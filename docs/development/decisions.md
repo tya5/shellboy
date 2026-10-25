@@ -33,3 +33,5 @@ UI投影・module分割・既存資源の所有整理を、新しい業務状態
 ## 初回CIで判明したOS固有の境界
 
 LinuxとmacOSでopenptyのwinsize引数のconst性が異なるため、共通試験の4箇所はraw pointerで渡す。OSを跨ぐ広いlint抑制は追加しない。WindowsのSECURITY_ATTRIBUTESはCreateFileWだけが借りる同期blockへ閉じ、非SendなC構造体をasync状態へ残さない。unsafe Sendの追加、worker変更、Win32呼出し順の変更は不要と判断した。
+
+Windowsの標準検証で、Unix専用テストのjson macro importにもcfgが必要と判明し、importだけを同じcfgで制限した。CIはClippyのkeep-goingで全targetの診断を集め、失敗時も依存cacheを保存して同じ依存の再ビルドを減らす。通常CIのpushはbranchに限定し、version tagでは専用release workflowを実行する。コンパイルやテストの失敗を成功扱いにはしない。

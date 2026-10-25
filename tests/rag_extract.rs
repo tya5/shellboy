@@ -1,6 +1,7 @@
 #[path = "../src/rag/extract.rs"]
 mod extractor;
 use extractor::extract;
+#[cfg(unix)]
 use serde_json::json;
 use std::{fs, path::Path};
 

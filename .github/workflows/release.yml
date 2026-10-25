@@ -46,6 +46,10 @@ jobs:
           persist-credentials: false
       - name: Install pinned native Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-v1
+          cache-on-failure: true
       - name: Check tag version and native build host
         run: |
           python - <<'PY'
