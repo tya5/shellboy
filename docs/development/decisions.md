@@ -29,3 +29,7 @@ UI投影・module分割・既存資源の所有整理を、新しい業務状態
 レビュー指摘PR2-1〜3はコード経路を確認し、公開文書に条件・回避策・再現未確認の範囲を記載した。ここでgoalを再開したり、指摘の全是正完了とは扱わない。製品作業は公開リポジトリ、非公開台帳はGit管理外の `.local/review/` 内で独立したローカルGitとする。旧Gitを公開履歴へmergeしない。
 
 実proxyのURLとモデル名を持つ2つのignored試験は、合成データ専用・明示実行のみであり、秘密情報ではないため保持する。製品既定値や利用可能モデルの保証ではなく、通常CIでは外部APIを呼ばない。
+
+## 初回CIで判明したOS固有の境界
+
+LinuxとmacOSでopenptyのwinsize引数のconst性が異なるため、共通試験の4箇所はraw pointerで渡す。OSを跨ぐ広いlint抑制は追加しない。WindowsのSECURITY_ATTRIBUTESはCreateFileWだけが借りる同期blockへ閉じ、非SendなC構造体をasync状態へ残さない。unsafe Sendの追加、worker変更、Win32呼出し順の変更は不要と判断した。

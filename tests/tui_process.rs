@@ -238,7 +238,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
                 &mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                &mut size,
+                std::ptr::addr_of_mut!(size),
             )
         },
         0

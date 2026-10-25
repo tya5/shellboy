@@ -294,25 +294,29 @@ pub(super) async fn input_pipe() -> Result<(NativeStdin, OwnedHandle), ApiError>
         },
         "create overlapped shell stdin pipe",
     )?);
-    let security = SECURITY_ATTRIBUTES {
-        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: null_mut(),
-        bInheritHandle: 1,
+    // The raw-pointer security descriptor is only borrowed by CreateFileW.
+    // Keep it out of the async state carried across the connect await below.
+    let child = {
+        let security = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: null_mut(),
+            bInheritHandle: 1,
+        };
+        own(
+            unsafe {
+                CreateFileW(
+                    name.as_ptr(),
+                    GENERIC_READ,
+                    0,
+                    &security,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    null_mut(),
+                )
+            },
+            "open child stdin pipe",
+        )?
     };
-    let child = own(
-        unsafe {
-            CreateFileW(
-                name.as_ptr(),
-                GENERIC_READ,
-                0,
-                &security,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                null_mut(),
-            )
-        },
-        "open child stdin pipe",
-    )?;
     let mut operation = NativeOperation::new(parent.clone(), Vec::new())?;
     operation.begin_connect()?;
     timeout(Duration::from_secs(5), async {
