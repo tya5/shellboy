@@ -41,3 +41,7 @@ docs/validation/  確認手順と実施状況
 ```
 
 単一Cargo package・実行ファイル名ともに `shellboy` です。[適用仕様](docs/design/effective-spec.md) を開発の入口とし、[AGENTS.md](AGENTS.md) に作業境界を定めます。旧製品名のコマンド・環境変数・既定保存先との互換は提供しません。既存データの移動は不要で、Shellboyは新しい既定保存先を使います。
+
+## ライセンス
+
+[MIT](LICENSE)

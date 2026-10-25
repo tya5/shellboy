@@ -16,4 +16,4 @@
 
 Cargo package、実行ファイル、Rustの参照、CLI使用例、環境変数、OS既定保存先、DB名、内部の製品名付き識別子を `shellboy` へ統一します。旧形式との互換・自動移行は実装しません。既存のインストール・設定・保存データには手を加えません。新しい保存先は [setup](setup.md) を参照してください。
 
-検証結果は [acceptance](../validation/acceptance.md) に記録します。ライセンスは今回新たに選定・追加していません。
+検証結果は [acceptance](../validation/acceptance.md) に記録します。利用者の指定により [MIT License](../../LICENSE) を同梱します。
