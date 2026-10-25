@@ -1,5 +1,13 @@
 use super::*;
 
+fn fixture_cwd() -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(r"C:\fixture")
+    } else {
+        PathBuf::from("/fixture")
+    }
+}
+
 fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
@@ -35,7 +43,7 @@ fn report(context: ManagementContext, title: &str) -> UiUpdate {
 }
 #[test]
 fn closed_queued_report_and_error_cannot_reopen_or_replace_a_newer_frame_or_other_thread() {
-    let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
     ui.select_thread("a".into());
     let old = request(&mut ui);
     ui.event(key(KeyCode::Esc));
@@ -72,7 +80,7 @@ fn closed_queued_report_and_error_cannot_reopen_or_replace_a_newer_frame_or_othe
 }
 #[test]
 fn leaving_a_detail_page_drops_its_late_page_without_invalidating_the_whole_frame() {
-    let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
     let owner = request(&mut ui);
     ui.apply(report(owner.clone(), "current"));
     let state = ui.management.structured_mut().unwrap();
@@ -98,7 +106,7 @@ fn leaving_a_detail_page_drops_its_late_page_without_invalidating_the_whole_fram
 }
 #[test]
 fn index_preview_is_invalidated_on_close_and_same_scope_reopening_but_not_detail_requests() {
-    let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
     ui.insert("/index all", false);
     let actions = ui.event(key(KeyCode::Enter));
     let old = context(&actions[0]);
@@ -153,7 +161,7 @@ fn operation_defaults_follow_fresh_activity_without_retargeting_an_open_form() {
     }
     let old = "00000000-0000-0000-0000-000000000001";
     let new = "00000000-0000-0000-0000-000000000002";
-    let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
     ui.select_thread("a".into());
     let generation = ui.view().generation;
     let update = |epoch, run: &str, phase| UiUpdate::Activity {
@@ -190,7 +198,7 @@ fn operation_defaults_follow_fresh_activity_without_retargeting_an_open_form() {
 
 #[test]
 fn frame_content_and_status_navigation_do_not_depend_on_display_title() {
-    let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
     let owner = request(&mut ui);
     ui.apply(report(owner, "翻訳済みの別タイトル"));
     let actions = ui.event(key(KeyCode::Char('r')));
@@ -235,7 +243,7 @@ fn frame_content_and_status_navigation_do_not_depend_on_display_title() {
 fn mutation_owner_survives_saved_draft_install_receipt_body_eviction_and_other_reports() {
     let mut config = Config::default();
     config.cache.body_bytes = 0;
-    let mut ui = UiState::new(&config, PathBuf::from("/"));
+    let mut ui = UiState::new(&config, fixture_cwd());
     ui.select_thread("a".into());
     let placeholder = ui.view().draft.draft_id.clone();
     let owner = ManagementContext {
@@ -251,7 +259,7 @@ fn mutation_owner_survives_saved_draft_install_receipt_body_eviction_and_other_r
     });
     let saved = DraftSnapshot::default();
     let saved_id = saved.draft_id.clone();
-    let details = serde_json::from_value(serde_json::json!({"thread_id":"a","title":"saved","cwd":"/","connection":"fixture","model":"fixture","children_count":0,"shells_count":0})).unwrap();
+    let details = serde_json::from_value(serde_json::json!({"thread_id":"a","title":"saved","cwd":fixture_cwd(),"connection":"fixture","model":"fixture","children_count":0,"shells_count":0})).unwrap();
     ui.apply(UiUpdate::Thread {
         generation: ui.view().generation,
         details,
