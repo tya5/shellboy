@@ -321,7 +321,7 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     let read = &replies[3]["result"];
     assert_eq!(read["execution_id"], target);
     assert_eq!(read["text"], "SHELLBOY_BG_READ_V1");
-    assert_eq!(read["raw_bytes"], 15);
+    assert_eq!(read["raw_bytes"], b"SHELLBOY_BG_READ_V1".len());
     assert_eq!(read["encoding"], "UTF-8");
     assert_eq!(read["decode_errors"], false);
     assert_eq!(read["output_complete"], true);
