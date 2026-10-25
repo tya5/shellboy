@@ -481,7 +481,10 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         control: &Control,
         phase: &str,
     ) -> Incoming {
-        match timeout(Duration::from_secs(5), receive.recv()).await {
+        // This boundary includes a real PowerShell launch under concurrent owner tests.
+        // Match the native Windows shell fixture's bounded startup/output allowance.
+        let seconds = if cfg!(windows) { 15 } else { 5 };
+        match timeout(Duration::from_secs(seconds), receive.recv()).await {
             Ok(Some(request)) => request,
             failed => {
                 let diagnostic = timeout(Duration::from_secs(1), control.store.database.call(|db| {
