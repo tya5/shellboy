@@ -42,7 +42,7 @@ def main():
         bundled_links = 0
         for item in found.values():
             guide = cli('get', '--id', item['id'], '--limit-bytes', '65536')
-            assert guide['next_cursor'] is None
+            assert 'next_cursor' not in guide
             body = guide['text'].encode()
             assert hashlib.sha256(body).hexdigest() == guide['content_hash']
             assert guide['content_hash'] == item['content_hash']
