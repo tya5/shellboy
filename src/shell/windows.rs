@@ -346,26 +346,30 @@ async fn output_pipe() -> Result<PipePair, ApiError> {
             ApiError::new(ErrorCode::IoFailed, format!("create shell pipe: {error}"))
         })?;
     let name = wide(OsStr::new(&name))?;
-    let security = SECURITY_ATTRIBUTES {
-        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: null_mut(),
-        bInheritHandle: 1,
+    // Only the synchronous CreateFileW call borrows this raw-pointer descriptor.
+    // Keep it outside the async state suspended by parent.connect() below.
+    let child = {
+        let security = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: null_mut(),
+            bInheritHandle: 1,
+        };
+        // Child endpoints are synchronous. Only parent endpoints use overlapped I/O.
+        take_handle(
+            unsafe {
+                CreateFileW(
+                    name.as_ptr(),
+                    GENERIC_WRITE,
+                    0,
+                    &security,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    null_mut(),
+                )
+            },
+            "open shell pipe endpoint",
+        )?
     };
-    // Child endpoints are synchronous. Only parent endpoints use overlapped I/O.
-    let child = take_handle(
-        unsafe {
-            CreateFileW(
-                name.as_ptr(),
-                GENERIC_WRITE,
-                0,
-                &security,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                null_mut(),
-            )
-        },
-        "open shell pipe endpoint",
-    )?;
     timeout(Duration::from_secs(5), parent.connect())
         .await
         .map_err(|_| {
