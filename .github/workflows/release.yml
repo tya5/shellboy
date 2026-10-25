@@ -53,10 +53,10 @@ jobs:
       - name: Check tag version and native build host
         run: |
           python - <<'PY'
-          import os, re, subprocess, tomllib
-          from pathlib import Path
+          import json, os, re, subprocess
           tag = os.environ['RELEASE_TAG']
-          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          metadata = json.loads(subprocess.check_output(['cargo', '+1.99.1', 'metadata', '--locked', '--no-deps', '--format-version', '1'], text=True))
+          version = next(package['version'] for package in metadata['packages'] if package['name'] == 'shellboy')
           assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag), 'Use a stable vX.Y.Z version tag'
           assert tag == f'v{version}', 'Tag must match the Cargo package version'
           rustc = subprocess.check_output(['rustc', '+1.99.1', '-vV'], text=True)
