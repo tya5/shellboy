@@ -37,7 +37,7 @@ struct Evidence {
     index: usize,
     count: i64,
     attempt: String,
-    message: Option<String>,
+    error: Option<crate::model::ModelError>,
     source: Option<String>,
 }
 
@@ -74,18 +74,17 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
                     .query_row(rusqlite::params![turn, at], |r| {
                         Ok((r.get(0)?, r.get(1)?, r.get(2)?))
                     })?;
-                let message = body
+                let error = body
                     .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
                     .and_then(|body| {
                         serde_json::from_value::<crate::model::ModelError>(body["error"].clone())
                             .ok()
-                    })
-                    .map(|error| error.to_string());
+                    });
                 evidence.push(Evidence {
                     index,
                     count,
                     attempt,
-                    message,
+                    error,
                     source,
                 });
             }
@@ -95,7 +94,7 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
         .map_err(|error| error.into_api_error())?;
     for saved in evidence {
         let presentation = &mut nodes[saved.index].presentation;
-        let note = format!("再開前にこのTurnで記録したモデル失敗{}件", saved.count);
+        let note = format!("再開前にこの応答処理で記録したモデル失敗{}件", saved.count);
         presentation.title = format!("復旧再開 · {note}");
         if let Some(block) = presentation
             .blocks
@@ -103,9 +102,10 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             .find(|block| block.kind == BlockKind::Event)
         {
             block.text = saved
-                .message
+                .error
                 .as_ref()
-                .map(|message| {
+                .map(|error| {
+                    let message = &error.message;
                     format!("直近の保存理由: {}", {
                         let excerpt = message.chars().take(256).collect::<String>();
                         let suffix = if message.chars().count() > 256 {
@@ -139,8 +139,8 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             saved.count.to_string(),
         );
         field("attempt_id", "直近の失敗のAttempt ID", saved.attempt);
-        if let Some(message) = saved.message {
-            field("error/message", "直近の保存理由", message);
+        if let Some(error) = saved.error {
+            field("error/message", "直近の保存理由", error.to_string());
         }
         if let Some(source) = saved.source {
             field("source_node_id", "直近の失敗原文", source);
@@ -194,9 +194,9 @@ mod tests {
         let p = &nodes[0].presentation;
         assert_eq!(
             p.title,
-            "復旧再開 · 再開前にこのTurnで記録したモデル失敗2件"
+            "復旧再開 · 再開前にこの応答処理で記録したモデル失敗2件"
         );
-        assert!(p.blocks[0].text.contains("保存済み二回目🦀"));
+        assert_eq!(p.blocks[0].text, "直近の保存理由: 保存済み二回目🦀");
         assert!(
             p.fields
                 .iter()
@@ -215,6 +215,53 @@ mod tests {
         assert!(
             p.requires_attention(),
             "past failures remain visible outside routine event grouping"
+        );
+        let original = control
+            .store
+            .database
+            .call(|db| {
+                Ok((
+                    db.query_row(
+                        "SELECT error_json FROM model_attempt WHERE id='second'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?,
+                    db.query_row(
+                        "SELECT payload_json FROM node WHERE id='failure-source'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?,
+                    db.query_row(
+                        "SELECT payload_json FROM node WHERE id='saved-resume'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?,
+                ))
+            })
+            .await
+            .unwrap();
+        let expected =
+            json!({"error":{"kind":"provider","message":"保存済み二回目🦀","status":500}})
+                .to_string();
+        assert_eq!(original, (expected.clone(), expected, payload.to_string()));
+        // A typed message may itself contain this literal text. Never strip it.
+        control.store.database.call(|db| {
+            db.execute("UPDATE model_attempt SET error_json=?1 WHERE id='second'", [json!({"error":{"kind":"provider","message":"provider: literal saved reason","status":500}}).to_string()])?;
+            Ok(())
+        }).await.unwrap();
+        nodes[0].presentation = presentation::project("event", &payload, &text, 0);
+        enrich(&control, &mut nodes).await.unwrap();
+        assert_eq!(
+            nodes[0].presentation.blocks[0].text,
+            "直近の保存理由: provider: literal saved reason"
+        );
+        assert!(
+            nodes[0]
+                .presentation
+                .fields
+                .iter()
+                .any(|field| field.key.ends_with("error/message")
+                    && field.value == "provider: provider: literal saved reason")
         );
         // Missing saved facts do not fabricate a reason or a recovery count.
         control
