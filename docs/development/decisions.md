@@ -45,3 +45,5 @@ Windowsの標準検証で、Unix専用テストのjson macro importにもcfgが�
 TLSのローカルfixtureに限り、既存lockにある `tokio-rustls = 0.26.6` を固定のdev dependencyとして直接参照する。実行時のOpenSSLやOS trust storeへの書込みを不要にし、合成の公開テスト鍵で全OSのHTTP要求を検査するためである。製品依存・worker・永続表は増やさない。HTTP(S)プロキシとNO_PROXYは既存ライブラリの環境変数対応を案内し、独自の設定schema/除外規則は実装しない。
 
 Windows CIで判明した管理UI試験のUnix絶対パス前提は、fixtureをOS別絶対パスへ変更して解消する。製品の起動準備完了判定は緩めない。CIのTestsにはno-fail-fastを付け、一つのtargetが失敗しても後続targetの診断を集める。
+
+Windows全target試験で判明した添付fixtureのUnix絶対パス11件と、AGENTS参照pathの区切り期待値1件はfixtureだけを修正する。残るoverflow回復試験の5秒timeoutは段階が不明であり、PowerShell起動遅延や製品障害と断定しない。期限/製品動作は変えず、失敗時の段階と有限の保存状態を記録する。Windows CIでは当該回帰を全target testの前に実行し、不要な全実行ファイルのリンク待ちを挟まず診断する。成功後は従来どおり全targetを実行する。

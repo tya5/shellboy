@@ -250,7 +250,8 @@ async fn list_cursors_bind_revision_and_snippets_limit_unicode_characters() {
     );
     let expected_agents = _directory
         .path()
-        .join("project/AGENTS.md")
+        .join("project")
+        .join("AGENTS.md")
         .to_string_lossy()
         .into_owned();
     database

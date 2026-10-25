@@ -62,7 +62,7 @@ Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLB
 
 `connections.<名前>.headers` は任意のHTTP header辞書です。header名は大文字小文字を無視して重複不可、値の不正な制御文字は拒否します。`api_key_env` とAuthorization headerは併用不可です。headerへ秘密値を直接書くより環境変数参照を使ってください。`default_effort` は省略可能な非空文字列で、接続先が受け付ける値を指定します。モデル容量・effort対応のカタログは内蔵しません。
 
-`ssl_verify` は接続ごとのHTTPS証明書検証で、既定は `true` です。自己署名証明書などを使う接続で無効化する場合だけ、同じ `[connections.proxy]` に `ssl_verify = false` を指定します。その接続の会話・要約・埋め込み・モデル一覧に適用され、証明書の発行元・期限・ホスト名の検証が省略されます。HTTP接続には効果がありません。owner設定の変更後は再起動してください。独立RAGは実行時に読む接続設定へ従います。環境変数だけで検証を無効化する機能はありません。
+`ssl_verify` は接続ごとのHTTPS証明書検証で、既定は `true` です。自己署名証明書などを使う接続で無効化する場合だけ、同じ `[connections.proxy]` に `ssl_verify = false` を指定します。その接続の会話・要約・埋め込み・モデル一覧に適用され、証明書の発行元・期限・ホスト名の検証が省略されます。HTTP APIへ直接接続する場合は検証対象がありません。HTTPSの中継プロキシを使う場合は、そのプロキシ証明書の検証にも適用されます。owner設定の変更後は再起動してください。独立RAGは実行時に読む接続設定へ従います。環境変数だけで検証を無効化する機能はありません。
 
 会話はResponses、索引と検索クエリはEmbeddings APIを使います。`embedding.connection` と `embedding.model` は両方省略、または両方指定です。接続名は定義済みである必要があります。embedding変更時は別空間として扱い、過去データ全件を無断で再索引化しません。明示backfill/rebuildと費用の考え方は [履歴と検索](history-and-search.md) を参照してください。検索にもAPI利用が生じます。
 

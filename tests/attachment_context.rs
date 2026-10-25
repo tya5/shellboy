@@ -17,12 +17,17 @@ async fn fixture() -> (tempfile::TempDir, Store) {
     let store = Store::new(db, Arc::new(config), root.path().into(), "instance".into());
     (root, store)
 }
+fn attachment_path() -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("shellboy-attachment-context")
+        .join("external.bin")
+}
 fn request() -> Request {
     Request::new(
         "instance:attach",
         Command::AttachmentAdd(AttachmentAddArgs {
             thread_id: Some("thread".into()),
-            path: "/external.bin".into(),
+            path: attachment_path().to_str().unwrap().into(),
             kind: AttachmentKind::File,
         }),
     )
@@ -32,7 +37,7 @@ fn plan(revision: i64) -> AddPlan {
         thread_id: "thread".into(),
         selection_revision: revision,
         files: vec![PlannedAttachment {
-            path: "/external.bin".into(),
+            path: attachment_path(),
             kind: AttachmentKind::File,
             observed_bytes: Some(5),
             managed_id: None,

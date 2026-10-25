@@ -476,6 +476,37 @@ async fn invalid_second_tool_prevents_first_side_effect_and_every_call_receives_
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tools_twice() {
+    async fn next(
+        receive: &mut mpsc::Receiver<Incoming>,
+        control: &Control,
+        phase: &str,
+    ) -> Incoming {
+        match timeout(Duration::from_secs(5), receive.recv()).await {
+            Ok(Some(request)) => request,
+            failed => {
+                let diagnostic = timeout(Duration::from_secs(1), control.store.database.call(|db| {
+                    let mut observations = Vec::new();
+                    for (label, sql) in [
+                        ("turn", "SELECT json_object('state',state,'reason',recovery_reason_json) FROM turn LIMIT 8"),
+                        ("attempt", "SELECT json_object('state',state,'error',error_json) FROM model_attempt ORDER BY started_at LIMIT 16"),
+                        ("tool", "SELECT json_object('call',call_id,'state',state,'arguments',arguments_json) FROM tool_call LIMIT 8"),
+                        ("shell", "SELECT json_object('state',state,'exit_code',exit_code,'reason',end_reason,'sequence',saved_sequence,'complete',output_complete) FROM shell_execution LIMIT 8"),
+                        ("raw", "SELECT json_object('chunks',count(*),'bytes',coalesce(sum(length(bytes)),0)) FROM output_chunk"),
+                    ] {
+                        let mut statement = db.prepare(sql)?;
+                        let rows = statement.query_map([], |row| row.get::<_, String>(0))?
+                            .collect::<Result<Vec<_>, _>>()?;
+                        observations.push((label, rows));
+                    }
+                    Ok(observations)
+                })).await;
+                panic!(
+                    "no model request at {phase}; receive_closed={}; saved observations={diagnostic:?}",
+                    matches!(failed, Ok(None))
+                );
+            }
+        }
+    }
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = owner(root.path(), &url).await;
@@ -483,16 +514,21 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     let thread = thread(&control).await;
     send(&control, &thread, "three tool groups then overflow").await;
     for ordinal in 0..3 {
-        let request = incoming(&mut receive).await;
+        let request = next(
+            &mut receive,
+            &control,
+            &format!("before tool group {ordinal}"),
+        )
+        .await;
         request.reply.send((200,json!({"id":format!("group-{ordinal}"),"status":"completed","output":[{"type":"function_call","call_id":format!("call-{ordinal}"),"name":"shell","arguments":json!({"command":format!("echo raw-group-{ordinal}")}).to_string()}]}))).unwrap();
     }
     let overflow = json!({"error":{"code":"context_length_exceeded","message":"fixture pressure"}});
-    incoming(&mut receive)
+    next(&mut receive, &control, "after all three tool groups")
         .await
         .reply
         .send((400, overflow.clone()))
         .unwrap();
-    let retry_one = incoming(&mut receive).await;
+    let retry_one = next(&mut receive, &control, "first overflow: spill retry").await;
     let outputs: Vec<Value> = retry_one.body["input"]
         .as_array()
         .unwrap()
@@ -510,7 +546,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
             .contains("raw-group-2")
     );
     retry_one.reply.send((400, overflow.clone())).unwrap();
-    let summary = incoming(&mut receive).await;
+    let summary = next(&mut receive, &control, "second overflow: summary request").await;
     assert_eq!(summary.body["tools"], json!([]));
     summary
         .reply
@@ -519,7 +555,12 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
             answer("Earlier groups completed; exact references remain."),
         ))
         .unwrap();
-    let retry_two = incoming(&mut receive).await;
+    let retry_two = next(
+        &mut receive,
+        &control,
+        "second overflow: adopted summary retry",
+    )
+    .await;
     let outputs: Vec<Value> = retry_two.body["input"]
         .as_array()
         .unwrap()

@@ -1010,10 +1010,10 @@ async fn context_exclusion_notices_are_bounded_retryable_and_make_progress() {
                     .map(|i| PlannedAttachment {
                         // These excluded paths must never be opened. One path exceeds the
                         // entire notice budget; escaped UTF8 previews also exercise JSON bytes.
-                        path: PathBuf::from(if long_paths {
-                            format!("/{}-{i}", "界\n".repeat(20000))
+                        path: f.path.join(if long_paths {
+                            format!("{}-{i}", "界\n".repeat(20000))
                         } else {
-                            format!("/missing-{i}")
+                            format!("missing-{i}")
                         }),
                         kind: AttachmentKind::File,
                         observed_bytes: None,

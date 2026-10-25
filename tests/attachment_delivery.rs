@@ -21,9 +21,14 @@ async fn fixture() -> (tempfile::TempDir, Store) {
     let store = Store::new(db, Arc::new(config), root.path().into(), "instance".into());
     (root, store)
 }
+fn attachment_path() -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("shellboy-attachment-delivery")
+        .join("a.txt")
+}
 fn files() -> Vec<PlannedAttachment> {
     vec![PlannedAttachment {
-        path: "/fixture/a.txt".into(),
+        path: attachment_path(),
         kind: AttachmentKind::File,
         observed_bytes: Some(1),
         managed_id: None,
@@ -36,7 +41,7 @@ async fn accept(store: &Store, op: &str, revision: i64) -> Value {
                 format!("instance:{op}"),
                 Command::AttachmentAdd(AttachmentAddArgs {
                     thread_id: Some("thread".into()),
-                    path: "/fixture/a.txt".into(),
+                    path: attachment_path().to_str().unwrap().into(),
                     kind: AttachmentKind::File,
                 }),
             ),
@@ -289,7 +294,7 @@ async fn foreign_shell_origin_waits_for_its_own_group_even_when_target_is_idle()
                 "instance:cross",
                 Command::AttachmentAdd(AttachmentAddArgs {
                     thread_id: Some("thread".into()),
-                    path: "/fixture/a.txt".into(),
+                    path: attachment_path().to_str().unwrap().into(),
                     kind: AttachmentKind::File,
                 }),
             ),
@@ -534,7 +539,7 @@ async fn terminated_foreign_origin_incomplete_group_does_not_block_live_target()
                 "instance:foreign-will-stop",
                 Command::AttachmentAdd(AttachmentAddArgs {
                     thread_id: Some("thread".into()),
-                    path: "/fixture/a.txt".into(),
+                    path: attachment_path().to_str().unwrap().into(),
                     kind: AttachmentKind::File,
                 }),
             ),
