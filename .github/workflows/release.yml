@@ -1,0 +1,149 @@
+name: Release binaries
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            executable: shellboy.exe
+            archive: zip
+          - os: macos-14
+            target: aarch64-apple-darwin
+            executable: shellboy
+            archive: tar.gz
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            executable: shellboy
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TARGET: ${{ matrix.target }}
+      RELEASE_EXECUTABLE: ${{ matrix.executable }}
+      RELEASE_ARCHIVE: ${{ matrix.archive }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned native Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Check tag version and native build host
+        run: |
+          python - <<'PY'
+          import os, re, subprocess, tomllib
+          from pathlib import Path
+          tag = os.environ['RELEASE_TAG']
+          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag), 'Use a stable vX.Y.Z version tag'
+          assert tag == f'v{version}', 'Tag must match the Cargo package version'
+          rustc = subprocess.check_output(['rustc', '+1.99.1', '-vV'], text=True)
+          assert f"host: {os.environ['RELEASE_TARGET']}" in rustc, rustc
+          PY
+      - name: Build locked release binary
+        run: cargo +1.99.1 build --locked --release --bin shellboy --target "$RELEASE_TARGET"
+      - name: Smoke-test the native executable
+        run: |
+          "target/$RELEASE_TARGET/release/$RELEASE_EXECUTABLE" --version
+          "target/$RELEASE_TARGET/release/$RELEASE_EXECUTABLE" --help
+      - name: Package binary and public documentation
+        run: |
+          python - <<'PY'
+          import os, shutil, tarfile, zipfile
+          from pathlib import Path
+          name = f"shellboy-{os.environ['RELEASE_TAG']}-{os.environ['RELEASE_TARGET']}"
+          stage = Path('package') / name
+          stage.mkdir(parents=True)
+          executable = os.environ['RELEASE_EXECUTABLE']
+          shutil.copy2(Path('target') / os.environ['RELEASE_TARGET'] / 'release' / executable, stage / executable)
+          for filename in ('LICENSE', 'README.md', 'config.example.toml'):
+              shutil.copy2(filename, stage / filename)
+          # Guides are embedded in the binary; also make the Markdown usable offline.
+          shutil.copytree('docs', stage / 'docs')
+          out = Path('dist')
+          out.mkdir()
+          archive = out / f"{name}.{os.environ['RELEASE_ARCHIVE']}"
+          if os.environ['RELEASE_ARCHIVE'] == 'zip':
+              with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
+                  for path in sorted(stage.rglob('*')):
+                      if path.is_file():
+                          bundle.write(path, path.relative_to(stage.parent))
+          else:
+              with tarfile.open(archive, 'w:gz') as bundle:
+                  bundle.add(stage, arcname=name)
+          print(archive)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    name: Publish release and checksums
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Check complete asset set and write SHA-256 checksums
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          tag = os.environ['RELEASE_TAG']
+          expected = {
+              f'shellboy-{tag}-x86_64-pc-windows-msvc.zip',
+              f'shellboy-{tag}-aarch64-apple-darwin.tar.gz',
+              f'shellboy-{tag}-x86_64-unknown-linux-gnu.tar.gz',
+          }
+          files = sorted(Path('dist').iterdir())
+          assert {path.name for path in files} == expected, 'Incomplete or unexpected release assets'
+          lines = [f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in files]
+          Path('dist/SHA256SUMS').write_text(''.join(lines), encoding='utf-8')
+          PY
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Upload all assets before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A failed upload leaves a draft, which a rerun may safely resume.
+          # Published releases are immutable here; never silently replace their binaries.
+          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json; then
+            python -c 'import json; assert json.load(open("release-state.json"))["isDraft"], "Release is already published"'
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Shellboy $RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" dist/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

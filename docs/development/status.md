@@ -1,6 +1,6 @@
 # 開発状況
 
-更新: 2026-10-26。Shellboyへの名称変更と公開用構成の準備は完了しました。pushはまだ行っていません。
+更新: 2026-10-26。Shellboyへの名称変更と公開用構成の準備は完了しました。利用者の許可を受け、GitHubへのpushと初版リリースを進めます。最新の実行結果は [Actions](https://github.com/tya5/shellboy/actions)、配布物は [Releases](https://github.com/tya5/shellboy/releases) で確認します。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
@@ -15,4 +15,4 @@ TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の�
 
 改名前の作業履歴と公開用の新履歴は分離しています。以前のレビュー対応goalは中断状態を維持し、この名称変更・公開準備を旧goal全体の完遂とは扱いません。
 
-実API、実IME・clipboard、手元に実機がないOS・端末の再検証は今回未実施です。GitHub Actionsはpush後の実施結果と区別します。
+実API、実IME・clipboard、手元に実機がないOS・端末の再検証は今回未実施です。GitHub Actionsはローカル成功とは別に確認します。既知の制限は [一覧](known-limitations.md)、レビュー台帳は [運用](maintenance.md) に記載します。

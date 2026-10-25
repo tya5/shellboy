@@ -6,6 +6,19 @@ Rust製のターミナル向けAIエージェント環境です。Responses互�
 
 名称変更後の公開用ソースで標準チェックを実施しています。現在の実装・確認範囲は [開発状況](docs/development/status.md) と [検証状況](docs/validation/acceptance.md) に記録します。
 
+## バイナリのダウンロード
+
+[Releases](https://github.com/tya5/shellboy/releases) でWindows x64、macOS Apple Silicon、Linux x64向けの配布物と `SHA256SUMS` を提供します。初版は `v0.1.0` です。
+
+Windowsは `shellboy-v0.1.0-x86_64-pc-windows-msvc.zip` をダウンロードして展開します。PowerShellの例:
+
+```powershell
+Expand-Archive .\shellboy-v0.1.0-x86_64-pc-windows-msvc.zip -DestinationPath .
+.\shellboy-v0.1.0-x86_64-pc-windows-msvc\shellboy.exe --help
+```
+
+接続先とモデルは [設定ガイド](docs/guides/configuration.md) に従って設定してください。既知のreceipt予算・索引切替・巨大raw検索の制限は [既知の制限](docs/development/known-limitations.md) に記載しています。
+
 ## ビルドと起動
 
 RustupとOSのC/C++ビルド環境を用意します。ツールチェーンは `rust-toolchain.toml`、依存は `Cargo.lock` で固定します。
