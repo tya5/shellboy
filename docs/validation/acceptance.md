@@ -1,18 +1,21 @@
 # 検証状況
 
-更新: 2026-10-26。Shellboyへの改名後の検証結果はこれから記録します。この公開用文書の作成時点では、以下を成功と宣言しません。改名前の試験件数・commit・私的ログ・画像を現在の合格根拠として扱いません。
+更新: 2026-10-26。macOS / aarch64、固定Rust 1.99.1で、改名後の公開用ディレクトリから実施しました。対象は公開Gitの `8de8699`（以降の変更は結果文書のみ）です。非公開snapshot・過去検証asset・作業台帳を置かない構成を使っています。
 
-| 確認 | 現在の扱い | 手順・対象 |
+| 確認 | 結果 | 手順・対象 |
 |---|---|---|
-| 固定依存でのビルドとCLI名 | 未確定 | `cargo build --locked`、`shellboy --help`、`shellboy --version` |
-| fmt・全target Clippy・テスト | 未確定 | `sh scripts/check.sh` または `./scripts/check.ps1` |
-| オフライン同梱ガイド | 未確定 | `shellboy docs list`、`scripts/check-docs.py`。owner・設定・APIがなくても読めること |
-| 新しい既定保存先・環境変数 | 未確定 | 設定試験、一時data-dir。旧環境の変更や自動移行をしないこと |
-| 一時owner・CLI・正常終了 | 未確定 | 合成fixtureで起動・送信・状態照会・終了・再openを確認 |
-| TUI・端末・IME・clipboard | 未実施の環境は対象外 | [実端末手順](manual-terminal.md)。自動PTYを実IMEの成功としない |
-| 実provider互換・意味検索の品質 | 未実施 | loopback固定応答・固定vectorで代用しない。実APIは別途明示した確認のみ |
-| 公開用初期checkout | 未確定 | 非公開ファイルなしでbuild/test、同梱ガイド、相対リンクを確認 |
+| 固定依存でのビルドとCLI名 | 成功 | 全targetをビルド。実binaryの `shellboy --help` と `shellboy --version`（0.1.0）を確認 |
+| fmt・全target Clippy・テスト | 成功 | `sh scripts/check.sh`。67テスト群、982 passed / 0 failed / 15 ignored。修正後の通し実行は約6分 |
+| オフライン同梱ガイド | 成功 | `scripts/check-docs.py`、33 CLI確認、13 guide・3 category、同梱リンク115件。空cwd・環境変数なし・存在しない設定・owner/API不要、状態ファイルの作成なし |
+| 新しい既定保存先・環境変数 | 成功 | config / CLI / runtime試験。新しい名前・OS既定path・保存先解決を確認。旧名・旧データ形式への互換は対象外 |
+| 一時owner・CLI・正常終了 | 成功 | cli_process / runtime / tui_process試験。IPC接続、同ID再送、実shellからのCLI呼出し、PTYでの入力・固定HTTP応答・終了を確認 |
+| TUI描画・スクロール | 自動試験成功 | TestBackendと自動PTY。実IME・OS clipboard・各端末GUIの再確認は今回未実施 |
+| 実provider互換・意味検索の品質 | 今回未実施 | 通常試験はloopback固定応答・固定vector等。実API/性能/実環境のignored試験を合格数へ含めない |
+| 公開用checkoutの独立性 | 成功 | 公開対象320ファイルのみで上記build/test。literal include 63件の欠落なし、旧名称残存なし、公開文書の相対リンク欠落なし |
+| 公開Gitの全履歴 | 検査実施 | gitleaks v8.30.1、全ref・全履歴、allowコメント無効、redact有効。検出0件。非公開ファイル・旧履歴commitを含まない |
 
-実施後は対象source、OS/architecture、コマンド、成功/失敗/未実施、制限をこの文書へ追記します。性能試験のignoreを通常テストの成功に含めず、手順だけを実施証拠にしません。実会話・資格情報・個人path・私的画像を証拠としてGitへ入れません。
+`CARGO_BUILD_JOBS=2`、`CARGO_INCREMENTAL=0` を指定し、ビルド生成物だけローカルcacheへ出しました。ソース・guide・migration・fixtureは公開用ディレクトリのものです。GitHub Actionsはpush前のため未実施です。実会話・資格情報・個人path・私的画像・生ログは検証文書へ含めません。
 
-採用範囲は [適用仕様](../design/effective-spec.md)、開発の現在地は [status](../development/status.md)、標準チェックは [setup](../development/setup.md) に記載します。
+初回の通し検証では、名称変更で長くなった合成トークンの出力を19 bytesと正しく取得していましたが、テストに旧名の15 bytesという固定期待値が残っていました。期待値をtokenのbyte長へ変更し、該当回帰単独と上記の通し検証で成功しました。製品の出力処理は変更していません。追加のガイド検証scriptにも旧cursor期待値があったため、最終ページでcursorを省略する既存契約へ合わせました。
+
+採用範囲は [適用仕様](../design/effective-spec.md)、現在地は [status](../development/status.md)、標準手順は [setup](../development/setup.md)、公開対象と履歴の扱いは [公開構成](../development/publication.md) を参照してください。実端末の追加確認は [手順](manual-terminal.md) と実施結果を区別します。

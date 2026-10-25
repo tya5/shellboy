@@ -13,3 +13,11 @@
 ## コアの責務
 
 UI投影・module分割・既存資源の所有整理を、新しい業務状態や独立workerの追加と混同しない。新しいCore型・永続表・event・queue・依存が必要な場合は、既存責務では不足する理由、上限、所有者、寿命、終了時回収、互換を対象設計に記録する。数値を減らすためだけの削除や汎用frameworkの追加は行わない。
+
+## 非同梱DDLへのテスト依存を外す
+
+公開対象から原仕様snapshotを除くため、依存smoke testが読み込むDDLを原仕様の論理候補から配布中の `migrations/0001_initial.sql` へ変更した。初期migrationの35表（core 33表、採用経路、migration ledger）とintegrity/foreign-key検査を維持する。元DDLをコピーして別のschema正本を作らず、後続migrationの検証は既存のstorage試験へ残す。これにより非公開資料なしで結合試験をコンパイルできる。
+
+## 未統合だった復旧表示修正の扱い
+
+改名前に用意されていた修正は、履歴やerror JSONを変更せずtyped errorのmessage部分を短い表示へ投影する内容だった。名称変更とは別のcommitとして取り込み、完全fieldのコピーと利用者本文中の `provider:` は保持した。変更順序を再構成するための旧履歴のmergeや書換えはせず、公開用履歴には修正済みソースだけを反映する。

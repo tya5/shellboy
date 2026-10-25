@@ -17,3 +17,13 @@
 Cargo package、実行ファイル、Rustの参照、CLI使用例、環境変数、OS既定保存先、DB名、内部の製品名付き識別子を `shellboy` へ統一します。旧形式との互換・自動移行は実装しません。既存のインストール・設定・保存データには手を加えません。新しい保存先は [setup](setup.md) を参照してください。
 
 検証結果は [acceptance](../validation/acceptance.md) に記録します。利用者の指定により [MIT License](../../LICENSE) を同梱します。
+
+## 公開範囲の確認（2026-10-26）
+
+公開用Gitは旧Gitのcloneではなく、選別した320ファイルから初期化した独立した履歴です。旧commitをparent・remote・alternateとして持ちません。非公開snapshot、過去の検証asset、未追跡のレビュー画像、個人cacheは公開用ディレクトリに配置していません。元のファイルと履歴はローカルに保持しています。
+
+公開用ファイルの旧名称残存は0件、相対リンク424件の参照先欠落は0件、Rustのliteral include参照63件の欠落は0件でした。実行時ガイドを含む公開対象ファイルだけで検証します。
+
+公式releaseのchecksumを照合したgitleaks v8.30.1で、公開用Gitの全ref・全履歴を検査しました。既定ルールを使い、allowコメントによる除外を無効にし、結果は0件でした。結果文書を含む最終commit後にも同じ検査を実施しています。実行例は `gitleaks git . --log-opts=--all --redact=100 --ignore-gitleaks-allow` です。生成した詳細reportやlogはGit管理外に置きます。
+
+名前の確認では、[GitHubの公開先](https://github.com/tya5/shellboy) は利用者が作成済みです。[別所有者の同名repository](https://github.com/c1982/shellboy) も存在します。今回の公開先は所有者名で区別できるため変更しません。[crates.io API](https://crates.io/api/v1/crates/shellboy) は確認時点で404（未登録）でした。名前の予約は行っておらず、Cargoの `publish = false` は維持しています。

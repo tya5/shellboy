@@ -4,7 +4,7 @@ Rust製のターミナル向けAIエージェント環境です。Responses互�
 
 使い始める人は [User Guide](docs/guides/user-guide.md)、Shellboy内で作業するモデルは [Agent Guide](docs/guides/agent-guide.md) を参照してください。[ガイド一覧](docs/guides/README.md) から設定・履歴検索・添付・復旧・CLIへ進めます。
 
-現在はShellboyへの改名と公開用構成を準備しています。改名前の検証結果を改名後の合格とは扱いません。現在の確認範囲は [開発状況](docs/development/status.md) と [検証状況](docs/validation/acceptance.md) に記録します。
+名称変更後の公開用ソースで標準チェックを実施しています。現在の実装・確認範囲は [開発状況](docs/development/status.md) と [検証状況](docs/validation/acceptance.md) に記録します。
 
 ## ビルドと起動
 
