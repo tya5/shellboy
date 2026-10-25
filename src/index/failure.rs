@@ -1,0 +1,239 @@
+//! Embedding failure adoption and bounded automatic retry.
+use super::*;
+
+// One bounded record per existing profile key. Legacy integer counters have no
+// cause identity and conservatively begin a new streak; an existing pause stays.
+#[derive(Serialize, Deserialize)]
+struct FailureStreak {
+    cause: String,
+    count: usize,
+}
+
+fn failure_cause(error: &ModelError, transient: bool) -> String {
+    if transient {
+        return "transient".into();
+    }
+    // Codes identify provider causes. Without a code, distinguish exact bounded
+    // messages too; do not guess from prose or persist it in the counter.
+    let identity = json!([
+        error.kind,
+        error.status,
+        error.provider_code,
+        error
+            .provider_code
+            .is_none()
+            .then_some(error.message.as_str())
+    ]);
+    format!("unknown:{}", hash(identity.to_string().as_bytes()))
+}
+
+fn advance_streak(
+    tx: &Transaction<'_>,
+    keys: IndexKeys<'_>,
+    cause: String,
+    threshold: usize,
+) -> Result<bool, StorageError> {
+    let record = keys.common_failures();
+    let previous = meta(tx, &record)?.and_then(|value| decode_json::<FailureStreak>(&value).ok());
+    let count = previous
+        .filter(|previous| previous.cause == cause)
+        .map_or(1, |previous| previous.count.saturating_add(1))
+        .min(threshold);
+    set_json_meta(tx, &record, &FailureStreak { cause, count })?;
+    Ok(count >= threshold)
+}
+
+impl IndexService {
+    pub(super) async fn fail_work(
+        &self,
+        key: &str,
+        claimed: Claimed,
+        error: ModelError,
+        cancelled: bool,
+    ) -> Result<(), ApiError> {
+        let failure_key = self.failure_key().unwrap_or(key).to_owned();
+        let pause_keys = self.identity_keys();
+        let key = key.to_owned();
+        let config = self.config.clone();
+        self.database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                adopt_failure_tx(
+                    &tx,
+                    &claimed,
+                    IndexKeys::new(&key),
+                    (&failure_key, &pause_keys),
+                    &error,
+                    cancelled,
+                    &config,
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(db_error)
+    }
+}
+
+/// Adopt failure/retry/split facts only inside the caller's existing transaction.
+fn adopt_failure_tx(
+    tx: &Transaction<'_>,
+    claimed: &Claimed,
+    keys: IndexKeys<'_>,
+    family: (&str, &[String]),
+    error: &ModelError,
+    cancelled: bool,
+    config: &Config,
+) -> Result<(), StorageError> {
+    let (failure_key, pause_keys) = family;
+    let retry_delays = &config.indexing.retry_delays_ms;
+    let retries = config.indexing.retries;
+    let pause_count = config.indexing.common_failure_pause_count;
+    let error_json = serde_json::to_value(error).map_err(|_| {
+        StorageError::from(err(
+            ErrorCode::InvalidState,
+            "Cannot encode embedding error",
+        ))
+    })?;
+    let failure = error.embedding_failure();
+    let immediate = failure.credentials_or_credit || failure.invalid_configuration;
+    let length = !immediate && failure.input_limit;
+    let common = failure.transient;
+    let cause = failure_cause(error, common);
+    if !claim_valid(tx, claimed)?
+        || !witness_valid(tx, &claimed.work.witness, &claimed.work.body_kind)?
+    {
+        discard_claim(tx, claimed, "Source disappeared before error adoption")?;
+        return Ok(());
+    }
+    if length && claimed.work.segment.end - claimed.work.segment.start > 1 && !cancelled {
+        set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
+        let size = (claimed.work.segment.end - claimed.work.segment.start)
+            .div_ceil(2)
+            .max(1);
+        let children = split_text(&claimed.work.segment.text, size, claimed.work.segment.start);
+        for segment in children {
+            let mut child = claimed.work.clone();
+            child.segment = segment;
+            child.attempts = 0;
+            child.state = "pending".into();
+            child.next_at = None;
+            child.error = None;
+            if let Some(space) = &claimed.space {
+                queue_job(tx, space, &child)?;
+            } else {
+                tx.execute(
+                    "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
+                    params![bootstrap_key(keys, &child), encode_json(&child)?],
+                )?;
+            }
+        }
+        if let Some(job) = &claimed.job_id {
+            tx.execute(
+                "UPDATE embedding_job SET state='split',error_json=?2 WHERE id=?1",
+                params![job, error_json.to_string()],
+            )?;
+            tx.execute("DELETE FROM app_meta WHERE key=?1", [IndexKeys::input(job)])?;
+        }
+        if let Some(bootstrap) = &claimed.bootstrap_key {
+            tx.execute("DELETE FROM app_meta WHERE key=?1", [bootstrap])?;
+        }
+    } else {
+        let retry = common && !immediate && !cancelled && claimed.work.attempts <= retries;
+        let delay = if retry {
+            let base = retry_delays[claimed.work.attempts.saturating_sub(1)];
+            let bytes = uuid::Uuid::new_v4();
+            let jitter = 0.8
+                + (u16::from_le_bytes([bytes.as_bytes()[0], bytes.as_bytes()[1]]) as f64
+                    / u16::MAX as f64)
+                    * 0.4;
+            Some((base as f64 * jitter).round() as i64)
+        } else {
+            None
+        };
+        let next = delay.map(|millis| {
+            (chrono::Utc::now() + chrono::Duration::milliseconds(millis)).to_rfc3339()
+        });
+        let state = if retry { "pending" } else { "failed" };
+        if let Some(job) = &claimed.job_id {
+            tx.execute(
+                "UPDATE embedding_job SET state=?2,error_json=?3,next_attempt_at=?4 WHERE id=?1",
+                params![job, state, error_json.to_string(), next],
+            )?;
+        }
+        if let Some(bootstrap) = &claimed.bootstrap_key {
+            let mut work = claimed.work.clone();
+            work.state = state.into();
+            work.error = Some(error_json.clone());
+            work.next_at = next.clone();
+            update_json_meta(tx, bootstrap, &work)?;
+        }
+        let pause = if cancelled {
+            set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
+            false
+        } else if immediate {
+            set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
+            true
+        } else if retry {
+            false
+        } else {
+            advance_streak(tx, IndexKeys::new(failure_key), cause, pause_count)?
+        };
+        if pause {
+            for paused in pause_keys {
+                set_meta(tx, &IndexKeys::new(paused).pause(), &error_json.to_string())?;
+            }
+            if let Some(space) = &claimed.space {
+                tx.execute("UPDATE index_space SET state=CASE WHEN state='candidate' THEN 'candidate_paused' ELSE 'paused' END WHERE id=?1 AND state IN ('active','candidate')",[&space.id])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cause_identity_uses_codes_or_exact_messages_and_keeps_the_counter_bounded() {
+        let mut a = ModelError::provider(
+            Some(400),
+            &json!({"error":{"code":"unknown_a","message":"first"}}),
+        );
+        let mut b = a.clone();
+        b.message = "request-specific detail".into();
+        assert_eq!(failure_cause(&a, false), failure_cause(&b, false));
+        a.provider_code = None;
+        b.provider_code = None;
+        assert_ne!(failure_cause(&a, false), failure_cause(&b, false));
+        assert_eq!(failure_cause(&a, true), failure_cause(&b, true));
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        set_meta(&tx, "index.common_failures.key", "2").unwrap();
+        assert!(
+            !advance_streak(&tx, IndexKeys::new("key"), "transient".into(), 3).unwrap(),
+            "legacy integer does not prove a consecutive cause"
+        );
+        assert!(!advance_streak(&tx, IndexKeys::new("key"), "transient".into(), 3).unwrap());
+        assert!(
+            !advance_streak(&tx, IndexKeys::new("key"), failure_cause(&a, false), 3).unwrap(),
+            "different cause begins at one"
+        );
+        let value = serde_json::to_string(&FailureStreak {
+            cause: failure_cause(&a, false),
+            count: usize::MAX,
+        })
+        .unwrap();
+        set_meta(&tx, "index.common_failures.key", &value).unwrap();
+        assert!(advance_streak(&tx, IndexKeys::new("key"), failure_cause(&a, false), 3).unwrap());
+        let value = meta(&tx, "index.common_failures.key").unwrap().unwrap();
+        assert!(value.len() <= 128);
+        assert_eq!(
+            serde_json::from_str::<FailureStreak>(&value).unwrap().count,
+            3
+        );
+    }
+}

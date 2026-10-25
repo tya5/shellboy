@@ -1,0 +1,21 @@
+# Copy to your chosen user config path, then replace the URL and model IDs.
+# Keys are read from environment variables; do not paste credentials here.
+default_connection = "proxy"
+default_model = "REPLACE_WITH_MODEL_ID"
+
+[connections.proxy]
+base_url = "https://proxy.example/v1"
+api_key_env = "SHELLBOY_API_KEY"
+# default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
+
+# Embeddings are optional. Enabling them indexes newly finalized conversation
+# text; old conversation backfill still requires an explicit selection.
+# [embedding]
+# connection = "proxy"
+# model = "REPLACE_WITH_EMBEDDING_MODEL_ID"
+
+[retention]
+tool_raw_days = 7
+tool_raw_bytes = 1073741824
+clipboard_days = 7
+clipboard_bytes = 268435456

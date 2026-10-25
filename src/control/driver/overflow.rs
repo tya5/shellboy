@@ -1,0 +1,130 @@
+//! Ephemeral per-Turn/generation budget; durable state remains in SQLite.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Reduction {
+    OldGroups,
+    CurrentSuffix,
+}
+pub(super) struct OverflowBudget {
+    turn: String,
+    generation: i64,
+    stage: u8,
+}
+impl Default for OverflowBudget {
+    fn default() -> Self {
+        Self {
+            turn: String::new(),
+            generation: -1,
+            stage: 0,
+        }
+    }
+}
+impl OverflowBudget {
+    pub(super) fn observe(&mut self, turn: &str, generation: i64) {
+        if self.turn != turn || self.generation != generation {
+            self.turn = turn.into();
+            self.generation = generation;
+            self.stage = 0;
+        }
+    }
+    pub(super) fn available(&self) -> bool {
+        self.stage < 2
+    }
+    /// Called after the request failure has been durably saved.
+    pub(super) fn begin(&mut self) -> Option<Reduction> {
+        if !self.available() {
+            return None;
+        }
+        Some(if self.stage == 0 {
+            self.stage = 1;
+            Reduction::OldGroups
+        } else {
+            self.stage = 2;
+            Reduction::CurrentSuffix
+        })
+    }
+    pub(super) fn unlock_current(&mut self) {
+        self.stage = 2;
+    }
+}
+pub(super) async fn retry_or_recover(
+    control: &std::sync::Arc<super::Control>,
+    snapshot: &super::Snapshot,
+    slot: &super::DriverSlot,
+    attempt: String,
+    failure: super::model::http::AttemptFailure,
+    overflow: &mut OverflowBudget,
+) -> Result<(), super::ApiError> {
+    use super::*;
+    let thread = &snapshot.thread;
+
+    if failure.error.is_context_limit() && overflow.available() {
+        let attempt_id = attempt.clone();
+        let body = json!({"error":failure.error,"partial_text":failure.partial_text,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+        let transition = control
+            .store
+            .database
+            .call(move |db| crate::control::state::fail_attempt(db, &attempt_id, &body, &now()))
+            .await
+            .map_err(storage_error)?;
+        if transition == crate::control::state::AttemptTransition::Obsolete {
+            return Ok(());
+        }
+        let reduction =
+            if overflow.begin().expect("available overflow budget") == Reduction::OldGroups {
+                let spill = control
+                    .compactor
+                    .spill_cancellable(thread, false, slot.stop.clone())
+                    .await;
+                match spill {
+                    Ok(ref result) if result.no_target => {
+                        overflow.unlock_current();
+                        spill_and_summarize(&control.compactor, thread, slot.stop.clone()).await
+                    }
+                    other => other,
+                }
+            } else {
+                spill_and_summarize(&control.compactor, thread, slot.stop.clone()).await
+            };
+        match reduction {
+            Ok(result) if !result.no_target => {
+                control.changed(thread);
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(error) => {
+                return fail_turn(control, snapshot, error).await;
+            }
+        }
+    }
+    let error=ApiError::new(ErrorCode::IoFailed,failure.error.to_string()).hint("Inspect the incomplete response and explicitly retry this Run; tools already saved are not re-executed");
+    let saved = json!({"error":failure.error,"partial_text":failure.partial_text,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+    recover(control, snapshot, error.clone(), Some((attempt, saved))).await?;
+    Err(error)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn two_stage_budget_is_shared_by_requests_and_reset_only_by_turn_or_generation() {
+        let mut budget = OverflowBudget::default();
+        budget.observe("turn", 1);
+        assert!(budget.available());
+        assert_eq!(budget.begin(), Some(Reduction::OldGroups));
+        budget.observe("turn", 1);
+        assert_eq!(budget.begin(), Some(Reduction::CurrentSuffix));
+        assert!(!budget.available());
+        assert_eq!(budget.begin(), None);
+        budget.observe("turn", 1);
+        assert!(!budget.available());
+        budget.observe("turn", 2);
+        assert_eq!(budget.begin(), Some(Reduction::OldGroups));
+        budget.unlock_current();
+        assert!(
+            !budget.available(),
+            "no old target consumes the current-suffix stage too"
+        );
+        budget.observe("next", 2);
+        assert!(budget.available());
+        assert_eq!(budget.begin(), Some(Reduction::OldGroups));
+    }
+}

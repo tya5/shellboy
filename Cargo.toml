@@ -1,0 +1,61 @@
+[package]
+name = "shellboy"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+description = "Shellboy native personal agent"
+
+[[bin]]
+name = "shellboy"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "io-std", "net", "signal"] }
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color", "unstable-rendered-line-info"] }
+crossterm = { version = "=0.29.0", features = ["event-stream"] }
+rusqlite = { version = "=0.40.2", features = ["bundled", "blob"] }
+sqlite-vec = "=0.1.9"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+toml = "=1.1.8"
+thiserror = "=2.0.21"
+fs2 = "=0.4.3"
+chrono = "=0.4.45"
+base64 = "=0.23.1"
+uuid = { version = "=1.29.0", features = ["v4", "serde"] }
+url = { version = "=2.5.8", features = ["serde"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["json", "stream", "rustls"] }
+futures-util = "=0.3.34"
+encoding_rs = "=0.8.42"
+libc = "=0.2.191"
+sha2 = "=0.11.1"
+tokio-util = { version = "=0.7.20", features = ["rt"] }
+unicode-width = "=0.2.2"
+unicode-segmentation = "=1.13.3"
+clap = { version = "=4.6.7", features = ["derive"] }
+arboard = "=3.7.0"
+png = "=0.18.1"
+pulldown-cmark = { version = "=0.13.5", default-features = false }
+tui-markdown = { version = "=0.3.12", default-features = false, features = ["highlight-code"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Keep the fixed-version streaming decoder optimized in development too.
+# Invalid-byte shell output otherwise spends seconds in dependency debug loops.
+[profile.dev.package.encoding_rs]
+opt-level = 2
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_System_Environment", "Win32_Globalization", "Win32_System_IO"] }

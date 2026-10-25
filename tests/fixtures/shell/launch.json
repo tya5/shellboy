@@ -1,0 +1,15 @@
+{
+  "bash": {
+    "command": "printf '日本語\\n'",
+    "prefix": ["--noprofile", "--norc", "-c"],
+    "stdin_source": "pipe",
+    "process_scope": "process_group_on_unix_job_on_windows"
+  },
+  "powershell": {
+    "command": "Write-Output '日本語'",
+    "prefix": ["-NoLogo", "-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-EncodedCommand"],
+    "command_encoding": "UTF-16LE",
+    "stdin_source": "pipe",
+    "process_scope": "process_group_on_unix_job_on_windows"
+  }
+}

@@ -1,0 +1,118 @@
+# ネイティブTUIの状態・入力境界
+
+入力確定・応答性・ビューポート・コピー・貼り付けの採用契約を具体化する。実装 `src/ui.rs`、純粋な状態遷移とTestBackend描画の試験 `tests/ui.rs`。由来となった初期UI仕様は非同梱。
+
+TUIはメインOSスレッドでRatatui/Crosstermを使う。端末描画/入力以外のfile・DB・network・clipboard操作は実行しない。有限Tokio actionチャネルへ `try_send`、有限std updateチャネルから `try_recv` だけを使い、満杯なら未受付と表示してSend本文を保持する。1巡に処理する更新件数を制限し、入力処理を更新洪水で枯渇させない。UIは単一の業務状態正本ではなく、Control/DBのsnapshotを表示する。
+
+`run(&Config, Sender<UiAction>, Receiver<UiUpdate>)` に入る前にworkerから `Initialize{cwd}` を送る。UI自身はcurrent_dirすら呼ばない。終了はQuit要求後のShutdown更新まで画面を継続する。端末はRAIIでraw mode、alternate screen、bracketed paste、mouse captureを復元する。
+
+`UiState::event` と `apply` はテスト可能な純粋な状態操作。Sendはdraft ID/revision、Thread、cwd、本文、添付指定、connection/model/effortをsnapshot化する。DB受付までは表示を消さない。送信中の次の編集は新revisionの別本文になり、古いreceiptは新本文を消せない。失敗/取消しsnapshotはpendingに残し、復元できる。受付失敗後の再送は新revisionで受け付け、古い遅延受付から隔離する。receiptの受理・準備・保留・失敗・取消し・完了を文字で識別し、色だけに依存しない。受付済みを実行完了と表示しない。
+
+Threadごとに下書き、node ID＋Unicode本文位置anchor、追従状態を持つ。切替で実行停止を要求しない。保存要求はworkerへ送る。履歴/Thread snapshotには選択generationを付け、古い結果を別画面へ適用しない。先頭へ移動すると前pageを非同期要求する。新着中も過去anchorを維持し、追従中/停止/停止中の新着を区別する。Ctrl+Endで追従を再開する。新しい未送信チャットを作っても元の下書きを残し、Thread一覧に「未送信の下書き」として選択可能にする。
+
+本文描画はviewportに必要な範囲だけを組み立てる。描画はdirty時だけ、設定max_fps以下で集約し、idle中は再描画しない。入力eventを待つterminal pollは使うが、DB/workerの完了待ち・join・キュー空き待ちには使わない。本文cacheの予算超過時は非表示Threadを先に回収し、表示中もanchor周辺の作業範囲を残して範囲外を回収する。現在viewportの作業範囲は保持cache予算と区別する。履歴の永続正本と再取得はDB worker側の責務。
+
+入力編集はUTF-8 byte cursorを持ち、左右/削除はUnicode grapheme単位で動く。端末カーソルはUnicode表示幅と折返し位置から置く。日本語/結合文字/ZWJ emojiを対象とし、IME変換状態を推測しない。bracketed Pasteは改行・indent・末尾改行を本文へ挿入する。CRLF/CRだけLFに統一し、自動送信/コマンド実行はしない。貼付けを含む下書きがslashで始まっても本文送信とする判断を採用した。これは貼付け由来の操作を暗黙実行しないためで、typed slash commandとは区別する。
+
+長文Pasteは全文を保ったまま行数/文字数placeholderへ折りたたむ。F3で確認、F4で展開/編集位置へ移動、F5で削除できる。送信では全文を展開する。下書きbyte上限超過は貼付け全体を未挿入とし、既存本文を破らない。外部添付は `/attach` でパス指定だけ追加し、stat/readはworkerが行う。画像は明示 `/image` / `/paste-image` actionで取得し、workerの保存成功後だけ添付済みにする。遅い画像結果は元のdraft/revisionへ照合し、切替先へ混入させない。
+
+F2または `/select` は選択・コピーモード。入った瞬間だけモード表示を描画し、mouse captureを解除、その後は背景更新を保持して画面の再描画を凍結する。F2/Escはキーボードだけで解除でき、元の追従状態を維持して再描画する。OS clipboardの読取り・コピー成功推測は行わない。本文/コードblockのコピーは `/copy` actionをworkerへ送り、DB原文の取得とOS/OSC52アダプタをUI外で扱う。Ctrl+Cをコピーキーへ置換しない。
+
+基本コマンド `/help /threads /new /fork /compact /model /effort /cwd` と、添付・画像・copy補助を実装。Thread一覧はID/title/cwd/parent/state/更新時刻/抜粋、filterとpageを持つ。run/turn/所有処理の詳細はThread snapshot・Progress更新とControlの詳細取得を使う。statusには意味のある状態、実経過時間、実際に開始したtool回数をworkerから表示する。UI自身は実行開始回数を推測しない。
+
+既存Threadの `/effort none` は公開thread.setの `effort: ""` を未指定へのリセットとして渡す（通常のeffortは空文字不可）。この具体化はrootの設定変更処理と合わせ、TOMLの空effort許可へ拡張しない。
+
+ローカルTestBackend/入力試験はreceipt遅延、送信失敗、Thread切替、stale snapshot、貼付けとfold、Unicode cursor、設定キー、終了/中断/背景化、画像結果の宛先を対象とする。実端末IME、マウス選択、SSH/tmux、OS clipboard、実DB永続化、巨大出力下の応答性は別の受入検証であり、この試験だけで合格としない。
+
+## Worker接続と原文window
+
+`src/frontend.rs` は共有runtimeでControlへの橋渡しを行う。Sendは専用JoinSet、その他の長いCommandは独立JoinSetで処理し、wait/GC/index backfillの完了待ちで次のUI actionを止めない。準備SendとCommandは各32件、clipboardは2件に制限する。Quitではclipboard取消し、受付中Sendの完了、Controlの所有処理停止、残るCommand observer完了、DB owner終了の順を守る。DB受付済みのmutation futureをabortしない。file preparationの設定timeoutまで待つ場合がある。
+
+ClipboardAdapterは注入可能なClipboardBackendを通じて呼ぶ。画像は保存済みManagedImageのleaseをdraft単位で保持し、UIが元revisionに採用したackを返す。stale結果はleaseを解放し、採用済み画像はdetach/discard又はmessage+refsのDB受付後に解放する。OSコピーはworker成功だけを成功表示する。OSC52はworkerからTerminalRequest bytesを送り、UIの端末I/O箇所で一度だけ書く。本文コピーはDB原文の先頭64KiBを取得し、続きがあれば全文コピーを明示拒否する。完全な指定fenced code blockだけのコピーは可能で、cache tailを原文と取り違えない。
+
+UiNodeは本文windowのbase_char_offsetと原文total_charsを持つ。anchorはwindow内位置でなく元本文Unicode文字位置。初回履歴は最大64KiB tail、anchor復元又は範囲外scrollでは元位置周辺の64KiB windowをDB workerが再取得する。途中のstreamもtailを上限64KiBに抑え、追従停止中のanchor windowを置換しない。保存view_stateの復元には選択generationに加えview_revisionを照合し、先行したユーザー移動を上書きしない。Ctrl+Endは最新pageを再取得して追従する。
+
+実行中だけ500ms間隔でDB snapshotから進捗を更新し、終了後のelapsedはended_at-created_atで固定する。履歴node kind=userをuserとして描画する。
+
+2026-10-24 macOSでrepo本体の `cargo test --test frontend --test ui --test output --test cli` が37件成功。frontend4件には注入clipboardのPNG保存→lease採用→添付付き送信、原文/codeblockコピー、全文超過拒否、DB終了時刻による経過時間固定を含む。UI16件には復元とユーザー移動の競合、原文位置からwindow要求、OSC52 bytesのdeferを含む。実OS clipboardと実端末・SSHの受入検証は未実施。
+
+## P6で追加した製品操作
+
+`/edit [user-node-id]` は原依頼取得をLoadEditRequestとしてworkerへ渡す。省略時はanchor又は最後のuser nodeを使うが、実際のuser種別・選択経路・原文保持はbackendが照合する。結果のThread/generation/draft revisionが一致する場合だけ、別のローカル下書きに原文と添付指定を展開する。元の下書き、旧Thread、過去の原依頼は変更しない。原文が下書き上限を超えたら切り詰めず中止する。取得した本文はliteral扱いで、slashから始まる元依頼もコマンドへ変換しない。
+
+編集下書きはsource Thread/nodeと取得時のRun IDをDraftSnapshot.editへ保持する。Runがあれば送信前に対象Runを示す停止確認を表示し、YだけがSendEditedを発行する。Enterは肯定とせず、N/Escは下書きを保持して戻る。backendへconfirmed_run_idを送り、取得後に新Runが始まった場合はEditConfirmationRequiredで再確認する。backendの責務は、対象Run停止のterminal確定後、元依頼の直前まで分岐し、編集本文を新規送信すること。初回依頼の編集は空prefixで新Threadを作る。受付後の下書きからedit指定を外し、その後の通常依頼を再びforkしない。失敗snapshotは元のedit指定を含めて復元可能とする。
+
+`/index` / `/index status` は索引管理を表示する。`/index all`、`/index thread`（現在の保存済みThread）、`/index threads ID...` で費用対象を明示する。`/index space SPACE-ID [all|thread|threads ID...]` は空間別管理で、IDだけなら状態照会だけ。管理画面はpending/running/done/failed/paused、未索引数、空間情報、preview、操作結果を同じoverlayに表示する。データ取得はfrontend/IndexServiceの責務で、UIは結果を推測しない。非アクティブ空間への追加や切替は既存のサービス契約に従い、UIで暗黙に有効化しない。
+
+管理画面のSは状態、Pはpreview、Bは過去分backfill、Tは失敗retry、Rはrebuild。対象を明示し、同じIndexArgsに対応するpreview成功を受け取るまでB/T/Rは実行しない。確認画面にはsource/segment/character数などのpreviewと対象space/Thread、外部embedding APIの費用発生、単価不明時の金額未見積を表示する。Y後にpreviewを消費し、次の実行には再取得が必要。見積りは取得時点であり、対象sourceの更新による数の変化を予約・固定したものではない。scope違いの遅延previewは許可に使わない。
+
+`/search QUERY` はHistorySearchをworkerへ渡し、結果を管理overlayへ表示する。generic Commandの成功結果も破棄せず表示する。管理応答は構造化fieldと、最新1件の詳細documentへ分ける。documentの保持量はbody_bytes予算内、応答自体は既存8MiB frame上限内。表示fieldの上限を超える内容は省略を明記し、明示詳細から64KiBずつ取得する。詳細を予算内に保持できない時は対象IDによる原文page又は絞込み再照会を案内する。状態とpreviewを片方の到着だけで上書きしない。Escで戻り、上下/PgUp/PgDnで読める。これはDB検索結果や操作receipt自体の保持上限ではない。
+
+Quitは通常の保存・停止を開始し、UIは終了進捗を表示し続ける。設定grace後にfrontendからforce_availableを受けた場合だけ、W/Enterの待機継続とFの強制終了選択を表示する。Fの後も警告付き確認を出し、YだけがForceQuitを発行する。ForceShutdownでui.runはUiExitReason::Forcedを返し、TerminalGuard復元後のプロセス終了はmainが扱う。grace前のFやEnterだけでは強制終了しない。Ctrl+Qは確認画面や選択モードからも通常終了を開始し、選択モードの描画凍結を解除する。
+
+未保存下書きの `/effort none` はwire上のSome("")で明示解除を保持し、Send/SendEditedが既定値・元Threadからの継承へ戻さないようにする。UI表示では空値を未指定として扱い、DBにはbackendがNULLへ正規化する。未保存下書きの `/model` は明示effortを保持する。接続やmodelを変えてもeffortをNoneへ戻したり、新接続defaultへ勝手に置き換えたりしない。
+
+2026-10-24 macOSで `cargo test --test ui` 23件と `cargo clippy --lib --test ui -- -D warnings` 成功。追加試験は別編集下書きと元下書き保持、Runの明示同意・race再確認、遅延原文拒否、scopeとpreview一致、preview消費、spaceのreadonly状態、検索/管理結果表示、grace前強制禁止、二段階強制確認、effort保持を対象とする。backendの停止順序・空prefix fork・atomic send・実プロセス強制終了は別の統合試験が必要で、このUI状態試験だけで合格としない。
+
+## 保存済み添付と推論表示
+
+`/attachments` は下書きの添付指定に加え、保存済みThreadのattachment_selectionをAttachmentListで取得して同じ添付管理overlayへ表示する。selected、managed、unavailable_reasonをworkerの結果のまま扱う。Sで再一覧、R又は `/reload-attachments` で明示再読込を要求する。再読込はfrontend/Controlのfile workerへ渡し、UIがファイルを開いたり、新しいTurn/API要求を開始したりしない。
+
+`/detach ID` は下書きに一致するIDがあればその指定だけを削除する。それ以外は保存済みThreadへAttachmentRemoveを送り、永続selectionから除外する。旧source nodeや外部ファイルを削除しない。添付、索引、一般結果のoverlay操作モードを分け、添付画面のRを誤って索引rebuildへ解釈しない。
+
+UiNodeはcanonical textと、同じtextに対するUnicode文字位置の半開区間reasoning_rangesを持つ。frontendはhistory::text_of_payloadと同じ既知フィールドの順序で推論テキスト／要約を識別し、暗号化継続データを表示本文に混ぜない。元node IDを共有し、推論用synthetic nodeや独立したfork境界は作らない。copy/history取得は折りたたみplaceholderではなくcanonical原文を使う。
+
+推論区間は既定で文字数と開閉コマンドのplaceholderを表示し、`/reasoning [node-id]` で展開・折りたたむ。expandで必要なら同じnodeの元文字位置からwindowを非同期取得する。anchorは折りたたみ後の見た目の位置へ変換せず、元のUnicode文字位置を保持する。折りたたみ中のscrollは推論区間の境界を越えて移動する。APIが返さなかった推論テキストを補わない。
+
+live streamも同じ元文字位置のrangeを使う。追従停止中に新tailが旧windowを外れた場合、旧windowと対応するreasoning metadataを一緒に保持する。新tail側の短いrange一覧で旧windowの推論分類を消すと、意図せず推論が展開されるためである。本文cache予算にはtext capacityだけでなくreasoning_rangesのcapacityも含め、非表示nodeの展開状態もcache回収とともに破棄する。node本文window外のmetadataはfrontendが間引き、再取得時にcanonical原文から再構築する。
+
+2026-10-24 macOSで `cargo test --test ui` 29件と `cargo clippy --lib --test ui --test performance -- -D warnings` 成功。追加試験は永続添付操作のrouting、推論の既定折りたたみ・開閉、copyの元node ID維持、CJKを含む元windowの文字位置、追従停止中stream更新での折りたたみ保持、metadata容量のcache回収を含む。tests/performance.rsは追加fieldの空metadata追従のみ行い、前記baseline性能値をP6変更後の再測定とは扱わない。
+
+## A17/A18: キャッシュ回収と橋渡しの非待機化
+
+本文回収はUiNodeのID、原文文字数、path ordinalを残してtext/rangeの容量を解放する。空の本文は未キャッシュと表示し、scroll先の元文字位置から再取得する。node ID/role/構造体のmetadataは本文と合わせてbody_bytesへ計上し、history_bytesは全Threadの送信用履歴cache専用とする。現在のanchor周辺の最大3nodeは表示作業領域として保持予算から区別する。metadataを回収したpageは先頭ordinal、selection_revision、全node数を残し、前後境界の移動で同じ選択revisionのpageを再取得する。opaqueな旧cursorだけに復帰を依存しない。取得結果にはThread generationとview_revisionを照合し、移動後の遅着windowでanchorを上書きしない。
+
+F1と `/help` には本文（表示metadataを含む）・layout・送信用履歴・添付Base64の設定予算とbyte合計を表示する。合計はu128で計算し、設定値の加算overflowを避ける。保持予算の表示であり、表示中/送信中の作業領域やOS資源を含む実RSSの上限とは表示しない。
+
+frontendのDB読取りは最大8件の相関付きworkerへ分離し、選択切替で旧選択observerを取消す。選択、履歴、window、原文復元、Thread一覧、状態更新、進捗取得のDB完了をbridgeが直接待たない。進捗は専用1枠でcoalesceし、Changed通知はThreadごとにまとめる。キュー満杯は明示再試行とし、受付済みmutationを取消しで消さない。保存は専用FIFO actor（32件）と最新checkpointのThread別backlog（最大64 Thread）を使う。同Threadの後続保存は先行保存の後へ入り、backlog満杯又は保存失敗はUIに再試行状態を返す。終了時はbacklogを含めて保存完了を待つが、その待機は終了猶予・明示強制終了の操作処理と独立する。
+
+受付済みsnapshotはmessage node IDを参照し、重複した本文Stringの容量と添付本体リストを解放する。fold ranges、cursor、edit指定など復元用の軽量メタデータは保持する。失敗・取消後の `/restore` はDBの不変原文とそのnodeの全attachment_refを非同期取得し、元fold/cursorを戻す。復元待ちの間に新しい入力があればexpected revision不一致で結果を採用しない。完了receiptはUIのpendingから、全terminal receiptはfrontend observer表から除去する。取消件数はdurableなtool_result.status=cancelledを現在Turnのtool_groupに結合して数え、broadcast Noticeを取り逃しても進捗再取得で表示する。
+
+live本文の重複保持は現在Threadの64KiB tailに限定し、非選択Threadには文字数だけ残す。内部eventはShellboy、summary/spillも明示した役割を表示し、assistant発話と混同しない。入力欄の高さは最大6改行分だけ走査して3〜8行に決め、全文改行数のu16変換を行わない。canonical下書き全文とfold情報は保持する。
+
+回帰は `tests/ui.rs` のevicted body/metadata、ReceiptSource復元（Unicode、fold、遅着拒否）と、`tests/frontend.rs` の実Run停止→Cancelled receipt、DB workerを停止したままQuit猶予通知を受信する試験を含む。後者はDB解放より前に通知が届く因果関係を確認するもので、入力遅延のp95測定やV7全体の合格を示さない。
+
+2026-10-24 macOSの最終対象チェック: `cargo test --test ui --test frontend --test tui_process` はUI33件・frontend10件・実TUI1件成功、`cargo clippy --all-targets -- -D warnings` 成功。実TUI試験はproxy応答表示と正常終了を確認し、入力/描画latency分布や3OS/IMEの検証を代替しない。
+
+正本DBの保存失敗は再試行可能なキュー満杯と区別する。save actorと直接DBを読む履歴・進捗・原文復元・編集読込み・copyはSaveFailed分類を共通処理し、Control.fail_storageで新規受付を閉じ、HTTP取消しと所有shell停止へ進む。StorageFailed表示は本文を残し、自動保存retryを立てない。単なるread/saveキュー満杯や消えた選択対象はInvalidState/TargetUnavailableとして扱い、全体停止へ昇格しない。DB停止は正常終了扱いとせず、終了結果にもSaveFailedを返す。
+
+`tests/frontend.rs::draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input` は実SQLite INSERT triggerでdraft保存を失敗させ、所有する実shellのPID消滅・output_complete、新しいThreadCreateの拒否、UI本文保持、異常終了結果を照合する。fixtureはlocalhostのモデルproxyだけを使い、実APIや実データを使わない。
+
+同日のSaveFailed追補後、frontend12件、全targets Clippyが成功。直接読取りの別fixtureではview_stateを意図的に壊し、選択のLoadFailed通知後に新規requestが拒否されることも確認した。上記UI33件・実TUI1件はStorageFailed型追加後も成功している。
+
+## 全Thread layout LRUと本文予算の統一
+
+`cache.layout_bytes` は全Threadで共有するUI変換結果のLRUとする。keyはview/Thread ID、本文windowの採用revision、selection/view revision、元anchorとfollow、reasoningの開閉集合、履歴内側の幅/高さ。History/Stream/NodeWindow/HistoryWindowの採用や本文回収で本文revisionを進め、同じ長さの本文差替えでも以前のlayoutを再利用しない。公開のmutable viewアクセスも保守的にrevisionを進める。UI内部の下書き編集やstatus更新は本文revisionを変えず、履歴変換の再構築を避ける。取得拒否された遅着windowは採用せず、既存のgeneration/view_revision境界を維持する。
+
+entryは表示対象historyの変換済みStringと、描画と同じRatatui Paragraph/Wrap(trim:false)が計算したwrapped行数。描画中はArcで借り、cache hitで本文Stringを複製しない。予算には変換Stringのcapacity、key中のID/開閉集合、entryと管理metadataを含める。0又は単独entryが予算を超える場合はそのframeの作業領域だけとし保持しない。LRUからの回収はanchor/ordinal/本文windowを変更しない。本文revisionが変わった同じviewの旧entryは破棄し、元本文回収後に古い変換結果を表示しない。幅や高さ、開閉、anchorが異なる結果は別keyで、同一Threadの再選択も元の本文revisionが同じなら再利用できる。
+
+UI本文LRUは最初にactive anchor周辺の最大3nodeを作業領域として固定し、それ以外の本文/metadata/未使用Vec capacityを同じbody_bytes counterへ計上する。inactive Threadは選択generationの古い順（同値はview ID順）に本文、そのpage metadataを回収し、activeはworking外の遠方から回収する。inactive page破棄はVec::newへの置換でstruct bufferも解放する。active pageの縮小後は余分なstruct capacityも解放する。予算内のinactive本文を、除外対象のactive本文サイズだけを理由に消さない。先頭node削除だけfirst_ordinalを増やし、選択revisionと元anchorを保持して原文の前後pageを再取得する。
+
+frontendのstream tailは巨大deltaをtrimした後の余剰String capacityと不要reasoning_ranges capacityも解放し、小さいtailだけを保持しているのに元deltaの大きなbufferが残ることを避ける。
+
+
+## 種類別表示の追補（2026-10-24）
+
+表示の追加要件と採用判断は [tui-presentation.md](tui-presentation.md) を参照。保存payloadから独立したtyped presentationをworkerで作り、通常表示・構造化詳細・原文pageを分ける。`UiNode.text` は原文anchor/copy用の従来本文を保持し、表示の整形で上書きしない。Markdown parserと外部制御列除去はUI外で行い、UIは有限viewportのstyle/セルへ配置する。
+
+## panic時の端末復元順（U12）
+
+端末sessionのRAII責務は通常終了だけでなく、sessionを所有するUI threadのpanicで既存panic hookが診断を出す前に復元する。session期間だけ前のhookを保持して委譲する局所guardを使い、単一の原子的なactive値でhookとDropの二重復元を防ぐ。通常Dropは元hookを戻す。unwind中はRustがhook交換を禁止するため復元済みの転送hookを残し、元のpanicを握り潰さず終了する。panicをcatchして同じprocessでUIを再開する機能は追加しない。abort/kill/stack overflowなどpanic hookを経由しない停止の復元保証には広げない。
+
+他workerのpanicは回収可能な既存責務を持つためUI端末を解除せず、前hookへそのまま渡す。hookは端末所有threadだけが端末I/Oを行い、Core state/worker/永続記録を追加しない。追加Arcはsessionの復元状態と前hookだけを保持し、通常終了で解放する。実PTYを所有する子test processで、UI panicの診断より先にalternate screenを解除すること、worker panicでは早期解除せず通常Dropで一回復元することを検証する。Windows実端末検証とは扱わない。
+
+## Thread絞込みの有限な遅延要求（U15）
+
+一覧の打鍵は即座にfilterと要求generationへ反映し、旧返答を失効させる。DB取得だけはUI-local単調時計による150msのtrailing deadlineへ集約し、連続入力の最終条件を一度送る。ThreadBrowserが保持する追加値は未送信deadline一件だけで、入力停止後の既存UI event loopで消費する。新しいDB poller、常駐task、Core stateは追加しない。150msは入力burstを集約する表示上の応答時間であり、DB timeoutや取得の完了保証ではない。
+
+open/明示Ctrl+R/後続pageは従来通り即時要求する。closeと新open/明示refreshは未送信deadlineを解除する。256文字上限や空Backspaceでfilterが変わらない場合は要求も増やさない。未送信の旧generationを既存deferred action再送から除き、queue満杯でも保持する一覧要求は最新一件に限る。受理済み旧要求の実行は取り消さず、既存generationで返答だけ拒否する。表示中の実Thread IDを選ぶ操作とcursor/page/2000件上限は変えない。試験は固定Instantで集約境界・旧返答・明示refresh・close・queue再送を確認し、待ちsleepを使わない。

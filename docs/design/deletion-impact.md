@@ -1,0 +1,19 @@
+# Thread削除前の参照情報
+
+2026-10-25採用。引継ぎA10/A15/A16と既存のThread削除契約を維持した追加の読取り操作。`thread delete-preview --thread ID [--descendants]` は削除候補の判定材料を返す。削除・GC・ファイル操作を開始しない。
+
+## snapshotと削除可否
+
+DBの同一read snapshotで集計する。既存の削除操作と同じ、未削除Threadを辿る子孫集合を使い、`descendants=false`は指定Threadのみを選ぶ。`selection.descendant_thread_count`は指定Threadから到達可能な未削除の子孫数、`surviving_descendant_thread_count`はそのうち今回選択しない数。削除済みThreadを中継する子孫は既存削除と同様に辿らない。`latest_updated_at`は選択集合の最終更新時刻、指定Threadの時刻も個別に返す。
+
+`deletable_now`は選択集合にlive/stopping Runがないことだけを示す。Run詳細は最大50件、全件数とtruncatedを付ける。子Threadや参照共有はそれ自体を削除阻害条件にしない。previewは予約でも削除保証でもなく、実際のdelete transactionが再判定する。root_revisionはGC root世代の観測値で、Run状態等の全変化を表すtokenではない。
+
+## 参照数の意味
+
+`reference_scope=direct_references_not_gc_reachability`。selected_path_nodesは選択Threadのpath nodeのdistinct union。shared_path_nodesはそのうち選択外の未削除Threadのpathにもあるnode数。surviving_path_thread_countはそれを共有するThread数で、親子関係に依存しない。payloadがtombstoneでもnode識別子への参照として数える。
+
+completed_replacement_source_nodesはselected path nodeのうちcompleted replacementの直接sourceであるnode数。surviving_replacement_source_nodesは更に、そのreplacementのoutputを選択外の未削除Threadのpathまたはthread_replacementで参照しているもの。これは再帰GC到達性の代替ではない。GCはcompleted以外のreplacement出典やTurn、receipt、runtime pin等も保護しうる。
+
+attachment_reference_countはselected path nodeを出典とするattachment_refのdistinct ID数。同じパスへの複数添付は別参照。外部/managed内訳を返す。選択外Threadの参照を含め物理ファイル数・実体存在・unlink対象を推定しない。外部ファイルを削除しない既存契約を維持する。
+
+`reclaimable_bytes=null`と理由を返す。GCの段階的到達性判定を独立に再実装しない。容量は共有・pin・保持policy・別spaceの索引・DB/WALによって変わり、path payload bytesを足した値を物理空き容量と見なせない。previewはGC実行や直後の領域回収を保証しない。

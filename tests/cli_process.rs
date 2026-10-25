@@ -1,0 +1,251 @@
+use serde_json::Value;
+use shellboy::{app::DataOwner, control::Control, ipc::LocalServer};
+use std::process::Command;
+
+#[test]
+fn process_help_version_and_errors_use_expected_exit_and_output() {
+    let binary = env!("CARGO_BIN_EXE_shellboy");
+    for flag in ["--help", "--version"] {
+        let output = Command::new(binary).arg(flag).output().unwrap();
+        assert!(output.status.success());
+        assert!(!output.stdout.is_empty());
+    }
+    let output = Command::new(binary).arg("does-not-exist").output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "invalid_argument");
+    assert!(value.get("operation_id").is_none());
+    assert_eq!(value["ok"], false);
+    let root = tempfile::tempdir().unwrap();
+    let output = Command::new(binary)
+        .arg("--data-dir")
+        .arg(root.path())
+        .args(["thread", "list"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "app_not_running");
+    assert!(value.get("operation_id").is_none());
+    let output = Command::new(binary)
+        .arg("--data-dir")
+        .arg(root.path())
+        .args([
+            "--operation-id",
+            "known-instance:provided",
+            "thread",
+            "list",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["operation_id"], "known-instance:provided");
+    assert_eq!(value["error"]["code"], "app_not_running");
+    assert!(std::fs::read_dir(root.path()).unwrap().next().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create_twice() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let (send, receive) = tokio::sync::mpsc::channel(16);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let task = tokio::spawn(control.clone().serve(receive));
+    let operation = format!("{}:cli-fixture", owner.instance_id);
+    async fn cli(directory: &std::path::Path, args: &[&str]) -> (bool, Value) {
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(directory)
+            .args(args)
+            .output()
+            .await
+            .unwrap();
+        (
+            output.status.success(),
+            serde_json::from_slice(&output.stdout).unwrap(),
+        )
+    }
+    let (ok, first) = cli(
+        &owner.loaded.data_dir,
+        &["--operation-id", &operation, "thread", "create"],
+    )
+    .await;
+    assert!(ok, "{first}");
+    let (ok, repeat) = cli(
+        &owner.loaded.data_dir,
+        &["--operation-id", &operation, "thread", "create"],
+    )
+    .await;
+    assert!(ok);
+    assert_eq!(first, repeat);
+    let (ok, conflict) = cli(
+        &owner.loaded.data_dir,
+        &[
+            "--operation-id",
+            &operation,
+            "thread",
+            "create",
+            "--model",
+            "changed",
+        ],
+    )
+    .await;
+    assert!(!ok);
+    assert_eq!(conflict["error"]["code"], "operation_conflict");
+    let (ok, list) = cli(&owner.loaded.data_dir, &["thread", "list"]).await;
+    assert!(ok);
+    assert_eq!(list["result"]["items"].as_array().unwrap().len(), 1);
+    let thread = first["result"]["thread_id"].as_str().unwrap();
+    let (ok, accepted) = cli(
+        &owner.loaded.data_dir,
+        &[
+            "message",
+            "send",
+            "--thread",
+            thread,
+            "--text",
+            "persisted despite missing model connection",
+        ],
+    )
+    .await;
+    assert!(ok, "{accepted}");
+    assert_eq!(accepted["result"]["delivery_status"], "accepted");
+    let message = accepted["result"]["message_id"].as_str().unwrap();
+    let (ok, saved) = cli(
+        &owner.loaded.data_dir,
+        &["message", "get", "--message", message],
+    )
+    .await;
+    assert!(ok, "{saved}");
+    assert_eq!(saved["result"]["message_id"], message);
+    // Cost inspection must also work before an embedding profile exists. The
+    // real CLI/RPC path returns finite counts, without authorizing paid work.
+    async fn index_state(control: &Control) -> (i64, i64, i64) {
+        control
+            .store
+            .database
+            .call(|db| {
+                Ok((
+                    db.query_row("SELECT COUNT(*) FROM embedding_job", [], |row| row.get(0))?,
+                    db.query_row("SELECT COUNT(*) FROM index_space", [], |row| row.get(0))?,
+                    db.query_row(
+                        "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'index.%'",
+                        [],
+                        |row| row.get(0),
+                    )?,
+                ))
+            })
+            .await
+            .unwrap()
+    }
+    let index_before = index_state(&control).await;
+    let preview_operation = format!("{}:cost-preview", owner.instance_id);
+    let preview_args = [
+        "--operation-id",
+        &preview_operation,
+        "index",
+        "preview",
+        "--source",
+        message,
+    ];
+    let (ok, preview) = cli(&owner.loaded.data_dir, &preview_args).await;
+    assert!(ok, "{preview}");
+    assert_eq!(preview["result"]["sources"], 1);
+    assert!(preview["result"]["characters"].as_u64().unwrap() > 0);
+    assert!(preview["result"]["segments"].as_u64().unwrap() > 0);
+    let (ok, preview_replay) = cli(&owner.loaded.data_dir, &preview_args).await;
+    assert!(ok, "{preview_replay}");
+    assert_eq!(preview_replay, preview);
+    assert_eq!(index_state(&control).await, index_before);
+    // Saturate only a temporary owner's receipt budget. The real CLI must still
+    // resolve the receipt-free observation path and replay the original ID.
+    let instance = owner.instance_id.clone();
+    control.store.database.call(move |db| {
+        db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES(?1,?2,'null','fixture','pending','2026-10-25',268435456)", rusqlite::params![format!("{instance}:saturated-fixture"),instance])?;
+        Ok(())
+    }).await.unwrap();
+    let (ok, refused) = cli(&owner.loaded.data_dir, &["thread", "create"]).await;
+    assert!(!ok);
+    assert_eq!(refused["error"]["code"], "storage_limit");
+    let (ok, lookup) = cli(
+        &owner.loaded.data_dir,
+        &["status", "--operation", &operation],
+    )
+    .await;
+    assert!(ok, "{lookup}");
+    assert_eq!(lookup["result"]["operation"]["state"], "completed");
+    assert_eq!(
+        lookup["result"]["operation"]["targets"]["thread_id"],
+        thread
+    );
+    assert_eq!(
+        lookup["result"]["receipt_budget"]["full_result_admission_blocked"],
+        true
+    );
+    let (ok, replay) = cli(
+        &owner.loaded.data_dir,
+        &["--operation-id", &operation, "thread", "create"],
+    )
+    .await;
+    assert!(ok, "{replay}");
+    assert_eq!(replay, first);
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    task.await.unwrap();
+}
+
+#[test]
+fn parser_errors_identify_known_arguments_without_echoing_rejected_values() {
+    let binary = env!("CARGO_BIN_EXE_shellboy");
+    for (args, kind, argument) in [
+        (
+            vec!["history", "list", "--limit", "PRIVATE_REJECTED_VALUE"],
+            "ValueValidation",
+            Some("--limit"),
+        ),
+        (
+            vec!["shell", "get"],
+            "MissingRequiredArgument",
+            Some("--execution"),
+        ),
+        (
+            vec!["PRIVATE_REJECTED_SUBCOMMAND"],
+            "InvalidSubcommand",
+            None,
+        ),
+    ] {
+        let output = Command::new(binary).args(args).output().unwrap();
+        assert!(!output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(!text.contains("PRIVATE_REJECTED"), "{text}");
+        let value: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["error"]["code"], "invalid_argument");
+        assert_eq!(value["error"]["details"]["parser_kind"], kind, "{value}");
+        assert!(
+            value["error"]["hint"].as_str().unwrap().contains("Usage:"),
+            "{value}"
+        );
+        if let Some(argument) = argument {
+            assert!(
+                value["error"]["details"]["arguments"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|v| v == argument),
+                "{value}"
+            );
+        }
+        assert!(value.get("operation_id").is_none());
+    }
+}

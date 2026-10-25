@@ -1,0 +1,30 @@
+//! Shellboy native agent: typed operations, durable state and asynchronous workers.
+
+pub mod app;
+pub mod attachments;
+pub mod cli;
+pub mod compaction;
+pub mod config;
+pub mod context;
+pub mod control;
+pub mod deletion;
+pub mod diagnostics;
+mod digest;
+pub mod docs;
+pub mod frontend;
+pub mod gc;
+pub mod history;
+pub mod index;
+mod input_path;
+pub mod instructions;
+pub mod ipc;
+mod json_pointer;
+pub mod model;
+pub mod presentation;
+pub mod protocol;
+pub mod rag;
+pub mod shell;
+pub mod status;
+pub mod storage;
+pub mod terminal_links;
+pub mod ui;

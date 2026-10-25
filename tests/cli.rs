@@ -1,0 +1,666 @@
+use clap::{Parser, error::ErrorKind};
+use shellboy::{
+    cli::{Cli, MAX_STDIN_TEXT_BYTES},
+    protocol::{Command, ErrorCode},
+};
+#[cfg(unix)]
+use std::ffi::OsString;
+use std::path::Path;
+
+fn cwd() -> &'static Path {
+    if cfg!(windows) {
+        Path::new("C:\\cli\\cwd")
+    } else {
+        Path::new("/cli/cwd")
+    }
+}
+async fn convert(args: &[&str]) -> Command {
+    let cli = Cli::try_parse_from(std::iter::once("shellboy").chain(args.iter().copied())).unwrap();
+    cli.into_command_with_stdin(cwd(), &mut &b""[..])
+        .await
+        .unwrap()
+        .unwrap()
+}
+#[tokio::test]
+async fn all_public_cli_operations_map_to_shared_typed_contracts() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["status"], "status"),
+        (&["model", "list"], "model.list"),
+        (&["thread", "list"], "thread.list"),
+        (&["thread", "get", "--thread", "t"], "thread.get"),
+        (&["thread", "create"], "thread.create"),
+        (
+            &["thread", "delete-preview", "--thread", "t", "--descendants"],
+            "thread.delete_preview",
+        ),
+        (
+            &["thread", "fork", "--thread", "t", "--node", "n"],
+            "thread.fork",
+        ),
+        (&["thread", "delete", "--thread", "t"], "thread.delete"),
+        (
+            &["thread", "set", "--thread", "t", "--model", "m"],
+            "thread.set",
+        ),
+        (
+            &["message", "send", "--thread", "t", "--text", "hello"],
+            "message.send",
+        ),
+        (&["message", "get", "--message", "m"], "message.get"),
+        (&["operation", "get", "--operation", "op"], "operation.get"),
+        (&["run", "get", "--run", "r"], "run.get"),
+        (&["run", "retry", "--run", "r"], "run.retry"),
+        (&["run", "stop", "--run", "r"], "run.stop"),
+        (&["turn", "get", "--turn", "u"], "turn.get"),
+        (
+            &[
+                "wait",
+                "--conditions-json",
+                r#"[{"type":"run_ended","run_id":"r"}]"#,
+            ],
+            "wait",
+        ),
+        (&["history", "list", "--thread", "t"], "history.list"),
+        (&["history", "get", "--node", "n"], "history.get"),
+        (
+            &[
+                "history",
+                "relations",
+                "--node",
+                "n",
+                "--relation",
+                "sources",
+            ],
+            "history.relations",
+        ),
+        (
+            &["history", "search", "--query", "needle"],
+            "history.search",
+        ),
+        (&["shell", "get", "--execution", "x"], "shell.get"),
+        (&["shell", "read", "--execution", "x"], "shell.read"),
+        (
+            &["shell", "write", "--execution", "x", "--text", "input"],
+            "shell.write",
+        ),
+        (&["shell", "eof", "--execution", "x"], "shell.eof"),
+        (&["shell", "stop", "--execution", "x"], "shell.stop"),
+        (
+            &[
+                "attachment",
+                "add",
+                "--thread",
+                "t",
+                "--path",
+                "file",
+                "--kind",
+                "file",
+            ],
+            "attachment.add",
+        ),
+        (&["attachment", "list", "--thread", "t"], "attachment.list"),
+        (
+            &["attachment", "remove", "--thread", "t", "--attachment", "a"],
+            "attachment.remove",
+        ),
+        (&["compact", "--thread", "t"], "compact"),
+        (&["index", "status"], "index.status"),
+        (&["index", "backfill", "--scope", "all"], "index.backfill"),
+        (&["index", "preview", "--scope", "all"], "index.preview"),
+        (&["index", "retry"], "index.retry"),
+        (&["index", "rebuild", "--thread", "t"], "index.rebuild"),
+        (&["storage", "status"], "storage.status"),
+        (
+            &["storage", "collect", "--category", "raw"],
+            "storage.collect",
+        ),
+    ];
+    assert_eq!(cases.len(), 37);
+    for (args, name) in cases {
+        let command = convert(args).await;
+        assert_eq!(serde_json::to_value(command).unwrap()["command"], *name);
+    }
+}
+
+#[tokio::test]
+async fn defaults_globals_and_effort_clear_preserve_owner_and_wire_semantics() {
+    let cli = Cli::try_parse_from([
+        "shellboy",
+        "--data-dir",
+        "data",
+        "thread",
+        "list",
+        "--config",
+        "settings.toml",
+        "--operation-id",
+        "opaque",
+    ])
+    .unwrap();
+    assert_eq!(cli.data_dir.as_deref(), Some(Path::new("data")));
+    assert_eq!(cli.config.as_deref(), Some(Path::new("settings.toml")));
+    assert_eq!(cli.operation_id.as_deref(), Some("opaque"));
+    let clone = cli.clone();
+    assert!(
+        matches!(clone.into_command_with_stdin(cwd(),&mut &b""[..]).await.unwrap(),Some(Command::ThreadList(a)) if a.limit==50 && a.cursor.is_none())
+    );
+    let cli = Cli::try_parse_from(["shellboy"]).unwrap();
+    assert!(
+        cli.into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        matches!(convert(&["thread","set","--connection","proxy"]).await,Command::ThreadSet(a) if a.connection.as_deref()==Some("proxy") && a.model.is_none())
+    );
+    assert!(
+        matches!(convert(&["thread","set","--effort",""]).await,Command::ThreadSet(a) if a.effort.as_deref()==Some(""))
+    );
+    assert!(
+        matches!(convert(&["message","send","--text",""]).await,Command::MessageSend(a) if a.thread_id.is_none() && a.text.is_empty())
+    );
+    assert!(
+        matches!(convert(&["history","get","--node","n"]).await,Command::HistoryGet(a) if a.limit_bytes==65536 && a.encoding=="UTF-8")
+    );
+    assert!(
+        matches!(convert(&["history","search","--query","q"]).await,Command::HistorySearch(a) if a.limit==10)
+    );
+    assert!(
+        matches!(convert(&["shell","read","--execution","x"]).await,Command::ShellRead(a) if a.encoding.is_none())
+    );
+    assert!(
+        matches!(convert(&["shell","read","--execution","x","--encoding","CP932"]).await,Command::ShellRead(a) if a.encoding.as_deref()==Some("CP932"))
+    );
+}
+
+#[tokio::test]
+async fn attachment_alias_and_add_resolve_against_cli_cwd_without_accessing_file() {
+    let canonical = convert(&[
+        "attachment",
+        "add",
+        "--path",
+        "missing/../日本語.png",
+        "--kind",
+        "image",
+        "--thread",
+        "t",
+    ])
+    .await;
+    let alias = convert(&[
+        "attach",
+        "missing/../日本語.png",
+        "--kind",
+        "image",
+        "--thread",
+        "t",
+    ])
+    .await;
+    assert_eq!(canonical, alias);
+    match canonical {
+        Command::AttachmentAdd(a) => assert_eq!(Path::new(&a.path), cwd().join("日本語.png")),
+        _ => panic!(),
+    }
+    let command = convert(&["thread", "create", "--cwd", "relative/../project"]).await;
+    assert!(
+        matches!(command,Command::ThreadCreate(a) if a.cwd.as_deref()==Some("relative/../project"))
+    );
+}
+
+#[tokio::test]
+async fn stdin_text_preserves_exact_utf8_and_exclusive_text_source() {
+    let cli = Cli::try_parse_from(["shellboy", "message", "send", "--text-stdin"]).unwrap();
+    let mut input = &b"hello\n\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e\n\0"[..];
+    let command = cli
+        .into_command_with_stdin(cwd(), &mut input)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(command,Command::MessageSend(a) if a.text=="hello\n日本語\n\0"));
+    let cli = Cli::try_parse_from([
+        "shellboy",
+        "shell",
+        "write",
+        "--execution",
+        "x",
+        "--text-stdin",
+        "--encoding",
+        "CP932",
+    ])
+    .unwrap();
+    let command = cli
+        .into_command_with_stdin(cwd(), &mut &b"text\n"[..])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(command,Command::ShellWrite(a) if a.text=="text\n" && a.encoding=="CP932"));
+    for args in [
+        vec!["shellboy", "message", "send"],
+        vec![
+            "shellboy",
+            "message",
+            "send",
+            "--text",
+            "body",
+            "--text-stdin",
+        ],
+        vec!["shellboy", "shell", "write", "--execution", "x"],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+    // A --text operation never consumes stdin.
+    let cli = Cli::try_parse_from(["shellboy", "message", "send", "--text", "body"]).unwrap();
+    let mut unread = &b"unconsumed"[..];
+    cli.into_command_with_stdin(cwd(), &mut unread)
+        .await
+        .unwrap();
+    assert_eq!(unread, b"unconsumed");
+}
+
+#[tokio::test]
+async fn stdin_invalid_utf8_and_overflow_reject_entire_input_without_echo() {
+    let cli = Cli::try_parse_from(["shellboy", "message", "send", "--text-stdin"]).unwrap();
+    let error = cli
+        .into_command_with_stdin(cwd(), &mut &b"secret\xff"[..])
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(!error.message.contains("secret"));
+    let bytes = vec![b'x'; MAX_STDIN_TEXT_BYTES + 2];
+    let mut input = bytes.as_slice();
+    let cli = Cli::try_parse_from(["shellboy", "message", "send", "--text-stdin"]).unwrap();
+    let error = cli
+        .into_command_with_stdin(cwd(), &mut input)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InputLimit);
+    assert_eq!(input.len(), 1);
+}
+
+#[tokio::test]
+async fn invalid_flags_limits_wait_json_and_unselected_backfill_never_become_operations() {
+    for args in [
+        vec!["shellboy", "shell", "start", "--command", "x"],
+        vec![
+            "shellboy",
+            "attachment",
+            "add",
+            "--path",
+            "p",
+            "--kind",
+            "audio",
+        ],
+        vec!["shellboy", "index", "status", "--scope", "everything"],
+        vec![
+            "shellboy",
+            "wait",
+            "--conditions-json",
+            "[]",
+            "--timeout-ms",
+            "-1",
+        ],
+        vec!["shellboy", "thread", "fork", "--thread", "t"],
+        vec!["shellboy", "thread", "delete"],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+    for args in [
+        vec!["shellboy", "thread", "list", "--limit", "201"],
+        vec![
+            "shellboy",
+            "history",
+            "get",
+            "--node",
+            "n",
+            "--limit-bytes",
+            "65537",
+        ],
+        vec![
+            "shellboy", "history", "search", "--query", "q", "--limit", "51",
+        ],
+        vec![
+            "shellboy",
+            "wait",
+            "--conditions-json",
+            "[{\"type\":\"invented\",\"secret\":\"hidden\"}]",
+        ],
+        vec!["shellboy", "wait", "--conditions-json", "[]"],
+        vec!["shellboy", "thread", "set"],
+        vec!["shellboy", "index", "backfill"],
+    ] {
+        let cli = Cli::try_parse_from(args).unwrap();
+        let error = cli
+            .into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert!(!error.message.contains("hidden"));
+    }
+}
+
+#[test]
+fn help_and_version_are_display_success_and_unknown_operation_is_parse_error() {
+    for args in [
+        vec!["shellboy", "--help"],
+        vec!["shellboy", "help", "thread"],
+        vec!["shellboy", "shell", "--help"],
+    ] {
+        assert_eq!(
+            Cli::try_parse_from(args).unwrap_err().kind(),
+            ErrorKind::DisplayHelp
+        );
+    }
+    assert_eq!(
+        Cli::try_parse_from(["shellboy", "--version"])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::DisplayVersion
+    );
+    assert_eq!(
+        Cli::try_parse_from(["shellboy", "nonexistent"])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidSubcommand
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn non_utf8_paths_are_explicit_errors_instead_of_lossy_references() {
+    use std::os::unix::ffi::OsStringExt;
+    for prefix in [
+        vec!["attach", "--kind", "file"],
+        vec!["thread", "create", "--cwd"],
+        vec!["thread", "set", "--cwd"],
+        vec!["thread", "fork", "--thread", "t", "--node", "n", "--cwd"],
+    ] {
+        let args = std::iter::once(OsString::from("shellboy"))
+            .chain(prefix.into_iter().map(OsString::from))
+            .chain(std::iter::once(OsString::from_vec(b"bad-\xff".to_vec())))
+            .collect::<Vec<_>>();
+        let cli = Cli::try_parse_from(args).unwrap();
+        let error = cli
+            .into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert_eq!(error.message, "path must be representable as UTF-8");
+    }
+}
+
+#[tokio::test]
+async fn operation_lookup_target_is_independent_of_global_request_id() {
+    let cases: &[(&[&str], Option<&str>)] = &[
+        (&["operation", "get", "--operation", "target:receipt"], None),
+        (
+            &[
+                "--operation-id",
+                "request:lookup",
+                "operation",
+                "get",
+                "--operation",
+                "target:receipt",
+            ],
+            Some("request:lookup"),
+        ),
+        (
+            &[
+                "operation",
+                "--operation-id",
+                "request:lookup",
+                "get",
+                "--operation",
+                "target:receipt",
+            ],
+            Some("request:lookup"),
+        ),
+        (
+            &[
+                "operation",
+                "get",
+                "--operation-id",
+                "request:lookup",
+                "--operation",
+                "target:receipt",
+            ],
+            Some("request:lookup"),
+        ),
+        (
+            &[
+                "operation",
+                "get",
+                "--operation",
+                "target:receipt",
+                "--operation-id",
+                "request:lookup",
+            ],
+            Some("request:lookup"),
+        ),
+    ];
+    for (args, expected_request_id) in cases {
+        let cli = Cli::try_parse_from(std::iter::once("shellboy").chain(args.iter().copied()))
+            .unwrap_or_else(|error| panic!("{args:?}: {error}"));
+        assert_eq!(
+            cli.operation_id.as_deref(),
+            *expected_request_id,
+            "{args:?}"
+        );
+        let command = cli
+            .into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            command,
+            Command::OperationGet(shellboy::protocol::OperationTarget {
+                operation_id: "target:receipt".into(),
+            }),
+            "{args:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn model_list_preserves_explicit_selection_and_rejects_empty_flags() {
+    let Command::ModelList(args) = convert(&[
+        "model",
+        "list",
+        "--connection",
+        "proxy",
+        "--thread",
+        "target",
+    ])
+    .await
+    else {
+        panic!("model.list expected")
+    };
+    assert_eq!(args.connection.as_deref(), Some("proxy"));
+    assert_eq!(args.thread_id.as_deref(), Some("target"));
+    let Command::ModelList(args) = convert(&["model", "list"]).await else {
+        panic!("model.list expected")
+    };
+    assert!(args.connection.is_none() && args.thread_id.is_none());
+    for flag in ["--connection", "--thread"] {
+        let cli = Cli::try_parse_from(["shellboy", "model", "list", flag, ""]).unwrap();
+        assert!(
+            cli.into_command_with_stdin(cwd(), &mut &b""[..])
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn thread_title_preserves_explicit_empty_reset() {
+    assert!(
+        matches!(convert(&["thread", "set", "--thread", "t", "--title", "作業タイトル"]).await,
+        Command::ThreadSet(a) if a.title.as_deref() == Some("作業タイトル") && a.thread_id.as_deref() == Some("t"))
+    );
+    assert!(matches!(convert(&["thread", "set", "--title", ""]).await,
+        Command::ThreadSet(a) if a.title.as_deref() == Some("") && a.thread_id.is_none()));
+    assert!(matches!(convert(&["thread", "set", "--model", "m"]).await,
+        Command::ThreadSet(a) if a.title.is_none()));
+}
+
+#[tokio::test]
+async fn search_filters_and_relation_direction_are_typed_without_implicit_target() {
+    let command = convert(&[
+        "history",
+        "search",
+        "--query",
+        "q",
+        "--thread",
+        "t",
+        "--kind",
+        "user",
+        "--kind",
+        "assistant",
+        "--exclude-kind",
+        "tool",
+        "--from",
+        "2026-01-01T00:00:00+09:00",
+        "--to",
+        "2027-01-01T00:00:00Z",
+    ])
+    .await;
+    assert!(
+        matches!(command, Command::HistorySearch(a) if a.thread_id.as_deref()==Some("t") && a.kinds==["user", "assistant"] && a.exclude_kinds==["tool"] && a.from.is_some() && a.to.is_some())
+    );
+    assert!(
+        matches!(convert(&["history", "search", "--query", "q"]).await, Command::HistorySearch(a) if a.thread_id.is_none() && a.kinds.is_empty())
+    );
+    assert!(
+        matches!(convert(&["history", "relations", "--node", "n", "--relation", "replacements", "--limit", "2", "--cursor", "c"]).await, Command::HistoryRelations(a) if a.limit==2 && a.cursor.as_deref()==Some("c") && a.relation==shellboy::protocol::HistoryRelation::Replacements)
+    );
+}
+
+#[tokio::test]
+async fn shared_enum_vocabulary_keeps_cli_spellings_and_wire_values() {
+    for name in ["image", "file"] {
+        let value = serde_json::to_value(
+            convert(&["attachment", "add", "--path", "missing", "--kind", name]).await,
+        )
+        .unwrap();
+        assert_eq!(value["args"]["kind"], name);
+    }
+    for name in ["threads", "all"] {
+        let value =
+            serde_json::to_value(convert(&["index", "status", "--scope", name]).await).unwrap();
+        assert_eq!(value["args"]["scope"], name);
+    }
+    for (cli, wire) in [
+        ("raw", "raw"),
+        ("managed-images", "managed_images"),
+        ("history", "history"),
+        ("index", "index"),
+        ("all", "all"),
+    ] {
+        let value =
+            serde_json::to_value(convert(&["storage", "status", "--category", cli]).await).unwrap();
+        assert_eq!(value["args"]["category"], wire);
+    }
+    for name in ["previous", "next", "sources", "replacements"] {
+        let value = serde_json::to_value(
+            convert(&["history", "relations", "--node", "n", "--relation", name]).await,
+        )
+        .unwrap();
+        assert_eq!(value["args"]["relation"], name);
+    }
+    for args in [
+        vec![
+            "shellboy",
+            "storage",
+            "status",
+            "--category",
+            "managed_images",
+        ],
+        vec![
+            "shellboy",
+            "history",
+            "relations",
+            "--node",
+            "n",
+            "--relation",
+            "replacement",
+        ],
+        vec![
+            "shellboy",
+            "attachment",
+            "add",
+            "--path",
+            "missing",
+            "--kind",
+            "other",
+        ],
+        vec!["shellboy", "index", "status", "--scope", "other"],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+}
+
+#[tokio::test]
+async fn shared_defaults_keep_parser_and_wire_deserialization_identical() {
+    for (argv, name, args) in [
+        (vec!["thread", "list"], "thread.list", serde_json::json!({})),
+        (
+            vec!["history", "search", "--query", "q"],
+            "history.search",
+            serde_json::json!({"query":"q"}),
+        ),
+        (
+            vec![
+                "history",
+                "relations",
+                "--node",
+                "n",
+                "--relation",
+                "previous",
+            ],
+            "history.relations",
+            serde_json::json!({"node_id":"n","relation":"previous"}),
+        ),
+        (
+            vec!["history", "get", "--node", "n"],
+            "history.get",
+            serde_json::json!({"node_id":"n"}),
+        ),
+        (
+            vec!["shell", "write", "--execution", "x", "--text", "s"],
+            "shell.write",
+            serde_json::json!({"execution_id":"x","text":"s"}),
+        ),
+        (
+            vec![
+                "wait",
+                "--conditions-json",
+                "[{\"type\":\"run_ended\",\"run_id\":\"r\"}]",
+            ],
+            "wait",
+            serde_json::json!({"conditions":[{"type":"run_ended","run_id":"r"}]}),
+        ),
+    ] {
+        let parsed = convert(&argv).await;
+        let wire: Command =
+            serde_json::from_value(serde_json::json!({"command":name,"args":args})).unwrap();
+        assert_eq!(parsed, wire, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn malformed_history_since_is_rejected_before_trying_an_owner() {
+    let cli = Cli::try_parse_from([
+        "shellboy",
+        "history",
+        "list",
+        "--thread",
+        "t",
+        "--since",
+        "2026-10-25",
+    ])
+    .unwrap();
+    let error = cli
+        .into_command_with_stdin(cwd(), &mut &b""[..])
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(error.message, "since must be RFC3339 with timezone");
+}

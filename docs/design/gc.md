@@ -1,0 +1,68 @@
+# 保持・到達性GCと容量表示
+
+採用設計。保持と到達性・GC確定境界を具体化する。会話・回答・推論・要約を期限で削除しない。由来となった初期保持仕様と引継ぎ資料は非同梱。
+
+生存Threadの選択pathだけでなく、そのThreadのTurnに属する未採用/過去node、Threadのmessage receipt、採用replacement出力も保持rootとする。削除Thread由来のnodeは、別の生存fork pathまたは有効なreplacement_sourceから必要なものだけ保持する。会話edgeの全outgoing先を保持対象にしない。これによりfork共有prefixの後ろにある削除元専用suffixを誤って残さない。出典はreplacement出力→sourceの関係を再帰展開し、旧summaryを含む多段出典を保護する。
+
+`gc_job` とDB接続内TEMP work tableでroot走査/出典mark/sweepを短いbatchへ分ける。marksetをアプリRAMへ全件常駐させない。接続終了でTEMPが消えたら、保存済みjobはmarkから再開する。job開始時のnode rowid上限で対象を固定し、root revisionが変わった場合は既markを保守的に残す。未markの破壊候補は現在のrootと逆方向replacement出典到達性を同transactionで再検証し、runtime pinも照合する。後発nodeはこのjobの対象へ含めず、後発の削除jobも完了扱いにしない。sweepはnode自体/edge/出典関係を残してpayload tombstone化し、理由と本文revisionを更新する。duplicated output_item本文も同transactionでtombstone化し、全IndexSpaceのvec/chunk/job/入力snippetを索引serviceのhelperで削除する。
+
+復旧待ちの `incomplete_response` は選択pathへ追加しない監査nodeだが、生存ThreadのTurn所属により保持rootになる。このINSERTと同じtransactionで `root_revision` を更新し、Roots走査後の追加も次の破壊batch前に現在到達性の再検証へ反映させる。再送対象への混入や、全nodeを無条件に保持する対処はしない。公開型・表・event・worker・依存の追加は不要。
+
+rawは確定済みshellのpipe原文だけを、既定7日/合計1 GiBの両方で回収する。生存shellと `runtime_pin(resource_kind='shell_output',resource_id=execution ID)` は回収しない。最初のbatchで `app_meta.raw_tombstone.<execution ID>` をdeletingへ保存し、retention generationを増加し、その実行のtool_raw索引だけを全spaceから同transactionで削除し、保存済みの会話引用/添付パスの索引は残す。その後に原文chunkを有限batchで消す。途中crash後もmarkerがあるrawを新たにread/indexしない。完了時markerをdeletedへ進める。metadataと履歴中の既存引用を会話期限削除にすり替えない。
+
+managed画像のdeleting→unlink→deletedとpin/active検査は共有AttachmentServiceへ委ねる。外部ファイルは対象にしない。期限/容量判定でpinned分を無理に削除せず、回収不能bytesを別に返す。
+
+容量は論理live bytesと物理DB/WAL/managed/log bytes、DB再利用可能page bytesを分離する。DELETE直後にOS空き容量が増えると説明せず、自動VACUUMを実行しない。物理属性の取得は有限file worker上で実施し、UI/main OS threadから同期stat/走査を呼ばない。logical limit超過は新しい副作用をstorage_limitで保留するための判定として公開し、停止/終端保存/GCは許す。保存済みspaceのsemantic閲覧はquery embeddingだけを生成して許可し、索引pauseを変更しない。索引用の新規embedding停止と閲覧を区別する（[G10](index.md#論理容量上限とsemantic閲覧g10)）。
+
+logical bytesの採用定義は保存本文（nodeと監査outputの重複を含む）、snapshot/draft/attempt/event/receipt本文、pipe原文、managed raw_size、vec float32要素、`app_meta` の `index.*` 入力/preview/bootstrap/auto payloadの合計。SQLiteのB-tree/索引page overheadとは別の値とする。`reclaimable_bytes` はrawから確実に回収できる下限であり、会話GCやmanaged候補の未確定見積りを加算しない。詳細応答の `reclaimable_is_lower_bound` をtrueとし、quotaはこの見積りではなくlogical live合計で判定する。索引workerも同じ `require_capacity_tx` を利用する。
+
+raw候補metadataは128実行ずつ取得し、chunkは128行かつ1 MiB以内のtransactionに分ける（単独の既存oversize chunkだけは進捗のため許容）。root/出典/sweepは各128件。mark後にruntime pinが追加された場合もsweep直前に未mark pinを取り込み、残りの破壊候補を現在のpinを含むrootと逆方向の再帰出典で同transaction内に再検証する。sweep cursorは戻さず、継続するpin追加で進捗を失わない。root revisionだけでは捉えられない一時読取り保護をこの検査で補う。
+
+根拠と検証は GC検証（非同梱の検証記録） に記録する。全量データでのGC中入力遅延・physical filesystemの回収速度はこの局所試験から達成としない。
+
+成功済み要約partの `summary.part.*` 本文もlogical history bytesへ計上する。cacheは保持rootを追加しない。部分成功は参照元本文が有効な間は再利用用に保存し、明示削除GC後に一つでもsourceがtombstone/不存在になれば、そのexact入力版へ一致できないcacheを128件ずつ回収する。共有prefixが残っていても、一緒に生成された削除branch本文の派生cacheを永久保持しない。
+
+未完了waitの `app_meta wait.pending.*` も保存byte数をlogical historyへ加算する。成立・取消しで解放し、前instance分はstartupで履歴metadata nodeへ移すため、以後は通常のnode payload accountingと到達可能性に従う。
+
+
+## W7の進捗是正
+
+制御測定（非同梱の検証記録）で、root変更が続くと全markの再走査で回収0になることを確認した。
+Threadごとのcounterへ単純分割せず、既存global revisionとTEMP markを使う。
+job開始時のnode rowid上限で対象を固定し、後から増えたnodeをそのjobのsweepへ入れない。
+revision変更後は既markを保守的に残し、未mark候補は破壊transaction内で現在のrootと逆方向の
+replacement出典到達性を再検証する方式を採る。新たなfork/Turn/pin/sourceを除外しない。
+旧rootを過剰保持した場合は次のjobで再判定し、安全性を優先する。
+
+root判定SQLを共有し、同じSQLの毎node prepareを避ける局所整理を挙動変更と分ける。
+新しい永続表・worker・Thread counterは追加せず、既存cursorにhorizonと再検証要否を記録する。
+有効なTEMP sessionとcursorがあるjobはstart_historyの再呼出しでも進捗を保持する。旧cursor（上限記録なし）/TEMP消失は従来どおり安全にresetする。job.root_revisionは開始時の基準として維持し、その時点までの削除jobだけを同時完了できる。Root/Provenance/Sweepの保守的markはjob終了で破棄し、後発の明示削除jobで除去済みrootを再判定する。
+
+## 容量集計の本文読取り除去（G4）
+
+原レビューG4は本文の反復読取りとDB worker占有の是正であり、O(1)集計の追加を要求しない。
+容量の定義を変えず、schema v7の狭いexpression/covering indexだけをSUMする。
+TEXTは`octet_length`、rawは`length(BLOB)`、managedは既存`raw_size`を使い、明示の
+`INDEXED BY`で本文table走査への退行を防ぐ。nodeの既存`payload_bytes`は旧rowと実UTF-8
+本文長の一致を保証するDDLがないため、集計では実本文由来のindexを採る。旧rowを補正・改変しない。
+vec量は従来どおり保存dimension×4をchunkごとに加算し、vector本文の取得を追加しない。
+receipt予算counterの固定metadata overhead/予約量はlogical historyへ流用しない。
+
+`quota_counter`の再利用も検討したが、全tableの増減・状態変更・削除・rollbackを担当する
+数十個のtriggerと初期化責任を増やすため不採用。派生indexはSQLiteが原文のINSERT/UPDATE/
+DELETE・tombstoneと同transactionで保守し、rollback/crash/reopenで別cacheとずれない。
+集計は残存row数に対してO(N)だが、本文byte数に比例する反復読取りをしない。
+index構築は旧DBのmigration時に一度必要で、永続サイズと更新コストも増える。上限は原文row数に
+比例するscalar index（本文コピーなし）であり、新しい保持root・worker・表・公開設定は加えない。
+index破損はSQLiteのintegrity検査/REINDEXの対象で、通常起動に全本文再集計を追加しない。
+
+
+G7の検索可視性のため、削除Threadの最終thread_path/thread_replacementは本文回収まで
+所有証拠として残す。root判定は従来どおりlive Threadだけなので回収を妨げない。
+sweepの既存node batch内でtombstone確定と同transactionに当該nodeの削除Thread pathと
+当該出力replacementの削除Thread登録を消す。処理量は当該nodeの所有参照数に依存し、
+新しい全履歴cleanup worker/queueやschemaを作らない。生存Threadのpath/登録は変更しない。
+
+## 履歴収集の段分離（R2-8）
+
+history_stepの既存単一write transaction内でroots/provenance/sweepをprivate関数へ分け、破壊的tombstone手順を一箇所にまとめる。TEMP marks/session、BATCH、有限horizon、root revision変更時とlate pinの到達性再検証、cursor進捗、全space vector削除→node tombstone→所有証拠解放→output_item→incomplete attemptの順序は不変。段分離はGC再開状態やworkerを増やさず、Stageの保存済みsnake_case bytesを維持する。

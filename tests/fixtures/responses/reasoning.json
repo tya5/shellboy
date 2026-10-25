@@ -1,0 +1,21 @@
+{
+  "id": "resp-fixture",
+  "status": "completed",
+  "output": [
+    {
+      "id": "reasoning-fixture",
+      "type": "reasoning",
+      "summary": [{"type": "summary_text", "text": "Synthetic reasoning summary"}],
+      "encrypted_content": "opaque-final-fixture",
+      "provider_extension": {"preserve": true}
+    },
+    {
+      "id": "message-fixture",
+      "type": "message",
+      "role": "assistant",
+      "phase": "commentary",
+      "status": "completed",
+      "content": [{"type": "output_text", "text": "日本語😀", "annotations": []}]
+    }
+  ]
+}

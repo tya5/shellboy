@@ -1,0 +1,17 @@
+# 起動と受付の実装設計
+
+P2ではowner・Control・ThreadDriver・UIを分離する。モデル通信やシェル完了を待つThreadDriverが、外部CLIや自Thread CLIを受けるControlを占有しない。
+
+## 保存先の所有
+
+owner.lockはOS file lockを使い、存在判定やPIDで代用しない。DB専用threadが同じlock guardを保持し、呼出し元の取消し・Dropでもwriter終了まで解放しない。終了時は新規受付停止→全実行停止→DB保存/drain/close→endpointとsocket掃除→lock解放。別data-dirは独立する。
+
+endpoint.jsonはprotocol_version、instance_id、transport、address。秘密を含めない。起動時に同じdata-dir内へ一時保存してrenameし、古いendpointの存在では生存と判定しない。Unix socketはOS長制限を避ける短いprivate一時ディレクトリ内、Windowsはinstance固有のnamed pipeに置く。新ownerは古いPIDをkillせず、前回未終端を中断・結果未確認として保存する。
+
+## 操作の順序
+
+Control受付とDB commitを順序の基準にする。operation receiptを同transactionで保存してから実行タスクを起動する。現在instanceのoperation_idは同要求を再実行せず結果を返し、異内容ならconflict。旧instance IDは保存済み結果の照会だけ。
+
+各ThreadのDriverは一つ。モデルresponseの全toolを事前検証し、順に結果を確定する。追加指示・通知・設定変更は安全な要求境界で反映。停止/取消しは独立tokenで伝え、DB応答後・API開始直前にも世代を照合する。
+
+所有shellの出力イベントは有限byte予算を保持したままDBへ保存し、その後予算を返す。completion watchの到達だけで終端保存しない。イベント経路をdrainし、状態と原文を保存してから完了通知を配送する。

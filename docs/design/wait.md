@@ -1,0 +1,45 @@
+# 非同期waitと合成循環
+
+採用設計。原文CLI契約5節を優先し、既定30秒、0は即時確認、非負の有限timeoutを使う。未知IDは操作エラー、存在する削除tombstoneと登録後削除はunavailable、復旧待ちはrecovery_waitとして返す。失敗した対象の終端もsatisfiedであり、対象の成功を装わない。
+
+waitは観測operationで、解除・timeout・接続切断で対象を止めない。状態確認と登録はDBの短いsnapshotとControl登録mutexで扱い、通知を先に登録してから状態を確認する。通知欠落でも最終状態をDBから再読し、timeout到達時も最後に一度確認する。matchedは同じDB snapshot上で成立した条件をまとめる。
+
+`shell_output` の再観測通知はraw chunkとsaved_sequenceのcommit成功後に発行する。shell終了や他のCLI操作の完了を待たず、保存済みbyteへ到達できる。待機用の既存Notifyだけを使い、chunk単位のUI Changed eventや新しいpollerは増やさない。保存失敗時は成功通知を出さず、既存の保存障害処理へ進む。
+
+循環判定はRunだけを頂点にしない。同Runの別shell待機を正しく扱うため、Run/Turn/shellを別resource nodeとし、所有辺Run→子Run、Run→Turn、Turn→shell、Run→shell、待機辺caller shell→対象resourceを合成する。自己Run/Turn/shellは明示拒否し、祖先・兄弟の合成循環を到達性で拒否する。複数any条件の未成立対象へ全て辺を置く保守的な規則を採用する。実行中の所有親を付替える操作はなく、新規所有は新Runだけなので、登録間の所有辺追加から新しい循環は生まれない。
+
+人間追加指示・途中報告のreceiptだけをinterruptedの原因にし、stdoutや指定外の完了eventは単に再観測のきっかけにする。通常完了通知はforeground shellをbackgroundへ変えない。待機辺はRAIIで一度だけ除去し、observer futureの取消しでも残さない。
+
+runtime操作は先にoperation_receiptのpending意図をcommitする。OS側stdin write/EOF/stopの実行後に結果を保存する。現在プロセス内の同一ID観測は共有し、完成済み結果は再生、結果不明のpending意図は新規副作用へ再利用しない。再起動後の旧IDも照会だけ。副作用とDBの分散transactionを仮定せず、最後の結果保存に失敗した場合は不確実状態として受付を止める。
+
+## インスタンス中断時の観測情報
+
+停止・アプリ終了・再起動をまたぐ観測情報として、未完了waitの条件を `app_meta wait.pending.<operation_id>` に保存してからRAMの待機グラフへ登録する。保存失敗時は登録しない。保存するcallerはThread/Run/Turn/execution IDだけで、Origin tokenや環境変数を含めない。公開契約に条件件数の別上限はないため、輸送と同じ8MiBのmetadata上限を検査し、logical history容量へ算入する。成立・timeout・切断・shutdown取消しで保存recordを解放し、対象自体は停止しない。
+
+次回起動は旧Run/Turn/shellを終端化する前に中断snapshotを保存し、wait条件全文を各影響Threadの `interrupted_wait` 履歴nodeへ移す。これはRun/Turnを開始しないmetadataで、role/item/outputを持たずモデルへの通常履歴replayへ入れない。`history get` で元条件をページ取得でき、選択経路の通常履歴として明示Thread削除まで保持する。再開contextには各種件数と最大64件、waitは最大4条件のpreviewと元node参照を入れる。64件を超すwaitも全件履歴nodeに残り、history list/getで到達できる。旧版のpending操作から要求種別やwait条件を復元できない場合はunknownと明示し、推測した条件を作らない。
+
+中断contextイベント自体では自動Run/Turnを作らず、人間の明示再開が新Run/Turnを作った安全境界で取り込む。旧receiptのRun/Turn割当は変更せず、未反映参照、旧直属子の終了状態・回答参照、シェルの結果未確認状態を渡す。古いPIDの検査・再停止、副作用の再実行はしない。
+
+中断context自体も `interruption_context` nodeとして保持し、まだ再開していない子Threadの情報へ親からhistory list/getで到達できる。Run/Turn/shell/子/未反映/旧版不明操作の全snapshot refsは `interruption_details` nodeへ32件または約64KiBごとのchunkで保持する。inline一覧を64件に制限しても原文を破棄しない。detailの参照一覧も最初64chunk＋総数に制限し、残りはThread履歴からkindとsectionで取得する。単一recordがchunk目安を超える場合は単独nodeに保存し、公開HistoryGetの64KiB pagingで読む。waitの全条件は個別 `interrupted_wait` nodeが正本である。
+
+## C6: モデルを止めている明示waitの保存
+
+外部人間の観測とbackground shell内のwaitはTurnの状態を変えない。
+Driverが現在foregroundで待つexecutionだけを、既存の有限ForegroundSlotに識別IDとして保持する。
+循環検査を通った未成立waitが実際に待機する境界で、そのexecution・tool group・attemptの
+Turn/generationと生存Runを照合し、running→waitingを既存DB workerで保存する。
+即時成立、timeout=0、拒否された循環はwaitingを作らない。
+
+既存wait.pending metadataへ待機を反映したgenerationを追加し、新表・worker・公開型は作らない。
+既存8MiB metadata上限には追加fieldの最大byteも予約し、peer照会はkeyのprefix範囲で絞る。
+同executionの複数waitがある場合は、最後の観測解除までwaitingを保持する。
+成立/timeout/切断/取消しのcleanupで自己metadataを除去し、同世代の他のwaitがなく、
+現在も同じforeground executionならwaiting→runningへ戻す。終端/復旧/新世代を戻さない。
+foreground解除時にも、そのslotを先に無効化してから同世代のwaitingを解除する。
+これにより人手背景化後の古いwaitが、新しいcallやモデル要求を待機扱いにしない。
+
+slot確認とDB更新を短い同期区間で直列化し、UI threadへDBやawaitを持ち込まない。
+spawn後にCLI waitがslot登録へ先行した場合は、登録時に既存Notifyで再観測を促す。
+状態変更のcommit後だけ既存Changedで画面を更新し、監視pollerや汎用遷移エンジンは追加しない。
+通常終了は既存C5のsnapshotでpending条件とwaitingを保存してから取消し・終端化する。
+Forceの途中切断は従来どおり次回起動の回復対象とする。
