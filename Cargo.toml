@@ -57,6 +57,7 @@ codegen-units = 1
 opt-level = 2
 
 [dev-dependencies]
+tokio-rustls = "=0.26.6"
 tempfile = "=3.27.0"
 
 [target."cfg(windows)".dependencies]

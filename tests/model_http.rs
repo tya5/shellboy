@@ -62,6 +62,7 @@ async fn fake(
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let connection = Connection {
         base_url: format!("http://{}/v1/", listener.local_addr().unwrap()),
+        ssl_verify: true,
         api_key_env: None,
         default_effort: None,
         headers: BTreeMap::from([("Authorization".into(), "Bearer fake-private-key".into())]),

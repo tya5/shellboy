@@ -6,6 +6,8 @@ default_model = "REPLACE_WITH_MODEL_ID"
 [connections.proxy]
 base_url = "https://proxy.example/v1"
 api_key_env = "SHELLBOY_API_KEY"
+# Set false only to disable certificate verification for this connection.
+# ssl_verify = true
 # default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
 
 # Embeddings are optional. Enabling them indexes newly finalized conversation

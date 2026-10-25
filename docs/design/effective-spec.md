@@ -49,6 +49,8 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | AGENTS読込 | 新Turnごとに有限file workerで本文を読み直す。同Turn retryは保存済みsnapshotを維持 | [control](control.md)。mtime/size一致の内容変更も反映する。ファイルの原子的snapshotは保証しない |
 | shell stdin EOF | 既知の閉鎖済みstdinへのEOF再送は冪等成功。未知IDやwriteの閉鎖済み入力への送信は別に検証 | [shell設計](shell.md)。acceptedは新規閉鎖・送信・shell終了の証拠ではない |
 
+接続ごとの `ssl_verify` は既定true。明示falseだけHTTPS証明書検証を無効化し、会話・要約・embedding・モデル一覧へ一貫して適用する。
+
 設定の正本は [設定設計](config.md) と `src/config.rs` の検証済みschema。
 起動引数 > `SHELLBOY_DATA_DIR` > TOML > OS既定（接続CLIはTOMLを読まない）。
 存在する不正設定を黙って無視しない。接続・モデル・embedding未設定は捏造せず、必要な操作だけを開始前に拒否する。

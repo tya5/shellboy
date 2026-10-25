@@ -392,3 +392,32 @@ fn validation_phases_preserve_first_error_and_do_not_echo_secret_values() {
         assert!(!text.contains("PRIVATE_"));
     }
 }
+
+#[test]
+fn tls_verification_defaults_to_enabled_and_is_connection_local() {
+    assert!(Connection::default().ssl_verify);
+    let direct: Connection = toml::from_str("base_url='https://example.test/v1'").unwrap();
+    assert!(direct.ssl_verify);
+    let config = Config::parse(
+        "[connections.omitted]\nbase_url='https://example.test/v1'\n\
+         [connections.verified]\nbase_url='https://example.test/v1'\nssl_verify=true\n\
+         [connections.unverified]\nbase_url='https://example.test/v1'\nssl_verify=false\n",
+    )
+    .unwrap();
+    assert!(config.connections["omitted"].ssl_verify);
+    assert!(config.connections["verified"].ssl_verify);
+    assert!(!config.connections["unverified"].ssl_verify);
+    let diagnostic = format!("{:?}", config.connections["unverified"]);
+    assert!(diagnostic.contains("ssl_verify: false"));
+    assert!(!diagnostic.contains("https://example.test"));
+}
+
+#[test]
+fn tls_verification_rejects_non_boolean_values() {
+    for value in ["'false'", "'true'", "0", "1", "[]", "{}"] {
+        let source = format!(
+            "[connections.proxy]\nbase_url='https://example.test/v1'\nssl_verify={value}\n"
+        );
+        assert!(Config::parse(&source).is_err(), "accepted {value}");
+    }
+}

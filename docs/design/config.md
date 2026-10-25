@@ -16,6 +16,10 @@
 
 検証: `cargo test --test config` は既定値、全節の未知キー、型違い、数値関係、接続参照、URL/認証矛盾、秘密伏せ、パス優先順位、明示/既定設定ファイルを対象とする。OS注入によるパス試験は各OSでの実機動作検証を代替しない。shell実行、lock、実proxyはこのモジュールの試験範囲外。
 
+## 接続ごとのTLS検証
+
+`connections.<名前>.ssl_verify` はboolで既定true。明示falseの場合だけ、その接続のHTTPS証明書検証を無効化する。HTTP URLでは効果がない。ConnectionのRust DefaultとTOML省略時をともにtrueへ揃え、文字列や数値は拒否する。ownerは起動時の設定を保持するため変更後は再起動する。独立RAGは実行時に読む同じ接続設定を使う。接続CLIからownerのTLS設定を上書きしない。
+
 ## R3-6: 設定検証の局所化
 
 Connection内のURL/effort/credential名/header検証はConnectionへ、数値・範囲・retry整合・env・path/keyは各sectionへ移す。Configは既定接続とembeddingの参照関係を持つ。first errorを維持するため、数値positive→worker容量→local相互条件→connection内容→section間参照→env/path/keyの順序を明示し、単にsectionごとの一括検証へ並べ替えない。Ui/Shellなどは既存の段階に合わせた小さな検証関数を持つ。

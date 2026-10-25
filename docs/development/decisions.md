@@ -35,3 +35,13 @@ UI投影・module分割・既存資源の所有整理を、新しい業務状態
 LinuxとmacOSでopenptyのwinsize引数のconst性が異なるため、共通試験の4箇所はraw pointerで渡す。OSを跨ぐ広いlint抑制は追加しない。WindowsのSECURITY_ATTRIBUTESはCreateFileWだけが借りる同期blockへ閉じ、非SendなC構造体をasync状態へ残さない。unsafe Sendの追加、worker変更、Win32呼出し順の変更は不要と判断した。
 
 Windowsの標準検証で、Unix専用テストのjson macro importにもcfgが必要と判明し、importだけを同じcfgで制限した。CIはClippyのkeep-goingで全targetの診断を集め、失敗時も依存cacheを保存して同じ依存の再ビルドを減らす。通常CIのpushはbranchに限定し、version tagでは専用release workflowを実行する。コンパイルやテストの失敗を成功扱いにはしない。
+
+## モデルAPIのTLS検証設定（2026-10-26）
+
+利用者の依頼により初版0.1.0へ接続ごとの `ssl_verify`（既定true）を追加する。reqwest 0.13.5/rustlsに環境変数だけで検証を無効化する機能はなく、既存ConnectionとHttpModelClientの生成箇所で完結させる。設定省略で無効にならないようRust DefaultとSerdeの既定値を揃える。会話/要約/embedding/モデル一覧で同じ設定を使い、ownerのhot reloadや新規環境変数は追加しない。証明書チェーンだけでなくホスト名なども検証対象外になることをガイドへ明記する。追加CAや接続時の対話確認は今回の範囲に含めない。
+
+確認は合成証明書のローカルHTTPSで行い、HTTPだけのmockをTLS成功の根拠にしない。既存リリース候補のCI結果と変更後の確認を区別し、変更後の候補でCIを確認してからタグを作る。
+
+TLSのローカルfixtureに限り、既存lockにある `tokio-rustls = 0.26.6` を固定のdev dependencyとして直接参照する。実行時のOpenSSLやOS trust storeへの書込みを不要にし、合成の公開テスト鍵で全OSのHTTP要求を検査するためである。製品依存・worker・永続表は増やさない。HTTP(S)プロキシとNO_PROXYは既存ライブラリの環境変数対応を案内し、独自の設定schema/除外規則は実装しない。
+
+Windows CIで判明した管理UI試験のUnix絶対パス前提は、fixtureをOS別絶対パスへ変更して解消する。製品の起動準備完了判定は緩めない。CIのTestsにはno-fail-fastを付け、一つのtargetが失敗しても後続targetの診断を集める。

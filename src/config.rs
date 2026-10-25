@@ -52,13 +52,25 @@ pub struct Config {
     pub logging: Logging,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {
     pub base_url: String,
     pub api_key_env: Option<String>,
     pub default_effort: Option<String>,
     pub headers: BTreeMap<String, String>,
+    pub ssl_verify: bool,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            base_url: String::new(),
+            api_key_env: None,
+            default_effort: None,
+            headers: BTreeMap::new(),
+            ssl_verify: true,
+        }
+    }
 }
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -67,6 +79,7 @@ impl fmt::Debug for Connection {
             .field("api_key_env", &self.api_key_env)
             .field("default_effort", &self.default_effort)
             .field("headers", &"[redacted]")
+            .field("ssl_verify", &self.ssl_verify)
             .finish()
     }
 }

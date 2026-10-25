@@ -2374,41 +2374,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shellboy"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "base64 0.23.1",
- "chrono",
- "clap",
- "crossterm",
- "encoding_rs",
- "fs2",
- "futures-util",
- "libc",
- "png",
- "pulldown-cmark",
- "ratatui",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "sqlite-vec",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "toml",
- "tui-markdown",
- "unicode-segmentation",
- "unicode-width",
- "url",
- "uuid",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2482,6 +2447,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",
@@ -2687,6 +2653,42 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "digest 0.11.3",
+]
+
+[[package]]
+name = "shellboy"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "base64 0.23.1",
+ "chrono",
+ "clap",
+ "crossterm",
+ "encoding_rs",
+ "fs2",
+ "futures-util",
+ "libc",
+ "png",
+ "pulldown-cmark",
+ "ratatui",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sqlite-vec",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "toml",
+ "tui-markdown",
+ "unicode-segmentation",
+ "unicode-width",
+ "url",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

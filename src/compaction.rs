@@ -1254,6 +1254,7 @@ mod tests {
                 api_key_env: None,
                 headers: Default::default(),
                 default_effort: None,
+                ssl_verify: true,
             },
         );
         config

@@ -48,6 +48,7 @@ default_model = "YOUR_RESPONSES_MODEL_ID"
 base_url = "https://proxy.example/v1"
 api_key_env = "SHELLBOY_PROXY_API_KEY"
 # default_effort = "low"
+# ssl_verify = true
 
 # 任意。設定する場合は二つとも指定する。
 # [embedding]
@@ -61,9 +62,39 @@ Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLB
 
 `connections.<名前>.headers` は任意のHTTP header辞書です。header名は大文字小文字を無視して重複不可、値の不正な制御文字は拒否します。`api_key_env` とAuthorization headerは併用不可です。headerへ秘密値を直接書くより環境変数参照を使ってください。`default_effort` は省略可能な非空文字列で、接続先が受け付ける値を指定します。モデル容量・effort対応のカタログは内蔵しません。
 
+`ssl_verify` は接続ごとのHTTPS証明書検証で、既定は `true` です。自己署名証明書などを使う接続で無効化する場合だけ、同じ `[connections.proxy]` に `ssl_verify = false` を指定します。その接続の会話・要約・埋め込み・モデル一覧に適用され、証明書の発行元・期限・ホスト名の検証が省略されます。HTTP接続には効果がありません。owner設定の変更後は再起動してください。独立RAGは実行時に読む接続設定へ従います。環境変数だけで検証を無効化する機能はありません。
+
 会話はResponses、索引と検索クエリはEmbeddings APIを使います。`embedding.connection` と `embedding.model` は両方省略、または両方指定です。接続名は定義済みである必要があります。embedding変更時は別空間として扱い、過去データ全件を無断で再索引化しません。明示backfill/rebuildと費用の考え方は [履歴と検索](history-and-search.md) を参照してください。検索にもAPI利用が生じます。
 
 モデル一覧はTUIの `/models` または `shellboy model list` で取得し、現在のThreadのモデルは `/models` で選択するか `shellboy thread set --model MODEL_ID` で変更できます。利用可能なモデルは接続先の設定に依存します。
+
+## HTTP(S)プロキシと除外先
+
+APIの `base_url` とは別に、HTTP(S)通信の中継プロキシを環境変数で指定できます。Shellboy起動前に設定し、稼働ownerへ反映するには再起動します。独立RAGにも起動時の環境が適用されます。
+
+Bash例：
+
+```bash
+export HTTP_PROXY=http://proxy.example:8080
+export HTTPS_PROXY=http://proxy.example:8080
+export NO_PROXY=localhost,127.0.0.1,.internal.example
+shellboy
+```
+
+PowerShell例：
+
+```powershell
+$env:HTTP_PROXY = 'http://proxy.example:8080'
+$env:HTTPS_PROXY = 'http://proxy.example:8080'
+$env:NO_PROXY = 'localhost,127.0.0.1,.internal.example'
+shellboy
+```
+
+`HTTP_PROXY` はHTTP宛、`HTTPS_PROXY` はHTTPS宛です。通常のHTTP CONNECTプロキシなら、`HTTPS_PROXY` の値も `http://...` を使います。`ALL_PROXY` は両方の共通指定で、個別のHTTP/HTTPS指定が優先します。小文字の `http_proxy`、`https_proxy`、`all_proxy`、`no_proxy` もライブラリが扱います。同名の大文字/小文字を異なる値で併記しないでください。
+
+`NO_PROXY` はカンマ区切りの除外ホスト/IP/ドメインなどを指定します。`NO_PROXY='*'` は全宛先をプロキシ対象外にします。ローカルAPIを直接使う場合は `localhost,127.0.0.1,::1` を指定してください。これらはプロセス全体の環境設定で、接続別TOMLの `proxy` / `no_proxy` キーはありません。現在のビルドは環境変数による指定を利用し、macOS/WindowsのGUIに設定されたシステムプロキシを自動取得するfeatureは有効にしていません。SOCKS対応も有効にしていません。
+
+詳細は [reqwestのproxy仕様](https://docs.rs/reqwest/0.13.5/reqwest/#proxies) と [NO_PROXYの形式](https://docs.rs/reqwest/0.13.5/reqwest/struct.NoProxy.html#method.from_env) を参照してください。
 
 ## 起動設定とThread設定
 
@@ -80,6 +111,7 @@ Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLB
 | 節 | キー = 既定値 | 用途 |
 |---|---|---|
 | root | `data_dir` = OS既定、`default_connection` / `default_model` = 未設定、`connections` = 空 | 保存先・新規会話の既定 |
+| `connections.<名前>` | `ssl_verify=true`、接続URL/認証/effort/headerは上記 | 接続単位のTLS検証。既定で検証あり |
 | `embedding` | `connection` / `model` = 未設定 | 索引・検索API |
 | `shell` | `kind` = Unix `bash` / Windows `powershell`、`executable` = 自動、`env` = 空辞書 | shell種別・実行ファイル・追加環境。WSL直接起動の指定ではない |
 | `retention` | `tool_raw_days=7`, `tool_raw_bytes=1073741824`, `clipboard_days=7`, `clipboard_bytes=268435456` | raw出力7日/1GiB、managed画像7日/256MiB。使用中pin/選択/下書きは保護 |

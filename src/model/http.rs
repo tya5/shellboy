@@ -57,6 +57,7 @@ impl HttpModelClient {
             .validate()
             .map_err(|e| ModelError::new("config_invalid", e.to_string()))?;
         let client = Client::builder()
+            .tls_danger_accept_invalid_certs(!connection.ssl_verify)
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .connect_timeout(std::time::Duration::from_secs(30))
