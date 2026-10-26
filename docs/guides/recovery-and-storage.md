@@ -200,6 +200,8 @@ stack overflow等のfatal abortでは正常終了処理を通らず、原因本�
 
 `storage_limit`とreceipt予算の案内が出た操作は未受付です。既知IDは `shellboy status --operation OPERATION_ID` で状態・対象ID・不確実性を確認できます。全文結果は認証が有効な元callerから元のコマンドを元のoperation IDで再送して取得し、副作用を重複実行しません。元shellのOriginが失効している場合はstatusで状態を確認し、容量回復後にoperation getで照会します。`shellboy status`とこのlookupは新receiptを作りません。statusのreceipt_budgetで保存量と予約量を含む予算を確認します。
 
+後続sourceでは `run stop` / `shell stop` に通常256MiBとは別の固定受付余白を確保します。statusの `control_headroom_bytes` / `control_limit_bytes` / `control_available_bytes` が停止用の上限と残量です。通常要求はこの余白を使わず、停止も同じoperation IDによる保存結果の再送を維持します。停止自身が余白を使い切った場合は新IDを拒否するため、TUIのreceiptを使わない停止も引き続き利用できます。残量はmetadataを含む次の任意要求の受付保証ではありません。これは公開v0.1.1には未収録のローカル修正です。
+
 現在instanceのreceiptは期限削除しないため、同instanceの記録だけで満ちると新しい `storage collect` も容量不足になる場合があります。内部GCは継続します。現在作業を通常終了し、利用者が明示的にownerを再起動すると、不要になった旧terminal receiptを回収できます。旧pending intentや保護参照を無理に削除せず、自動再起動もしません。保存outcomeは1件8MiB、operation receipt専用予算は256MiBで、SQLiteファイルの物理上限ではありません。
 
 GC結果のmanaged_deleted/managed_failuresは各128件までの詳細です。managed_deleted_count/managed_failure_countが実数、managed_details_truncatedが省略の有無を示します。詳細の省略は回収処理自体の省略を意味しません。

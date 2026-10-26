@@ -170,3 +170,7 @@ shellboy --% wait --conditions-json [{\"type\":\"run_ended\",\"run_id\":\"ACTUAL
 ```
 
 `--%` 以降で `$env:...` が通常どおり展開されることを期待しません。Windows実機検証は今回対象外なので、この例を全PowerShell版での実行保証とはしません。通常の文字列sendには `shellboy message send --thread 'ACTUAL_THREAD_ID' --text '確認してください'` のように単純な引数を使えます。
+
+## shellの経過時間
+
+`elapsed_ms` はOS起動直前から、直接の子processの終了・配下processの回収確認・出力drainを経てcompletionを確定するまでの監視期間です。配下がpipeを保持している間の待ちや出力の背圧も含み、確定後のDB保存待ち・結果読取り時間は含みません。`started_at` / `ended_at` は別の保存時刻です。過去の未計測実行には推定値を足さず、このfieldを省略します。

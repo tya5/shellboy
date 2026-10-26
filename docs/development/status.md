@@ -4,6 +4,12 @@
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
+## レビュー対応goalの再開
+
+v0.1.1公開後、利用者の指示でレビュー対応を再開しました。製品はこのリポジトリ、非公開台帳・旧証拠監査は独立したローカルGitへ置きます。台帳に追加指摘19件も含め、古い定型完了文を個別根拠へ直し、反証や確認不足の親項目は検証待ちへ戻しています。旧hashを公開hashへ読み替えません。
+
+まず索引更新時の選択保持と巨大rawの範囲取得を `d844c1a` / `c913582` に実装し、index49件・RAG16件・関連単体2件とstrict Clippyが成功しました。停止receiptの専用余白・検索identityの分離・末尾cursor省略も `1ab0460` / `4c76dc3` / `c3f2246` に実装しました。対象のcontrol DB・index・RAG・status試験とlib407件、strict Clippyが成功しています。統合標準checkと残るUI/履歴/構造指摘の是正は継続します。これらのgoal変更はローカルcommitのみで、v0.1.1配布物・利用中owner・既定設定/DBには反映していません。
+
 ## v0.1.1公開完了
 
 v0.1.0以降の修正を、検証済みcommit `e55da58` のtag `v0.1.1` として公開しました。最終Responsesの採用と受信済み本文の保持、Windowsの隠し環境変数、Unix IPCの自動配置、Enter直後の送信状態・診断が対象です。3 OSのnative CIはWindows 925件、macOS/Linux各1,025件成功。Windows x64・macOS ARM64・Linux x64のrelease buildと起動確認、全archiveの公開ダウンロードとSHA-256照合も成功しました。初版のtag・配布物は置換していません。
@@ -51,6 +57,6 @@ mkdir前に予定pathを記録し、locatorのみ・空directory・bind後の各
 
 接続ごとの `ssl_verify`（既定true）を初版へ追加しました。HTTP(S)プロキシ/NO_PROXYはライブラリの既存環境変数を使い、設定ガイドにBash/PowerShell例を記載しています。TLS変更後のnative CIはWindows 891件、macOS/Linux各986件が成功しました。配布物は3 OSでrelease buildとhelp/versionを確認し、全archiveの公開ダウンロードとSHA-256照合も成功しました。後続のWindows試験待機上限調整は製品コードを変更しておらず、別commitの検証として [記録](../validation/acceptance.md) します。
 
-改名前の作業履歴と公開用の新履歴は分離しています。以前のレビュー対応goalは中断状態を維持し、この名称変更・公開準備を旧goal全体の完遂とは扱いません。
+改名前の作業履歴と公開用の新履歴は分離しています。名称変更・公開準備は旧goal全体の完遂とは扱いません。レビュー対応goalはv0.1.1公開後に再開しました。
 
 Windows/Linuxのnative検証はGitHub Actionsで実施しました。実provider API、実IME・OS clipboard、各端末GUIの再検証は今回未実施です。既知の制限は [一覧](known-limitations.md)、レビュー台帳は [運用](maintenance.md) に記載します。

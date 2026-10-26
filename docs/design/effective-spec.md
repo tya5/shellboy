@@ -36,6 +36,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 
 | 対象 | 適用する契約 | 根拠・影響 |
 |---|---|---|
+| TUIの観測経過 | 現在画面がTurnの活動を観測した単調時間。選択前・再起動前・未取得期間は含めず、復旧/Turn終端で停止。送信直後の時計は送信要求からのUIローカル経過 | [実行状態表示](tui-activity-indicator.md)、[UI](ui.md) |
 | owner wait | 既定30,000ms、0は即確認、非負有限値。any、timeoutでも対象は生存 | [wait](wait.md)、[protocol](protocol.md) |
 | 履歴semantic検索 | 既定10件、最大50件。ページcursorなし | [protocol](protocol.md)、[index](index.md) |
 | 論理容量上限とsemantic閲覧 | 既存spaceの明示検索はquery embeddingを許可し、索引pauseを変更しない | [index](index.md)。新source/vector/jobの停止を維持し、queryの外部費用や物理disk/receipt別予算を免除しない |
