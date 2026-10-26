@@ -57,10 +57,10 @@ impl Command {
     pub(crate) fn route(&self) -> CommandRoute {
         self.name_and_route().1
     }
-    /// Only Status bypasses immutable operation receipts. Other observations
-    /// still retain same-ID results; this is not a read-only classification.
+    /// Observations are evaluated afresh and never consume durable receipts.
+    /// Wait remains stateful: it owns registration and changes caller activity.
     pub(crate) fn requires_receipt(&self) -> bool {
-        self.route() != CommandRoute::StatusProjection
+        !self.is_read_only()
     }
     /// May owner shutdown drop the runtime action before receipt finalization?
     pub(crate) fn runtime_cancellable(&self) -> bool {

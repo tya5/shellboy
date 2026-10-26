@@ -66,6 +66,16 @@ struct SavedOutcome {
     error: Option<ApiError>,
 }
 
+/// Reclamation must not replace malformed durable data with an expiry marker.
+pub(super) fn valid_saved_outcome(body: &str) -> bool {
+    serde_json::from_str::<SavedOutcome>(body).is_ok_and(|saved| {
+        matches!(
+            (saved.result, saved.error),
+            (Some(_), None) | (None, Some(_))
+        )
+    })
+}
+
 impl Store {
     pub fn new(
         database: DbWorker,
@@ -130,6 +140,20 @@ impl Store {
         let store = self.clone();
         self.database
             .call(move |connection| {
+                if !request.command.requires_receipt() {
+                    // Use the canonical query projections without reserving,
+                    // replaying, or collecting immutable mutation receipts.
+                    let tx = connection.transaction()?;
+                    let result = store.dispatch(
+                        &tx,
+                        &request.command,
+                        caller.as_ref(),
+                        &request.operation_id,
+                        &chrono::Utc::now().to_rfc3339(),
+                    );
+                    tx.commit()?;
+                    return Ok(result);
+                }
                 Ok(store.execute_transaction(connection, &request, caller.as_ref()))
             })
             .await
@@ -371,6 +395,7 @@ impl Store {
             if let Some((previous,body))=saved {
                 if previous!=fingerprint {return Ok(Err(error(ErrorCode::OperationConflict,"operation ID was already used with different arguments")));}
                 let result=if let Some(body)=body {
+                    if body==super::receipt::EXPIRED_OUTCOME {return Ok(Ok(RuntimeReservation::Saved(Err(super::receipt::expired_error()))));}
                     let outcome:SavedOutcome=serde_json::from_str(&body).map_err(|_|StorageError::Schema("saved runtime operation result is malformed".into()))?;
                     match (outcome.result,outcome.error) {
                         (Some(value),None)=>RuntimeReservation::Saved(Ok(value)),
@@ -1674,7 +1699,11 @@ fn storage_error(error: StorageError) -> ApiError {
 }
 
 /// Receipt completion describes the command, not the asynchronous work it queued.
-fn operation_details(db: &Connection, id: &str, current_instance: &str) -> Result<Value> {
+pub(crate) fn operation_details(
+    db: &Connection,
+    id: &str,
+    current_instance: &str,
+) -> Result<Value> {
     let row: Option<(String, String, String, Option<String>)> = db.query_row(
         "SELECT instance_id,created_at,state,result_ref_json FROM operation_receipt WHERE operation_id=?1",
         [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
@@ -1685,8 +1714,12 @@ fn operation_details(db: &Connection, id: &str, current_instance: &str) -> Resul
             "operation receipt not found",
         ));
     };
+    let expired = body.as_deref() == Some(super::receipt::EXPIRED_OUTCOME);
     let outcome: Option<Value> = body
         .map(|body| {
+            if expired {
+                return Ok(json!({"error":super::receipt::expired_error()}));
+            }
             serde_json::from_str(&body)
                 .map_err(|_| error(ErrorCode::InvalidState, "operation receipt is malformed"))
         })
@@ -1710,8 +1743,8 @@ fn operation_details(db: &Connection, id: &str, current_instance: &str) -> Resul
         "operation_id":id, "instance_id":instance, "created_at":created_at,
         "current_instance":instance == current_instance,
         "state":state, "outcome":outcome,
-        "result_uncertain":state == "pending",
-        "replay_policy":if state == "pending" { "do_not_reexecute" } else { "return_saved_outcome" },
+        "result_uncertain":state == "pending", "result_expired":expired,
+        "replay_policy":if state == "pending" { "do_not_reexecute" } else if expired {"operation_expired"} else { "return_saved_outcome" },
         "targets":targets,
     });
     if result.is_some_and(|v| {
@@ -1808,6 +1841,9 @@ fn saved_operation(
                 "saved operation has no committed result",
             )
         })?;
+        if body == super::receipt::EXPIRED_OUTCOME {
+            return Err(super::receipt::expired_error());
+        }
         let outcome: SavedOutcome = serde_json::from_str(&body).map_err(|_| {
             error(
                 ErrorCode::InvalidState,

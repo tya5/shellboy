@@ -391,6 +391,27 @@ async fn non_utf8_paths_are_explicit_errors_instead_of_lossy_references() {
 async fn operation_lookup_target_is_independent_of_global_request_id() {
     let cases: &[(&[&str], Option<&str>)] = &[
         (&["operation", "get", "--operation", "target:receipt"], None),
+        (&["status", "--operation", "target:receipt"], None),
+        (
+            &[
+                "--operation-id",
+                "request:lookup",
+                "status",
+                "--operation",
+                "target:receipt",
+            ],
+            Some("request:lookup"),
+        ),
+        (
+            &[
+                "status",
+                "--operation",
+                "target:receipt",
+                "--operation-id",
+                "request:lookup",
+            ],
+            Some("request:lookup"),
+        ),
         (
             &[
                 "--operation-id",
@@ -457,6 +478,50 @@ async fn operation_lookup_target_is_independent_of_global_request_id() {
             "{args:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn deprecated_status_operation_alias_rejects_work_filters_and_invalid_targets() {
+    for filter in [
+        vec!["--thread", "t"],
+        vec!["--run", "r"],
+        vec!["--since", "2026-10-25T00:00:00Z"],
+        vec!["--state", "failed"],
+        vec!["--all"],
+        vec!["--limit", "50"],
+        vec!["--cursor", "cursor"],
+    ] {
+        let args: Vec<_> = ["shellboy", "status", "--operation", "target:receipt"]
+            .into_iter()
+            .chain(filter)
+            .collect();
+        assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
+    }
+    let cli = Cli::try_parse_from(["shellboy", "status", "--operation", ""]).unwrap();
+    assert_eq!(
+        cli.into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    use clap::CommandFactory;
+    let mut root = Cli::command();
+    let status = root
+        .find_subcommand_mut("status")
+        .unwrap()
+        .render_long_help()
+        .to_string();
+    assert!(status.contains("deprecated") && status.contains("operation get"));
+    let operation = root
+        .find_subcommand_mut("operation")
+        .unwrap()
+        .find_subcommand_mut("get")
+        .unwrap()
+        .render_long_help()
+        .to_string();
+    assert!(operation.contains("allocates no receipt"));
+    assert!(!operation.contains("fresh observation ID"));
 }
 
 #[tokio::test]

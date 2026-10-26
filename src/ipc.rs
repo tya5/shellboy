@@ -261,23 +261,18 @@ async fn connect(
 }
 fn uncertain_reply(mut error: ApiError, operation_id: &str, command: &Command) -> ApiError {
     if !command.requires_receipt() {
-        error.hint=Some("Repeat shellboy status with the same filters to observe fresh state; this read-only projection does not create an operation receipt".into());
+        let cost = if matches!(command, Command::HistorySearch(_)) {
+            " Semantic search may incur another query embedding charge."
+        } else {
+            ""
+        };
+        error.hint = Some(format!(
+            "Repeat shellboy {} with the same arguments to observe fresh state; this observation does not create an operation receipt. The same operation ID also runs a new observation.{cost} Check CLI/owner release compatibility; older owners may have retained read receipts",
+            command.name().replace('.', " ")
+        ));
         error.details = Some(
             serde_json::json!({"operation_id":operation_id,"read_only":true,"request_may_have_been_applied":false}),
         );
-        return error;
-    }
-    if command.is_read_only() {
-        error.hint = Some(format!(
-            "The {} observation does not change target state, but its receipt or result may have been saved. Use details.operation_id with shellboy operation get --operation OPERATION_ID or replay the same operation ID for the original result. Use a fresh operation ID only for a new observation. An older owner may not support this command; a missing receipt does not prove a previous mutation was never applied. Check CLI/owner release compatibility, and do not resubmit an unconfirmed mutation under a new ID",
-            command.name()
-        ));
-        error.details = Some(serde_json::json!({
-            "operation_id": operation_id,
-            "read_only": true,
-            "request_may_have_been_applied": true,
-            "next_operation": Command::OperationGet(crate::protocol::OperationTarget {operation_id:operation_id.into()})
-        }));
         return error;
     }
     error.hint = Some("Use details.operation_id with shellboy operation get --operation OPERATION_ID, then inspect saved target state. An older owner may not support this command; a missing receipt does not prove the request was never applied. If receipt lookup is also unsupported, inspect the target using commands available on that owner. Check that CLI and owner use the same release; do not resubmit the mutation under a new ID".into());
@@ -490,7 +485,7 @@ mod frame_delivery_tests {
     }
 
     #[tokio::test]
-    async fn lost_reply_distinguishes_receipt_free_reads_saved_reads_and_stateful_waits() {
+    async fn lost_reply_distinguishes_receipt_free_observations_and_stateful_waits() {
         let cases = [
             Command::Status(Default::default()),
             Command::ThreadGet(crate::protocol::ThreadTarget {
@@ -538,27 +533,17 @@ mod frame_delivery_tests {
             let hint = error.hint.unwrap();
             let details = error.details.unwrap();
             assert_eq!(details["operation_id"], "instance:lost");
-            match name {
-                "status" => {
-                    assert_eq!(details["read_only"], true);
-                    assert_eq!(details["request_may_have_been_applied"], false);
-                    assert!(details.get("next_operation").is_none());
-                    assert!(hint.contains("does not create an operation receipt"));
-                }
-                "wait" => {
-                    assert_eq!(details["request_may_have_been_applied"], true);
-                    assert_ne!(details["read_only"], true);
-                    assert!(hint.contains("do not resubmit the mutation under a new ID"));
-                }
-                _ => {
-                    assert_eq!(details["read_only"], true);
-                    assert_eq!(details["request_may_have_been_applied"], true);
-                    assert_eq!(details["next_operation"]["command"], "operation.get");
-                    assert!(hint.contains(name));
-                    assert!(hint.contains("does not change target state"));
-                    assert!(hint.contains("replay the same operation ID"));
-                    assert!(hint.contains("fresh operation ID only for a new observation"));
-                }
+            if name == "wait" {
+                assert_eq!(details["request_may_have_been_applied"], true);
+                assert_ne!(details["read_only"], true);
+                assert!(hint.contains("do not resubmit the mutation under a new ID"));
+            } else {
+                assert_eq!(details["read_only"], true);
+                assert_eq!(details["request_may_have_been_applied"], false);
+                assert!(details.get("next_operation").is_none());
+                assert!(hint.contains(&name.replace('.', " ")));
+                assert!(hint.contains("does not create an operation receipt"));
+                assert!(hint.contains("same operation ID also runs a new observation"));
             }
             task.await.unwrap();
         }
@@ -612,12 +597,12 @@ mod frame_delivery_tests {
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::IoFailed);
         let hint = error.hint.unwrap();
-        assert!(hint.contains("older owner"));
-        assert!(hint.contains("missing receipt does not prove"));
-        assert!(hint.contains("do not resubmit"));
+        assert!(hint.contains("older owners"));
+        assert!(hint.contains("CLI/owner release compatibility"));
+        assert!(hint.contains("does not create an operation receipt"));
         let details = error.details.unwrap();
         assert_eq!(details["operation_id"], "instance:unsupported");
-        assert_eq!(details["request_may_have_been_applied"], true);
+        assert_eq!(details["request_may_have_been_applied"], false);
         task.await.unwrap();
     }
 

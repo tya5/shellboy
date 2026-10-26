@@ -627,6 +627,8 @@ impl Control {
         disconnected: CancellationToken,
     ) -> (Response<Value>, Option<MutationResult>) {
         let operation = request.operation_id.clone();
+        let observation = !request.command.requires_receipt();
+        let observation_name = request.command.name();
         let result = async {
             request.validate()?;
             let origin = self.validate_origin(&request.origin).await?;
@@ -638,13 +640,18 @@ impl Control {
                 ));
             }
             match request.command.route() {
-                CommandRoute::Runtime => self
-                    .runtime_request(request, origin, disconnected)
-                    .await
-                    .map(|result| MutationResult {
+                CommandRoute::Runtime => {
+                    let result = if observation {
+                        self.runtime_observation(request, origin, disconnected)
+                            .await
+                    } else {
+                        self.runtime_request(request, origin, disconnected).await
+                    };
+                    result.map(|result| MutationResult {
                         result,
                         ..MutationResult::default()
-                    }),
+                    })
+                }
                 CommandRoute::Database | CommandRoute::StatusProjection => match &request.command {
                     Command::AttachmentAdd(args) => {
                         if let Some(saved) = self.store.replay(&request, &origin).await? {
@@ -678,6 +685,30 @@ impl Control {
             }
         }
         .await;
+        // Receipt-free results still obey the exact response-envelope bound,
+        // including operation ID and recovery hints, before reaching transport.
+        let result = if observation {
+            let result = result.map_err(|error: ApiError| {
+                if error.hint.is_none()
+                    && matches!(error.code, ErrorCode::IoFailed | ErrorCode::InvalidState)
+                {
+                    let cost = if observation_name == "history.search" {
+                        " Repeating semantic search may incur another query embedding charge."
+                    } else { "" };
+                    error.hint(format!("This observation did not create an operation receipt. Check the reported cause, then repeat shellboy {} for fresh state.{cost}", observation_name.replace('.', " ")))
+                } else { error }
+            });
+            let projected = result
+                .as_ref()
+                .map(|effects| effects.result.clone())
+                .map_err(Clone::clone);
+            match receipt::encode(&operation, &projected) {
+                Ok(_) => result,
+                Err(error) => Err(error),
+            }
+        } else {
+            result
+        };
         match result {
             Ok(effects) => (
                 Response::success(operation, effects.result.clone()),

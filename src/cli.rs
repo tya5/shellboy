@@ -21,7 +21,7 @@ pub struct Cli {
     /// Configuration file for the TUI owner or standalone RAG embeddings.
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
-    /// Receipt key. Replay returns the original result; use fresh IDs for current observations.
+    /// Request ID. Mutations replay saved outcomes; observations read current state without a receipt.
     #[arg(long, global = true)]
     pub operation_id: Option<String>,
     #[command(subcommand)]
@@ -141,7 +141,7 @@ pub enum MessageCommand {
 pub enum OperationCommand {
     /// Inspect a receipt and downstream targets before repeating an uncertain mutation.
     #[command(
-        after_help = "  shellboy operation get --operation OPERATION_ID\n\nUse error.details.operation_id if an automatically assigned ID was returned after a connection failure. An unavailable receipt does not prove the side effect never happened. Use a fresh observation ID for this lookup; do not pass the inspected ID as global --operation-id. Guide: shellboy docs get --id shellboy/recovery-and-storage"
+        after_help = "  shellboy operation get --operation OPERATION_ID\n\nUse error.details.operation_id if an automatically assigned ID was returned after a connection failure. An unavailable receipt does not prove the side effect never happened. This lookup allocates no receipt. --operation selects the saved receipt; global --operation-id only identifies this lookup request. Guide: shellboy docs get --id shellboy/recovery-and-storage"
     )]
     Get(OperationOptions),
 }
@@ -222,11 +222,15 @@ pub struct ListOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Examples:\n  shellboy status\n  shellboy status --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nGuide: shellboy docs get --id shellboy/agent-guide"
+    after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nThe deprecated status --operation alias uses operation get and will be removed after v0.1.2.\nGuide: shellboy docs get --id shellboy/agent-guide"
 )]
 pub struct StatusOptions {
-    /// Inspect a saved operation without allocating another receipt.
-    #[arg(long = "operation")]
+    /// Deprecated until the next release: use operation get --operation ID.
+    #[arg(
+        long = "operation",
+        id = "status_lookup_operation_id",
+        conflicts_with_all = ["thread_id", "run_id", "since", "state", "all", "limit", "cursor"]
+    )]
     pub operation_id: Option<String>,
     /// Exact Thread; model callers default to their own Thread.
     #[arg(long = "thread")]
@@ -551,16 +555,34 @@ impl Cli {
             return Ok(None);
         };
         let command = match command {
-            CliCommand::Status(a) => C::Status(wire::StatusArgs {
-                operation_id: a.operation_id,
-                thread_id: a.thread_id,
-                run_id: a.run_id,
-                since: a.since,
-                state: a.state,
-                all: a.all,
-                limit: a.limit,
-                cursor: a.cursor,
-            }),
+            CliCommand::Status(a) => {
+                if let Some(operation_id) = a.operation_id {
+                    if a.thread_id.is_some()
+                        || a.run_id.is_some()
+                        || a.since.is_some()
+                        || !a.state.is_empty()
+                        || a.all
+                        || a.limit != wire::DEFAULT_LIST_LIMIT
+                        || a.cursor.is_some()
+                    {
+                        return Err(invalid(
+                            "status --operation cannot be combined with work filters, a limit, or a cursor; use operation get --operation ID",
+                        ));
+                    }
+                    C::OperationGet(wire::OperationTarget { operation_id })
+                } else {
+                    C::Status(wire::StatusArgs {
+                        operation_id: None,
+                        thread_id: a.thread_id,
+                        run_id: a.run_id,
+                        since: a.since,
+                        state: a.state,
+                        all: a.all,
+                        limit: a.limit,
+                        cursor: a.cursor,
+                    })
+                }
+            }
             CliCommand::Docs { .. } | CliCommand::Rag(_) => return Ok(None),
             CliCommand::Model {
                 command: ModelCommand::List(a),

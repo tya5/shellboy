@@ -31,6 +31,18 @@ impl Admission {
 }
 const ROW_BYTES: u64 = 512;
 const CLEANUP_BATCH: usize = 128;
+const RESULT_RETENTION_SECONDS: u64 = 24 * 60 * 60;
+// A single-byte JSON marker always shrinks a valid SavedOutcome object. Keep
+// its identity/hash row so current-instance retransmission cannot run again.
+pub(super) const EXPIRED_OUTCOME: &str = "0";
+pub(super) fn expired_error() -> ApiError {
+    let mut error = ApiError::new(
+        ErrorCode::OperationExpired,
+        "The saved operation result has expired; the original operation will not be executed again",
+    );
+    error.hint=Some("Inspect current state with shellboy operation get --operation ID and the target's get command. A new operation ID starts a new request; check side effects before doing so.".into());
+    error
+}
 type Result<T> = std::result::Result<T, ApiError>;
 fn sql(_: rusqlite::Error) -> ApiError {
     crate::storage::save_error("Cannot maintain operation receipts")
@@ -44,22 +56,60 @@ pub(super) fn usage(db: &Connection, instance: &str) -> Result<u64> {
     // pending reservations use a partial index instead of scanning saved bodies.
     db.query_row("SELECT q.logical_bytes+(SELECT COALESCE(SUM(reserved_bytes),0) FROM operation_receipt INDEXED BY operation_receipt_pending_budget WHERE instance_id=?1 AND state='pending') FROM quota_counter q WHERE q.category='operation_receipt'",[instance],|r|r.get::<_,i64>(0).map(|n|n as u64)).map_err(sql)
 }
-/// No protected pending intent or current-instance row is ever removed.
-/// `pressure` permits early collection of old terminal rows; ordinary maintenance
-/// keeps their query window for seven days. All call sites own a transaction.
+/// Protected intent is never removed. Current identities keep an expired-result
+/// marker; only old-instance identities may be deleted. All call sites own a
+/// transaction, and one pass touches at most CLEANUP_BATCH rows.
 pub(super) fn collect(db: &Connection, instance: &str, pressure: bool) -> Result<u64> {
-    let ids=db.prepare("SELECT operation_id FROM operation_receipt o WHERE instance_id<>?1 AND substr(operation_id,1,length(?1)+1)<>?1||':' AND state IN ('completed','failed') AND NOT EXISTS(SELECT 1 FROM receipt r WHERE r.client_operation_id=o.operation_id AND r.state IN ('accepted','held')) AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.operation_id=o.operation_id AND d.status IN ('accepted','held')) AND (?2 OR julianday(created_at)<=julianday('now','-7 days')) AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '[]' END) x WHERE (m.key LIKE 'compact.pending.%' OR m.key LIKE 'compact.inflight.%') AND x.value=o.operation_id) ORDER BY created_at,operation_id LIMIT ?3").map_err(sql)?.query_map(params![instance,pressure,CLEANUP_BATCH as i64], |r|r.get::<_,String>(0)).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
-    for id in &ids {
+    let rows=db.prepare("SELECT operation_id,(instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':'),COALESCE(octet_length(result_ref_json),0) FROM operation_receipt o
+        WHERE state IN ('completed','failed')
+        AND NOT EXISTS(SELECT 1 FROM receipt r WHERE r.client_operation_id=o.operation_id AND r.state IN ('accepted','held'))
+        AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.operation_id=o.operation_id AND d.status IN ('accepted','held'))
+        AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '[]' END) x WHERE (m.key LIKE 'compact.pending.%' OR m.key LIKE 'compact.inflight.%') AND x.value=o.operation_id)
+        AND (((instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':')
+            AND result_ref_json IS NOT NULL AND result_ref_json<>?4 AND octet_length(result_ref_json)>1
+            AND (?2 OR julianday(created_at)<=julianday('now','-1 day')))
+          OR (instance_id<>?1 AND substr(operation_id,1,length(?1)+1)<>?1||':'
+            AND (?2 OR julianday(created_at)<=julianday('now','-7 days'))))
+        ORDER BY created_at,operation_id LIMIT ?3").map_err(sql)?.query_map(params![instance,pressure,CLEANUP_BATCH as i64,EXPIRED_OUTCOME], |r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,i64>(2)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
+    let mut collected = 0;
+    // Preserve malformed durable envelopes. Parse one body at a time and cap
+    // aggregate validation bytes as well as row count on this DB-worker pass.
+    let mut examined_bytes = 0u64;
+    for (id, current, body_bytes) in &rows {
+        if *current {
+            let bytes = u64::try_from(*body_bytes).unwrap_or(u64::MAX);
+            if bytes > MAX_OUTCOME_BYTES || examined_bytes.saturating_add(bytes) > MAX_OUTCOME_BYTES
+            {
+                continue;
+            }
+            examined_bytes += bytes;
+            let body: String = db
+                .query_row(
+                    "SELECT result_ref_json FROM operation_receipt WHERE operation_id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .map_err(sql)?;
+            if !super::db::valid_saved_outcome(&body) {
+                continue;
+            }
+        }
         db.execute(
             "DELETE FROM app_meta WHERE key=?1",
             [crate::compaction::CompactionKeys::result(id)],
         )
         .map_err(sql)?;
-        db.execute("DELETE FROM operation_receipt WHERE operation_id=?1", [id])
-            .map_err(sql)?;
+        if *current {
+            db.execute("UPDATE operation_receipt SET result_ref_json=?2,reserved_bytes=0 WHERE operation_id=?1", params![id,EXPIRED_OUTCOME]).map_err(sql)?;
+        } else {
+            db.execute("DELETE FROM operation_receipt WHERE operation_id=?1", [id])
+                .map_err(sql)?;
+        }
+        collected += 1;
     }
-    Ok(ids.len() as u64)
+    Ok(collected)
 }
+
 pub(super) fn reserve(
     db: &Connection,
     instance: &str,
@@ -105,7 +155,7 @@ fn reserve_with_limit(
             ErrorCode::StorageLimit,
             "Operation receipt budget is full; the command was not accepted",
         );
-        error.hint=Some("Use shellboy status --operation ID or resend the original command with the same operation ID. Internal GC continues; finish current work and restart the owner explicitly to reclaim old completed receipts.".into());
+        error.hint=Some("Use shellboy operation get --operation ID or resend the original command with the same operation ID. Internal GC continues; finish current work and restart the owner explicitly to reclaim old completed receipts.".into());
         return Err(error);
     }
     db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES(?1,?2,?3,?4,'pending',?5,?6)",params![operation,instance,origin,fingerprint,now,MAX_OUTCOME_BYTES as i64]).map_err(sql)?;
@@ -140,50 +190,13 @@ pub(crate) fn summary(db: &Connection, instance: &str) -> Result<Value> {
     let used = usage(db, instance)?;
     let protected_old:i64=db.query_row("SELECT q.logical_bytes-(SELECT COALESCE(SUM(512+octet_length(operation_id)+octet_length(instance_id)+octet_length(origin_json)+octet_length(request_hash)+octet_length(created_at)+COALESCE(octet_length(result_ref_json),0)),0) FROM operation_receipt INDEXED BY operation_receipt_pending_budget WHERE instance_id=?1 AND state='pending') FROM quota_counter q WHERE category='operation_receipt.pending_actual'",[instance],|r|r.get(0)).map_err(sql)?;
     Ok(
-        json!({"accounted_bytes":used,"limit_bytes":TOTAL_BYTES,"max_outcome_bytes":MAX_OUTCOME_BYTES,"control_headroom_bytes":CONTROL_HEADROOM_BYTES,"control_limit_bytes":CONTROL_TOTAL_BYTES,"control_available_bytes":CONTROL_TOTAL_BYTES.saturating_sub(used),"protected_old_pending_bytes":protected_old,"at_limit":used>=TOTAL_BYTES,"available_bytes":TOTAL_BYTES.saturating_sub(used),"full_result_admission_blocked":used.saturating_add(MAX_OUTCOME_BYTES)>TOTAL_BYTES,"recovery":"same_id_replay_status_internal_gc_explicit_restart"}),
+        json!({"accounted_bytes":used,"limit_bytes":TOTAL_BYTES,"max_outcome_bytes":MAX_OUTCOME_BYTES,"result_retention_seconds":RESULT_RETENTION_SECONDS,"result_retention":"24h_or_pressure","expired_replay":"operation_expired","control_headroom_bytes":CONTROL_HEADROOM_BYTES,"control_limit_bytes":CONTROL_TOTAL_BYTES,"control_available_bytes":CONTROL_TOTAL_BYTES.saturating_sub(used),"protected_old_pending_bytes":protected_old,"at_limit":used>=TOTAL_BYTES,"available_bytes":TOTAL_BYTES.saturating_sub(used),"full_result_admission_blocked":used.saturating_add(MAX_OUTCOME_BYTES)>TOTAL_BYTES,"recovery":"same_id_replay_or_expired_status_internal_gc_explicit_restart"}),
     )
 }
 
 pub(super) fn under_pressure(db: &Connection, instance: &str) -> Result<bool> {
     Ok(usage(db, instance)?.saturating_add(MAX_OUTCOME_BYTES) > TOTAL_BYTES)
 }
-pub(crate) fn details(db: &Connection, instance: &str, id: &str) -> Result<Value> {
-    use rusqlite::OptionalExtension;
-    let row: Option<(String, String, String)> = db
-        .query_row(
-            "SELECT instance_id,state,created_at FROM operation_receipt WHERE operation_id=?1",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()
-        .map_err(sql)?;
-    let Some((owner, state, created)) = row else {
-        return Err(ApiError::new(
-            ErrorCode::OperationNotFound,
-            "Operation receipt not found; old receipts may have been collected",
-        ));
-    };
-    let mut targets = serde_json::Map::new();
-    let mut omitted = false;
-    let mut statement=db.prepare("SELECT key,value FROM json_each((SELECT result_ref_json FROM operation_receipt WHERE operation_id=?1),'$.result') WHERE key IN ('thread_id','message_id','run_id','turn_id','execution_id','attachment_id','space_id') AND type='text'").map_err(sql)?;
-    let rows = statement
-        .query_map([id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })
-        .map_err(sql)?;
-    for row in rows {
-        let (key, value) = row.map_err(sql)?;
-        if value.len() <= 1024 {
-            targets.insert(key, json!(value));
-        } else {
-            omitted = true;
-        }
-    }
-    Ok(
-        json!({"targets":targets,"targets_omitted":omitted,"operation_id":id,"instance_id":owner,"current_instance":owner==instance,"state":state,"created_at":created,"result_uncertain":state=="pending","replay_policy":if state=="pending"{"do_not_reexecute"}else{"return_saved_outcome"},"outcome_included":false,"hint":"Resend the original command with its operation ID to retrieve the saved outcome without allocating a new receipt"}),
-    )
-}
-
 /// Runtime mutations have scalar acknowledgments; collection has at most 128
 /// IDs and 128 bounded failure details. Reject an envelope that cannot carry
 /// that certified 512KiB result before starting external effects.
@@ -273,11 +286,11 @@ mod tests {
         assert_eq!(
             collect(&db, "current", true).unwrap(),
             0,
-            "current terminal results stay replayable"
+            "malformed fixture envelopes are retained, not hidden by expiry"
         );
     }
     #[test]
-    fn current_terminal_budget_requires_explicit_instance_change_not_silent_expiry() {
+    fn current_result_pressure_reclaims_body_but_preserves_identity_and_counter() {
         let db = fixture();
         let budget = MAX_OUTCOME_BYTES + 2048;
         reserve_with_limit(
@@ -296,34 +309,11 @@ mod tests {
             [&outcome],
         )
         .unwrap();
-        assert_eq!(
-            reserve_with_limit(
-                &db,
-                "current",
-                "current:next",
-                "null",
-                "hash",
-                "now",
-                budget
-            )
-            .unwrap_err()
-            .code,
-            ErrorCode::StorageLimit
-        );
-        assert_eq!(collect(&db, "current", true).unwrap(), 0);
-        assert_eq!(
-            db.query_row(
-                "SELECT result_ref_json FROM operation_receipt WHERE operation_id='current:first'",
-                [],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            outcome
-        );
+        let before = usage(&db, "current").unwrap();
         reserve_with_limit(
             &db,
-            "restarted",
-            "restarted:first",
+            "current",
+            "current:next",
             "null",
             "hash",
             "now",
@@ -332,12 +322,203 @@ mod tests {
         .unwrap();
         assert_eq!(
             db.query_row(
-                "SELECT COUNT(*) FROM operation_receipt WHERE operation_id='current:first'",
+                "SELECT result_ref_json FROM operation_receipt WHERE operation_id='current:first'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            EXPIRED_OUTCOME
+        );
+        assert_eq!(collect(&db, "current", true).unwrap(), 0);
+        assert_eq!(
+            usage(&db, "current").unwrap(),
+            scanned_usage(&db, "current")
+        );
+        db.execute(
+            "DELETE FROM operation_receipt WHERE operation_id='current:next'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            usage(&db, "current").unwrap(),
+            before - outcome.len() as u64 + 1
+        );
+        assert_eq!(
+            super::super::db::operation_details(&db, "current:first", "current").unwrap()["result_expired"],
+            true
+        );
+        assert_eq!(
+            super::super::db::operation_details(&db, "current:first", "current").unwrap()["state"],
+            "completed"
+        );
+        assert_eq!(collect(&db, "restarted", true).unwrap(), 1);
+        assert_eq!(usage(&db, "restarted").unwrap(), 0);
+    }
+    #[test]
+    fn current_ttl_and_pressure_protect_pending_deliveries_and_compaction() {
+        let db = fixture();
+        for (id, state) in [
+            ("expired", "completed"),
+            ("failed", "failed"),
+            ("pending", "pending"),
+            ("message", "completed"),
+            ("attachment", "completed"),
+            ("compact-pending", "completed"),
+            ("compact-inflight", "completed"),
+        ] {
+            db.execute(r#"INSERT INTO operation_receipt VALUES(?1,'current','null','hash',?2,'2000-01-01','{"result":{}}',0)"#,params![format!("current:{id}"),state]).unwrap();
+            db.execute(
+                r#"INSERT INTO app_meta VALUES(?1,'{"status":"completed"}')"#,
+                [format!("compact.result.current:{id}")],
+            )
+            .unwrap();
+        }
+        db.execute("INSERT INTO receipt VALUES('current:message','held')", [])
+            .unwrap();
+        db.execute(
+            "INSERT INTO attachment_delivery VALUES('current:attachment','accepted')",
+            [],
+        )
+        .unwrap();
+        db.execute(r#"INSERT INTO app_meta VALUES('compact.pending.fixture','["current:compact-pending"]')"#,[]).unwrap();
+        db.execute(r#"INSERT INTO app_meta VALUES('compact.inflight.fixture','["current:compact-inflight"]')"#,[]).unwrap();
+        db.execute(r#"INSERT INTO operation_receipt VALUES('current:fresh','current','null','hash','completed',datetime('now','-23 hours'),'{"result":{}}',0)"#,[]).unwrap();
+        assert_eq!(collect(&db, "current", false).unwrap(), 2);
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM operation_receipt WHERE result_ref_json='0'",
                 [],
                 |r| r.get::<_, i64>(0)
             )
             .unwrap(),
-            0
+            2
+        );
+        assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('compact.result.current:expired','compact.result.current:failed')",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        assert_eq!(collect(&db, "current", true).unwrap(), 1);
+        for id in [
+            "pending",
+            "message",
+            "attachment",
+            "compact-pending",
+            "compact-inflight",
+        ] {
+            assert_ne!(
+                db.query_row(
+                    "SELECT result_ref_json FROM operation_receipt WHERE operation_id=?1",
+                    [format!("current:{id}")],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                EXPIRED_OUTCOME
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key=?1",
+                    [format!("compact.result.current:{id}")],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+        }
+        assert_eq!(
+            usage(&db, "current").unwrap(),
+            scanned_usage(&db, "current")
+        );
+    }
+    #[test]
+    fn expiry_is_batched_and_never_hides_corrupt_outcomes_or_deletes_current_ids() {
+        let db = fixture();
+        for n in 0..130 {
+            db.execute(r#"INSERT INTO operation_receipt VALUES(?1,'current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[format!("current:{n:03}")]).unwrap();
+        }
+        assert_eq!(collect(&db, "current", true).unwrap(), 128);
+        assert_eq!(collect(&db, "current", true).unwrap(), 2);
+        assert_eq!(collect(&db, "current", true).unwrap(), 0);
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM operation_receipt", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            130
+        );
+        for (id, body) in [
+            ("bad-json", "broken"),
+            ("bad-envelope", "{}"),
+            (
+                "bad-error",
+                r#"{"error":{"code":"unknown","message":"bad"}}"#,
+            ),
+        ] {
+            db.execute("INSERT INTO operation_receipt VALUES(?1,'current','null','hash','failed','2000-01-01',?2,0)",params![format!("current:{id}"),body]).unwrap();
+        }
+        assert_eq!(collect(&db, "current", true).unwrap(), 0);
+        assert_eq!(
+            usage(&db, "current").unwrap(),
+            scanned_usage(&db, "current")
+        );
+    }
+    #[test]
+    fn expiry_limits_examined_bytes_and_skips_oversized_legacy_rows() {
+        let db = fixture();
+        let large = encode(
+            "current:a",
+            &Ok(json!({"text":"x".repeat(MAX_OUTCOME_BYTES as usize/2)})),
+        )
+        .unwrap();
+        for id in ["current:a", "current:b"] {
+            db.execute("INSERT INTO operation_receipt VALUES(?1,'current','null','hash','completed','2000-01-01',?2,0)",params![id,large]).unwrap();
+        }
+        db.execute(r#"INSERT INTO operation_receipt VALUES('current:c','current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[]).unwrap();
+        assert_eq!(
+            collect(&db, "current", true).unwrap(),
+            2,
+            "one large outcome plus a small outcome fit; two large do not"
+        );
+        assert!(
+            !db.query_row(
+                "SELECT result_ref_json='0' FROM operation_receipt WHERE operation_id='current:b'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+        );
+        assert_eq!(collect(&db, "current", true).unwrap(), 1);
+        // An out-of-contract oversized legacy envelope is never materialized or
+        // overwritten, and does not prevent a subsequent small row's progress.
+        db.execute("INSERT INTO operation_receipt VALUES('current:oversized','current','null','hash','completed','2000-01-01',?1,0)",["x".repeat(MAX_OUTCOME_BYTES as usize+1)]).unwrap();
+        db.execute(r#"INSERT INTO operation_receipt VALUES('current:z','current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[]).unwrap();
+        assert_eq!(collect(&db, "current", true).unwrap(), 1);
+        assert_eq!(db.query_row("SELECT octet_length(result_ref_json) FROM operation_receipt WHERE operation_id='current:oversized'",[],|r|r.get::<_,i64>(0)).unwrap(),MAX_OUTCOME_BYTES as i64+1);
+        assert_eq!(collect(&db, "current", true).unwrap(), 0);
+        assert_eq!(
+            usage(&db, "current").unwrap(),
+            scanned_usage(&db, "current")
+        );
+    }
+    #[test]
+    fn failed_current_expiry_rolls_back_companion_and_quota_updates() {
+        let mut db = fixture();
+        db.execute_batch(r#"INSERT INTO operation_receipt VALUES('current:done','current','null','hash','completed','2000-01-01','{"result":{}}',0);
+            INSERT INTO app_meta VALUES('compact.result.current:done','{}');
+            CREATE TRIGGER fail_expiry BEFORE UPDATE ON operation_receipt BEGIN SELECT RAISE(ABORT,'fixture');END;"#).unwrap();
+        let before = usage(&db, "current").unwrap();
+        {
+            let tx = db.transaction().unwrap();
+            assert!(collect(&tx, "current", true).is_err());
+        }
+        assert_eq!(usage(&db, "current").unwrap(), before);
+        assert_eq!(
+            usage(&db, "current").unwrap(),
+            scanned_usage(&db, "current")
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key='compact.result.current:done'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
         );
     }
     #[test]

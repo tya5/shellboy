@@ -343,6 +343,7 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
 #[tokio::test]
 #[ignore = "manual operation-size sample; temporary owner, no model API"]
 async fn measure_current_instance_receipt_sizes() {
+    use rusqlite::OptionalExtension;
     use shellboy::control::Control;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
@@ -439,7 +440,7 @@ async fn measure_current_instance_receipt_sizes() {
             let result = control.request(request).await;
             assert!(result.ok, "{name}: {:?}", result.error);
             durations.push(started.elapsed());
-            sizes.push(owner.db.call(move|db|Ok(db.query_row("SELECT 512+octet_length(operation_id)+octet_length(instance_id)+octet_length(origin_json)+octet_length(request_hash)+octet_length(created_at)+COALESCE(octet_length(result_ref_json),0) FROM operation_receipt WHERE operation_id=?1",[operation],|r|r.get::<_,i64>(0))?)).await.unwrap());
+            sizes.push(owner.db.call(move|db|Ok(db.query_row("SELECT 512+octet_length(operation_id)+octet_length(instance_id)+octet_length(origin_json)+octet_length(request_hash)+octet_length(created_at)+COALESCE(octet_length(result_ref_json),0) FROM operation_receipt WHERE operation_id=?1",[operation],|r|r.get::<_,i64>(0)).optional()?.unwrap_or(0))).await.unwrap());
         }
         sizes.sort_unstable();
         durations.sort_unstable();
@@ -449,7 +450,11 @@ async fn measure_current_instance_receipt_sizes() {
             sizes[0],
             sizes[9],
             bytes,
-            (256 * 1024 * 1024 - 8 * 1024 * 1024 - 1024) / bytes,
+            if bytes == 0 {
+                "receipt-free".to_owned()
+            } else {
+                ((256 * 1024 * 1024 - 8 * 1024 * 1024 - 1024) / bytes).to_string()
+            },
             durations[5].as_secs_f64() * 1000.0
         );
     }
@@ -462,7 +467,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
     use shellboy::control::Control;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config, "").unwrap();
+    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
     let data = root.path().join("data");
     let owner = DataOwner::start(Some(config.clone()), Some(data.clone()), root.path().into())
         .await
@@ -470,10 +475,12 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
     let control = Control::new(&owner, root.path().into());
     let saved_request = request(
         &control.store.instance_id,
-        Command::ThreadList(ThreadListArgs {
-            limit: 50,
-            cursor: None,
-            query: None,
+        Command::ThreadCreate(ThreadCreateArgs {
+            parent_id: None,
+            cwd: None,
+            connection: None,
+            model: None,
+            effort: None,
         }),
     );
     let saved = control.request(saved_request.clone()).await;
@@ -499,24 +506,30 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         ));
     }
     for command in [
-        Command::ThreadList(ThreadListArgs {
-            limit: 50,
-            cursor: None,
-            query: None,
-        }),
+        Command::ThreadList(ThreadListArgs::default()),
         Command::StorageStatus(StorageArgs { category: None }),
-        Command::StorageCollect(StorageArgs { category: None }),
     ] {
-        assert_eq!(
-            control
-                .request(request(&control.store.instance_id, command))
-                .await
-                .error
-                .unwrap()
-                .code,
-            ErrorCode::StorageLimit
+        let response = control
+            .request(request(&control.store.instance_id, command))
+            .await;
+        assert!(
+            response.ok,
+            "receipt-free observation remains available: {:?}",
+            response.error
         );
     }
+    assert_eq!(
+        control
+            .request(request(
+                &control.store.instance_id,
+                Command::StorageCollect(StorageArgs { category: None })
+            ))
+            .await
+            .error
+            .unwrap()
+            .code,
+        ErrorCode::StorageLimit
+    );
     let lookup = control
         .request(request(
             &control.store.instance_id,
@@ -532,8 +545,14 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         true
     );
     assert_eq!(
-        control.request(saved_request.clone()).await.result,
-        saved.result
+        control
+            .request(saved_request.clone())
+            .await
+            .error
+            .unwrap()
+            .code,
+        ErrorCode::OperationExpired,
+        "receipt pressure expires the terminal result without replaying its mutation"
     );
     control
         .gc
@@ -619,4 +638,238 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         .unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime_nonexecution() {
+    let (_dir, store) = fixture().await;
+    let create = request(
+        "first",
+        Command::ThreadCreate(ThreadCreateArgs {
+            parent_id: None,
+            cwd: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    );
+    let created = store.execute(create.clone(), None).await.unwrap().result;
+    let runtime = request(
+        "first",
+        Command::ShellWrite(ShellWriteArgs {
+            execution_id: "synthetic".into(),
+            text: "once".into(),
+            encoding: "UTF-8".into(),
+        }),
+    );
+    assert!(matches!(
+        store.reserve_runtime(runtime.clone(), None).await.unwrap(),
+        RuntimeReservation::New
+    ));
+    store
+        .finalize_runtime(runtime.operation_id.clone(), Ok(json!({"accepted":true})))
+        .await
+        .unwrap();
+    store.database.call(|db| {db.execute("UPDATE operation_receipt SET created_at='2000-01-01' WHERE state IN ('completed','failed')",[])?;Ok(())}).await.unwrap();
+    assert_eq!(store.collect_receipts().await.unwrap(), 2);
+    assert_eq!(
+        store.execute(create.clone(), None).await.unwrap_err().code,
+        ErrorCode::OperationExpired
+    );
+    assert_eq!(
+        store.replay(&create, &None).await.unwrap_err().code,
+        ErrorCode::OperationExpired
+    );
+    let mut changed = create.clone();
+    if let Command::ThreadCreate(args) = &mut changed.command {
+        args.cwd = Some("different-cwd".into());
+    }
+    assert_eq!(
+        store.execute(changed, None).await.unwrap_err().code,
+        ErrorCode::OperationConflict
+    );
+    assert!(matches!(
+        store.reserve_runtime(runtime.clone(), None).await.unwrap(),
+        RuntimeReservation::Saved(Err(ApiError {
+            code: ErrorCode::OperationExpired,
+            ..
+        }))
+    ));
+    let mut changed = runtime.clone();
+    if let Command::ShellWrite(args) = &mut changed.command {
+        args.text = "twice".into();
+    }
+    assert_eq!(
+        store.reserve_runtime(changed, None).await.unwrap_err().code,
+        ErrorCode::OperationConflict
+    );
+    let details = inspect(&store, &create.operation_id).await;
+    assert_eq!(details["state"], "completed");
+    assert_eq!(details["result_expired"], true);
+    assert_eq!(details["replay_policy"], "operation_expired");
+    assert_eq!(details["outcome"]["error"]["code"], "operation_expired");
+    assert_eq!(details["result_uncertain"], false);
+    let status = store
+        .execute(
+            request(
+                "first",
+                Command::Status(StatusArgs {
+                    operation_id: Some(runtime.operation_id.clone()),
+                    ..Default::default()
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(status["operation"]["result_expired"], true);
+    assert_eq!(status["operation"]["replay_policy"], "operation_expired");
+    assert_eq!(status["receipt_budget"]["result_retention_seconds"], 86_400);
+    assert_eq!(store.collect_receipts().await.unwrap(), 0);
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM thread", [], |row| row
+                    .get::<_, i64>(0))?,
+                1
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM shell_execution", [], |row| row
+                    .get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT result_ref_json FROM operation_receipt WHERE operation_id=?1",
+                    [create.operation_id],
+                    |row| row.get::<_, String>(0)
+                )?,
+                "0"
+            );
+            assert!(created["thread_id"].as_str().is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_current_identity() {
+    let (_dir, store) = fixture().await;
+    let original = request(
+        "first",
+        Command::ThreadCreate(ThreadCreateArgs {
+            parent_id: None,
+            cwd: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    );
+    store.execute(original.clone(), None).await.unwrap();
+    store.database.call(|db| {
+        db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES('first:pressure','first','null','hash','pending','2000-01-01',268435456)",[])?;
+        Ok(())
+    }).await.unwrap();
+    let rejected = request(
+        "first",
+        Command::ThreadCreate(ThreadCreateArgs {
+            parent_id: None,
+            cwd: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    );
+    assert_eq!(
+        store
+            .execute(rejected.clone(), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::StorageLimit
+    );
+    assert_eq!(
+        store
+            .execute(original.clone(), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::OperationExpired
+    );
+    let status = store
+        .execute(
+            request(
+                "first",
+                Command::Status(StatusArgs {
+                    operation_id: Some(original.operation_id.clone()),
+                    ..Default::default()
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(status["operation"]["result_expired"], true);
+    // Stops retain the existing finite headroom even when ordinary admission
+    // remains blocked by protected pending reservations.
+    let stop = request(
+        "first",
+        Command::ShellStop(ExecutionTarget {
+            execution_id: "synthetic".into(),
+        }),
+    );
+    assert!(matches!(
+        store.reserve_runtime(stop.clone(), None).await.unwrap(),
+        RuntimeReservation::New
+    ));
+    store
+        .finalize_runtime(stop.operation_id.clone(), Ok(json!({"accepted":true})))
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.reserve_runtime(stop, None).await.unwrap(),
+        RuntimeReservation::Saved(Ok(_))
+    ));
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id=?1",
+                    [original.operation_id],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id=?1",
+                    [rejected.operation_id],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                0
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM thread", [], |row| row
+                    .get::<_, i64>(0))?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT state FROM operation_receipt WHERE operation_id='first:pressure'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )?,
+                "pending"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    store.database.shutdown().await.unwrap();
 }

@@ -151,6 +151,18 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
             .output()
             .await
             .unwrap();
+        let warning = String::from_utf8_lossy(&output.stderr);
+        if args.first() == Some(&"status") && args.contains(&"--operation") {
+            assert!(
+                warning.contains("deprecated") && warning.contains("shellboy operation get"),
+                "{warning}"
+            );
+        } else {
+            assert!(
+                !warning.contains("status --operation is deprecated"),
+                "{warning}"
+            );
+        }
         (
             output.status.success(),
             serde_json::from_slice(&output.stdout).unwrap(),
@@ -249,7 +261,8 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
     assert_eq!(preview_replay, preview);
     assert_eq!(index_state(&control).await, index_before);
     // Saturate only a temporary owner's receipt budget. The real CLI must still
-    // resolve the receipt-free observation path and replay the original ID.
+    // resolve the receipt-free observation path. Pressure may expire saved
+    // terminal outcomes, but retransmission must never create the Thread again.
     let instance = owner.instance_id.clone();
     control.store.database.call(move |db| {
         db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES(?1,?2,'null','fixture','pending','2026-10-25',268435456)", rusqlite::params![format!("{instance}:saturated-fixture"),instance])?;
@@ -264,13 +277,24 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
     )
     .await;
     assert!(ok, "{lookup}");
-    assert_eq!(lookup["result"]["operation"]["state"], "completed");
+    assert_eq!(lookup["result"]["state"], "completed");
+    assert_eq!(lookup["result"]["result_expired"], true);
+    assert_eq!(lookup["result"]["replay_policy"], "operation_expired");
     assert_eq!(
-        lookup["result"]["operation"]["targets"]["thread_id"],
-        thread
+        lookup["result"]["outcome"]["error"]["code"],
+        "operation_expired"
     );
+    let (ok, canonical) = cli(
+        &owner.loaded.data_dir,
+        &["operation", "get", "--operation", &operation],
+    )
+    .await;
+    assert!(ok, "{canonical}");
+    assert_eq!(lookup["result"], canonical["result"]);
+    let (ok, status) = cli(&owner.loaded.data_dir, &["status"]).await;
+    assert!(ok, "{status}");
     assert_eq!(
-        lookup["result"]["receipt_budget"]["full_result_admission_blocked"],
+        status["result"]["receipt_budget"]["full_result_admission_blocked"],
         true
     );
     let (ok, replay) = cli(
@@ -278,8 +302,11 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
         &["--operation-id", &operation, "thread", "create"],
     )
     .await;
-    assert!(ok, "{replay}");
-    assert_eq!(replay, first);
+    assert!(!ok, "{replay}");
+    assert_eq!(replay["error"]["code"], "operation_expired");
+    let (ok, list) = cli(&owner.loaded.data_dir, &["thread", "list"]).await;
+    assert!(ok, "{list}");
+    assert_eq!(list["result"]["items"].as_array().unwrap().len(), 1);
     server.shutdown().await.unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();

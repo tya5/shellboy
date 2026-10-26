@@ -424,7 +424,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
             items: Vec::new(),
             next_cursor: None,
             receipt_budget: crate::control::receipt::summary(db, instance)?,
-            operation: Some(crate::control::receipt::details(db, instance, id)?),
+            operation: Some(crate::control::db::operation_details(db, id, instance)?),
         });
     }
 

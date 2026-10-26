@@ -31,6 +31,31 @@ pub(super) struct RuntimeOperation {
 }
 
 impl Control {
+    pub(super) async fn runtime_observation(
+        self: &Arc<Self>,
+        request: Request,
+        caller: Option<Origin>,
+        disconnected: CancellationToken,
+    ) -> Result<Value, ApiError> {
+        debug_assert!(!request.command.requires_receipt());
+        if !request.command.runtime_cancellable() {
+            // IndexStatus is an already queued finite DB read, as before.
+            return self.runtime_action(request, caller, disconnected).await;
+        }
+        let cancelled = disconnected.clone();
+        // The outer admitted request owns this bounded observation. Existing
+        // readers retain their pin/file-worker cleanup when the future drops.
+        tokio::select! { biased;
+            _ = self.stop.cancelled() => Err(ApiError::new(ErrorCode::InvalidState,
+                "Owner stopped this observation; no operation receipt was created")
+                .hint("Repeat the observation after the owner is available; a semantic search may incur another query embedding charge")),
+            _ = cancelled.cancelled() => Err(ApiError::new(ErrorCode::InvalidState,
+                "Observation caller disconnected; no operation receipt was created")
+                .hint("Repeat the observation for fresh state; a semantic search may incur another query embedding charge")),
+            result = self.runtime_action(request, caller, disconnected) => result,
+        }
+    }
+
     pub(super) async fn runtime_request(
         self: &Arc<Self>,
         request: Request,

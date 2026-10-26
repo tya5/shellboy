@@ -414,7 +414,7 @@ fn status_request_defaults_and_bounds_are_part_of_the_wire_contract() {
 }
 
 #[tokio::test]
-async fn receipt_lookup_is_opt_in_read_only_and_never_returns_saved_secret_outcomes() {
+async fn legacy_wire_receipt_lookup_shares_canonical_details_without_exposing_origin_tokens() {
     let f = Fixture::new().await;
     let before = f.db.call(|db| Ok(db.total_changes())).await.unwrap();
     let lookup = f
@@ -428,10 +428,32 @@ async fn receipt_lookup_is_opt_in_read_only_and_never_returns_saved_secret_outco
     assert!(lookup.items.is_empty());
     let value = serde_json::to_value(&lookup).unwrap();
     assert_eq!(value["operation"]["state"], "completed");
-    assert_eq!(value["operation"]["outcome_included"], false);
+    let canonical = f
+        .store
+        .execute(
+            Request {
+                protocol_version: 1,
+                operation_id: "fixture:canonical-lookup".into(),
+                command: Command::OperationGet(OperationTarget {
+                    operation_id: "fixture:held".into(),
+                }),
+                origin: None,
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        value["operation"], canonical,
+        "legacy wire wrapper shares canonical detail"
+    );
     assert!(!value.to_string().contains("PRIVATE_TOKEN"));
     assert_eq!(value["operation"]["targets"]["message_id"], "held-node");
-    assert!(value["operation"].get("outcome").is_none());
+    assert_eq!(
+        value["operation"]["outcome"]["result"]["message_id"],
+        "held-node"
+    );
     assert_eq!(
         f.status(StatusArgs {
             operation_id: Some("missing".into()),
@@ -467,7 +489,7 @@ async fn receipt_lookup_is_opt_in_read_only_and_never_returns_saved_secret_outco
         .unwrap()
         .unwrap();
     assert!(
-        matches!(command,Command::Status(StatusArgs{operation_id:Some(id),..}) if id=="fixture:held")
+        matches!(command,Command::OperationGet(OperationTarget{operation_id:id}) if id=="fixture:held")
     );
     f.close().await;
 }

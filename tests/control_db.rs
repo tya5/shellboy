@@ -136,8 +136,11 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
         Command::ThreadList(ThreadListArgs::default()),
     );
     assert_eq!(
-        newer.execute(unknown, None).await.unwrap_err().code,
-        ErrorCode::OperationExpired
+        newer.execute(unknown, None).await.unwrap().result["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
     store.database.shutdown().await.unwrap();
 }
@@ -995,7 +998,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
         effort: None,
         parent_id: None,
     }));
-    let created = store
+    let _created = store
         .execute(create_request.clone(), None)
         .await
         .unwrap()
@@ -1041,9 +1044,10 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
             store
                 .execute(create_request.clone(), None)
                 .await
-                .unwrap()
-                .result,
-            created
+                .unwrap_err()
+                .code,
+            ErrorCode::OperationExpired,
+            "pressure may reclaim the terminal result but must not recreate its Thread"
         );
         assert!(matches!(
             store.reserve_runtime(intent.clone(), None).await.unwrap(),
@@ -1264,7 +1268,7 @@ async fn repeated_quota_refusals_commit_bounded_housekeeping_without_accepting_n
 }
 
 #[tokio::test]
-async fn history_filter_preflight_rejects_before_receipt_admission_and_keeps_valid_read_receipts() {
+async fn history_filter_validation_and_valid_reads_never_create_receipts() {
     let (_directory, store) = store().await;
     let thread = create(&store, None).await;
     let before = store
@@ -1334,7 +1338,7 @@ async fn history_filter_preflight_rejects_before_receipt_admission_and_keeps_val
         })
         .await
         .unwrap();
-    assert_eq!(receipts, before.1 + 1);
+    assert_eq!(receipts, before.1);
     store.database.shutdown().await.unwrap();
 }
 
@@ -1482,7 +1486,8 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         .unwrap();
 
     // Stop traffic itself is finite. At that boundary fresh stop IDs are
-    // refused, but saved results/conflicts still precede capacity checks.
+    // refused. Pressure can expire terminal results; their retained identities
+    // still prevent replaying effects and reject different request arguments.
     fill(&store, pressure_id, 301_998_080).await;
     assert_eq!(
         store
@@ -1511,15 +1516,16 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         ErrorCode::StorageLimit
     );
     assert_eq!(
-        store.execute(run_stop, None).await.unwrap().result,
-        stopped.result
+        store.execute(run_stop, None).await.unwrap_err().code,
+        ErrorCode::OperationExpired
     );
-    let RuntimeReservation::Saved(Ok(replayed_shell)) =
-        store.reserve_runtime(shell_stop, None).await.unwrap()
-    else {
-        panic!("saved stop result required even at the stop budget limit");
-    };
-    assert_eq!(replayed_shell, saved_shell);
+    assert!(matches!(
+        store.reserve_runtime(shell_stop, None).await.unwrap(),
+        RuntimeReservation::Saved(Err(ApiError {
+            code: ErrorCode::OperationExpired,
+            ..
+        }))
+    ));
     assert_eq!(
         store.execute(run_conflict, None).await.unwrap_err().code,
         ErrorCode::OperationConflict
@@ -1535,7 +1541,13 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     let status = execute(&store, Command::Status(StatusArgs::default()))
         .await
         .result;
-    assert_eq!(status["receipt_budget"]["control_available_bytes"], 0);
+    assert!(
+        status["receipt_budget"]["control_available_bytes"]
+            .as_u64()
+            .unwrap()
+            < 8 * 1024 * 1024,
+        "reclaiming small terminal results does not admit a full reservation"
+    );
     assert_eq!(status["receipt_budget"]["available_bytes"], 0);
     assert_eq!(status["receipt_budget"]["at_limit"], true);
     store
@@ -1643,4 +1655,170 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
             store.database.shutdown().await.unwrap();
         }
     }
+}
+
+#[tokio::test]
+async fn large_database_observations_do_not_grow_receipts_even_when_pending_reservations_are_full()
+{
+    use shellboy::control::db::RuntimeReservation;
+    let (_directory, store) = store().await;
+    let thread = create(&store, None).await;
+    let (message, _) = send(&store, &thread.thread_id, &"history-body-".repeat(6000)).await;
+    let pending = request(Command::ShellWrite(ShellWriteArgs {
+        execution_id: "not-executed".into(),
+        text: "not-written".into(),
+        encoding: "UTF-8".into(),
+    }));
+    assert!(matches!(
+        store.reserve_runtime(pending.clone(), None).await.unwrap(),
+        RuntimeReservation::New
+    ));
+    let pressure_id = pending.operation_id.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE operation_receipt SET reserved_bytes=268435456 WHERE operation_id=?1",
+                [pressure_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let snapshot = || {
+        |db: &mut rusqlite::Connection| {
+            Ok((
+                db.total_changes(),
+                db.query_row("SELECT COUNT(*) FROM operation_receipt", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+                db.query_row(
+                    "SELECT logical_bytes FROM quota_counter WHERE category='operation_receipt'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?,
+            ))
+        }
+    };
+    let before = store.database.call(snapshot()).await.unwrap();
+    let commands = [
+        Command::Status(StatusArgs::default()),
+        Command::ThreadList(ThreadListArgs::default()),
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.thread_id.clone()),
+        }),
+        Command::ThreadDeletePreview(ThreadDeleteArgs {
+            thread_id: thread.thread_id.clone(),
+            descendants: false,
+        }),
+        Command::MessageGet(MessageTarget {
+            message_id: message.message_id.clone(),
+        }),
+        Command::OperationGet(OperationTarget {
+            operation_id: pending.operation_id,
+        }),
+        Command::RunGet(RunTarget {
+            run_id: message.run_id.unwrap(),
+        }),
+        Command::TurnGet(TurnTarget {
+            turn_id: message.turn_id.unwrap(),
+        }),
+        Command::HistoryList(HistoryListArgs {
+            thread_id: thread.thread_id.clone(),
+            limit: 50,
+            cursor: None,
+            run_id: None,
+            since: None,
+            state: None,
+        }),
+        Command::HistoryGet(HistoryGetArgs {
+            node_id: message.message_id.clone(),
+            limit_bytes: 65536,
+            cursor: None,
+            encoding: "UTF-8".into(),
+        }),
+        Command::HistoryRelations(HistoryRelationsArgs {
+            node_id: message.message_id,
+            relation: HistoryRelation::Sources,
+            limit: 50,
+            cursor: None,
+        }),
+        Command::AttachmentList(ThreadTarget {
+            thread_id: Some(thread.thread_id),
+        }),
+    ];
+    for _ in 0..20 {
+        for command in &commands {
+            let result = store.execute(request(command.clone()), None).await;
+            assert!(result.is_ok(), "{}: {result:?}", command.name());
+        }
+    }
+    assert_eq!(
+        store.database.call(snapshot()).await.unwrap(),
+        before,
+        "observations must neither reserve/save receipts nor collect pending work"
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn fresh_observations_can_reuse_a_mutation_id_without_replacing_its_saved_outcome() {
+    let (_directory, store) = store().await;
+    let original = request(Command::ThreadCreate(ThreadCreateArgs {
+        connection: None,
+        cwd: None,
+        model: None,
+        effort: None,
+        parent_id: None,
+    }));
+    let saved = store.execute(original.clone(), None).await.unwrap().result;
+    let thread = saved["thread_id"].as_str().unwrap().to_owned();
+    let read = Request::new(
+        original.operation_id.clone(),
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.clone()),
+        }),
+    );
+    let before = store.execute(read.clone(), None).await.unwrap().result;
+    store
+        .execute(
+            request(Command::ThreadSet(ThreadSetArgs {
+                thread_id: Some(thread),
+                title: Some("new title".into()),
+                ..Default::default()
+            })),
+            None,
+        )
+        .await
+        .unwrap();
+    let after = store.execute(read, None).await.unwrap().result;
+    assert_ne!(before["title"], after["title"]);
+    assert_eq!(after["title"], "new title");
+    let lookup = store
+        .execute(
+            Request::new(
+                original.operation_id.clone(),
+                Command::OperationGet(OperationTarget {
+                    operation_id: original.operation_id.clone(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(lookup["outcome"]["result"], saved);
+    assert_eq!(
+        store.execute(original.clone(), None).await.unwrap().result,
+        saved
+    );
+    let mut conflict = original;
+    if let Command::ThreadCreate(args) = &mut conflict.command {
+        args.cwd = Some("different".into());
+    }
+    assert_eq!(
+        store.execute(conflict, None).await.unwrap_err().code,
+        ErrorCode::OperationConflict
+    );
+    store.database.shutdown().await.unwrap();
 }
