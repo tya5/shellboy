@@ -659,6 +659,9 @@ pub enum UiUpdate {
     IncompleteResponses {
         thread_id: String,
         generation: u64,
+        selection_revision: u64,
+        view_revision: Option<u64>,
+        root_revision: u64,
         // A saved preview belongs after this selected node, never at the tail
         // of an unrelated history page. This is not a canonical ordinal.
         nodes: Vec<(String, UiNode)>,
@@ -1534,9 +1537,17 @@ impl UiState {
             UiUpdate::IncompleteResponses {
                 thread_id,
                 generation,
+                selection_revision,
+                view_revision,
+                root_revision,
                 nodes,
             } => {
-                if let Some(view) = self.view_for(&thread_id, generation) {
+                if let Some(view) = self.view_for(&thread_id, generation)
+                    && view.selection_revision == selection_revision
+                    && view_revision.is_none_or(|revision| view.view_revision == revision)
+                    && root_revision >= view.received_revision
+                {
+                    view.received_revision = root_revision;
                     view.on_incomplete_responses(nodes);
                 }
             }

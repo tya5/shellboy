@@ -20,6 +20,7 @@ pub struct ThreadView {
     pub before_cursor: Option<String>,
     pub first_ordinal: u64,
     pub selection_revision: u64,
+    pub(super) received_revision: u64,
     pub total_nodes: u64,
     pub anchor: ViewAnchor,
     pub follow: bool,
@@ -191,6 +192,7 @@ impl ThreadView {
             before_cursor: None,
             first_ordinal: 0,
             selection_revision: 0,
+            received_revision: 0,
             total_nodes: 0,
             anchor: ViewAnchor::default(),
             follow: true,
@@ -313,7 +315,7 @@ impl ThreadView {
             .sources
             .last()
             .is_none_or(|r| r.covered_end == view.nodes.len())
-            && view.first_ordinal + view.nodes.len() as u64 >= view.total_nodes
+            && view.first_ordinal + view.selected_node_count() as u64 >= view.total_nodes
             && view
                 .nodes
                 .last()
@@ -509,7 +511,7 @@ impl ThreadView {
                 .sources
                 .last()
                 .is_none_or(|r| r.covered_end == view.nodes.len())
-                && view.first_ordinal + view.nodes.len() as u64 >= view.total_nodes
+                && view.first_ordinal + view.selected_node_count() as u64 >= view.total_nodes
                 && view
                     .nodes
                     .last()
@@ -602,7 +604,7 @@ impl ThreadView {
                     }
                 }
                 let ordinal = if forward {
-                    view.first_ordinal + view.nodes.len() as u64
+                    view.first_ordinal + view.selected_node_count() as u64
                 } else {
                     view.first_ordinal.saturating_sub(1)
                 };
@@ -650,17 +652,28 @@ impl ThreadView {
         }
         vec![]
     }
+    fn selected_node_count(&self) -> usize {
+        self.nodes
+            .iter()
+            .filter(|node| !self.provisional_nodes.contains(&node.node_id))
+            .count()
+    }
     /// Join only proven, contiguous portions of the same selected path. A body-only
     /// reply has no ordinal and therefore must never extend this ordered cache.
     pub(super) fn merge_navigation_window(&mut self, incoming: &mut Vec<UiNode>, first: &mut u64) {
         let old_start = self.first_ordinal;
-        let old_end = old_start + self.nodes.len() as u64;
+        let selected = self
+            .nodes
+            .iter()
+            .filter(|node| !self.provisional_nodes.contains(&node.node_id))
+            .collect::<Vec<_>>();
+        let old_end = old_start + selected.len() as u64;
         let new_end = *first + incoming.len() as u64;
         let overlap_start = old_start.max(*first);
         let overlap_end = old_end.min(new_end);
         if overlap_start >= overlap_end
             || (overlap_start..overlap_end).any(|ordinal| {
-                self.nodes[(ordinal - old_start) as usize].node_id
+                selected[(ordinal - old_start) as usize].node_id
                     != incoming[(ordinal - *first) as usize].node_id
             })
         {
@@ -671,7 +684,11 @@ impl ThreadView {
             .enumerate()
             .map(|(index, node)| (*first + index as u64, node))
             .collect::<BTreeMap<_, _>>();
-        for (index, node) in std::mem::take(&mut self.nodes).into_iter().enumerate() {
+        for (index, node) in std::mem::take(&mut self.nodes)
+            .into_iter()
+            .filter(|node| !self.provisional_nodes.contains(&node.node_id))
+            .enumerate()
+        {
             let ordinal = old_start + index as u64;
             if let Some(loaded) = ordered.get_mut(&ordinal) {
                 if !node.text.is_empty() {
@@ -1394,6 +1411,7 @@ impl ThreadView {
                 last
             };
             let removed = self.nodes.remove(index);
+            let selected = !self.provisional_nodes.remove(&removed.node_id);
             if let Some((attempt, saved)) = self.committed_nodes.remove_entry(&removed.node_id) {
                 *retained = retained
                     .saturating_sub(expanded_id_bytes(&attempt) + expanded_id_bytes(&saved));
@@ -1402,7 +1420,7 @@ impl ThreadView {
             if let Some(id) = self.reasoning_expanded.take(&removed.node_id) {
                 *retained = retained.saturating_sub(expanded_id_bytes(&id));
             }
-            if index == 0 {
+            if index == 0 && selected {
                 self.first_ordinal += 1;
             }
             self.mark_source_changed();
@@ -2022,6 +2040,86 @@ mod received_tests {
         );
     }
     #[test]
+    fn received_previews_do_not_advance_selected_ordinals_or_break_page_merges() {
+        let node = |id: &str| UiNode {
+            node_id: id.into(),
+            role: "assistant".into(),
+            text: id.into(),
+            total_chars: id.len(),
+            ..Default::default()
+        };
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.nodes = vec![node("n0"), node("n1"), node("n2")];
+        view.first_ordinal = 10;
+        let mut paid = node("paid");
+        paid.role = "received_response".into();
+        view.on_incomplete_responses(vec![("n0".into(), paid.clone())]);
+        assert_eq!(view.selected_node_count(), 3);
+        let mut incoming = vec![node("n1"), node("n2"), node("n3")];
+        let mut first = 11;
+        view.merge_navigation_window(&mut incoming, &mut first);
+        assert_eq!(first, 10);
+        assert_eq!(
+            incoming
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>(),
+            ["n0", "n1", "n2", "n3"]
+        );
+        view.nodes = vec![paid, node("n1")];
+        view.provisional_nodes.insert("paid".into());
+        let mut retained = usize::MAX;
+        view.trim_page_edges(&["n1".into()], &mut retained, 0);
+        assert_eq!(view.first_ordinal, 10, "a preview has no canonical ordinal");
+        assert_eq!(view.selected_node_count(), 1);
+        assert!(!view.provisional_nodes.contains("paid"));
+    }
+    #[test]
+    fn delayed_received_refresh_cannot_replace_a_newer_snapshot_or_navigation() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        let node = |id: &str, role: &str| UiNode {
+            node_id: id.into(),
+            role: role.into(),
+            text: id.into(),
+            total_chars: id.len(),
+            ..Default::default()
+        };
+        ui.view_mut().nodes = vec![node("anchor", "assistant")];
+        ui.view_mut().selection_revision = 7;
+        ui.view_mut().view_revision = 5;
+        let refresh = |selection_revision, view_revision, root_revision, nodes| {
+            UiUpdate::IncompleteResponses {
+                thread_id: "t".into(),
+                generation,
+                selection_revision,
+                view_revision,
+                root_revision,
+                nodes,
+            }
+        };
+        ui.apply(refresh(
+            7,
+            Some(5),
+            10,
+            vec![("anchor".into(), node("paid", "received_response"))],
+        ));
+        assert!(ui.view().nodes.iter().any(|n| n.node_id == "paid"));
+        for stale in [
+            refresh(7, Some(5), 9, vec![]),
+            refresh(7, Some(4), 11, vec![]),
+            refresh(6, None, 12, vec![]),
+        ] {
+            ui.apply(stale);
+            assert!(ui.view().nodes.iter().any(|n| n.node_id == "paid"));
+            assert_eq!(ui.view().received_revision, 10);
+        }
+        ui.apply(refresh(7, Some(5), 11, vec![]));
+        assert!(!ui.view().nodes.iter().any(|n| n.node_id == "paid"));
+        assert_eq!(ui.view().received_revision, 11);
+    }
+    #[test]
     fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
@@ -2065,6 +2163,9 @@ mod received_tests {
         ui.apply(UiUpdate::IncompleteResponses {
             thread_id: "t".into(),
             generation: generation + 100,
+            selection_revision: 0,
+            view_revision: None,
+            root_revision: 0,
             nodes: vec![],
         });
         assert_eq!(ui.view().thread_id.as_deref(), Some("other"));

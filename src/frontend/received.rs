@@ -167,15 +167,24 @@ struct PreviewRow {
     differences: Option<String>,
     delta_differences: Option<String>,
 }
+#[derive(Clone, Copy)]
+pub(super) struct Scope {
+    pub(super) selection_revision: u64,
+    pub(super) view_revision: Option<u64>,
+}
 pub(super) async fn refresh(
     control: &Control,
     updates: &SyncSender<UiUpdate>,
     thread: &str,
     generation: u64,
     width: u16,
+    scope: Scope,
 ) -> Result<(), ApiError> {
     let target = thread.to_owned();
-    let rows=control.store.database.call(move|db|{
+    let snapshot=control.store.database.call(move|db|{
+        let selection=crate::history::selection_revision(db,&target,crate::history::ThreadScope::Live)?;
+        if selection as u64 != scope.selection_revision {return Ok(None);}
+        let root_revision=db.query_row("SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'",[],|row|row.get::<_,u64>(0))?;
         let mut statement=db.prepare(r#"SELECT n.id,n.kind,
           coalesce(substr(json_extract(n.payload_json,'$.partial_text'),1,16384),''),
           coalesce(substr(json_extract(n.payload_json,'$.partial_reasoning'),1,16384),''),
@@ -194,8 +203,11 @@ pub(super) async fn refresh(
         let rows=statement.query_map(rusqlite::params![target,SAVED_BYTES as i64],|r|Ok(PreviewRow{
             id:r.get(0)?,after:r.get(8)?,kind:r.get(1)?,partial:r.get(2)?,reasoning:r.get(3)?,total:r.get(4)?,saved:r.get(5)?,differences:r.get(6)?,delta_differences:r.get(7)?
         }))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
+        Ok(Some((rows,root_revision)))
     }).await.map_err(storage_error)?;
+    let Some((rows, root_revision)) = snapshot else {
+        return Ok(());
+    };
     let nodes=presentation_work(move||rows.into_iter().rev().filter_map(|row|{
         let after=row.after?;
         let full_saved=row.saved.is_some();
@@ -216,6 +228,9 @@ pub(super) async fn refresh(
         UiUpdate::IncompleteResponses {
             thread_id: thread.into(),
             generation,
+            selection_revision: scope.selection_revision,
+            view_revision: scope.view_revision,
+            root_revision,
             nodes,
         },
     )
@@ -370,6 +385,33 @@ mod tests {
         ));
     }
     #[test]
+    fn done_only_prose_and_reasoning_are_compared_to_final_channels() {
+        let message =
+            |text| json!({"type":"message","content":[{"type":"output_text","text":text}]});
+        let reasoning =
+            |text| json!({"type":"reasoning","summary":[{"type":"summary_text","text":text}]});
+        let mut payload = json!({"classification":"stream_difference","partial_text":"","partial_reasoning":"","completed_items":{"0":message("done answer"),"1":reasoning("done reasoning")},"raw_response":{"output":[message("final answer"),reasoning("final reasoning")]}});
+        assert_eq!(body(&payload).0, "done reasoning\ndone answer");
+        assert!(preview_visible(
+            "model_stream_observation",
+            &payload,
+            &body(&payload).0
+        ));
+        payload["raw_response"]["output"] =
+            json!([message("done answer"), reasoning("final reasoning")]);
+        assert!(
+            preview_visible("model_stream_observation", &payload, &body(&payload).0),
+            "reasoning-only difference remains visible"
+        );
+        payload["raw_response"]["output"] =
+            json!([message("done answer"), reasoning("done reasoning")]);
+        assert!(!preview_visible(
+            "model_stream_observation",
+            &payload,
+            &body(&payload).0
+        ));
+    }
+    #[test]
     fn audit_source_binds_attempt_and_turn_with_legacy_fallback() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE model_attempt(id TEXT,turn_id TEXT,error_json TEXT); CREATE TABLE node(id TEXT,turn_id TEXT,kind TEXT,payload_json TEXT,deleted_reason TEXT); INSERT INTO model_attempt VALUES('a','u','{}');INSERT INTO node VALUES('legacy','u','incomplete_response','{}',NULL);").unwrap();
@@ -431,7 +473,19 @@ mod tests {
         .unwrap();
         let control = Control::new(&owner, root.path().into());
         let (tx, rx) = std::sync::mpsc::sync_channel(8);
-        refresh(&control, &tx, "t", 7, 80).await.unwrap();
+        refresh(
+            &control,
+            &tx,
+            "t",
+            7,
+            80,
+            Scope {
+                selection_revision: 0,
+                view_revision: None,
+            },
+        )
+        .await
+        .unwrap();
         let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
             panic!()
         };
@@ -489,7 +543,19 @@ mod tests {
                 INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES('empty','u','incomplete_response','{"partial_text":"","partial_reasoning":"","completed_items":{}}',62,'2026-01-01T00:01:01Z');"#)?;
             Ok(())
         }).await.unwrap();
-        refresh(&control, &tx, "t", 7, 80).await.unwrap();
+        refresh(
+            &control,
+            &tx,
+            "t",
+            7,
+            80,
+            Scope {
+                selection_revision: 0,
+                view_revision: None,
+            },
+        )
+        .await
+        .unwrap();
         let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
             panic!()
         };
@@ -500,6 +566,23 @@ mod tests {
         assert!(title.contains("36件"));
         let empty = latest.iter().find(|field| field.value == "empty").unwrap();
         assert_eq!(empty.displayed(), "受信記録を開く");
+        refresh(
+            &control,
+            &tx,
+            "t",
+            7,
+            80,
+            Scope {
+                selection_revision: 99,
+                view_revision: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

@@ -180,6 +180,7 @@ impl<'a> HistoryReader<'a> {
         .await?;
         let enriched = streams::enrich(self.control, &mut nodes, self.width).await;
         checked_storage(self.control, enriched).await?;
+        let selection_revision = info.revision;
         reply
             .deliver(self.updates, nodes, info, anchor.unwrap_or_default())
             .await;
@@ -189,6 +190,10 @@ impl<'a> HistoryReader<'a> {
             &reply.target.thread,
             reply.target.generation,
             self.width,
+            received::Scope {
+                selection_revision,
+                view_revision: Some(reply.view_revision),
+            },
         )
         .await?;
         Ok(())
@@ -223,6 +228,7 @@ impl<'a> HistoryReader<'a> {
                     "Requested history ordinal is no longer selected",
                 )
             })?;
+            let selection_revision = info.revision;
             reply.deliver(self.updates, nodes, info, anchor).await;
             received::refresh(
                 self.control,
@@ -230,6 +236,10 @@ impl<'a> HistoryReader<'a> {
                 &reply.target.thread,
                 reply.target.generation,
                 self.width,
+                received::Scope {
+                    selection_revision,
+                    view_revision: Some(reply.view_revision),
+                },
             )
             .await?;
             Ok(())
@@ -293,6 +303,10 @@ impl<'a> HistoryReader<'a> {
                 &reply.thread,
                 reply.generation,
                 self.width,
+                received::Scope {
+                    selection_revision: info.revision,
+                    view_revision: None,
+                },
             )
             .await?;
             Ok(())
