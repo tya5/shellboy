@@ -10,6 +10,14 @@ async fn owner(root: &Path) -> DataOwner {
         .await
         .unwrap()
 }
+async fn crash_owner(owner: DataOwner) {
+    let path = owner.loaded.data_dir.join("endpoint.json");
+    let metadata = std::fs::read(&path).unwrap();
+    // Stop the test's DB/diagnostic workers without killing the test process,
+    // then restore the metadata that an abrupt process exit would have left.
+    owner.shutdown().await.unwrap();
+    std::fs::write(path, metadata).unwrap();
+}
 fn endpoint(owner: &DataOwner) -> Endpoint {
     serde_json::from_slice(&std::fs::read(owner.loaded.data_dir.join("endpoint.json")).unwrap())
         .unwrap()
@@ -26,7 +34,20 @@ async fn bind_error(owner: &DataOwner) -> ApiError {
 }
 
 #[tokio::test]
-async fn repeated_crashes_reuse_one_socket_namespace_for_the_same_data_directory() {
+async fn cleanup_succeeds_if_the_os_already_removed_the_temporary_namespace() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path()).await;
+    let (send, _) = mpsc::channel(1);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let socket = PathBuf::from(endpoint(&owner).address);
+    std::fs::remove_file(&socket).unwrap();
+    std::fs::remove_dir(socket.parent().unwrap()).unwrap();
+    server.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn repeated_crashes_remove_the_old_namespace_and_create_a_fresh_one() {
     let root = tempfile::tempdir().unwrap();
     let mut expected = None;
     let mut previous_instance = None;
@@ -37,7 +58,8 @@ async fn repeated_crashes_reuse_one_socket_namespace_for_the_same_data_directory
         let published = endpoint(&owner);
         assert!(published.address.len() < 104);
         if let Some(address) = &expected {
-            assert_eq!(&published.address, address);
+            assert_ne!(&published.address, address);
+            assert!(!Path::new(address).parent().unwrap().exists());
         }
         if let Some(instance) = &previous_instance {
             assert_ne!(&published.instance_id, instance);
@@ -49,38 +71,21 @@ async fn repeated_crashes_reuse_one_socket_namespace_for_the_same_data_directory
         server.task.abort();
         assert!(server.task.await.unwrap_err().is_cancelled());
         assert!(Path::new(expected.as_ref().unwrap()).exists());
-        owner.shutdown().await.unwrap();
+        crash_owner(owner).await;
     }
     let owner = owner(root.path()).await;
     let (send, _) = mpsc::channel(1);
     let server = LocalServer::bind(&owner, send).await.unwrap();
-    assert_eq!(endpoint(&owner).address, expected.unwrap());
-    let folder = socket_folder(&owner.loaded.data_dir, current_uid()).unwrap();
+    let published = endpoint(&owner);
+    assert_ne!(published.address, expected.unwrap());
+    let folder = PathBuf::from(published.address)
+        .parent()
+        .unwrap()
+        .to_path_buf();
     assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1);
     server.shutdown().await.unwrap();
     assert!(!folder.exists());
     owner.shutdown().await.unwrap();
-}
-
-#[tokio::test]
-async fn canonical_aliases_share_identity_but_distinct_directories_and_uids_do_not() {
-    let root = tempfile::tempdir().unwrap();
-    let first = root.path().join("first");
-    let second = root.path().join("second");
-    let alias = root.path().join("alias");
-    std::fs::create_dir(&first).unwrap();
-    std::fs::create_dir(&second).unwrap();
-    symlink(&first, &alias).unwrap();
-    let identity = socket_folder(&first, current_uid()).unwrap();
-    assert_eq!(identity, socket_folder(&alias, current_uid()).unwrap());
-    assert_ne!(identity, socket_folder(&second, current_uid()).unwrap());
-    assert_ne!(
-        namespace::namespace_name(&std::fs::canonicalize(&first).unwrap(), current_uid()),
-        namespace::namespace_name(
-            &std::fs::canonicalize(&first).unwrap(),
-            current_uid().wrapping_add(1)
-        )
-    );
 }
 
 #[tokio::test]
@@ -98,11 +103,12 @@ async fn recovering_one_data_directory_preserves_another_live_owner() {
     assert_ne!(first_address, second_address);
     first_server.task.abort();
     assert!(first_server.task.await.unwrap_err().is_cancelled());
-    first_owner.shutdown().await.unwrap();
+    crash_owner(first_owner).await;
     let first_owner = owner(first.path()).await;
     let (send, _) = mpsc::channel(1);
     let first_server = LocalServer::bind(&first_owner, send).await.unwrap();
-    assert_eq!(endpoint(&first_owner).address, first_address);
+    assert_ne!(endpoint(&first_owner).address, first_address);
+    assert!(!Path::new(&first_address).parent().unwrap().exists());
     first_server.shutdown().await.unwrap();
     first_owner.shutdown().await.unwrap();
     assert!(Path::new(&second_address).exists());
@@ -131,7 +137,7 @@ async fn a_live_socket_is_preserved_when_bind_is_called_twice() {
 }
 
 #[tokio::test]
-async fn unsafe_folder_and_socket_paths_fail_without_following_or_deleting_them() {
+async fn untrusted_metadata_preserves_arbitrary_directories_and_symlinks() {
     let root = tempfile::tempdir().unwrap();
     let owner = owner(root.path()).await;
     let foreign = root.path().join("foreign");
@@ -140,31 +146,82 @@ async fn unsafe_folder_and_socket_paths_fail_without_following_or_deleting_them(
         .create(&foreign)
         .unwrap();
     std::fs::write(foreign.join("keep"), b"unchanged").unwrap();
-    let folder = socket_folder(&owner.loaded.data_dir, current_uid()).unwrap();
-    symlink(&foreign, &folder).unwrap();
-    assert_eq!(bind_error(&owner).await.code, ErrorCode::IoFailed);
-    assert_eq!(std::fs::read(foreign.join("keep")).unwrap(), b"unchanged");
-    assert!(folder.is_symlink());
-    std::fs::remove_file(&folder).unwrap();
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&folder)
+    let alias = root.path().join("alias");
+    symlink(&foreign, &alias).unwrap();
+    for folder in [&foreign, &alias] {
+        let forged = Endpoint {
+            protocol_version: crate::protocol::PROTOCOL_VERSION,
+            instance_id: "untrusted".into(),
+            transport: "unix".into(),
+            address: folder.join("s").to_str().unwrap().into(),
+        };
+        std::fs::write(
+            owner.loaded.data_dir.join("endpoint.json"),
+            serde_json::to_vec(&forged).unwrap(),
+        )
         .unwrap();
+        let (send, _) = mpsc::channel(1);
+        let server = LocalServer::bind(&owner, send).await.unwrap();
+        server.shutdown().await.unwrap();
+        assert_eq!(std::fs::read(foreign.join("keep")).unwrap(), b"unchanged");
+        assert!(alias.is_symlink());
+    }
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn recognized_namespace_with_unexpected_contents_is_preserved() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path()).await;
+    let folder = namespace::create_folder(current_uid()).unwrap();
     let socket = folder.join("s");
-    symlink(foreign.join("keep"), &socket).unwrap();
-    assert_eq!(bind_error(&owner).await.code, ErrorCode::IoFailed);
-    assert!(socket.is_symlink());
-    assert_eq!(std::fs::read(foreign.join("keep")).unwrap(), b"unchanged");
-    std::fs::remove_file(&socket).unwrap();
-    std::fs::write(&socket, b"not a socket").unwrap();
-    assert_eq!(bind_error(&owner).await.code, ErrorCode::IoFailed);
-    assert_eq!(std::fs::read(&socket).unwrap(), b"not a socket");
-    std::fs::remove_file(&socket).unwrap();
-    std::fs::write(folder.join("keep"), b"unexpected").unwrap();
-    assert_eq!(bind_error(&owner).await.code, ErrorCode::IoFailed);
-    assert_eq!(std::fs::read(folder.join("keep")).unwrap(), b"unexpected");
-    std::fs::remove_file(folder.join("keep")).unwrap();
-    std::fs::remove_dir(&folder).unwrap();
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    drop(listener);
+    let keep = folder.join("keep");
+    std::fs::write(&keep, b"unchanged").unwrap();
+    let forged = Endpoint {
+        protocol_version: crate::protocol::PROTOCOL_VERSION,
+        instance_id: "untrusted".into(),
+        transport: "unix".into(),
+        address: socket.to_str().unwrap().into(),
+    };
+    std::fs::write(
+        owner.loaded.data_dir.join("endpoint.json"),
+        serde_json::to_vec(&forged).unwrap(),
+    )
+    .unwrap();
+    let (send, _) = mpsc::channel(1);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    server.shutdown().await.unwrap();
+    assert!(socket.exists());
+    assert_eq!(std::fs::read(&keep).unwrap(), b"unchanged");
+    std::fs::remove_file(keep).unwrap();
+    std::fs::remove_file(socket).unwrap();
+    std::fs::remove_dir(folder).unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn group_writable_data_directory_and_ancestors_do_not_control_socket_namespace() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+    let owner = owner(root.path()).await;
+    std::fs::set_permissions(
+        &owner.loaded.data_dir,
+        std::fs::Permissions::from_mode(0o777),
+    )
+    .unwrap();
+    let (send, _) = mpsc::channel(1);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let published = endpoint(&owner);
+    assert!(!Path::new(&published.address).starts_with(root.path()));
+    assert!(published.address.len() <= 103);
+    validate_folder(
+        Path::new(&published.address).parent().unwrap(),
+        current_uid(),
+    )
+    .unwrap();
+    server.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
 
@@ -192,11 +249,6 @@ async fn failed_publication_removes_only_its_owned_socket_and_temp_metadata() {
     let error = bind_error(&owner).await;
     assert_eq!(error.code, ErrorCode::IoFailed);
     assert!(metadata.is_dir());
-    assert!(
-        !socket_folder(&owner.loaded.data_dir, current_uid())
-            .unwrap()
-            .exists()
-    );
     assert!(
         !owner
             .loaded
@@ -228,8 +280,7 @@ async fn cleanup_preserves_a_socket_replaced_after_the_original_binding() {
 }
 
 #[tokio::test]
-async fn a_stale_endpoint_at_the_reused_address_cannot_dispatch_to_the_new_instance() {
-    use crate::protocol::{Command, MessageSendArgs};
+async fn a_stale_endpoint_has_no_address_after_a_restart() {
     let root = tempfile::tempdir().unwrap();
     let first = owner(root.path()).await;
     let (send, _) = mpsc::channel(1);
@@ -237,32 +288,16 @@ async fn a_stale_endpoint_at_the_reused_address_cannot_dispatch_to_the_new_insta
     let stale = endpoint(&first);
     server.task.abort();
     assert!(server.task.await.unwrap_err().is_cancelled());
-    first.shutdown().await.unwrap();
+    crash_owner(first).await;
     let next = owner(root.path()).await;
     let (send, mut requests) = mpsc::channel(1);
     let server = LocalServer::bind(&next, send).await.unwrap();
-    assert_eq!(stale.address, endpoint(&next).address);
-    let stream = tokio::net::UnixStream::connect(&stale.address)
-        .await
-        .unwrap();
-    let operation = format!("{}:stale", stale.instance_id);
-    let error = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        crate::ipc::call_stream(
-            stream,
-            stale,
-            Command::MessageSend(MessageSendArgs {
-                thread_id: Some("t".into()),
-                text: "must not be sent".into(),
-            }),
-            Some(operation),
-            None,
-        ),
-    )
-    .await
-    .unwrap()
-    .unwrap_err();
-    assert_eq!(error.code, ErrorCode::ProtocolMismatch);
+    assert_ne!(stale.address, endpoint(&next).address);
+    assert!(
+        tokio::net::UnixStream::connect(&stale.address)
+            .await
+            .is_err()
+    );
     assert!(matches!(
         requests.try_recv(),
         Err(mpsc::error::TryRecvError::Empty)
@@ -307,4 +342,109 @@ async fn a_preplaced_legacy_shared_tmp_name_cannot_block_the_private_namespace()
         started,
         "a preplaced predictable shared-/tmp name must not block startup"
     );
+}
+
+#[tokio::test]
+async fn cleanup_preserves_a_replaced_parent_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join("private");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&folder)
+        .unwrap();
+    let path = folder.join("s");
+    let original = tokio::net::UnixListener::bind(&path).unwrap();
+    let owned = SocketFile::capture(path.clone()).unwrap();
+    let moved = root.path().join("moved");
+    std::fs::rename(&folder, &moved).unwrap();
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&folder)
+        .unwrap();
+    let replacement = tokio::net::UnixListener::bind(&path).unwrap();
+    assert!(owned.remove().is_err());
+    assert!(owned.remove_folder().is_err());
+    assert!(path.exists());
+    assert!(moved.join("s").exists());
+    drop(replacement);
+    drop(original);
+}
+
+#[tokio::test]
+async fn recognized_namespace_socket_impostors_are_preserved() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path()).await;
+    let target = root.path().join("keep");
+    std::fs::write(&target, b"unchanged").unwrap();
+    for link in [false, true] {
+        let folder = namespace::create_folder(current_uid()).unwrap();
+        let socket = folder.join("s");
+        if link {
+            symlink(&target, &socket).unwrap();
+        } else {
+            std::fs::write(&socket, b"not a socket").unwrap();
+        }
+        let forged = Endpoint {
+            protocol_version: crate::protocol::PROTOCOL_VERSION,
+            instance_id: "untrusted".into(),
+            transport: "unix".into(),
+            address: socket.to_str().unwrap().into(),
+        };
+        std::fs::write(
+            owner.loaded.data_dir.join("endpoint.json"),
+            serde_json::to_vec(&forged).unwrap(),
+        )
+        .unwrap();
+        let (send, _) = mpsc::channel(1);
+        let server = LocalServer::bind(&owner, send).await.unwrap();
+        server.shutdown().await.unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"unchanged");
+        assert!(std::fs::symlink_metadata(&socket).is_ok());
+        if link {
+            assert!(socket.is_symlink());
+        } else {
+            assert_eq!(std::fs::read(&socket).unwrap(), b"not a socket");
+        }
+        std::fs::remove_file(socket).unwrap();
+        std::fs::remove_dir(folder).unwrap();
+    }
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn crash_during_socket_preparation_retains_a_locator_and_reclaims_empty_directories() {
+    let root = tempfile::tempdir().unwrap();
+    for stage in 0..3 {
+        let first = owner(root.path()).await;
+        let folder = namespace::folder_candidates(current_uid())
+            .unwrap()
+            .remove(0);
+        let planned = Endpoint {
+            protocol_version: crate::protocol::PROTOCOL_VERSION,
+            instance_id: first.instance_id.clone(),
+            transport: "unix".into(),
+            address: folder.join("s").to_str().unwrap().into(),
+        };
+        first.publish_endpoint(planned).await.unwrap();
+        assert!(!folder.exists(), "locator is published before mkdir");
+        if stage >= 1 {
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&folder)
+                .unwrap();
+        }
+        if stage >= 2 {
+            drop(tokio::net::UnixListener::bind(folder.join("s")).unwrap());
+        }
+        crash_owner(first).await;
+        let next = owner(root.path()).await;
+        let (send, _) = mpsc::channel(1);
+        let server = LocalServer::bind(&next, send).await.unwrap();
+        assert!(
+            !folder.exists(),
+            "planned, empty, and socket-bearing old directories are reclaimed"
+        );
+        server.shutdown().await.unwrap();
+        next.shutdown().await.unwrap();
+    }
 }

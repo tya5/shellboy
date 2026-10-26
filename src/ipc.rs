@@ -15,6 +15,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[cfg(unix)]
+mod peer;
 mod server;
 pub use server::LocalServer;
 
@@ -131,9 +133,67 @@ pub async fn call(
     operation_id: Option<String>,
     origin: Option<Origin>,
 ) -> Result<Response<Value>, ApiError> {
+    let endpoint = match environment_endpoint(data_dir)? {
+        Some(endpoint) => endpoint,
+        None => read_endpoint(data_dir).await?,
+    };
+    connect(endpoint, command, operation_id, origin).await
+}
+
+fn environment_endpoint(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
+    #[cfg(unix)]
+    {
+        if std::env::var_os("SHELLBOY_DATA_DIR")
+            .as_deref()
+            .map(Path::new)
+            != Some(data_dir)
+        {
+            return Ok(None);
+        }
+        let Some(address) = std::env::var_os("SHELLBOY_SOCKET").filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        let address = address.into_string().map_err(|_| mismatch())?;
+        let instance_id = std::env::var("SHELLBOY_INSTANCE_ID")
+            .ok()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(mismatch)?;
+        if !Path::new(&address).is_absolute() {
+            return Err(mismatch());
+        }
+        Ok(Some(Endpoint {
+            protocol_version: PROTOCOL_VERSION,
+            instance_id,
+            transport: "unix".into(),
+            address,
+        }))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = data_dir;
+        Ok(None)
+    }
+}
+
+async fn read_endpoint(data_dir: &Path) -> Result<Endpoint, ApiError> {
     let path = data_dir.join("endpoint.json");
-    let endpoint = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
+        #[cfg(unix)]
+        let file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+                .open(path)
+                .map_err(io_error)?
+        };
+        #[cfg(not(unix))]
         let file = std::fs::File::open(path).map_err(io_error)?;
+        let metadata = file.metadata().map_err(io_error)?;
+        if !metadata.is_file() || metadata.len() > 64 * 1024 {
+            return Err(mismatch());
+        }
         use std::io::Read;
         let mut bytes = Vec::new();
         file.take(64 * 1024 + 1)
@@ -145,7 +205,15 @@ pub async fn call(
         serde_json::from_slice::<Endpoint>(&bytes).map_err(|_| mismatch())
     })
     .await
-    .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Endpoint worker failed"))??;
+    .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Endpoint worker failed"))?
+}
+
+async fn connect(
+    endpoint: Endpoint,
+    command: Command,
+    operation_id: Option<String>,
+    origin: Option<Origin>,
+) -> Result<Response<Value>, ApiError> {
     if endpoint.protocol_version != PROTOCOL_VERSION {
         return Err(mismatch());
     }
@@ -161,6 +229,13 @@ pub async fn call(
         .await
         .map_err(|_| io_error(std::io::ErrorKind::TimedOut.into()))?
         .map_err(io_error)?;
+        peer::verify(&stream).map_err(|_| {
+            ApiError::new(
+                ErrorCode::IoFailed,
+                "Local IPC peer identity could not be verified",
+            )
+            .hint("Start Shellboy and its CLI under the same OS user")
+        })?;
         call_stream(stream, endpoint, command, operation_id, origin).await
     }
     #[cfg(windows)]

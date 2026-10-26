@@ -18,6 +18,12 @@ TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の�
 
 macOSで共通UTF-16組立の4試験、対象strict Clippy、fmt/diffが成功しました。Windows専用のPowerShell起動回帰も追加しましたが、Windowsでの実行は未実施です。変更はローカルに保持し、push・配布物の更新は行っていません。詳細は [検証状況](../validation/acceptance.md) に記録しています。
 
+## WSL/LinuxのIPC起動条件の修正
+
+[Issue #2](https://github.com/tya5/shellboy/issues/2)へ対応し、XDG_RUNTIME_DIRが使えない環境でもOS一時領域に専用0700 socket directoryを自動で用意します。固定hashや保存先祖先の権限への依存を除き、接続両側のpeer uid照合、モデルshellへのSHELLBOY_SOCKET伝播、既存endpoint.json経由の人向けCLI接続を揃えました。別data-dir指定やinstance不一致で別ownerへfallbackしません。
+
+mkdir前に予定pathを記録し、locatorのみ・空directory・bind後の各段階で落ちた場合も次回起動で検証して回収します。別owner・改変file・symlink・未知の内容は削除しません。Unix保存先は0700へ限定し、親の権限は変更しません。macOSで対象5 suiteの430件、umask002/XDGなしの複合条件の追加確認、strict Clippy、同梱docs検証が成功しました。詳細は [検証状況](../validation/acceptance.md) に記録しています。Linux/WSL実機・別uidの実processでの確認、push・新配布物は未実施です。
+
 ## 初版公開の完了範囲
 
 - package・実行名・Rust参照・環境変数・既定保存先・製品名付き識別子をShellboyへ統一しました。旧名や旧保存形式の互換は追加していません。

@@ -87,6 +87,8 @@ pub struct Control {
     instructions: InstructionLoader,
     replay: replay::ReplayCache,
     data_dir: PathBuf,
+    #[cfg(unix)]
+    endpoint: Arc<std::sync::RwLock<Option<crate::app::Endpoint>>>,
     live: Arc<LiveRegistry>,
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
@@ -151,6 +153,8 @@ impl Control {
             instructions: InstructionLoader::new(&config),
             replay: replay::ReplayCache::new(config.cache.history_bytes),
             data_dir: owner.loaded.data_dir.clone(),
+            #[cfg(unix)]
+            endpoint: owner.endpoint.clone(),
             live: Arc::new(LiveRegistry::default()),
             origins: Mutex::new(HashMap::new()),
             events,

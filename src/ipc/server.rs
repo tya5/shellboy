@@ -60,9 +60,17 @@ trait Acceptor: Send + 'static {
 impl Acceptor for tokio::net::UnixListener {
     type Stream = tokio::net::UnixStream;
     async fn accept(&mut self) -> io::Result<Self::Stream> {
-        tokio::net::UnixListener::accept(self)
-            .await
-            .map(|(stream, _)| stream)
+        loop {
+            let (stream, _) = tokio::net::UnixListener::accept(self).await?;
+            if super::peer::verify(&stream).is_ok() {
+                return Ok(stream);
+            }
+            // Unverified peers never receive a hello/welcome or occupy a
+            // protocol task. Reject this connection, keeping the listener live.
+            drop(stream);
+            // A ready backlog of rejected peers must still allow shutdown.
+            tokio::task::yield_now().await;
+        }
     }
 }
 
@@ -212,8 +220,7 @@ impl LocalServer {
     ) -> Result<Self, ApiError> {
         let instance = owner.instance_id.clone();
         #[cfg(unix)]
-        let (listener, endpoint, socket) =
-            endpoint::bind_unix(owner.loaded.data_dir.clone(), instance.clone()).await?;
+        let (listener, _, socket) = endpoint::bind_unix(owner, instance.clone()).await?;
         #[cfg(windows)]
         let (listener, endpoint) = {
             use crate::{app::Endpoint, protocol::PROTOCOL_VERSION};
@@ -243,6 +250,7 @@ impl LocalServer {
             #[cfg(unix)]
             socket,
         };
+        #[cfg(windows)]
         if let Err(error) = owner.publish_endpoint(endpoint).await {
             drop(listener);
             let _ = files.cleanup().await;

@@ -536,6 +536,18 @@ async fn run_shell(
     ] {
         env.insert(name.into(), value);
     }
+    #[cfg(unix)]
+    {
+        let address = control
+            .endpoint
+            .read()
+            .ok()
+            .and_then(|endpoint| endpoint.as_ref().map(|value| value.address.clone()))
+            .unwrap_or_default();
+        // Empty clears a socket inherited from a different owner in standalone
+        // fixtures; production publishes its endpoint before starting drivers.
+        env.insert("SHELLBOY_SOCKET".into(), address);
+    }
     if let Ok(executable) = std::env::current_exe()
         && let Some(parent) = executable.parent()
     {

@@ -2,6 +2,87 @@ use serde_json::Value;
 use shellboy::{app::DataOwner, control::Control, ipc::LocalServer};
 use std::process::Command;
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn socket_environment_bypasses_metadata_but_never_overrides_another_data_directory() {
+    use shellboy::{app::Endpoint, protocol::Response};
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "").unwrap();
+    let first = DataOwner::start(
+        Some(config.clone()),
+        Some(root.path().join("first")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let second = DataOwner::start(
+        Some(config),
+        Some(root.path().join("second")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let (send, mut a) = tokio::sync::mpsc::channel(4);
+    let first_server = LocalServer::bind(&first, send).await.unwrap();
+    let (send, mut b) = tokio::sync::mpsc::channel(4);
+    let second_server = LocalServer::bind(&second, send).await.unwrap();
+    let endpoint: Endpoint = serde_json::from_slice(
+        &std::fs::read(first.loaded.data_dir.join("endpoint.json")).unwrap(),
+    )
+    .unwrap();
+    std::fs::remove_file(first.loaded.data_dir.join("endpoint.json")).unwrap();
+    let replies = tokio::spawn(async move {
+        loop {
+            let (item, owner) =
+                tokio::select! {item=a.recv()=>(item,"first"),item=b.recv()=>(item,"second")};
+            let Some(item) = item else { break };
+            let _ = item.reply.send(Response::success(
+                item.request.operation_id,
+                serde_json::json!({"owner":owner}),
+            ));
+        }
+    });
+    for (directory, instance, expected) in [
+        (
+            &first.loaded.data_dir,
+            endpoint.instance_id.as_str(),
+            Some("first"),
+        ),
+        (
+            &second.loaded.data_dir,
+            endpoint.instance_id.as_str(),
+            Some("second"),
+        ),
+        (&first.loaded.data_dir, "wrong-instance", None),
+    ] {
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(directory)
+            .args(["thread", "list"])
+            .env("SHELLBOY_DATA_DIR", &first.loaded.data_dir)
+            .env("SHELLBOY_SOCKET", &endpoint.address)
+            .env("SHELLBOY_INSTANCE_ID", instance)
+            .output()
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if let Some(expected) = expected {
+            assert!(output.status.success(), "{value}");
+            assert_eq!(value["result"]["owner"], expected);
+        } else {
+            assert!(!output.status.success());
+            assert_eq!(value["error"]["code"], "protocol_mismatch");
+        }
+    }
+    first_server.shutdown().await.unwrap();
+    second_server.shutdown().await.unwrap();
+    replies.abort();
+    let _ = replies.await;
+    first.shutdown().await.unwrap();
+    second.shutdown().await.unwrap();
+}
+
 #[test]
 fn process_help_version_and_errors_use_expected_exit_and_output() {
     let binary = env!("CARGO_BIN_EXE_shellboy");

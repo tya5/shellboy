@@ -157,37 +157,17 @@ I/Oエラーとする。受信済みrequestの未知操作や版互換そのも�
 加えない。各分類の許可済work、接続、受信frameを別に数え、満杯の通常work下で停止/Statusが進むことと、
 切断済mutationが処理完了まで枠を保持することを障害注入fixtureで検証する。
 
-### Unix socketの安定namespaceと残存物（P12）
+### Unix socketの専用namespaceと残存物（Issue #2）
 
-socket directoryは実効uidとcanonical data-dirをSHA-256へ渡した先頭128bit（32hex）を使い、
-検証済みuser-private baseの `r-<hash>/s` とする（PR1-11）。共有 `/tmp` の予測可能な名前は、
-別uidに先置きされると安全拒否だけでは起動不能になるため使わない。候補はXDG_RUNTIME_DIR、
-macOSのconfstr(_CS_DARWIN_USER_TEMP_DIR)、Linuxの `/run/user/<euid>` の順とし、
-絶対path・symlinkでない実効uid所有0700 directoryを再検証する。不正/他uid/公開権限/長すぎる
-環境候補をそのまま信用せず、次候補へ進む。canonical baseとdata-dir fallbackの祖先もroot/euid所有で、他者書込み不可またはstickyであることを検査し、leafが0700でも他者が親から差替えられる配置を拒否する。macOSのOS候補はTMPDIR環境値に依存しない。
+ソケットの配置先はownerが決める。使えるXDG_RUNTIME_DIRの下へランダム名の0700 directoryを原子的に作り、使えない場合はOSの共有一時領域 `/tmp`（macOSではcanonical path）へ同じ専用directoryを作る。baseの所有・権限・sticky・symlinkを検証し、不適切/長すぎる環境候補は使用しない。data-dirの権限や祖先をソケット配置の成立条件にせず、固定uid/data-dir hash、`/run/user`候補探索、data-dir下の`.ipc`は使わない。ソケットのUTF-8 pathは103bytes以下とする。新しい表・worker・設定は追加しない。
 
-private baseを使えないheadless環境では、canonical data-dirが実効uid所有でgroup/world書込み不可
-なら、その下の0700 `.ipc/s` を使う。いずれもsocket pathはUTF-8で103bytes以下とし、
-安全で短い候補が無い場合は起動を拒否して短い0700 XDG_RUNTIME_DIRの設定へ誘導する。
-新しい設定key・永続nonce・表・worker・home探索は追加しない。endpoint.jsonとinstance handshakeは維持する。
-同一data-dirと同じ有効baseをowner lock下で再利用し、繰り返すクラッシュでdirectoryを増やさない。
-data-dirのsymlink別名はcanonical identityへ揃え、private baseでは別data-dir/uidを異なるhashへ写す。
-baseの明示変更で残った旧directoryは任意走査して削除せず、旧UUIDや共有/tmp方式と同じく保持する。
+`endpoint.json`の既存addressが配置の正本であり、ランダム名は認証nonceではない。人のCLIはmetadataを読み、モデルのshellには `SHELLBOY_SOCKET` で実際のpathと既存のinstance ID/data-dirを渡す。CLIは環境data-dirと対象が一致し、有効なsocket/instanceがある場合に限りmetadataを読まずに接続する。明示的に別data-dirを選んだ場合は通常のmetadataへ戻す。環境経由の失敗から別endpointへ自動fallbackせず、既存instance handshakeを維持する。ownerからControlへはpublish済みendpointのメモリ上のsnapshotを共有し、tool起動のためのfile読込み・DB状態・workerは増やさない。
 
-再利用時はdirectoryがsymlinkでなく、実効uid所有の0700であり、既知socket以外の内容を
-持たないことを確認する。既存socketもsymlink/通常fileを拒否し、所有uidを照合する。
-250msまでの接続probeが成功する場合や判定不能の場合は削除しない。接続拒否/対象消失だけを
-staleとし、取得したdevice/inode/ctimeが同じsocketを回収する。正常終了・恒久受付障害・公開失敗の
-清掃にも同じ所有identityを使い、差替えられたsocketや別instanceのmetadataは保存する。
-自instanceの公開用temp metadataも既知の名前だけを清掃する。bind準備/清掃失敗は起動側の
-`io_failed`として文脈を示し、接続先未起動の`app_not_running`へ誤分類しない。
+Unix接続の両側で、hello/request送信前にTokioのpeer_cred（Linux SO_PEERCRED、macOS getpeereid）からpeer uidを得て実効uidと照合する。未検証接続は拒否し、サーバーはその接続だけを破棄して受付を続ける。配置先の秘匿性やorigin tokenの代用とは扱わず、Windows named pipeの既存経路は変更しない。
 
-旧UUID directoryにはdata-dirとの検証可能な結び付きが無いため、任意走査や旧endpointの
-飛び先を根拠とした削除は採用しない。これら既存残存物の自動移行清掃は対象外とする。
-旧artifactはdirectoryと本文を持たないsocketのfilesystem entryであり、会話/DBを保存しない。
-その小さな既存残存より、別data-dir/別uidの資源を誤って消す危険を避ける判断を採用する。
-新方式以降の同一data-dirの残存増加は上記の安定namespaceで防ぐ。OSによる一時directoryの回収は保証とせず、
-Windows pipeはプロセス終了時にOSが解放する既存方式を維持する。
+owner lock取得後に前回endpoint metadataの既知pathだけを確認し、許可したbase・正しい専用名・実効uid所有0700・symlinkでないdirectory・既知socketだけの内容・socket所有uidを検証する。250msの接続probeが拒否/対象消失の場合だけstaleとし、directoryのdevice/inodeとsocketのdevice/inode/ctimeが変わっていないことを再確認してsocketと空directoryを削除する。生存/判定不能、未知形式や別の場所を指すmetadata、他者のfileは保持し、任意走査・recursive deleteはしない。新規directoryのmkdir前に予定pathを既存endpoint.jsonへ原子的に公開する。locatorだけ、空directory、bind済みsocketの各段階の異常終了後も、次回起動で安全に検証・回収できる。正常終了・公開失敗の清掃も自身のidentityに限定する。旧固定名領域の自動移行清掃は行わない。
+
+会話保存先はソケットと独立に、Unixで新規作成時0700とする。既存保存先も自分のdirectoryであることを確認し0700へ限定するが、symlinkや他uid所有へchmodしない。作成・検証は起動のfile workerで行い、UI threadへI/Oを持ち込まない。OS一時領域自体へ書けない等の残る失敗では、利用者へ次の操作を示し、詳しい理由は詳細情報へ保持する。`/tmp`の自動掃除からの完全保護は保証せず、XDG_RUNTIME_DIRを優先する。
 
 
 PR1-12ではUnix socketの型・field・清掃をUnix cfgへ揃え、Windows named pipeにはmetadata清掃だけを残す。

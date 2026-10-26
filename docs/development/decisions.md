@@ -69,3 +69,11 @@ Windows全target試験で判明した添付fixtureのUnix絶対パス11件と、
 `environment_block`が`=C:`だけを例外にしていたため、既存の`inherited_environment`が読み取れる`=::`、`=ExitCode`等を再構築時に拒否していた。ドライブ名の列挙を増やさず、先頭以外の`=`を区切りとする既存の読込み規則へ検査を揃える。[MicrosoftのMSBuild実装](https://source.dot.net/Microsoft.Build.Framework/BackEnd/CommunicationsUtilities.cs.html)にも隠し変数と`=ExitCode`の説明があり、継承環境を通常設定の環境変数名制約と同一視しない。値のNUL、名前のNUL・空名・途中の`=`は拒否し、設定envの英数字/underscore制約は変更しない。
 
 不正entryの診断は変数名だけを先頭128文字に制限して引用・escapeし、値はコピーしない。UTF-16の環境block本体はlossy変換せず、値中の`=`や非Unicodeのcode unitも保持する。新しい状態・依存・worker・設定は不要。親processの環境を変更しない合成fixtureで混在環境と注入拒否を試験し、Windows専用の起動回帰は実機確認と分けて扱う。
+
+## WSL/LinuxのIPC起動条件（Issue #2、2026-10-26）
+
+利用者にXDG_RUNTIME_DIRの作成や祖先権限の調整を求める旧方式を廃止する。XDGが使えなければcanonical /tmpのsticky領域へランダム0700 directoryを原子的に作る。旧P12の固定hash/永続nonce非追加という判断は、既存endpoint.jsonのaddressにランダムpathを保存する方針へ変更する。pathは認証情報ではなく配置のlocatorであり、instance handshakeと接続両側のpeer uid照合を併用する。[Linux unix(7)](https://man7.org/linux/man-pages/man7/unix.7.html)と固定Tokioのpeer_cred実装を確認し、独自OS syscall wrapperや新依存は追加しない。
+
+ディレクトリ作成後・socket bind後の公開前クラッシュでlocatorを失わないよう、予定pathをmkdir前に既存publisherで原子的に保存する。通常のCLI接続はbind完了後に可能になる。owner/Control間にはpublish済みEndpointの小さなメモリsnapshotを共有し、shellへSHELLBOY_SOCKETを渡すための毎回file読込みや業務stateを増やさない。別data-dir指定では環境pathを使わず、指定環境pathが失敗しても他ownerへfallbackしない。
+
+清掃は現在認められる安全なbase・専用名・所有・0700・内容・file identity・生存probeで限定する。別XDGへ変更した場合や改変されたlocatorを根拠に探索範囲を広げず、削除対象と検証できない残骸は保全する。旧固定名の自動移行清掃や/tmp全域走査は行わない。保存先はsocket配置から独立して新規0700、既存の自分のdirectoryも0700へ限定し、symlink/他uidへのchmodや親の権限変更をしない。実行UI thread、Core状態・表・worker・キューは追加しない。

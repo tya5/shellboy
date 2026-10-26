@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 pub fn storage_error(error: StorageError) -> ApiError {
@@ -35,6 +35,37 @@ impl Drop for OwnerLock {
 impl OwnerLock {
     /// Blocking file I/O: call from startup's file worker, never the UI thread.
     pub fn acquire(data_dir: &Path) -> Result<Arc<Self>, ApiError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(data_dir)
+                .map_err(io_error)?;
+            let directory = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+                .open(data_dir.components().collect::<PathBuf>())
+                .map_err(io_error)?;
+            let metadata = directory.metadata().map_err(io_error)?;
+            // Never chmod through a symlink or alter another user's directory.
+            if !metadata.is_dir()
+                || metadata.file_type().is_symlink()
+                || metadata.uid() != unsafe { libc::geteuid() }
+            {
+                return Err(ApiError::new(
+                    ErrorCode::IoFailed,
+                    "保存先を専用にできません。自分が所有する実ディレクトリを --data-dir で指定してください",
+                ));
+            }
+            if metadata.mode() & 0o7777 != 0o700 {
+                directory
+                    .set_permissions(std::fs::Permissions::from_mode(0o700))
+                    .map_err(io_error)?;
+            }
+        }
+        #[cfg(not(unix))]
         std::fs::create_dir_all(data_dir).map_err(io_error)?;
         let file = OpenOptions::new()
             .create(true)
@@ -86,6 +117,7 @@ pub struct DataOwner {
     pub loaded: LoadedConfig,
     pub db: DbWorker,
     pub diagnostics: crate::diagnostics::Diagnostics,
+    pub(crate) endpoint: Arc<RwLock<Option<Endpoint>>>,
     _lock: Arc<OwnerLock>,
 }
 impl DataOwner {
@@ -163,6 +195,7 @@ impl DataOwner {
             loaded,
             db,
             diagnostics,
+            endpoint: Arc::new(RwLock::new(None)),
             _lock: lock,
         })
     }
@@ -176,6 +209,7 @@ impl DataOwner {
             ));
         }
         let dir = self.loaded.data_dir.clone();
+        let published = endpoint.clone();
         tokio::task::spawn_blocking(move || {
             let temporary = dir.join(format!("endpoint-{}.tmp", endpoint.instance_id));
             let data = serde_json::to_vec(&endpoint)
@@ -200,7 +234,14 @@ impl DataOwner {
             std::fs::rename(temporary, target).map_err(io_error)
         })
         .await
-        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Endpoint worker failed"))?
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Endpoint worker failed"))??;
+        *self.endpoint.write().map_err(|_| {
+            ApiError::new(
+                ErrorCode::IoFailed,
+                "Endpoint publication state unavailable",
+            )
+        })? = Some(published);
+        Ok(())
     }
 
     /// Control must stop/reap all owned executions before calling this method.
@@ -236,6 +277,79 @@ impl DataOwner {
 #[cfg(all(test, unix))]
 mod owner_lock_tests {
     use super::*;
+
+    #[test]
+    fn data_directory_is_private_under_group_writable_umask() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        const CHILD: &str = "SHELLBOY_TEST_PRIVATE_DIRECTORY";
+        if let Some(data) = std::env::var_os(CHILD) {
+            // Isolated test subprocess: never mutate the parent test process's umask.
+            unsafe { libc::umask(0o002) };
+            let data = PathBuf::from(data);
+            let lock = OwnerLock::acquire(&data).unwrap();
+            assert_eq!(std::fs::metadata(&data).unwrap().mode() & 0o777, 0o700);
+            drop(lock);
+            std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o775)).unwrap();
+            let reopened = OwnerLock::acquire(&data).unwrap();
+            assert_eq!(std::fs::metadata(&data).unwrap().mode() & 0o777, 0o700);
+            drop(reopened);
+            let target = data.parent().unwrap().join("unrelated");
+            std::fs::create_dir(&target).unwrap();
+            let before = std::fs::metadata(&target).unwrap().mode();
+            let alias = data.parent().unwrap().join("alias");
+            std::os::unix::fs::symlink(&target, &alias).unwrap();
+            assert!(OwnerLock::acquire(&PathBuf::from(format!("{}/", alias.display()))).is_err());
+            assert_eq!(std::fs::metadata(target).unwrap().mode(), before);
+            let config = data.parent().unwrap().join("config.toml");
+            std::fs::write(&config, "").unwrap();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let owner = DataOwner::start(Some(config), Some(data.clone()), data.clone())
+                        .await
+                        .unwrap();
+                    let (sender, _) = tokio::sync::mpsc::channel(1);
+                    let server = crate::ipc::LocalServer::bind(&owner, sender).await.unwrap();
+                    let endpoint: Endpoint =
+                        serde_json::from_slice(&std::fs::read(data.join("endpoint.json")).unwrap())
+                            .unwrap();
+                    assert_eq!(
+                        Path::new(&endpoint.address)
+                            .parent()
+                            .unwrap()
+                            .parent()
+                            .unwrap(),
+                        std::fs::canonicalize("/tmp").unwrap()
+                    );
+                    server.shutdown().await.unwrap();
+                    owner.shutdown().await.unwrap();
+                });
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "app::owner_lock_tests::data_directory_is_private_under_group_writable_umask",
+                "--nocapture",
+            ])
+            .env(CHILD, root.path().join("data"))
+            .env_remove("XDG_RUNTIME_DIR")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::metadata(root.path()).unwrap().mode() & 0o777,
+            0o775
+        );
+    }
 
     #[tokio::test]
     async fn completed_owner_releases_lock_even_when_a_duplicated_descriptor_is_still_open() {

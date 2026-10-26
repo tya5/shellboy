@@ -259,7 +259,8 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     // A second genuine model tool call observes the first one over IPC. Its stdout
     // includes a message receipt, while the target must retain only its own token.
     let script = format!(
-        "'{executable}' message send --thread '{}' --text 'unrelated receipt fixture'\n\
+        "test -n \"$SHELLBOY_SOCKET\" || exit 91\n\
+         '{executable}' message send --thread '{}' --text 'unrelated receipt fixture'\n\
          '{executable}' wait --conditions-json '[{{\"type\":\"shell_ended\",\"execution_id\":\"{target}\"}}]' --timeout-ms 30000\n\
          '{executable}' shell get --execution '{target}'\n\
          '{executable}' shell read --execution '{target}' --encoding UTF-8 --limit-bytes 65536",

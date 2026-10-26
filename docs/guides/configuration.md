@@ -22,6 +22,8 @@ cargo build --locked --release --bin shellboy
 
 ## 配置と優先順位
 
+Linux/WSLでも `XDG_RUNTIME_DIR` の手動設定は不要です。Unixのローカル通信領域はShellboyが利用可能なXDG runtime directoryかOSの一時領域に用意します。別端末のCLIは同じdata-dirの `endpoint.json` を読み、モデルのshellは自動設定された `SHELLBOY_SOCKET` とinstance情報で接続します。これらの値を自分で推測・設定する必要はありません。Unixの会話保存先は新規・既存とも自分専用の0700へ限定し、指定した親ディレクトリの権限は変更しません。
+
 | OS | 設定ファイル | データディレクトリ |
 |---|---|---|
 | macOS | `$HOME/Library/Application Support/shellboy/config.toml` | `$HOME/Library/Application Support/shellboy/data` |
