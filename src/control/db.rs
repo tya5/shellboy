@@ -1053,7 +1053,8 @@ fn assign_message(
                 }
                 assigned_turn = Some(turn_id);
             } else {
-                let turn_id = new_turn(tx, id, &run_id, now)?;
+                let turn_id =
+                    super::state::create_turn_tx(tx, id, &run_id, now, now).map_err(sql_error)?;
                 assigned_turn = Some(turn_id);
                 assignment = Assignment::NewTurn;
                 wake = true;
@@ -1085,7 +1086,7 @@ fn assign_message(
             now,
         )
         .map_err(sql_error)?;
-        let turn_id = new_turn(tx, id, &run_id, now)?;
+        let turn_id = super::state::create_turn_tx(tx, id, &run_id, now, now).map_err(sql_error)?;
         // A human's new instruction, or an owning parent's explicit terminal
         // child restart, is the resume boundary for unassigned saved input.
         // Previously assigned receipts keep their original Run/Turn forever.
@@ -1106,17 +1107,6 @@ fn assign_message(
         reason,
         wake,
     })
-}
-
-fn new_turn(tx: &Transaction<'_>, thread: &str, run: &str, now: &str) -> Result<String> {
-    let id = uuid::Uuid::new_v4().to_string();
-    tx.execute(
-        "INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES(?1,?2,?3,'preparing',?4)",
-        params![id, thread, run, now],
-    )
-    .map_err(sql_error)?;
-    super::context::turn_started(tx, thread, run, &id, now).map_err(sql_error)?;
-    Ok(id)
 }
 
 fn actor(caller: Option<&Origin>) -> Value {

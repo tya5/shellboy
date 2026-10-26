@@ -280,7 +280,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         // the originating group's completion nudges this driver again.
         if attachment_blocked { return Ok(Next::Idle); }
         let events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND e.kind<>'context_changed' ORDER BY e.created_at,e.id")?.query_map([&run],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
-        if turn.is_none()&&(!events.is_empty()||attachment_count>0){let new_turn=id();tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'preparing',?4)",params![new_turn,thread,run,now()])?;super::context::turn_started(&tx,&thread,&run,&new_turn,&now())?;turn=Some(new_turn);}
+        if turn.is_none()&&(!events.is_empty()||attachment_count>0){turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);}
         let Some(turn)=turn else{
             let owned:i64=tx.query_row("SELECT (SELECT count(*) FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping'))+(SELECT count(*) FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
             if owned>0{return Ok(Next::Idle);}
@@ -335,9 +335,7 @@ async fn recover_preparation(
         let (turn,generation) = match active {
             Some(target) => target,
             None => {
-                let turn = id();
-                tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'preparing',?4)",params![turn,thread,run,now()])?;
-                super::context::turn_started(&tx,&thread,&run,&turn,&now())?;
+                let turn = super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?;
                 (turn,0)
             }
         };

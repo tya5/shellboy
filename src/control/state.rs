@@ -11,6 +11,24 @@ pub(super) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+/// Create the Turn and its existing context observation in the caller's
+/// transaction. Admission predicates and wake/recovery policy stay with callers.
+pub(super) fn create_turn_tx(
+    tx: &rusqlite::Transaction<'_>,
+    thread: &str,
+    run: &str,
+    created_at: &str,
+    started_at: &str,
+) -> rusqlite::Result<String> {
+    let turn = uuid::Uuid::new_v4().to_string();
+    tx.execute(
+        "INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES(?1,?2,?3,'preparing',?4)",
+        params![turn, thread, run, created_at],
+    )?;
+    super::context::turn_started(tx, thread, run, &turn, started_at)?;
+    Ok(turn)
+}
+
 /// A DB transition result, not a second in-memory attempt state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AttemptTransition {
