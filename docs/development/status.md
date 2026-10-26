@@ -1,6 +1,6 @@
 # 開発状況
 
-更新: 2026-10-27。Shellboyへの名称変更と公開用構成の準備は完了しました。GitHubへのpushと [v0.1.1の公開](https://github.com/tya5/shellboy/releases/tag/v0.1.1) は完了しました。[Windows x64 ZIP](https://github.com/tya5/shellboy/releases/download/v0.1.1/shellboy-v0.1.1-x86_64-pc-windows-msvc.zip)、macOS ARM64、Linux x64の配布物とSHA-256を公開しています。最新の実行結果は [Actions](https://github.com/tya5/shellboy/actions)、配布物は [Releases](https://github.com/tya5/shellboy/releases) で確認します。
+更新: 2026-10-27。v0.1.2向けのレビュー対応を完了しました。Windows x64・macOS ARM64・Linux x64の配布先は [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2)、公開状態と実行結果は [Actions](https://github.com/tya5/shellboy/actions) で確認します。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
@@ -10,13 +10,13 @@ v0.1.1公開後、利用者の指示でレビュー対応を再開しました�
 
 索引選択・巨大raw参照・停止receipt・検索identity・末尾cursorに加え、復旧CASとTurn作成の共通化、LiveRegistryの所有境界、Core通知の表示責務、Turn境界SQLの索引化を実装しました。TUIは保存本文の取得まで受信済み表示を保持し、中断・ツール・エラーを構造化して表示します。長い出力の省略・折返しを含め、原文との位置対応を修正しました。
 
-`f488196` の単体試験428件が成功しました。実WezTermセルで復旧→retry、複数tool、正式な終了記録のgroupとF6原文を確認し、現行UI経路のrelease負荷測定3回と実PTY14回も成功しました。画像取得はOS側の失敗で未実施です。条件は [検証状況](../validation/acceptance.md) に記録しています。標準checkは全68群・1,058成功・失敗0、台帳の全終端gateも成功しました。219項目は217完了・Windows実機なし2環境対象外で、判断待ちはありません。これらのgoal変更はローカルcommitのみで、v0.1.1配布物・利用中owner・既定設定/DBには反映していません。
+`f488196` の単体試験428件が成功しました。実WezTermセルで復旧→retry、複数tool、正式な終了記録のgroupとF6原文を確認し、現行UI経路のrelease負荷測定3回と実PTY14回も成功しました。画像取得はOS側の失敗で未実施です。条件は [検証状況](../validation/acceptance.md) に記録しています。標準checkは全68群・1,058成功・失敗0、台帳の全終端gateも成功しました。219項目は217完了・Windows実機なし2環境対象外で、判断待ちはありません。レビュー完了時点ではローカルcommitのみでした。利用者の指示でv0.1.2として公開を進めます。v0.1.1のtag・配布物は保持し、既定設定/DBを変更する操作は行いません。
 
 ## v0.1.1公開完了
 
 v0.1.0以降の修正を、検証済みcommit `e55da58` のtag `v0.1.1` として公開しました。最終Responsesの採用と受信済み本文の保持、Windowsの隠し環境変数、Unix IPCの自動配置、Enter直後の送信状態・診断が対象です。3 OSのnative CIはWindows 925件、macOS/Linux各1,025件成功。Windows x64・macOS ARM64・Linux x64のrelease buildと起動確認、全archiveの公開ダウンロードとSHA-256照合も成功しました。初版のtag・配布物は置換していません。
 
-ローカルの `~/.local/bin/shellboy` も、公開済みmacOS版を検証して配置しました。`shellboy --version` は0.1.1です。実行中processの停止や設定・履歴の変更はしていません。CI・配布物の確認範囲は [検証状況](../validation/acceptance.md) に記録します。
+ローカルの `~/.local/bin/shellboy` も、公開済みmacOS版を検証して配置しました。当該リリース時点の `shellboy --version` は0.1.1でした。実行中processの停止や設定・履歴の変更はしていません。CI・配布物の確認範囲は [検証状況](../validation/acceptance.md) に記録します。
 
 ## Enter直後の送信状態
 
