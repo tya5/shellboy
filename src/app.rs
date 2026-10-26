@@ -328,14 +328,54 @@ mod owner_lock_tests {
                     let endpoint: Endpoint =
                         serde_json::from_slice(&std::fs::read(data.join("endpoint.json")).unwrap())
                             .unwrap();
-                    assert_eq!(
-                        Path::new(&endpoint.address)
-                            .parent()
-                            .unwrap()
-                            .parent()
-                            .unwrap(),
-                        std::fs::canonicalize("/tmp").unwrap()
-                    );
+                    let folder = Path::new(&endpoint.address).parent().unwrap();
+                    let metadata = std::fs::symlink_metadata(folder).unwrap();
+                    let uid = unsafe { libc::geteuid() };
+                    assert!(metadata.is_dir() && !metadata.file_type().is_symlink());
+                    assert_eq!(metadata.uid(), uid);
+                    assert_eq!(metadata.mode() & 0o7777, 0o700);
+                    assert!(endpoint.address.len() <= 103);
+                    let base = folder.parent().unwrap();
+                    let fallback = std::fs::canonicalize("/tmp").unwrap();
+                    #[cfg(target_os = "macos")]
+                    let expected = {
+                        use std::os::unix::ffi::OsStringExt;
+                        // Ask the OS directly, independently of inherited TMPDIR.
+                        let mut bytes = vec![0u8; 4096];
+                        let length = unsafe {
+                            libc::confstr(
+                                libc::_CS_DARWIN_USER_TEMP_DIR,
+                                bytes.as_mut_ptr().cast(),
+                                bytes.len(),
+                            )
+                        };
+                        let user = (length > 0 && length <= bytes.len()).then(|| {
+                            bytes.truncate(length - 1);
+                            PathBuf::from(std::ffi::OsString::from_vec(bytes))
+                        });
+                        user.and_then(|path| std::fs::canonicalize(path).ok())
+                            .filter(|path| {
+                                let socket = path.join(folder.file_name().unwrap()).join("s");
+                                let private = std::fs::symlink_metadata(path).is_ok_and(|m| {
+                                    m.is_dir() && m.uid() == uid && m.mode() & 0o7777 == 0o700
+                                });
+                                private
+                                    && socket.to_str().is_some()
+                                    && socket.as_os_str().len() <= 103
+                                    && path.ancestors().all(|parent| {
+                                        std::fs::symlink_metadata(parent).is_ok_and(|m| {
+                                            m.is_dir()
+                                                && !m.file_type().is_symlink()
+                                                && (m.uid() == 0 || m.uid() == uid)
+                                                && (m.mode() & 0o022 == 0 || m.mode() & 0o1000 != 0)
+                                        })
+                                    })
+                            })
+                            .unwrap_or(fallback)
+                    };
+                    #[cfg(not(target_os = "macos"))]
+                    let expected = fallback;
+                    assert_eq!(base, expected);
                     server.shutdown().await.unwrap();
                     owner.shutdown().await.unwrap();
                 });

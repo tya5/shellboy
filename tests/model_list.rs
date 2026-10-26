@@ -295,8 +295,31 @@ async fn invalid_thread_unknown_connection_forged_origin_and_disconnected_caller
         cancelled.error.as_ref().unwrap().code,
         ErrorCode::InvalidState
     );
-    assert_eq!(control.request(req).await, cancelled);
     assert!(rx.try_recv().is_err());
+    // A disconnected observation is not a saved failed operation. A connected
+    // caller using the same correlation ID must fetch current state again.
+    let worker = control.clone();
+    let fresh = tokio::spawn(async move { worker.request(req).await });
+    incoming(&mut rx)
+        .await
+        .reply
+        .send((200, json!({"data":[{"id":"after-cancel"}]})))
+        .unwrap();
+    let fresh = fresh.await.unwrap();
+    assert!(fresh.ok, "{:?}", fresh.error);
+    assert_eq!(fresh.operation_id, cancelled.operation_id);
+    assert_eq!(fresh.result.unwrap()["models"], json!(["after-cancel"]));
+    assert_eq!(
+        owner
+            .db
+            .call(|db| Ok(
+                db.query_row("SELECT COUNT(*) FROM operation_receipt", [], |row| row
+                    .get::<_, i64>(0))?
+            ))
+            .await
+            .unwrap(),
+        0
+    );
     control.shutdown().await.unwrap();
     assert_eq!(
         control

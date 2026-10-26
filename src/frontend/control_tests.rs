@@ -540,15 +540,42 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
         db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES(?1,?2,'null','synthetic-pending','pending','2000-01-01',268435456)",rusqlite::params![format!("{instance}:full"),instance])?;
         Ok(())
     }).await.unwrap();
-    let error = super::request(
+    let receipt_budget = |db: &mut rusqlite::Connection| {
+        Ok((
+            db.query_row("SELECT COUNT(*) FROM operation_receipt", [], |row| {
+                row.get::<_, i64>(0)
+            })?,
+            db.query_row(
+                "SELECT logical_bytes FROM quota_counter WHERE category='operation_receipt'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+            db.query_row(
+                "SELECT COALESCE(SUM(reserved_bytes),0) FROM operation_receipt",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+        ))
+    };
+    let before = control.store.database.call(receipt_budget).await.unwrap();
+    assert!(
+        before.2 >= 256 * 1024 * 1024,
+        "pending intent keeps mutation admission full"
+    );
+    let observed = super::request(
         &control,
         Command::ThreadGet(ThreadTarget {
             thread_id: Some("thread".into()),
         }),
     )
     .await
-    .unwrap_err();
-    assert_eq!(error.code, ErrorCode::StorageLimit);
+    .unwrap();
+    assert_eq!(observed["thread_id"], "thread");
+    assert_eq!(
+        control.store.database.call(receipt_budget).await.unwrap(),
+        before,
+        "full-budget observation allocates neither a receipt nor a reservation"
+    );
     assert_eq!(
         control
             .cancel_thread("missing".into())

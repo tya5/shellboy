@@ -1512,6 +1512,28 @@ mod tests {
             OpKind::ALL,
             expected.iter().map(|row| row.0).collect::<Vec<_>>()
         );
+        // Expected durable intentions, independent of dispatch ownership and
+        // the read-only classifier: wait also owns saved lifecycle state.
+        let receipt_commands = std::collections::HashSet::from([
+            "thread.create",
+            "thread.fork",
+            "thread.delete",
+            "thread.set",
+            "message.send",
+            "run.retry",
+            "run.stop",
+            "wait",
+            "shell.write",
+            "shell.eof",
+            "shell.stop",
+            "attachment.add",
+            "attachment.remove",
+            "compact",
+            "index.backfill",
+            "index.retry",
+            "index.rebuild",
+            "storage.collect",
+        ]);
         let mut names = std::collections::HashSet::new();
         for (operation, name, args) in expected {
             assert!(names.insert(name), "duplicate wire contract {name}");
@@ -1565,7 +1587,11 @@ mod tests {
                     CommandRoute::Database
                 }
             );
-            assert_eq!(command.requires_receipt(), name != "status");
+            assert_eq!(
+                command.requires_receipt(),
+                receipt_commands.contains(name),
+                "{name} receipt contract"
+            );
             assert_eq!(
                 command.runtime_cancellable(),
                 matches!(
@@ -1631,6 +1657,10 @@ mod tests {
                 assert_eq!(&actual["args"][key], value, "{name} argument {key}");
             }
         }
+        assert!(
+            receipt_commands.is_subset(&names),
+            "every receipt operation has a form fixture"
+        );
     }
     #[test]
     fn unknown_or_missing_field_is_an_error_while_an_existing_blank_remains_optional() {

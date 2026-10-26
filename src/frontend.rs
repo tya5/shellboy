@@ -140,13 +140,12 @@ async fn management_request(
             serde_json::json!({"request_operation_id":operation_id,"error":response.error.unwrap_or_else(|| ApiError::new(ErrorCode::IoFailed,"Operation failed without details"))}),
         );
     };
-    if is_read_projection {
-        return Ok(result);
-    }
-    if let Value::Object(object) = &mut result {
-        object.insert("request_operation_id".into(), Value::String(operation_id));
-    } else {
-        result = serde_json::json!({"request_operation_id":operation_id,"items":result});
+    if !is_read_projection {
+        if let Value::Object(object) = &mut result {
+            object.insert("request_operation_id".into(), Value::String(operation_id));
+        } else {
+            result = serde_json::json!({"request_operation_id":operation_id,"items":result});
+        }
     }
     if let Some(args) = index_args {
         result["management"] = control.index.management_status(args).await?;

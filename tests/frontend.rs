@@ -1046,6 +1046,12 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     .await;
     assert!(!field(&managed, "/management/spaces").is_empty());
     assert!(
+        managed
+            .iter()
+            .all(|field| field.key != "/request_operation_id"),
+        "index management retains its supplemental projection without a receipt link"
+    );
+    assert!(
         field(&managed, "/management/coverage/not_indexed_sources")
             .parse::<u64>()
             .is_ok()
@@ -1746,7 +1752,12 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await;
     assert!(omitted);
-    assert!(field(&fields, "/request_operation_id").starts_with(&observer.store.instance_id));
+    assert!(
+        fields
+            .iter()
+            .all(|field| field.key != "/request_operation_id"),
+        "receipt-free history reads must not advertise a saved operation result"
+    );
     assert!(field(&fields, "/text").contains("詳細"));
     send.send(UiAction::LoadManagementDetail {
         request_id: report_id,
@@ -2741,9 +2752,15 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         .await
         .unwrap();
     reopened.db.call(move |db| {
-        let draft:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1",[thread],|r|r.get(0))?;
+        let draft:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1",[&thread],|r|r.get(0))?;
         assert_eq!(serde_json::from_str::<DraftSnapshot>(&draft).unwrap().text,"latest unsent draft");
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM node WHERE kind='message' AND payload_json LIKE '%queued instruction survives%'",[],|r|r.get::<_,i64>(0))?,1);
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM receipt WHERE target_thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?,1);
+        let (kind,body):(String,String)=db.query_row("SELECT n.kind,n.payload_json FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1",[thread],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        assert_eq!(kind,"user");
+        let payload:serde_json::Value=serde_json::from_str(&body).unwrap();
+        assert_eq!(payload["role"],"user");
+        assert_eq!(payload["content"][0]["type"],"input_text");
+        assert_eq!(payload["content"][0]["text"],"queued instruction survives");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM shell_execution",[],|r|r.get::<_,i64>(0))?,0);
         Ok(())
     }).await.unwrap();
