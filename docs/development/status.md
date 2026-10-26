@@ -4,6 +4,10 @@
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
+## v0.1.1公開準備
+
+利用者の指示により、v0.1.0以降の修正をv0.1.1として公開します。最終Responsesの採用と受信済み本文の保持、Windowsの隠し環境変数、Unix IPCの自動配置、Enter直後の送信状態・診断が対象です。3 OSのnative CI成功後にversion tagを公開し、既存workflowでWindows x64・macOS ARM64・Linux x64のバイナリとSHA256SUMSを生成します。初版のtag・配布物は置換しません。完了結果は別途記録します。
+
 ## Enter直後の送信状態
 
 ローカル試用用に `796437e` の開発ビルドをユーザーの `~/.local/bin/shellboy` へ配置し、ビルド元とのSHA-256一致、配置後のhelp/versionを確認しました。未作成だったShellboy設定へ既存のLiteLLM接続設定を引き継ぎました。旧履歴の移行や実行中processの切替はしていません。
