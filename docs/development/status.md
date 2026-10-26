@@ -1,6 +1,6 @@
 # 開発状況
 
-更新: 2026-10-26。Shellboyへの名称変更と公開用構成の準備は完了しました。GitHubへのpushと [v0.1.1の公開](https://github.com/tya5/shellboy/releases/tag/v0.1.1) は完了しました。[Windows x64 ZIP](https://github.com/tya5/shellboy/releases/download/v0.1.1/shellboy-v0.1.1-x86_64-pc-windows-msvc.zip)、macOS ARM64、Linux x64の配布物とSHA-256を公開しています。最新の実行結果は [Actions](https://github.com/tya5/shellboy/actions)、配布物は [Releases](https://github.com/tya5/shellboy/releases) で確認します。
+更新: 2026-10-27。Shellboyへの名称変更と公開用構成の準備は完了しました。GitHubへのpushと [v0.1.1の公開](https://github.com/tya5/shellboy/releases/tag/v0.1.1) は完了しました。[Windows x64 ZIP](https://github.com/tya5/shellboy/releases/download/v0.1.1/shellboy-v0.1.1-x86_64-pc-windows-msvc.zip)、macOS ARM64、Linux x64の配布物とSHA-256を公開しています。最新の実行結果は [Actions](https://github.com/tya5/shellboy/actions)、配布物は [Releases](https://github.com/tya5/shellboy/releases) で確認します。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
@@ -8,7 +8,9 @@ TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の�
 
 v0.1.1公開後、利用者の指示でレビュー対応を再開しました。製品はこのリポジトリ、非公開台帳・旧証拠監査は独立したローカルGitへ置きます。台帳に追加指摘19件も含め、古い定型完了文を個別根拠へ直し、反証や確認不足の親項目は検証待ちへ戻しています。旧hashを公開hashへ読み替えません。
 
-まず索引更新時の選択保持と巨大rawの範囲取得を `d844c1a` / `c913582` に実装し、index49件・RAG16件・関連単体2件とstrict Clippyが成功しました。停止receiptの専用余白・検索identityの分離・末尾cursor省略も `1ab0460` / `4c76dc3` / `c3f2246` に実装しました。対象のcontrol DB・index・RAG・status試験とlib407件、strict Clippyが成功しています。統合標準checkと残るUI/履歴/構造指摘の是正は継続します。これらのgoal変更はローカルcommitのみで、v0.1.1配布物・利用中owner・既定設定/DBには反映していません。
+索引選択・巨大raw参照・停止receipt・検索identity・末尾cursorに加え、復旧CASとTurn作成の共通化、LiveRegistryの所有境界、Core通知の表示責務、Turn境界SQLの索引化を実装しました。TUIは保存本文の取得まで受信済み表示を保持し、中断・ツール・エラーを構造化して表示します。長い出力の省略・折返しを含め、原文との位置対応を修正しました。
+
+`6f8f78a` の単体試験427件が成功しました。最終標準check、現行UI経路の性能測定、専用合成fixtureによる実端末確認は継続中です。過去ビルドの成功と現行確認を分けて記録します。これらのgoal変更はローカルcommitのみで、v0.1.1配布物・利用中owner・既定設定/DBには反映していません。
 
 ## v0.1.1公開完了
 
