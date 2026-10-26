@@ -66,6 +66,19 @@ pub(super) fn legacy_may_activate(
     Ok(selected.is_none_or(|space| space.splitter == keys.splitter()))
 }
 
+/// The old hash omits split_chars, so an upgrade must not infer user consent
+/// to replace its selected coverage with a freshly segmented current space.
+pub(super) fn preserve_legacy_selection(
+    db: &Connection,
+    legacy_key: &str,
+) -> Result<bool, StorageError> {
+    let selected = meta(db, IndexKeys::ACTIVE_SPACE)?
+        .map(|id| load_space(db, &id))
+        .transpose()?
+        .flatten();
+    Ok(selected.is_some_and(|space| space.splitter == IndexKeys::new(legacy_key).splitter()))
+}
+
 impl IndexService {
     pub(super) fn identity_keys(&self) -> Vec<String> {
         let mut keys: Vec<_> = self.profile_key.iter().cloned().collect();
@@ -361,7 +374,25 @@ fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<()
             "Select the corresponding embedding/split_chars configuration before activating this old space",
         )));
     }
-    if !matches!(space.state.as_str(), "active" | "inactive" | "paused") {
+    let prepared_upgrade = if space.state == "candidate" {
+        let mut prepared = false;
+        for key in keys {
+            let keys = IndexKeys::new(key);
+            if meta(tx, &keys.group("active"))?.as_deref() != Some(id) {
+                continue;
+            }
+            let pending: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state NOT IN ('done','split')) OR EXISTS(SELECT 1 FROM app_meta WHERE key LIKE ?2 OR key LIKE ?3)",
+                params![id, keys.bootstrap_pattern(), keys.auto_pattern()],
+                |row| row.get(0),
+            )?;
+            prepared = !pending;
+        }
+        prepared
+    } else {
+        false
+    };
+    if !matches!(space.state.as_str(), "active" | "inactive" | "paused") && !prepared_upgrade {
         return Err(StorageError::from(err(
             ErrorCode::InvalidState,
             "Incomplete candidate cannot become active",
@@ -373,6 +404,20 @@ fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<()
     )?;
     tx.execute("UPDATE index_space SET state='active' WHERE id=?1", [&id])?;
     set_meta(tx, IndexKeys::ACTIVE_SPACE, id)?;
+    // Returning to a legacy selection keeps its prepared current-policy space
+    // writable as a candidate, without allowing new sources to select it again.
+    if keys
+        .last()
+        .is_some_and(|key| space.splitter == IndexKeys::new(key).splitter())
+        && keys.len() > 1
+        && let Some(candidate) = meta(tx, &IndexKeys::new(&keys[0]).group("active"))?
+        && candidate != id
+    {
+        tx.execute(
+            "UPDATE index_space SET state='candidate' WHERE id=?1 AND state='inactive'",
+            [candidate],
+        )?;
+    }
     Ok(())
 }
 fn read_status(

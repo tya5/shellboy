@@ -22,6 +22,7 @@ enum Reply {
     Error(u16, &'static str),
     Embed(usize),
     ProtocolError,
+    UncodedError(String),
     Wait(oneshot::Sender<()>, oneshot::Receiver<()>, usize),
 }
 struct Proxy {
@@ -79,6 +80,7 @@ impl Proxy {
                     .unwrap_or(Reply::Embed(3));
                 let (status, body) = match reply {
                     Reply::ProtocolError => (200, json!({"invalid":"embedding response"})),
+                    Reply::UncodedError(message) => (400, json!({"error":{"message":message}})),
                     Reply::Error(status, code) => (
                         status,
                         json!({"error":{"code":code,"message":"synthetic embedding failure"}}),
@@ -2390,7 +2392,17 @@ async fn legacy_rebuild_completion_honors_unprepared_sources_and_keeps_new_activ
         f.node("current", "abcdefghijklmnopqrstuvwx").await;
         changed.enqueue_new(&["current".into()]).await.unwrap();
         drain_service(&changed).await;
-        let current = changed.status(args()).await.unwrap().space_id.unwrap();
+        // Upgrade now preserves the selected legacy space. This case checks
+        // that an explicit choice of the ready current-policy candidate is not
+        // subsequently replaced by completion of an older legacy rebuild.
+        let current = f.db.call(|db| {
+            db.query_row("SELECT s.id FROM index_space s JOIN embedding_job j ON j.space_id=s.id WHERE j.source_node_id='current' LIMIT 1", [], |r| r.get::<_, String>(0)).map_err(Into::into)
+        }).await.unwrap();
+        assert_ne!(
+            changed.status(args()).await.unwrap().space_id.as_deref(),
+            Some(current.as_str())
+        );
+        changed.select_space(&current).await.unwrap();
         changed.retry(args()).await.unwrap();
         drain_service(&changed).await;
         assert_eq!(f.proxy.count(), 6); // one old, one failed, two current, two fixed legacy
@@ -2902,5 +2914,120 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     })
     .await
     .unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
+async fn upgrade_keeps_legacy_search_and_reuses_ready_candidate_until_explicit_selection() {
+    let mut config = Config::default();
+    config.indexing.split_chars = 8;
+    let f = Fixture::new(config).await;
+    f.node("old-history", "cat old").await;
+    f.service
+        .enqueue_new(&["old-history".into()])
+        .await
+        .unwrap();
+    f.drain().await;
+    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    legacy_fixture(&f).await;
+    let current = configured_service(&f, 8);
+    f.node("fresh", "dog new history longer").await;
+    current.enqueue_new(&["fresh".into()]).await.unwrap();
+    assert!(current.process_one(CancellationToken::new()).await.unwrap());
+    let candidate =
+        f.db.call(|db| {
+            db.query_row(
+                "SELECT id FROM index_space WHERE state='candidate'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap();
+    assert!(
+        current.select_space(&candidate).await.is_err(),
+        "unfinished candidate cannot be selected"
+    );
+    drain_service(&current).await;
+    assert_eq!(
+        current.status(args()).await.unwrap().space_id.as_deref(),
+        Some(old.as_str())
+    );
+    let hits = current.search("cat", 10).await.unwrap();
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.node_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["old-history"]
+    );
+    f.node("fresh-again", "dog more").await;
+    current.enqueue_new(&["fresh-again".into()]).await.unwrap();
+    drain_service(&current).await;
+    f.db.call(|db| {
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM index_space", [], |r|r.get::<_,i64>(0))?, 2);
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id WHERE s.state='active'", [], |r|r.get::<_,i64>(0))?, 1);
+        Ok(())
+    }).await.unwrap();
+    current.select_space(&candidate).await.unwrap();
+    assert_eq!(
+        current.status(args()).await.unwrap().space_id.as_deref(),
+        Some(candidate.as_str())
+    );
+    current.select_space(&old).await.unwrap();
+    f.node("last-new", "dog last").await;
+    current.enqueue_new(&["last-new".into()]).await.unwrap();
+    drain_service(&current).await;
+    assert_eq!(
+        current.status(args()).await.unwrap().space_id.as_deref(),
+        Some(old.as_str())
+    );
+    f.db.call(|db| {
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM index_space", [], |r| r
+                .get::<_, i64>(0))?,
+            2
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
+async fn changing_uncoded_400_details_do_not_bypass_the_terminal_failure_breaker() {
+    let mut config = Config::default();
+    config.indexing.retries = 0;
+    config.indexing.retry_delays_ms.clear();
+    let f = Fixture::new(config).await;
+    for i in 0..4 {
+        let node = format!("uncoded-{i}");
+        f.node(&node, "cat body").await;
+        f.service.enqueue_new(&[node]).await.unwrap();
+    }
+    for i in 0..3 {
+        f.proxy.push(Reply::UncodedError(format!(
+            "request {i}: provider rejected input {i}"
+        )));
+        assert!(
+            f.service
+                .process_one(CancellationToken::new())
+                .await
+                .unwrap()
+        );
+        assert_eq!(f.service.status(args()).await.unwrap().paused, i == 2);
+    }
+    assert!(
+        !f.service
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        f.proxy.count(),
+        3,
+        "remaining authorized source must not incur another request while paused"
+    );
     f.close().await;
 }

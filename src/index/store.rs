@@ -475,7 +475,11 @@ impl EmbeddingAdoption {
             discard_claim(tx, claimed, "Source or index group changed before adoption")?;
             return Ok(());
         }
-        let activate = !legacy || identity::legacy_may_activate(tx, IndexKeys::new(key_copy))?;
+        let preserve_selection = !legacy
+            && claimed.work.group == "active"
+            && identity::preserve_legacy_selection(tx, failure_key)?;
+        let activate = !preserve_selection
+            && (!legacy || identity::legacy_may_activate(tx, IndexKeys::new(key_copy))?);
         let space = match &claimed.space {
             Some(space) => load_space(tx, &space.id)?.ok_or_else(serde_error)?,
             None => ensure_space(
@@ -528,7 +532,9 @@ impl EmbeddingAdoption {
             tx.execute("DELETE FROM app_meta WHERE key=?1", [bootstrap])?;
         }
         set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
-        finish_candidate(tx, IndexKeys::new(key_copy), &claimed.work.group, activate)?;
+        if !preserve_selection {
+            finish_candidate(tx, IndexKeys::new(key_copy), &claimed.work.group, activate)?;
+        }
         Ok(())
     }
 }

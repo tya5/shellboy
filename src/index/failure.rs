@@ -13,17 +13,10 @@ fn failure_cause(error: &ModelError, transient: bool) -> String {
     if transient {
         return "transient".into();
     }
-    // Codes identify provider causes. Without a code, distinguish exact bounded
-    // messages too; do not guess from prose or persist it in the counter.
-    let identity = json!([
-        error.kind,
-        error.status,
-        error.provider_code,
-        error
-            .provider_code
-            .is_none()
-            .then_some(error.message.as_str())
-    ]);
+    // Without a provider code, kind/status identify a coarse failure class.
+    // Per-request prose (IDs, echoed input, timings) must not defeat the breaker.
+    // This groups unknown failures, not inferred identical root causes.
+    let identity = json!([error.kind, error.status, error.provider_code]);
     format!("unknown:{}", hash(identity.to_string().as_bytes()))
 }
 
@@ -196,7 +189,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cause_identity_uses_codes_or_exact_messages_and_keeps_the_counter_bounded() {
+    fn cause_identity_uses_codes_or_status_classes_and_keeps_the_counter_bounded() {
         let mut a = ModelError::provider(
             Some(400),
             &json!({"error":{"code":"unknown_a","message":"first"}}),
@@ -206,7 +199,7 @@ mod tests {
         assert_eq!(failure_cause(&a, false), failure_cause(&b, false));
         a.provider_code = None;
         b.provider_code = None;
-        assert_ne!(failure_cause(&a, false), failure_cause(&b, false));
+        assert_eq!(failure_cause(&a, false), failure_cause(&b, false));
         assert_eq!(failure_cause(&a, true), failure_cause(&b, true));
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")

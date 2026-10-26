@@ -90,8 +90,8 @@ terminal job失敗が設定回数連続すればpauseする。別原因・正常
 
 既存`index.common_failures.<profile>`の整数を、cause/countの小さな内部JSONへ置き換える。
 新table/worker/queueはない。causeは一時障害の固定tag、又はkind/status/provider codeのhash
-（code不明なら完全一致messageもhash入力）であり、推測的な文面分類をしない。provider本文を
-counterへ複製しない。countは設定閾値で飽和するため1profile約128bytes以内。原因を復元できない
+（code不明ならkind/statusまで）であり、推測的な文面分類をしない。provider本文を
+counterへ複製しない。リクエストID等が変動する文面だけでstreakを分断しない。codeなし障害は同じkind/statusという粗い障害クラスとして数え、同一根本原因だとは断定しない。countは設定閾値で飽和するため1profile約128bytes以内。原因を復元できない
 旧整数は次の失敗で新streakを開始するが、保存済pauseは維持する。成功と明示retryの既存`0`
 resetを引き続き扱い、許可済み失敗入力以外をretryで追加しない。
 
@@ -215,3 +215,9 @@ successful embeddingのDB採用に渡すEmbeddingIdentityは既存key/profile/mo
 CLIのbackfill/rebuildは、対象を明示する非対話の既存契約を保つ。先行previewや新しい確認tokenを必須にして既存自動化を壊す案、同ユーザーshellの人間／モデルを新しい権限機構で識別する案は採らない。CLI helpとモデル向けガイドで、previewは無課金の候補確認、backfill/rebuildは費用を伴う受付であることと、利用者から依頼されていない全履歴処理をモデルが自発的に始めないことを示す。利用者が依頼した範囲の確認・実行は同じCLIで行える。
 
 previewは長期snapshot/対象予約/費用承認の証明ではなく、その後の履歴追加・GC・設定変更で投入対象や量は変わり得る。機械的な承認の検証は今回のコアの責務に加えない。追加Core公開variantは既存の候補読取りへの薄い入口1個だけで、同じ有限runtime/DB/file workerとreceipt寿命を使い、表・event・worker・依存・常駐状態は追加しない。実装と検証ではpreview前後のjob/許可/candidateとHTTP要求数を照合し、その後の明示backfillが選択範囲だけを受付することを確認する。
+
+## 旧splitterからの更新で検索選択を保つ（PR2-2）
+
+設定値を保存していないlegacy splitterと、split_charsを含む現行identityを、利用者が行った設定変更と同一視しない。同じ接続名/endpoint/modelのlegacy spaceがactiveの場合、新規許可分は現行policy専用の既存candidate spaceへ投入し、成功しても旧activeを自動で上書きしない。通常group.active pointerを候補の再利用に使い、後続新規sourceも同じ候補へ入れる。旧vectorへの書足し、過去分の自動再課金、旧索引の削除は行わない。
+
+利用者はstatusのspacesで候補を確認し、既存の明示selectで切り替えるか、対象を指定したrebuildを行う。通常候補のselectは許可済みauto/bootstrap/jobが全て終了成功している場合だけ認め、rebuild途中のcandidateは引き続き拒否する。旧spaceへ戻した後も新規sourceだけでは再び勝手に切り替えない。明示的に異なる接続/model/split_charsを選んだ現行space間のG9動作は変えない。新しい永続状態・表・worker・queueは追加しない。
