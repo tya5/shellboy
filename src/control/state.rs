@@ -59,21 +59,40 @@ pub(super) fn complete_attempt(
     )?;
     attempt_outcome(db, attempt, AttemptState::Completed, changed)
 }
+fn failed_context_limit(body: Option<&str>) -> bool {
+    #[derive(serde::Deserialize)]
+    struct SavedFailure {
+        error: crate::model::ModelError,
+    }
+    body.and_then(|body| serde_json::from_str::<SavedFailure>(body).ok())
+        .is_some_and(|saved| saved.error.is_context_limit())
+}
+
 pub(super) fn incomplete_attempt(
     db: &Connection,
     attempt: &str,
     error: &Value,
     at: &str,
 ) -> Result<AttemptTransition, StorageError> {
-    // Context-limit failure is saved before reduction. If reduction has no
-    // target, preserve the existing failed -> incomplete audit classification.
+    // Only a saved, typed context-limit failure may be reclassified after
+    // reduction. CAS the exact saved cause so caller data cannot replace it.
+    let saved_failure: Option<Option<String>> = db
+        .query_row(
+            "SELECT error_json FROM model_attempt WHERE id=?1 AND state='failed'",
+            [attempt],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let permitted_failure = saved_failure
+        .flatten()
+        .filter(|body| failed_context_limit(Some(body)));
     let changed = db.execute(
         "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3
-         WHERE id=?1 AND state IN ('preparing','inflight','failed')
+         WHERE id=?1 AND (state IN ('preparing','inflight') OR (state='failed' AND error_json=?4))
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state IN ('preparing','running','waiting','recovery_wait') AND r.state='live')",
-        params![attempt, error.to_string(), at],
+        params![attempt, error.to_string(), at, permitted_failure],
     )?;
     attempt_outcome(db, attempt, AttemptState::Incomplete, changed)
 }
@@ -88,7 +107,7 @@ fn attempt_outcome(
     }
     let row = db
         .query_row(
-            "SELECT a.state,a.generation,u.generation,u.state,r.state
+            "SELECT a.state,a.generation,u.generation,u.state,r.state,a.error_json
          FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id
          WHERE a.id=?1",
             [attempt],
@@ -99,6 +118,7 @@ fn attempt_outcome(
                     r.get::<_, i64>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
                 ))
             },
         )
@@ -109,7 +129,7 @@ fn attempt_outcome(
                 "Model attempt is no longer available",
             )
         })?;
-    let (state, generation, turn_generation, turn, run) = row;
+    let (state, generation, turn_generation, turn, run, saved_error) = row;
     let state: AttemptState = serde_json::from_value(Value::String(state))
         .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Unknown saved model attempt state"))?;
     let turn: TurnState = serde_json::from_value(Value::String(turn))
@@ -141,7 +161,8 @@ fn attempt_outcome(
     let predecessor_permits = match target {
         AttemptState::Completed => state == AttemptState::Inflight,
         AttemptState::Incomplete => {
-            ACTIVE_ATTEMPTS.contains(&state) || state == AttemptState::Failed
+            ACTIVE_ATTEMPTS.contains(&state)
+                || (state == AttemptState::Failed && failed_context_limit(saved_error.as_deref()))
         }
         _ => ACTIVE_ATTEMPTS.contains(&state),
     };
@@ -494,12 +515,7 @@ mod tests {
         let cases = [
             ("preparing", Some(Applied), None, Some(Applied)),
             ("inflight", Some(Applied), Some(Applied), Some(Applied)),
-            (
-                "failed",
-                Some(AlreadyApplied),
-                Some(Obsolete),
-                Some(Applied),
-            ),
+            ("failed", Some(AlreadyApplied), Some(Obsolete), None),
             (
                 "completed",
                 Some(Obsolete),
@@ -556,7 +572,7 @@ mod tests {
     #[test]
     fn failed_raw_survives_reduction_and_incomplete_reclassification_rolls_back_atomically() {
         let mut db = fixture("inflight");
-        let raw = json!({"raw_response":"context-limit","partial_text":"audit"});
+        let raw = json!({"error":crate::model::ModelError::provider(Some(400), &json!({"error":{"code":"context_length_exceeded","message":"context limit"}})),"raw_response":"context-limit","partial_text":"audit"});
         assert_eq!(
             fail_attempt(&db, "attempt", &raw, "failed").unwrap(),
             AttemptTransition::Applied
@@ -609,6 +625,42 @@ mod tests {
         }
     }
     #[test]
+    fn failed_incomplete_reclassification_requires_the_saved_typed_context_limit() {
+        for code in [
+            "context_length_exceeded",
+            "max_context_length_exceeded",
+            "context_window_exceeded",
+        ] {
+            let db = fixture("failed");
+            let raw = json!({"error":{"kind":"provider","message":"context limit","provider_code":code,"status":400},"raw_response":"paid received text"});
+            db.execute("UPDATE model_attempt SET error_json=?1", [raw.to_string()])
+                .unwrap();
+            assert_eq!(
+                incomplete_attempt(&db, "attempt", &raw, "new").unwrap(),
+                AttemptTransition::Applied
+            );
+            assert_eq!(
+                saved(&db),
+                ("incomplete".into(), raw.to_string(), "new".into())
+            );
+        }
+        for body in [
+            "not JSON".to_owned(),
+            json!({"error":{"provider_code":"context_length_exceeded"}}).to_string(),
+            json!({"error":{"kind":"provider","message":"auth","provider_code":"invalid_api_key","status":401}}).to_string(),
+            json!({"error":{"kind":"transport","message":"network unavailable"}}).to_string(),
+            json!({"error":{"kind":"provider","message":"context_length_exceeded"}}).to_string(),
+        ] {
+            let db = fixture("failed");
+            db.execute("UPDATE model_attempt SET error_json=?1",[body]).unwrap();
+            let before = saved(&db);
+            let forged = json!({"error":{"kind":"provider","message":"new claimed cause","provider_code":"context_length_exceeded"}});
+            assert_eq!(incomplete_attempt(&db,"attempt",&forged,"new").unwrap_err().into_api_error().code,ErrorCode::InvalidState);
+            assert_eq!(saved(&db),before,"incoming error cannot reclassify an unrelated saved failure");
+        }
+    }
+
+    #[test]
     fn missing_unknown_and_real_database_failures_remain_distinct() {
         let db = fixture("unknown");
         let error = fail_attempt(&db, "missing", &json!({}), "now")
@@ -636,6 +688,9 @@ mod tests {
             ("failed", incomplete_attempt),
         ] {
             let db = fixture(state);
+            if state == "failed" {
+                db.execute("UPDATE model_attempt SET error_json=?1", [json!({"error":{"kind":"provider","message":"context limit","provider_code":"context_length_exceeded","status":400}}).to_string()]).unwrap();
+            }
             db.execute_batch("CREATE TRIGGER suppress_attempt BEFORE UPDATE ON model_attempt BEGIN SELECT RAISE(IGNORE); END;").unwrap();
             let original = saved(&db);
             let error = operation(&db, "attempt", &json!({}), "now")

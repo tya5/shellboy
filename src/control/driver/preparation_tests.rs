@@ -863,6 +863,17 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
             .await
             .unwrap()
         );
+        if saved == "completed" {
+            save_tool_result(
+                &control,
+                &snapshot,
+                "group",
+                "call",
+                json!({"status":"completed","original_result":"ORIGINAL_RESULT"}),
+            )
+            .await
+            .unwrap();
+        }
         let state = saved.to_owned();
         control
             .store
@@ -877,7 +888,7 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
             .await
             .unwrap();
         let marker = root.path().join("must-not-spawn");
-        let args=serde_json::from_value(json!({"command":format!("printf duplicate > '{}'",marker.display()),"background":true})).unwrap();
+        let args: ShellToolArgs=serde_json::from_value(json!({"command":format!("printf duplicate > '{}'",marker.display()),"background":true})).unwrap();
         let slot = DriverSlot {
             id: id(),
             run_id: accepted.run_id.clone().unwrap(),
@@ -886,17 +897,54 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
             foreground: Arc::new(ForegroundSlot::default()),
         };
         assert_eq!(
-            run_shell(control.clone(), &snapshot, &slot, "group", "call", args)
-                .await
-                .unwrap_err()
-                .code,
+            run_shell(
+                control.clone(),
+                &snapshot,
+                &slot,
+                "group",
+                "call",
+                args.clone()
+            )
+            .await
+            .unwrap_err()
+            .code,
+            ErrorCode::OperationConflict
+        );
+        assert_eq!(
+            run_tool_group(
+                &control,
+                &snapshot,
+                &slot,
+                "group",
+                vec![model::ToolCall {
+                    call_id: "call".into(),
+                    item_id: None,
+                    args: Ok(args),
+                }]
+            )
+            .await
+            .unwrap_err()
+            .code,
             ErrorCode::OperationConflict
         );
         assert!(!marker.exists());
+        assert!(
+            !control
+                .storage_failed
+                .load(std::sync::atomic::Ordering::Acquire),
+            "an existing completed result must not become a storage failure"
+        );
+        let expected_state = saved.to_owned();
         control
             .store
             .database
-            .call(|db| {
+            .call(move |db| {
+                assert_eq!(db.query_row("SELECT state FROM tool_call WHERE group_id='group' AND call_id='call'",[],|r|r.get::<_,String>(0))?,expected_state);
+                assert_eq!(db.query_row("SELECT state FROM tool_group WHERE id='group'",[],|r|r.get::<_,String>(0))?,"running");
+                let results: Vec<String> = db.prepare("SELECT n.payload_json FROM tool_result r JOIN node n ON n.id=r.node_id WHERE r.group_id='group' AND r.call_id='call'")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+                assert_eq!(results.len(),usize::from(expected_state == "completed"));
+                assert!(results.iter().all(|result| result.contains("ORIGINAL_RESULT")));
+                assert_eq!(db.query_row("SELECT COUNT(*) FROM node WHERE kind='tool_result'",[],|r|r.get::<_,i64>(0))?,results.len() as i64);
                 assert_eq!(
                     db.query_row("SELECT count(*) FROM shell_execution", [], |r| r
                         .get::<_, i64>(0))?,

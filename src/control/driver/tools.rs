@@ -77,6 +77,12 @@ pub(super) async fn run_tool_group(
                 Err(error) => {
                     if error.is_storage_failure() {
                         control.fail_storage().await;
+                        return Err(error);
+                    }
+                    // Admission conflicts concern a pre-existing call. They are
+                    // not a new tool failure that may complete that call.
+                    if error.code == ErrorCode::OperationConflict {
+                        return Err(error);
                     }
                     cancelled = Some(error.to_string());
                     json!({"status":"error","error":error})
