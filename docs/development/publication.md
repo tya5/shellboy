@@ -4,6 +4,8 @@
 
 2026-10-26、追加修正を [v0.1.1](https://github.com/tya5/shellboy/releases/tag/v0.1.1) として公開しました。tagは `e55da58`、Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供し、公開ダウンロードと照合を確認しています。v0.1.0は保持しています。
 
+2026-10-27、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。3 OSのnative CI・配布ビルド・起動確認が成功し、全archiveの認証なしダウンロードとSHA-256照合も完了しました。ローカルバイナリは公開macOS版に更新済みです。旧tag・配布物は保持しています。
+
 ## 同梱するもの
 
 通常のRustプロジェクト構成を維持し、`src/`、`tests/` と合成fixture、`migrations/`、`examples/`、固定toolchainとlockfile、CI、汎用の検証scriptを同梱します。`docs/guides/` は実行ファイルへ組み込むため全件必要です。採用済み設計、汎用セットアップ、判断、現在地、検証手順も公開します。
