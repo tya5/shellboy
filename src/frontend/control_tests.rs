@@ -1285,14 +1285,18 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
         );
         assert_eq!(ui.management.as_ref().unwrap().title, "作業状態");
         sender.try_send(UiAction::Quit).unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        // This checks eventual cleanup, not the UI shutdown grace. Windows
+        // filesystem/IPC/log joins need headroom beyond that 5-second grace
+        // when the native suite runs many fixtures concurrently.
+        let cleanup_seconds = if cfg!(windows) { 30 } else { 5 };
+        tokio::time::timeout(std::time::Duration::from_secs(cleanup_seconds), async {
             while !bridge.is_finished() {
                 drain(&incoming);
-                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
         })
         .await
-        .unwrap();
+        .expect("scoped mutation fixture must finish graceful cleanup");
         bridge.await.unwrap().unwrap();
     }
 }
