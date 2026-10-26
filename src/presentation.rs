@@ -144,29 +144,7 @@ impl ToolPresentation {
             mark = "✗";
         }
         let state_text = tool_state_text(state, code);
-        let compact = |text: &str, limit: usize| {
-            let mut value: String = text.chars().take(limit).collect();
-            if text.chars().count() > limit {
-                value.push('…');
-            }
-            value
-        };
-        let identity = self.ordinal.map_or_else(
-            || format!("参照 {}", compact(&self.call_id, 16)),
-            |n| format!("#{}", n + 1),
-        );
-        let command = if self.command.is_empty() {
-            "コマンドは原文参照".to_owned()
-        } else {
-            compact(
-                &self
-                    .command
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                120,
-            )
-        };
+        let identity_command = self.command_identity();
         let observed = if current.is_some_and(|state| {
             matches!(
                 state,
@@ -177,7 +155,7 @@ impl ToolPresentation {
         } else {
             ""
         };
-        let mut heading = format!("{mark} {identity} {command} · {observed}{state_text}");
+        let mut heading = format!("{mark} {identity_command} · {observed}{state_text}");
         if let Some(current) = current {
             let same_state = current == self.status
                 || (matches!(current, "running_current" | "background_current")
@@ -201,9 +179,41 @@ impl ToolPresentation {
             heading.push_str(&format!(" · {}.{:01}秒", ms / 1000, (ms % 1000) / 100));
         }
         if let Some(id) = &self.execution_id {
-            heading.push_str(&format!(" · 実行 {} · F6", compact(id, 8)));
+            heading.push_str(&format!(" · 実行 {} · F6", compact_tool_label(id, 8)));
         }
         heading
+    }
+    fn command_identity(&self) -> String {
+        let identity = self.ordinal.map_or_else(
+            || format!("参照 {}", compact_tool_label(&self.call_id, 16)),
+            |n| format!("#{}", n + 1),
+        );
+        let command = if self.command.is_empty() {
+            "コマンドは原文参照".into()
+        } else {
+            compact_tool_label(
+                &self
+                    .command
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                120,
+            )
+        };
+        format!("{identity} {command}")
+    }
+    /// A call shows the request; exit facts belong to its result card.
+    pub fn call_heading(&self) -> String {
+        let live = self.current_state.as_deref().filter(|state| {
+            matches!(
+                *state,
+                "pending" | "starting" | "running_current" | "background_current" | "stopping"
+            )
+        });
+        let state = live
+            .map(|state| format!(" · {}", tool_state_text(state, None)))
+            .unwrap_or_default();
+        format!("↳ {}{state}", self.command_identity())
     }
     pub fn clear_observation(&mut self) {
         self.current_state = None;
@@ -231,6 +241,14 @@ impl ToolPresentation {
             + self.execution_id.as_ref().map_or(0, String::capacity)
     }
 }
+fn compact_tool_label(text: &str, limit: usize) -> String {
+    let mut value: String = text.chars().take(limit).collect();
+    if text.chars().count() > limit {
+        value.push('…');
+    }
+    value
+}
+
 fn tool_state_heading(state: &str, exit_code: Option<i64>) -> (&'static str, &'static str) {
     match state {
         "requested" => ("↳", "呼出し"),

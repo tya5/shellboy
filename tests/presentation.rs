@@ -1188,4 +1188,16 @@ fn terminal_tools_plain_code_and_index_readiness_avoid_internal_noise() {
         p.fields.iter().any(|field| field.value == "active"),
         "raw state remains in details"
     );
+    let selection = json!({"kind":"index_state","change":{
+        "before":{"active_space":"previous","active_state":"active","profile":"p","model":"m","paused":false},
+        "after":{"active_space":"selected","active_state":"active","profile":"p","model":"m","paused":false}
+    }});
+    let payload = json!({"text":format!("Shellboy event v1: {selection}")});
+    let changed = project("event", &payload, &text_of_payload(&payload), 0);
+    assert_eq!(
+        changed.event_class,
+        EventClass::Change,
+        "a different selected index is not routine readiness"
+    );
+    assert!(changed.fields.iter().any(|field| field.value == "selected"));
 }

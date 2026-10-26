@@ -33,6 +33,12 @@ pub(super) fn routine_index_ready(event: &serde_json::Value) -> bool {
         && after["active_state"] == "active"
         && after["paused"] == Value::Bool(false)
         && before.get("paused") != Some(&Value::Bool(true))
+        && before
+            .get("active_space")
+            .and_then(Value::as_str)
+            .is_none_or(|selected| {
+                after.get("active_space").and_then(Value::as_str) == Some(selected)
+            })
         && ["profile", "model", "pause_kind"].iter().all(|key| {
             before.get(*key).unwrap_or(&Value::Null) == after.get(*key).unwrap_or(&Value::Null)
         })

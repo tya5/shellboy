@@ -178,16 +178,13 @@ fn node_lines_inner(
         }
         if let Some(tool) = &block.tool {
             if previous_tool.as_deref() != Some(tool.call_id.as_str()) {
-                let mut header = vec![Line::from(Span::styled(
-                    tool.heading(),
-                    Style::default().fg(if tool.requires_attention() {
-                        theme::ATTENTION
-                    } else {
-                        theme::TOOL
-                    }),
-                ))];
-                annotate_links(&mut header, &node.presentation.links, targets);
-                out.extend(hanging_wrap(header, width));
+                out.extend(tool_header_lines(
+                    tool,
+                    block.kind == BlockKind::ToolCall,
+                    width,
+                    &node.presentation.links,
+                    targets,
+                ));
                 if !tool.reason.is_empty() {
                     out.extend(hanging_wrap(
                         vec![Line::from(Span::styled(
@@ -368,6 +365,28 @@ fn omission_notices(node: &UiNode) -> Vec<String> {
     } else {
         vec![format!("{} · F6 詳細", parts.join(" · "))]
     }
+}
+fn tool_header_lines(
+    tool: &crate::presentation::ToolPresentation,
+    request: bool,
+    width: u16,
+    links: &[crate::presentation::PresentationLink],
+    targets: &mut Vec<std::sync::Arc<str>>,
+) -> Vec<Line<'static>> {
+    let mut header = vec![Line::from(Span::styled(
+        if request {
+            tool.call_heading()
+        } else {
+            tool.heading()
+        },
+        Style::default().fg(if tool.requires_attention() {
+            theme::ATTENTION
+        } else {
+            theme::TOOL
+        }),
+    ))];
+    annotate_links(&mut header, links, targets);
+    hanging_wrap(header, width)
 }
 fn link_target(targets: &mut Vec<std::sync::Arc<str>>, url: &str) -> usize {
     targets
@@ -588,6 +607,11 @@ fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
 fn adjacent_tool_pair(call: &UiNode, result: &UiNode) -> bool {
     let calls = &call.presentation.blocks;
     (!result.text.is_empty() || result.total_chars == 0)
+        && result
+            .presentation
+            .blocks
+            .first()
+            .is_some_and(|block| block.kind == BlockKind::ToolResult && block.tool.is_some())
         && !calls.is_empty()
         && calls.iter().all(|block| {
             block.kind == BlockKind::ToolCall
@@ -726,11 +750,17 @@ pub(super) fn history(
     let mut index = begin;
     while index < end {
         let begin = index;
+        let mut rendered_index = index;
+        let mut group_header_rows = 0;
         let node = &view.nodes()[index];
         let chunk = if let Some(summary) = interruption_group(&view.nodes()[index..end]) {
             index += summary + 1;
-            let summary = &view.nodes()[index - 1];
+            rendered_index = index - 1;
+            let summary = &view.nodes()[rendered_index];
             let mut chunk = node_lines(summary, false, summary.base_char_offset, width, &mut links);
+            group_header_rows = chunk.first().map_or(0, |line| {
+                hanging_wrap(vec![line.clone()], width.max(1)).len()
+            });
             chunk.push(Line::from(Span::styled(
                 format!("  原文{}件 · F6 詳細", index - begin),
                 Style::default().fg(theme::MUTED),
@@ -743,7 +773,25 @@ pub(super) fn history(
             .is_some_and(|result| adjacent_tool_pair(node, result))
         {
             index += 2;
-            let result = &view.nodes()[index - 1];
+            rendered_index = index - 1;
+            let result = &view.nodes()[rendered_index];
+            // Reuse precisely the renderer's header wrapping. It is already
+            // physical rows before the final group wrap, including long commands.
+            if let Some(tool) = result
+                .presentation
+                .blocks
+                .first()
+                .and_then(|block| block.tool.as_ref())
+            {
+                let header = tool_header_lines(
+                    tool,
+                    false,
+                    width.saturating_sub(2).max(1),
+                    &result.presentation.links,
+                    &mut links,
+                );
+                group_header_rows = hanging_wrap(header, width.max(1)).len();
+            }
             let mut chunk = node_lines(result, false, result.base_char_offset, width, &mut links);
             // Result commands are enriched from their exact call source. Retain
             // its explicit URL targets when rendering that shared heading.
@@ -769,6 +817,7 @@ pub(super) fn history(
             continue;
         }
         let chunk = hanging_wrap(chunk, width.max(1));
+        let node = &view.nodes()[rendered_index];
         let source_starts = node
             .presentation
             .blocks
@@ -787,13 +836,40 @@ pub(super) fn history(
         let mut byte: usize = 0;
         let mut offset = node.base_char_offset;
         let mut consumed = 0;
-        for line in chunk {
+        // Extra work for known excerpt gaps is limited to one forward source
+        // window in total, independently of the number of decoration rows.
+        let mut tail_search_budget = node.text.len();
+        let mut excerpt_jump = false;
+        for (row, line) in chunk.into_iter().enumerate() {
+            if row < group_header_rows && rendered_index != begin {
+                sources.push(RowSource {
+                    node: if row == 0 { begin } else { rendered_index },
+                    covered_end: index,
+                    offset: if row == 0 {
+                        view.nodes()[begin].base_char_offset
+                    } else {
+                        node.base_char_offset
+                    },
+                });
+                lines.push(line);
+                continue;
+            }
             let text = line
                 .spans
                 .iter()
                 .map(|s| s.content.as_ref())
                 .collect::<String>();
             let text = source_candidate(&text);
+            if line.spans.iter().any(|span| {
+                span.style.fg == Some(theme::MUTED)
+                    && span.content.trim_start().starts_with("… 出力抜粋（表示")
+            }) {
+                excerpt_jump = true;
+            }
+            let output_body = line.spans.iter().any(|span| {
+                matches!(span.style.fg, Some(color) if color == theme::TEXT || color == theme::LINK)
+                    && !span.content.trim().is_empty()
+            });
             // Exact visible substrings give original character positions for
             // plain text, code and Markdown prose. Generated decoration maps to
             // the preceding source position, never a fabricated character ratio.
@@ -844,6 +920,16 @@ pub(super) fn history(
                                 })
                         })
                 });
+            // Only the real output following our typed excerpt marker may
+            // cross the fast lookup bound. Headers/notices cannot spend this.
+            let matched = matched.or_else(|| {
+                if excerpt_jump && output_body {
+                    excerpt_jump = false;
+                    excerpt_tail_match(&node.text, text, byte, &mut tail_search_budget)
+                } else {
+                    None
+                }
+            });
             if let Some((start, length)) = matched {
                 consumed += node.text[byte..start].chars().count();
                 offset = node.base_char_offset + consumed;
@@ -872,20 +958,36 @@ pub(super) fn history(
                 byte = end;
             }
             sources.push(RowSource {
-                node: begin,
+                node: rendered_index,
                 covered_end: index,
                 offset,
             });
             lines.push(line);
         }
         sources.push(RowSource {
-            node: begin,
+            node: rendered_index,
             covered_end: index,
             offset,
         });
         lines.push(Line::default());
     }
     (lines, links, sources)
+}
+fn excerpt_tail_match(
+    source: &str,
+    text: &str,
+    byte: usize,
+    budget: &mut usize,
+) -> Option<(usize, usize)> {
+    if text.is_empty() || *budget == 0 {
+        return None;
+    }
+    let end = source.floor_char_boundary(byte.saturating_add(*budget).min(source.len()));
+    let window = &source[byte..end];
+    let found = window.find(text);
+    let used = found.map_or(window.len(), |offset| offset + text.len());
+    *budget = budget.saturating_sub(used);
+    found.map(|offset| (byte + offset, text.len()))
 }
 pub(super) fn plain(lines: &[Line<'_>]) -> String {
     lines
@@ -981,6 +1083,333 @@ pub(super) fn link_regions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn wrapped_group_headers_cannot_consume_matching_stdout_source() {
+        use crate::presentation::{NodePresentation, PresentationBlock, ToolPresentation};
+        let token = "MATCH_BODY_TARGET123";
+        assert_eq!(token.len(), 20);
+        let body = format!("{token}\n{token}\nTAIL\n");
+        let tool = ToolPresentation {
+            call_id: "c".into(),
+            ordinal: Some(0),
+            command: format!("{} {token}", "prefix ".repeat(8)),
+            execution_id: Some("e".into()),
+            status: "exited".into(),
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        let call = UiNode {
+            node_id: "call".into(),
+            role: "assistant".into(),
+            text: "call source".into(),
+            total_chars: 11,
+            presentation: NodePresentation {
+                kind: PresentationKind::Assistant,
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(tool.clone()),
+                    text: "call source".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let result = UiNode {
+            node_id: "result".into(),
+            text: body.clone(),
+            base_char_offset: 123,
+            total_chars: 123 + body.chars().count(),
+            presentation: NodePresentation {
+                kind: PresentationKind::ToolResult,
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(tool),
+                    text: body,
+                    source_start: 123,
+                    source_end: 170,
+                    source_exact: true,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![call, result];
+        let (lines, _, sources) = history(&view, 22);
+        let first_body = lines
+            .iter()
+            .position(|line| {
+                line.spans.iter().any(|span| {
+                    span.style.fg == Some(theme::TEXT) && span.content.contains("MATCH_BODY")
+                })
+            })
+            .unwrap();
+        assert!(
+            first_body > 1,
+            "the long command header has physical continuation rows"
+        );
+        assert_eq!(sources[0].node, 0);
+        assert!(
+            sources[1..first_body]
+                .iter()
+                .all(|source| source.node == 1 && source.offset == 123)
+        );
+        assert_eq!(sources[first_body].node, 1);
+        assert_eq!(
+            sources[first_body].offset, 123,
+            "matching header continuation must not advance past the first stdout token"
+        );
+    }
+
+    #[test]
+    fn tail_source_search_has_one_window_budget_and_utf8_boundaries() {
+        let source = format!("{}尾部🙂", "日本語".repeat(3000));
+        let mut budget = source.len();
+        let found = excerpt_tail_match(&source, "尾部🙂", 0, &mut budget).unwrap();
+        assert_eq!(&source[found.0..found.0 + found.1], "尾部🙂");
+        assert_eq!(budget, 0);
+        assert!(
+            excerpt_tail_match(&source, "日本語", 0, &mut budget).is_none(),
+            "decoration/repeated candidates cannot restart a whole-window scan"
+        );
+        let mut tiny = 1;
+        assert!(excerpt_tail_match(&source, "日本語", 0, &mut tiny).is_none());
+    }
+
+    #[test]
+    fn grouped_unicode_bodies_keep_their_real_node_offsets_and_window_requests() {
+        use crate::presentation::{
+            NodePresentation, PresentationBlock, PresentationField, ToolPresentation,
+        };
+        let field = |key: &str, value: &str| PresentationField {
+            key: key.into(),
+            label: key.into(),
+            value: value.into(),
+            display: None,
+            value_omitted: false,
+        };
+        let body = (0..120)
+            .map(|i| format!("行{i:03} 日本語🙂 e\u{301} bounded body\n"))
+            .collect::<String>();
+        let base = 65_000;
+        for interruption in [false, true] {
+            let mut leading = UiNode {
+                node_id: "first".into(),
+                text: "unrelated original request".into(),
+                total_chars: 26,
+                ..Default::default()
+            };
+            let actual = if interruption { "summary" } else { "result" };
+            let tool = ToolPresentation {
+                call_id: "c".into(),
+                ordinal: Some(0),
+                command: "echo grouped".into(),
+                execution_id: Some("execution".into()),
+                status: "exited".into(),
+                exit_code: Some(0),
+                ..Default::default()
+            };
+            if interruption {
+                leading.presentation = NodePresentation {
+                    kind: PresentationKind::Interrupted,
+                    fields: vec![field("/section", "runs")],
+                    ..Default::default()
+                };
+            } else {
+                leading.role = "assistant".into();
+                leading.presentation = NodePresentation {
+                    kind: PresentationKind::Assistant,
+                    blocks: vec![PresentationBlock {
+                        kind: BlockKind::ToolCall,
+                        tool: Some(tool.clone()),
+                        text: leading.text.clone(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+            }
+            let rendered = UiNode {
+                node_id: actual.into(),
+                text: body.clone(),
+                base_char_offset: base,
+                total_chars: base + body.chars().count() + 2000,
+                presentation: NodePresentation {
+                    kind: if interruption {
+                        PresentationKind::Interrupted
+                    } else {
+                        PresentationKind::ToolResult
+                    },
+                    title: if interruption {
+                        "前回の中断記録".into()
+                    } else {
+                        String::new()
+                    },
+                    fields: if interruption {
+                        vec![
+                            field("/kind", "previous_instance_interrupted"),
+                            field("/change/runs/detail_node_ids/0", "first"),
+                        ]
+                    } else {
+                        vec![]
+                    },
+                    blocks: vec![PresentationBlock {
+                        kind: if interruption {
+                            BlockKind::Event
+                        } else {
+                            BlockKind::ToolResult
+                        },
+                        tool: (!interruption).then_some(tool),
+                        text: body.clone(),
+                        source_start: base,
+                        source_end: base + body.chars().count(),
+                        source_exact: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+            view.thread_id = Some("thread".into());
+            *view.nodes_mut_for_test() = vec![leading, rendered];
+            view.total_nodes = 2;
+            view.follow = false;
+            let (lines, _, sources) = history(&view, 100);
+            let target = if interruption { "行040" } else { "行118" };
+            let next = if interruption { "行041" } else { "行119" };
+            let row = lines
+                .iter()
+                .position(|line| plain(std::slice::from_ref(line)).contains(target))
+                .unwrap();
+            let expected = base + body[..body.find(target).unwrap()].chars().count();
+            assert_eq!(
+                sources[0].node, 0,
+                "only the generated group header owns the first member"
+            );
+            assert_eq!(
+                sources[row].node, 1,
+                "body belongs to its rendered result/summary"
+            );
+            assert_eq!(
+                sources[row].offset, expected,
+                "original Unicode position is preserved"
+            );
+            assert_eq!(
+                sources.last().unwrap().node,
+                1,
+                "trailing blank follows the body source"
+            );
+            view.anchor = crate::ui::ViewAnchor {
+                node_id: Some(actual.into()),
+                char_offset: expected,
+            };
+            let mut cache = super::super::HistoryLayoutCache::default();
+            let budget = 1024 * 1024;
+            let layout = view.history_layout("fixture", &mut cache, budget, 100, 2);
+            view.viewport_row(&layout, 100, 2);
+            assert!(view.scroll(1, "fixture", &mut cache, budget).is_empty());
+            assert_eq!(view.anchor.node_id.as_deref(), Some(actual));
+            let expected_next = base + body[..body.find(next).unwrap()].chars().count();
+            assert_eq!(view.anchor.char_offset, expected_next);
+            let mut requested = false;
+            for _ in 0..150 {
+                for action in view.scroll(1, "fixture", &mut cache, budget) {
+                    if let crate::ui::UiAction::LoadNodeWindow {
+                        node_id,
+                        char_offset,
+                        ..
+                    } = action
+                    {
+                        assert_eq!(
+                            node_id, actual,
+                            "next body window must never target the leading call/detail"
+                        );
+                        assert!(char_offset >= base);
+                        requested = true;
+                    }
+                }
+                if requested {
+                    break;
+                }
+            }
+            assert!(
+                requested,
+                "the bounded Unicode body reaches a source-window boundary"
+            );
+        }
+    }
+
+    #[test]
+    fn multiple_calls_show_requests_separately_from_terminal_result_facts() {
+        use crate::presentation::{NodePresentation, PresentationBlock, ToolPresentation};
+        let mut call = UiNode {
+            node_id: "multi-call".into(),
+            role: "assistant".into(),
+            text: "source calls".into(),
+            total_chars: 12,
+            presentation: NodePresentation {
+                kind: PresentationKind::Assistant,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut results = Vec::new();
+        for (ordinal, command, exit) in [(0, "echo first", 0), (1, "echo second", 7)] {
+            let tool = ToolPresentation {
+                call_id: format!("call-{ordinal}"),
+                ordinal: Some(ordinal),
+                command: command.into(),
+                status: "completed".into(),
+                current_state: Some("exited".into()),
+                current_exit_code: Some(exit),
+                execution_id: Some(format!("e-{ordinal}")),
+                ..Default::default()
+            };
+            call.presentation.blocks.push(PresentationBlock {
+                kind: BlockKind::ToolCall,
+                tool: Some(tool.clone()),
+                text: command.into(),
+                ..Default::default()
+            });
+            results.push(UiNode {
+                node_id: format!("result-{ordinal}"),
+                text: format!("output-{ordinal}"),
+                total_chars: 8,
+                presentation: NodePresentation {
+                    kind: PresentationKind::ToolResult,
+                    blocks: vec![PresentationBlock {
+                        kind: BlockKind::ToolResult,
+                        tool: Some(tool),
+                        text: format!("output-{ordinal}"),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![call];
+        view.nodes_mut_for_test().extend(results);
+        let shown = plain(&history(&view, 120).0);
+        let requests = shown
+            .lines()
+            .filter(|line| line.trim_start().starts_with('↳'))
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests
+                .iter()
+                .all(|line| !line.contains("終了") && !line.contains("呼出し"))
+        );
+        assert_eq!(shown.matches("終了 0").count(), 1);
+        assert_eq!(shown.matches("終了 7").count(), 1);
+        assert!(shown.contains("#1 echo first") && shown.contains("#2 echo second"));
+        assert_eq!(view.nodes().len(), 3);
+    }
+
     #[test]
     fn interruption_details_group_only_with_their_explicit_saved_summary() {
         fn node(id: &str, kind: &str, value: serde_json::Value) -> UiNode {
@@ -1103,9 +1532,9 @@ mod tests {
         let (lines, targets, sources) = history(&view, 100);
         assert_eq!(plain(&lines).matches(url).count(), 1);
         assert!(
-            sources
-                .iter()
-                .all(|source| source.node == 0 && source.covered_end == 2)
+            sources.iter().all(|source| source.covered_end == 2)
+                && sources[0].node == 0
+                && sources.iter().skip(1).all(|source| source.node == 1)
         );
         assert_eq!(
             targets[0].as_ref(),
