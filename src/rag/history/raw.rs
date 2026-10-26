@@ -108,6 +108,61 @@ pub(super) fn raw_text(db: &Connection, witness: &Value) -> Result<String> {
     Ok(text)
 }
 
+/// Verify the entire indexed span while retaining only a bounded retrieval
+/// unit. The splitter policy does not impose a maximum span length.
+pub(super) fn semantic(
+    db: &Connection,
+    witness: &Value,
+    span: &crate::index::SourceSpan,
+) -> Result<(String, Value)> {
+    use sha2::{Digest, Sha256};
+    if span.start > span.end {
+        return Err(err("revision_unavailable", "Invalid indexed raw range"));
+    }
+    let mut digest = Sha256::new();
+    let mut position = 0usize;
+    let mut selected = String::new();
+    let mut retained = 0usize;
+    let mut whole = Some(String::new());
+    walk(db, witness, |part, _| {
+        let count = part.chars().count();
+        if let Some(body) = &mut whole {
+            if position.saturating_add(count) <= WINDOW {
+                body.push_str(part);
+            } else {
+                whole = None;
+            }
+        }
+        // Each decoded page is bounded independently of the source/span size.
+        let page: String = part
+            .chars()
+            .skip(span.start.saturating_sub(position))
+            .take(span.end.saturating_sub(position.max(span.start)))
+            .collect();
+        digest.update(page.as_bytes());
+        for character in page.chars().take(WINDOW - retained) {
+            selected.push(character);
+            retained += 1;
+        }
+        position = position.saturating_add(count);
+        Ok(())
+    })?;
+    let actual = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if position < span.end || actual != span.content_hash {
+        return Err(err("revision_unavailable", "Indexed source range changed"));
+    }
+    if let Some(body) = whole {
+        return Ok((body, witness.clone()));
+    }
+    let mut witness = witness.clone();
+    witness["range"] = json!({"start":span.start,"end":span.start+retained});
+    Ok((selected, witness))
+}
+
 const WINDOW: usize = 64 * 1024;
 
 pub(super) struct Match {
@@ -202,6 +257,32 @@ mod tests {
             "small full-body reference remains identical"
         );
         assert_eq!(raw_text(&db, &found.witness).unwrap(), found.body);
+        let span = crate::index::SourceSpan {
+            source_revision: 1,
+            content_hash: hash("あ�".as_bytes()),
+            body_kind: "tool_raw".into(),
+            start: 1,
+            end: 3,
+        };
+        let (body, selected_witness) = semantic(&db, &witness, &span).unwrap();
+        assert_eq!(body, "Bあ�", "small raw retains full-body references");
+        assert_eq!(selected_witness, witness);
+        let missing = crate::index::SourceSpan {
+            end: 4,
+            ..span.clone()
+        };
+        assert_eq!(
+            semantic(&db, &witness, &missing).unwrap_err().code,
+            "revision_unavailable"
+        );
+        let changed = crate::index::SourceSpan {
+            content_hash: hash(b"wrong"),
+            ..span
+        };
+        assert_eq!(
+            semantic(&db, &witness, &changed).unwrap_err().code,
+            "revision_unavailable"
+        );
         assert!(keyword(&db, &witness, "").unwrap().is_none());
         let mut invalid = found.witness;
         invalid["range"] = json!({"start":0,"end":WINDOW+1});

@@ -1385,3 +1385,195 @@ async fn successful_derived_revision_breaks_provider_failure_streak_and_retry_re
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn history_semantic_streams_large_raw_spans_and_preserves_valid_hits() {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    use shellboy::{config::Config, index::IndexService, storage::DbWorker};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let (requests, _, server) = proxy(root).await;
+    std::fs::create_dir(root.join("data")).unwrap();
+    let db = DbWorker::open(root.join("data/shellboy.db")).await.unwrap();
+    db.call(|c| {
+        c.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/tmp','/tmp/AGENTS.md','fixture','model','now');
+        INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
+        INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn','t','r','completed','now');
+        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','turn',0,0,'fixture','model',0,'completed','{}','now');
+        INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','turn','completed','now');
+        INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','large',0,'shell','{}','completed','large');
+        INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,exit_code,output_complete,started_at,ended_at)VALUES('large','r','turn','large','exited','/tmp','{}','UTF-8','UTF-8','closed',1,0,1,'now','now');")?;
+        for (id, kind, payload) in [
+            ("large", "tool_result", json!({"item":{"type":"function_call_output","call_id":"large","output":"NEAR canonical tool result"}})),
+            ("normal", "user", json!({"role":"user","content":[{"type":"input_text","text":"NEAR ordinary history"}]})),
+        ] {
+            let payload = payload.to_string();
+            let hash = Sha256::digest(payload.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>();
+            c.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,?2,'now',?3,?4,?5)",rusqlite::params![id,kind,payload,payload.len() as i64,hash])?;
+        }
+        c.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','large','large','completed')", [])?;
+        c.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('large',0,'stdout',0,?1,'now')",["NEAR あ境界".as_bytes()])?;
+        Ok(())
+    }).await.unwrap();
+    let config =
+        Config::parse(&std::fs::read_to_string(root.join("config.toml")).unwrap()).unwrap();
+    let service = IndexService::new(db.clone(), Arc::new(config));
+    service
+        .enqueue_new(&["large".into(), "normal".into()])
+        .await
+        .unwrap();
+    while service
+        .process_one(tokio_util::sync::CancellationToken::new())
+        .await
+        .unwrap()
+    {}
+    let small = search(root, "history", "NEAR", SearchMode::Hybrid).await;
+    assert_eq!(small["ok"], true, "{small}");
+    let raw = small["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["location"]["body_kind"] == "tool_raw")
+        .unwrap();
+    assert!(
+        raw["location"]["range"].is_null(),
+        "small full-body references remain compatible with keyword fusion"
+    );
+    let reference = raw["reference"].as_str().unwrap();
+    let got = call(
+        root,
+        RagCommand::Get {
+            reference: reference.into(),
+            limit_bytes: 65536,
+            cursor: None,
+        },
+    )
+    .await;
+    assert_eq!(got["result"]["text"], "NEAR あ境界");
+
+    // Seed a completed, valid tail span directly: this is the same saved index
+    // representation as backfill, without thousands of irrelevant HTTP calls.
+    const PREFIX: usize = 17 * 1024 * 1024;
+    db.call(|c| {
+        let mut bytes = vec![b'x'; PREFIX];
+        bytes.extend_from_slice("NEAR あ境界".as_bytes());
+        c.execute("UPDATE output_chunk SET bytes=?1 WHERE execution_id='large'",[bytes])?;
+        c.execute("UPDATE embedding_job SET span_start=span_start+?1,span_end=span_end+?1 WHERE body_kind='tool_raw'",[PREFIX as i64])?;
+        c.execute("UPDATE embedding_chunk SET span_start=span_start+?1,span_end=span_end+?1 WHERE job_id IN(SELECT id FROM embedding_job WHERE body_kind='tool_raw')",[PREFIX as i64])?;
+        Ok(())
+    }).await.unwrap();
+    let before_queries = requests.load(Ordering::SeqCst);
+    let found = search(root, "history", "NEAR", SearchMode::Semantic).await;
+    assert_eq!(found["ok"], true, "{found}");
+    let items = found["result"]["items"].as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|hit| hit["location"]["node_id"] == "normal")
+    );
+    let raw = items
+        .iter()
+        .find(|hit| hit["location"]["body_kind"] == "tool_raw")
+        .unwrap();
+    assert_eq!(raw["location"]["range"]["start"], PREFIX);
+    assert_eq!(raw["excerpt"], "NEAR あ境界");
+    let reference = raw["reference"].as_str().unwrap().to_owned();
+    let got = call(
+        root,
+        RagCommand::Get {
+            reference: reference.clone(),
+            limit_bytes: 65536,
+            cursor: None,
+        },
+    )
+    .await;
+    assert_eq!(got["ok"], true, "{got}");
+    assert_eq!(got["result"]["text"], "NEAR あ境界");
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        before_queries + 1,
+        "only query embedding, no source reindex/get embedding"
+    );
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&reference)
+        .unwrap();
+    let witness: Value = serde_json::from_slice(&decoded).unwrap();
+    assert_eq!(witness["witness"]["raw"]["range"], raw["location"]["range"]);
+
+    // A legal splitter can produce spans larger than the retrieval window.
+    // Hash the complete span, but retain and page only its first 64K characters.
+    db.call(|c| {
+        let mut bytes = vec![b'x'; PREFIX];
+        bytes.extend_from_slice("NEAR あ境界".as_bytes());
+        let hash = Sha256::digest(&bytes).iter().map(|b|format!("{b:02x}")).collect::<String>();
+        let end = PREFIX + "NEAR あ境界".chars().count();
+        c.execute("UPDATE embedding_job SET span_start=0,span_end=?1,source_hash=?2 WHERE body_kind='tool_raw'",rusqlite::params![end as i64,hash])?;
+        c.execute("UPDATE embedding_chunk SET span_start=0,span_end=?1,content_hash=?2 WHERE job_id IN(SELECT id FROM embedding_job WHERE body_kind='tool_raw')",rusqlite::params![end as i64,hash])?;
+        Ok(())
+    }).await.unwrap();
+    let wide = search(root, "history", "NEAR", SearchMode::Semantic).await;
+    assert_eq!(wide["ok"], true, "{wide}");
+    let raw = wide["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["location"]["body_kind"] == "tool_raw")
+        .unwrap();
+    assert_eq!(raw["location"]["range"], json!({"start":0,"end":65536}));
+    assert!(raw["location"]["indexed_range"]["end"].as_u64().unwrap() > 16 * 1024 * 1024);
+    let wide_reference = raw["reference"].as_str().unwrap().to_owned();
+    let got = call(
+        root,
+        RagCommand::Get {
+            reference: wide_reference.clone(),
+            limit_bytes: 65536,
+            cursor: None,
+        },
+    )
+    .await;
+    assert_eq!(got["result"]["text"].as_str().unwrap().len(), 65536);
+
+    // Corruption outside the returned prefix still invalidates the indexed
+    // span. It must not become an apparently successful empty/partial hit.
+    db.call(|c| {
+        let mut bytes = vec![b'x'; PREFIX];
+        bytes.extend_from_slice("NEAR い境界".as_bytes());
+        c.execute(
+            "UPDATE output_chunk SET bytes=?1 WHERE execution_id='large'",
+            [bytes],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let corrupt = search(root, "history", "NEAR", SearchMode::Semantic).await;
+    assert_eq!(corrupt["ok"], false, "{corrupt}");
+    assert_eq!(
+        corrupt["result"]["scope_errors"][0]["code"],
+        "revision_unavailable"
+    );
+    let stale = call(
+        root,
+        RagCommand::Get {
+            reference,
+            limit_bytes: 65536,
+            cursor: None,
+        },
+    )
+    .await;
+    assert_eq!(stale["error"]["code"], "revision_unavailable");
+    db.call(|c| { c.execute("UPDATE shell_execution SET retention_generation=retention_generation+1 WHERE id='large'", [])?; Ok(()) }).await.unwrap();
+    let expired = call(
+        root,
+        RagCommand::Get {
+            reference: wide_reference,
+            limit_bytes: 65536,
+            cursor: None,
+        },
+    )
+    .await;
+    assert_eq!(expired["error"]["code"], "revision_unavailable");
+    db.shutdown().await.unwrap();
+    server.abort();
+}

@@ -315,7 +315,7 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
         let (kind, _, payload, _) = node(&db.connection, &found.node_id)?;
         for span in found.spans {
             let (body, raw) = if span.body_kind == "tool_raw" {
-                let witness:Option<String>=db.connection.query_row("SELECT authorized_watermark FROM embedding_job WHERE source_node_id=?1 AND space_id=?2 AND body_kind='tool_raw' AND source_revision=?3 AND state='done' LIMIT 1",params![found.node_id,&descriptor.id,span.source_revision],|r|r.get(0)).optional()?.flatten();
+                let witness:Option<String>=db.connection.query_row("SELECT authorized_watermark FROM embedding_job WHERE source_node_id=?1 AND space_id=?2 AND body_kind='tool_raw' AND source_revision=?3 AND span_start=?4 AND span_end=?5 AND source_hash=?6 AND state='done' LIMIT 1",params![found.node_id,&descriptor.id,span.source_revision,span.start as i64,span.end as i64,span.content_hash],|r|r.get(0)).optional()?.flatten();
                 let raw = witness
                     .and_then(|s| serde_json::from_str::<Value>(&s).ok())
                     .and_then(|v| v.get("witness").and_then(|v| v.get("raw")).cloned())
@@ -323,7 +323,8 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
                     .ok_or_else(|| {
                         err("revision_unavailable", "Raw-output witness is unavailable")
                     })?;
-                (raw_text(&db.connection, &raw)?, Some(raw))
+                let (body, raw) = raw::semantic(&db.connection, &raw, &span)?;
+                (body, Some(raw))
             } else {
                 let body = bodies(&db.connection, &found.node_id, &kind, &payload)?
                     .into_iter()
@@ -337,15 +338,18 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
                     })?;
                 (body, None)
             };
-            let selected: String = body
-                .chars()
-                .skip(span.start)
-                .take(span.end.saturating_sub(span.start))
-                .collect();
-            if hash(selected.as_bytes()) != span.content_hash {
-                return Err(err("revision_unavailable", "Indexed source range changed"));
+            if raw.is_none() {
+                let selected: String = body
+                    .chars()
+                    .skip(span.start)
+                    .take(span.end.saturating_sub(span.start))
+                    .collect();
+                if span.start > span.end || hash(selected.as_bytes()) != span.content_hash {
+                    return Err(err("revision_unavailable", "Indexed source range changed"));
+                }
             }
-            hits.push(make_hit(
+            let range = raw.as_ref().and_then(|raw| raw.get("range")).cloned();
+            let mut hit = make_hit(
                 &db,
                 &found.node_id,
                 HistoryBody {
@@ -358,7 +362,12 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
                     Some(found.distance),
                     Some(descriptor.id.clone()),
                 ),
-            )?);
+            )?;
+            if let Some(range) = range {
+                hit.location["range"] = range;
+                hit.location["indexed_range"] = json!({"start":span.start,"end":span.end});
+            }
+            hits.push(hit);
         }
     }
     Ok(hits)
