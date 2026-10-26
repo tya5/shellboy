@@ -1,6 +1,6 @@
 # 公開用リポジトリの構成
 
-2026-10-26。公開先は `tya5/shellboy`。名称変更と公開準備を行い、pushは別の操作として扱います。
+2026-10-26。公開先は `tya5/shellboy`。名称変更と公開準備を終え、利用者の明示許可によりmainと [v0.1.0 Release](https://github.com/tya5/shellboy/releases/tag/v0.1.0) を公開しました。
 
 ## 同梱するもの
 
