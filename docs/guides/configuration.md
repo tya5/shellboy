@@ -24,6 +24,13 @@ cargo build --locked --release --bin shellboy
 
 Linux/WSLでも `XDG_RUNTIME_DIR` の手動設定は不要です。Unixのローカル通信領域はShellboyが利用可能なXDG runtime directoryかOSの一時領域に用意します。別端末のCLIは同じdata-dirの `endpoint.json` を読み、モデルのshellは自動設定された `SHELLBOY_SOCKET` とinstance情報で接続します。これらの値を自分で推測・設定する必要はありません。Unixの会話保存先は新規・既存とも自分専用の0700へ限定し、指定した親ディレクトリの権限は変更しません。
 
+Linuxでは通信directoryを動作中lockし、lockを尊重するsystemd-tmpfilesの古さによる清掃から保護します。
+最終logoutによるXDG runtime領域の削除、OS再起動、管理者による削除やmacOSの清掃全般を防ぐ保証はありません。
+Shellboyはlinger等のOS設定を変更しません。ownerが動作中なのにCLIだけ接続できなくなった場合は、
+既知operationの状態と保存済み結果を確認し、ownerを通常終了して起動し直してください。
+通信領域が消えても、同じ操作を別IDで無条件に再送しないでください。
+
+
 | OS | 設定ファイル | データディレクトリ |
 |---|---|---|
 | macOS | `$HOME/Library/Application Support/shellboy/config.toml` | `$HOME/Library/Application Support/shellboy/data` |

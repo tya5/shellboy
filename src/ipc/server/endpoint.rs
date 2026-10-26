@@ -11,6 +11,10 @@ pub(super) struct SocketFile {
     pub(super) path: PathBuf,
     identity: (u64, u64, i64, i64),
     parent_identity: (u64, u64),
+    // Only newly created live namespaces own a lease. Stale capture stays a
+    // metadata/probe operation and must not bypass a live socket on contention.
+    #[cfg(target_os = "linux")]
+    _namespace_lease: Option<namespace::Lease>,
 }
 #[cfg(unix)]
 impl SocketFile {
@@ -28,6 +32,8 @@ impl SocketFile {
             parent_identity: folder_identity(path.parent().expect("socket has a parent"))?,
             path,
             identity: socket_identity(&metadata),
+            #[cfg(target_os = "linux")]
+            _namespace_lease: None,
         })
     }
     fn validate_parent(&self) -> Result<(), ApiError> {
@@ -287,21 +293,63 @@ pub(super) async fn bind_unix(
             continue;
         }
         let candidate = folder.clone();
-        tokio::task::spawn_blocking(move || validate_folder(&candidate, current_uid()))
+        let identity = tokio::task::spawn_blocking(move || {
+            validate_folder(&candidate, current_uid())?;
+            folder_identity(&candidate)
+        })
+        .await
+        .map_err(|error| server_error("directory worker failed", error))??;
+        let created = PreviousNamespace {
+            folder: folder.clone(),
+            identity,
+            socket: None,
+        };
+        #[cfg(target_os = "linux")]
+        let lease = {
+            let candidate = folder.clone();
+            match tokio::task::spawn_blocking(move || {
+                namespace::Lease::acquire(&candidate, identity)
+            })
             .await
-            .map_err(|error| server_error("directory worker failed", error))??;
+            .map_err(|error| server_error("directory lease worker failed", error))?
+            {
+                Ok(lease) => lease,
+                Err(error) => {
+                    // Identity checks preserve any replacement or unexpected
+                    // contents. No recursive delete or lockfile is needed.
+                    let _ = tokio::task::spawn_blocking(move || created.remove()).await;
+                    let _ = files.cleanup().await;
+                    return Err(error);
+                }
+            }
+        };
         let path = folder.join("s");
         let listener = match tokio::net::UnixListener::bind(&path) {
             Ok(listener) => listener,
             Err(error) => {
-                let _ = tokio::task::spawn_blocking(move || remove_folder(&folder)).await;
+                let _ = tokio::task::spawn_blocking(move || created.remove()).await;
                 let _ = files.cleanup().await;
                 return Err(server_error("bind failed", error));
             }
         };
-        let socket = tokio::task::spawn_blocking(move || SocketFile::capture(path))
-            .await
-            .map_err(|error| server_error("socket metadata worker failed", error))??;
+        let socket = tokio::task::spawn_blocking(move || {
+            let socket = SocketFile::capture(path)?;
+            if socket.parent_identity != identity {
+                return Err(server_error(
+                    "socket namespace changed",
+                    "directory replacement preserved",
+                ));
+            }
+            #[cfg(target_os = "linux")]
+            let socket = {
+                let mut socket = socket;
+                socket._namespace_lease = Some(lease);
+                socket
+            };
+            Ok::<_, ApiError>(socket)
+        })
+        .await
+        .map_err(|error| server_error("socket metadata worker failed", error))??;
         return Ok((listener, endpoint, Some(socket)));
     }
     Err(namespace::runtime_error(

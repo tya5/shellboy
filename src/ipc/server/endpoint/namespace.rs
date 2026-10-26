@@ -2,6 +2,52 @@
 use super::{ApiError, Path, PathBuf, validate_folder};
 use std::os::unix::fs::MetadataExt;
 
+// Only Linux's cooperating tmpfiles ageing has a documented lock exclusion.
+// A lease does not prevent logout cleanup, unlink, or arbitrary administrators.
+#[cfg(target_os = "linux")]
+pub(super) struct Lease {
+    directory: std::fs::File,
+}
+#[cfg(target_os = "linux")]
+impl Lease {
+    pub(super) fn acquire(folder: &Path, identity: (u64, u64)) -> Result<Self, ApiError> {
+        use fs2::FileExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(folder)
+            .map_err(|error| super::server_error("namespace lease open failed", error))?;
+        let metadata = directory
+            .metadata()
+            .map_err(|error| super::server_error("namespace lease metadata failed", error))?;
+        validate_folder(folder, super::current_uid())?;
+        if !metadata.is_dir()
+            || metadata.uid() != super::current_uid()
+            || metadata.mode() & 0o7777 != 0o700
+            || (metadata.dev(), metadata.ino()) != identity
+            || super::folder_identity(folder)? != identity
+        {
+            return Err(super::server_error(
+                "namespace lease refused",
+                "directory identity changed; preserved",
+            ));
+        }
+        directory
+            .try_lock_exclusive()
+            .map_err(|error| super::server_error("namespace lease lock failed", error))?;
+        Ok(Self { directory })
+    }
+}
+#[cfg(target_os = "linux")]
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // Match the owner lock's final-owner semantics in the presence of dup
+        // or a short-lived fork before exec. The FD itself is close-on-exec.
+        let _ = fs2::FileExt::unlock(&self.directory);
+    }
+}
+
 const MAX_SOCKET_PATH: usize = 103;
 
 pub(super) fn runtime_bases(uid: u32) -> Result<Vec<PathBuf>, ApiError> {
@@ -133,6 +179,32 @@ fn usable_socket_path(folder: &Path) -> bool {
 mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn lease_rejects_busy_replaced_and_symlinked_folders_and_unlocks_its_final_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("private");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let identity = super::super::folder_identity(&folder).unwrap();
+        let lease = Lease::acquire(&folder, identity).unwrap();
+        let inherited = lease.directory.try_clone().unwrap();
+        assert!(Lease::acquire(&folder, identity).is_err());
+        assert!(Lease::acquire(&folder, (identity.0, identity.1.wrapping_add(1))).is_err());
+        let alias = root.path().join("alias");
+        symlink(&folder, &alias).unwrap();
+        assert!(Lease::acquire(&alias, identity).is_err());
+        drop(lease);
+        let next = Lease::acquire(&folder, identity).expect("final owner unlocks despite dup");
+        drop(inherited);
+        assert!(
+            Lease::acquire(&folder, identity).is_err(),
+            "old dup close cannot unlock new owner"
+        );
+        drop(next);
+        assert!(Lease::acquire(&folder, identity).is_ok());
+    }
+
     #[test]
     fn no_xdg_uses_system_tmp_and_names_are_random() {
         let uid = super::super::current_uid();

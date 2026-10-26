@@ -167,7 +167,20 @@ Unix接続の両側で、hello/request送信前にTokioのpeer_cred（Linux SO_P
 
 owner lock取得後に前回endpoint metadataの既知pathだけを確認し、許可したbase・正しい専用名・実効uid所有0700・symlinkでないdirectory・既知socketだけの内容・socket所有uidを検証する。250msの接続probeが拒否/対象消失の場合だけstaleとし、directoryのdevice/inodeとsocketのdevice/inode/ctimeが変わっていないことを再確認してsocketと空directoryを削除する。生存/判定不能、未知形式や別の場所を指すmetadata、他者のfileは保持し、任意走査・recursive deleteはしない。新規directoryのmkdir前に予定pathを既存endpoint.jsonへ原子的に公開する。locatorだけ、空directory、bind済みsocketの各段階の異常終了後も、次回起動で安全に検証・回収できる。正常終了・公開失敗の清掃も自身のidentityに限定する。旧固定名領域の自動移行清掃は行わない。
 
-会話保存先はソケットと独立に、Unixで新規作成時0700とする。既存保存先も自分のdirectoryであることを確認し0700へ限定するが、symlinkや他uid所有へchmodしない。作成・検証は起動のfile workerで行い、UI threadへI/Oを持ち込まない。OS一時領域自体へ書けない等の残る失敗では、利用者へ次の操作を示し、詳しい理由は詳細情報へ保持する。`/tmp`の自動掃除からの完全保護は保証せず、XDG_RUNTIME_DIRを優先する。
+会話保存先はソケットと独立に、Unixで新規作成時0700とする。既存保存先も自分のdirectoryであることを確認し0700へ限定するが、symlinkや他uid所有へchmodしない。作成・検証は起動のfile workerで行い、UI threadへI/Oを持ち込まない。OS一時領域自体へ書けない等の残る失敗では、利用者へ次の操作を示し、詳しい理由は詳細情報へ保持する。XDG_RUNTIME_DIRを優先する。
+
+Linuxでは新規live namespace directory自身を`O_DIRECTORY|O_NOFOLLOW`で開き、作成したdevice/inode・
+実効uid所有0700を照合して、既存fs2のnonblocking exclusive BSD flockを取得する。directory FDは
+既存のSocketFile/EndpointFilesがlistener終了と自身の清掃まで1本保持し、最後の正規所有者のDropで
+明示unlockする。stale候補のcapture/probeはlockを取得せず、生存socketへの二重bind拒否を維持する。
+取得失敗時はbindせず、同じdirectory identityの空領域と自身のendpoint metadataだけを清掃して理由を返す。
+新しいlockfile・table・event・worker・queue・依存は追加しない。
+
+この保護は[systemd-tmpfilesのage掃除](https://www.freedesktop.org/software/systemd/man/latest/tmpfiles.d.html)
+がBSD flock済みdirectoryと配下をskipする仕様に対するもの。macOSの標準清掃全般、Linuxの最終logout/
+user-runtime-dir unit停止、reboot/unmount、管理者や利用者の明示削除、非協調cleanerまで防ぐ保証はない。
+XDGはセッション寿命を持ち、Shellboyはlinger設定を変更しない。消失後の自動再bind/環境endpoint差替えや
+mutation再送は行わず、保存済みoperationを確認してownerを通常終了/再起動する。
 
 
 PR1-12ではUnix socketの型・field・清掃をUnix cfgへ揃え、Windows named pipeにはmetadata清掃だけを残す。

@@ -448,3 +448,37 @@ async fn crash_during_socket_preparation_retains_a_locator_and_reclaims_empty_di
         next.shutdown().await.unwrap();
     }
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn live_namespace_holds_directory_flock_until_listener_cleanup() {
+    use fs2::FileExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path()).await;
+    let (send, _) = mpsc::channel(1);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let socket = PathBuf::from(endpoint(&owner).address);
+    let folder = socket.parent().unwrap();
+    let observer = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(folder)
+        .unwrap();
+    assert_eq!(
+        observer.try_lock_exclusive().unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    // Stale capture must not acquire this lock and silently skip the live
+    // endpoint. The ordinary probe still rejects binding the same owner twice.
+    let error = bind_error(&owner).await;
+    assert!(error.message.contains("live"));
+    server.shutdown().await.unwrap();
+    assert!(!folder.exists());
+    assert!(!owner.loaded.data_dir.join("endpoint.json").exists());
+    observer
+        .try_lock_exclusive()
+        .expect("listener cleanup must release its directory lease");
+    fs2::FileExt::unlock(&observer).unwrap();
+    owner.shutdown().await.unwrap();
+}
