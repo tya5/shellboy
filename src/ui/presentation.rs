@@ -1119,6 +1119,119 @@ pub(super) fn link_regions(
 mod tests {
     use super::*;
     #[test]
+    fn formal_shutdown_group_identity_survives_generic_field_limits() {
+        fn scene(value: &serde_json::Value, summary_kind: &str) -> Vec<UiNode> {
+            let mut nodes = Vec::new();
+            for section in [
+                "runs",
+                "turns",
+                "shells",
+                "owned_children",
+                "legacy_pending_operations_with_unknown_targets",
+            ] {
+                let saved = &value["change"][section];
+                let payload = serde_json::json!({"text":serde_json::json!({"section":section,"items":saved["items"]}).to_string()});
+                let text = crate::history::text_of_payload(&payload);
+                nodes.push(UiNode {
+                    node_id: saved["detail_node_ids"][0].as_str().unwrap().into(),
+                    text: text.clone(),
+                    total_chars: text.chars().count(),
+                    presentation: crate::presentation::project(
+                        "interruption_details",
+                        &payload,
+                        &text,
+                        0,
+                    ),
+                    ..Default::default()
+                });
+            }
+            let payload = serde_json::json!({"text":value.to_string()});
+            let text = crate::history::text_of_payload(&payload);
+            let summary = crate::presentation::project(summary_kind, &payload, &text, 0);
+            assert!(summary.fields.len() <= 128);
+            assert!(summary.metadata_bytes() <= crate::presentation::MAX_METADATA_BYTES);
+            nodes.push(UiNode {
+                node_id: "summary".into(),
+                text: text.clone(),
+                total_chars: text.chars().count(),
+                presentation: summary,
+                ..Default::default()
+            });
+            nodes
+        }
+        // Anonymous shape of the actual five-section shutdown snapshot. The
+        // outer /text field tree plus decoded envelope exceeds 128 fields.
+        let small:serde_json::Value=serde_json::from_str(r#"{"actor":{"kind":"shellboy","source":"shutdown"},"change":{"automatic_replay":false,"cancelled_waits":{"count":0,"detail_node_count":0,"detail_node_ids":[],"details_kind":"interruption_details","history_kind":"fixture","items":[],"section":"cancelled_waits","truncated":false},"legacy_pending_operations_with_unknown_targets":{"count":1,"detail_node_count":1,"detail_node_ids":["fixture-id-00"],"details_kind":"interruption_details","items":[{"operation_id":"fixture","request_kind":"fixture","state":"fixture","wait_targets":"fixture"}],"section":"legacy_pending_operations_with_unknown_targets","truncated":false},"os_processes_inspected":false,"owned_children":{"count":1,"detail_node_count":1,"detail_node_ids":["fixture-id-01"],"details_kind":"interruption_details","items":[{"answer_node_id":"fixture-id-02","first_message_id":"fixture-id-03","first_request_node_id":"fixture-id-04","last_turn_id":"fixture-id-05","owner_run_id":"fixture-id-06","planned_state":"stopped","previous_state":"live","run_id":"fixture-id-07","thread_id":"fixture-id-08"}],"section":"owned_children","truncated":false},"reason":"app_shutdown","result_uncertain":true,"runs":{"count":1,"detail_node_count":1,"detail_node_ids":["fixture-id-09"],"details_kind":"interruption_details","items":[{"first_message_id":"fixture-id-10","first_request_node_id":"fixture-id-11","owner_run_id":null,"planned_state":"stopped","previous_state":"live","request_count":1,"run_id":"fixture-id-06","stop_reason":"app_shutdown"}],"section":"runs","truncated":false},"shells":{"count":1,"detail_node_count":1,"detail_node_ids":["fixture-id-12"],"details_kind":"interruption_details","items":[{"execution_id":"fixture-id-13","output_complete":false,"planned_state":"stopped","previous_state":"running","result_uncertain":true,"retention_generation":0,"run_id":"fixture-id-06","saved_sequence":1,"turn_id":"fixture-id-14"}],"section":"shells","truncated":false},"turns":{"count":1,"detail_node_count":1,"detail_node_ids":["fixture-id-15"],"details_kind":"interruption_details","items":[{"answer_node_id":null,"previous_state":"running","recovery_reason":null,"run_id":"fixture-id-06","turn_id":"fixture-id-14"}],"section":"turns","truncated":false},"unreflected_messages":{"count":0,"detail_node_count":0,"detail_node_ids":[],"details_kind":"interruption_details","items":[],"section":"unreflected_messages","truncated":false}},"kind":"app_shutdown","observed_at":"fixture","snapshot_node_id":"fixture-id-16","timezone":"fixture"}"#).unwrap();
+        let generic = crate::presentation::fields_of_value(&small);
+        let wrapped =
+            crate::presentation::fields_of_value(&serde_json::json!({"text":small.to_string()}));
+        assert!(generic.len() + wrapped.len() > 128);
+        let nodes = scene(&small, "interruption_context");
+        assert_eq!(interruption_group(&nodes), Some(5));
+        assert!(
+            nodes
+                .last()
+                .unwrap()
+                .presentation
+                .fields
+                .iter()
+                .any(|field| field.key == "/kind" && field.value == "app_shutdown")
+        );
+        let mut large = small.clone();
+        let template = large["change"]["shells"]["items"][0].clone();
+        large["change"]["shells"]["items"] = serde_json::Value::Array(
+            (0..32)
+                .map(|index| {
+                    let mut item = template.clone();
+                    item["execution_id"] = serde_json::json!(format!("fixture-shell-{index}"));
+                    item
+                })
+                .collect(),
+        );
+        large["change"]["shells"]["count"] = serde_json::json!(32);
+        assert_eq!(
+            crate::presentation::fields_of_value(&large).len(),
+            128,
+            "one decoded envelope also reaches the generic limit"
+        );
+        assert_eq!(
+            interruption_group(&scene(&large, "interruption_context")),
+            Some(5)
+        );
+        assert_eq!(interruption_group(&scene(&small, "tool_result")), None);
+        let mut unknown_kind = small.clone();
+        unknown_kind["kind"] = serde_json::json!("future_shutdown");
+        assert_eq!(
+            interruption_group(&scene(&unknown_kind, "interruption_context")),
+            None
+        );
+        let mut unknown_path = small.clone();
+        let refs = unknown_path["change"]["runs"]
+            .as_object_mut()
+            .unwrap()
+            .remove("detail_node_ids")
+            .unwrap();
+        unknown_path["change"]["runs"]["nested"] = serde_json::json!({"detail_node_ids":refs});
+        // Keep the detail's ID available to build the fixture, then remove the
+        // canonical identity from the projected summary alone.
+        let mut invalid = scene(&small, "interruption_context");
+        let payload = serde_json::json!({"text":unknown_path.to_string()});
+        let text = crate::history::text_of_payload(&payload);
+        invalid.last_mut().unwrap().presentation =
+            crate::presentation::project("interruption_context", &payload, &text, 0);
+        assert_eq!(interruption_group(&invalid), None);
+        let mut unknown_section = scene(&small, "interruption_context");
+        let section = unknown_section[0]
+            .presentation
+            .fields
+            .iter_mut()
+            .find(|field| field.key == "/section")
+            .unwrap();
+        section.value = "future_sources".into();
+        assert_eq!(interruption_group(&unknown_section), None);
+    }
+
+    #[test]
     fn a_generated_gap_never_matches_the_same_text_inside_omitted_stdout() {
         use crate::presentation::{NodePresentation, PresentationBlock};
         let gap = "… 出力抜粋（表示120行中115行省略）· F6 詳細";

@@ -49,6 +49,7 @@ fn event(
         let (title, body) = events::interruption(value, kind);
         p.title = title;
         b.text = body.join("\n");
+        prioritize_interruption_identity(p, value, kind);
     } else {
         let event = if value.get("kind").and_then(Value::as_str) == Some("context_changed") {
             value.get("payload").unwrap_or(value)
@@ -95,6 +96,76 @@ fn event(
         } else {
             body.join("\n")
         };
+    }
+}
+
+// Group identity must survive the generic field tree's item/byte limits. These
+// are the same exact saved paths, retained inside the existing field budget.
+fn prioritize_interruption_identity(p: &mut NodePresentation, value: &Value, kind: &str) {
+    const SECTIONS: &[&str] = &[
+        "runs",
+        "turns",
+        "shells",
+        "owned_children",
+        "unreflected_messages",
+        "cancelled_waits",
+        "legacy_pending_operations_with_unknown_targets",
+    ];
+    fn push(fields: &mut Vec<PresentationField>, key: &str, value: &Value) {
+        if fields.len() >= MAX_FIELDS {
+            return;
+        }
+        let Some(raw) = value.as_str() else {
+            return;
+        };
+        if raw.len() > 4096 {
+            return;
+        }
+        let Some(mut field) = fields_of_value(&serde_json::json!({"value":raw}))
+            .into_iter()
+            .find(|field| field.key == "/value" && !field.value_omitted && field.value == raw)
+        else {
+            return;
+        };
+        field.key = key.into();
+        field.label = key.into();
+        fields.push(field);
+    }
+    let mut identity = Vec::new();
+    if kind == "interruption_details"
+        && value["section"]
+            .as_str()
+            .is_some_and(|section| SECTIONS.contains(&section))
+    {
+        push(&mut identity, "/section", &value["section"]);
+    } else if kind == "interruption_context"
+        && matches!(
+            value["kind"].as_str(),
+            Some("app_shutdown" | "previous_instance_interrupted")
+        )
+    {
+        push(&mut identity, "/kind", &value["kind"]);
+        for section in SECTIONS {
+            if let Some(references) = value["change"][*section]["detail_node_ids"].as_array() {
+                for (index, reference) in references.iter().take(MAX_FIELDS).enumerate() {
+                    push(
+                        &mut identity,
+                        &format!("/change/{section}/detail_node_ids/{index}"),
+                        reference,
+                    );
+                    if identity.len() >= MAX_FIELDS {
+                        break;
+                    }
+                }
+            }
+            if identity.len() >= MAX_FIELDS {
+                break;
+            }
+        }
+    }
+    if !identity.is_empty() {
+        identity.append(&mut p.fields);
+        p.fields = identity;
     }
 }
 
