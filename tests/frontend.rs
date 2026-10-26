@@ -1795,6 +1795,11 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await;
     assert_eq!(field(&empty, "/items"), "0");
+    assert!(
+        empty
+            .iter()
+            .all(|field| field.key != "/request_operation_id")
+    );
     send.send(UiAction::Manage(Command::ShellRead(ShellReadArgs {
         execution_id: "recorded-shell".into(),
         cursor: None,

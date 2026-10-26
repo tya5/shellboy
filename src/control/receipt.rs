@@ -67,10 +67,10 @@ pub(super) fn collect(db: &Connection, instance: &str, pressure: bool) -> Result
         AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '[]' END) x WHERE (m.key LIKE 'compact.pending.%' OR m.key LIKE 'compact.inflight.%') AND x.value=o.operation_id)
         AND (((instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':')
             AND result_ref_json IS NOT NULL AND result_ref_json<>?4 AND octet_length(result_ref_json)>1
-            AND (?2 OR julianday(created_at)<=julianday('now','-1 day')))
+            AND (?2 OR julianday(created_at)<=julianday('now',?5)))
           OR (instance_id<>?1 AND substr(operation_id,1,length(?1)+1)<>?1||':'
             AND (?2 OR julianday(created_at)<=julianday('now','-7 days'))))
-        ORDER BY created_at,operation_id LIMIT ?3").map_err(sql)?.query_map(params![instance,pressure,CLEANUP_BATCH as i64,EXPIRED_OUTCOME], |r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,i64>(2)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
+        ORDER BY created_at,operation_id LIMIT ?3").map_err(sql)?.query_map(params![instance, pressure, CLEANUP_BATCH as i64, EXPIRED_OUTCOME, format!("-{RESULT_RETENTION_SECONDS} seconds")], |r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,i64>(2)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
     let mut collected = 0;
     // Preserve malformed durable envelopes. Parse one body at a time and cap
     // aggregate validation bytes as well as row count on this DB-worker pass.
@@ -155,7 +155,7 @@ fn reserve_with_limit(
             ErrorCode::StorageLimit,
             "Operation receipt budget is full; the command was not accepted",
         );
-        error.hint=Some("Use shellboy operation get --operation ID or resend the original command with the same operation ID. Internal GC continues; finish current work and restart the owner explicitly to reclaim old completed receipts.".into());
+        error.hint=Some("Current terminal results are reclaimed under pressure before this refusal. Inspect shellboy operation get --operation ID and pending/protected work with shellboy status. Wait for pending work to finish; if identity metadata or protected receipts still fill the budget, finish current work and restart the owner explicitly. Same-ID replay may return operation_expired and never reexecutes the command.".into());
         return Err(error);
     }
     db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES(?1,?2,?3,?4,'pending',?5,?6)",params![operation,instance,origin,fingerprint,now,MAX_OUTCOME_BYTES as i64]).map_err(sql)?;
