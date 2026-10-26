@@ -1,6 +1,14 @@
 # Shellboy
 
-Rust製のターミナル向けAIエージェント環境です。Responses互換proxyへの接続、shell実行、分岐可能な履歴、SQLiteによる永続化、子エージェントへの委譲を備えます。
+Rust製の軽量なターミナル向けAIエージェント環境です。モデルのツールはshellだけで、モデルは `shellboy` CLIを通じて自分の履歴を検索・分岐し、子エージェントへ再帰的に委譲します。単一の実行ファイルで動き、SQLiteに保存し、Responses互換のproxyへ接続します。
+
+## 特徴
+
+- **軽量な単一binary**：実行ファイルは `shellboy` 1つです（Windows x64・macOS Apple Silicon・Linux x64）。会話と索引はローカルのSQLiteに保存し、常駐サービスや別のデータベースを必要としません。release binaryの起動は約41ms、待機中のRSSは約17MiBでした（空のDB・モデル未設定の限定条件。[検証状況](docs/validation/acceptance.md)）。
+- **ツールはshellだけ**：モデルに渡すツールはshell 1つです。履歴の検索、送信、子の会話、待機、添付は、すべて同じ `shellboy` CLIで行います。人も同じCLIを別の端末から使えます。
+- **モデルが自分の履歴を使える**：会話（Thread）、作業の寿命（Run）、次の回答までの処理（Turn）を区別して保存します。モデルはCLIで過去の発話やshellの出力をキーワード・意味の両方で検索し、原文と前後へ戻れます。履歴は書き換えずに分岐するので、要約や圧縮の後も出典へたどれます。
+- **再帰的な委譲**：モデルは子のThreadを作って調査や作業を任せ、その結果を待って読めます。親子の系譜と、どのRunが処理を所有するかは別に管理します。
+- **止めても失わない**：受け付けた依頼は先に保存します。通信の失敗やモデルの異常応答では、理由を残して復旧待ちにし、再試行・新しい指示・停止を選べます。
 
 使い始める人は [User Guide](docs/guides/user-guide.md)、Shellboy内で作業するモデルは [Agent Guide](docs/guides/agent-guide.md) を参照してください。[ガイド一覧](docs/guides/README.md) から設定・履歴検索・添付・復旧・CLIへ進めます。
 
