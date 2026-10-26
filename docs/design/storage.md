@@ -102,3 +102,17 @@ ownerを終了してupgrade前に取得したDB全体の整合backupを別data-d
 ## 共通のbyte digest（R2-8）
 
 SHA-256 lowercase hexの共通化は既存の32byte digestを64文字へ変換する処理だけを共有する。各domainのserde順序/UTF-8 bytes/区切り/範囲/版fingerprintは呼出し側に残す。incremental file hashやcursor fingerprintの入力順序を一律に変えず、保存済みbody hash・receipt fingerprint・引用hash・embedding identity・docs cursorのbytesを維持する。標準UTF境界関数への置換もpage開始検証と無進捗拒否を維持し、上限や未知cursorを緩めない。
+
+
+## Turn出典探索のcovering index（PR2-15、schema v9）
+
+`0009_compaction_turn_indexes`は`node_turn ON node(turn_id,id)`と
+`receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id)`の2本だけを追加する。
+compaction seedのTurn所属node/legacy割当receiptを狭い範囲でseekし、無関係なreplacementの全走査を
+避けるための導出indexである。node/receipt全row分の追加diskと書込み時のindex保守費用を負うが、
+新しい一次情報・table・column・trigger・workerは作らない。利益/走査の限界は[compaction](compaction.md)参照。
+
+schema v8以下からの初回upgradeで一度構築し、失敗時は両indexと新ledger/user_versionを同transactionで
+rollbackする。既存migrationを改変せず、node本文/source/receipt割当/予約を保存したまま前進する。
+旧binaryは従来どおり対応上限を超えるschemaを拒否する。read-only RAGも既存MIGRATION_NAMESを共用し、
+別の版台帳や自動downgradeは追加しない。

@@ -142,7 +142,7 @@ mod tests {
             let db = rusqlite::Connection::open(path).unwrap();
             // Re-run the idempotent compatibility migration to obtain a real
             // migration admission barrier without production delay hooks.
-            db.execute_batch("DELETE FROM schema_migration WHERE version=8; PRAGMA user_version=7; BEGIN IMMEDIATE").unwrap();
+            db.execute_batch("DROP INDEX node_turn; DROP INDEX receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; BEGIN IMMEDIATE").unwrap();
             entered.send(()).unwrap();
             held.recv_timeout(Duration::from_secs(3)).unwrap();
             db.execute_batch("COMMIT").unwrap();

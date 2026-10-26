@@ -841,7 +841,7 @@ async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
     let worker = DbWorker::open(&path).await.unwrap();
     worker.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DELETE FROM schema_migration WHERE version=8; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
+    db.execute_batch("DROP INDEX node_turn; DROP INDEX receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
     db.close().unwrap();
     assert!(matches!(
         DbWorker::open(&path).await,
@@ -871,4 +871,90 @@ async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
         Ok(())
     }).await.unwrap();
     worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without_rebuilding() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("turn-index-upgrade.sqlite");
+    let worker = DbWorker::open(&path).await.unwrap();
+    worker.call(|db| {
+        seed_thread(db,"saved")?;
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','saved','completed','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','saved','r','completed','now');
+            INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('source','u','user','now','{\"text\":\"日本語🌿\"}',37,'preserve-hash');
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at)VALUES('input','input-op','{}','saved','source','r','u','applied','now');
+            INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES('old:pending','old','null','preserve-request','pending','now',8192);")?;
+        Ok(())
+    }).await.unwrap();
+    worker.shutdown().await.unwrap();
+    // Recreate the exact previous schema, then collide with the second index
+    // name so the first CREATE INDEX must also roll back with version/ledger.
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch(
+        "DROP INDEX node_turn; DROP INDEX receipt_turn_source;
+        DELETE FROM schema_migration WHERE version=9; PRAGMA user_version=8;
+        CREATE TABLE receipt_turn_source(blocker INTEGER);",
+    )
+    .unwrap();
+    db.close().unwrap();
+    assert!(matches!(
+        DbWorker::open(&path).await,
+        Err(StorageError::Sqlite(_))
+    ));
+    let db = Connection::open(&path).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        8
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM schema_migration WHERE version=9",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name='node_turn'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT payload_json FROM node WHERE id='source'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "{\"text\":\"日本語🌿\"}"
+    );
+    db.execute("DROP TABLE receipt_turn_source", []).unwrap();
+    db.close().unwrap();
+    for reopen in 0..2 {
+        let worker = DbWorker::open(&path).await.unwrap();
+        worker.call(move |db| {
+            assert_eq!(db.query_row("PRAGMA user_version",[],|row|row.get::<_,i64>(0))?,SCHEMA_VERSION);
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=9",[],|row|row.get::<_,String>(0))?,"0009_compaction_turn_indexes");
+            for (index, expected) in [("node_turn",vec!["turn_id","id"]),("receipt_turn_source",vec!["turn_id","target_thread_id","message_node_id"])] {
+                let columns=db.prepare(&format!("PRAGMA index_info({index})"))?.query_map([],|row|row.get::<_,String>(2))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                assert_eq!(columns,expected);
+            }
+            assert_eq!(db.query_row("SELECT payload_json,payload_bytes,body_hash,turn_id FROM node WHERE id='source'",[],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))?,("{\"text\":\"日本語🌿\"}".into(),37,"preserve-hash".into(),"u".into()));
+            assert_eq!(db.query_row("SELECT run_id,turn_id,state FROM receipt WHERE id='input'",[],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?)))?,("r".into(),"u".into(),"applied".into()));
+            assert_eq!(db.query_row("SELECT state,reserved_bytes,request_hash FROM operation_receipt WHERE operation_id='old:pending'",[],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,String>(2)?)))?,("pending".into(),8192,"preserve-request".into()));
+            if reopen==0 {
+                // If migration9 were executed again, these names would collide.
+                assert_eq!(db.query_row("SELECT COUNT(*) FROM schema_migration WHERE version=9",[],|row|row.get::<_,i64>(0))?,1);
+            }
+            Ok(())
+        }).await.unwrap();
+        worker.shutdown().await.unwrap();
+    }
 }

@@ -23,6 +23,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (6, "0006_receipt_budget"),
     (7, "0007_usage_and_source_indexes"),
     (8, "0008_receipt_accounting_compat"),
+    (9, "0009_compaction_turn_indexes"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -36,6 +37,8 @@ const USAGE_SOURCE_INDEX_MIGRATION: &str =
     include_str!("../migrations/0007_usage_and_source_indexes.sql");
 const RECEIPT_ACCOUNTING_COMPAT_MIGRATION: &str =
     include_str!("../migrations/0008_receipt_accounting_compat.sql");
+const COMPACTION_TURN_INDEX_MIGRATION: &str =
+    include_str!("../migrations/0009_compaction_turn_indexes.sql");
 const CONTEXT_INDEX_MIGRATION: &str = include_str!("../migrations/0003_context_indexes.sql");
 
 #[derive(Debug, thiserror::Error)]
@@ -503,6 +506,12 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(RECEIPT_ACCOUNTING_COMPAT_MIGRATION)?;
+        transaction.commit()?;
+    }
+    if version < 9 {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        transaction.execute_batch(COMPACTION_TURN_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
     validate_schema(&connection)?;
