@@ -129,11 +129,11 @@ async fn stream_input_layout_and_db_fairness() {
     let mut lag = Vec::new();
     let mut db_samples = tokio::task::JoinSet::new();
     let mut metadata_jobs = tokio::task::JoinSet::new();
-    let mut ui_updates = 0usize;
-    let mut snapshot_bytes = 0usize;
+    let mut projected_samples = 0usize;
+    let mut projected_sample_bytes = 0usize;
     let mut draw_ns = 0u128;
     let mut draws = 0usize;
-    let mut last_index = 0;
+    let mut last_index = None;
     let mut gaps = 0usize;
     let mut stream_ready = false;
     let mut proxy_released = false;
@@ -142,48 +142,42 @@ async fn stream_input_layout_and_db_fairness() {
     while !(saved && input_samples.len() == 7) {
         assert!(
             start.elapsed() < Duration::from_secs(30),
-            "load fixture timeout; updates={ui_updates}, inputs={}, saved={saved}",
+            "load fixture timeout; projected_samples={projected_samples}, inputs={}, saved={saved}",
             input_samples.len()
         );
-        // Same bounded UI pump policy as main: at most 256 updates then yield.
-        for _ in 0..256 {
-            let Ok(update) = incoming.try_recv() else {
-                break;
-            };
-            if let UiUpdate::Stream { text, .. } = &update {
-                ui_updates += 1;
-                snapshot_bytes += text.len();
-                if let Some(at) = text.rfind("STREAM_EVENT_") {
-                    let index: usize = text[at + 13..at + 17].parse().unwrap();
+        // Apply the production 32-update/4ms pump, including its one retention
+        // pass. Observe only the resulting view; inspecting notifications here
+        // would consume them before the production admission/retention path.
+        ui.drain_updates(&incoming);
+        redraw |= ui.dirty;
+        for node in ui.view().nodes() {
+            let text = &node.text;
+            if let Some(at) = text.rfind("STREAM_EVENT_") {
+                let index: usize = text[at + 13..at + 17].parse().unwrap();
+                if last_index.is_none_or(|previous| index > previous) {
+                    projected_samples += 1;
+                    projected_sample_bytes += text.len();
                     if let Some(sent) = stamps[index].get() {
                         lag.push(sent.elapsed().as_secs_f64() * 1000.);
                     }
-                    if index > last_index + 1 {
-                        gaps += index - last_index - 1;
+                    gaps += index.saturating_sub(last_index.map_or(0, |previous| previous + 1));
+                    last_index = Some(index);
+                    if !stream_ready {
+                        stream_ready = true;
+                        next_input = Some(Instant::now());
                     }
-                    last_index = index;
-                }
-                if !stream_ready {
-                    stream_ready = true;
-                    next_input = Some(Instant::now());
                 }
             }
-            if let UiUpdate::History { nodes, .. } = &update
-                && nodes.iter().any(|node| node.text.ends_with("STREAM_FINAL"))
+            if text.ends_with("STREAM_FINAL")
+                && !ui.view().provisional_nodes.contains(&node.node_id)
             {
                 saved = true;
-                assert!(
-                    nodes
-                        .iter()
-                        .any(|node| node.total_chars == expected.chars().count())
-                );
+                assert_eq!(node.total_chars, expected.chars().count());
             }
-            ui.apply(update);
-            if !proxy_released && ui.view().thread_id.is_some() {
-                proxy_released = true;
-                started.notify_one();
-            }
-            redraw = true;
+        }
+        if !proxy_released && ui.view().thread_id.is_some() {
+            proxy_released = true;
+            started.notify_one();
         }
         for action in ui.take_deferred_actions() {
             if let Err(error) = send.try_send(action) {
@@ -276,14 +270,12 @@ async fn stream_input_layout_and_db_fairness() {
     let counters = &frontend::stream_metrics::SNAPSHOTS;
     println!(
         "PERF_STREAM {}",
-        json!({"deltas":DELTAS,"source_bytes":expected.len(),"snapshots":counters.load(Ordering::Relaxed),"cloned_bytes":frontend::stream_metrics::CLONED_BYTES.load(Ordering::Relaxed),"delivered_updates":ui_updates,"delivered_snapshot_bytes":snapshot_bytes,"skipped_intermediate_markers":gaps,"layout_builds":ui.layout_cache.builds,"draws":draws,"draw_total_ms":draw_ns as f64/1e6,"queue_lag_ms":{"n":lag.len(),"p50":percentile(lag.clone(),0.5),"p95":percentile(lag,0.95)},"input_to_testbackend_ms":{"n":input_samples.len(),"samples":input_samples},"db_roundtrip_ms":{"n":db_ms.len(),"samples":db_ms},"display_db_gate_reads":frontend::stream_metrics::GATE_READS.load(Ordering::Relaxed),"display_db_gate_service_ns":frontend::stream_metrics::GATE_NANOS.load(Ordering::Relaxed),"wall_seconds":start.elapsed().as_secs_f64(),"boundary":"local SSE emit timestamp -> stream update dequeued; injected Paste -> matching TestBackend cells; DB worker queue+read RTT; no terminal pixels or physical input"})
+        json!({"deltas":DELTAS,"source_bytes":expected.len(),"snapshots":counters.load(Ordering::Relaxed),"cloned_bytes":frontend::stream_metrics::CLONED_BYTES.load(Ordering::Relaxed),"post_pump_view_samples":projected_samples,"post_pump_sample_bytes":projected_sample_bytes,"markers_not_observed_between_pumps":gaps,"layout_builds":ui.layout_cache.builds,"draws":draws,"draw_total_ms":draw_ns as f64/1e6,"source_to_projected_view_ms":{"n":lag.len(),"p50":percentile(lag.clone(),0.5),"p95":percentile(lag,0.95)},"input_to_testbackend_ms":{"n":input_samples.len(),"samples":input_samples},"db_roundtrip_ms":{"n":db_ms.len(),"samples":db_ms},"display_db_gate_reads":frontend::stream_metrics::GATE_READS.load(Ordering::Relaxed),"display_db_gate_service_ns":frontend::stream_metrics::GATE_NANOS.load(Ordering::Relaxed),"wall_seconds":start.elapsed().as_secs_f64(),"boundary":"local SSE emit timestamp -> latest source marker observed after production drain_updates (32 updates/4ms, including retention); samples and skipped markers are post-pump view observations, not dequeued update counts; injected Paste -> matching TestBackend cells; DB worker queue+read RTT; 1ms harness polling and 30fps TestBackend, no terminal pixels or physical input"})
     );
     send.try_send(UiAction::Quit).unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         while !bridge.is_finished() {
-            while let Ok(update) = incoming.try_recv() {
-                ui.apply(update);
-            }
+            ui.drain_updates(&incoming);
             tokio::task::yield_now().await;
         }
     })
