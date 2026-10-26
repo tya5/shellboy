@@ -167,7 +167,16 @@ impl ToolPresentation {
                 120,
             )
         };
-        let observed = if current.is_some() { "現在 " } else { "" };
+        let observed = if current.is_some_and(|state| {
+            matches!(
+                state,
+                "starting" | "running_current" | "background_current" | "stopping"
+            )
+        }) {
+            "現在 "
+        } else {
+            ""
+        };
         let mut heading = format!("{mark} {identity} {command} · {observed}{state_text}");
         if let Some(current) = current {
             let same_state = current == self.status
@@ -467,18 +476,15 @@ fn style_code_regions(
                         })
                         .collect();
                 }
-                let caption = if language.is_empty() {
-                    String::new()
-                } else {
-                    format!("言語: {language}")
-                };
-                let mut caption = Line::from(Span::styled(
-                    caption,
-                    Style::default().fg(crate::ui::theme::CODE_CAPTION),
-                ));
-                let padding = usize::from(width).saturating_sub(caption.width());
-                caption.spans.insert(0, Span::raw(" ".repeat(padding)));
-                output.push(caption.style(Style::default().bg(background)));
+                if !matches!(language.as_str(), "" | "text" | "plaintext" | "plain") {
+                    let mut caption = Line::from(Span::styled(
+                        language.clone(),
+                        Style::default().fg(crate::ui::theme::CODE_CAPTION),
+                    ));
+                    let padding = usize::from(width).saturating_sub(caption.width());
+                    caption.spans.insert(0, Span::raw(" ".repeat(padding)));
+                    output.push(caption.style(Style::default().bg(background)));
+                }
                 for mut line in body {
                     line.spans.insert(0, Span::raw("  "));
                     let pad = usize::from(width).saturating_sub(line.width());

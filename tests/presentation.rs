@@ -423,14 +423,14 @@ fn oss_code_highlighting_uses_bundled_theme_with_language_caption_and_no_termina
     assert!(visible.contains("rust") && visible.contains("unknown-language"));
     let caption = lines
         .iter()
-        .find(|line| line.spans.iter().any(|s| s.content.contains("言語: rust")))
+        .find(|line| line.spans.iter().any(|s| s.content.contains("rust")))
         .expect("caption identifies its role without color");
     let caption_text = caption
         .spans
         .iter()
         .map(|s| s.content.as_ref())
         .collect::<String>();
-    assert!(caption_text.ends_with("言語: rust"));
+    assert!(caption_text.ends_with("rust"));
     assert!(
         caption_text.starts_with("    "),
         "language caption belongs at the upper right"
@@ -757,9 +757,9 @@ fn first_observations_are_compact_but_real_null_transitions_and_raw_fields_remai
 #[test]
 fn shell_outcome_marker_and_attention_use_current_code_without_overwriting_saved_code() {
     for (code, marker, attention, label) in [
-        (Some(0), "✓", false, "現在 終了 0"),
-        (Some(7), "✗", true, "現在 終了 7"),
-        (None, "·", false, "現在 終了（コード不明）"),
+        (Some(0), "✓", false, "終了 0"),
+        (Some(7), "✗", true, "終了 7"),
+        (None, "·", false, "終了（コード不明）"),
     ] {
         let tool = ToolPresentation {
             ordinal: Some(1),
@@ -784,16 +784,16 @@ fn shell_outcome_marker_and_attention_use_current_code_without_overwriting_saved
         ..Default::default()
     };
     assert!(tool.heading().starts_with("✗"));
-    assert!(tool.heading().contains("現在 終了 7 · 返却時 背景継続"));
+    assert!(tool.heading().contains("終了 7 · 返却時 背景継続"));
     tool.status = "failed".into();
     tool.exit_code = Some(7);
     tool.current_exit_code = Some(0);
-    assert!(tool.heading().contains("現在 終了 0 · 返却時 失敗 7"));
+    assert!(tool.heading().contains("終了 0 · 返却時 失敗 7"));
     assert!(tool.heading().starts_with("✗"));
     tool.current_exit_code = None;
     assert!(
         tool.heading()
-            .contains("現在 終了（コード不明） · 返却時 失敗 7")
+            .contains("終了（コード不明） · 返却時 失敗 7")
     );
     tool.observation_unavailable();
     assert_eq!(tool.current_exit_code, None);
@@ -1095,5 +1095,97 @@ fn markdown_content_uses_terminal_foreground_and_structure_on_dark_and_light_bas
         p.links
             .iter()
             .any(|link| link.url == "https://example.com/path")
+    );
+}
+
+#[test]
+fn structured_tool_errors_have_readable_summaries_and_preserve_original_fields() {
+    for (error, expected) in [
+        (
+            json!({"code":"permission_denied","message":"Cannot open fixture"}),
+            "Cannot open fixture · permission_denied",
+        ),
+        (
+            json!({"error":{"message":"Nested failure"}}),
+            "Nested failure",
+        ),
+        (json!({"code":"fixture_code"}), "fixture_code · 詳細はF6"),
+        (json!([{"message":"unknown array"}]), "エラー詳細はF6"),
+        (
+            json!({"arbitrary":"private-shaped-detail"}),
+            "エラー詳細はF6",
+        ),
+    ] {
+        let payload = json!({"item":{"type":"function_call_output","call_id":"call","output":json!({"status":"failed","error":error}).to_string()}});
+        let canonical = text_of_payload(&payload);
+        let p = project("tool_result", &payload, &canonical, 0);
+        let tool = p
+            .blocks
+            .iter()
+            .find_map(|block| block.tool.as_ref())
+            .unwrap();
+        assert_eq!(tool.reason, expected);
+        assert!(!tool.reason.contains('{') && !tool.reason.contains('['));
+        assert_eq!(
+            text_of_payload(&payload),
+            canonical,
+            "source JSON remains intact"
+        );
+        assert!(p.fields.iter().any(|field| field.key.contains("/error")));
+    }
+}
+
+#[test]
+fn terminal_tools_plain_code_and_index_readiness_avoid_internal_noise() {
+    use shellboy::presentation::ToolPresentation;
+    let terminal = ToolPresentation {
+        command: "echo test".into(),
+        status: "running".into(),
+        current_state: Some("stopped".into()),
+        ..Default::default()
+    };
+    let heading = terminal.heading();
+    assert!(heading.contains("停止") && heading.contains("返却時 背景継続"));
+    assert!(!heading.contains("現在"));
+    for language in ["", "text", "plaintext"] {
+        let source = format!("```{language}\nunique-code-body\n```\n");
+        let payload =
+            json!({"output":[{"type":"message","content":[{"type":"output_text","text":source}]}]});
+        let mut p = project(
+            "assistant_response",
+            &payload,
+            &text_of_payload(&payload),
+            0,
+        );
+        shellboy::presentation::render_markdown(&mut p, 80);
+        let shown = p
+            .blocks
+            .iter()
+            .filter_map(|block| block.rendered.as_ref())
+            .flat_map(|rendered| &rendered.lines)
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(shown.contains("unique-code-body"));
+        assert!(!shown.contains("言語:"));
+        assert!(
+            !shown
+                .lines()
+                .any(|line| matches!(line.trim(), "text" | "plaintext"))
+        );
+    }
+    let event = json!({"kind":"index_state","change":{"before":{"active_state":null,"paused":false},"after":{"active_state":"active","paused":false}}});
+    let payload = json!({"text":format!("Shellboy event v1: {event}")});
+    let p = project("event", &payload, &text_of_payload(&payload), 0);
+    assert_eq!(p.event_class, EventClass::Routine);
+    assert_eq!(p.title, "検索索引 · 利用可能");
+    assert!(
+        p.fields.iter().any(|field| field.value == "active"),
+        "raw state remains in details"
     );
 }

@@ -481,3 +481,20 @@ streamの終了時、保存済み未確定sourceがある場合は、既存の�
 metadataだけの成功差分と、tool/encryptedだけで表示本文がない成功差分は通常previewから除外する。最終確定本文は通常nodeで読めるため重複表示を避けるもので、保存・一覧総件数・原文からは除かない。実際に回答/平文推論が異なる成功記録と失敗本文は表示する。
 
 成功監査はStreamSettled時の即時保持対象にせず、保存previewの分類後にだけ表示する。metadata-only記録の瞬間的な重複表示を避ける。`delta_differences` が非空の成功記録はmetadata-only抑止の対象外とする。
+
+
+## PR2 UI補正（12 / 13 / 16 / 17 / 18）
+
+通常入力とrecall待ち後の遅延Enterは同じ管理action scope付与を通す。元下書きへ戻ったslashを含め、Esc・Thread切替後に古い管理結果がpopupを再表示しない。別overlayへ移った間の遅延Enterは実行せず、入力を残す。
+
+StreamCommittedは保存nodeとの対応通知であり、canonical本文取得の完了ではない。既存仮本文は同世代の保存nodeを実際に取り込むまで保持し、UIの32件/4ms更新境界や読込失敗で有料の受信本文を消さない。保存nodeへのID付替え・本文一致推測・新しいコア状態は導入しない。
+
+plain/toolの同一URL全出現へ同じ完全targetを結び付ける。semantic Markdownの既存targetを表示文字から上書きしない。構造化errorはmessage/code等の有限要約を通常表示し、未知構造は詳細への入口を示す。元JSONはF6原文・fieldsに保持する。
+
+中断summaryが明示参照する詳細nodeは同じ表示範囲内で一つの要約へまとめ、全memberの原文・F6入口を残す。保存関係が確認できない詳細やpage境界の単独詳細は隠さない。terminalなshell状態は単に終了/停止等と表示し、OS生存の観測を意味する「現在」を付けない。呼出しと結果の見出しは目的と結果へ分担する。コードのtext/plaintext/未指定言語は無駄なcaption行を作らず、具体言語は短い言語名を示す。索引の内部state名は人向け状態へ写し、通常のactive遷移を管理情報の長文へ膨らませない。
+
+UI-localの確定待ち対応表は、保持中のprovisional nodeごとに最大1件のattempt→保存nodeだけを持つ。複数commitの到着順に依存して前の対応を失わない。既存本文cacheの予算へID capacity/entry overheadを算入し、canonical取り込み・node eviction・view破棄で解放する。保存済み本文やDAGの代替ではなく、新しいworker/queue/永続表は作らない。同一executionと確認できる隣接call-only node/resultだけを表示groupにし、全memberのRowSource範囲と元callの完全URLを維持する。mixed prose、離れた結果、本文未取得の結果では呼出しを独立表示する。元call/node・F6原文を残す。
+
+canonical IDだけを持つ本文未取得のnodeでは仮本文を置き換えない。本文を伴うHistory/NodeWindow、または真の0文字本文が届いて初めて対応を解消する。
+
+中断groupはInterrupted summaryの保存kind（previous_instance_interrupted/app_shutdown）と、既知sectionの正規/change/.../detail_node_ids/index参照を検証する。別kindのtool JSONや似たfield名ではまとめない。NodeWindowは非同期中に元slotがevictされ得るため、既存slotへ本文を取り込めた場合だけ確定待ち仮本文を解放する。消えたslotを古い窓応答で追加せず、次の採用履歴更新まで仮本文を保つ。

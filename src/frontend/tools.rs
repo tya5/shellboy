@@ -17,6 +17,7 @@ struct CallSource {
     released: bool,
     group_id: String,
     prior_reason: Option<String>,
+    execution_id: Option<String>,
 }
 
 // The node's saved group uses the existing (group_id, call_id) primary key.
@@ -29,7 +30,7 @@ SELECT c.ordinal,
                  WHERE r.group_id=c.group_id AND r.call_id=c.call_id),c.state),
        s.state,
        EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id),
-       c.group_id, s.exit_code
+       c.group_id, s.exit_code, c.operation_id
 FROM tool_call c LEFT JOIN shell_execution s ON s.id=c.operation_id
 WHERE c.group_id=COALESCE(
     (SELECT CASE WHEN json_valid(n.payload_json) THEN json_extract(n.payload_json,'$.group_id') END
@@ -99,6 +100,7 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
                             group_id: row.get(5)?,
                             prior_reason: None,
                             shell_exit_code: row.get(6)?,
+                            execution_id: row.get(7)?,
                         })
                     })
                     .optional()?;
@@ -127,6 +129,9 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
                 continue;
             }
             tool.ordinal = Some(source.ordinal);
+            if source.shell_state.is_some() {
+                tool.execution_id = source.execution_id.clone();
+            }
             if tool.status == "cancelled"
                 && tool.reason_kind == ToolReasonKind::PriorCallInterrupted
             {

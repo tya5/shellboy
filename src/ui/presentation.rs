@@ -395,9 +395,9 @@ fn annotate_links(
             let text = span.content.as_ref();
             let mut matches = links
                 .iter()
-                .filter_map(|link| {
-                    text.find(&link.url)
-                        .map(|start| (start, start + link.url.len(), link.url.as_str()))
+                .flat_map(|link| {
+                    text.match_indices(&link.url)
+                        .map(|(start, _)| (start, start + link.url.len(), link.url.as_str()))
                 })
                 .collect::<Vec<_>>();
             matches.sort_by_key(|(start, end, _)| (*start, std::cmp::Reverse(*end)));
@@ -567,7 +567,7 @@ fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
         title.push_str(&format!(" · その他{unknown}件"));
     }
     if routine > 0 {
-        title.push_str(&format!(" · 開始通知{routine}件"));
+        title.push_str(&format!(" · 通常通知{routine}件"));
     }
     title.push_str(" · F6 詳細");
     let mut lines = vec![Line::from(Span::styled(
@@ -584,6 +584,96 @@ fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
         )));
     }
     lines
+}
+fn adjacent_tool_pair(call: &UiNode, result: &UiNode) -> bool {
+    let calls = &call.presentation.blocks;
+    (!result.text.is_empty() || result.total_chars == 0)
+        && !calls.is_empty()
+        && calls.iter().all(|block| {
+            block.kind == BlockKind::ToolCall
+                && block
+                    .tool
+                    .as_ref()
+                    .and_then(|tool| tool.execution_id.as_deref())
+                    .is_some_and(|execution| {
+                        result.presentation.blocks.iter().any(|other| {
+                            other.kind == BlockKind::ToolResult
+                                && other
+                                    .tool
+                                    .as_ref()
+                                    .and_then(|tool| tool.execution_id.as_deref())
+                                    == Some(execution)
+                        })
+                    })
+        })
+}
+fn interruption_group(nodes: &[UiNode]) -> Option<usize> {
+    let details = nodes
+        .iter()
+        .take_while(|node| {
+            node.presentation.kind == PresentationKind::Interrupted
+                && node
+                    .presentation
+                    .fields
+                    .iter()
+                    .any(|field| field.key == "/section")
+        })
+        .count();
+    if details == 0 {
+        return None;
+    }
+    let summary = nodes.get(details)?;
+    if summary.presentation.kind != PresentationKind::Interrupted
+        || !summary.presentation.fields.iter().any(|field| {
+            field.key == "/kind"
+                && matches!(
+                    field.value.as_str(),
+                    "previous_instance_interrupted" | "app_shutdown"
+                )
+        })
+    {
+        return None;
+    }
+    let references = summary
+        .presentation
+        .fields
+        .iter()
+        .filter_map(|field| {
+            if field.value_omitted {
+                return None;
+            }
+            let path = field.key.strip_prefix("/change/")?;
+            let (section, rest) = path.split_once('/')?;
+            if !matches!(
+                section,
+                "runs"
+                    | "turns"
+                    | "shells"
+                    | "owned_children"
+                    | "unreflected_messages"
+                    | "cancelled_waits"
+                    | "legacy_pending_operations_with_unknown_targets"
+            ) {
+                return None;
+            }
+            rest.strip_prefix("detail_node_ids/")?
+                .parse::<usize>()
+                .ok()?;
+            Some((section, field.value.as_str()))
+        })
+        .collect::<Vec<_>>();
+    nodes[..details]
+        .iter()
+        .all(|node| {
+            node.presentation
+                .fields
+                .iter()
+                .find(|field| field.key == "/section")
+                .is_some_and(|section| {
+                    references.contains(&(section.value.as_str(), node.node_id.as_str()))
+                })
+        })
+        .then_some(details)
 }
 /// One physical wrapped row and its nearest original Unicode position. Decoration
 /// rows intentionally share an anchor; the viewport keeps their row displacement.
@@ -637,7 +727,29 @@ pub(super) fn history(
     while index < end {
         let begin = index;
         let node = &view.nodes()[index];
-        let chunk = if quiet_event(node) {
+        let chunk = if let Some(summary) = interruption_group(&view.nodes()[index..end]) {
+            index += summary + 1;
+            let summary = &view.nodes()[index - 1];
+            let mut chunk = node_lines(summary, false, summary.base_char_offset, width, &mut links);
+            chunk.push(Line::from(Span::styled(
+                format!("  原文{}件 · F6 詳細", index - begin),
+                Style::default().fg(theme::MUTED),
+            )));
+            chunk
+        } else if view
+            .nodes()
+            .get(index + 1)
+            .filter(|_| index + 1 < end)
+            .is_some_and(|result| adjacent_tool_pair(node, result))
+        {
+            index += 2;
+            let result = &view.nodes()[index - 1];
+            let mut chunk = node_lines(result, false, result.base_char_offset, width, &mut links);
+            // Result commands are enriched from their exact call source. Retain
+            // its explicit URL targets when rendering that shared heading.
+            annotate_links(&mut chunk, &node.presentation.links, &mut links);
+            chunk
+        } else if quiet_event(node) {
             index += 1;
             while index < end && quiet_event(&view.nodes()[index]) {
                 index += 1;
@@ -653,6 +765,9 @@ pub(super) fn history(
                 &mut links,
             )
         };
+        if chunk.is_empty() {
+            continue;
+        }
         let chunk = hanging_wrap(chunk, width.max(1));
         let source_starts = node
             .presentation
@@ -866,6 +981,220 @@ pub(super) fn link_regions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn interruption_details_group_only_with_their_explicit_saved_summary() {
+        fn node(id: &str, kind: &str, value: serde_json::Value) -> UiNode {
+            let payload = serde_json::json!({"text":value.to_string()});
+            let text = crate::history::text_of_payload(&payload);
+            UiNode {
+                node_id: id.into(),
+                text: text.clone(),
+                total_chars: text.chars().count(),
+                presentation: crate::presentation::project(kind, &payload, &text, 0),
+                ..Default::default()
+            }
+        }
+        let detail = node(
+            "detail",
+            "interruption_details",
+            serde_json::json!({"section":"runs","items":[{"run_id":"r"}]}),
+        );
+        let summary = node(
+            "summary",
+            "interruption_context",
+            serde_json::json!({"kind":"previous_instance_interrupted","change":{"runs":{"count":1,"detail_node_ids":["detail"]},"result_uncertain":true,"automatic_replay":false}}),
+        );
+        assert_eq!(
+            interruption_group(&[detail.clone(), summary.clone()]),
+            Some(1)
+        );
+        assert_eq!(interruption_group(std::slice::from_ref(&detail)), None);
+        let mut unrelated = detail.clone();
+        unrelated.node_id = "other-detail".into();
+        assert_eq!(interruption_group(&[unrelated, summary.clone()]), None);
+        let mut wrong_kind = summary.clone();
+        wrong_kind.presentation.kind = PresentationKind::ToolResult;
+        assert_eq!(interruption_group(&[detail.clone(), wrong_kind]), None);
+        let mut wrong_path = summary.clone();
+        for field in &mut wrong_path.presentation.fields {
+            if field.key.contains("/detail_node_ids/") {
+                field.key = "/arbitrary/detail_node_ids/0".into();
+            }
+        }
+        assert_eq!(interruption_group(&[detail.clone(), wrong_path]), None);
+        let mut wrong_section = summary.clone();
+        for field in &mut wrong_section.presentation.fields {
+            if field.key.contains("/detail_node_ids/") {
+                field.key = "/change/shells/detail_node_ids/0".into();
+            }
+        }
+        assert_eq!(interruption_group(&[detail.clone(), wrong_section]), None);
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![detail, summary];
+        let (lines, _, sources) = history(&view, 100);
+        let shown = plain(&lines);
+        assert!(shown.contains("前回の中断記録"));
+        assert!(!shown.contains("前回の保存記録"));
+        assert!(shown.contains("原文2件"));
+        assert!(
+            sources
+                .iter()
+                .any(|source| source.node == 0 && source.covered_end == 2)
+        );
+        assert_eq!(
+            view.nodes().len(),
+            2,
+            "both source nodes remain available to F6"
+        );
+    }
+
+    #[test]
+    fn adjacent_tool_groups_keep_both_source_anchors_and_original_url_targets() {
+        use crate::presentation::{NodePresentation, PresentationBlock, ToolPresentation};
+        let url = "https://example.invalid/tool";
+        let tool = ToolPresentation {
+            call_id: "call".into(),
+            command: format!("echo {url}"),
+            status: "completed".into(),
+            execution_id: Some("execution".into()),
+            ..Default::default()
+        };
+        let call = UiNode {
+            node_id: "call-node".into(),
+            role: "assistant".into(),
+            text: "source call".into(),
+            total_chars: 11,
+            presentation: NodePresentation {
+                kind: PresentationKind::Assistant,
+                links: vec![crate::presentation::PresentationLink {
+                    label: url.into(),
+                    url: url.into(),
+                    source_start: 0,
+                    source_end: 11,
+                }],
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(tool.clone()),
+                    text: "source call".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let result = UiNode {
+            node_id: "result-node".into(),
+            text: "output".into(),
+            total_chars: 6,
+            presentation: NodePresentation {
+                kind: PresentationKind::ToolResult,
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(tool),
+                    text: "output".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![call.clone(), result.clone()];
+        let (lines, targets, sources) = history(&view, 100);
+        assert_eq!(plain(&lines).matches(url).count(), 1);
+        assert!(
+            sources
+                .iter()
+                .all(|source| source.node == 0 && source.covered_end == 2)
+        );
+        assert_eq!(
+            targets[0].as_ref(),
+            url,
+            "the grouped command retains its call's link binding"
+        );
+        assert!(
+            link_regions(&lines, &targets, 100, lines.len() as u16, 0)
+                .iter()
+                .any(|region| region.url.as_ref() == url)
+        );
+        assert_eq!(
+            view.nodes().len(),
+            2,
+            "F6 retains independent call/result sources"
+        );
+        let mut mixed = call.clone();
+        mixed.presentation.blocks.insert(
+            0,
+            PresentationBlock {
+                kind: BlockKind::Plain,
+                text: "prose before call".into(),
+                ..Default::default()
+            },
+        );
+        *view.nodes_mut_for_test() = vec![mixed, result.clone()];
+        assert_eq!(
+            plain(&history(&view, 100).0).matches(url).count(),
+            2,
+            "mixed prose is not collapsed"
+        );
+        *view.nodes_mut_for_test() = vec![
+            call.clone(),
+            UiNode {
+                node_id: "separate".into(),
+                role: "user".into(),
+                text: "other message".into(),
+                total_chars: 13,
+                ..Default::default()
+            },
+            result.clone(),
+        ];
+        assert_eq!(
+            plain(&history(&view, 100).0).matches(url).count(),
+            2,
+            "separated results do not erase call rows"
+        );
+        let mut metadata = result;
+        metadata.text.clear();
+        *view.nodes_mut_for_test() = vec![call, metadata];
+        assert_eq!(
+            plain(&history(&view, 100).0).matches(url).count(),
+            1,
+            "metadata-only results cannot replace a useful call"
+        );
+    }
+
+    #[test]
+    fn repeated_plain_urls_are_all_clickable_without_rebinding_semantic_links() {
+        let url = "https://example.invalid/same";
+        let mut lines = vec![Line::from(format!("日本語 {url} then {url}"))];
+        let links = vec![crate::presentation::PresentationLink {
+            label: url.into(),
+            url: url.into(),
+            source_start: 0,
+            source_end: 100,
+        }];
+        let mut targets = Vec::new();
+        annotate_links(&mut lines, &links, &mut targets);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(
+            lines[0]
+                .spans
+                .iter()
+                .filter(|span| span.style.underline_color.is_some())
+                .count(),
+            2
+        );
+        let regions = link_regions(&lines, &targets, 100, 1, 0);
+        assert_eq!(regions.len(), 2);
+        assert!(regions.iter().all(|region| region.url.as_ref() == url));
+        let original = lines[0].spans.clone();
+        annotate_links(&mut lines, &links, &mut targets);
+        assert_eq!(
+            lines[0].spans, original,
+            "an existing semantic binding is not inferred again"
+        );
+    }
+
     #[test]
     fn body_and_metadata_notices_report_only_their_known_extent() {
         let text = "完全な本文".repeat(300);
@@ -1305,7 +1634,7 @@ mod tests {
         ];
         let shown = plain(&event_group(&events));
         assert!(shown.contains("· 状態変更 3件"));
-        assert!(shown.contains("開始通知2件"));
+        assert!(shown.contains("通常通知2件"));
         assert!(shown.contains("モデル: A → B"));
         assert!(!shown.contains("作業開始 / 応答処理を開始"));
         let payload = serde_json::json!({"text":"要約の本文","source_node_ids":["one","two"]});

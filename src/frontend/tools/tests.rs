@@ -32,6 +32,10 @@ async fn repeated_call_ids_in_other_groups_cannot_replace_a_cancelled_calls_sour
     assert_eq!(tool.ordinal, Some(2));
     assert_eq!(tool.command, "printf 正しい🦀");
     assert_eq!(tool.status, "cancelled");
+    assert!(
+        tool.execution_id.is_none(),
+        "cancelled/unadmitted calls have no invented shell identity"
+    );
     assert_eq!(tool.reason, "作業停止のため取消");
     assert_eq!(nodes[0].text, text);
     assert_eq!(nodes[0].presentation.blocks[0].source_start, 0);
@@ -103,6 +107,10 @@ async fn call_and_background_result_share_current_exit_facts_and_failed_reads_cl
             let tool = node.presentation.blocks[0].tool.as_ref().unwrap();
             assert_eq!(tool.ordinal, Some(1));
             assert_eq!(tool.command, "printf fixture");
+            assert!(
+                tool.execution_id.is_some(),
+                "call/result correlation has the actual shell identity"
+            );
             assert_eq!(tool.current_state.as_deref(), Some("exited"));
             assert_eq!(tool.current_exit_code, code);
             assert_eq!(
@@ -146,10 +154,7 @@ async fn call_and_background_result_share_current_exit_facts_and_failed_reads_cl
         .unwrap();
     assert_eq!(call.status, "completed");
     assert_eq!(call.exit_code, None);
-    assert!(
-        call.heading()
-            .starts_with("✗ #3 printf terminal · 現在 終了 7")
-    );
+    assert!(call.heading().starts_with("✗ #3 printf terminal · 終了 7"));
     assert!(
         !call.heading().contains("返却時"),
         "a call carries no saved result code"

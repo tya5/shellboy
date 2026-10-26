@@ -24,6 +24,20 @@ pub(super) fn event_title(kind: &str) -> &str {
     }
 }
 
+/// Automatic readiness is a routine observation, not a user setting change.
+pub(super) fn routine_index_ready(event: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    let before = &event["change"]["before"];
+    let after = &event["change"]["after"];
+    event["kind"] == "index_state"
+        && after["active_state"] == "active"
+        && after["paused"] == Value::Bool(false)
+        && before.get("paused") != Some(&Value::Bool(true))
+        && ["profile", "model", "pause_kind"].iter().all(|key| {
+            before.get(*key).unwrap_or(&Value::Null) == after.get(*key).unwrap_or(&Value::Null)
+        })
+}
+
 pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
     use serde_json::Value;
     // Canonical Shellboy notification nodes are added when preparing continuation
@@ -44,6 +58,9 @@ pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
         if let Some(title) = continuation {
             return title.into();
         }
+    }
+    if routine_index_ready(event) {
+        return "検索索引 · 利用可能".into();
     }
     let first = event.pointer("/change/before") == Some(&Value::Null);
     if first
@@ -212,6 +229,19 @@ pub(super) fn changes(value: &serde_json::Value) -> Vec<String> {
         .filter_map(|(key, label)| {
             let old = before.get(*key);
             let new = after.get(*key);
+            let describe = |value: &Value| {
+                if kind == "index_state" && *key == "active_state" {
+                    match value.as_str() {
+                        Some("active") => return "利用可能".into(),
+                        Some("paused" | "candidate_paused") => return "一時停止".into(),
+                        Some("candidate") => return "準備済み・切替前".into(),
+                        Some("inactive") => return "未選択".into(),
+                        Some(_) => return "詳細参照".into(),
+                        None => {}
+                    }
+                }
+                describe(value)
+            };
             if old.unwrap_or(&Value::Null) == new.unwrap_or(&Value::Null) || new.is_none() {
                 None
             } else if kind == "index_state" && before.is_null() {

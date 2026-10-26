@@ -61,6 +61,7 @@ fn event(
             .unwrap_or("context_changed");
         p.event_class = match event_kind {
             "run_started" | "turn_started" => EventClass::Routine,
+            "index_state" if events::routine_index_ready(event) => EventClass::Routine,
             "index_state" if event.pointer("/change/after/paused") == Some(&Value::Bool(true)) => {
                 EventClass::Attention
             }
@@ -119,6 +120,25 @@ fn call(
     p.body_omitted_chars = p.body_omitted_chars.saturating_add(omitted);
 }
 
+fn display_reason(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return tool_reason(text);
+    }
+    let message = ["/message", "/detail", "/error/message", "/error/detail"]
+        .iter()
+        .find_map(|path| value.pointer(path).and_then(Value::as_str));
+    let code = value
+        .get("code")
+        .and_then(Value::as_str)
+        .or_else(|| value.pointer("/error/code").and_then(Value::as_str));
+    match (message, code) {
+        (Some(message), Some(code)) => format!("{} · {}", tool_reason(message), tool_reason(code)),
+        (Some(message), None) => tool_reason(message),
+        (None, Some(code)) => format!("{} · 詳細はF6", tool_reason(code)),
+        (None, None) => "エラー詳細はF6".into(),
+    }
+}
+
 fn result(
     p: &mut NodePresentation,
     b: &mut PresentationBlock,
@@ -152,12 +172,7 @@ fn result(
             .get("reason")
             .filter(|value| !value.is_null())
             .or_else(|| value.get("error").filter(|value| !value.is_null()))
-            .map(|v| {
-                v.as_str()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| v.to_string())
-            })
-            .map(|s| tool_reason(&s))
+            .map(display_reason)
             .unwrap_or_default();
         tool.elapsed_ms = value.get("elapsed_ms").and_then(Value::as_u64);
         tool.exit_code = value.get("exit_code").and_then(Value::as_i64);
