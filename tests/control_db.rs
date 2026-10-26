@@ -1337,3 +1337,230 @@ async fn history_filter_preflight_rejects_before_receipt_admission_and_keeps_val
     assert_eq!(receipts, before.1 + 1);
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admission_and_replay() {
+    use shellboy::control::db::RuntimeReservation;
+    let (_directory, store) = store().await;
+    let thread = create(&store, None).await;
+    let (message, _) = send(&store, &thread.thread_id, "work to stop").await;
+    let run_id = message.run_id.unwrap();
+    let pressure_id = "instance:receipt-pressure".to_owned();
+    assert!(matches!(
+        store
+            .reserve_internal(
+                pressure_id.clone(),
+                serde_json::json!({"fixture":"pressure"})
+            )
+            .await
+            .unwrap(),
+        RuntimeReservation::New
+    ));
+    // Real pending reservations and trigger-maintained counters, without a
+    // hundreds-of-MiB saved outcome. The chosen row owns only the missing bytes.
+    async fn fill(store: &Store, pressure: String, target: u64) {
+        store.database.call(move |db| {
+            let actual: i64 = db.query_row(
+                "SELECT logical_bytes FROM quota_counter WHERE category='operation_receipt'",
+                [], |row| row.get(0),
+            )?;
+            let other: i64 = db.query_row(
+                "SELECT COALESCE(SUM(reserved_bytes),0) FROM operation_receipt WHERE instance_id='instance' AND state='pending' AND operation_id<>?1",
+                [&pressure], |row| row.get(0),
+            )?;
+            assert!(target as i64 >= actual + other);
+            db.execute(
+                "UPDATE operation_receipt SET reserved_bytes=?2 WHERE operation_id=?1 AND state='pending'",
+                rusqlite::params![pressure, target as i64 - actual - other],
+            )?;
+            Ok(())
+        }).await.unwrap();
+    }
+    fill(&store, pressure_id.clone(), 256 * 1024 * 1024).await;
+    let status = execute(&store, Command::Status(StatusArgs::default()))
+        .await
+        .result;
+    assert_eq!(status["receipt_budget"]["available_bytes"], 0);
+    assert_eq!(
+        status["receipt_budget"]["control_headroom_bytes"],
+        33_562_624
+    );
+    assert_eq!(status["receipt_budget"]["control_limit_bytes"], 301_998_080);
+    assert_eq!(
+        status["receipt_budget"]["control_available_bytes"],
+        33_562_624
+    );
+    let normal = request(Command::ThreadCreate(ThreadCreateArgs {
+        connection: None,
+        cwd: None,
+        model: None,
+        effort: None,
+        parent_id: None,
+    }));
+    assert_eq!(
+        store.execute(normal, None).await.unwrap_err().code,
+        ErrorCode::StorageLimit
+    );
+    assert_eq!(
+        store
+            .reserve_runtime(
+                request(Command::ShellWrite(ShellWriteArgs {
+                    execution_id: "not-started".into(),
+                    text: "not written".into(),
+                    encoding: "UTF-8".into(),
+                })),
+                None
+            )
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::StorageLimit
+    );
+
+    // ShellStop retains the runtime intent contract while consuming the stop
+    // allowance. A concurrent same-ID observer cannot execute it twice.
+    let shell_stop = request(Command::ShellStop(ExecutionTarget {
+        execution_id: "fixture-shell".into(),
+    }));
+    assert!(matches!(
+        store
+            .reserve_runtime(shell_stop.clone(), None)
+            .await
+            .unwrap(),
+        RuntimeReservation::New
+    ));
+    assert!(matches!(
+        store
+            .reserve_runtime(shell_stop.clone(), None)
+            .await
+            .unwrap(),
+        RuntimeReservation::Pending
+    ));
+    let mut shell_conflict = shell_stop.clone();
+    shell_conflict.command = Command::ShellStop(ExecutionTarget {
+        execution_id: "another-shell".into(),
+    });
+    assert_eq!(
+        store
+            .reserve_runtime(shell_conflict.clone(), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::OperationConflict
+    );
+
+    // RunStop takes the DB path, changes state and generation once, and saves
+    // its result in the same transaction while the shell reservation is live.
+    let run_stop = request(Command::RunStop(RunTarget {
+        run_id: run_id.clone(),
+    }));
+    let stopped = store.execute(run_stop.clone(), None).await.unwrap();
+    assert_eq!(stopped.result["state"], "stopping");
+    assert_eq!(stopped.stop_runs, vec![run_id.clone()]);
+    let replay = store.execute(run_stop.clone(), None).await.unwrap();
+    assert_eq!(replay.result, stopped.result);
+    assert!(
+        replay.stop_runs.is_empty(),
+        "saved outcomes do not repeat stop effects"
+    );
+    let mut run_conflict = run_stop.clone();
+    run_conflict.command = Command::RunStop(RunTarget {
+        run_id: "another-run".into(),
+    });
+    assert_eq!(
+        store
+            .execute(run_conflict.clone(), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::OperationConflict
+    );
+    let saved_shell = serde_json::json!({"accepted":true});
+    store
+        .finalize_runtime(shell_stop.operation_id.clone(), Ok(saved_shell.clone()))
+        .await
+        .unwrap();
+
+    // Stop traffic itself is finite. At that boundary fresh stop IDs are
+    // refused, but saved results/conflicts still precede capacity checks.
+    fill(&store, pressure_id, 301_998_080).await;
+    assert_eq!(
+        store
+            .execute(
+                request(Command::RunStop(RunTarget {
+                    run_id: run_id.clone()
+                })),
+                None
+            )
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::StorageLimit
+    );
+    assert_eq!(
+        store
+            .reserve_runtime(
+                request(Command::ShellStop(ExecutionTarget {
+                    execution_id: "fresh-stop".into()
+                })),
+                None
+            )
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::StorageLimit
+    );
+    assert_eq!(
+        store.execute(run_stop, None).await.unwrap().result,
+        stopped.result
+    );
+    let RuntimeReservation::Saved(Ok(replayed_shell)) =
+        store.reserve_runtime(shell_stop, None).await.unwrap()
+    else {
+        panic!("saved stop result required even at the stop budget limit");
+    };
+    assert_eq!(replayed_shell, saved_shell);
+    assert_eq!(
+        store.execute(run_conflict, None).await.unwrap_err().code,
+        ErrorCode::OperationConflict
+    );
+    assert_eq!(
+        store
+            .reserve_runtime(shell_conflict, None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::OperationConflict
+    );
+    let status = execute(&store, Command::Status(StatusArgs::default()))
+        .await
+        .result;
+    assert_eq!(status["receipt_budget"]["control_available_bytes"], 0);
+    assert_eq!(status["receipt_budget"]["available_bytes"], 0);
+    assert_eq!(status["receipt_budget"]["at_limit"], true);
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM thread", [], |r| r.get::<_, i64>(0))?,
+                1
+            );
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM shell_execution", [], |r| r
+                    .get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT generation FROM turn WHERE run_id=?1",
+                    [&run_id],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    store.database.shutdown().await.unwrap();
+}

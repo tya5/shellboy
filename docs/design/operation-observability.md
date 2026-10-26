@@ -62,9 +62,9 @@ DB側は同ID再送でMutationResultのeffectsを復元せず、wake/停止等�
 
 現在instanceの同ID再送結果は終了まで不変で、read-onlyかどうかとは独立する。読取receiptを一律除外せず、`Status` だけは従来どおりreceipt不要の現在値projectionとする。cursorの有効性・検索snapshot寿命をreceipt保持と同一視しない。
 
-内部既定は保存outcome1件8MiB、operation_receiptのaggregate256MiB。compact.result等の後続metadataはこのreceipt専用上限の外で、既存の全体logical data上限へ引き続き算入し、旧receipt回収時に併せて削除する。各rowのID・origin・hash・時刻・結果と512bytesの管理費、実行中の未使用result予約を算入する。これはSQLiteの物理使用量上限ではない。未知サイズのruntime結果は副作用前に8MiBを予約し、固定ackも現行実装では同じ8MiBを予約する（後述の同時受付上限）。runtime_preflightの512KiBは輸送frameの検証用で、予約byte数を下げるものではない。通常DB操作は同transactionで事前予約を確認し、結果超過はsavepoint内の変更をrollbackする。runtime結果は開始前に上限を保証し、GCの詳細配列には件数上限と総数・省略表示を持たせる。保存outcomeに加え、operation IDやerror hintを含む完全なResponse envelopeが輸送8MiBに収まることも保存前に確認する。予約と確定は同じDB worker順序で行い、確定後に未使用予約を解放する。
+内部既定は保存outcome1件8MiB、operation_receiptの通常受付上限256MiB。停止受付だけの有限余白は後述する。compact.result等の後続metadataはこのreceipt専用上限の外で、既存の全体logical data上限へ引き続き算入し、旧receipt回収時に併せて削除する。各rowのID・origin・hash・時刻・結果と512bytesの管理費、実行中の未使用result予約を算入する。これはSQLiteの物理使用量上限ではない。未知サイズのruntime結果は副作用前に8MiBを予約し、固定ackも現行実装では同じ8MiBを予約する（後述の同時受付上限）。runtime_preflightの512KiBは輸送frameの検証用で、予約byte数を下げるものではない。通常DB操作は同transactionで事前予約を確認し、結果超過はsavepoint内の変更をrollbackする。runtime結果は開始前に上限を保証し、GCの詳細配列には件数上限と総数・省略表示を持たせる。保存outcomeに加え、operation IDやerror hintを含む完全なResponse envelopeが輸送8MiBに収まることも保存前に確認する。予約と確定は同じDB worker順序で行い、確定後に未使用予約を解放する。
 
-予算到達は副作用前の`storage_limit`で拒否し、拒否そのものを新receiptとして蓄積しない。同IDの既存receipt照会は容量検査に先行する。任意回数の新operation receiptを有限な非常用poolへ保存する解決は採らない。receipt不要の`shellboy status --operation ID`を追加し、既存receiptの状態・不確実性・対象ID・予算を読み取れるようにする。全文結果は認証が有効な元callerから元の要求/同IDを再送して得る。失効したOriginでは認証を迂回せず、statusで状態/対象を確認し、容量回復後にoperation getを使う。従来の`operation get`の保存済み結果を変更しない。現在receiptだけで容量が満ちた場合も内部GC（開始時/60秒ごと）とstatus・同ID照会・通常終了は妨げず、明示的なowner再起動で旧terminal receiptを回収できる。動作中ownerを自動再起動しない。
+予算到達は副作用前の`storage_limit`で拒否し、拒否そのものを新receiptとして蓄積しない。同IDの既存receipt照会は容量検査に先行する。任意回数の新operation receiptの受付は保証しない。停止専用の有限余白も同じoperation_receiptと予算計算を使う。receipt不要の`shellboy status --operation ID`を追加し、既存receiptの状態・不確実性・対象ID・予算を読み取れるようにする。全文結果は認証が有効な元callerから元の要求/同IDを再送して得る。失効したOriginでは認証を迂回せず、statusで状態/対象を確認し、容量回復後にoperation getを使う。従来の`operation get`の保存済み結果を変更しない。現在receiptだけで容量が満ちた場合も内部GC（開始時/60秒ごと）とstatus・同ID照会・通常終了は妨げず、明示的なowner再起動で旧terminal receiptを回収できる。動作中ownerを自動再起動しない。
 
 旧instanceのterminal receiptは、accepted/held message・未反映添付・queued/inflight compactによる参照がなければ短いbatchで回収できる。通常は7日を目安とし、容量圧迫時には早期回収する。関連するcompact.resultも一体で回収する。現instanceの全rowと、旧instanceの未確定intentは保護する。旧pendingの8MiB実行中予約は新instanceでは不要なので実metadata量だけ算入し、結果を捏造せず不確実性を維持する。保護対象だけで上限に達した場合も無断削除をせずstatusに示す。旧receipt回収後は元IDで副作用を再実行せずoperation_expired、operation get/status照会はnot foundとなる。
 
@@ -77,7 +77,7 @@ DB側は同ID再送でMutationResultのeffectsを復元せず、wake/停止等�
 
 ## 現instance満杯と同時予約の制限（PR1-3）
 
-256MiBは「完了結果の実metadata/outcome量＋current pendingの未使用予約」の上限である。
+256MiBは通常受付に対する「完了結果の実metadata/outcome量＋current pendingの未使用予約」の上限である。停止受付の追加余白も同じ使用量へ算入する。
 読取・wait・固定ackも新operation IDなら最初に8MiB＋row管理512bytes＋ID/origin/hash/時刻の
 実byte数を予約する。短いmetadataの空fixtureでも同時pendingは31件までで、32件目は副作用前に
 拒否される。既存の完了結果や長いmetadataがあればさらに少ない。これはIPC接続/work枠と別の
@@ -91,13 +91,40 @@ DB側は同ID再送でMutationResultのeffectsを復元せず、wake/停止等�
 結果サイズ・文字escape・ページ幅・操作頻度・並行予約に依存し、固定の稼働時間保証はない。
 実操作の標本bytesと頻度例はreceipt予算検証（非同梱の検証記録）へ記録する。
 
-満杯時は新IDの`storage status`/`storage collect`も同じ予約で拒否される。`run.stop`/`shell.stop`も
-新receiptを必要とし、IPCの停止用優先枠がreceipt容量を保証するわけではない。owner自体の通常
-終了は新CLI receiptを必要としない。回復経路は
+満杯時は新IDの`storage status`/`storage collect`も通常の予約で拒否される。`run.stop`/`shell.stop`は
+後述の停止専用余白を利用できる。owner自体の通常終了は新CLI receiptを必要としない。回復経路は
 receipt-freeの`shellboy status`/`shellboy status --operation ID`、元のcommand/args/callerを保った同ID再送、
 owner内部の定期GCと通常終了、作業終了後の明示restartである。Status/再送は新rowを作らず、
 内部GCはCLI receipt予約を経ない。ただし内部GCがcurrent結果を捨てることはない。restart後も
 旧pending/accepted・held等からの参照保護は維持し、未確定副作用を再実行しない。予約部分だけが
 新instanceでは不要になる。回収可能な旧terminalは通常7日/容量圧迫時の短いbatchで回収し、
 不足が残れば次の内部GC/受付時回収を待つ。保護された実metadataだけで満杯ならrestartだけで
-必ず回復するとは約束しない。無断失効、新しい非常用receipt pool、TTL/表/workerは加えない。
+必ず回復するとは約束しない。無断失効、独立したreceipt pool、TTL/表/workerは加えない。
+
+
+## 通常予算が満杯でも停止を受け付ける（PR2-1）
+
+通常操作は従来の256MiBまでとし、`run.stop`と`shell.stop`だけに、同じoperation_receiptの
+aggregate上限を `256MiB + CONTROL_HEADROOM_BYTES` まで認める。
+`CONTROL_HEADROOM_BYTES = 2 × (MAX_OUTCOME_BYTES + MAX_FRAME_BYTES + 4096)`、すなわち
+33,562,624 bytes、停止時のaggregate上限は301,998,080 bytesとする。IPCの停止用2枠について、
+1件8MiBのoutcome予約、要求frame最大8MiB以内のID/保存origin metadata、512bytesのrow管理費と
+固定hash/instance/時刻を収容する4096bytesを各1件分として置く。通常要求はこの余白を使えない。
+
+これは別のpool、quota counter、表、worker、公開操作を増やす仕組みではない。既存のusage/予約/
+確定/回収をそのまま使い、受付classで上限だけを選ぶ小さな内部enumをreceipt moduleへ置く。
+DB経由のRunStopとruntime経由のShellStopの両方へ適用し、内部送信/編集やその他の操作は通常classを使う。
+新規停止も副作用前に同じ8MiBを予約し、fingerprint・保存outcome・原子的DB停止・runtime pending intentの
+契約は変えない。同ID同要求は満杯判定より先に照合し、保存済み結果を返す。異なる引数はconflict、
+pendingは再実行許可にしない。TUIの現在Run停止は従来どおりreceiptを必要としない。
+
+停止の保存結果も同じaggregate使用量に残るため、通常側に空きが戻るとは限らない。短いmetadataなら
+2件を超える停止も余白に収まるが、無限の新operation IDは受け付けない。停止自身の予約/保存結果や
+保護された旧recordで停止上限も満ちれば新IDは`storage_limit`となる。同ID照会、receipt-free status、
+TUI停止/通常終了、既存の回収/明示restartは維持する。未受付の停止を成功とは表示しない。
+
+`receipt_budget`の既存`limit_bytes`/`available_bytes`/`at_limit`は通常256MiBに対する値を維持し、
+`control_headroom_bytes`、`control_limit_bytes`、`control_available_bytes`を追加する。accounted_bytesは
+両classの共通使用量であり、availableは個々の要求metadataと8MiB予約を差し引く前の量で、受付保証ではない。
+試験は既存予約と実DB counterで通常/停止の満杯境界を作り、通常要求拒否・RunStop適用・ShellStop intent確定・
+保存結果再送・引数conflict・有限余白満杯時の拒否を確認する。巨大結果や実APIは不要。

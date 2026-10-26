@@ -5,6 +5,30 @@ use serde_json::{Value, json};
 
 pub(super) const MAX_OUTCOME_BYTES: u64 = 8 * 1024 * 1024;
 const TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+// Two bounded IPC stop requests can reserve their maximum outcome and metadata
+// even when ordinary admission has consumed its entire budget.
+const CONTROL_HEADROOM_BYTES: u64 = 2 * (MAX_OUTCOME_BYTES + MAX_FRAME_BYTES as u64 + 4096);
+const CONTROL_TOTAL_BYTES: u64 = TOTAL_BYTES + CONTROL_HEADROOM_BYTES;
+
+#[derive(Clone, Copy)]
+pub(super) enum Admission {
+    Normal,
+    Stop,
+}
+impl Admission {
+    pub(super) fn for_command(command: &Command) -> Self {
+        match command {
+            Command::RunStop(_) | Command::ShellStop(_) => Self::Stop,
+            _ => Self::Normal,
+        }
+    }
+    fn limit(self) -> u64 {
+        match self {
+            Self::Normal => TOTAL_BYTES,
+            Self::Stop => CONTROL_TOTAL_BYTES,
+        }
+    }
+}
 const ROW_BYTES: u64 = 512;
 const CLEANUP_BATCH: usize = 128;
 type Result<T> = std::result::Result<T, ApiError>;
@@ -43,6 +67,7 @@ pub(super) fn reserve(
     origin: &str,
     fingerprint: &str,
     now: &str,
+    admission: Admission,
 ) -> Result<()> {
     reserve_with_limit(
         db,
@@ -51,7 +76,7 @@ pub(super) fn reserve(
         origin,
         fingerprint,
         now,
-        TOTAL_BYTES,
+        admission.limit(),
     )
 }
 fn reserve_with_limit(
@@ -115,7 +140,7 @@ pub(crate) fn summary(db: &Connection, instance: &str) -> Result<Value> {
     let used = usage(db, instance)?;
     let protected_old:i64=db.query_row("SELECT q.logical_bytes-(SELECT COALESCE(SUM(512+octet_length(operation_id)+octet_length(instance_id)+octet_length(origin_json)+octet_length(request_hash)+octet_length(created_at)+COALESCE(octet_length(result_ref_json),0)),0) FROM operation_receipt INDEXED BY operation_receipt_pending_budget WHERE instance_id=?1 AND state='pending') FROM quota_counter q WHERE category='operation_receipt.pending_actual'",[instance],|r|r.get(0)).map_err(sql)?;
     Ok(
-        json!({"accounted_bytes":used,"limit_bytes":TOTAL_BYTES,"max_outcome_bytes":MAX_OUTCOME_BYTES,"protected_old_pending_bytes":protected_old,"at_limit":used>=TOTAL_BYTES,"available_bytes":TOTAL_BYTES.saturating_sub(used),"full_result_admission_blocked":used.saturating_add(MAX_OUTCOME_BYTES)>TOTAL_BYTES,"recovery":"same_id_replay_status_internal_gc_explicit_restart"}),
+        json!({"accounted_bytes":used,"limit_bytes":TOTAL_BYTES,"max_outcome_bytes":MAX_OUTCOME_BYTES,"control_headroom_bytes":CONTROL_HEADROOM_BYTES,"control_limit_bytes":CONTROL_TOTAL_BYTES,"control_available_bytes":CONTROL_TOTAL_BYTES.saturating_sub(used),"protected_old_pending_bytes":protected_old,"at_limit":used>=TOTAL_BYTES,"available_bytes":TOTAL_BYTES.saturating_sub(used),"full_result_admission_blocked":used.saturating_add(MAX_OUTCOME_BYTES)>TOTAL_BYTES,"recovery":"same_id_replay_status_internal_gc_explicit_restart"}),
     )
 }
 
@@ -209,13 +234,22 @@ mod tests {
                 "null",
                 "hash",
                 "now",
+                Admission::Normal,
             )
             .unwrap();
         }
         assert_eq!(
-            reserve(&db, "current", "current:32", "null", "hash", "now")
-                .unwrap_err()
-                .code,
+            reserve(
+                &db,
+                "current",
+                "current:32",
+                "null",
+                "hash",
+                "now",
+                Admission::Normal
+            )
+            .unwrap_err()
+            .code,
             ErrorCode::StorageLimit
         );
         assert_eq!(collect(&db, "current", true).unwrap(), 0);
@@ -226,7 +260,16 @@ mod tests {
             31
         );
         db.execute("UPDATE operation_receipt SET state='completed',result_ref_json='{}',reserved_bytes=0 WHERE operation_id='current:0'",[]).unwrap();
-        reserve(&db, "current", "current:32", "null", "hash", "now").unwrap();
+        reserve(
+            &db,
+            "current",
+            "current:32",
+            "null",
+            "hash",
+            "now",
+            Admission::Normal,
+        )
+        .unwrap();
         assert_eq!(
             collect(&db, "current", true).unwrap(),
             0,

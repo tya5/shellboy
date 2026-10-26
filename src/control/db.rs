@@ -17,6 +17,8 @@ use crate::{
     storage::{DbWorker, StorageError},
 };
 
+use super::receipt::Admission;
+
 type Result<T> = std::result::Result<T, ApiError>;
 
 #[derive(Debug, Clone, Default)]
@@ -153,6 +155,7 @@ impl Store {
                     &request.operation_id,
                     &fingerprint,
                     caller.as_ref(),
+                    Admission::Normal,
                     |tx, now| {
                         let target_id = target(
                             match &request.command {
@@ -243,8 +246,13 @@ impl Store {
         let store = self.clone();
         self.database
             .call(move |db| {
-                Ok(
-                    store.transact(db, &operation_id, &fingerprint, None, |tx, now| {
+                Ok(store.transact(
+                    db,
+                    &operation_id,
+                    &fingerprint,
+                    None,
+                    Admission::Normal,
+                    |tx, now| {
                         let target = if let Some(thread) = thread_id {
                             thread
                         } else {
@@ -287,8 +295,8 @@ impl Store {
                             Some(node),
                         )?;
                         Ok(result)
-                    }),
-                )
+                    },
+                ))
             })
             .await
             .map_err(storage_error)?
@@ -324,8 +332,15 @@ impl Store {
                 .map_err(|_| error(ErrorCode::InvalidArgument, "invalid request encoding"))?,
         );
         let preflight = super::receipt::runtime_preflight(&request).err();
-        self.reserve_hashed(request.operation_id, caller, fingerprint, preflight)
-            .await
+        let admission = Admission::for_command(&request.command);
+        self.reserve_hashed(
+            request.operation_id,
+            caller,
+            fingerprint,
+            preflight,
+            admission,
+        )
+        .await
     }
     pub async fn reserve_internal(
         &self,
@@ -337,6 +352,7 @@ impl Store {
             None,
             hash(serde_json::to_vec(&json!({"internal_operation":body})).unwrap()),
             None,
+            Admission::Normal,
         )
         .await
     }
@@ -346,6 +362,7 @@ impl Store {
         caller: Option<Origin>,
         fingerprint: String,
         preflight: Option<ApiError>,
+        admission: Admission,
     ) -> Result<RuntimeReservation> {
         let instance_id = self.instance_id.clone();
         self.database.call(move|db| {
@@ -366,7 +383,7 @@ impl Store {
             let valid=operation_id.split_once(':').is_some_and(|(instance,nonce)|instance==instance_id && !nonce.is_empty());
             if !valid {return Ok(Err(error(ErrorCode::OperationExpired,"unknown operation from an earlier instance cannot execute")));}
             if let Some(error)=preflight {return Ok(Err(error));}
-            if let Err(error)=super::receipt::reserve(&tx,&instance_id,&operation_id,&serde_json::to_string(&caller.as_ref().map(|origin|origin.identity())).unwrap(),&fingerprint,&chrono::Utc::now().to_rfc3339()) {
+            if let Err(error)=super::receipt::reserve(&tx,&instance_id,&operation_id,&serde_json::to_string(&caller.as_ref().map(|origin|origin.identity())).unwrap(),&fingerprint,&chrono::Utc::now().to_rfc3339(),admission) {
                 if error.code==ErrorCode::StorageLimit {tx.commit()?;}
                 return Ok(Err(error));
             }
@@ -555,6 +572,7 @@ impl Store {
             &request.operation_id,
             &fingerprint,
             caller,
+            Admission::for_command(&request.command),
             |tx, now| self.dispatch(tx, &request.command, caller, &request.operation_id, now),
         )
     }
@@ -582,8 +600,13 @@ impl Store {
         let store = self.clone();
         self.database
             .call(move |connection| {
-                Ok(
-                    store.transact(connection, &operation_id, &fingerprint, None, |tx, now| {
+                Ok(store.transact(
+                    connection,
+                    &operation_id,
+                    &fingerprint,
+                    None,
+                    Admission::Normal,
+                    |tx, now| {
                         let thread_id = store.create_thread(tx, &args, now)?;
                         store.send(
                             tx,
@@ -595,8 +618,8 @@ impl Store {
                             &operation_id,
                             now,
                         )
-                    }),
-                )
+                    },
+                ))
             })
             .await
             .map_err(storage_error)?
@@ -608,6 +631,7 @@ impl Store {
         operation_id: &str,
         fingerprint: &str,
         caller: Option<&Origin>,
+        admission: Admission,
         operation: impl FnOnce(&Transaction<'_>, &str) -> Result<MutationResult>,
     ) -> Result<MutationResult> {
         let tx = connection.transaction().map_err(sql_error)?;
@@ -634,6 +658,7 @@ impl Store {
             &serde_json::to_string(&caller.map(Origin::identity)).unwrap(),
             fingerprint,
             &now,
+            admission,
         ) {
             if error.code == ErrorCode::StorageLimit {
                 tx.commit().map_err(sql_error)?;
