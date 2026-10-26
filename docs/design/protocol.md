@@ -169,6 +169,8 @@ owner lock取得後に前回endpoint metadataの既知pathだけを確認し、�
 
 会話保存先はソケットと独立に、Unixで新規作成時0700とする。既存保存先も自分のdirectoryであることを確認し0700へ限定するが、symlinkや他uid所有へchmodしない。作成・検証は起動のfile workerで行い、UI threadへI/Oを持ち込まない。OS一時領域自体へ書けない等の残る失敗では、利用者へ次の操作を示し、詳しい理由は詳細情報へ保持する。XDG_RUNTIME_DIRを優先する。
 
+Unixのdata-dir末端はsymlinkを拒否し、実ディレクトリを明示するよう案内する。祖先のsymlinkを一律禁止する契約ではない。起動中のprobe失敗・生存socket・probe timeout・namespace lease・bind失敗は既存`io_failed`のまま、人向け原因と次操作、detailsの`component=local_ipc`・`phase=startup`・`reason`・低層`cause`を返す。生存/判定不能socketは保全する。稼働後listener失敗の「受付済みreceiptを確認する」案内を起動時には流用しない。wire型・状態・永続記録は増やさない。
+
 Linuxでは新規live namespace directory自身を`O_DIRECTORY|O_NOFOLLOW`で開き、作成したdevice/inode・
 実効uid所有0700を照合して、既存fs2のnonblocking exclusive BSD flockを取得する。directory FDは
 既存のSocketFile/EndpointFilesがlistener終了と自身の清掃まで1本保持し、最後の正規所有者のDropで

@@ -37,6 +37,8 @@ cargo run --locked --bin shellboy -- --config /path/to/config.toml --data-dir /p
 
 ownerのdata-dirはCLI引数 > `SHELLBOY_DATA_DIR` > TOML > OS既定の順です。接続CLIはTOMLを読みません。相対path等の詳細は [設定設計](../design/config.md) に従います。Shellboyは旧名の保存先・環境変数・実行名を互換として探索せず、旧データを自動移動しません。既存データの移動作業は今回不要です。
 
+Unixでは保存先の末端にsymlinkを指定できません。自分が所有する実ディレクトリを `--data-dir` で指定してください。保存先は0700へ限定しますが、symlinkのリンク先をchmodしません。通信の起動が拒否された場合は表示された原因・次操作に従い、生存または停止を確認できない通信先を手動で削除しないでください。前回のShellboyが生存していれば通常終了し、一時領域の権限・空き容量や通信資源を確認して再起動します。これは稼働後の通信障害に対する受付済みoperation確認とは別の起動診断です。
+
 ## 標準チェック
 
 macOS/Linuxでは `sh scripts/check.sh`、Windows PowerShellでは `./scripts/check.ps1` を使います。内容は以下です。

@@ -1,5 +1,5 @@
 //! Owner-bound socket namespace and cleanup, with filesystem work off the UI.
-use super::server_error;
+use super::{server_error, startup_error};
 use crate::{app::Endpoint, protocol::ApiError};
 use std::{
     io,
@@ -242,12 +242,17 @@ pub(super) async fn bind_unix(
                         error.kind(),
                         io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
                     ) => {}
-                Ok(Err(error)) => return Err(server_error("existing socket probe failed", error)),
-                _ => {
-                    return Err(server_error(
-                        "bind refused",
-                        "existing socket is live or its probe timed out; preserved",
+                Ok(Err(error)) => {
+                    return Err(startup_error("existing_socket_probe_failed", error));
+                }
+                Ok(Ok(_)) => {
+                    return Err(startup_error(
+                        "existing_socket_live",
+                        "existing socket preserved",
                     ));
+                }
+                Err(error) => {
+                    return Err(startup_error("existing_socket_probe_timeout", error));
                 }
             }
         }
@@ -319,7 +324,7 @@ pub(super) async fn bind_unix(
                     // contents. No recursive delete or lockfile is needed.
                     let _ = tokio::task::spawn_blocking(move || created.remove()).await;
                     let _ = files.cleanup().await;
-                    return Err(error);
+                    return Err(startup_error("namespace_lease_failed", error));
                 }
             }
         };
@@ -329,7 +334,7 @@ pub(super) async fn bind_unix(
             Err(error) => {
                 let _ = tokio::task::spawn_blocking(move || created.remove()).await;
                 let _ = files.cleanup().await;
-                return Err(server_error("bind failed", error));
+                return Err(startup_error("bind_failed", error));
             }
         };
         let socket = tokio::task::spawn_blocking(move || {

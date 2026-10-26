@@ -616,3 +616,42 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
         "the closed watch must not produce repeated UI notices"
     );
 }
+
+#[test]
+fn startup_failures_explain_the_phase_without_mutation_recovery_advice() {
+    for reason in [
+        "existing_socket_live",
+        "existing_socket_probe_timeout",
+        "existing_socket_probe_failed",
+        "namespace_lease_failed",
+        "bind_failed",
+    ] {
+        let error = super::startup_error(
+            reason,
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        );
+        assert_eq!(error.code, crate::protocol::ErrorCode::IoFailed);
+        assert!(!error.message.contains("Permission denied"));
+        let hint = error.hint.as_deref().unwrap();
+        assert!(!hint.contains("receipt"));
+        assert!(!hint.contains("Restart the owner"));
+        let details = error.details.as_ref().unwrap();
+        assert_eq!(details["phase"], "startup");
+        assert_eq!(details["reason"], reason);
+        assert!(details["cause"].is_string());
+        assert_eq!(super::startup_context(error.clone()), error);
+    }
+    let nested = super::startup_context(super::server_error("socket metadata failed", "not found"));
+    assert_eq!(
+        nested.details.as_ref().unwrap()["reason"],
+        "endpoint_preparation_failed"
+    );
+    assert!(!nested.hint.as_deref().unwrap().contains("receipt"));
+    // Runtime listener failure is distinct: it can follow accepted mutations.
+    assert!(
+        super::server_error("listener stopped", "fixture")
+            .hint
+            .unwrap()
+            .contains("receipts")
+    );
+}

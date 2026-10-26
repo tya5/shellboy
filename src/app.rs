@@ -47,7 +47,14 @@ impl OwnerLock {
                 .read(true)
                 .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
                 .open(data_dir.components().collect::<PathBuf>())
-                .map_err(io_error)?;
+                .map_err(|error| {
+                    ApiError::new(
+                        ErrorCode::IoFailed,
+                        "保存先を安全に開けません。保存先の末端はsymlinkではなく、自分が所有する実ディレクトリが必要です",
+                    )
+                    .hint("自分が所有する実ディレクトリを --data-dir で指定し、読み書き権限を確認してください")
+                    .details(serde_json::json!({"component":"data_directory", "reason":"directory_open_failed", "os_error":error.raw_os_error(), "cause":error.to_string()}))
+                })?;
             let metadata = directory.metadata().map_err(io_error)?;
             // Never chmod through a symlink or alter another user's directory.
             if !metadata.is_dir()
@@ -298,7 +305,13 @@ mod owner_lock_tests {
             let before = std::fs::metadata(&target).unwrap().mode();
             let alias = data.parent().unwrap().join("alias");
             std::os::unix::fs::symlink(&target, &alias).unwrap();
-            assert!(OwnerLock::acquire(&PathBuf::from(format!("{}/", alias.display()))).is_err());
+            let error = match OwnerLock::acquire(&PathBuf::from(format!("{}/", alias.display()))) {
+                Ok(_) => panic!("symlink data directory must be refused"),
+                Err(error) => error,
+            };
+            assert!(error.message.contains("symlink"));
+            assert!(error.hint.as_deref().unwrap().contains("--data-dir"));
+            assert_eq!(error.details.unwrap()["reason"], "directory_open_failed");
             assert_eq!(std::fs::metadata(target).unwrap().mode(), before);
             let config = data.parent().unwrap().join("config.toml");
             std::fs::write(&config, "").unwrap();

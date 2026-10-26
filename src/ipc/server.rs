@@ -120,6 +120,45 @@ fn server_error(context: &str, error: impl std::fmt::Display) -> ApiError {
         .hint("Restart the owner to restore CLI access and inspect known operation receipts before repeating mutations")
 }
 
+/// Startup has no accepted IPC work to recover. Keep its advice separate from
+/// a listener that failed after accepting requests; never suggest replay here.
+fn startup_error(reason: &str, error: impl std::fmt::Display) -> ApiError {
+    let (message, hint) = match reason {
+        "existing_socket_live" => (
+            "前回の通信先が応答しているため、起動を中止しました",
+            "既存のShellboyを通常終了してから、起動し直してください",
+        ),
+        "existing_socket_probe_timeout" | "existing_socket_probe_failed" => (
+            "前回の通信先が停止済みか確認できないため、起動を中止しました",
+            "既存のShellboyの状態を確認してください。通信先は安全のため削除していません",
+        ),
+        "namespace_lease_failed" => (
+            "一時通信領域を専有できないため、起動を中止しました",
+            "OSの一時領域の権限とロック利用可否を確認して、起動し直してください",
+        ),
+        _ => (
+            "ローカル通信の待受を開始できません",
+            "OSの一時通信領域の空き容量・権限と通信資源の使用状況を確認して、起動し直してください",
+        ),
+    };
+    ApiError::new(ErrorCode::IoFailed, message)
+        .hint(hint)
+        .details(serde_json::json!({"component":"local_ipc", "phase":"startup", "reason":reason, "cause":error.to_string()}))
+}
+
+fn startup_context(error: ApiError) -> ApiError {
+    // Specific namespace/startup diagnostics already carry a reason and advice.
+    if error
+        .details
+        .as_ref()
+        .is_some_and(|details| details["component"] == "local_ipc" && details["reason"].is_string())
+    {
+        error
+    } else {
+        startup_error("endpoint_preparation_failed", error)
+    }
+}
+
 fn retryable(error: &io::Error) -> bool {
     if matches!(
         error.kind(),
@@ -220,7 +259,9 @@ impl LocalServer {
     ) -> Result<Self, ApiError> {
         let instance = owner.instance_id.clone();
         #[cfg(unix)]
-        let (listener, _, socket) = endpoint::bind_unix(owner, instance.clone()).await?;
+        let (listener, _, socket) = endpoint::bind_unix(owner, instance.clone())
+            .await
+            .map_err(startup_context)?;
         #[cfg(windows)]
         let (listener, endpoint) = {
             use crate::{app::Endpoint, protocol::PROTOCOL_VERSION};
@@ -229,7 +270,7 @@ impl LocalServer {
             let pipe = ServerOptions::new()
                 .first_pipe_instance(true)
                 .create(&address)
-                .map_err(|error| server_error("bind failed", error))?;
+                .map_err(|error| startup_error("bind_failed", error))?;
             (
                 PipeAcceptor {
                     pipe,
@@ -254,7 +295,7 @@ impl LocalServer {
         if let Err(error) = owner.publish_endpoint(endpoint).await {
             drop(listener);
             let _ = files.cleanup().await;
-            return Err(error);
+            return Err(startup_context(error));
         }
         Ok(Self::start(listener, instance, requests, files))
     }
