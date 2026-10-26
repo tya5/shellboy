@@ -1,5 +1,7 @@
 //! Owner-bound socket namespace and cleanup, with filesystem work off the UI.
-use super::{server_error, startup_error};
+use super::server_error;
+#[cfg(unix)]
+use super::startup_error;
 use crate::{app::Endpoint, protocol::ApiError};
 use std::{
     io,
