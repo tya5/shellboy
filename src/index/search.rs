@@ -54,13 +54,28 @@ impl IndexService {
                 ));
             }
         }
+        let config = self.config.clone();
         let space = self
             .database
-            .call(|db| {
-                meta(db, IndexKeys::ACTIVE_SPACE)?
-                    .map(|id| load_space(db, &id))
-                    .transpose()
-                    .map(Option::flatten)
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let space = meta(&tx, IndexKeys::ACTIVE_SPACE)?
+                    .map(|id| load_space(&tx, &id))
+                    .transpose()?.flatten();
+                if let Some(space) = &space {
+                    if !config.connections.contains_key(&space.profile) {
+                        return Err(StorageError::from(err(ErrorCode::ConfigInvalid,
+                            "Selected index space connection is not configured")));
+                    }
+                    let marker = meta(&tx, &IndexKeys::query_profile(&space.id))?;
+                    let key = identity::query_profile_key(&config, &space.profile, &space.model,
+                        &space.splitter, marker.as_deref()).ok_or_else(|| StorageError::from(err(
+                            ErrorCode::InvalidState,
+                            "Index query fingerprint is incompatible; restore the original embedding/split configuration and select the space to verify it")))?;
+                    identity::bind_query_profile(&tx, &space.id, &key)?;
+                }
+                tx.commit()?;
+                Ok(space)
             })
             .await
             .map_err(db_error)?;
@@ -274,13 +289,14 @@ fn filtered_hits(
 
 /// Read-only snapshot adapter for standalone RAG. Does not open/migrate the
 /// conversation store or start indexing workers.
-pub(crate) fn rag_profile_key(
-    config: &Config,
-    name: &str,
-    model: &str,
-    splitter: &str,
-) -> Option<String> {
-    identity::compatible_profile_key(config, name, model, splitter)
+pub(crate) fn rag_profile_key(config: &Config, space: &SpaceDescriptor) -> Option<String> {
+    identity::query_profile_key(
+        config,
+        &space.profile,
+        &space.model,
+        &space.splitter,
+        space.query_profile_key.as_deref(),
+    )
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SpaceDescriptor {
@@ -289,6 +305,7 @@ pub(crate) struct SpaceDescriptor {
     pub(crate) model: String,
     pub(crate) dimension: usize,
     pub(crate) splitter: String,
+    pub(crate) query_profile_key: Option<String>,
     table: String,
 }
 pub(crate) fn rag_space(db: &Connection) -> Result<Option<SpaceDescriptor>, ApiError> {
@@ -298,7 +315,9 @@ pub(crate) fn rag_space(db: &Connection) -> Result<Option<SpaceDescriptor>, ApiE
     let Some(space) = load_space(db, &id).map_err(db_error)? else {
         return Ok(None);
     };
+    let query_profile_key = meta(db, &IndexKeys::query_profile(&space.id)).map_err(db_error)?;
     Ok(Some(SpaceDescriptor {
+        query_profile_key,
         id: space.id,
         profile: space.profile,
         model: space.model,
@@ -418,4 +437,53 @@ fn exact_filtered_hits(
         }
     }
     Ok(hits)
+}
+
+#[cfg(test)]
+mod visibility_cost_tests {
+    use super::*;
+
+    /// A diagnostic measurement, not a latency SLA: same production visibility
+    /// function, bundled SQLite, no provider traffic or persisted user history.
+    #[tokio::test]
+    async fn visibility_cost_across_shared_replacement_depths() {
+        for depth in [0, 8, 64] {
+            let temp = tempfile::tempdir().unwrap();
+            let worker = DbWorker::open(temp.path().join("visibility.sqlite"))
+                .await
+                .unwrap();
+            worker.call(move |db| {
+                let tx = db.transaction()?;
+                tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,deleted_at) VALUES('deleted','/','/a','p','m','now','now'),('live','/','/a','p','m','now',NULL);")?;
+                for i in 0..=depth {
+                    let summary = format!("summary-{i}");
+                    tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'summary','now','{}')", [&summary])?;
+                    tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,?1,?1,'1','1','completed','now')", [&summary])?;
+                    if i > 0 {
+                        tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)VALUES(?1,0,?2,0)", params![summary,format!("summary-{}",i-1)])?;
+                    }
+                }
+                tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('live',0,?1)",[format!("summary-{depth}")])?;
+                for i in 0..256 {
+                    let source = format!("source-{i}");
+                    tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')", [&source])?;
+                    tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('deleted',?1,?2)",params![i,source])?;
+                    tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)VALUES('summary-0',?1,?2,0)",params![i,source])?;
+                }
+                tx.commit()?;
+                for live in [true, false] {
+                    if !live {
+                        db.execute("UPDATE thread SET deleted_at='now' WHERE id='live'", [])?;
+                    }
+                    let started = std::time::Instant::now();
+                    for i in 0..256 {
+                        assert_eq!(history::reachability::searchable(db, &format!("source-{i}"))?, live);
+                    }
+                    eprintln!("visibility sources=256 shared_depth={depth} live={live} elapsed_us={}",started.elapsed().as_micros());
+                }
+                Ok(())
+            }).await.unwrap();
+            worker.shutdown().await.unwrap();
+        }
+    }
 }

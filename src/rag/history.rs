@@ -286,8 +286,8 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
             "History embedding connection is not configured",
         )
     })?;
-    let key = crate::index::rag_profile_key(&loaded.config, name, model, &descriptor.splitter)
-        .ok_or_else(||err("index_incompatible","History index endpoint/model/splitter fingerprint does not match current configuration"))?;
+    let key = crate::index::rag_profile_key(&loaded.config, &descriptor)
+        .ok_or_else(||err("index_incompatible","History index endpoint/model identity is unverified; restore its original split_chars setting or select a verified index space"))?;
     let profile = search::Profile {
         id: key,
         name: name.into(),

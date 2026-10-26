@@ -2954,6 +2954,12 @@ async fn upgrade_keeps_legacy_search_and_reuses_ready_candidate_until_explicit_s
         current.status(args()).await.unwrap().space_id.as_deref(),
         Some(old.as_str())
     );
+    let status = current.status(args()).await.unwrap();
+    assert!(
+        status.reason.as_deref().is_some_and(
+            |reason| reason.contains(&candidate) && reason.contains("Explicitly select")
+        )
+    );
     let hits = current.search("cat", 10).await.unwrap();
     assert_eq!(
         hits.iter()
@@ -3029,5 +3035,144 @@ async fn changing_uncoded_400_details_do_not_bypass_the_terminal_failure_breaker
         3,
         "remaining authorized source must not incur another request while paused"
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn query_identity_survives_split_changes_and_never_silently_rebinds_endpoints() {
+    let mut config = Config::default();
+    config.indexing.split_chars = 8;
+    let f = Fixture::new(config).await;
+    f.node("query-source", "cat source").await;
+    f.service
+        .enqueue_new(&["query-source".into()])
+        .await
+        .unwrap();
+    f.drain().await;
+    let space = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let marker_key = format!("index.query_profile.{space}");
+    let marker_copy = marker_key.clone();
+    let marker =
+        f.db.call(move |db| {
+            db.query_row(
+                "SELECT value FROM app_meta WHERE key=?1",
+                [marker_copy],
+                |r| r.get::<_, String>(0),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap();
+    assert_eq!(marker.len(), 64);
+    assert!(marker.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    let changed = configured_service(&f, 12);
+    assert!(!changed.search("cat", 10).await.unwrap().is_empty());
+    let marker_copy = marker_key.clone();
+    f.db.call(move |db| {
+        db.execute("DELETE FROM app_meta WHERE key=?1", [marker_copy])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let requests = f.proxy.count();
+    let error = changed.search("cat", 10).await.unwrap_err();
+    assert!(error.message.contains("original embedding/split"));
+    assert_eq!(
+        f.proxy.count(),
+        requests,
+        "unknown old splitter is refused before HTTP"
+    );
+    assert!(
+        changed.select_space(&space).await.is_err(),
+        "select still requires matching split configuration"
+    );
+    f.service.select_space(&space).await.unwrap();
+    assert!(!changed.search("cat", 10).await.unwrap().is_empty());
+    let other = Proxy::new().await;
+    let mut config = Config::default();
+    config.indexing.split_chars = 8;
+    config.connections.insert(
+        "embed".into(),
+        Connection {
+            base_url: other.url.clone(),
+            ..Default::default()
+        },
+    );
+    config.embedding.connection = Some("embed".into());
+    config.embedding.model = Some("embedding-fixture".into());
+    let endpoint_changed = IndexService::new(f.db.clone(), Arc::new(config));
+    assert!(endpoint_changed.search("cat", 10).await.is_err());
+    assert!(endpoint_changed.select_space(&space).await.is_err());
+    assert_eq!(
+        other.count(),
+        0,
+        "endpoint changes require an explicit new index, not query rebinding"
+    );
+    let marker_copy = marker_key.clone();
+    f.db.call(move |db| {
+        assert_eq!(
+            db.query_row(
+                "SELECT value FROM app_meta WHERE key=?1",
+                [&marker_copy],
+                |r| r.get::<_, String>(0)
+            )?,
+            marker
+        );
+        db.execute(
+            "UPDATE app_meta SET value='malformed' WHERE key=?1",
+            [marker_copy],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let requests = f.proxy.count();
+    assert!(f.service.search("cat", 10).await.is_err());
+    assert!(f.service.select_space(&space).await.is_err());
+    assert_eq!(
+        f.proxy.count(),
+        requests,
+        "corrupt marker must not fall back to matching splitter"
+    );
+    other.close().await;
+    f.close().await;
+}
+
+#[tokio::test]
+async fn owner_search_verifies_and_completes_pre_g5_query_metadata_without_guessing_split() {
+    let mut config = Config::default();
+    config.indexing.split_chars = 8;
+    let f = Fixture::new(config).await;
+    f.node("query-legacy", "cat legacy").await;
+    f.service
+        .enqueue_new(&["query-legacy".into()])
+        .await
+        .unwrap();
+    f.drain().await;
+    legacy_fixture(&f).await;
+    f.db.call(|db| {
+        db.execute(
+            "DELETE FROM app_meta WHERE key LIKE 'index.query_profile.%'",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let changed = configured_service(&f, 12);
+    assert!(!changed.search("cat", 10).await.unwrap().is_empty());
+    f.db.call(|db| {
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'index.query_profile.%'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?,
+            1
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
     f.close().await;
 }

@@ -7,11 +7,13 @@ pub(super) struct EmbeddingIdentity {
     pub(super) key: String,
     pub(super) profile: String,
     pub(super) model: String,
+    pub(super) query_key: String,
 }
 impl EmbeddingIdentity {
     pub(super) fn configured(config: &Config, key: String) -> Self {
         Self {
             key,
+            query_key: legacy_profile_key(config).expect("configured embedding identity"),
             profile: config.embedding.connection.clone().unwrap_or_default(),
             model: config.embedding.model.clone().unwrap_or_default(),
         }
@@ -55,6 +57,39 @@ pub(super) fn compatible_profile_key(
         .into_iter()
         .find(|key| splitter == IndexKeys::new(key).splitter())
 }
+/// Query compatibility is independent of the source segmentation policy.
+/// Unknown old keys still require the full current-policy compatibility proof.
+pub(super) fn query_profile_key(
+    config: &Config,
+    name: &str,
+    model: &str,
+    splitter: &str,
+    stored: Option<&str>,
+) -> Option<String> {
+    let connection = config.connections.get(name)?;
+    let expected = endpoint_key(name, &connection.base_url, model);
+    if let Some(stored) = stored {
+        return (stored == expected).then_some(expected);
+    }
+    compatible_profile_key(config, name, model, splitter).map(|_| expected)
+}
+
+pub(super) fn bind_query_profile(
+    tx: &Transaction<'_>,
+    space: &str,
+    expected: &str,
+) -> Result<(), StorageError> {
+    let key = IndexKeys::query_profile(space);
+    match meta(tx, &key)? {
+        Some(stored) if stored == expected => Ok(()),
+        Some(_) => Err(StorageError::from(err(
+            ErrorCode::InvalidState,
+            "Selected index space endpoint/model fingerprint does not match current configuration",
+        ))),
+        None => set_meta(tx, &key, expected),
+    }
+}
+
 pub(super) fn legacy_may_activate(
     db: &Connection,
     keys: IndexKeys<'_>,
@@ -147,10 +182,17 @@ impl IndexService {
         self.key()?;
         let id = space_id.to_owned();
         let keys = self.identity_keys();
+        let config = self.config.clone();
         self.database
             .call(move |db| {
                 let tx = db.transaction()?;
                 select_space_tx(&tx, &id, &keys)?;
+                let space = load_space(&tx, &id)?.ok_or_else(serde_error)?;
+                let query_key = query_profile_key(&config, &space.profile, &space.model,
+                    &space.splitter, meta(&tx, &IndexKeys::query_profile(&id))?.as_deref())
+                    .ok_or_else(|| StorageError::from(err(ErrorCode::InvalidState,
+                        "Selected index space endpoint/model fingerprint does not match current configuration")))?;
+                bind_query_profile(&tx, &id, &query_key)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -442,6 +484,22 @@ fn read_status(
     if let Some(space) = &selected {
         spaces.insert(space.clone());
     }
+    let mut upgrade_candidate = None;
+    if !explicit
+        && keys.len() > 1
+        && selected
+            .as_ref()
+            .map(|id| load_space(db, id))
+            .transpose()?
+            .flatten()
+            .is_some_and(|space| {
+                legacy
+                    .as_ref()
+                    .is_some_and(|key| space.splitter == IndexKeys::new(key).splitter())
+            })
+    {
+        upgrade_candidate = meta(db, &IndexKeys::new(&keys[0]).group("active"))?;
+    }
     for key in &keys {
         if let Some(pause) = meta(db, &IndexKeys::new(key).pause())? {
             status.paused = true;
@@ -537,6 +595,14 @@ fn read_status(
     if keys.is_empty() {
         status.reason = Some("Embedding connection/model is not configured".into());
     }
+    if status.reason.is_none()
+        && let Some(candidate) = upgrade_candidate
+    {
+        status.reason = Some(format!(
+            "Legacy search selection is preserved; current-policy sources are indexed into candidate {candidate}. Explicitly select this candidate after all authorized inputs succeed, or rebuild the intended sources"
+        ));
+    }
+
     Ok(status)
 }
 fn read_next_delay(
@@ -586,6 +652,46 @@ fn read_next_delay(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verified_query_marker_is_written_once_and_matching_reads_do_not_write() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            CREATE TRIGGER prevent_marker_update BEFORE UPDATE ON app_meta
+            WHEN OLD.key LIKE 'index.query_profile.%'
+            BEGIN SELECT RAISE(ABORT,'query marker must not be rewritten'); END;",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        bind_query_profile(&tx, "space", "verified").unwrap();
+        tx.commit().unwrap();
+        let before: i64 = db
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(before, 1);
+        let tx = db.transaction().unwrap();
+        bind_query_profile(&tx, "space", "verified").unwrap();
+        let error = bind_query_profile(&tx, "space", "different")
+            .unwrap_err()
+            .into_api_error();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert_eq!(
+            meta(&tx, &IndexKeys::query_profile("space"))
+                .unwrap()
+                .as_deref(),
+            Some("verified")
+        );
+        tx.commit().unwrap();
+        let after: i64 = db
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            after, before,
+            "matching reads and rejected rebinding do not write"
+        );
+    }
+
     #[test]
     fn segmentation_policy_changes_identity_but_not_endpoint_failure_family() {
         let mut config = Config::default();

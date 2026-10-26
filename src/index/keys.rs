@@ -43,6 +43,9 @@ impl<'a> IndexKeys<'a> {
     pub(super) fn input(job: &str) -> String {
         format!("{}{job}", Self::INPUT_PREFIX)
     }
+    pub(super) fn query_profile(space: &str) -> String {
+        format!("index.query_profile.{space}")
+    }
     pub(super) fn preview(chunk: &str) -> String {
         format!("{}{chunk}", Self::PREVIEW_PREFIX)
     }
@@ -79,6 +82,10 @@ mod tests {
             (keys.splitter(), "unicode-paragraph-v1:profile:日本"),
             (IndexKeys::input("job:1"), "index.input.job:1"),
             (IndexKeys::preview("chunk:1"), "index.preview.chunk:1"),
+            (
+                IndexKeys::query_profile("space:1"),
+                "index.query_profile.space:1",
+            ),
             (IndexKeys::observed("thread:1"), "index.observed.thread:1"),
         ] {
             assert_eq!(actual.as_bytes(), expected.as_bytes());

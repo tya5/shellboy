@@ -176,6 +176,7 @@ pub(super) fn ensure_space(
                 "Embedding dimension changed; explicitly rebuild into a new space",
             )));
         }
+        identity::bind_query_profile(tx, &space.id, &embedding.query_key)?;
         return Ok(space);
     }
     if dimension == 0 || dimension > crate::storage::MAX_VECTOR_DIMENSIONS {
@@ -216,6 +217,7 @@ pub(super) fn ensure_space(
             table
         ],
     )?;
+    identity::bind_query_profile(tx, &space, &embedding.query_key)?;
     Ok(Space {
         id: space,
         profile: profile.into(),

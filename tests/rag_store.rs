@@ -701,6 +701,59 @@ async fn history_semantic_accepts_custom_split_and_legacy_without_default_embedd
     let current = search(root, "history", "NEAR", SearchMode::Semantic).await;
     assert_eq!(current["ok"], true, "{current}");
     assert!(!current["result"]["items"].as_array().unwrap().is_empty());
+    let changed_split = read_config.replace("split_chars=8", "split_chars=12");
+    std::fs::write(root.join("config.toml"), &changed_split).unwrap();
+    let changed = search(root, "history", "NEAR", SearchMode::Semantic).await;
+    assert_eq!(
+        changed["ok"], true,
+        "query embedding identity is independent of segmentation: {changed}"
+    );
+    assert!(!changed["result"]["items"].as_array().unwrap().is_empty());
+    let query_count = requests.load(Ordering::SeqCst);
+    std::fs::write(
+        root.join("config.toml"),
+        changed_split.replace(&endpoint, "http://127.0.0.1:1/v1"),
+    )
+    .unwrap();
+    let wrong_endpoint = search(root, "history", "NEAR", SearchMode::Semantic).await;
+    assert_eq!(
+        wrong_endpoint["result"]["scope_errors"][0]["code"],
+        "index_incompatible"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        query_count,
+        "reject mismatching endpoint before HTTP"
+    );
+    std::fs::write(root.join("config.toml"), &changed_split).unwrap();
+    db.call(|db| {
+        db.execute("DELETE FROM app_meta WHERE key='index.query_profile.'||(SELECT value FROM app_meta WHERE key='index.active_space')", [])?;
+        Ok(())
+    }).await.unwrap();
+    let unverified = search(root, "history", "NEAR", SearchMode::Semantic).await;
+    assert_eq!(
+        unverified["result"]["scope_errors"][0]["code"], "index_incompatible",
+        "do not guess the original split policy: {unverified}"
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), query_count);
+    std::fs::write(root.join("config.toml"), &read_config).unwrap();
+    let matching = search(root, "history", "NEAR", SearchMode::Semantic).await;
+    assert_eq!(
+        matching["ok"], true,
+        "unmarked spaces retain strict verified fallback: {matching}"
+    );
+    assert_eq!(
+        db.call(|db| Ok(db.query_row(
+            "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'index.query_profile.%'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?))
+        .await
+        .unwrap(),
+        0,
+        "standalone RAG must not supplement owner metadata"
+    );
+    std::fs::write(root.join("config.toml"), &changed_split).unwrap();
     let legacy =
         Sha256::digest(format!("fixture\0{endpoint}\0synthetic\0unicode-paragraph-v1").as_bytes())
             .iter()
@@ -712,12 +765,12 @@ async fn history_semantic_accepts_custom_split_and_legacy_without_default_embedd
     assert!(!old["result"]["items"].as_array().unwrap().is_empty());
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        indexed + 2,
+        indexed + 4,
         "only explicit query embeddings; no source reindex"
     );
     std::fs::write(
         root.join("config.toml"),
-        read_config.replace(&endpoint, "http://127.0.0.1:1/v1"),
+        changed_split.replace(&endpoint, "http://127.0.0.1:1/v1"),
     )
     .unwrap();
     let incompatible = search(root, "history", "NEAR", SearchMode::Semantic).await;
@@ -725,7 +778,7 @@ async fn history_semantic_accepts_custom_split_and_legacy_without_default_embedd
         incompatible["result"]["scope_errors"][0]["code"],
         "index_incompatible"
     );
-    assert_eq!(requests.load(Ordering::SeqCst), indexed + 2);
+    assert_eq!(requests.load(Ordering::SeqCst), indexed + 4);
     db.shutdown().await.unwrap();
     server.abort();
 }
