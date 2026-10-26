@@ -149,11 +149,8 @@ impl Control {
                 // with the starter's deferred-stop check, so neither misses it.
                 let mut operations = control.runtime_operations.lock().await;
                 operations.remove(&operation_id);
-                if stop_self
-                    && let Some(execution) = deferred_shell_stop
-                    && let Some(shell) = control.live.shells.lock().await.get(&execution)
-                {
-                    shell.handle.stop();
+                if stop_self && let Some(execution) = deferred_shell_stop {
+                    control.live.stop_shell(&execution).await;
                 }
                 drop(operations);
                 control.changed.notify_waiters();
@@ -451,15 +448,15 @@ impl Control {
         }).await.map_err(storage_error)?;
         if let Some(thread) = target {
             self.changed(&thread);
-            let shell = self.live.shells.lock().await.get(&execution_id).cloned();
+            let shell = self.live.clone_shell_handle(&execution_id).await;
             if let Some(shell) = shell {
                 if is_eof {
-                    shell.handle.eof().await?;
+                    shell.eof().await?;
                 } else if !caller
                     .as_ref()
                     .is_some_and(|origin| origin.execution_id == execution_id)
                 {
-                    shell.handle.stop();
+                    shell.stop();
                 }
             }
             Ok(json!({"accepted":true}))

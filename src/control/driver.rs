@@ -593,13 +593,16 @@ async fn run_shell(
         }
     };
     let handle = spawned.handle.clone();
-    control.live.shells.lock().await.insert(
-        execution.clone(),
-        LiveShell {
-            run_id: snapshot.run.clone(),
-            handle: handle.clone(),
-        },
-    );
+    control
+        .live
+        .register_shell(
+            execution.clone(),
+            LiveShell {
+                run_id: snapshot.run.clone(),
+                handle: handle.clone(),
+            },
+        )
+        .await;
     let collector = control.clone();
     let current = snapshot.clone();
     let execution_copy = execution.clone();
@@ -607,7 +610,7 @@ async fn run_shell(
     let (done_send, mut done_receive) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
         let result = collect_shell(&collector, &current, &execution_copy, spawned).await;
-        collector.live.shells.lock().await.remove(&execution_copy);
+        collector.live.remove_shell(&execution_copy).await;
         collector.origins.lock().await.remove(&origin.token);
         if let Err(error) = &result {
             if error.is_storage_failure() {

@@ -855,7 +855,7 @@ mod tests {
         }).await.unwrap();
         let foreground = Arc::new(ForegroundSlot::default());
         let receive = foreground.register("sa");
-        control.live.drivers.lock().await.insert(
+        control.live.test_drivers().lock().await.insert(
             "a".into(),
             super::super::DriverSlot {
                 id: "fixture".into(),
@@ -1010,7 +1010,7 @@ mod tests {
         waiting_state(&control, "running").await;
         pending_count(&control, 0).await;
         foreground.clear();
-        control.live.drivers.lock().await.clear();
+        control.live.test_drivers().lock().await.clear();
         owner.shutdown().await.unwrap();
     }
     #[tokio::test]
@@ -1049,7 +1049,7 @@ mod tests {
             waiting_state(&control, expected).await;
             pending_count(&control, 0).await;
             foreground.clear();
-            control.live.drivers.lock().await.clear();
+            control.live.test_drivers().lock().await.clear();
             owner.shutdown().await.unwrap();
         }
     }
@@ -1103,7 +1103,7 @@ mod tests {
         task.await.unwrap().unwrap();
         waiting_state(&control, "running").await;
         foreground.clear();
-        control.live.drivers.lock().await.clear();
+        control.live.test_drivers().lock().await.clear();
         owner.shutdown().await.unwrap();
     }
     #[tokio::test]
@@ -1132,7 +1132,7 @@ mod tests {
         pending_count(&control, 0).await;
         assert!(control.waits.entries.lock().unwrap().is_empty());
         foreground.clear();
-        control.live.drivers.lock().await.clear();
+        control.live.test_drivers().lock().await.clear();
         owner.shutdown().await.unwrap();
     }
 }

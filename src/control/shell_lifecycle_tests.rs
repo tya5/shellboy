@@ -279,7 +279,7 @@ async fn stop_and_eof_during_real_spawn_registration_are_reapplied() {
             )))
             .unwrap();
         let execution = starting(&control).await;
-        let registration_gate = control.live.shells.lock().await;
+        let registration_gate = control.live.test_shells().lock().await;
         drop(origin_gate);
         wait_marker(&marker).await; // Real OS side effect before handle publication.
         let signaling = control.clone();
@@ -328,7 +328,7 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
         .send(tool(&format!("printf READY > '{}'; cat", marker.display())))
         .unwrap();
     let execution = starting(&control).await;
-    let registration_gate = control.live.shells.lock().await;
+    let registration_gate = control.live.test_shells().lock().await;
     drop(origin_gate);
     wait_marker(&marker).await;
     let origin = control
@@ -388,7 +388,7 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
         .unwrap();
     assert!(started.elapsed() < Duration::from_secs(3));
     assert!(control.runtime_operations.lock().await.is_empty());
-    assert!(control.live.shells.lock().await.is_empty());
+    assert!(control.live.test_shells().lock().await.is_empty());
     assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
     owner.shutdown().await.unwrap();
     server.abort();
@@ -585,7 +585,7 @@ async fn failed_grace_owner_does_not_swallow_another_saved_stop() {
     let (_, reply) = incoming(&mut requests).await;
     reply.send(answer()).unwrap();
     control.shutdown().await.unwrap();
-    assert!(control.live.shells.lock().await.is_empty());
+    assert!(control.live.test_shells().lock().await.is_empty());
     owner.shutdown().await.unwrap();
     server.abort();
 }

@@ -1,17 +1,108 @@
 //! Live process/driver registrations, cancellation, and handle liveness.
 //! DB Run/Turn state remains authoritative; these maps contain owned handles.
-use super::{DriverSlot, LiveShell};
-use std::collections::{HashMap, HashSet};
-use tokio::sync::Mutex;
+use super::{DriverSlot, ForegroundRelease, ForegroundSlot, LiveShell};
+use crate::{
+    protocol::{ApiError, ErrorCode},
+    shell::ShellHandle,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+use tokio::sync::{Mutex, Notify};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 pub(super) struct LiveRegistry {
-    // Control keeps its atomic registration/replacement guards at the spawn
-    // boundary. Cancellation and combined liveness stay together here.
-    pub(super) drivers: Mutex<HashMap<String, DriverSlot>>,
-    pub(super) shells: Mutex<HashMap<String, LiveShell>>,
+    drivers: Mutex<HashMap<String, DriverSlot>>,
+    shells: Mutex<HashMap<String, LiveShell>>,
 }
 impl LiveRegistry {
+    /// The lookup, existing-slot notification and new-slot publication share one
+    /// guard. Allocate driver resources only when no slot already owns Thread.
+    pub(super) async fn register_or_nudge_driver(
+        &self,
+        thread: &str,
+        run: String,
+        owner_stop: &CancellationToken,
+        interrupt: bool,
+    ) -> Option<DriverSlot> {
+        let mut drivers = self.drivers.lock().await;
+        if let Some(slot) = drivers.get(thread) {
+            slot.nudge.notify_one();
+            if interrupt {
+                slot.foreground.release(ForegroundRelease::AdditionalInput);
+            }
+            return None;
+        }
+        let slot = DriverSlot {
+            id: uuid::Uuid::new_v4().to_string(),
+            run_id: run,
+            stop: owner_stop.child_token(),
+            nudge: Arc::new(Notify::new()),
+            foreground: Arc::new(ForegroundSlot::default()),
+        };
+        drivers.insert(thread.to_owned(), slot.clone());
+        Some(slot)
+    }
+
+    pub(super) async fn remove_driver_if_current(&self, thread: &str, slot: &str) -> bool {
+        let mut drivers = self.drivers.lock().await;
+        if drivers.get(thread).is_some_and(|entry| entry.id == slot) {
+            drivers.remove(thread);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(super) async fn background(&self, thread: &str) -> Result<(), ApiError> {
+        let drivers = self.drivers.lock().await;
+        let slot = drivers.get(thread).ok_or_else(|| {
+            ApiError::new(ErrorCode::InvalidState, "No foreground work is running")
+        })?;
+        if !slot.foreground.release(ForegroundRelease::Background) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "No foreground shell is being awaited",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) async fn register_shell(&self, execution: String, shell: LiveShell) {
+        self.shells.lock().await.insert(execution, shell);
+    }
+
+    pub(super) async fn remove_shell(&self, execution: &str) {
+        self.shells.lock().await.remove(execution);
+    }
+
+    pub(super) async fn clone_shell_handle(&self, execution: &str) -> Option<ShellHandle> {
+        self.shells
+            .lock()
+            .await
+            .get(execution)
+            .map(|shell| shell.handle.clone())
+    }
+
+    /// Stop while holding the shell guard, so a caller retaining the runtime
+    /// intent guard preserves the existing intent -> registration lock order.
+    pub(super) async fn stop_shell(&self, execution: &str) {
+        if let Some(shell) = self.shells.lock().await.get(execution) {
+            shell.handle.stop();
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_drivers(&self) -> &Mutex<HashMap<String, DriverSlot>> {
+        &self.drivers
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_shells(&self) -> &Mutex<HashMap<String, LiveShell>> {
+        &self.shells
+    }
     pub(super) async fn cancel_run(&self, thread: &str, run: &str) -> bool {
         let active = {
             let drivers = self.drivers.lock().await;
@@ -82,5 +173,121 @@ impl LiveRegistry {
                 shell.handle.stop();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_kicks_publish_one_slot_and_old_completion_cannot_remove_a_replacement() {
+        let registry = Arc::new(LiveRegistry::default());
+        let stop = CancellationToken::new();
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let spawn_kick = |interrupt| {
+            let registry = registry.clone();
+            let stop = stop.clone();
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                registry
+                    .register_or_nudge_driver("thread", "run".into(), &stop, interrupt)
+                    .await
+            })
+        };
+        let first = spawn_kick(false);
+        let second = spawn_kick(true);
+        barrier.wait().await;
+        let (first, second) = (first.await.unwrap(), second.await.unwrap());
+        assert_eq!(
+            usize::from(first.is_some()) + usize::from(second.is_some()),
+            1
+        );
+        let first = first.or(second).unwrap();
+        assert!(registry.remove_driver_if_current("thread", &first.id).await);
+        let replacement = registry
+            .register_or_nudge_driver("thread", "replacement".into(), &stop, false)
+            .await
+            .unwrap();
+        assert!(!registry.remove_driver_if_current("thread", &first.id).await);
+        assert!(
+            !registry.cancel_run("thread", "run").await,
+            "stale Run cancellation must not cancel the replacement driver"
+        );
+        assert!(!replacement.stop.is_cancelled());
+        let runs = HashSet::from(["replacement".to_owned()]);
+        registry.cancel_owned(&runs, Some("thread")).await;
+        assert!(
+            !replacement.stop.is_cancelled(),
+            "owned drain excludes the current driver"
+        );
+        assert!(!registry.has_owned(&runs, Some("thread")).await);
+        registry.cancel_owned(&runs, None).await;
+        assert!(replacement.stop.is_cancelled());
+        assert!(
+            registry
+                .remove_driver_if_current("thread", &replacement.id)
+                .await
+        );
+        assert!(registry.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call() {
+        let registry = LiveRegistry::default();
+        let stop = CancellationToken::new();
+        assert_eq!(
+            registry.background("missing").await.unwrap_err().code,
+            ErrorCode::InvalidState
+        );
+        let slot = registry
+            .register_or_nudge_driver("thread", "run".into(), &stop, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            registry.background("thread").await.unwrap_err().code,
+            ErrorCode::InvalidState
+        );
+        let mut call = slot.foreground.register("execution");
+        assert!(
+            registry
+                .register_or_nudge_driver("thread", "ignored-run".into(), &stop, false)
+                .await
+                .is_none()
+        );
+        tokio::time::timeout(Duration::from_secs(1), slot.nudge.notified())
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), call.recv())
+                .await
+                .is_err(),
+            "quiet kick nudges without releasing foreground"
+        );
+        assert!(
+            registry
+                .register_or_nudge_driver("thread", "ignored-run".into(), &stop, true)
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), call.recv())
+                .await
+                .unwrap(),
+            Some(ForegroundRelease::AdditionalInput)
+        );
+        registry.background("thread").await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), call.recv())
+                .await
+                .unwrap(),
+            Some(ForegroundRelease::Background)
+        );
+        assert!(
+            registry.remove_driver_if_current("thread", &slot.id).await,
+            "nudge never replaces a registered slot"
+        );
     }
 }

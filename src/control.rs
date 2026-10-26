@@ -932,17 +932,7 @@ impl Control {
         }
     }
     pub async fn background(&self, thread_id: &str) -> Result<(), ApiError> {
-        let drivers = self.live.drivers.lock().await;
-        let slot = drivers.get(thread_id).ok_or_else(|| {
-            ApiError::new(ErrorCode::InvalidState, "No foreground work is running")
-        })?;
-        if !slot.foreground.release(ForegroundRelease::Background) {
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "No foreground shell is being awaited",
-            ));
-        }
-        Ok(())
+        self.live.background(thread_id).await
     }
     fn kick(
         self: &Arc<Self>,
@@ -991,23 +981,13 @@ impl Control {
                     return;
                 }
             };
-            let mut drivers = control.live.drivers.lock().await;
-            if let Some(slot) = drivers.get(&thread_id) {
-                slot.nudge.notify_one();
-                if interrupt {
-                    slot.foreground.release(ForegroundRelease::AdditionalInput);
-                }
+            let Some(slot) = control
+                .live
+                .register_or_nudge_driver(&thread_id, run_id, &control.stop, interrupt)
+                .await
+            else {
                 return;
-            }
-            let slot = DriverSlot {
-                id: uuid::Uuid::new_v4().to_string(),
-                run_id,
-                stop: control.stop.child_token(),
-                nudge: Arc::new(Notify::new()),
-                foreground: Arc::new(ForegroundSlot::default()),
             };
-            drivers.insert(thread_id.clone(), slot.clone());
-            drop(drivers);
             tokio::spawn(async move {
                 if let Err(error) =
                     driver::drive(control.clone(), thread_id.clone(), slot.clone()).await
@@ -1020,14 +1000,10 @@ impl Control {
                         error,
                     });
                 }
-                let mut drivers = control.live.drivers.lock().await;
-                if drivers
-                    .get(&thread_id)
-                    .is_some_and(|entry| entry.id == slot.id)
-                {
-                    drivers.remove(&thread_id);
-                }
-                drop(drivers);
+                control
+                    .live
+                    .remove_driver_if_current(&thread_id, &slot.id)
+                    .await;
                 control.changed(&thread_id);
                 control.nudge_owner(&slot.run_id).await;
                 // An accepted send/retry can race the previous driver's final
@@ -1464,7 +1440,7 @@ mod failure_tests {
             )
             .await
             .unwrap();
-        control.live.shells.lock().await.insert(
+        control.live.test_shells().lock().await.insert(
             "failure-observer-shell".into(),
             LiveShell {
                 run_id: "fixture-run-without-driver".into(),
@@ -1473,7 +1449,7 @@ mod failure_tests {
         );
         // Model a recovery-wait background shell: no driver remains to stop it.
         // Hold the map so begin_shutdown's synchronous try_lock cannot stop it.
-        let held = control.live.shells.lock().await;
+        let held = control.live.test_shells().lock().await;
         let failure_control = control.clone();
         let failure = tokio::spawn(async move {
             failure_control.fail_storage().await;
@@ -1499,7 +1475,7 @@ mod failure_tests {
         .await
         .unwrap();
         assert_eq!(completion.state, ShellState::Stopped);
-        control.live.shells.lock().await.clear();
+        control.live.test_shells().lock().await.clear();
         assert_eq!(
             control.shutdown().await.unwrap_err().code,
             ErrorCode::SaveFailed
