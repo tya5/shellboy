@@ -2018,9 +2018,30 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     // the completion notice were published. No sleep can turn absence into success.
     let mut notices = Vec::new();
     while let Ok(event) = events.try_recv() {
-        if let shellboy::control::EngineEvent::Notice { thread_id, text } = event {
+        if let shellboy::control::EngineEvent::Notice {
+            thread_id,
+            foreground_release,
+            cancelled_calls,
+        } = event
+        {
             assert_eq!(thread_id, accepted.thread_id);
-            notices.push(text);
+            assert_eq!(cancelled_calls, cancelled_count);
+            assert_eq!(
+                foreground_release,
+                Some((
+                    results[0]["execution_id"].as_str().unwrap().to_owned(),
+                    shellboy::control::ForegroundRelease::Background
+                ))
+            );
+            let remaining = if cancelled_calls == 0 {
+                "後続の未実行呼出しはありません".to_owned()
+            } else {
+                format!("未実行のツール呼出しを{cancelled_calls}件取り消しました")
+            };
+            notices.push(format!(
+                "人間の操作でshell {}の待機を解除し背景へ移しました。{remaining}",
+                results[0]["execution_id"].as_str().unwrap()
+            ));
         }
     }
     assert_eq!(

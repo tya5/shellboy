@@ -2,7 +2,7 @@
 use tokio::sync::watch;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ForegroundRelease {
+pub enum ForegroundRelease {
     Background,
     AdditionalInput,
 }

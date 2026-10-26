@@ -199,6 +199,27 @@ async fn status(
     )
     .await;
 }
+fn tool_group_notice(
+    release: Option<(&str, crate::control::ForegroundRelease)>,
+    cancelled_calls: usize,
+) -> String {
+    let remaining = if cancelled_calls == 0 {
+        "後続の未実行呼出しはありません".to_owned()
+    } else {
+        format!("未実行のツール呼出しを{cancelled_calls}件取り消しました")
+    };
+    match release {
+        Some((execution, reason)) => {
+            let cause = match reason {
+                crate::control::ForegroundRelease::Background => "人間の操作",
+                crate::control::ForegroundRelease::AdditionalInput => "追加指示",
+            };
+            format!("{cause}でshell {execution}の待機を解除し背景へ移しました。{remaining}")
+        }
+        None => remaining,
+    }
+}
+
 fn trace_send(
     diagnostics: &Diagnostics,
     trace: &MessageSendTrace,
@@ -2617,8 +2638,9 @@ async fn run_with_clipboard_slots(
                 Ok(EngineEvent::Error { thread_id, error }) => {
                     status(&updates, Some(thread_id), error).await
                 }
-                Ok(EngineEvent::Notice { thread_id, text }) => {
-                    status(&updates, Some(thread_id), text).await
+                Ok(EngineEvent::Notice { thread_id, foreground_release, cancelled_calls }) => {
+                    let release = foreground_release.as_ref().map(|(execution, reason)| (execution.as_str(), *reason));
+                    status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     if let Some(thread) = &selection.active_thread {
@@ -3189,3 +3211,24 @@ mod stream_tests {
 
 #[cfg(test)]
 mod control_tests;
+
+#[cfg(test)]
+mod notice_tests {
+    use super::tool_group_notice;
+    use crate::control::ForegroundRelease;
+
+    #[test]
+    fn tool_group_facts_are_formatted_at_the_frontend_boundary() {
+        let background = tool_group_notice(Some(("execution", ForegroundRelease::Background)), 0);
+        assert!(background.contains("人間の操作でshell execution"));
+        assert!(background.contains("後続の未実行呼出しはありません"));
+        assert!(!background.contains("取り消"));
+        let input = tool_group_notice(Some(("other", ForegroundRelease::AdditionalInput)), 2);
+        assert!(input.contains("追加指示でshell other"));
+        assert!(input.contains("2件取り消しました"));
+        assert_eq!(
+            tool_group_notice(None, 3),
+            "未実行のツール呼出しを3件取り消しました"
+        );
+    }
+}

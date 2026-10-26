@@ -3,7 +3,8 @@ mod foreground;
 pub(crate) mod interruption;
 mod live;
 mod runtime;
-use foreground::{ForegroundRelease, ForegroundSlot};
+pub use foreground::ForegroundRelease;
+use foreground::ForegroundSlot;
 use live::LiveRegistry;
 use runtime::{RuntimeOperation, encode_result};
 pub mod attachment_delivery;
@@ -51,7 +52,8 @@ pub enum EngineEvent {
     },
     Notice {
         thread_id: String,
-        text: String,
+        foreground_release: Option<(String, ForegroundRelease)>,
+        cancelled_calls: usize,
     },
     Error {
         thread_id: String,

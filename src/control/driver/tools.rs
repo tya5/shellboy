@@ -130,30 +130,11 @@ pub(super) async fn run_tool_group(
         control.changed(&target);
         control.kick_quiet(target).await;
     }
-    let notice = match foreground_release {
-        Some((execution, reason)) => {
-            let cause = match reason {
-                ForegroundRelease::Background => "人間の操作",
-                ForegroundRelease::AdditionalInput => "追加指示",
-            };
-            let remaining = if cancelled_count == 0 {
-                "後続の未実行呼出しはありません".to_owned()
-            } else {
-                format!("未実行のツール呼出しを{cancelled_count}件取り消しました")
-            };
-            Some(format!(
-                "{cause}でshell {execution}の待機を解除し背景へ移しました。{remaining}"
-            ))
-        }
-        None if cancelled_count > 0 => Some(format!(
-            "未実行のツール呼出しを{cancelled_count}件取り消しました"
-        )),
-        None => None,
-    };
-    if let Some(text) = notice {
+    if foreground_release.is_some() || cancelled_count > 0 {
         let _ = control.events.send(EngineEvent::Notice {
             thread_id: snapshot.thread.clone(),
-            text,
+            foreground_release,
+            cancelled_calls: cancelled_count,
         });
     }
     Ok(())
