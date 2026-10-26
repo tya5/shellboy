@@ -365,3 +365,95 @@ async fn streamed_fixture(malformed_final: bool) {
         }
     }
 }
+
+#[tokio::test]
+async fn message_send_trace_links_milestones_without_logging_message_content() {
+    use shellboy::diagnostics::{MessageSendStage, MessageSendTrace};
+    let root = tempfile::tempdir().unwrap();
+    let diagnostics = Diagnostics::start(
+        root.path().into(),
+        Logging {
+            file_bytes: 8192,
+            files: 1,
+        },
+    );
+    for stage in [
+        MessageSendStage::Queued,
+        MessageSendStage::Processing,
+        MessageSendStage::Saved,
+    ] {
+        diagnostics.record_message_send(
+            DiagnosticIds {
+                thread_id: Some("thread-1".into()),
+                ..Default::default()
+            },
+            MessageSendTrace {
+                stage,
+                draft_id: "draft-1".into(),
+                revision: 42,
+                operation_id: "instance:operation-1".into(),
+                message_id: matches!(stage, MessageSendStage::Saved).then(|| "message-1".into()),
+            },
+        );
+    }
+    diagnostics.shutdown().await;
+    assert!(!diagnostics.has_failed());
+    let content = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+    let records: Vec<serde_json::Value> = content
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 3);
+    for (record, stage) in records.iter().zip(["queued", "processing", "saved"]) {
+        assert_eq!(record["event"], "message_send");
+        assert_eq!(record["ids"]["thread_id"], "thread-1");
+        assert_eq!(record["send"]["stage"], stage);
+        assert_eq!(record["send"]["draft_id"], "draft-1");
+        assert_eq!(record["send"]["revision"], 42);
+        assert_eq!(record["send"]["operation_id"], "instance:operation-1");
+        assert!(record.get("failure").is_none());
+        assert!(record.get("body").is_none());
+        assert!(record.get("text").is_none());
+        assert!(record["at"].as_str().is_some());
+    }
+    assert!(records[0]["send"].get("message_id").is_none());
+    assert_eq!(records[2]["send"]["message_id"], "message-1");
+}
+
+#[tokio::test]
+async fn rejected_send_trace_is_bounded_and_has_a_fixed_stage() {
+    use shellboy::diagnostics::{MessageSendStage, MessageSendTrace};
+    let root = tempfile::tempdir().unwrap();
+    let diagnostics = Diagnostics::start(
+        root.path().into(),
+        Logging {
+            file_bytes: 4096,
+            files: 1,
+        },
+    );
+    for stage in [MessageSendStage::QueueFull, MessageSendStage::Failed] {
+        diagnostics.record_message_send(
+            DiagnosticIds::default(),
+            MessageSendTrace {
+                stage,
+                draft_id: format!("draft\n{}", "x".repeat(300)),
+                revision: u64::MAX,
+                operation_id: "instance:\noperation".into(),
+                message_id: Some("message\t1".into()),
+            },
+        );
+    }
+    diagnostics.shutdown().await;
+    let content = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+    let records: Vec<serde_json::Value> = content
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 2);
+    for (record, stage) in records.iter().zip(["queue_full", "failed"]) {
+        assert_eq!(record["send"]["stage"], stage);
+        assert_eq!(record["send"]["draft_id"].as_str().unwrap().len(), 128);
+        assert_eq!(record["send"]["operation_id"], "instance:operation");
+        assert_eq!(record["send"]["message_id"], "message1");
+    }
+}

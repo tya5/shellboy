@@ -10,6 +10,12 @@
 
 ## 表示する段階
 
+Enter直後から既存footerにUI内の送信段階を表示する。既存draft_id/revisionで対象を固定し、backend受付後はmessage_idへ結ぶ。`送信受付中`はUIが送信要求を作った時点、`保存済み・表示待ち`は保存成功通知後で対応message nodeを履歴projectionにまだ確認できない時点を表す。node IDの一致を確認したら送信段階を終える。すでに準備中以降のRun/Turnが動いている場合、保存後の表示待ちは同じ行の補足へ回し、実際の処理段階を主表示に維持する。Run停止/復旧等の注意状態も保持し、同じ行に送信段階を併記する。新しいCore状態や恒久的な送信表は設けない。
+
+反映確認は送信ごとに一方向へ保持する。receipt/source/履歴の到着順の違い、別Thread、古いrevision、下書きの追記で対象を取り違えない。Completed通知がsource通知より先行してもmessage IDの結び付けまで保持する。Completedとsource IDが揃えば、現在の履歴窓外にある場合も送信表示を終了して既存pendingを解放する。これにより実行完了後に無限の表示待ちを残さない。新しい送信を始めた場合も古いCompletedは解放する。保留/失敗/取消では送信の動きを止め、元の入力と保存済み出典を維持する。時間経過だけで未送信扱いや自動再送にせず、表示時計はUIローカル・overlay中は既存の停止規則を使う。
+
+通常診断には既存の有限writerでfrontend受信、処理開始、保存成功、失敗/キュー満杯を固定分類で記録し、draft ID/revision・operation ID・message IDを結ぶ。queuedはfrontendが要求を受け取った事実であり、Enter自体や画面への描画完了を意味しない。本文・添付path・token・任意エラー本文はログへ入れない。
+
 | 表示 | 既存の根拠 | 動き |
 |---|---|---|
 | 準備中 | 非終端Turnのpreparing | `●`＋段階文字に控えめなshimmer |

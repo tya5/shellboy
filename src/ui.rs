@@ -23,6 +23,8 @@ mod input;
 mod lifecycle;
 mod management;
 mod models;
+#[cfg(test)]
+mod send_tests;
 pub use management::ManagementPopup;
 mod operations;
 mod overlay;
@@ -738,6 +740,12 @@ pub struct PendingSend {
     pub status: ReceiptStatus,
     pub message: Option<String>,
     pub source_node_id: Option<String>,
+    send: Option<SendProgress>,
+}
+#[derive(Clone, Debug)]
+struct SendProgress {
+    started_at: Instant,
+    reflected: bool,
 }
 #[derive(Clone, Debug)]
 pub struct ManagementView {
@@ -1612,17 +1620,18 @@ impl UiState {
                 revision,
                 node_id,
             } => {
-                if let Some(pending) = self
-                    .views
-                    .values_mut()
-                    .flat_map(|view| view.pending.values_mut())
-                    .find(|p| p.snapshot.draft_id == draft_id && p.snapshot.revision == revision)
-                {
+                if let Some(view) = self.views.values_mut().find(|view| {
+                    view.pending
+                        .get(&revision)
+                        .is_some_and(|p| p.snapshot.draft_id == draft_id)
+                }) {
+                    let pending = view.pending.get_mut(&revision).expect("matching receipt");
                     pending.source_node_id = Some(node_id);
                     pending.snapshot.text = String::new();
                     pending.snapshot.attachments = Vec::new();
                     // Fold ranges and cursor are lightweight source offsets.
                     // Keep them so restoring a large paste stays folded.
+                    view.observe_sent_nodes();
                 }
             }
             UiUpdate::RestoredSnapshot {
@@ -2236,7 +2245,7 @@ impl UiState {
             .activity
             .advance_clock(now);
         let visible = self.composer_active();
-        let phase = self.view().activity.phase();
+        let phase = self.view().footer_phase();
         if self
             .animation
             .tick(now, phase, visible, self.config.ui.max_fps)
@@ -2302,6 +2311,7 @@ impl UiState {
                             status: ReceiptStatus::Accepting,
                             message: None,
                             source_node_id: None,
+                            send: None,
                         },
                     );
                 }
@@ -2335,6 +2345,7 @@ impl UiState {
         self.send_current(None)
     }
     fn send_current(&mut self, confirmed_run_id: Option<String>) -> Vec<UiAction> {
+        self.dirty = true;
         let text = self.view().draft.text.clone();
         let view = self.active_view_mut();
         if text.trim().is_empty() && view.draft.attachments.is_empty() {
@@ -2356,6 +2367,8 @@ impl UiState {
             view.draft.revision += 1;
         }
         let draft = view.draft.clone();
+        view.pending
+            .retain(|_, pending| pending.status != ReceiptStatus::Completed);
         view.pending.insert(
             draft.revision,
             PendingSend {
@@ -2364,9 +2377,13 @@ impl UiState {
                 status: ReceiptStatus::Accepting,
                 message: None,
                 source_node_id: None,
+                send: Some(SendProgress {
+                    started_at: Instant::now(),
+                    reflected: false,
+                }),
             },
         );
-        view.status = "受付処理中 · DB保存待ち".into();
+        view.status = "送信要求を受け付け中".into();
         view.cancel_navigation();
         view.follow = true;
         view.unseen = false;
@@ -3626,9 +3643,11 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     } else {
         "F1 ヘルプ · F6 詳細 · F8 操作 · Ctrl+Q 終了"
     };
-    let activity_phase = view.activity.phase();
+    let send = view.sending();
+    let activity_phase = view.footer_phase();
     let has_activity = view.activity.snapshot.is_some();
-    let busy = if has_activity {
+    let has_indicator = has_activity || send.is_some();
+    let busy = if has_indicator {
         activity_phase.is_active() || activity_phase == activity::ActivityPhase::Recovery
     } else {
         view.run_id.is_some()
@@ -3651,8 +3670,25 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         &view.status
     };
     let mut status_parts = vec![follow.to_owned()];
+    if let Some((phase, count, started)) = send {
+        let mut note = String::new();
+        if phase != activity_phase {
+            note.push_str(phase.label());
+        }
+        if count > 1 {
+            note.push_str(&format!(" {count}件"));
+        }
+        let seconds = started.elapsed().as_secs();
+        if seconds > 0 {
+            note.push_str(&format!(" 送信から{seconds}秒"));
+        }
+        if !note.is_empty() {
+            status_parts.insert(0, note.trim().to_owned());
+        }
+    }
     if activity_phase != activity::ActivityPhase::Recovery
         && busy
+        && send.is_none()
         && let Some(elapsed_ms) = view.activity.displayed_elapsed_ms()
         && elapsed_ms > 0
     {
@@ -3669,7 +3705,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     if view.cancelled_calls > 0 {
         status_parts.push(format!("取消{}件", view.cancelled_calls));
     }
-    if !has_activity {
+    if !has_indicator {
         status_parts.insert(
             0,
             if view.thread_id.is_some() {
@@ -3689,7 +3725,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         theme::MUTED
     });
     let mut status_spans = Vec::new();
-    if has_activity {
+    if has_indicator {
         status_spans.extend(state.animation.spans(activity_phase, style, Instant::now()));
         status_spans.push(Span::styled(" · ", style));
     }

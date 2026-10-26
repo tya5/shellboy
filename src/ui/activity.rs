@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 pub enum ActivityPhase {
     #[default]
     Idle,
+    Sending,
+    Reflecting,
     Preparing,
     AwaitingModel,
     Receiving,
@@ -25,6 +27,8 @@ impl ActivityPhase {
     pub fn label(self) -> &'static str {
         match self {
             Self::Idle => "入力できます",
+            Self::Sending => "送信受付中",
+            Self::Reflecting => "保存済み・表示待ち",
             Self::Preparing => "準備中",
             Self::AwaitingModel => "モデル応答待ち",
             Self::Receiving => "応答受信中",
@@ -45,7 +49,9 @@ impl ActivityPhase {
     }
     fn motion(self) -> Motion {
         match self {
-            Self::Preparing
+            Self::Sending
+            | Self::Reflecting
+            | Self::Preparing
             | Self::AwaitingModel
             | Self::Receiving
             | Self::Tools

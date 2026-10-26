@@ -74,6 +74,63 @@ impl Default for VisualScroll {
     }
 }
 impl ThreadView {
+    pub(super) fn observe_sent_nodes(&mut self) {
+        for pending in self.pending.values_mut() {
+            if let Some(send) = &mut pending.send
+                && !send.reflected
+                && pending
+                    .source_node_id
+                    .as_ref()
+                    .is_some_and(|id| self.nodes.iter().any(|node| &node.node_id == id))
+            {
+                send.reflected = true;
+            }
+        }
+        self.pending.retain(|_, pending| {
+            !(pending.status == ReceiptStatus::Completed && pending.source_node_id.is_some())
+        });
+    }
+    pub(super) fn sending(&self) -> Option<(activity::ActivityPhase, usize, Instant)> {
+        let mut stage = None;
+        let mut count = 0;
+        let mut started = None;
+        for pending in self.pending.values() {
+            let Some(send) = &pending.send else { continue };
+            let phase = match pending.status {
+                ReceiptStatus::Accepting => activity::ActivityPhase::Sending,
+                ReceiptStatus::Accepted | ReceiptStatus::Preparing | ReceiptStatus::Completed
+                    if !send.reflected =>
+                {
+                    activity::ActivityPhase::Reflecting
+                }
+                _ => continue,
+            };
+            count += 1;
+            started = Some(started.map_or(send.started_at, |at: Instant| at.min(send.started_at)));
+            if stage.is_none() || phase == activity::ActivityPhase::Sending {
+                stage = Some(phase);
+            }
+        }
+        stage.map(|phase| (phase, count, started.expect("a pending send has a clock")))
+    }
+    pub(super) fn footer_phase(&self) -> activity::ActivityPhase {
+        let phase = self.activity.phase();
+        if matches!(
+            phase,
+            activity::ActivityPhase::Stopping
+                | activity::ActivityPhase::Recovery
+                | activity::ActivityPhase::Failed
+        ) {
+            return phase;
+        }
+        self.sending().map_or(phase, |(sending, _, _)| {
+            if sending == activity::ActivityPhase::Reflecting && phase.is_active() {
+                phase
+            } else {
+                sending
+            }
+        })
+    }
     pub(super) fn cancel_navigation(&mut self) {
         self.tool_refresh = None;
         self.tool_refresh_dirty = false;
@@ -786,6 +843,7 @@ impl ThreadView {
         if source_changed {
             self.mark_source_changed();
         }
+        self.observe_sent_nodes();
         self.total_nodes = total_nodes;
         if append || self.follow || previous_tail.is_none() {
             self.before_cursor = before_cursor;
@@ -1009,6 +1067,7 @@ impl ThreadView {
                 .any(|node| Some(&node.node_id) == self.anchor.node_id.as_ref());
         self.mark_source_changed();
         self.nodes = nodes;
+        self.observe_sent_nodes();
         self.provisional_nodes.clear();
         self.committed_preview = None;
         self.first_ordinal = first_ordinal;
@@ -1168,7 +1227,9 @@ impl ThreadView {
             self.status
                 .push_str(" · 編集中の入力を保持（次は全文送信）");
         }
-        if status == ReceiptStatus::Completed {
+        if status == ReceiptStatus::Completed
+            && (pending.send.is_none() || pending.source_node_id.is_some())
+        {
             self.pending.remove(&revision);
         }
         true

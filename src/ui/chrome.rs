@@ -15,8 +15,8 @@ pub(super) fn header(view: &ThreadView, width: u16, selection: bool) -> String {
         return fit(label, usize::from(width), false);
     }
     let width = usize::from(width);
-    let phase = if view.activity.snapshot.is_some() {
-        view.activity.phase().label()
+    let phase = if view.activity.snapshot.is_some() || view.sending().is_some() {
+        view.footer_phase().label()
     } else if view.thread_id.is_some() {
         "状態を確認中"
     } else {

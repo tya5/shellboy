@@ -22,6 +22,7 @@ pub enum DiagnosticEvent {
     DatabaseFailure,
     ModelFailure,
     ModelStreamDifference,
+    MessageSend,
     ShellFailure,
     StorageLimit,
     IndexPaused,
@@ -37,6 +38,25 @@ pub struct DiagnosticIds {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_id: Option<String>,
 }
+/// Frontend milestones, not durable message/Run states.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageSendStage {
+    Queued,
+    Processing,
+    Saved,
+    Failed,
+    QueueFull,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageSendTrace {
+    pub stage: MessageSendStage,
+    pub draft_id: String,
+    pub revision: u64,
+    pub operation_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+}
 #[derive(Serialize)]
 struct Entry {
     at: String,
@@ -47,6 +67,8 @@ struct Entry {
     failure: Option<ModelFailureDetails>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream_difference: Option<ModelFailureDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    send: Option<MessageSendTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,6 +141,7 @@ struct Record {
     ids: DiagnosticIds,
     failure: Option<ModelFailureDetails>,
     stream_difference: Option<ModelFailureDetails>,
+    send: Option<MessageSendTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -152,6 +175,7 @@ impl Diagnostics {
                     ids,
                     failure,
                     stream_difference,
+                    send,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -162,6 +186,7 @@ impl Diagnostics {
                         dropped,
                         failure,
                         stream_difference,
+                        send,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -298,12 +323,29 @@ impl Diagnostics {
             None,
         );
     }
+    /// Nonblocking, fixed-stage diagnostics. Never accepts message or error text.
+    pub fn record_message_send(&self, ids: DiagnosticIds, mut send: MessageSendTrace) {
+        send.draft_id = sanitize_id(&send.draft_id);
+        send.operation_id = sanitize_id(&send.operation_id);
+        send.message_id = send.message_id.as_deref().map(sanitize_id);
+        self.enqueue_with_send(DiagnosticEvent::MessageSend, ids, None, None, Some(send));
+    }
     fn enqueue(
+        &self,
+        event: DiagnosticEvent,
+        ids: DiagnosticIds,
+        failure: Option<ModelFailureDetails>,
+        stream_difference: Option<ModelFailureDetails>,
+    ) {
+        self.enqueue_with_send(event, ids, failure, stream_difference, None);
+    }
+    fn enqueue_with_send(
         &self,
         event: DiagnosticEvent,
         mut ids: DiagnosticIds,
         failure: Option<ModelFailureDetails>,
         stream_difference: Option<ModelFailureDetails>,
+        send: Option<MessageSendTrace>,
     ) {
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -328,6 +370,7 @@ impl Diagnostics {
                     ids,
                     failure,
                     stream_difference,
+                    send,
                 })
                 .is_err()
         }) {

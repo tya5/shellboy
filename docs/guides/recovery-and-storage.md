@@ -190,6 +190,10 @@ RAMのbody/layout/history/画像Base64 cache予算はストレージ保持量と
 
 Windowsの既定は `%LOCALAPPDATA%\shellboy\data\logs\shellboy.log` です。保存先を変更した場合は指定したdata-dirの下を確認します。モデル失敗の `model_failure` は固定分類と `attempt_id` を記録します。`model_stream_difference` は途中と最終応答の差分を示す診断で、それだけでは失敗や復旧待ちを意味しません。ログのThread/Run/Turn/attempt IDで対象を照合し、本文と最終応答は同じThreadの `/received` から保存原文を確認します。原文には会話やツール引数が含まれるため、そのまま外部へ共有しないでください。
 
+TUI送信の `message_send` は `send.draft_id` / `revision` / `operation_id` で1件ずつ追えます。`queued` はfrontendが要求を取り出した時点、`processing` は送信処理開始、`saved` は保存成功、`failed` / `queue_full` は失敗・受付枠不足です。`saved` の `message_id` とThread IDを保存済み履歴に結びます。`operation_id` は既存のoperation照会にも使えます。
+
+「送信受付中」のままなら最後の段階を確認します。`queued` だけなら処理開始前、`processing` までなら保存成功前、`saved` まであるのに画面が進まなければ通知・履歴取得・描画側の切り分けに使えます。`queued` はEnterや画面描画の記録ではなく、`saved` も画面反映完了を意味しません。ログは既存の有限・非同期writerによる最善努力の記録で、無効設定・容量不足・異常終了等による欠落があり、行の不在だけで未受付や原因を断定しません。本文・添付pathは追加記録しません。
+
 stack overflow等のfatal abortでは正常終了処理を通らず、原因本文がファイルへ記録されない場合があります。端末の標準エラーの文面と、落ちた時刻・画面・直前の操作も調査に使います。正常shutdownがないことだけで原因までは断定しません。
 
 ### operation receiptの容量で拒否された場合

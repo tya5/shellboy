@@ -30,6 +30,7 @@ use crate::{
     },
     config::CopyBackend,
     control::{Control, EngineEvent},
+    diagnostics::{DiagnosticIds, Diagnostics, MessageSendStage, MessageSendTrace},
     ipc::LocalServer,
     protocol::*,
     ui::*,
@@ -197,6 +198,32 @@ async fn status(
         },
     )
     .await;
+}
+fn trace_send(
+    diagnostics: &Diagnostics,
+    trace: &MessageSendTrace,
+    stage: MessageSendStage,
+    thread_id: Option<&str>,
+    value: Option<&Value>,
+) {
+    diagnostics.record_message_send(
+        DiagnosticIds {
+            thread_id: value
+                .and_then(|value| value.get("thread_id"))
+                .and_then(Value::as_str)
+                .or(thread_id)
+                .map(str::to_owned),
+            ..Default::default()
+        },
+        MessageSendTrace {
+            stage,
+            message_id: value
+                .and_then(|value| value.get("message_id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            ..trace.clone()
+        },
+    );
 }
 enum BackgroundResult {
     StreamFrame {
@@ -784,6 +811,19 @@ async fn run_with_clipboard_slots(
                         model,
                         effort,
                     } => {
+                        let diagnostics = owner.diagnostics.clone();
+                        let trace = MessageSendTrace {
+                            stage: MessageSendStage::Queued,
+                            draft_id: draft_id.clone(),
+                            revision,
+                            operation_id: format!(
+                                "{}:{}",
+                                control.store.instance_id,
+                                uuid::Uuid::new_v4()
+                            ),
+                            message_id: None,
+                        };
+                        trace_send(&diagnostics, &trace, MessageSendStage::Queued, thread_id.as_deref(), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = thread_id.clone();
                         update(
@@ -803,6 +843,7 @@ async fn run_with_clipboard_slots(
                             match send_slots.clone().try_acquire_owned() {
                                 Ok(permit) => Some(permit),
                                 Err(_) => {
+                                    trace_send(&diagnostics, &trace, MessageSendStage::QueueFull, thread_id.as_deref(), None);
                                     update(
                                         &updates,
                                         UiUpdate::Receipt {
@@ -833,6 +874,8 @@ async fn run_with_clipboard_slots(
                                     .await
                                     .expect("frontend send slots remain open"),
                             };
+                            trace_send(&diagnostics, &trace, MessageSendStage::Processing, thread_id.as_deref(), None);
+                            let trace_thread = thread_id.as_deref().map(str::to_owned);
                             let ids = attachments
                                 .iter()
                                 .map(|attachment| attachment.id.clone())
@@ -847,11 +890,7 @@ async fn run_with_clipboard_slots(
                                 let (content, files) = draft_input(&text, attachments)?;
                                 control
                                     .send_ordered_draft(
-                                        format!(
-                                            "{}:{}",
-                                            control.store.instance_id,
-                                            uuid::Uuid::new_v4()
-                                        ),
+                                        trace.operation_id.clone(),
                                         ThreadCreateArgs {
                                             connection,
                                             cwd: Some(cwd),
@@ -866,6 +905,13 @@ async fn run_with_clipboard_slots(
                                     .await
                             }
                             .await;
+                            trace_send(
+                                &diagnostics,
+                                &trace,
+                                if result.is_ok() { MessageSendStage::Saved } else { MessageSendStage::Failed },
+                                trace_thread.as_deref(),
+                                result.as_ref().ok(),
+                            );
                             let _ = sender
                                 .send(BackgroundResult::Sent {
                                     draft_id,
@@ -1200,6 +1246,19 @@ async fn run_with_clipboard_slots(
                         model,
                         effort,
                     } => {
+                        let diagnostics = owner.diagnostics.clone();
+                        let trace = MessageSendTrace {
+                            stage: MessageSendStage::Queued,
+                            draft_id: draft_id.clone(),
+                            revision,
+                            operation_id: format!(
+                                "{}:{}",
+                                control.store.instance_id,
+                                uuid::Uuid::new_v4()
+                            ),
+                            message_id: None,
+                        };
+                        trace_send(&diagnostics, &trace, MessageSendStage::Queued, Some(source_thread_id.as_str()), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = None;
                         update(
@@ -1219,6 +1278,7 @@ async fn run_with_clipboard_slots(
                             match send_slots.clone().try_acquire_owned() {
                                 Ok(permit) => Some(permit),
                                 Err(_) => {
+                                    trace_send(&diagnostics, &trace, MessageSendStage::QueueFull, Some(source_thread_id.as_str()), None);
                                     update(
                                         &updates,
                                         UiUpdate::Receipt {
@@ -1249,6 +1309,8 @@ async fn run_with_clipboard_slots(
                                     .await
                                     .expect("frontend send slots remain open"),
                             };
+                            trace_send(&diagnostics, &trace, MessageSendStage::Processing, Some(source_thread_id.as_str()), None);
+                            let trace_thread = Some(source_thread_id.clone());
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
                             let result = async {
                                 let (content, files) = draft_input(&text, attachments)?;
@@ -1260,11 +1322,7 @@ async fn run_with_clipboard_slots(
                                 })?;
                                 control
                                     .edit_ordered_request(
-                                        format!(
-                                            "{}:{}",
-                                            control.store.instance_id,
-                                            uuid::Uuid::new_v4()
-                                        ),
+                                        trace.operation_id.clone(),
                                         source_thread_id,
                                         source_node_id,
                                         confirmed_run_id,
@@ -1281,6 +1339,13 @@ async fn run_with_clipboard_slots(
                                     .await
                             }
                             .await;
+                            trace_send(
+                                &diagnostics,
+                                &trace,
+                                if result.is_ok() { MessageSendStage::Saved } else { MessageSendStage::Failed },
+                                trace_thread.as_deref(),
+                                result.as_ref().ok(),
+                            );
                             let _ = sender
                                 .send(BackgroundResult::Sent {
                                     draft_id,

@@ -111,12 +111,43 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
         .unwrap()
         .unwrap()
         .unwrap();
+    let log = std::fs::read_to_string(data.join("logs/shellboy.log")).unwrap();
+    assert!(!log.contains("saved message"));
+    assert!(!log.contains("next unsent text"));
+    let traces = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|line| line["event"] == "message_send" && line["send"]["draft_id"] == "first-draft")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        traces
+            .iter()
+            .map(|line| line["send"]["stage"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["queued", "processing", "saved"]
+    );
+    let operation = traces[0]["send"]["operation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        traces
+            .iter()
+            .all(|line| line["send"]["operation_id"] == operation && line["send"]["revision"] == 0)
+    );
+    let saved_message = traces[2]["send"]["message_id"].as_str().unwrap().to_owned();
     let owner = DataOwner::start(Some(config), Some(data), root.path().into())
         .await
         .unwrap();
     let values = owner
         .db
         .call(move |db| {
+            let correlated: String = db.query_row(
+                "SELECT message_node_id FROM receipt WHERE client_operation_id=?1",
+                [operation],
+                |row| row.get(0),
+            )?;
+            assert_eq!(correlated, saved_message);
             Ok((
                 db.query_row("SELECT count(*) FROM thread", [], |r| r.get::<_, i64>(0))?,
                 db.query_row(
