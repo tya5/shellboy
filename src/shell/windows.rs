@@ -489,6 +489,7 @@ impl ShellSupervisor {
         // Attributes and their backing handle slices stay alive through this call.
         // Job assignment is part of creation, before the first instruction runs.
         let spawned_at = Instant::now();
+        self.admit_start()?;
         if unsafe {
             CreateProcessW(
                 exe.as_ptr(),

@@ -479,9 +479,24 @@ pub(super) fn fail_shell_spawn(
     execution: &str,
     at: &str,
 ) -> Result<usize, StorageError> {
+    finish_shell_spawn(db, execution, at, false)
+}
+pub(super) fn cancel_shell_spawn(
+    db: &Connection,
+    execution: &str,
+    at: &str,
+) -> Result<usize, StorageError> {
+    finish_shell_spawn(db, execution, at, true)
+}
+fn finish_shell_spawn(
+    db: &Connection,
+    execution: &str,
+    at: &str,
+    cancelled: bool,
+) -> Result<usize, StorageError> {
     // A saved stop intent can still be stopping when OS spawn fails. Settle
     // that admitted execution, but never overwrite an already terminal result.
-    let changed=db.execute("UPDATE shell_execution SET state='failed',end_reason='spawn_failed',output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",params![execution,at])?;
+    let changed=db.execute("UPDATE shell_execution SET state=?3,end_reason=?4,output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",params![execution,at,if cancelled {"stopped"} else {"failed"},if cancelled {"stopped_before_spawn"} else {"spawn_failed"}])?;
     if changed == 0 {
         let state: Option<String> = db
             .query_row(

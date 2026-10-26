@@ -43,7 +43,9 @@ pub(super) async fn run_tool_group(
     let mut cancelled_count = 0usize;
     let mut foreground_release = None;
     for call in calls {
-        if slot.stop.is_cancelled() {
+        if control.shell.starts_closed() {
+            cancelled = Some("Owner shutdown started before this call".into());
+        } else if slot.stop.is_cancelled() {
             cancelled = Some("Run stopped before this call".into());
         }
         let result = if let Some(error) = validation_errors.get(&call.call_id) {

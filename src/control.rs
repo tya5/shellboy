@@ -1054,6 +1054,7 @@ impl Control {
     /// Close admission immediately while the adapter preserves its drafts and
     /// drains already accepted work. This method never waits for a lock or I/O.
     pub fn begin_shutdown(&self) {
+        self.shell.close_start_admission();
         self.admission_closed.store(true, Ordering::SeqCst);
         self.stop.cancel();
         self.live.try_stop_shells();
@@ -1062,6 +1063,7 @@ impl Control {
     /// Capture before cancellation releases waits or terminalizes owned Runs.
     /// A failed snapshot must still cancel/drain; shutdown propagates this result.
     pub async fn prepare_shutdown(&self) -> Result<(), ApiError> {
+        self.shell.close_start_admission();
         self.admission_closed.store(true, Ordering::SeqCst);
         self.changed.notify_waiters();
         let result = self
@@ -1106,6 +1108,12 @@ impl Control {
         }
         self.begin_shutdown();
         result
+    }
+    pub(crate) fn tool_start_gate(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.shell.start_gate()
+    }
+    pub(crate) fn close_tool_start_admission(&self) {
+        self.shell.close_start_admission();
     }
     async fn work_is_drained(&self) -> bool {
         // End each guard's scope before acquiring the next ownership map.

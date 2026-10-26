@@ -289,6 +289,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     let config = owner.loaded.config.clone();
     runtime.spawn(control.clone().serve(rpc_receive));
     let (actions_send, actions_receive) = shellboy::ui::actions::channel(128);
+    actions_send.close_tool_starts_on_quit(&control);
     let (updates_send, updates_receive) = std::sync::mpsc::sync_channel(128);
     let bridge = runtime.spawn(shellboy::frontend::run(
         control,

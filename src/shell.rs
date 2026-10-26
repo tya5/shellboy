@@ -160,11 +160,37 @@ pub struct ShellExecution {
 #[derive(Clone)]
 pub struct ShellSupervisor {
     config: Config,
+    // One-way owner-lifecycle fact, shared with the existing Quit mailbox.
+    starts_closed: Arc<std::sync::atomic::AtomicBool>,
 }
 impl ShellSupervisor {
     pub fn new(config: &Config) -> Self {
         Self {
             config: config.clone(),
+            starts_closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+    pub(crate) fn start_gate(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.starts_closed.clone()
+    }
+    pub(crate) fn close_start_admission(&self) {
+        self.starts_closed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub(crate) fn starts_closed(&self) -> bool {
+        self.starts_closed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn admit_start(&self) -> Result<(), ApiError> {
+        // This load is the start-admission linearization point relative to the
+        // Quit store. No await may occur between admission and native creation.
+        if self.starts_closed() {
+            Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Owner shutdown cancelled this shell before process creation",
+            )
+            .details(serde_json::json!({"reason":"shutdown_before_spawn"})))
+        } else {
+            Ok(())
         }
     }
     /// This method never commits DB state. A successful call means OS process
@@ -248,6 +274,7 @@ impl ShellSupervisor {
             .kill_on_drop(true)
             .process_group(0);
         let spawned_at = Instant::now();
+        self.admit_start()?;
         let mut child = command.spawn().map_err(|error| {
             ApiError::new(ErrorCode::IoFailed, format!("shell spawn failed: {error}"))
         })?;

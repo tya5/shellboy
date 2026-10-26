@@ -1487,3 +1487,150 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
     reopened.shutdown().await.unwrap();
     server.abort();
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_quit_prevents_tools_from_a_late_model_response_without_cancelling_capture_first()
+{
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    let (actions, _pending_actions) = shellboy::ui::actions::channel(1);
+    actions.close_tool_starts_on_quit(&control);
+    send(&control, &thread, "response will arrive after Quit").await;
+    let pending = incoming(&mut receive).await;
+    actions.try_send(shellboy::ui::UiAction::Quit).unwrap();
+    let marker = root.path().join("forbidden-after-quit");
+    let command = format!("printf forbidden > '{}'", marker.display());
+    pending.reply.send((200,json!({"id":"late-tools","status":"completed","output":[{"type":"function_call","name":"shell","call_id":"late-call","arguments":json!({"command":command}).to_string()}]}))).unwrap();
+    let next = incoming(&mut receive).await;
+    assert!(next.body["input"].as_array().unwrap().iter().any(|item| {
+        item["type"] == "function_call_output"
+            && item["output"]
+                .as_str()
+                .is_some_and(|body| body.contains("cancelled"))
+    }));
+    next.reply
+        .send((200, answer("cancelled by owner exit")))
+        .unwrap();
+    settled(&control, &thread).await;
+    assert!(!marker.exists());
+    owner
+        .db
+        .call(|db| {
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM shell_execution", [], |r| r
+                    .get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM tool_call WHERE state='completed'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM turn WHERE state='recovery_wait'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quit_during_the_first_tool_cancels_the_next_call_without_restarting_the_existing_process()
+{
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    let (actions, _pending_actions) = shellboy::ui::actions::channel(1);
+    actions.close_tool_starts_on_quit(&control);
+    send(&control, &thread, "two tool calls, exit during the first").await;
+    let pending = incoming(&mut receive).await;
+    let marker = root.path().join("forbidden-second-tool");
+    let second = format!("printf forbidden > '{}'", marker.display());
+    pending.reply.send((200,json!({"id":"two-tools","status":"completed","output":[
+        {"type":"function_call","name":"shell","call_id":"first","arguments":json!({"command":"printf FIRST; read ignored","stdin_open":true}).to_string()},
+        {"type":"function_call","name":"shell","call_id":"second","arguments":json!({"command":second}).to_string()}
+    ]}))).unwrap();
+    // Synchronize on persisted output from the first actual OS process, then
+    // keep it blocked on stdin until the Quit acceptance has closed the gate.
+    let execution = timeout(Duration::from_secs(5), async {
+        loop {
+            let found = owner.db.call(|db| {
+                use rusqlite::OptionalExtension;
+                Ok(db.query_row("SELECT s.id FROM shell_execution s WHERE json_extract(s.shell_json,'$.spawned')=1 AND EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id)",[],|r|r.get::<_,String>(0)).optional()?)
+            }).await.unwrap();
+            if let Some(execution) = found { break execution; }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await.unwrap();
+    actions.try_send(shellboy::ui::UiAction::Quit).unwrap();
+    request(
+        &control,
+        Command::ShellWrite(ShellWriteArgs {
+            execution_id: execution,
+            text: "continue\n".into(),
+            encoding: "UTF-8".into(),
+        }),
+    )
+    .await;
+    let next = incoming(&mut receive).await;
+    let outputs = next.body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["type"] == "function_call_output")
+        .collect::<Vec<_>>();
+    assert_eq!(outputs.len(), 2);
+    assert!(outputs.iter().any(|item| {
+        item["call_id"] == "second"
+            && item["output"]
+                .as_str()
+                .is_some_and(|body| body.contains("cancelled"))
+    }));
+    next.reply
+        .send((200, answer("second call cancelled")))
+        .unwrap();
+    settled(&control, &thread).await;
+    assert!(!marker.exists());
+    owner
+        .db
+        .call(|db| {
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM shell_execution", [], |r| r
+                    .get::<_, i64>(0))?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM shell_execution WHERE state='exited' AND exit_code=0",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}

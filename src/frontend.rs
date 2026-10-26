@@ -612,6 +612,7 @@ async fn run_with_clipboard_slots(
     clipboard: Arc<dyn ClipboardBackend>,
     command_slots: Arc<Semaphore>,
 ) -> Result<(), ApiError> {
+    actions.close_tool_starts_on_quit(&control);
     let mut selection = selection::Selection::default();
     let mut ipc_failure = server.failures();
     let mut watch_ipc_failure = true;
@@ -758,7 +759,12 @@ async fn run_with_clipboard_slots(
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
                     }
-                    UiAction::Quit => break,
+                    UiAction::Quit => {
+                        // Also covers ordinary Tokio action receivers used by
+                        // embedders, which do not have the UI control mailbox.
+                        control.close_tool_start_admission();
+                        break;
+                    },
                     UiAction::RenderWidth { width } => {
                         render_width = width.max(1);
                         if let Some(thread) = &selection.active_thread {

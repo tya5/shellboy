@@ -3,7 +3,10 @@ use super::UiAction;
 use std::{
     collections::BTreeSet,
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::sync::{Notify, mpsc};
 
@@ -11,6 +14,7 @@ const CANCEL_TARGETS: usize = 32;
 #[derive(Default)]
 struct Controls {
     quit_requested: bool,
+    tool_start_gate: Option<Arc<AtomicBool>>,
     quit: Option<Vec<UiAction>>,
     cancels: BTreeSet<String>,
     active_cancel: Option<String>,
@@ -82,7 +86,22 @@ impl From<mpsc::Receiver<UiAction>> for ActionReceiver {
         }
     }
 }
+fn bind_tool_gate(shared: &Option<Arc<Shared>>, gate: Arc<AtomicBool>) {
+    if let Some(shared) = shared {
+        let mut controls = shared.controls.lock().expect("UI control mailbox poisoned");
+        // A Quit posted before frontend initialization must not be forgotten.
+        if controls.quit_requested {
+            gate.store(true, Ordering::SeqCst);
+        }
+        controls.tool_start_gate = Some(gate);
+    }
+}
 impl ActionSender {
+    /// Wire the owner before the terminal starts accepting Quit keys. This
+    /// only shares a one-way atomic flag; UI never waits for process creation.
+    pub fn close_tool_starts_on_quit(&self, control: &crate::control::Control) {
+        bind_tool_gate(&self.shared, control.tool_start_gate());
+    }
     // Preserve Tokio's lossless rejected-action contract without allocating a wrapper.
     #[allow(clippy::result_large_err)]
     pub fn try_send(&self, action: UiAction) -> Result<(), mpsc::error::TrySendError<UiAction>> {
@@ -109,6 +128,9 @@ impl ActionSender {
         }
         match action {
             UiAction::Quit => {
+                if let Some(gate) = &controls.tool_start_gate {
+                    gate.store(true, Ordering::SeqCst);
+                }
                 if !controls.quit_requested {
                     controls.quit_requested = true;
                     controls.quit = Some(vec![]);
@@ -158,6 +180,9 @@ impl ActionSender {
             if !controls.alive {
                 return vec![mpsc::error::TrySendError::Closed(UiAction::Quit)];
             }
+            if let Some(gate) = &controls.tool_start_gate {
+                gate.store(true, Ordering::SeqCst);
+            }
             if !controls.quit_requested {
                 controls.quit_requested = true;
                 controls.quit = Some(snapshots);
@@ -174,6 +199,9 @@ impl ActionSender {
     }
 }
 impl ActionReceiver {
+    pub(crate) fn close_tool_starts_on_quit(&self, control: &crate::control::Control) {
+        bind_tool_gate(&self.shared, control.tool_start_gate());
+    }
     pub fn is_closing(&self) -> bool {
         self.closing
     }
@@ -283,5 +311,33 @@ impl ActionStream for ActionReceiver {
 impl ActionStream for mpsc::Receiver<UiAction> {
     fn next_action(&mut self) -> impl Future<Output = Option<UiAction>> + Send {
         self.recv()
+    }
+}
+
+#[cfg(test)]
+mod quit_start_tests {
+    use super::*;
+    #[test]
+    fn quit_closes_tool_admission_synchronously_and_late_binding_cannot_forget_it() {
+        for batch in [false, true] {
+            let (send, _receive) = channel(1);
+            let gate = Arc::new(AtomicBool::new(false));
+            bind_tool_gate(&send.shared, gate.clone());
+            if batch {
+                assert!(send.try_send_batch(vec![UiAction::Quit]).is_empty());
+            } else {
+                send.try_send(UiAction::Quit).unwrap();
+            }
+            assert!(
+                gate.load(Ordering::SeqCst),
+                "receiver has not consumed Quit yet"
+            );
+            send.try_send(UiAction::WaitForShutdown).unwrap();
+            send.try_send(UiAction::ForceQuit).unwrap();
+            assert!(gate.load(Ordering::SeqCst));
+            let late = Arc::new(AtomicBool::new(false));
+            bind_tool_gate(&send.shared, late.clone());
+            assert!(late.load(Ordering::SeqCst));
+        }
     }
 }

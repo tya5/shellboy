@@ -490,6 +490,12 @@ async fn run_shell(
     call_id: &str,
     args: ShellToolArgs,
 ) -> Result<(Value, bool), ApiError> {
+    if control.shell.starts_closed() {
+        return Ok((
+            json!({"status":"cancelled","reason":"owner_shutdown_before_spawn"}),
+            true,
+        ));
+    }
     control.gc.require_capacity().await?;
     let execution = id();
     let current = snapshot.clone();
@@ -505,6 +511,9 @@ async fn run_shell(
         tx.commit()?;Ok(true)}).await.map_err(storage_error)?;
     if !ready || slot.stop.is_cancelled() {
         return Err(invalid("Run stopped before shell spawn"));
+    }
+    if control.shell.starts_closed() {
+        return cancel_unstarted_shell(&control, &execution).await;
     }
     let origin = Origin {
         instance_id: control.store.instance_id.clone(),
@@ -564,6 +573,10 @@ async fn run_shell(
             return Err(error);
         }
     };
+    if control.shell.starts_closed() {
+        control.origins.lock().await.remove(&origin.token);
+        return cancel_unstarted_shell(&control, &execution).await;
+    }
     if stop || slot.stop.is_cancelled() {
         control.origins.lock().await.remove(&origin.token);
         return Ok((
@@ -578,6 +591,14 @@ async fn run_shell(
     {
         Ok(value) => value,
         Err(error) => {
+            if error
+                .details
+                .as_ref()
+                .is_some_and(|details| details["reason"] == "shutdown_before_spawn")
+            {
+                control.origins.lock().await.remove(&origin.token);
+                return cancel_unstarted_shell(&control, &execution).await;
+            }
             let execution = execution.clone();
             control.origins.lock().await.remove(&origin.token);
             control
@@ -684,6 +705,26 @@ async fn run_shell(
         control.changed(&snapshot.thread);
     }
     result
+}
+
+async fn cancel_unstarted_shell(
+    control: &Control,
+    execution: &str,
+) -> Result<(Value, bool), ApiError> {
+    let id = execution.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            super::state::cancel_shell_spawn(db, &id, &now())?;
+            Ok(())
+        })
+        .await
+        .map_err(storage_error)?;
+    Ok((
+        json!({"status":"cancelled","execution_id":execution,"reason":"owner_shutdown_before_spawn"}),
+        true,
+    ))
 }
 
 async fn shell_result(

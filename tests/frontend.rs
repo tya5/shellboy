@@ -2644,3 +2644,108 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
     send.send(UiAction::Quit).await.unwrap();
     bridge.await.unwrap().unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_latest_draft() {
+    use shellboy::protocol::*;
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let data = root.path().join("data");
+    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+    let owner = DataOwner::start(Some(config.clone()), Some(data.clone()), root.path().into())
+        .await
+        .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let thread = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:thread", control.store.instance_id),
+                Command::ThreadCreate(ThreadCreateArgs {
+                    connection: None,
+                    cwd: None,
+                    model: None,
+                    effort: None,
+                    parent_id: None,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (rpc, _) = tokio::sync::mpsc::channel(1);
+    let server = LocalServer::bind(&owner, rpc).await.unwrap();
+    let (send, receive) = shellboy::ui::actions::channel(2);
+    send.try_send(UiAction::Send {
+        draft_id: "queued-before-quit".into(),
+        revision: 0,
+        thread_id: Some(thread.clone()),
+        cwd: root.path().into(),
+        text: "queued instruction survives".into(),
+        attachments: vec![],
+        connection: None,
+        model: None,
+        effort: None,
+    })
+    .unwrap();
+    send.try_send(UiAction::SaveDraft {
+        thread_id: thread.clone(),
+        draft: DraftSnapshot {
+            draft_id: "draft".into(),
+            revision: 1,
+            text: "older draft".into(),
+            ..Default::default()
+        },
+        anchor: ViewAnchor::default(),
+        follow: false,
+    })
+    .unwrap();
+    assert!(
+        send.try_send_batch(vec![
+            UiAction::SaveDraft {
+                thread_id: thread.clone(),
+                draft: DraftSnapshot {
+                    draft_id: "draft".into(),
+                    revision: 2,
+                    text: "latest unsent draft".into(),
+                    ..Default::default()
+                },
+                anchor: ViewAnchor::default(),
+                follow: false
+            },
+            UiAction::Quit,
+        ])
+        .is_empty()
+    );
+    // No frontend has bound the owner yet. Its first poll must close tool
+    // starts while preserving the already accepted Send and draft ordering.
+    let (updates, _received) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(frontend::run(
+        control,
+        receive,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(5), bridge)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let reopened = DataOwner::start(Some(config), Some(data), root.path().into())
+        .await
+        .unwrap();
+    reopened.db.call(move |db| {
+        let draft:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1",[thread],|r|r.get(0))?;
+        assert_eq!(serde_json::from_str::<DraftSnapshot>(&draft).unwrap().text,"latest unsent draft");
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM node WHERE kind='message' AND payload_json LIKE '%queued instruction survives%'",[],|r|r.get::<_,i64>(0))?,1);
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM shell_execution",[],|r|r.get::<_,i64>(0))?,0);
+        Ok(())
+    }).await.unwrap();
+    reopened.shutdown().await.unwrap();
+}
