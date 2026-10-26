@@ -55,14 +55,18 @@ pub(super) fn runtime_bases(uid: u32) -> Result<Vec<PathBuf>, ApiError> {
 }
 
 fn runtime_bases_from(uid: u32, candidate: Option<PathBuf>) -> Result<Vec<PathBuf>, ApiError> {
-    let mut bases = Vec::with_capacity(2);
-    if let Some(candidate) = candidate {
-        let candidate: PathBuf = candidate.components().collect();
-        if candidate.is_absolute()
-            && validate_folder(&candidate, uid).is_ok()
-            && let Ok(base) = std::fs::canonicalize(&candidate)
-            && protected_ancestors(&base, uid)
-            && usable_socket_path(&base.join(namespace_name(uid)))
+    runtime_bases_with(uid, candidate, os_user_tmp())
+}
+
+fn runtime_bases_with(
+    uid: u32,
+    candidate: Option<PathBuf>,
+    user_tmp: Option<PathBuf>,
+) -> Result<Vec<PathBuf>, ApiError> {
+    let mut bases = Vec::with_capacity(3);
+    for candidate in [candidate, user_tmp].into_iter().flatten() {
+        if let Some(base) = private_runtime_base(uid, candidate)
+            && !bases.contains(&base)
         {
             bases.push(base);
         }
@@ -74,9 +78,49 @@ fn runtime_bases_from(uid: u32, candidate: Option<PathBuf>) -> Result<Vec<PathBu
             }
         }
         Err(error) if bases.is_empty() => return Err(error),
-        Err(_) => {} // A usable XDG runtime base does not depend on /tmp.
+        Err(_) => {} // A usable private base does not depend on /tmp.
     }
     Ok(bases)
+}
+
+fn private_runtime_base(uid: u32, candidate: PathBuf) -> Option<PathBuf> {
+    let candidate: PathBuf = candidate.components().collect();
+    if !candidate.is_absolute() || validate_folder(&candidate, uid).is_err() {
+        return None;
+    }
+    let base = std::fs::canonicalize(candidate).ok()?;
+    (protected_ancestors(&base, uid) && usable_socket_path(&base.join(namespace_name(uid))))
+        .then_some(base)
+}
+
+#[cfg(target_os = "macos")]
+fn os_user_tmp() -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    // Query the OS rather than trusting inherited TMPDIR. confstr includes its
+    // terminating NUL in the required size; keep even this discovery bounded.
+    // SAFETY: a null buffer with zero length requests only the required size.
+    let length = unsafe { libc::confstr(libc::_CS_DARWIN_USER_TEMP_DIR, std::ptr::null_mut(), 0) };
+    if length == 0 || length > 4096 {
+        return None;
+    }
+    let mut bytes = vec![0u8; length];
+    // SAFETY: the buffer is writable for exactly the supplied byte length.
+    let copied = unsafe {
+        libc::confstr(
+            libc::_CS_DARWIN_USER_TEMP_DIR,
+            bytes.as_mut_ptr().cast(),
+            bytes.len(),
+        )
+    };
+    if copied != length || bytes.pop() != Some(0) || bytes.contains(&0) {
+        return None;
+    }
+    Some(PathBuf::from(std::ffi::OsString::from_vec(bytes)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn os_user_tmp() -> Option<PathBuf> {
+    None
 }
 
 pub(super) fn runtime_error(reason: &str) -> ApiError {
@@ -107,7 +151,7 @@ fn system_tmp(uid: u32) -> Result<PathBuf, ApiError> {
 }
 
 pub(super) fn folder_candidates(uid: u32) -> Result<Vec<PathBuf>, ApiError> {
-    let mut folders = Vec::with_capacity(16);
+    let mut folders = Vec::with_capacity(24);
     for base in runtime_bases(uid)? {
         for _ in 0..8 {
             let folder = base.join(namespace_name(uid));
@@ -206,12 +250,23 @@ mod tests {
     }
 
     #[test]
-    fn no_xdg_uses_system_tmp_and_names_are_random() {
+    fn no_xdg_uses_safe_os_temporary_bases_and_names_are_random() {
         let uid = super::super::current_uid();
+        let bases = runtime_bases_from(uid, None).unwrap();
+        assert_eq!(bases.last(), Some(&std::fs::canonicalize("/tmp").unwrap()));
+        let expected_user = os_user_tmp().and_then(|path| private_runtime_base(uid, path));
         assert_eq!(
-            runtime_bases_from(uid, None).unwrap(),
-            vec![std::fs::canonicalize("/tmp").unwrap()]
+            bases.first(),
+            expected_user.as_ref().or_else(|| bases.last())
         );
+        for base in &bases {
+            let folder = base.join(namespace_name(uid));
+            assert!(usable_socket_path(&folder));
+            assert!(
+                recognized_folder(&folder, uid).unwrap(),
+                "restart cleanup recognizes each base"
+            );
+        }
         assert_ne!(namespace_name(uid), namespace_name(uid));
     }
     #[test]
@@ -223,20 +278,89 @@ mod tests {
         let alias = root.path().join("alias");
         symlink(&exposed, &alias).unwrap();
         let uid = super::super::current_uid();
-        let fallback = std::fs::canonicalize("/tmp").unwrap();
+        let fallback = runtime_bases_from(uid, None).unwrap();
         for candidate in [
             exposed.clone(),
             alias.clone(),
             PathBuf::from("relative"),
             PathBuf::from(format!("/{}", "x".repeat(200))),
         ] {
-            assert_eq!(
-                runtime_bases_from(uid, Some(candidate)).unwrap(),
-                vec![fallback.clone()]
-            );
+            assert_eq!(runtime_bases_from(uid, Some(candidate)).unwrap(), fallback);
         }
         assert!(alias.is_symlink());
         assert_eq!(std::fs::metadata(exposed).unwrap().mode() & 0o777, 0o755);
+    }
+
+    #[test]
+    fn private_bases_preserve_xdg_priority_then_user_tmp_then_system_tmp() {
+        let fallback = std::fs::canonicalize("/tmp").unwrap();
+        // Keep this fixture's socket paths short even on macOS, where the
+        // default tempfile root itself includes a user-specific long prefix.
+        let root = tempfile::tempdir_in(&fallback).unwrap();
+        let uid = super::super::current_uid();
+        let xdg = root.path().join("xdg");
+        let user = root.path().join("user");
+        for path in [&xdg, &user] {
+            std::fs::create_dir(path).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        assert_eq!(
+            runtime_bases_with(uid, Some(xdg.clone()), Some(user.clone())).unwrap(),
+            vec![xdg.clone(), user.clone(), fallback.clone()]
+        );
+        assert_eq!(
+            runtime_bases_with(uid, Some(user.clone()), Some(user.clone())).unwrap(),
+            vec![user.clone(), fallback.clone()],
+            "duplicate bases do not multiply candidate attempts"
+        );
+        let alias = root.path().join("alias");
+        symlink(&user, &alias).unwrap();
+        let long = root.path().join("x".repeat(110));
+        std::fs::create_dir(&long).unwrap();
+        std::fs::set_permissions(&long, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let exposed = root.path().join("exposed");
+        let protected_child = exposed.join("private");
+        std::fs::create_dir(&exposed).unwrap();
+        std::fs::create_dir(&protected_child).unwrap();
+        std::fs::set_permissions(&exposed, std::fs::Permissions::from_mode(0o777)).unwrap();
+        std::fs::set_permissions(&protected_child, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for unsafe_user in [
+            alias.clone(),
+            long,
+            protected_child,
+            PathBuf::from("relative"),
+        ] {
+            assert_eq!(
+                runtime_bases_with(uid, Some(xdg.clone()), Some(unsafe_user)).unwrap(),
+                vec![xdg.clone(), fallback.clone()],
+                "unsafe or overlong user tmp must preserve the usable XDG and fallback"
+            );
+        }
+        std::fs::set_permissions(&user, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            runtime_bases_with(uid, None, Some(user.clone())).unwrap(),
+            vec![fallback]
+        );
+        assert!(alias.is_symlink());
+        assert_eq!(std::fs::metadata(user).unwrap().mode() & 0o777, 0o755);
+        assert_eq!(std::fs::metadata(exposed).unwrap().mode() & 0o777, 0o777);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_os_user_tmp_precedes_system_tmp_when_safe_and_short_enough() {
+        let uid = super::super::current_uid();
+        let user = os_user_tmp().expect("Darwin supplies its per-user temporary directory");
+        if let Some(canonical) = private_runtime_base(uid, user) {
+            assert_eq!(runtime_bases_from(uid, None).unwrap()[0], canonical);
+            assert!(recognized_folder(&canonical.join(namespace_name(uid)), uid).unwrap());
+        } else {
+            assert_eq!(
+                runtime_bases_from(uid, None).unwrap(),
+                vec![std::fs::canonicalize("/tmp").unwrap()],
+                "unusable OS user temporary directory falls back without relaxing checks"
+            );
+        }
     }
     #[test]
     fn path_bound_counts_utf8_bytes_and_rejects_lossy_paths() {
