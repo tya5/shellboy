@@ -889,6 +889,16 @@ pub(super) fn history(
                 .any(|span| span.style.underline_color == Some(EXCERPT_GAP_MARKER));
             if gap_row {
                 excerpt_jump = true;
+                // A generated omission row has no literal source of its own.
+                // Keep the previous real anchor even if its label also occurs
+                // inside the omitted user output; do not spend search budget.
+                sources.push(RowSource {
+                    node: rendered_index,
+                    covered_end: index,
+                    offset,
+                });
+                lines.push(line);
+                continue;
             }
             let output_body = !gap_row
                 && line
@@ -1108,6 +1118,76 @@ pub(super) fn link_regions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_generated_gap_never_matches_the_same_text_inside_omitted_stdout() {
+        use crate::presentation::{NodePresentation, PresentationBlock};
+        let gap = "… 出力抜粋（表示120行中115行省略）· F6 詳細";
+        let body = (0..120)
+            .map(|index| {
+                if index == 50 {
+                    gap.to_owned()
+                } else {
+                    format!("LINE{index:03}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let node = UiNode {
+            node_id: "stdout-source".into(),
+            role: "tool".into(),
+            text: body.clone(),
+            total_chars: body.chars().count(),
+            presentation: NodePresentation {
+                kind: PresentationKind::ToolResult,
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    text: body.clone(),
+                    source_start: 0,
+                    source_end: body.chars().count(),
+                    source_exact: true,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![node];
+        let (lines, _, sources) = history(&view, 100);
+        let head_row = lines
+            .iter()
+            .position(|line| plain(std::slice::from_ref(line)).contains("LINE002"))
+            .unwrap();
+        let head_offset = body[..body.find("LINE002").unwrap()].chars().count();
+        assert_eq!(sources[head_row].offset, head_offset);
+        let gap_rows = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| {
+                line.spans
+                    .iter()
+                    .any(|span| span.style.underline_color == Some(EXCERPT_GAP_MARKER))
+            })
+            .map(|(row, _)| row)
+            .collect::<Vec<_>>();
+        assert!(!gap_rows.is_empty());
+        assert!(
+            gap_rows
+                .iter()
+                .all(|row| sources[*row].offset == head_offset),
+            "generated gap rows retain the preceding real source instead of jumping to line 50"
+        );
+        let tail_row = lines
+            .iter()
+            .position(|line| plain(std::slice::from_ref(line)).contains("LINE118"))
+            .unwrap();
+        let tail_offset = body[..body.find("LINE118").unwrap()].chars().count();
+        assert_eq!(
+            sources[tail_row].offset, tail_offset,
+            "the real tail still gets its exact source position"
+        );
+    }
+
     #[test]
     fn excerpt_gap_metadata_survives_wrapping_without_becoming_a_terminal_link() {
         let gap = Line::from(Span::styled(
