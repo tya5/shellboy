@@ -138,30 +138,27 @@ pub(super) fn project(kind: &str, mut node: UiNode, width: u16, omitted: bool) -
 }
 
 fn preview_visible(kind: &str, payload: &Value, text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
     if kind != "model_stream_observation" {
         return true;
     }
-    if payload
-        .get("delta_differences")
-        .and_then(Value::as_array)
-        .is_some_and(|items| !items.is_empty())
-    {
-        return !text.is_empty();
+    // Mismatch classifications describe JSON structure as well as prose. A
+    // metadata/content/call-id difference must not duplicate a paid answer.
+    let Some(final_response) = payload.get("raw_response") else {
+        return false;
+    };
+    if !final_response.get("output").is_some_and(Value::is_array) {
+        return false;
     }
-    let only_metadata = payload
-        .get("differences")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            !items.is_empty()
-                && items
-                    .iter()
-                    .all(|item| item.get("field").and_then(Value::as_str) == Some("metadata"))
-        });
-    !only_metadata && !text.is_empty()
+    let final_body = body(&serde_json::json!({"raw_response": final_response}));
+    body(payload) != final_body
 }
 
 struct PreviewRow {
     id: String,
+    after: Option<String>,
     kind: String,
     partial: String,
     reasoning: String,
@@ -185,31 +182,34 @@ pub(super) async fn refresh(
           coalesce(length(json_extract(n.payload_json,'$.partial_text')),0)+coalesce(length(json_extract(n.payload_json,'$.partial_reasoning')),0),
           CASE WHEN length(CAST(n.payload_json AS BLOB))<=?2 THEN n.payload_json END,
           substr(json_extract(n.payload_json,'$.differences'),1,4096),
-          substr(json_extract(n.payload_json,'$.delta_differences'),1,4096)
+          substr(json_extract(n.payload_json,'$.delta_differences'),1,4096),
+          (SELECT p.node_id FROM thread_path p JOIN node prior ON prior.id=p.node_id
+           WHERE p.thread_id=u.thread_id AND prior.turn_id=n.turn_id AND prior.rowid<n.rowid
+           ORDER BY p.ordinal DESC LIMIT 1)
           FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id
           WHERE u.thread_id=?1 AND t.deleted_at IS NULL
             AND n.kind IN ('incomplete_response','model_stream_observation')
             AND n.deleted_reason IS NULL AND json_valid(n.payload_json)
           ORDER BY n.rowid DESC LIMIT 2"#)?;
         let rows=statement.query_map(rusqlite::params![target,SAVED_BYTES as i64],|r|Ok(PreviewRow{
-            id:r.get(0)?,kind:r.get(1)?,partial:r.get(2)?,reasoning:r.get(3)?,total:r.get(4)?,saved:r.get(5)?,differences:r.get(6)?,delta_differences:r.get(7)?
+            id:r.get(0)?,after:r.get(8)?,kind:r.get(1)?,partial:r.get(2)?,reasoning:r.get(3)?,total:r.get(4)?,saved:r.get(5)?,differences:r.get(6)?,delta_differences:r.get(7)?
         }))?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }).await.map_err(storage_error)?;
     let nodes=presentation_work(move||rows.into_iter().rev().filter_map(|row|{
+        let after=row.after?;
         let full_saved=row.saved.is_some();
         let payload=row.saved.and_then(|s|serde_json::from_str::<Value>(&s).ok()).unwrap_or_else(||serde_json::json!({"classification":if row.kind=="model_stream_observation"{"stream_difference"}else{"incomplete_response"},"partial_text":row.partial,"partial_reasoning":row.reasoning,"differences":row.differences.and_then(|s|serde_json::from_str::<Value>(&s).ok()),"delta_differences":row.delta_differences.and_then(|s|serde_json::from_str::<Value>(&s).ok())}));
-        let (mut text,mut reasoning)=body(&payload);
+        let (text,mut reasoning)=body(&payload);
         if !preview_visible(&row.kind,&payload,&text){return None;}
         let known=text.chars().count();
         let omitted=!full_saved && row.total>known as i64;
-        if !full_saved && text.is_empty(){text="保存原文は表示予算を超えています。F6から原文を確認してください".into();}
         let(text,base,total)=window(&text,None);
         reasoning.retain(|range|range.1>base && range.0<base+text.chars().count());
         let mut node=project(&row.kind,UiNode{node_id:row.id,text,base_char_offset:base,total_chars:total,reasoning_ranges:reasoning,..Default::default()},width,!full_saved);
         if omitted{node.presentation.body_omitted_chars=(row.total as usize).saturating_sub(known);}
         streams::seal_node(&mut node);
-        Some(node)
+        Some((after,node))
     }).collect()).await?;
     update(
         updates,
@@ -255,21 +255,20 @@ pub(super) async fn list(
             fields.push(crate::presentation::PresentationField {
                 key: format!("/received/source/{id}"),
                 label: format!(
-                    "{at} · {} · {} · {}",
+                    "{} · {} · Turn {}",
+                    crate::presentation::fields::local_time(&at).unwrap_or(at),
                     if kind == "model_stream_observation" {
                         "差分・最終確定済み"
                     } else {
                         "未確定"
                     },
                     turn.chars().take(8).collect::<String>(),
+                ),
+                display: Some(
                     excerpt
-                        .unwrap_or_default()
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .chars()
-                        .take(80)
-                        .collect::<String>()
+                        .filter(|text| !text.trim().is_empty())
+                        .map(|text| text.lines().next().unwrap_or("").chars().take(80).collect())
+                        .unwrap_or_else(|| "受信記録を開く".into()),
                 ),
                 value: id,
                 ..Default::default()
@@ -322,17 +321,53 @@ mod tests {
         ));
         assert!(preview_visible(
             "model_stream_observation",
-            &json!({"differences":[{"field":"text"}]}),
+            &json!({"partial_text":"paid differing text","raw_response":{"output":[]}}),
             "paid differing text"
         ));
-        assert!(preview_visible("incomplete_response", &json!({}), ""));
+        assert!(!preview_visible("incomplete_response", &json!({}), ""));
         assert!(preview_visible(
             "model_stream_observation",
-            &json!({"differences":[{"field":"metadata"}],"delta_differences":["text"]}),
+            &json!({"partial_text":"paid delta","raw_response":{"output":[]},"differences":[{"field":"metadata"}],"delta_differences":["text"]}),
             "paid delta"
         ));
 
         assert_eq!(body(&json!({"completed_items":{"10":{"type":"message","content":[{"type":"refusal","refusal":"後"}]},"2":{"type":"message","content":[{"type":"output_text","text":"先"}]}}})).0,"先\n後");
+    }
+    #[test]
+    fn empty_receipts_and_structural_differences_do_not_invent_or_duplicate_body() {
+        let message =
+            json!({"type":"message","content":[{"type":"output_text","text":"same answer"}]});
+        let mut payload = json!({"partial_text":"same answer","completed_items":{"0":message},"raw_response":{"output":[message]},"differences":[{"field":"content"},{"field":"call_id"},{"field":"arguments"}],"delta_differences":[]});
+        assert!(!preview_visible(
+            "model_stream_observation",
+            &payload,
+            &body(&payload).0
+        ));
+        payload["partial_text"] = json!("different paid answer");
+        assert!(preview_visible(
+            "model_stream_observation",
+            &payload,
+            &body(&payload).0
+        ));
+        payload["partial_text"] = json!("");
+        assert!(!preview_visible(
+            "model_stream_observation",
+            &payload,
+            &body(&payload).0
+        ));
+        let empty = json!({"partial_text":"","partial_reasoning":"","completed_items":{},"classification":"http_500"});
+        assert!(body(&empty).0.is_empty());
+        assert!(!preview_visible(
+            "incomplete_response",
+            &empty,
+            &body(&empty).0
+        ));
+        let reason = json!({"partial_reasoning":"paid reasoning","partial_text":"same answer","raw_response":{"output":[message,{"type":"reasoning","summary":[{"type":"summary_text","text":"final reasoning"}]}]}});
+        assert!(preview_visible(
+            "model_stream_observation",
+            &reason,
+            &body(&reason).0
+        ));
     }
     #[test]
     fn audit_source_binds_attempt_and_turn_with_legacy_fallback() {
@@ -378,9 +413,10 @@ mod tests {
         .unwrap();
         owner.db.call(|db|{
             db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','fixture','fixture','fixture','fixture','2026-01-01T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','2026-01-01T00:00:00Z');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','failed','2026-01-01T00:00:00Z');")?;
+            db.execute_batch("INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES('anchor','u','user_message','{}',2,'2026-01-01T00:00:00Z'); INSERT INTO thread_path(thread_id,node_id,ordinal)VALUES('t','anchor',0);")?;
             for i in 0..35 {
                 let kind=if i==34{"model_stream_observation"}else{"incomplete_response"};
-                let body=json!({"partial_text":format!("有料本文{i}"),"partial_reasoning":"理由","attempt_id":format!("a{i}")}).to_string();
+                let body=json!({"partial_text":format!("有料本文{i}"),"partial_reasoning":"理由","attempt_id":format!("a{i}"),"raw_response":{"output":[]}}).to_string();
                 db.execute("INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES(?1,'u',?2,?3,length(?3),'2026-01-01T00:00:00Z')",rusqlite::params![format!("n{i}"),kind,body])?;
             }
             Ok(())
@@ -400,13 +436,16 @@ mod tests {
             panic!()
         };
         assert_eq!(
-            nodes.iter().map(|n| n.node_id.as_str()).collect::<Vec<_>>(),
+            nodes
+                .iter()
+                .map(|(_, n)| n.node_id.as_str())
+                .collect::<Vec<_>>(),
             ["n33", "n34"]
         );
-        assert_eq!(nodes[0].text, "理由\n有料本文33");
-        assert_eq!(nodes[0].reasoning_ranges, [(0, 2)]);
-        assert!(nodes[0].presentation.title.contains("未確定"));
-        assert!(nodes[1].presentation.title.contains("確定済み"));
+        assert_eq!(nodes[0].1.text, "理由\n有料本文33");
+        assert_eq!(nodes[0].1.reasoning_ranges, [(0, 2)]);
+        assert!(nodes[0].1.presentation.title.contains("未確定"));
+        assert!(nodes[1].1.presentation.title.contains("確定済み"));
         let (title, first) = list(&control, "t".into(), 1).await.unwrap();
         assert!(title.contains("35件"));
         assert_eq!(
@@ -440,7 +479,27 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(count, 0);
+        assert_eq!(count, 1);
+        // A later successful Turn must not move an older paid preview behind
+        // the new answer, and an HTTP failure with no body adds no preview.
+        owner.db.call(|db| {
+            db.execute_batch(r#"INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('later','t','r','completed','2026-01-01T00:01:00Z');
+                INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES('answer','later','assistant_response','{}',2,'2026-01-01T00:01:00Z');
+                INSERT INTO thread_path(thread_id,node_id,ordinal)VALUES('t','answer',1);
+                INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES('empty','u','incomplete_response','{"partial_text":"","partial_reasoning":"","completed_items":{}}',62,'2026-01-01T00:01:01Z');"#)?;
+            Ok(())
+        }).await.unwrap();
+        refresh(&control, &tx, "t", 7, 80).await.unwrap();
+        let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
+            panic!()
+        };
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].0, "anchor");
+        assert_eq!(nodes[0].1.node_id, "n34");
+        let (title, latest) = list(&control, "t".into(), 1).await.unwrap();
+        assert!(title.contains("36件"));
+        let empty = latest.iter().find(|field| field.value == "empty").unwrap();
+        assert_eq!(empty.displayed(), "受信記録を開く");
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

@@ -659,7 +659,9 @@ pub enum UiUpdate {
     IncompleteResponses {
         thread_id: String,
         generation: u64,
-        nodes: Vec<UiNode>,
+        // A saved preview belongs after this selected node, never at the tail
+        // of an unrelated history page. This is not a canonical ordinal.
+        nodes: Vec<(String, UiNode)>,
     },
     StreamSettled {
         thread_id: String,

@@ -1894,10 +1894,16 @@ impl ThreadView {
             self.mark_source_changed();
         }
     }
-    pub(super) fn on_incomplete_responses(&mut self, nodes: Vec<UiNode>) {
-        let ids = nodes
+    pub(super) fn on_incomplete_responses(&mut self, nodes: Vec<(String, UiNode)>) {
+        let previous_order = self
+            .nodes
             .iter()
             .map(|n| n.node_id.clone())
+            .collect::<Vec<_>>();
+        let ids = nodes
+            .iter()
+            .filter(|(after, _)| self.nodes.iter().any(|node| &node.node_id == after))
+            .map(|(_, node)| node.node_id.clone())
             .collect::<std::collections::BTreeSet<_>>();
         let previous = self.nodes.len();
         self.nodes
@@ -1905,26 +1911,36 @@ impl ThreadView {
         let mut changed = previous != self.nodes.len();
         self.provisional_nodes
             .retain(|id| self.nodes.iter().any(|n| &n.node_id == id));
-        for incoming in nodes {
+        // Insert backwards so previews sharing a selected predecessor retain
+        // their saved chronological order. Never append to an unrelated Turn.
+        for (after, mut incoming) in nodes.into_iter().rev() {
+            if !ids.contains(&incoming.node_id) {
+                continue;
+            }
             self.provisional_nodes.insert(incoming.node_id.clone());
-            if let Some(existing) = self
+            let previous_index = self
                 .nodes
-                .iter_mut()
-                .find(|n| n.node_id == incoming.node_id)
-            {
+                .iter()
+                .position(|n| n.node_id == incoming.node_id);
+            if let Some(index) = previous_index {
+                let mut existing = self.nodes.remove(index);
                 if !existing.same_projection(&incoming) {
+                    changed = true;
                     if !self.follow && self.anchor.node_id.as_deref() == Some(&incoming.node_id) {
                         existing.total_chars = incoming.total_chars;
-                    } else {
-                        *existing = incoming;
+                        incoming = existing;
                     }
-                    changed = true;
                 }
-            } else {
-                self.nodes.push(incoming);
-                changed = true;
             }
+            let index = self.nodes.iter().position(|n| n.node_id == after).unwrap() + 1;
+            changed |= previous_index.is_none();
+            self.nodes.insert(index, incoming);
         }
+        changed |= self
+            .nodes
+            .iter()
+            .map(|n| &n.node_id)
+            .ne(previous_order.iter());
         if changed {
             self.mark_source_changed();
         }
@@ -1934,6 +1950,77 @@ impl ThreadView {
 #[cfg(test)]
 mod received_tests {
     use super::*;
+    #[test]
+    fn saved_previews_stay_in_their_turn_and_do_not_leak_into_other_pages() {
+        fn node(id: &str, role: &str) -> UiNode {
+            UiNode {
+                node_id: id.into(),
+                role: role.into(),
+                text: id.into(),
+                total_chars: id.len(),
+                ..Default::default()
+            }
+        }
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.nodes = vec![
+            node("old-user", "user"),
+            node("old-end", "event"),
+            node("new-user", "user"),
+            node("new-answer", "assistant"),
+        ];
+        let previews = || {
+            vec![
+                ("old-end".into(), node("paid-a", "received_response")),
+                ("old-end".into(), node("paid-b", "received_response")),
+            ]
+        };
+        view.on_incomplete_responses(previews());
+        let ids = |view: &ThreadView| {
+            view.nodes
+                .iter()
+                .map(|node| node.node_id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(&view),
+            [
+                "old-user",
+                "old-end",
+                "paid-a",
+                "paid-b",
+                "new-user",
+                "new-answer"
+            ]
+        );
+        view.on_incomplete_responses(previews());
+        assert_eq!(
+            ids(&view),
+            [
+                "old-user",
+                "old-end",
+                "paid-a",
+                "paid-b",
+                "new-user",
+                "new-answer"
+            ]
+        );
+        view.nodes.retain(|node| {
+            node.node_id == "new-user"
+                || node.node_id == "new-answer"
+                || node.role == "received_response"
+        });
+        view.on_incomplete_responses(previews());
+        assert_eq!(ids(&view), ["new-user", "new-answer"]);
+        assert!(!view.provisional_nodes.contains("paid-a"));
+        // Returning to the old page restores the real source after its own
+        // selected predecessor, without changing canonical history ordinals.
+        view.nodes.insert(0, node("old-end", "event"));
+        view.on_incomplete_responses(previews());
+        assert_eq!(
+            ids(&view),
+            ["old-end", "paid-a", "paid-b", "new-user", "new-answer"]
+        );
+    }
     #[test]
     fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
