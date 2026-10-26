@@ -6,6 +6,8 @@ TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の�
 
 ## Enter直後の送信状態
 
+ローカル試用用に `796437e` の開発ビルドをユーザーの `~/.local/bin/shellboy` へ配置し、ビルド元とのSHA-256一致、配置後のhelp/versionを確認しました。未作成だったShellboy設定へ既存のLiteLLM接続設定を引き継ぎました。旧履歴の移行や実行中processの切替はしていません。
+
 Enterを押した時点で既存ステータス行に「送信受付中」を表示し、同じアニメーション時計で動かします。保存成功後は対応message IDを履歴で確認するまで「保存済み・表示待ち」を表示します。すでにRun/Turnが進んでいる場合はその段階を主表示に維持し、表示待ちを併記します。複数送信・経過時間・失敗時の入力保持と、通知順序の前後・高速完了・会話切替を扱います。
 
 既存の有限診断writerへmessage_sendを追加し、draft ID/revision・実際のoperation ID・保存message IDを関連付けます。保存成功をUI通知前に記録するため、保存前の待ちと通知・履歴・描画側の問題の切り分けに使えます。本文・添付pathのログや新しいCore状態・表・workerは追加しません。設計は [実行状態表示](../design/tui-activity-indicator.md)、調査手順は [診断ログ](../guides/recovery-and-storage.md#診断ログを確認する) を参照してください。
