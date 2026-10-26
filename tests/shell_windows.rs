@@ -47,6 +47,34 @@ async fn collect(mut execution: ShellExecution) -> (Vec<u8>, Vec<u8>, ShellCompl
     .unwrap()
 }
 #[tokio::test]
+async fn powershell_starts_with_hidden_environment_entries() {
+    let environment = [
+        ("=::", r"::\"),
+        ("=ExitCode", "00000000"),
+        ("=ExitCodeAscii", "00000000"),
+        ("SHELLBOY_ENV_FIXTURE", "visible"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+    .collect();
+    let execution = ShellSupervisor::new(&config())
+        .spawn(
+            "windows-hidden-environment".into(),
+            std::env::current_dir().unwrap(),
+            args("[Console]::Out.Write($env:SHELLBOY_ENV_FIXTURE); exit 0"),
+            environment,
+        )
+        .await
+        .unwrap();
+    let (out, err, done) = collect(execution).await;
+    assert_eq!(out, b"visible");
+    assert!(err.is_empty());
+    assert_eq!(done.state, ShellState::Exited);
+    assert_eq!(done.exit_code, Some(0));
+    assert!(done.output_complete && done.group_cleanup_confirmed);
+}
+
+#[tokio::test]
 async fn powershell_literal_command_quoting_stdout_stderr_and_exit_are_preserved() {
     let (out, err, done) = collect(
         spawn(args(

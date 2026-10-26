@@ -63,3 +63,9 @@ Windows全target試験で判明した添付fixtureのUnix絶対パス11件と、
 不正な最終応答等で復旧待ちになっても受信した有料本文をUIから消さず、保存済み証跡から再表示する。最新窓の表示上限は維持し、過去の受信データはUI一覧と既存原文cursorで発見・閲覧可能にする。Thread削除・GC時の既存回収責務には平文推論も含める。
 
 受信deltaと最終本文の差も観測対象とし、item.doneのない応答でも途中本文を失わないようにする。response全体の回答/平文推論差には架空のoutput_indexを付けない。同一HTTP chunk内で後続JSONの解析が失敗した場合も、先に解析済みのeventを受信本文へ反映する。成功時のmetadataだけの差は原文・診断へ残し、通常会話へ同じ回答を重ねない。
+
+## Windows継承環境の隠し変数（Issue #1、2026-10-26）
+
+`environment_block`が`=C:`だけを例外にしていたため、既存の`inherited_environment`が読み取れる`=::`、`=ExitCode`等を再構築時に拒否していた。ドライブ名の列挙を増やさず、先頭以外の`=`を区切りとする既存の読込み規則へ検査を揃える。[MicrosoftのMSBuild実装](https://source.dot.net/Microsoft.Build.Framework/BackEnd/CommunicationsUtilities.cs.html)にも隠し変数と`=ExitCode`の説明があり、継承環境を通常設定の環境変数名制約と同一視しない。値のNUL、名前のNUL・空名・途中の`=`は拒否し、設定envの英数字/underscore制約は変更しない。
+
+不正entryの診断は変数名だけを先頭128文字に制限して引用・escapeし、値はコピーしない。UTF-16の環境block本体はlossy変換せず、値中の`=`や非Unicodeのcode unitも保持する。新しい状態・依存・worker・設定は不要。親processの環境を変更しない合成fixtureで混在環境と注入拒否を試験し、Windows専用の起動回帰は実機確認と分けて扱う。

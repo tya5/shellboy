@@ -37,6 +37,8 @@ Windowsは下記native adapterで生成時Job割当を行う。OS/Job条件に�
 
 ### Windows adapterの確定境界
 
+継承したUnicode環境blockでは、`=C:`だけでなく`=::`、`=ExitCode`等の先頭`=`を持つ隠し変数も保持する。読込みと組立の規則を揃え、名前は非空・NULなし・先頭以外の`=`なし、値はNULなしを要求する。値の`=`とUTF-16 code unitは保持し、設定の`[shell.env]`の名前制約は緩めない。不正entryの診断には先頭128文字までの変数名を引用・制御文字escapeして含め、値は含めない。[Issue #1](https://github.com/tya5/shellboy/issues/1)の対策であり、CreateProcessW/Job/handleの所有や生成順序は変更しない。
+
 `src/shell/windows.rs` は非継承Jobを生成しKILL_ON_JOB_CLOSEを設定、JOB_LISTと標準I/O三本だけのHANDLE_LISTを同じSTARTUPINFOEXへ登録する。Windows10/Server2016以降を必要とし、利用できない場合は生成を拒否する。生成後Assignやsuspend/resume経路はない。明示applicationName、CRT規則で引用するUTF-16 argv、変更可能commandline、Unicode環境blockを作る。PATHは設定env→origin env順に大文字小文字を区別しないOrdinal比較で更新し、hidden drive変数も保持する。入力commandlineがOS上限を超えればinput_limit。Windows inboxのWSL bash launcherはGit Bash adapterとして使わない。
 
 直接processの終了は保持handleへ0msのWaitForSingleObjectを行う非同期pollで観測する。終了code259も終了観測後の実codeとして扱う。明示停止と自然終了後の残存処理はJob単位で終了し、ActiveProcesses=0を有限期限で確認する。Windows Job終了をUnix TERM相当と説明せず、forced=trueで保持する。Jobはcompletion公開前に閉じる。

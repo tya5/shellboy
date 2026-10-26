@@ -12,6 +12,12 @@ TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の�
 
 修正sourceはローカルcommit `d170da6` です。macOSの標準チェックは全68 suite、1,008 passed / 0 failed / 15 ignoredで成功しました。最終表示コードのstrict lib Clippy、同梱docsの33 CLI確認/13 guides/3 categories/116 links、秘密情報スキャンも成功しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。公開済みv0.1.0の配布物は変更していません。会社のWindows・社内API proxyによる実機再検証は未実施で、以下の初版検証結果とは区別します。
 
+## Windows隠し環境変数の修正
+
+[Issue #1](https://github.com/tya5/shellboy/issues/1)へ対応し、`=::`、`=ExitCode`等を含む継承環境をshellへ渡せる検査へ変更しました。空名・NUL・名前の途中の`=`は引き続き拒否し、診断へは値を含めず変数名だけを有界・escape付きで表示します。環境値の`=`やUTF-16 code unit、設定envの名前制約は維持します。
+
+macOSで共通UTF-16組立の4試験、対象strict Clippy、fmt/diffが成功しました。Windows専用のPowerShell起動回帰も追加しましたが、Windowsでの実行は未実施です。変更はローカルに保持し、push・配布物の更新は行っていません。詳細は [検証状況](../validation/acceptance.md) に記録しています。
+
 ## 初版公開の完了範囲
 
 - package・実行名・Rust参照・環境変数・既定保存先・製品名付き識別子をShellboyへ統一しました。旧名や旧保存形式の互換は追加していません。

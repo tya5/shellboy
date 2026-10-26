@@ -83,17 +83,17 @@ where
 pub fn environment_block(entries: &[EnvironmentEntry]) -> Result<Vec<u16>, ApiError> {
     let mut block = Vec::new();
     for (key, value) in entries {
-        let hidden_drive = key.len() == 3
-            && key[0] == b'=' as u16
-            && key[1] <= 127
-            && (key[1] as u8).is_ascii_alphabetic()
-            && key[2] == b':' as u16;
+        // Match inherited_environment: the separator is the first '=' after
+        // the initial code unit, so hidden names are not limited to '=C:'.
         if key.is_empty()
             || key.contains(&0)
-            || (!hidden_drive && key.contains(&(b'=' as u16)))
+            || key.iter().skip(1).any(|&unit| unit == b'=' as u16)
             || value.contains(&0)
         {
-            return Err(invalid("invalid Windows environment key or value"));
+            let name: String = String::from_utf16_lossy(key).chars().take(128).collect();
+            return Err(invalid(&format!(
+                "invalid Windows environment key or value for variable {name:?}"
+            )));
         }
         block.extend(key);
         block.push(b'=' as u16);
