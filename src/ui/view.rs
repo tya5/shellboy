@@ -20,7 +20,11 @@ pub struct ThreadView {
     pub before_cursor: Option<String>,
     pub first_ordinal: u64,
     pub selection_revision: u64,
+    // Same-path retries add audit nodes without changing selection_revision.
+    // Retain only the last accepted existing DB root-revision watermark.
     pub(super) received_revision: u64,
+    // Last applied saved-history window, distinct from newer input requests.
+    pub(super) received_window_revision: Option<u64>,
     pub total_nodes: u64,
     pub anchor: ViewAnchor,
     pub follow: bool,
@@ -193,6 +197,7 @@ impl ThreadView {
             first_ordinal: 0,
             selection_revision: 0,
             received_revision: 0,
+            received_window_revision: None,
             total_nodes: 0,
             anchor: ViewAnchor::default(),
             follow: true,
@@ -2089,6 +2094,7 @@ mod received_tests {
         ui.view_mut().nodes = vec![node("anchor", "assistant")];
         ui.view_mut().selection_revision = 7;
         ui.view_mut().view_revision = 5;
+        ui.view_mut().received_window_revision = Some(5);
         let refresh = |selection_revision, view_revision, root_revision, nodes| {
             UiUpdate::IncompleteResponses {
                 thread_id: "t".into(),
@@ -2118,6 +2124,75 @@ mod received_tests {
         ui.apply(refresh(7, Some(5), 11, vec![]));
         assert!(!ui.view().nodes.iter().any(|n| n.node_id == "paid"));
         assert_eq!(ui.view().received_revision, 11);
+    }
+    #[test]
+    fn received_window_scope_survives_pending_scroll_but_not_a_later_applied_window() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        let node = |id: &str, role: &str| UiNode {
+            node_id: id.into(),
+            role: role.into(),
+            text: id.into(),
+            total_chars: id.len(),
+            ..Default::default()
+        };
+        let window = |revision, selection_revision| UiUpdate::HistoryWindow {
+            thread_id: "t".into(),
+            generation,
+            view_revision: revision,
+            nodes: vec![node("anchor", "assistant"), node("next", "assistant")],
+            first_ordinal: 0,
+            selection_revision,
+            total_nodes: 2,
+            anchor: ViewAnchor {
+                node_id: Some("anchor".into()),
+                char_offset: 0,
+            },
+        };
+        let received = |revision, root_revision| UiUpdate::IncompleteResponses {
+            thread_id: "t".into(),
+            generation,
+            selection_revision: 7,
+            view_revision: Some(revision),
+            root_revision,
+            nodes: vec![("anchor".into(), node("paid", "received_response"))],
+        };
+        ui.view_mut().follow = false;
+        ui.view_mut().selection_revision = 7;
+        ui.view_mut().view_revision = 5;
+        ui.view_mut().scroll.request = Some((5, None));
+        ui.view_mut().scroll.pending = 1;
+        // Before its saved-history window is applied, the corresponding audit
+        // must not install a source into an unrelated frame.
+        ui.apply(received(5, 10));
+        assert_eq!(ui.view().received_revision, 0);
+        ui.apply(window(5, 7));
+        assert_eq!(
+            ui.view().view_revision,
+            6,
+            "pending scroll resumes immediately"
+        );
+        assert_eq!(ui.view().received_window_revision, Some(5));
+        ui.apply(received(5, 10));
+        assert!(ui.view().nodes.iter().any(|node| node.node_id == "paid"));
+        // An in-flight newer request still shows the old applied window. Its
+        // received source remains valid until the replacement window arrives.
+        ui.view_mut().scroll.request = Some((6, None));
+        ui.apply(received(5, 11));
+        assert_eq!(ui.view().received_revision, 11);
+        ui.apply(window(6, 7));
+        assert_eq!(ui.view().received_window_revision, Some(6));
+        ui.apply(received(5, 12));
+        assert!(!ui.view().nodes.iter().any(|node| node.node_id == "paid"));
+        assert_eq!(ui.view().received_revision, 11);
+        ui.apply(received(6, 12));
+        assert!(ui.view().nodes.iter().any(|node| node.node_id == "paid"));
+        // A delayed window cannot move the accepted selection backwards.
+        let revision = ui.view().view_revision;
+        ui.apply(window(revision, 6));
+        assert_eq!(ui.view().selection_revision, 7);
+        assert_eq!(ui.view().received_window_revision, Some(6));
     }
     #[test]
     fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {

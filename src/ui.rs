@@ -1544,7 +1544,8 @@ impl UiState {
             } => {
                 if let Some(view) = self.view_for(&thread_id, generation)
                     && view.selection_revision == selection_revision
-                    && view_revision.is_none_or(|revision| view.view_revision == revision)
+                    && view_revision
+                        .is_none_or(|revision| view.received_window_revision == Some(revision))
                     && root_revision >= view.received_revision
                 {
                     view.received_revision = root_revision;
@@ -1702,10 +1703,10 @@ impl UiState {
                 total_nodes,
                 anchor,
             } => {
-                if let Some(view) = self
-                    .view_for(&thread_id, generation)
-                    .filter(|v| v.view_revision == view_revision)
-                {
+                if let Some(view) = self.view_for(&thread_id, generation).filter(|v| {
+                    v.view_revision == view_revision && selection_revision >= v.selection_revision
+                }) {
+                    view.received_window_revision = Some(view_revision);
                     view.on_history_window(
                         nodes,
                         first_ordinal,

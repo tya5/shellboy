@@ -184,7 +184,9 @@ pub(super) async fn refresh(
     let snapshot=control.store.database.call(move|db|{
         let selection=crate::history::selection_revision(db,&target,crate::history::ThreadScope::Live)?;
         if selection as u64 != scope.selection_revision {return Ok(None);}
-        let root_revision=db.query_row("SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'",[],|row|row.get::<_,u64>(0))?;
+        let root_revision=db.query_row("SELECT value FROM app_meta WHERE key='root_revision'",[],|row|row.get::<_,String>(0))?
+            .parse::<i64>().ok().and_then(|revision|u64::try_from(revision).ok())
+            .ok_or_else(||crate::storage::StorageError::Schema("root revision metadata is malformed".into()))?;
         let mut statement=db.prepare(r#"SELECT n.id,n.kind,
           coalesce(substr(json_extract(n.payload_json,'$.partial_text'),1,16384),''),
           coalesce(substr(json_extract(n.payload_json,'$.partial_reasoning'),1,16384),''),
@@ -583,6 +585,49 @@ mod tests {
             rx.try_recv(),
             Err(std::sync::mpsc::TryRecvError::Empty)
         ));
+        for malformed in ["-1", "not-a-revision"] {
+            owner
+                .db
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE app_meta SET value=?1 WHERE key='root_revision'",
+                        [malformed],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert!(
+                refresh(
+                    &control,
+                    &tx,
+                    "t",
+                    7,
+                    80,
+                    Scope {
+                        selection_revision: 0,
+                        view_revision: None
+                    }
+                )
+                .await
+                .is_err()
+            );
+            assert!(matches!(
+                rx.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ));
+        }
+        owner
+            .db
+            .call(|db| {
+                db.execute(
+                    "UPDATE app_meta SET value='0' WHERE key='root_revision'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
