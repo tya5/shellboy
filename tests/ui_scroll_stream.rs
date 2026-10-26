@@ -304,10 +304,43 @@ fn late_commit_cannot_rename_a_different_thread_or_generation() {
         "canonical source is not fabricated from a temporary preview"
     );
     assert!(
+        ui.view()
+            .nodes()
+            .iter()
+            .any(|node| node.node_id == "live-attempt"),
+        "paid preview stays until the real canonical body arrives"
+    );
+    let mut canonical = persisted(1, "canonical final body".into());
+    canonical.node_id = "canonical-response".into();
+    ui.apply(UiUpdate::History {
+        thread_id: "fixture".into(),
+        generation,
+        nodes: vec![persisted(0, "saved prose\n".repeat(80)), canonical],
+        before_cursor: None,
+        append: false,
+        first_ordinal: 0,
+        selection_revision: 2,
+        total_nodes: 2,
+    });
+    assert!(
         !ui.view()
             .nodes()
             .iter()
             .any(|node| node.node_id == "live-attempt")
+    );
+    assert_eq!(
+        ui.view()
+            .nodes()
+            .iter()
+            .filter(|node| node.node_id == "canonical-response")
+            .count(),
+        1
+    );
+    assert!(
+        ui.view()
+            .nodes()
+            .iter()
+            .any(|node| node.text == "canonical final body")
     );
 }
 

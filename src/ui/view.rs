@@ -15,6 +15,8 @@ pub struct ThreadView {
     nodes: Vec<UiNode>,
     pub(super) provisional_nodes: BTreeSet<String>,
     committed_preview: Option<(String, String)>,
+    // At most one saved correspondence per retained provisional node.
+    committed_nodes: BTreeMap<String, String>,
     pub before_cursor: Option<String>,
     pub first_ordinal: u64,
     pub selection_revision: u64,
@@ -185,6 +187,7 @@ impl ThreadView {
             nodes: Vec::new(),
             provisional_nodes: BTreeSet::new(),
             committed_preview: None,
+            committed_nodes: BTreeMap::new(),
             before_cursor: None,
             first_ordinal: 0,
             selection_revision: 0,
@@ -760,6 +763,9 @@ impl ThreadView {
             return false;
         }
         let mut source_changed = false;
+        if self.follow && !self.history_rebase_pending {
+            source_changed |= self.retire_committed_preview(&nodes);
+        }
         let previous_tail = self.nodes.last().map(|node| node.node_id.clone());
         if self.history_rebase_pending {
             // A tail refresh cannot replace the frame whose source
@@ -940,18 +946,55 @@ impl ThreadView {
             // preceding saved node. Canonical history replaces it atomically.
             return self.rebase_committed_stream(thread_id, generation);
         }
-        self.provisional_nodes.remove(&attempt_id);
-        if self
-            .committed_preview
-            .as_ref()
-            .is_some_and(|(attempt, _)| attempt == &attempt_id)
-        {
-            self.committed_preview = None;
+        // A commit identifies the saved source; it does not deliver its body.
+        // Keep paid output across separate queue turns until canonical delivery.
+        self.committed_nodes.insert(attempt_id, node_id);
+        let ready = self
+            .committed_nodes
+            .values()
+            .filter(|saved| {
+                self.nodes.iter().any(|node| {
+                    &node.node_id == *saved && (node.total_chars == 0 || !node.text.is_empty())
+                })
+            })
+            .cloned()
+            .map(|node_id| UiNode {
+                node_id,
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        if self.retire_committed_preview(&ready) {
+            self.mark_source_changed();
         }
-        // A provisional delta window is never renamed into canonical source.
-        self.nodes.retain(|node| node.node_id != attempt_id);
-        self.mark_source_changed();
         self.rebase_committed_stream(thread_id, generation)
+    }
+    fn retire_committed_preview(&mut self, incoming: &[UiNode]) -> bool {
+        let retired = self
+            .committed_nodes
+            .iter()
+            .filter(|(_, saved)| {
+                incoming.iter().any(|node| {
+                    &node.node_id == *saved && (node.total_chars == 0 || !node.text.is_empty())
+                })
+            })
+            .map(|(attempt, _)| attempt.clone())
+            .collect::<Vec<_>>();
+        self.remove_committed_previews(retired)
+    }
+    fn remove_committed_previews(&mut self, retired: Vec<String>) -> bool {
+        for attempt in &retired {
+            self.provisional_nodes.remove(attempt);
+            self.nodes.retain(|node| &node.node_id != attempt);
+            self.committed_nodes.remove(attempt);
+            if self
+                .committed_preview
+                .as_ref()
+                .is_some_and(|(id, _)| id == attempt)
+            {
+                self.committed_preview = None;
+            }
+        }
+        !retired.is_empty()
     }
     fn rebase_preview(&mut self) -> Option<UiAction> {
         if self.history_rebase_pending {
@@ -1027,17 +1070,34 @@ impl ThreadView {
     }
     pub(super) fn on_node_window(&mut self, view_revision: u64, mut node: UiNode) {
         let node_id_for_reply = node.node_id.clone();
+        let body_ready = node.total_chars == 0 || !node.text.is_empty();
+        let mut installed = false;
         if let Some(existing) = self
             .nodes
             .iter_mut()
             .find(|existing| existing.node_id == node.node_id)
-            && !existing.same_projection(&node)
         {
-            if !self.follow {
-                node.preserve_preview_on_transient_failure(existing);
+            installed = true;
+            if !existing.same_projection(&node) {
+                if !self.follow {
+                    node.preserve_preview_on_transient_failure(existing);
+                }
+                *existing = node;
+                self.mark_source_changed();
             }
-            *existing = node;
-            self.mark_source_changed();
+        }
+        // A source-window response does not install an off-page node. Its slot
+        // may have been evicted while this asynchronous read was pending.
+        if installed && body_ready && self.follow && !self.history_rebase_pending {
+            let retired = self
+                .committed_nodes
+                .iter()
+                .filter(|(_, saved)| *saved == &node_id_for_reply)
+                .map(|(attempt, _)| attempt.clone())
+                .collect::<Vec<_>>();
+            if self.remove_committed_previews(retired) {
+                self.mark_source_changed();
+            }
         }
         if self.scroll.request.is_none()
             || self.scroll.request.as_ref()
@@ -1069,6 +1129,7 @@ impl ThreadView {
         self.nodes = nodes;
         self.observe_sent_nodes();
         self.provisional_nodes.clear();
+        self.committed_nodes.clear();
         self.committed_preview = None;
         self.first_ordinal = first_ordinal;
         self.selection_revision = selection_revision;
@@ -1284,6 +1345,8 @@ impl ThreadView {
     pub(super) fn retain_source_ids(&mut self) {
         self.provisional_nodes
             .retain(|id| self.nodes.iter().any(|node| &node.node_id == id));
+        self.committed_nodes
+            .retain(|attempt, _| self.provisional_nodes.contains(attempt));
         if self
             .committed_preview
             .as_ref()
@@ -1305,6 +1368,7 @@ impl ThreadView {
     }
     pub(super) fn discard_cached_history(&mut self) {
         self.nodes = Vec::new();
+        self.committed_nodes.clear();
         self.provisional_nodes.clear();
         self.committed_preview = None;
         self.reasoning_expanded = BTreeSet::new();
@@ -1330,6 +1394,10 @@ impl ThreadView {
                 last
             };
             let removed = self.nodes.remove(index);
+            if let Some((attempt, saved)) = self.committed_nodes.remove_entry(&removed.node_id) {
+                *retained = retained
+                    .saturating_sub(expanded_id_bytes(&attempt) + expanded_id_bytes(&saved));
+            }
             *retained = retained.saturating_sub(removed.metadata_bytes() + removed.cached_bytes());
             if let Some(id) = self.reasoning_expanded.take(&removed.node_id) {
                 *retained = retained.saturating_sub(expanded_id_bytes(&id));
@@ -1353,6 +1421,11 @@ impl ThreadView {
                 bytes = bytes.saturating_add(
                     node.metadata_bytes() - std::mem::size_of::<UiNode>() + node.cached_bytes(),
                 );
+            }
+        }
+        for (attempt, saved) in &self.committed_nodes {
+            if !working.contains(attempt) {
+                bytes = bytes.saturating_add(expanded_id_bytes(attempt) + expanded_id_bytes(saved));
             }
         }
         for id in &self.reasoning_expanded {
@@ -1479,6 +1552,10 @@ mod owner_tests {
 
 impl ThreadView {
     pub(super) fn settle_stream(&mut self, attempt: &str) -> Option<UiAction> {
+        // A stale terminal read must not discard a source already committed.
+        if self.committed_nodes.contains_key(attempt) {
+            return None;
+        }
         if !self.provisional_nodes.remove(attempt) {
             return None;
         }
@@ -1761,8 +1838,8 @@ mod completion_notice_tests {
         assert!(ui.view().follow);
         assert_ne!(ui.view().view_revision, old_revision);
         ui.apply(commit());
-        assert!(ui.view().committed_preview.is_none());
-        assert!(ui.view().nodes().is_empty());
+        assert!(!ui.view().committed_nodes.is_empty());
+        assert_eq!(ui.view().nodes()[0].text, "bounded source");
         // A late accepted window from before Ctrl+End cannot pull follow back.
         ui.apply(UiUpdate::HistoryWindow {
             thread_id: "thread".into(),
@@ -1783,6 +1860,7 @@ mod completion_notice_tests {
 
 impl ThreadView {
     pub(super) fn retain_incomplete_stream(&mut self, attempt: &str, source: String, kind: &str) {
+        self.committed_nodes.remove(attempt);
         if self.nodes.iter().any(|n| n.node_id == source) {
             self.provisional_nodes.remove(attempt);
             self.nodes.retain(|n| n.node_id != attempt);
@@ -1903,5 +1981,154 @@ mod received_tests {
             nodes: vec![],
         });
         assert_eq!(ui.view().thread_id.as_deref(), Some("other"));
+    }
+}
+
+#[cfg(test)]
+mod committed_correspondence_tests {
+    use super::*;
+
+    #[test]
+    fn two_commits_resolve_reverse_body_delivery_without_losing_the_other_source() {
+        fn source(id: &str, text: &str, total_chars: usize) -> UiNode {
+            UiNode {
+                node_id: id.into(),
+                role: "assistant".into(),
+                text: text.into(),
+                total_chars,
+                ..Default::default()
+            }
+        }
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.thread_id = Some("thread".into());
+        for (attempt, saved, paid) in [
+            ("attempt-a", "saved-a", "paid A"),
+            ("attempt-b", "saved-b", "paid B"),
+        ] {
+            view.on_stream(source(attempt, paid, paid.chars().count()));
+            view.commit_stream_node(attempt.into(), saved.into(), "thread".into(), 0);
+        }
+        assert_eq!(view.committed_nodes.len(), 2);
+        view.on_history(
+            vec![source("saved-a", "", 7), source("saved-b", "", 7)],
+            None,
+            false,
+            0,
+            1,
+            2,
+        );
+        assert_eq!(view.committed_nodes.len(), 2);
+        assert!(view.nodes().iter().any(|node| node.text == "paid A"));
+        assert!(view.nodes().iter().any(|node| node.text == "paid B"));
+
+        let revision = view.view_revision;
+        view.on_node_window(revision, source("saved-b", "final B", 7));
+        assert_eq!(view.committed_nodes.len(), 1);
+        assert!(view.committed_nodes.contains_key("attempt-a"));
+        assert!(view.nodes().iter().any(|node| node.text == "paid A"));
+        assert!(!view.nodes().iter().any(|node| node.node_id == "attempt-b"));
+        assert_eq!(
+            view.nodes()
+                .iter()
+                .filter(|node| node.text == "final B")
+                .count(),
+            1
+        );
+        view.on_node_window(revision, source("saved-b", "final B", 7));
+        assert_eq!(
+            view.nodes()
+                .iter()
+                .filter(|node| node.text == "final B")
+                .count(),
+            1
+        );
+        assert!(view.nodes().iter().any(|node| node.text == "paid A"));
+
+        view.on_node_window(revision, source("saved-a", "final A", 7));
+        assert!(view.committed_nodes.is_empty());
+        assert!(view.provisional_nodes.is_empty());
+        assert_eq!(view.nodes().len(), 2);
+        assert_eq!(
+            view.nodes()
+                .iter()
+                .filter(|node| node.text == "final A")
+                .count(),
+            1
+        );
+        assert_eq!(
+            view.nodes()
+                .iter()
+                .filter(|node| node.text == "final B")
+                .count(),
+            1
+        );
+    }
+}
+
+#[cfg(test)]
+mod evicted_committed_source_tests {
+    use super::*;
+
+    #[test]
+    fn an_evicted_canonical_slot_cannot_retire_the_paid_preview_from_a_late_window() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.thread_id = Some("thread".into());
+        view.on_stream(UiNode {
+            node_id: "attempt".into(),
+            role: "assistant".into(),
+            text: "paid body".into(),
+            total_chars: 9,
+            ..Default::default()
+        });
+        view.commit_stream_node("attempt".into(), "saved".into(), "thread".into(), 0);
+        view.on_history(
+            vec![UiNode {
+                node_id: "saved".into(),
+                total_chars: 10,
+                ..Default::default()
+            }],
+            None,
+            false,
+            0,
+            1,
+            1,
+        );
+        let pending_revision = view.view_revision;
+        // Same effect as a page refresh/edge eviction while the window read
+        // waits: generation/view_revision stay valid, but its slot is gone.
+        view.nodes.retain(|node| node.node_id != "saved");
+        view.on_node_window(
+            pending_revision,
+            UiNode {
+                node_id: "saved".into(),
+                role: "assistant".into(),
+                text: "final body".into(),
+                total_chars: 10,
+                ..Default::default()
+            },
+        );
+        assert_eq!(view.nodes().len(), 1);
+        assert_eq!(view.nodes()[0].text, "paid body");
+        assert!(view.committed_nodes.contains_key("attempt"));
+        assert!(view.provisional_nodes.contains("attempt"));
+        view.on_history(
+            vec![UiNode {
+                node_id: "saved".into(),
+                role: "assistant".into(),
+                text: "final body".into(),
+                total_chars: 10,
+                ..Default::default()
+            }],
+            None,
+            false,
+            0,
+            2,
+            1,
+        );
+        assert_eq!(view.nodes().len(), 1);
+        assert_eq!(view.nodes()[0].node_id, "saved");
+        assert_eq!(view.nodes()[0].text, "final body");
+        assert!(view.committed_nodes.is_empty());
+        assert!(view.provisional_nodes.is_empty());
     }
 }

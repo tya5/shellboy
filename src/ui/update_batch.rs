@@ -198,3 +198,147 @@ mod tests {
         assert!(ui.is_stopped());
     }
 }
+
+#[cfg(test)]
+mod committed_delivery_tests {
+    use super::*;
+    #[test]
+    fn commit_at_the_update_boundary_keeps_paid_text_until_canonical_delivery() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("thread".into());
+        let generation = ui.view().generation;
+        ui.apply(UiUpdate::Stream {
+            thread_id: "thread".into(),
+            generation,
+            node_id: "attempt".into(),
+            role: "assistant".into(),
+            text: "paid intermediate text".into(),
+            base_char_offset: 0,
+            total_chars: 22,
+            reasoning_ranges: vec![],
+            presentation: Default::default(),
+            ack: None,
+        });
+        let (send, recv) = std::sync::mpsc::sync_channel(64);
+        for _ in 0..31 {
+            send.send(UiUpdate::Status {
+                thread_id: None,
+                text: "unrelated".into(),
+            })
+            .unwrap();
+        }
+        send.send(UiUpdate::StreamCommitted {
+            thread_id: "thread".into(),
+            generation,
+            attempt_id: "attempt".into(),
+            node_id: "saved".into(),
+        })
+        .unwrap();
+        send.send(UiUpdate::History {
+            thread_id: "thread".into(),
+            generation,
+            nodes: vec![UiNode {
+                node_id: "saved".into(),
+                role: "assistant".into(),
+                text: "canonical final text".into(),
+                total_chars: 20,
+                ..Default::default()
+            }],
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 1,
+            total_nodes: 1,
+        })
+        .unwrap();
+        assert_eq!(ui.drain_update_turn(&recv, Duration::MAX), 32);
+        assert_eq!(ui.view().nodes()[0].text, "paid intermediate text");
+        let before = ui.history_layout(80, 20);
+        assert!(before.text.contains("paid intermediate text"));
+        assert_eq!(ui.drain_update_turn(&recv, Duration::MAX), 1);
+        assert_eq!(ui.view().nodes().len(), 1);
+        assert_eq!(ui.view().nodes()[0].node_id, "saved");
+        let after = ui.history_layout(80, 20);
+        assert!(after.text.contains("canonical final text"));
+        assert!(!after.text.contains("paid intermediate text"));
+    }
+}
+
+#[cfg(test)]
+mod committed_source_tests {
+    use super::*;
+    #[test]
+    fn metadata_only_history_and_late_settled_keep_paid_source_until_body_arrives() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("thread".into());
+        let generation = ui.view().generation;
+        ui.apply(UiUpdate::Stream {
+            thread_id: "thread".into(),
+            generation,
+            node_id: "attempt".into(),
+            role: "assistant".into(),
+            text: "paid output".into(),
+            base_char_offset: 0,
+            total_chars: 11,
+            reasoning_ranges: vec![],
+            presentation: Default::default(),
+            ack: None,
+        });
+        ui.apply(UiUpdate::StreamCommitted {
+            thread_id: "thread".into(),
+            generation,
+            attempt_id: "attempt".into(),
+            node_id: "saved".into(),
+        });
+        ui.apply(UiUpdate::StreamSettled {
+            thread_id: "thread".into(),
+            generation,
+            attempt_id: "attempt".into(),
+            received_source: None,
+            ack: None,
+        });
+        ui.apply(UiUpdate::History {
+            thread_id: "thread".into(),
+            generation,
+            nodes: vec![UiNode {
+                node_id: "saved".into(),
+                total_chars: 20,
+                ..Default::default()
+            }],
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 1,
+            total_nodes: 1,
+        });
+        assert!(
+            ui.view()
+                .nodes()
+                .iter()
+                .any(|node| node.text == "paid output")
+        );
+        ui.active_view_mut()
+            .on_load_failed("body unavailable".into());
+        assert!(ui.history_layout(80, 20).text.contains("paid output"));
+        // The next canonical body may arrive from a source-window request,
+        // independently of another full history page.
+        let revision = ui.view().view_revision;
+        ui.active_view_mut().on_node_window(
+            revision,
+            UiNode {
+                node_id: "saved".into(),
+                role: "assistant".into(),
+                text: "canonical final text".into(),
+                total_chars: 20,
+                ..Default::default()
+            },
+        );
+        assert_eq!(ui.view().nodes().len(), 1);
+        assert_eq!(ui.view().nodes()[0].node_id, "saved");
+        assert!(
+            ui.history_layout(80, 20)
+                .text
+                .contains("canonical final text")
+        );
+    }
+}
