@@ -8,7 +8,10 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::{mpsc, oneshot},
+};
 
 async fn call(root: &Path, command: RagCommand) -> Value {
     execute(
@@ -72,6 +75,26 @@ async fn proxy(
     Arc<AtomicUsize>,
     tokio::task::JoinHandle<()>,
 ) {
+    proxy_with_gate(root, None).await
+}
+
+// Only marked query requests are held. Each arrival owns its response release;
+// dropping the test-side sender closes that request instead of orphaning it.
+async fn held_query(arrivals: &mut mpsc::Receiver<oneshot::Sender<()>>) -> oneshot::Sender<()> {
+    tokio::time::timeout(std::time::Duration::from_secs(5), arrivals.recv())
+        .await
+        .expect("marked query must arrive at the HTTP response gate")
+        .expect("HTTP fixture must retain the query arrival sender")
+}
+
+async fn proxy_with_gate(
+    root: &Path,
+    gate: Option<mpsc::Sender<oneshot::Sender<()>>>,
+) -> (
+    Arc<AtomicUsize>,
+    Arc<AtomicUsize>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     std::fs::write(root.join("config.toml"),format!("[connections.fixture]\nbase_url='http://{address}/v1'\n[embedding]\nconnection='fixture'\nmodel='synthetic'\n")).unwrap();
@@ -80,13 +103,24 @@ async fn proxy(
     let captured = requests.clone();
     let failing = fail_at.clone();
     let task = tokio::spawn(async move {
+        // The listener owns all connection tasks. Aborting/joining this fixture
+        // drops the JoinSet and cancels any unreleased response gates as well.
+        let mut connections = tokio::task::JoinSet::new();
         loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
+            let accepted = tokio::select! {
+                accepted = listener.accept() => accepted,
+                finished = connections.join_next(), if !connections.is_empty() => {
+                    finished.expect("tracked fixture request").expect("fixture request must not panic");
+                    continue;
+                }
+            };
+            let Ok((mut stream, _)) = accepted else {
                 return;
             };
             let requests = captured.clone();
             let failing = failing.clone();
-            tokio::spawn(async move {
+            let gate = gate.clone();
+            connections.spawn(async move {
                 let mut bytes = Vec::new();
                 let header_end = loop {
                     let mut b = [0; 4096];
@@ -118,21 +152,20 @@ async fn proxy(
                 let request: Value =
                     serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap();
                 let count = requests.fetch_add(1, Ordering::SeqCst) + 1;
-                if request["input"]
+                let held = request["input"]
                     .as_array()
                     .unwrap()
                     .iter()
-                    .any(|s| s.as_str().unwrap().contains("SHUTDOWN"))
-                {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                }
-                if request["input"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|s| s.as_str().unwrap().contains("DELAY"))
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    .any(|s| {
+                        let input = s.as_str().unwrap();
+                        input.contains("DELAY") || input.contains("SHUTDOWN")
+                    });
+                if held {
+                    let gate = gate.as_ref().expect("marked query requires an explicit test gate");
+                    let (release, released) = oneshot::channel();
+                    if gate.send(release).await.is_err() || released.await.is_err() {
+                        return;
+                    }
                 }
                 let limited = failing.load(Ordering::SeqCst) == usize::MAX - 1;
                 let alternate = failing.load(Ordering::SeqCst) == usize::MAX - 2 && count % 2 == 1;
@@ -331,7 +364,8 @@ async fn readonly_history_semantic_reuses_index_and_rejects_space_change_and_tom
     use shellboy::{config::Config, index::IndexService, storage::DbWorker};
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
-    let (requests, _, server) = proxy(root).await;
+    let (gate, mut arrivals) = mpsc::channel(1);
+    let (_, _, server) = proxy_with_gate(root, Some(gate)).await;
     std::fs::create_dir(root.join("data")).unwrap();
     let db = DbWorker::open(root.join("data/shellboy.db")).await.unwrap();
     let config =
@@ -371,15 +405,12 @@ async fn readonly_history_semantic_reuses_index_and_rejects_space_change_and_tom
     )
     .await;
     assert_eq!(got["result"]["text"], "NEAR 会話の復旧");
-    let initial = requests.load(Ordering::SeqCst);
     let path = root.to_path_buf();
     let pending =
         tokio::spawn(
             async move { search(&path, "history", "DELAY NEAR", SearchMode::Semantic).await },
         );
-    while requests.load(Ordering::SeqCst) == initial {
-        tokio::task::yield_now().await;
-    }
+    let release = held_query(&mut arrivals).await;
     db.call(|c| {
         c.execute(
             "UPDATE app_meta SET value='removed-space' WHERE key='index.active_space'",
@@ -389,7 +420,17 @@ async fn readonly_history_semantic_reuses_index_and_rejects_space_change_and_tom
     })
     .await
     .unwrap();
-    let changed = pending.await.unwrap();
+    assert!(
+        !pending.is_finished(),
+        "space changed while query response was held"
+    );
+    release
+        .send(())
+        .expect("query must still await response release");
+    let changed = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .expect("released history query must finish")
+        .unwrap();
     assert_eq!(changed["ok"], false);
     assert_eq!(
         changed["result"]["scope_errors"][0]["code"],
@@ -408,18 +449,19 @@ async fn readonly_history_semantic_reuses_index_and_rejects_space_change_and_tom
     assert_eq!(missing["error"]["code"], "revision_unavailable");
     db.shutdown().await.unwrap();
     server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test]
 async fn material_query_releases_snapshot_during_api_and_rejects_new_publication() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
-    let (requests, _, server) = proxy(root).await;
+    let (gate, mut arrivals) = mpsc::channel(1);
+    let (_, _, server) = proxy_with_gate(root, Some(gate)).await;
     init(root).await;
     std::fs::write(root.join("notes.md"), "OLD NEAR").unwrap();
     add(root, "notes", "notes.md").await;
     assert_eq!(index(root, None, IndexMode::Semantic).await["ok"], true);
-    let before = requests.load(Ordering::SeqCst);
     let task_root = root.to_path_buf();
     let pending = tokio::spawn(async move {
         search(
@@ -430,13 +472,7 @@ async fn material_query_releases_snapshot_during_api_and_rejects_new_publication
         )
         .await
     });
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        while requests.load(Ordering::SeqCst) == before {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    let release = held_query(&mut arrivals).await;
     std::fs::write(root.join("notes.md"), "NEW unembedded revision").unwrap();
     assert_eq!(index(root, None, IndexMode::Keyword).await["ok"], true);
     let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
@@ -444,13 +480,24 @@ async fn material_query_releases_snapshot_during_api_and_rejects_new_publication
         .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))
         .unwrap();
     assert_eq!(busy, 0, "network await must not retain a read snapshot");
-    let result = pending.await.unwrap();
+    assert!(
+        !pending.is_finished(),
+        "publication and checkpoint completed while response was held"
+    );
+    release
+        .send(())
+        .expect("query must still await response release");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .expect("released material query must finish")
+        .unwrap();
     assert_eq!(result["ok"], false);
     assert_eq!(
         result["result"]["scope_errors"][0]["code"],
         "source_changed"
     );
     server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test]
@@ -530,7 +577,8 @@ async fn owner_shuts_down_normally_during_history_query_http_and_query_reopens_o
     use shellboy::{app::DataOwner, index::IndexService};
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
-    let (requests, _, server) = proxy(root).await;
+    let (gate, mut arrivals) = mpsc::channel(1);
+    let (_, _, server) = proxy_with_gate(root, Some(gate)).await;
     let owner = DataOwner::start(
         Some(root.join("config.toml")),
         Some(root.join("data")),
@@ -551,18 +599,11 @@ async fn owner_shuts_down_normally_during_history_query_http_and_query_reopens_o
         .await
         .unwrap()
     {}
-    let initial = requests.load(Ordering::SeqCst);
     let task_root = root.to_path_buf();
     let pending = tokio::spawn(async move {
         search(&task_root, "history", "SHUTDOWN NEAR", SearchMode::Semantic).await
     });
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        while requests.load(Ordering::SeqCst) == initial {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    let release = held_query(&mut arrivals).await;
     tokio::time::timeout(std::time::Duration::from_secs(1), owner.shutdown())
         .await
         .unwrap()
@@ -571,10 +612,17 @@ async fn owner_shuts_down_normally_during_history_query_http_and_query_reopens_o
         !pending.is_finished(),
         "query HTTP fixture must still be in flight at owner shutdown"
     );
-    let result = pending.await.unwrap();
+    release
+        .send(())
+        .expect("owner shutdown must not cancel independent query HTTP");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .expect("released shutdown query must finish")
+        .unwrap();
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(result["result"]["items"].as_array().unwrap().len(), 1);
     server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test]

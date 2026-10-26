@@ -85,12 +85,46 @@ fn answer(text: &str) -> Value {
 async fn incoming(receive: &mut mpsc::Receiver<Incoming>) -> Incoming {
     timeout(Duration::from_secs(5), receive.recv())
         .await
-        .unwrap()
-        .unwrap()
+        .expect("loopback model request must arrive within the fixture watchdog")
+        .expect("loopback fixture must retain its incoming request sender")
+}
+// Capture state only after a watchdog failure. The polling cadence observes a
+// persisted condition; it does not establish the test's concurrency ordering.
+async fn progress(control: &Control, thread: &str) -> Value {
+    let thread = thread.to_owned();
+    control.store.database.call(move |db| {
+        let mut state = serde_json::Map::new();
+        for (name, query) in [
+            ("turns", "SELECT json_object('id',id,'state',state,'generation',generation,'reason_present',recovery_reason_json IS NOT NULL) FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 8"),
+            ("attempts", "SELECT json_object('id',a.id,'state',a.state,'error_present',a.error_json IS NOT NULL) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 ORDER BY a.rowid DESC LIMIT 8"),
+            ("shells", "SELECT json_object('id',s.id,'state',s.state,'exit',s.exit_code,'complete',s.output_complete) FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1 ORDER BY s.rowid DESC LIMIT 8"),
+        ] {
+            let rows = db.prepare(query)?.query_map([&thread], |row| row.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            state.insert(name.into(), json!(rows));
+        }
+        Ok(Value::Object(state))
+    }).await.unwrap()
 }
 async fn settled(control: &Control, thread: &str) {
     let target = thread.to_owned();
-    timeout(Duration::from_secs(5),async{loop{let target=target.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    let result = timeout(Duration::from_secs(5), async {
+        loop {
+            let target = target.clone();
+            if control.store.database.call(move |db| Ok(db.query_row(
+                "SELECT NOT EXISTS(SELECT 1 FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting'))",
+                [target], |row| row.get::<_, bool>(0),
+            )?)).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await;
+    if result.is_err() {
+        let diagnostic = timeout(Duration::from_secs(1), progress(control, thread)).await;
+        panic!(
+            "Thread did not settle within the fixture watchdog; observed after timeout: {diagnostic:?}"
+        );
+    }
 }
 async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     request(
@@ -871,7 +905,8 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
             answer("## 目的\nSynthetic attachment source summarized."),
         ))
         .unwrap();
-    timeout(Duration::from_secs(5), async {
+    let mut compact_state = Value::Null;
+    let compact_finished = timeout(Duration::from_secs(5), async {
         loop {
             let state = request(
                 &control,
@@ -880,14 +915,19 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
                 }),
             )
             .await;
-            if state["downstream"]["outcome"]["result"]["summary_node_id"].is_string() {
+            let complete = state["downstream"]["outcome"]["result"]["summary_node_id"].is_string();
+            compact_state = state;
+            if complete {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
-    .await
-    .unwrap();
+    .await;
+    assert!(
+        compact_finished.is_ok(),
+        "compaction did not publish its summary within the fixture watchdog; last operation state: {compact_state}"
+    );
     let resumed = request(
         &control,
         Command::MessageSend(MessageSendArgs {
