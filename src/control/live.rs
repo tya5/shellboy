@@ -112,7 +112,7 @@ impl LiveRegistry {
         &self.drivers
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn test_shells(&self) -> &Mutex<HashMap<String, LiveShell>> {
         &self.shells
     }
