@@ -1,6 +1,6 @@
 # Shell runtime
 
-採用状態: Unix群管理とWindows生成時Job adapterを実装済み。Windowsはcross-target型検査まで、実機実行は未検証。shellはモデル唯一のツールであり、CLIから再帰起動する操作を増やさない。初期のCLI・詳細設計・プロセス制御資料は非同梱。現行の生成・入力・出力・回収契約を以下に示す。
+採用状態: Unix群管理とWindows生成時Job adapterを実装済み。OS別のnative CI・配布確認と、Windowsの各shell・端末での実機受入を区別し、実施範囲は [検証状況](../validation/acceptance.md) に記録する。shellはモデル唯一のツールであり、CLIから再帰起動する操作を増やさない。初期のCLI・詳細設計・プロセス制御資料は非同梱。現行の生成・入力・出力・回収契約を以下に示す。
 
 `ShellSupervisor::new(&Config)` は設定snapshotを保持する。`spawn(execution_id,cwd,args,env)` は**呼出し元がDBへ起動意図をcommit済みで、所有Runがstoppingでないと再確認した後**に呼び出す。runtimeはDBを操作しない。起動途中の停止競合と世代照合もControlの責務で、spawn成功を永続受付成功と混同しない。
 
@@ -47,7 +47,7 @@ Windowsは下記native adapterで生成時Job割当を行う。OS/Job条件に�
 
 取消し要求だけでOVERLAPPED/bufferを解放しない。Rust futureがdropされても、未完了operationは安定したheapとhandle/eventを保持したcleanup waiterへ移す。通常の待機はTokioの短いtimer pollで、最後の安全な回収だけblocking poolを利用する。runtime終了でcleanup jobが開始されない場合は領域をプロセス終了まで保持し、kernel向けpointerをdanglingにしない。取消し完了を1秒で確認できない場合はfailedと未確認範囲を返し、現在<=64KiBは未確認として自動再送を禁止する。成功や完全受渡しを装わない。
 
-`windows_command.rs` のUTF-16 quoting/env組立はmacOSからもfixture試験する。Windows実機向け5ケースはliteral quote/stdout/stderr/exit、明示stdin/EOF、日本語、pipe容量を超える初期入力、自然終了時の子Job回収、停止/詰まったstdin deadlineを含む。実行証拠とcross検査範囲は Windows shell検証（非同梱の検証記録） を参照。
+`windows_command.rs` のUTF-16 quoting/env組立はmacOSからもfixture試験する。Windows実機向け5ケースはliteral quote/stdout/stderr/exit、明示stdin/EOF、日本語、pipe容量を超える初期入力、自然終了時の子Job回収、停止/詰まったstdin deadlineを含む。公開回帰は [UTF-16 command/env試験](../../tests/shell_windows_command.rs) と [Windows shell試験](../../tests/shell_windows.rs) を参照する。fixtureの存在を実機合格と扱わず、実行OS・native CI・未実施の範囲は [検証状況](../validation/acceptance.md) で確認する。
 
 ## 出力の完全性と複数失敗
 
@@ -135,7 +135,7 @@ wall clock差や0で補完しない。未知は省略し、既存のstarted_at/e
 
 ## Unix群の消滅と遅延KILL（S9）
 
-原Process-Control §2のPID再利用に関する明文は、再起動後に古いPIDだけでkillしないことで、
+PID再利用について本設計が保証するのは、再起動後に保存された古いPIDだけを根拠にkillしないことで、
 稼働中のPGIDに世代付き・原子的な所有権があるという保証ではない。現在のUnix adapterは
 直接childをreapしてから残存群を停止するため、群probeとsignalの間にはOS上の競合が残る。
 

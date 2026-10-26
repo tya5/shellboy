@@ -50,4 +50,4 @@ Changedはcommit後の再読のきっかけで、[activity projection](../../src
 
 ## SP8とW7の照合
 
-SP8の独自提案は全体revisionをThread単位へ単純置換する案であり、不採用を維持する。fork/source/ReadPinはThreadを横断するため、既存global revisionを残し、開始時horizon固定と破壊transaction内の現在root/逆出典再評価で進捗と保護を両立する。W7の実装 `19e3e03` / `01cec29`、10k/100kの書込み継続測定（非同梱の検証記録）、上表GC回帰が対応する。SP8を理由に別のcounter/schema/workerを追加しない。独立node中心の制御測定を、巨大出典DAGの最悪transaction時間や実UI性能の証明とはしない。
+SP8の独自提案は全体revisionをThread単位へ単純置換する案であり、不採用を維持する。fork/source/ReadPinはThreadを横断するため、既存global revisionを残し、開始時horizon固定と破壊transaction内の現在root/逆出典再評価で進捗と保護を両立する。現在の確定順序は [GC実装](../../src/gc/history.rs)、root更新中の進捗・後発node・pin保護は [GC回帰](../../tests/gc.rs) と対応する。過去の10k/100k書込み継続測定を現sourceの再測定へ読み替えず、実行版・測定条件・未実施は [検証状況](../validation/acceptance.md) に分けて記録する。SP8を理由に別のcounter/schema/workerを追加しない。独立node中心の制御測定を、巨大出典DAGの最悪transaction時間や実UI性能の証明とはしない。

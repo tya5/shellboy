@@ -50,7 +50,7 @@ global flagはサブコマンド側にも置けます。`--data-dir` はownerの
 
 通常のCLIは成功・失敗ともstdoutへ一行JSONを返します。help/versionは通常のテキストです。成功終了は0、構文/RPC/接続失敗は1。`wait` がtimeoutやrecovery_waitを正常に観測した場合もRPC成功なので0になり、対象作業の成否は `result` で判断します。
 
-返信を失った場合、`details.read_only=true`は対象を変更する操作ではないことを示します。ただし`status`以外のget/list/search等は元結果のreceiptを持つため、同じoperation IDでは元結果を照会し、新しい観測には新しいIDを使います。read-onlyでも`request_may_have_been_applied=true`ならreceipt/resultが保存された可能性は未確認です。`wait`は呼出元の待機状態を保存する場合があるためread-onlyとして扱いません。
+返信を失った場合、`details.read_only=true`は対象を変更する操作ではないことを示します。get/list/search/preview/statusはreceiptを作らず、同じoperation IDでも最新値を再計算します。通信断後は同じcommand/filterで再照会できますが、semantic検索のquery embedding費用は再発生し得ます。`wait`は呼出元の待機状態を保存する場合があるためread-onlyとして扱いません。
 
 ```json
 {"protocol_version":1,"operation_id":"INSTANCE:NONCE","ok":true,"result":{"accepted":true}}
@@ -62,7 +62,7 @@ global flagはサブコマンド側にも置けます。`--data-dir` はownerの
 
 `hint` / `details` は任意で、成功にはerror、失敗にはresultを付けません。通信開始前のエラーはoperation_idが空の場合があります。protocol frame全体は8MiB上限です。
 
-CLIは省略時にinstance固有operation IDを生成します。`--operation-id` で同一IDと同一内容・同一呼出元を再送すれば保存済み結果を取得でき、別内容なら `operation_conflict` です。message受付の保存とreceiptは同一transactionです。副作用操作のintentが受付済みで結果未確定ならpendingを返すことがあり、**同じ操作を別IDで再発行してよい証明にはなりません**。`operation get --operation ID` の `state` / `outcome` と対象状態を確認します。古いinstanceのIDは保存済みreceiptの照会用で、新規操作として実行しません。未保存の旧IDは `operation_expired`、存在しない照会は `operation_not_found` です。
+CLIは省略時にinstance固有operation IDを生成します。変更操作とwaitは、`--operation-id` で同一ID・同一内容・同一呼出元を再送すると保全中の結果を取得でき、別内容なら `operation_conflict` です。読取りは同じIDでも再観測し、その照会自身のreceiptを作りません。message受付の保存とreceiptは同一transactionです。副作用操作のintentが受付済みで結果未確定ならpendingを返すことがあり、**同じ操作を別IDで再発行してよい証明にはなりません**。`operation get --operation ID` の `state` / `outcome` と対象状態を確認します。古いinstanceのIDは保存済みreceiptの照会用で、新規操作として実行しません。未保存の旧IDと結果失効済みIDの変更再送は `operation_expired`、存在しない対象receiptの照会は `operation_not_found` です。現instanceの終端結果は24時間経過後の保守/圧迫時に回収できますが、IDの期限切れ記録を残し再実行しません。pendingや未反映参照は保護します。`result_expired` と `replay_policy` を確認し、結果が消えた変更を新IDで無条件にやり直さないでください。
 
 通信断で受付の有無が不明になった際に復元できるよう、重要な変更は既に得た同一instanceのID形式 `INSTANCE:任意の一意nonce` を明示して保存してください。IDのinstance部分はそのownerから返されたoperation_idに対応します。Run/Turn/message/nodeのIDをoperation_idへ流用しません。
 
@@ -72,7 +72,7 @@ CLIは省略時にinstance固有operation IDを生成します。`--operation-id
 
 `thread get` / `run get` / `turn get` / `message get` / `history get` は任意の `context` を返します。state、保存済みcreated_at/updated_at/ended_at、thread_id/run_id/turn_id/node_id、Threadのparent_thread_idとRunのowner_run_id、構造化recovery_reason等を、意味のある対象だけに含めます。記録されていないstarted_atやThreadのcreated_atは省略します。Run/Turnの `lifetime_ms` はcreated_atからended_atまでの壁時計時間で、準備・待機を含み、未終了時は省略します。nodeのThreadは生成元であり、fork先の採用経路ではありません。
 
-`operation get` の `state/outcome` は受付操作の保存結果です。`replay_policy=return_saved_outcome` は元結果の返却、`do_not_reexecute` はpendingで副作用を再開始しない意味です。`result_uncertain=true` は未実行の証明ではありません。`targets` は保存結果にある対象IDだけを返し、`downstream` はcompactの後続処理かmessageの現在配送状態を示します。その他はtargetsから各getへ進み、索引はspace単位の `index status` で確認します。照会結果も保存されるため、最新状態を観測するときは照会自身に新しいoperation IDを使います。
+`operation get` の `state/outcome` は受付操作の保存結果です。`replay_policy=return_saved_outcome` は元結果の返却、`do_not_reexecute` はpendingで副作用を再開始しない意味です。`result_uncertain=true` は未実行の証明ではありません。`targets` は保存結果にある対象IDだけを返し、`downstream` はcompactの後続処理かmessageの現在配送状態を示します。その他はtargetsから各getへ進み、索引はspace単位の `index status` で確認します。照会自身はreceiptを作らず、同じ照会IDでも現在値を読み直します。`result_expired=true` / `replay_policy=operation_expired` は元の結果本文が回収済みで、同IDの変更を再実行しないことを示します。
 
 ## 操作辞書（37操作）
 
@@ -90,7 +90,7 @@ CLIは省略時にinstance固有operation IDを生成します。`--operation-id
 |---|---|
 | `model list [--connection NAME] [--thread THREAD]` | `connection` と `models`（モデルID配列）。接続先のlive一覧を取得し、設定は変更しない |
 
-接続は明示 `--connection` > 明示Thread > 認証済み呼出元Thread > owner既定の順です。明示Threadは接続併記でも存在検査します。外部端末で引数なしならowner既定を使います。同じoperation IDの再送は保存結果を返すため、再取得時は新しい操作として実行します。embedding等も一覧に含まれ、生成能力を保証しません。接続先の一覧API非対応・認証エラー等は明示エラーを返します。
+接続は明示 `--connection` > 明示Thread > 認証済み呼出元Thread > owner既定の順です。明示Threadは接続併記でも存在検査します。外部端末で引数なしならowner既定を使います。同じoperation IDでも一覧を再取得し、照会自身のreceiptは保存しません。embedding等も一覧に含まれ、生成能力を保証しません。接続先の一覧API非対応・認証エラー等は明示エラーを返します。
 
 ### Thread（7操作）
 
@@ -116,7 +116,7 @@ CLIは省略時にinstance固有operation IDを生成します。`--operation-id
 |---|---|
 | `message send [--thread THREAD] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id。受付と完了は別。稼働中は安全境界へ追加、stopping中はheld/pendingになる場合がある。通常の機械送信はrecovery_waitを勝手に再開しない |
 | `message get --message MESSAGE` | 受付時と同じ割当と現在delivery_status、得られたanswer_node_id |
-| `operation get --operation ID` | operation_id/state/outcome、instance_id/created_at/current_instance、result_uncertain/replay_policy/targets、対象によるdownstream。共通 `--operation-id` はこの照会自体のID、`--operation` は調べる対象ID |
+| `operation get --operation ID` | operation_id/state/outcome、instance_id/created_at/current_instance、result_uncertain/result_expired/replay_policy/targets、対象によるdownstream。共通 `--operation-id` はこの照会自体のID、`--operation` は調べる対象ID |
 
 `--text` と `--text-stdin` は必ず片方。stdinはUTF-8を上限8MiBで読み、超過時に切捨てません。message/下書きの実際の許容サイズ等には設定上限も適用されます。
 
@@ -264,3 +264,7 @@ list/get/readのcursorは不透明な継続tokenです。返された文字列�
 ## 照合先
 
 構文は [cli.rs](../../src/cli.rs)、公開型/定数は [protocol.rs](../../src/protocol.rs)、JSON出力とexitは [main.rs](../../src/main.rs)、操作結果は [Control](../../src/control.rs) / [DB操作](../../src/control/db.rs) と照合しています。公開CLIにはTUI専用の編集送信・添付reload・索引費用previewの独立サブコマンドはありません。画面操作は [TUIガイド](tui.md) を参照してください。
+
+### v0.1.2の非推奨alias
+
+`status --operation ID` は `operation get --operation ID` と同じ照会へ正規化し、stderrで移行先を案内します。v0.1.2の1リリースだけ残し、次リリースで削除します。JSON stdoutのresultは正規照会の結果です。通常の作業一覧filterとの併用は拒否します。

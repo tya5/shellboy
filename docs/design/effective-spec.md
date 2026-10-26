@@ -49,7 +49,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | ストリーム完了 | 検証済み最終responseを採用。途中との差分は診断・保存だけとし、差分だけで復旧待ちにしない | [model HTTP](model-http.md)。ツールは最終responseの採用成功後だけ実行し、失敗時の受信本文も保存・参照可能にする |
 | Unix IPC | XDGが利用不能でも専用0700一時領域を自動用意。接続両側でpeer uidを照合 | [protocol](protocol.md)。モデルshellはSHELLBOY_SOCKET、人CLIはendpoint.jsonで接続し、保存先祖先をsocket配置条件にしない |
 | origin | 発行元の誤識別防止。OSユーザー隔離やpermission engineではない | [control](control.md)、[operation](operation-observability.md)。tokenを表示/モデル入力/保存結果へ複製しない |
-| receipt | 同ID/同要求は保存済み結果、異要求はconflict。現instance結果を勝手に期限回収しない | [operation](operation-observability.md)。保存outcome8MiB/operation receipt256MiB、事前予約・旧terminal回収・receipt不要status照会 |
+| receipt | 観測はreceipt不要で再観測。変更/waitの同ID/同要求は保全中結果、異要求はconflict。24時間経過保守/圧迫で結果だけを回収し同IDを期限切れにする。pending/参照保護を維持 | [operation](operation-observability.md)。保存outcome8MiB/operation receipt256MiB、事前予約・旧terminal回収・receipt不要status照会 |
 | AGENTS読込 | 新Turnごとに有限file workerで本文を読み直す。同Turn retryは保存済みsnapshotを維持 | [control](control.md)。mtime/size一致の内容変更も反映する。ファイルの原子的snapshotは保証しない |
 | shell stdin EOF | 既知の閉鎖済みstdinへのEOF再送は冪等成功。未知IDやwriteの閉鎖済み入力への送信は別に検証 | [shell設計](shell.md)。acceptedは新規閉鎖・送信・shell終了の証拠ではない |
 

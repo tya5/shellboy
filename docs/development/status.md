@@ -1,6 +1,6 @@
 # 開発状況
 
-更新: 2026-10-27。v0.1.2向けの先行レビュー対応を終え、タグ前の追加レビューで受信表示・RAG走査・起動診断を補強しています。Windows x64・macOS ARM64・Linux x64の配布先は [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2)、公開状態と実行結果は [Actions](https://github.com/tya5/shellboy/actions) で確認します。
+更新: 2026-10-27。v0.1.2向けの先行レビュー対応を終え、タグ前の追加レビューで受信表示・RAG走査・起動診断に加え、Issue #3の読取りreceipt除外・期限切れ保護・照会統合を進めています。Windows x64・macOS ARM64・Linux x64の配布先は [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2)、公開状態と実行結果は [Actions](https://github.com/tya5/shellboy/actions) で確認します。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 

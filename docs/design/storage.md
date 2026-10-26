@@ -49,7 +49,7 @@ schema v2 (`0002_gc_indexes.sql`) はreceipt→message、replacement→output、
 
 ### Schema v6（P2）
 
-`0006_receipt_budget` はoperation_receiptへ非負のreserved_bytes列を追加する。runtime副作用前に同transactionで容量予約を保存し、結果確定で解放する。旧rowは0で、再起動後に旧workerを再実行せず未確定intentを維持する。既存tableを再構築せず、履歴形式・資格情報・原文を変更しない。予約と保持の契約は [operation](operation-observability.md#receiptの有限予算p2w5c102)。 既存quota_counterに実metadata/result量とpending metadata量の導出row2件を置き、INSERT/UPDATE/DELETE trigger3件で同transaction内に更新する。current pendingの予約SUMだけは専用部分indexを使い、各要求で保存result全文を再走査しない。migration時に既存量から初期化し、通常起動で再初期化しない。新規table/workerはなく、counterは一次履歴ではない。
+`0006_receipt_budget` はoperation_receiptへ非負のreserved_bytes列を追加する。runtime副作用前に同transactionで容量予約を保存し、結果確定で解放する。旧rowは0で、再起動後に旧workerを再実行せず未確定intentを維持する。既存tableを再構築せず、履歴形式・資格情報・原文を変更しない。予約と保持の契約は [operation](operation-observability.md)。 既存quota_counterに実metadata/result量とpending metadata量の導出row2件を置き、INSERT/UPDATE/DELETE trigger3件で同transaction内に更新する。current pendingの予約SUMだけは専用部分indexを使い、各要求で保存result全文を再走査しない。migration時に既存量から初期化し、通常起動で再初期化しない。新規table/workerはなく、counterは一次履歴ではない。
 
 ### 読取りsnapshotと終了時checkpoint（C9）
 
@@ -83,14 +83,16 @@ writerとread-only RAGはmigration名/版の同じ内部constantを照合し、R
 
 ## 開発途中v6のforward互換とdowngrade（PR1-13）
 
-`b8ae7db`のv6はreserved_bytes列だけを作り、`04d77b1`で同じmigration名へ
-counter/index/triggerが追記されていた。配布前の開発途中DBに限定されるが、どちらもledgerが
+公開前の開発途中v6にはreserved_bytes列だけの版と、同じmigration名へ
+counter/index/triggerを追記した版が存在した。配布前の開発途中DBに限定されるが、どちらもledgerが
 同じなので版番号だけでは識別できない。元migrationを再編集せず、v8で同名index/triggerを
 `IF NOT EXISTS`作成し、既存receiptから導出counter2行だけを一度再計算する。既存v7にも適用し、
 実行後は同じ完成schemaに揃える。一次receipt、pending intent、reserved_bytes、履歴を変えず、
 副作用/APIを再実行しない。counterは削除可能な導出量で、保守責任はreceipt専用module/3triggerに
 据え置く。新表/workerは作らない。再計算はupgradeの単一transaction内の線形走査であり、
 通常open/要求ごとの再走査ではない。失敗時は新しい版/ledger/counterを一緒にrollbackする。
+配布する処理は [migration 0008](../../migrations/0008_receipt_accounting_compat.sql)、
+移行・rollback・不一致拒否の公開回帰は [storage試験](../../tests/storage.rs) を参照する。
 
 migrationは前進のみである。v5以降は資格情報除去、v6以降は副作用前の永続予約、v7以降は
 派生index、v8は上記互換補強を含む。対応schema上限が低い旧binaryは既存の版検査で拒否し、
@@ -116,3 +118,5 @@ schema v8以下からの初回upgradeで一度構築し、失敗時は両index�
 rollbackする。既存migrationを改変せず、node本文/source/receipt割当/予約を保存したまま前進する。
 旧binaryは従来どおり対応上限を超えるschemaを拒否する。read-only RAGも既存MIGRATION_NAMESを共用し、
 別の版台帳や自動downgradeは追加しない。
+
+operation receiptの終端結果には通常のSavedOutcome objectのほか、回収済み本文を示すJSON scalar `0`を許す。NULLのpendingとは区別し、ID/hash/origin/元terminal stateを同じrowに保持する。両replay入口でoperation_expiredへ投影し、同IDの変更を再実行しない。既存quota triggerで1byte markerとmetadataを計上する。新DDLは不要で、v0.1.2のschema9前進後だけ新形式を書き込む。旧binaryへ戻す手順と回収規則は [operation設計](operation-observability.md) を参照する。

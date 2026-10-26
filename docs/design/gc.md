@@ -18,7 +18,7 @@ logical bytesの採用定義は保存本文（nodeと監査outputの重複を含
 
 raw候補metadataは128実行ずつ取得し、chunkは128行かつ1 MiB以内のtransactionに分ける（単独の既存oversize chunkだけは進捗のため許容）。root/出典/sweepは各128件。mark後にruntime pinが追加された場合もsweep直前に未mark pinを取り込み、残りの破壊候補を現在のpinを含むrootと逆方向の再帰出典で同transaction内に再検証する。sweep cursorは戻さず、継続するpin追加で進捗を失わない。root revisionだけでは捉えられない一時読取り保護をこの検査で補う。
 
-根拠と検証は GC検証（非同梱の検証記録） に記録する。全量データでのGC中入力遅延・physical filesystemの回収速度はこの局所試験から達成としない。
+確定境界は [GC実装](../../src/gc/history.rs) と [到達性・容量・競合回帰](../../tests/gc.rs) を参照する。実行版・環境・測定と未実施は [検証状況](../validation/acceptance.md) に記録する。全量データでのGC中入力遅延・physical filesystemの回収速度は局所回帰から達成としない。
 
 成功済み要約partの `summary.part.*` 本文もlogical history bytesへ計上する。cacheは保持rootを追加しない。部分成功は参照元本文が有効な間は再利用用に保存し、明示削除GC後に一つでもsourceがtombstone/不存在になれば、そのexact入力版へ一致できないcacheを128件ずつ回収する。共有prefixが残っていても、一緒に生成された削除branch本文の派生cacheを永久保持しない。
 
@@ -27,7 +27,9 @@ raw候補metadataは128実行ずつ取得し、chunkは128行かつ1 MiB以内�
 
 ## W7の進捗是正
 
-制御測定（非同梱の検証記録）で、root変更が続くと全markの再走査で回収0になることを確認した。
+root変更のたびに全markをやり直す方式は、継続書込みでsweepへ進めなくなるため採らない。
+この進捗条件は [GC回帰](../../tests/gc.rs) でroot変更・後発node・pin保護と組み合わせて確認する。
+過去の10k/100k制御測定は当時の独立node中心の条件であり、現sourceの再測定や巨大出典DAGの最悪時間保証には流用しない。
 Threadごとのcounterへ単純分割せず、既存global revisionとTEMP markを使う。
 job開始時のnode rowid上限で対象を固定し、後から増えたnodeをそのjobのsweepへ入れない。
 revision変更後は既markを保守的に残し、未mark候補は破壊transaction内で現在のrootと逆方向の

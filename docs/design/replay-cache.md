@@ -36,4 +36,4 @@ RAM見積りは保持entryの文字列/Arc配列に加え、HashMapのusable cap
 
 [OpenAI公式reasoning guide](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-without-stored-responses)はstatelessで返された推論項目の保持・再送を案内しているが、個別proxyの変換や欠落項目の受理を保証するものではない。現在のepoch境界、元ID/summary/暗号化本文の無変更保持、モデル／profile変更時の旧項目除外を維持する。欠けた暗号化本文を作らず、summaryを暗号化本文や通常回答へ変換しない。新しいprovider設定・自動fallback・Core stateは追加しない。
 
-比較結果をすべてのproviderの互換性証明とは扱わない。実際に返された同epoch項目の再送が拒否される接続先を追加する際に、そのadapterの入力契約を確認し、元の監査本文を保持したまま処置を再検討する。実proxy試験の範囲は proxy検証（非同梱の検証記録） に記録する。
+比較結果をすべてのproviderの互換性証明とは扱わない。実際に返された同epoch項目の再送が拒否される接続先を追加する際に、そのadapterの入力契約を確認し、元の監査本文を保持したまま処置を再検討する。同epoch保持・epoch変更・元DBの不変性は [ReplayCache回帰](../../tests/replay_cache.rs) を参照する。課金APIで試した接続先・条件と未検証の範囲は [検証状況](../validation/acceptance.md) に分けて記録し、合成fixtureや過去の特定proxyの非再現を新providerの合格へ読み替えない。

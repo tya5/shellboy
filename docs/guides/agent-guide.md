@@ -76,7 +76,7 @@ shell IDになりません。起動の返却IDを `WORK_EXECUTION_ID`、依頼�
 
 CLIの `ok:true` は操作が成功したことを示し、送った依頼への回答完了を意味しません。`message send` のresultで `message_id`、`delivery_status`、`assignment`、任意の `run_id` / `turn_id` を確認します。`accepted` と `applied` を同一視せず、`held` / `pending` なら `message get` で追跡します。
 
-通信切断で結果が不明なら、まず保存した `operation_id` を `shellboy operation get --operation OPERATION_ID` で照会します。送信後の接続障害では、自動生成IDも返却JSONの `operation_id` / `error.details.operation_id` に残ります。受付記録が見つからないことは未実行の証明ではありません。新operation IDで同じ副作用を無条件に繰り返さず、対象の状態と原文を確認します。最新の観測には新しい照会IDを使い、以前の観測IDで古い結果を再表示しないでください。詳細は [復旧](recovery-and-storage.md) と [CLI辞書](cli-reference.md) を参照してください。
+通信切断で結果が不明なら、まず保存した `operation_id` を `shellboy operation get --operation OPERATION_ID` で照会します。送信後の接続障害では、自動生成IDも返却JSONの `operation_id` / `error.details.operation_id` に残ります。受付記録が見つからないことは未実行の証明ではありません。新operation IDで同じ副作用を無条件に繰り返さず、対象の状態と原文を確認します。get/list/search/preview/statusはreceiptを保存せず、同じ照会IDでも再観測します。履歴semantic検索はquery embedding費用が再発生し得ます。変更操作とwaitの元IDは結果照合用として保持します。詳細は [復旧](recovery-and-storage.md) と [CLI辞書](cli-reference.md) を参照してください。
 
 ## 必要な原文を取得する
 
@@ -131,7 +131,7 @@ shellboy thread get
 
 ## 操作追跡・保存済み状態・削除前の確認
 
-返答を見失った操作は `shellboy operation get --operation OPERATION_ID` で照会します。受付結果のstate/outcomeと後続完了を区別し、targetsから対象getへ進みます。messageとcompactはdownstreamも確認します。compactの同ID再送は後続完了後も元のqueued受付を返します。pending/result_uncertainは副作用未実行の証明ではなく、新IDで安全に再送できる意味でもありません。最新の状態を読む照会自身には新しいoperation IDを使います。attachment.addの同ID再送はmutableなpreflightより先に元結果を返しますが、認証と要求一致の検査は維持します。
+返答を見失った操作は `shellboy operation get --operation OPERATION_ID` で照会します。受付結果のstate/outcomeと後続完了を区別し、targetsから対象getへ進みます。messageとcompactはdownstreamも確認します。compactの同ID再送は後続完了後も元のqueued受付を返します。pending/result_uncertainは副作用未実行の証明ではなく、新IDで安全に再送できる意味でもありません。照会自身にはreceiptを作らず、そのoperation IDで観測結果を再取得する保証はありません。attachment.addの同ID再送はmutableなpreflightより先に元結果を返しますが、認証と要求一致の検査は維持します。
 
 Thread/Run/Turn/message/history getのcontextは、保存済み時刻・状態・理由・所有関係です。parent_thread_idはThreadの系譜、owner_run_idは実行所有です。未知のstarted_at、未終了のlifetime_msは省略され、lifetime_msは準備・待ち込みの作成→終了です。recovery_reasonはJSON値として読み、復旧待ち・再起動時の結果不明をfailureと決めつけません。historyの生成元と採用先は区別します。
 
@@ -140,3 +140,9 @@ Thread/Run/Turn/message/history getのcontextは、保存済み時刻・状態�
 ## 過去分の埋め込みと費用の確認
 
 過去の会話を埋め込むbackfill/rebuildは、会話中の通常の検索とは別にAPI費用が生じます。利用者から依頼されていない範囲、特に全履歴の処理を自発的に開始しないでください。任された対象を `shellboy index preview --scope threads --thread THREAD_ID`（全体を依頼された場合だけ `--scope all`）で確認してから、依頼された範囲のbackfill/rebuildを実行します。previewは無課金の候補読取りであり、正確なtoken数・請求額や対象予約ではありません。CLI実行自体には対話確認がありません。詳細は[履歴と検索](history-and-search.md)を参照してください。
+
+### 操作結果の保持と期限切れ
+
+変更操作とwaitの結果は、created_atから24時間経過後の内部保守、又はreceipt容量の圧迫時に回収される場合があります。pending/未反映参照は保護されます。同ID再送が `operation_expired` になっても、変更が未実行とは限りません。IDの期限切れ記録を残して再実行を拒否しているため、`operation get` の `result_expired` と対象の状態・履歴を調べ、新IDで同じ副作用を自動反復しないでください。
+
+読取りを繰り返してもoperation receipt予算は消費しません。変更/待機のpending予約や期限切れIDのmetadataは有限予算を使うため、無制限の受付保証はありません。`status` / `storage status` で状況を確認できます。詳しくは [復旧・容量](recovery-and-storage.md#operation-receiptの容量で拒否された場合)。

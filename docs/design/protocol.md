@@ -78,7 +78,7 @@ operation.getは既存state/outcomeへinstance_id/created_at/current_instance/re
 この検査で拒否した場合は要求未送信であり、`request_may_have_been_applied=false` と
 使用予定のoperation IDを示す。本文を減らす等の修正後に再実行でき、存在しないreceiptを照会するよう促さない。
 requestの書込み開始後にI/O失敗、途中切断、または不正な応答が起きた場合は、部分送信/適用の可能性を
-否定せず、同じoperation IDの照会を案内する。既存statusはreceiptを持たないためfreshな再照会へ案内する。
+否定せず、同じoperation IDの照会を案内する。対象を変えない観測はreceiptを持たないため、同じcommand/filterでfreshな再照会へ案内する。semantic検索は再びquery embedding費用が生じ得る。waitは待機状態を保存するためreceiptを維持する。
 サーバ側でoperation IDを確定できない不正frame/JSONは接続を閉じ、架空IDの応答を作らない。
 frame長が適正なJSON requestをdecode後に検証で拒否した場合は、元IDのerror応答を返して閉じる。
 wire版・8MiB上限・既存error codeは変更しない。
@@ -159,7 +159,7 @@ I/Oエラーとする。受信済みrequestの未知操作や版互換そのも�
 
 ### Unix socketの専用namespaceと残存物（Issue #2）
 
-ソケットの配置先はownerが決める。使えるXDG_RUNTIME_DIRの下へランダム名の0700 directoryを原子的に作り、使えない場合はOSの共有一時領域 `/tmp`（macOSではcanonical path）へ同じ専用directoryを作る。baseの所有・権限・sticky・symlinkを検証し、不適切/長すぎる環境候補は使用しない。data-dirの権限や祖先をソケット配置の成立条件にせず、固定uid/data-dir hash、`/run/user`候補探索、data-dir下の`.ipc`は使わない。ソケットのUTF-8 pathは103bytes以下とする。新しい表・worker・設定は追加しない。
+ソケットの配置先はownerが決める。使えるXDG_RUNTIME_DIRを最優先とし、macOSでは次にOSの `confstr(_CS_DARWIN_USER_TEMP_DIR)` から得たユーザー専用一時領域、最後にcanonical `/tmp`の順で、ランダム名の0700 directoryを原子的に作る。Linux等ではXDGの次がcanonical `/tmp`となる。macOSのユーザー一時領域も実効uid所有0700・canonical祖先の保護と103byte socket境界を満たす場合だけ使い、環境変数TMPDIRを配置の根拠にしない。候補への作成が失敗すれば次の安全な候補へ進み、再起動時の既知locator清掃も同じ許可base集合を使う。baseの所有・権限・sticky・symlinkを検証し、不適切/長すぎる環境候補は使用しない。data-dirの権限や祖先をソケット配置の成立条件にせず、固定uid/data-dir hash、`/run/user`候補探索、data-dir下の`.ipc`は使わない。ソケットのUTF-8 pathは103bytes以下とする。新しい表・worker・設定は追加しない。
 
 `endpoint.json`の既存addressが配置の正本であり、ランダム名は認証nonceではない。人のCLIはmetadataを読み、モデルのshellには `SHELLBOY_SOCKET` で実際のpathと既存のinstance ID/data-dirを渡す。CLIは環境data-dirと対象が一致し、有効なsocket/instanceがある場合に限りmetadataを読まずに接続する。明示的に別data-dirを選んだ場合は通常のmetadataへ戻す。環境経由の失敗から別endpointへ自動fallbackせず、既存instance handshakeを維持する。ownerからControlへはpublish済みendpointのメモリ上のsnapshotを共有し、tool起動のためのfile読込み・DB状態・workerは増やさない。
 
@@ -206,11 +206,11 @@ deny_unknown_fieldsを使う既存Hello/Welcomeへ能力fieldを一方的に足�
 
 Commandのwire名とdispatch routeはprotocolの網羅matchを正本とする。route、runtime actionをshutdownでdropできるか、取消後も許可するcleanup、C5 capture前に完了すべきcontext mutationは別の意味であり、独立した網羅matchに既存集合を移す。共通metadata registryやschema DSLへ統合しない。人間向け日本語title、入力前のTUIフォーム名、IPC通常24/停止2/Status2枠、shell所有者の認可targetはそれぞれ層の責務を保持する。元レビュー時点のfrontend英語36名は既に日本語表示となっているため、protocol名への置換で表示を退行させない。
 
-read-onlyは対象の状態を変更しないという意味であり、receipt不要とは異なる。Statusだけがreceiptなし、get/list/searchなどはimmutable receiptの同ID結果を維持する。history.searchのembedding要求などAPI利用の有無とも別概念である。Waitはorigin Turnのwaiting/runningとshell release outcomeを記録するので保守的にread-only=falseとする。IndexStatusは現実装の保存済み索引情報のreadであるが、まず既存runtime route・receipt・取消不可を構造変更で維持する。取消集合や送信済み要求の回復hintを変える場合は別の挙動commitに分ける。
+read-onlyは対象の状態を変更しない観測であり、Issue #3対応ではreceipt不要とする。API利用や一時pin/identity検証の有無は別概念である。Waitはorigin Turnのwaiting/runningとshell release outcomeを記録するためread-only=falseのままreceiptを維持する。IndexStatusは有限の保存情報readで、取消集合の変更は行わない。
 
 AttachmentKind/IndexScope/StorageCategory/HistoryRelationの語彙をprotocolへ揃え、CLIには薄いclap ValueEnum adapterを残す。protocolへclap deriveを入れない。storageのwire managed_imagesとCLI managed-imagesは層固有の表記として維持する。検索10/最大50、一覧50/最大200、wait30000ms、本文64KiB、UTF-8の同義既定値をprotocol定数へ揃える。TUIの一覧20件は管理フォームで最初に詳細を読める小さなpageを選ぶ意図的差分として名前付き定数で維持し、status/relationsの50件やraw表示用16KiBを同値と誤認して置換しない。
 
-R3-3の挙動採否: IndexStatusの取消可能集合への追加は採用しない。現状は有限DB readを既存所有経路で完了・receipt保存しており、同じreadであるというだけで寿命を変更する必要はない。WaitもcleanupとTurn状態保存を内部で所有するため、汎用action dropの集合へ加えない。一方、送信後の返信欠落hintはread-onlyなget/list/searchへ「mutationを新IDで再送しない」だけを返すと意味を誤るため区別する。Statusはreceiptなしでfresh照会、receipt付きreadは元operation照会/同ID replayまたは新IDのfresh観測、実mutation（Waitの条件付き保存を含む）は従来の不確実性を保持する。receipt付きreadのrequest_may_have_been_applied=trueはreceipt/resultが保存された可能性を示し、targetを書き換えた意味ではない。read_only=trueを付け、操作名とその違いをhintで説明する。認可、送信前拒否、受付上限、既存同ID結果は変更しない。
+R3-3とIssue #3の挙動採否: IndexStatusの取消集合への追加はしない。Waitのcleanup/Turn状態保存も既存所有経路で完了する。送信後に観測の返信が失われた場合はread_only=trueと同じcommand/filterでのfresh再照会を案内し、観測結果のreceipt照会へ誘導しない。変更とWaitは元ID/要求/callerによるreplay又は期限切れを照合し、未実行と決め付けない。認可、送信前拒否、受付上限、frame上限を維持する。
 
 ## R3-5: 検証責務と公開境界
 
@@ -222,4 +222,8 @@ HistoryListのsinceは原契約のoffset付きRFC3339をprotocolの事前検証�
 
 ## 索引の候補preview（G3）
 
-`index.preview` / `shellboy index preview` は既存IndexArgsとFeePreviewを公開する追加のread-only操作。scope/Thread/sourceの明示対象を必須とし、spaceだけでは全体選択しない。既存runtime route/receiptへ通し、ファイル読取りを含むためshutdown取消可、changes_context=falseとする。既存一時pinとreceiptの記録はあり、embedding API/job投入/candidate作成/過去分許可は行わない。previewの同ID再送は保存した観測を返し、最新の候補確認には新IDを使う。確認tokenや長期snapshotを発行せず、backfill/rebuildの公開構文と非対話受付を維持する。
+`index.preview` / `shellboy index preview` は既存IndexArgsとFeePreviewを公開する追加のread-only操作。scope/Thread/sourceの明示対象を必須とし、spaceだけでは全体選択しない。既存runtime routeへ通し、ファイル読取りを含むためshutdown取消可、changes_context=falseとする。既存一時pinは維持し、receiptを作らず、embedding API/job投入/candidate作成/過去分許可は行わない。previewは同IDでも最新候補を再観測する。確認tokenや長期snapshotを発行せず、backfill/rebuildの公開構文と非対話受付を維持する。
+
+## 観測の再照会と結果失効（Issue #3）
+
+get/list/search/preview/statusはreceiptを作らず、同IDでも再観測する。変更操作とwaitは保存済み要求照合を維持する。現instanceの終端結果は24時間経過後の保守又は圧迫時に結果本文を縮退できるが、pending/未反映参照を保護しID/hash等は保持する。同ID再送はoperation_expiredで、変更を再実行しない。別内容はoperation_conflict。operation.get/statusのresult_expiredとreplay_policyで区別し、読取り自身の照会IDは受付記録の対象ではない。既存error code・wire版・frame上限は維持する。詳細は [operation設計](operation-observability.md) を正本とする。

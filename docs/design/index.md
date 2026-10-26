@@ -143,8 +143,7 @@ config.embeddingの既定接続/modelが未設定又は別でも選択済みspac
 query embeddingの外部費用は閲覧でも発生し得るが、過去資料の再索引や追加source許可には転用しない。
 spaceなしでは従来どおり空結果でAPIを呼ばない。新表/worker/公開操作/設定は追加しない。
 
-これは物理disk fullやoperation receipt別予算を無効にするものではない。CLIの読取り結果は従来の
-receipt契約で保存される。実HTTP/DB失敗・不正filter・取得不能sourceは既存の分類で返す。
+これは物理disk fullやoperation receipt別予算を無効にするものではない。CLIの読取り結果はreceiptを作らず、同IDでも再観測する。実HTTP/DB失敗・不正filter・取得不能sourceは既存の分類で返す。
 
 ## pause/inactiveの遅延応答と明示retry（G8）
 
@@ -175,7 +174,7 @@ R2-3では既存DB job内の成功採用を `EmbeddingAdoption::adopt_embedding_
 
 新しい内部型は、DB jobが既存の成功API結果と固定許可を所有し採用methodを持つ `EmbeddingAdoption`（key/failure key/claim/embedding組/dimension/vector/legacyの7 field）と、既存pin付きreaderとcarry/Unicode offset/split_charsを保持する `RawSegments`（4 field）だけである。後者でpreview/投入のpage分割を共有し、投入時だけの既存watermark検査と最大128 jobのDB batchを残す。`Work::pending` は既存のpending初期値を共有する。新しい永続state/queue/cache/workerではない。
 
-R2-1/R2-3時点の測定（`1db8355`、main `1371b4d` 基準）: index入口は2,410行から1,058行、全index moduleは3,028行から3,957行、非空白文字数は92,019から99,016、200文字超の行は46から11。残存する長行はSQL/固定説明文のliteralで、statement-dense closureは分解する。移動のみの先行commitは全体+57行（private moduleのimport/公開path維持と移動signatureのrustfmt展開）で、原提案の+40行目安を17行超える。後続増分は名前付き関数・通常の整形・所有境界の明示であり、行数を目標にminifyしない。`process_key` は191行から127行へ整理し、IndexServiceの9 fieldは変更しない。成功採用DB closureのcaptureは9から1（所有command）、失敗採用は13から7（設定の共有参照を保持）である。公開Rust path・引数は維持する。
+公開前のmodule整理時点の記録値（現sourceの再測定ではない）: index入口は2,410行から1,058行、全index moduleは3,028行から3,957行、非空白文字数は92,019から99,016、200文字超の行は46から11。残存する長行はSQL/固定説明文のliteralで、statement-dense closureは分解する。移動のみの先行commitは全体+57行（private moduleのimport/公開path維持と移動signatureのrustfmt展開）で、原提案の+40行目安を17行超える。後続増分は名前付き関数・通常の整形・所有境界の明示であり、行数を目標にminifyしない。`process_key` は191行から127行へ整理し、IndexServiceの9 fieldは変更しない。成功採用DB closureのcaptureは9から1（所有command）、失敗採用は13から7（設定の共有参照を保持）である。公開Rust path・引数は維持する。これらの旧数値を現sourceの規模・性能の保証として使わない。現在の責務は上記moduleの [実装](../../src/index/mod.rs) と [固定key試験](../../src/index/keys.rs)、動作境界は [index統合試験](../../tests/index.rs)、実行した版と結果は [検証状況](../validation/acceptance.md) で確認する。
 
 ## 永続metadata keyの所有（R2-2）
 
@@ -214,7 +213,7 @@ successful embeddingのDB採用に渡すEmbeddingIdentityは既存key/profile/mo
 
 CLIのbackfill/rebuildは、対象を明示する非対話の既存契約を保つ。先行previewや新しい確認tokenを必須にして既存自動化を壊す案、同ユーザーshellの人間／モデルを新しい権限機構で識別する案は採らない。CLI helpとモデル向けガイドで、previewは無課金の候補確認、backfill/rebuildは費用を伴う受付であることと、利用者から依頼されていない全履歴処理をモデルが自発的に始めないことを示す。利用者が依頼した範囲の確認・実行は同じCLIで行える。
 
-previewは長期snapshot/対象予約/費用承認の証明ではなく、その後の履歴追加・GC・設定変更で投入対象や量は変わり得る。機械的な承認の検証は今回のコアの責務に加えない。追加Core公開variantは既存の候補読取りへの薄い入口1個だけで、同じ有限runtime/DB/file workerとreceipt寿命を使い、表・event・worker・依存・常駐状態は追加しない。実装と検証ではpreview前後のjob/許可/candidateとHTTP要求数を照合し、その後の明示backfillが選択範囲だけを受付することを確認する。
+previewは長期snapshot/対象予約/費用承認の証明ではなく、その後の履歴追加・GC・設定変更で投入対象や量は変わり得る。機械的な承認の検証は今回のコアの責務に加えない。追加Core公開variantは既存の候補読取りへの薄い入口1個だけで、同じ有限runtime/DB/file workerと一時pin寿命を使い、観測のreceiptは作らず、表・event・worker・依存・常駐状態は追加しない。実装と検証ではpreview前後のjob/許可/candidateとHTTP要求数を照合し、その後の明示backfillが選択範囲だけを受付することを確認する。
 
 ## 旧splitterからの更新で検索選択を保つ（PR2-2）
 

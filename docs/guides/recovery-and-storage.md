@@ -58,7 +58,7 @@ IDの文字列を新しいコマンドとして評価せず、`--operation` の�
 
 同じinstance内で同operation ID・同じ要求を再送すると、受付を重複させず保存済み結果を返します。同IDで内容を変更すると `operation_conflict` です。再起動後の旧IDも、同じ要求の保存済み結果が残っていればその結果を返し、副作用は再実行しません。旧IDの記録がなければ `operation_expired` です。結果不明のshell入力等を新IDで無条件再送しないでください。
 
-`operation get` の `targets` から対象のgetへ進みます。`downstream` はmessageの現在配送状態、またはcompactのqueued/running/completed/failedと終端outcomeを返します。受付の `state=completed` と後続処理の成功は別です。`result_uncertain` や `replay_policy=do_not_reexecute` があれば、結果不明の副作用を安全に再実行できるとは判断しません。最新状態の照会は新しい照会operation IDで行います。
+`operation get` の `targets` から対象のgetへ進みます。`downstream` はmessageの現在配送状態、またはcompactのqueued/running/completed/failedと終端outcomeを返します。受付の `state=completed` と後続処理の成功は別です。`result_uncertain` や `replay_policy=do_not_reexecute` があれば、結果不明の副作用を安全に再実行できるとは判断しません。照会自身にはreceiptを保存せず、同じ照会IDでも現在値を確認できます。
 
 get系の `context.recovery_reason` は構造化された理由です。再起動中断の `result_uncertain=true` は失敗確定ではなく、復旧待ちもfailureと同義ではありません。保存された時刻と所有を読み、未保存のstarted_atや全状態遷移を推定しません。Run/Turnの `lifetime_ms` は待機込みの作成から終了までで、未終了時は省略されます。
 
@@ -198,14 +198,22 @@ stack overflow等のfatal abortでは正常終了処理を通らず、原因本�
 
 ### operation receiptの容量で拒否された場合
 
-`storage_limit`とreceipt予算の案内が出た操作は未受付です。既知IDは `shellboy status --operation OPERATION_ID` で状態・対象ID・不確実性を確認できます。全文結果は認証が有効な元callerから元のコマンドを元のoperation IDで再送して取得し、副作用を重複実行しません。元shellのOriginが失効している場合はstatusで状態を確認し、容量回復後にoperation getで照会します。`shellboy status`とこのlookupは新receiptを作りません。statusのreceipt_budgetで保存量と予約量を含む予算を確認します。
+`storage_limit`とreceipt予算の案内で拒否された変更は未受付です。`shellboy status` / `storage status` / `operation get --operation ID` は新receiptを作らず、容量と保存済み操作を観測できます。get/list/search/previewは同IDでも再観測し、結果を蓄積しません。semantic検索のquery embeddingは再実行で費用が生じ得ます。waitはTurn待機状態を保存するためreceiptを維持します。
 
-後続sourceでは `run stop` / `shell stop` に通常256MiBとは別の固定受付余白を確保します。statusの `control_headroom_bytes` / `control_limit_bytes` / `control_available_bytes` が停止用の上限と残量です。通常要求はこの余白を使わず、停止も同じoperation IDによる保存結果の再送を維持します。停止自身が余白を使い切った場合は新IDを拒否するため、TUIのreceiptを使わない停止も引き続き利用できます。残量はmetadataを含む次の任意要求の受付保証ではありません。これは公開v0.1.1には未収録のローカル修正です。
+変更操作の元ID・同じ要求・有効な同callerで保全中の結果を再取得できます。終端結果はcreated_atから24時間経過後の内部保守、又は予算圧迫時に回収対象です。pendingと未反映message/添付/compactの参照は保護します。結果回収後もID/hash等を残し、同ID再送は `operation_expired` で拒否し、変更を再実行しません。`result_expired` / `replay_policy` と対象の状態・履歴を確認し、新IDで無条件に同じ副作用を繰り返さないでください。失効したOriginによる認証を迂回する仕組みではありません。
 
-現在instanceのreceiptは期限削除しないため、同instanceの記録だけで満ちると新しい `storage collect` も容量不足になる場合があります。内部GCは継続します。現在作業を通常終了し、利用者が明示的にownerを再起動すると、不要になった旧terminal receiptを回収できます。旧pending intentや保護参照を無理に削除せず、自動再起動もしません。保存outcomeは1件8MiB、operation receipt専用予算は256MiBで、SQLiteファイルの物理上限ではありません。
+`run stop` / `shell stop` は通常256MiBに加え固定余白を使います。`control_headroom_bytes` / `control_limit_bytes` / `control_available_bytes` で確認できます。停止自身も余白を使い切れば新IDを拒否し、TUIのCtrl+C・`/stop` はreceipt不要のままです。残量は任意の次要求の受付保証ではありません。
+
+期限切れIDのmetadataも同じ予算へ算入します。極端に多い変更や保護対象だけで満杯なら、作業を通常終了しownerを明示的に再起動して旧terminalを回収します。内部GCは継続し、旧pendingの不確実性と保護参照は維持します。自動再起動や無断のpending削除はしません。outcome1件8MiB・通常256MiBは論理予算で、SQLite物理サイズの上限ではありません。
 
 GC結果のmanaged_deleted/managed_failuresは各128件までの詳細です。managed_deleted_count/managed_failure_countが実数、managed_details_truncatedが省略の有無を示します。詳細の省略は回収処理自体の省略を意味しません。
 
 ### 失敗時に受信した本文
 
 画面に流れた本文は、復旧待ちへ入っても保存済み原文があれば「未確定の受信本文」として読み続けられます。`/received` の一覧は古い失敗や成功時のストリーム差分にも到達でき、Enterで保存原文を開きます。詳しいページ操作は[受信記録](tui.md#保存した受信記録を読む)を参照してください。未確定の本文を残すことと、モデル再試行でその本文を採用することは別です。
+
+### 終了の短い待ちとUnixの実行識別
+
+Quitの後も保存と所有処理の停止が終わるまでは、Runが短時間動き続ける場合があります。通常終了の完了を待ち、保存中の強制終了は未確認の外部副作用を残し得ることを考慮してください。Unixでは所有プロセスの記録を検査して停止しますが、PGIDの検査とsignal送信の間にOSがIDを再利用する競合を原子的に除く保証はありません。
+
+所有groupの外へ `setsid` 等で切り離した処理は、停止後も残り得ます。`nohup` 等を使う処理も、所有追跡の範囲外へ切り離す場合の完全回収は保証しません。自分でデーモン化した処理を再起動後まで追跡・維持する機能は今回の対象外です。

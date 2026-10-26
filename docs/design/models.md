@@ -14,4 +14,4 @@
 
 利用者の追加指示により、原文CLI契約への追加として `model.list` を公開する。`shellboy model list [--connection NAME] [--thread ID]` はownerの型付きRPCを使い、`ModelListResult { connection, models }` を返す。接続の優先順位は明示connection、明示Thread、認証済みoriginのThread、ownerの既定接続。明示Threadはconnection併記時も存在検査する。通常の外部CLIで省略した場合に画面の選択Threadへ依存しない。資格情報はowner側だけで扱う。
 
-HTTPはDB transaction外で行い、既存の受付・結果保存・operation IDによる再送規則と取消しを適用する。同じoperation IDの再送は取得済み一覧の再現であり、更新は新しい操作として要求する。一覧取得はThreadも既定設定も変更しない。TUIの一覧も同じControl実装を使い、F8へ33番目の型付き操作を追加する。モデル変更は既存 `thread.set` を使う。
+HTTPはDB transaction外で行い、既存の認証・有限受付・取消しとResponse上限を適用する。一覧観測はreceiptを作らず、同じoperation IDでも再取得する。一覧取得はThreadも既定設定も変更しない。TUIの一覧も同じControl実装を使い、F8へ33番目の型付き操作を追加する。モデル変更は既存 `thread.set` を使う。
