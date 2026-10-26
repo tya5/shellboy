@@ -62,7 +62,10 @@ impl UiState {
         {
             self.management.epoch = self.management.epoch.wrapping_add(1);
         }
-        let mut actions = self.event_inner(event);
+        let actions = self.event_inner(event);
+        self.scope_management_actions(actions)
+    }
+    pub(super) fn scope_management_actions(&mut self, mut actions: Vec<UiAction>) -> Vec<UiAction> {
         fn needs_scope(action: &UiAction) -> bool {
             match action {
                 UiAction::SubmittedCommand { action, .. } => needs_scope(action),

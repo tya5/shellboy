@@ -492,7 +492,11 @@ impl UiState {
         while let Some(key) = queued.pop_front() {
             let actions = match key {
                 RecallKey::Move(older) => self.recall_input(older),
-                RecallKey::Submit => self.submit(),
+                RecallKey::Submit if self.composer_active() => {
+                    let actions = self.submit();
+                    self.scope_management_actions(actions)
+                }
+                RecallKey::Submit => Vec::new(),
             };
             self.deferred_actions.extend(actions);
             if let Some(recall) = self.active_view_mut().composer.recall.as_mut()

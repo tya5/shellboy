@@ -384,3 +384,54 @@ fn received_list_opens_an_off_path_original_and_rejects_closed_list_results() {
     ui.apply(report());
     assert!(ui.management.is_none());
 }
+
+#[test]
+fn recalled_return_to_slash_draft_uses_the_same_scope_and_respects_overlay_ownership() {
+    fn answer(ui: &mut UiState, request: &UiAction, item: Option<&str>) {
+        let UiAction::RecallInput {
+            thread_id,
+            generation,
+            request_id,
+            ..
+        } = request
+        else {
+            panic!("{request:?}")
+        };
+        ui.apply(UiUpdate::RecalledInput {
+            thread_id: thread_id.clone(),
+            generation: *generation,
+            request_id: *request_id,
+            result: Ok(item.map(|text| RecalledPrompt {
+                ordinal: 3,
+                node_id: "old-message".into(),
+                text: text.into(),
+            })),
+        });
+    }
+    for overlay in [false, true] {
+        let mut ui = UiState::new(&Config::default(), fixture_cwd());
+        ui.select_thread("a".into());
+        ui.insert("/status ", false);
+        let up = ui.event(key(KeyCode::Up)).remove(0);
+        answer(&mut ui, &up, Some("old prompt"));
+        let down = ui.event(key(KeyCode::Down)).remove(0);
+        assert!(ui.event(key(KeyCode::Enter)).is_empty());
+        if overlay {
+            ui.event(key(KeyCode::F(1)));
+        }
+        answer(&mut ui, &down, None);
+        let deferred = ui.take_deferred_actions();
+        if overlay {
+            assert!(deferred.is_empty());
+            assert_eq!(ui.view().draft.text, "/status ");
+        } else {
+            let owner = context(&deferred[0]);
+            ui.event(key(KeyCode::Esc));
+            ui.apply(report(owner, "closed deferred report"));
+            assert!(
+                ui.management.is_none(),
+                "the recalled command's late report cannot reopen a popup"
+            );
+        }
+    }
+}
