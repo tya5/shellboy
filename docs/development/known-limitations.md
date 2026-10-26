@@ -1,27 +1,29 @@
-# 既知の制限と調査中の指摘
+# 既知の制限
 
-公開v0.1.1で残る制限と、後続sourceのローカル修正を区別して記録します。コード経路の確認と、条件を揃えた実行再現は区別しています。通常テストの成功を、以下の条件で問題が起きない証拠にはしません。
+v0.1.1で残った問題と、v0.1.2向けsourceでの修正・残る制限を区別します。実行済みの範囲は [検証状況](../validation/acceptance.md) に記録します。
 
-## PR2-1: receipt予算が満杯に近い場合のCLI停止
+## 停止とoperation receipt予算
 
-CLIの `run stop` / `shell stop` もoperation receiptの予約を必要とします。予約・保存結果が予算を占めると、停止の受付自体が `storage_limit` で拒否され得ます。停止用のIPC枠だけではこの制約を解消しません。
+v0.1.1では通常receiptが満杯になるとCLIの `run stop` / `shell stop` も `storage_limit` になり得ます。v0.1.2向けsourceは停止専用の固定余白を追加しています。通常256MiB/outcome8MiBの上限、同ID再送・異要求conflictの契約は維持します。
 
-TUIで現在の会話を選び、Ctrl+Cまたは `/stop` を使う経路はreceiptを作らず、予算満杯時にも使用できます。`shellboy status` で予算と保存状態を確認し、作業を通常終了してownerを明示的に再起動する方法で旧receiptの回収を行えます。停止を拒否されたことと、対象が終了したことを混同しないでください。
+停止自身の結果で余白も埋まるため、停止を無制限には受け付けません。TUIの現在の会話でCtrl+Cまたは `/stop` を使う経路はreceiptを作りません。`shellboy status` で保存状態と予算を確認し、作業を通常終了してownerを明示的に再起動すると旧receiptが回収されます。停止受付とOS processの終了を混同しないでください。
 
-コード経路と既存のTUI満杯時回帰を確認済みです。レビューに記載された同時wait数・蓄積量・時間のシナリオは今回実行再現していません。後続sourceでは停止専用の固定余白を既存receiptへ追加し、通常満杯時のRunStop適用・ShellStop intentと同ID再送/引数conflictを一時DBで確認しました。停止自身の余白は有限です。未配布のため、v0.1.1利用時は上記の回復経路を使います。
+## 索引方式の更新とsemantic検索の対象
 
-## PR2-2: splitter identity更新時の履歴semantic索引
+v0.1.1ではsplitter identity更新後に旧空間が既定検索から外れることがあります。v0.1.2向けsourceは旧activeを維持し、新規sourceを現行candidateへ索引化します。
 
-本文の分割・識別方式が変わると、同じ接続先・モデルの設定でも新しい索引空間がactiveとなり、旧空間の履歴が既定semantic検索の対象外になる場合があります。本文・旧vectorの削除とは別の問題です。旧空間の明示選択後の動作は追加確認が必要です。
+明示selectするまでは、新しい履歴は既定のsemantic検索には出ません。select後は旧spaceの履歴が既定検索から外れるため、新旧を同じspaceで検索するには対象を明示したrebuild/backfillが必要で、embedding費用が生じ得ます。keyword検索と原文参照はこの切替の影響を受けません。自動の有料再索引はしません。
 
-原文やkeyword検索を確認し、必要な範囲だけ明示的にbackfill/rebuildしてください。過去全件を無断で有料再索引する機能はありません。再索引にはembedding費用が生じ得ます。
+candidateの許可済み入力・jobが全て成功するまでselectを拒否します。保存入力がある失敗は `index retry`、原文/入力欠落や中断した準備は、対象を確認して明示rebuildしてください。接続先/modelが違う索引は読めません。旧spaceの元の分割設定が不明な場合は推測で再束縛せず、元の設定の復元が必要です。
 
-既存のlegacy空間切替試験とコード経路を確認済みです。製品名変更に伴う旧保存形式の互換不要という方針とは別に、索引方式更新時の制限として記録します。後続sourceでは旧activeを維持し、新規sourceは現行candidateへ索引化します。明示selectするまでは、新しい履歴は既定のsemantic検索には出ません。select後は旧spaceの履歴が既定検索から外れるため、新旧を同じspaceで検索するには対象を明示したrebuild/backfillが必要で、embedding費用が生じ得ます。keyword検索と原文参照はこの切替の影響を受けません。全成功後の明示select/rebuildで切り替える回帰は成功しています。読取endpoint/modelの独立検証も追加し、旧spaceの不明な分割設定は推測せず元設定の復元を要します。この修正はまだ配布物へ含まれません。
+## 独立RAGと巨大raw出力
 
-## PR2-3: 独立RAGの履歴semantic検索と巨大raw出力
+v0.1.1の履歴semantic検索は、範囲なしrawが16MiBを超えると `input_limit` でscope全体が失敗する場合があります。v0.1.2向けsourceではincremental decode/hash検証と最大64K文字のrange referenceを使い、同じwitnessの複数spanは1回のdecodeで検証します。重なるspanごとのhash検証の費用は残ります。改変・retention失効は引き続き失敗として返します。
 
-範囲を持たないraw witnessを使う履歴semantic hitは、全文のrawまたはdecoded textが16MiBを超えると `input_limit` になり、その履歴scopeのsemantic結果を取得できない可能性があります。hybridや複数scopeの検索では、成功した側の結果だけが返る場合があるため `scope_errors` / 部分失敗も確認してください。
+hybridや複数scopeの検索では、成功した側だけが返る場合があるため `scope_errors` と部分失敗も確認してください。keyword検索、または `shellboy shell read` のcursor付き取得でも原文を辿れます。
 
-keyword検索、または `shellboy shell read` のcursor付き読み取りで対象を確認してください。後続sourceはincremental decode/hash検証と最大64K文字のrange referenceで有限取得します。この修正はまだ配布物へ含まれません。
+## 会話欄の抜粋と受信記録
 
-上限検査とエラー伝播の経路は静的確認済みです。後続sourceでは17MiB rawの末尾span/巨大単一span、範囲外改変、retention失効を匿名fixtureで検証しました。公開v0.1.1には未収録です。
+長いshell出力のカードは取得した表示窓の抜粋です。カードに出る末尾はexecution全体の末尾とは限りません。表示範囲・省略量が不明な場合もあり、F6・原文reader、または `shellboy shell read` のcursorで続きと完了状態を確認してください。
+
+受信本文の会話previewは最新2記録・既存本文予算内に限定します。対応する履歴位置が表示窓外の場合や、大きな成功差分で最終本文と比較できない場合は会話previewを推測表示しません。`/received` のページ付き一覧から監査記録・原文へ到達できます。本文を受信していない失敗記録も一覧には残ります。

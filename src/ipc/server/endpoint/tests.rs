@@ -477,7 +477,10 @@ async fn live_namespace_holds_directory_flock_until_listener_cleanup() {
     // Stale capture must not acquire this lock and silently skip the live
     // endpoint. The ordinary probe still rejects binding the same owner twice.
     let error = bind_error(&owner).await;
-    assert!(error.message.contains("live"));
+    assert_eq!(
+        error.details.as_ref().unwrap()["reason"],
+        "existing_socket_live"
+    );
     server.shutdown().await.unwrap();
     assert!(!folder.exists());
     assert!(!owner.loaded.data_dir.join("endpoint.json").exists());
