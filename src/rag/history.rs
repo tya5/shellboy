@@ -311,19 +311,29 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
             )
         })?;
     let mut hits = Vec::new();
+    let mut raw_spans = Vec::new();
+    for found in &matches {
+        for span in &found.spans {
+            if span.body_kind != "tool_raw" {
+                continue;
+            }
+            let witness:Option<String>=db.connection.query_row("SELECT authorized_watermark FROM embedding_job WHERE source_node_id=?1 AND space_id=?2 AND body_kind='tool_raw' AND source_revision=?3 AND span_start=?4 AND span_end=?5 AND source_hash=?6 AND state='done' LIMIT 1",params![found.node_id,&descriptor.id,span.source_revision,span.start as i64,span.end as i64,span.content_hash],|r|r.get(0)).optional()?.flatten();
+            let raw = witness
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .and_then(|v| v.get("witness").and_then(|v| v.get("raw")).cloned())
+                .filter(|v| !v.is_null())
+                .ok_or_else(|| err("revision_unavailable", "Raw-output witness is unavailable"))?;
+            raw_spans.push((raw, span));
+        }
+    }
+    // KNN may select many spans from the same execution. Decode each saved
+    // witness once, without changing ranked order or source verification.
+    let mut raw_bodies = raw::semantic_batch(&db.connection, &raw_spans)?.into_iter();
     for found in matches {
         let (kind, _, payload, _) = node(&db.connection, &found.node_id)?;
         for span in found.spans {
             let (body, raw) = if span.body_kind == "tool_raw" {
-                let witness:Option<String>=db.connection.query_row("SELECT authorized_watermark FROM embedding_job WHERE source_node_id=?1 AND space_id=?2 AND body_kind='tool_raw' AND source_revision=?3 AND span_start=?4 AND span_end=?5 AND source_hash=?6 AND state='done' LIMIT 1",params![found.node_id,&descriptor.id,span.source_revision,span.start as i64,span.end as i64,span.content_hash],|r|r.get(0)).optional()?.flatten();
-                let raw = witness
-                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                    .and_then(|v| v.get("witness").and_then(|v| v.get("raw")).cloned())
-                    .filter(|v| !v.is_null())
-                    .ok_or_else(|| {
-                        err("revision_unavailable", "Raw-output witness is unavailable")
-                    })?;
-                let (body, raw) = raw::semantic(&db.connection, &raw, &span)?;
+                let (body, raw) = raw_bodies.next().expect("one result per raw span");
                 (body, Some(raw))
             } else {
                 let body = bodies(&db.connection, &found.node_id, &kind, &payload)?

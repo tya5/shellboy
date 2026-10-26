@@ -108,59 +108,96 @@ pub(super) fn raw_text(db: &Connection, witness: &Value) -> Result<String> {
     Ok(text)
 }
 
-/// Verify the entire indexed span while retaining only a bounded retrieval
-/// unit. The splitter policy does not impose a maximum span length.
-pub(super) fn semantic(
+/// Verify complete indexed spans with one decoder walk per saved raw witness.
+/// Each result retains at most WINDOW characters, independently of span size.
+pub(super) fn semantic_batch(
     db: &Connection,
-    witness: &Value,
-    span: &crate::index::SourceSpan,
-) -> Result<(String, Value)> {
+    requests: &[(Value, &crate::index::SourceSpan)],
+) -> Result<Vec<(String, Value)>> {
+    semantic_batch_from(requests, |witness, visit| walk(db, witness, visit))
+}
+
+type RawVisitor<'a> = dyn FnMut(&str, usize) -> Result<()> + 'a;
+
+fn semantic_batch_from(
+    requests: &[(Value, &crate::index::SourceSpan)],
+    mut read: impl FnMut(&Value, &mut RawVisitor<'_>) -> Result<()>,
+) -> Result<Vec<(String, Value)>> {
     use sha2::{Digest, Sha256};
-    if span.start > span.end {
-        return Err(err("revision_unavailable", "Invalid indexed raw range"));
-    }
-    let mut digest = Sha256::new();
-    let mut position = 0usize;
-    let mut selected = String::new();
-    let mut retained = 0usize;
-    let mut whole = Some(String::new());
-    walk(db, witness, |part, _| {
-        let count = part.chars().count();
-        if let Some(body) = &mut whole {
-            if position.saturating_add(count) <= WINDOW {
-                body.push_str(part);
-            } else {
-                whole = None;
-            }
+    use std::collections::BTreeMap;
+
+    // This request-local map is bounded by the existing KNN candidate limit.
+    // It holds witness/indices only; no raw body or long-lived cache is added.
+    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (index, (witness, span)) in requests.iter().enumerate() {
+        if span.start > span.end {
+            return Err(err("revision_unavailable", "Invalid indexed raw range"));
         }
-        // Each decoded page is bounded independently of the source/span size.
-        let page: String = part
-            .chars()
-            .skip(span.start.saturating_sub(position))
-            .take(span.end.saturating_sub(position.max(span.start)))
+        groups.entry(witness.to_string()).or_default().push(index);
+    }
+    let mut results: Vec<Option<(String, Value)>> = std::iter::repeat_with(|| None)
+        .take(requests.len())
+        .collect();
+    for indices in groups.into_values() {
+        let witness = &requests[indices[0]].0;
+        let mut states: Vec<_> = indices
+            .iter()
+            .map(|&index| (index, Sha256::new(), String::new(), 0usize))
             .collect();
-        digest.update(page.as_bytes());
-        for character in page.chars().take(WINDOW - retained) {
-            selected.push(character);
-            retained += 1;
+        let mut position = 0usize;
+        let mut whole = Some(String::new());
+        read(witness, &mut |part, _| {
+            // Decode each page once, and share its character-to-byte offsets.
+            // Work on a span only where it overlaps this page. Hashing genuinely
+            // overlapping indexed text remains necessary for each source hash.
+            let mut offsets: Vec<_> = part.char_indices().map(|(offset, _)| offset).collect();
+            let count = offsets.len();
+            offsets.push(part.len());
+            if let Some(body) = &mut whole {
+                if position.saturating_add(count) <= WINDOW {
+                    body.push_str(part);
+                } else {
+                    whole = None;
+                }
+            }
+            for (index, digest, selected, retained) in &mut states {
+                let span = requests[*index].1;
+                let start = span.start.saturating_sub(position).min(count);
+                let end = span.end.saturating_sub(position).min(count);
+                if start >= end {
+                    continue;
+                }
+                digest.update(&part.as_bytes()[offsets[start]..offsets[end]]);
+                let keep = (end - start).min(WINDOW - *retained);
+                selected.push_str(&part[offsets[start]..offsets[start + keep]]);
+                *retained += keep;
+            }
+            position = position.saturating_add(count);
+            Ok(())
+        })?;
+        for (index, digest, selected, retained) in states {
+            let span = requests[index].1;
+            let actual = digest
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            if position < span.end || actual != span.content_hash {
+                return Err(err("revision_unavailable", "Indexed source range changed"));
+            }
+            results[index] = Some(if let Some(body) = &whole {
+                (body.clone(), witness.clone())
+            } else {
+                let mut witness = witness.clone();
+                witness["range"] = json!({"start":span.start,"end":span.start+retained});
+                (selected, witness)
+            });
         }
-        position = position.saturating_add(count);
-        Ok(())
-    })?;
-    let actual = digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    if position < span.end || actual != span.content_hash {
-        return Err(err("revision_unavailable", "Indexed source range changed"));
     }
-    if let Some(body) = whole {
-        return Ok((body, witness.clone()));
-    }
-    let mut witness = witness.clone();
-    witness["range"] = json!({"start":span.start,"end":span.start+retained});
-    Ok((selected, witness))
+    Ok(results
+        .into_iter()
+        .map(|result| result.expect("each raw span was verified"))
+        .collect())
 }
 
 const WINDOW: usize = 64 * 1024;
@@ -236,6 +273,125 @@ pub(super) fn keyword(db: &Connection, witness: &Value, query: &str) -> Result<O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_spans_share_one_walk_per_witness_and_keep_ranked_ranges() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE shell_execution(id TEXT,retention_generation INTEGER,saved_sequence INTEGER,output_encoding TEXT,state TEXT);
+        CREATE TABLE app_meta(key TEXT,value TEXT);
+        CREATE TABLE output_chunk(execution_id TEXT,sequence INTEGER,stream TEXT,bytes BLOB);
+        INSERT INTO shell_execution VALUES('large',0,1,'UTF-8','exited'),('small',0,1,'UTF-8','exited');").unwrap();
+        // The Unicode character crosses a 64KiB BLOB page boundary. More
+        // than 100 selected spans must still read this legacy BLOB only once.
+        let text = format!("{}あ{}", "x".repeat(WINDOW - 1), "tail界".repeat(WINDOW));
+        let small = "別の出力";
+        for (execution, text) in [("large", text.as_str()), ("small", small)] {
+            db.execute(
+                "INSERT INTO output_chunk VALUES(?1,0,'stdout',?2)",
+                params![execution, text.as_bytes()],
+            )
+            .unwrap();
+        }
+        let large_witness =
+            json!({"execution":"large","generation":0,"saved_sequence":1,"encoding":"UTF-8"});
+        let small_witness =
+            json!({"execution":"small","generation":0,"saved_sequence":1,"encoding":"UTF-8"});
+        let characters: Vec<_> = text.chars().collect();
+        let mut spans = Vec::new();
+        for index in 0..200 {
+            let (start, end) = match index % 4 {
+                0 => (WINDOW - 2, WINDOW + 5),
+                1 => (WINDOW, characters.len()),
+                2 => (characters.len() - 30, characters.len()),
+                _ => (WINDOW + 1, WINDOW + 1),
+            };
+            let selected: String = characters[start..end].iter().collect();
+            spans.push(crate::index::SourceSpan {
+                source_revision: 1,
+                content_hash: hash(selected.as_bytes()),
+                body_kind: "tool_raw".into(),
+                start,
+                end,
+            });
+        }
+        let small_span = crate::index::SourceSpan {
+            source_revision: 1,
+            content_hash: hash("の".as_bytes()),
+            body_kind: "tool_raw".into(),
+            start: 1,
+            end: 2,
+        };
+        let mut requests: Vec<_> = spans
+            .iter()
+            .map(|span| (large_witness.clone(), span))
+            .collect();
+        requests.insert(2, (small_witness.clone(), &small_span));
+        let mut walks = 0usize;
+        let mut scanned_bytes = 0usize;
+        let found = semantic_batch_from(&requests, |witness, visit| {
+            walks += 1;
+            walk(&db, witness, |part, bytes| {
+                scanned_bytes += bytes;
+                visit(part, bytes)
+            })
+        })
+        .unwrap();
+        assert_eq!(walks, 2, "one walk per distinct witness, not per span");
+        assert_eq!(scanned_bytes, text.len() + small.len());
+        assert_eq!(found.len(), requests.len());
+        for ((witness, span), (body, actual_witness)) in requests.iter().zip(&found) {
+            if *witness == small_witness {
+                assert_eq!(body, small);
+                assert_eq!(
+                    *actual_witness, small_witness,
+                    "small body keeps full reference"
+                );
+            } else {
+                let end = span.end.min(span.start + WINDOW);
+                assert_eq!(
+                    *body,
+                    characters[span.start..end].iter().collect::<String>()
+                );
+                assert_eq!(
+                    actual_witness["range"],
+                    json!({"start":span.start,"end":end})
+                );
+                assert!(body.chars().count() <= WINDOW);
+            }
+        }
+        assert_eq!(raw_text(&db, &found[0].1).unwrap(), found[0].0);
+        assert_eq!(raw_text(&db, &found[1].1).unwrap(), found[1].0);
+        // A corrupt hash outside the returned prefix fails the whole scope;
+        // successful siblings must not mask source corruption.
+        let changed = crate::index::SourceSpan {
+            content_hash: hash(b"wrong"),
+            ..spans[1].clone()
+        };
+        requests.push((large_witness.clone(), &changed));
+        assert_eq!(
+            semantic_batch(&db, &requests).unwrap_err().code,
+            "revision_unavailable"
+        );
+        db.execute(
+            "UPDATE shell_execution SET retention_generation=1 WHERE id='large'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            semantic_batch(&db, &[(large_witness, &spans[0])])
+                .unwrap_err()
+                .code,
+            "revision_unavailable"
+        );
+    }
+
+    fn semantic(
+        db: &Connection,
+        witness: &Value,
+        span: &crate::index::SourceSpan,
+    ) -> Result<(String, Value)> {
+        Ok(semantic_batch(db, &[(witness.clone(), span)])?.remove(0))
+    }
 
     #[test]
     fn shared_decoder_preserves_interleaved_streams_eof_and_legacy_full_references() {
