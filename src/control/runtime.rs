@@ -281,16 +281,13 @@ impl Control {
             Command::ShellWrite(args) => {
                 let shell = self
                     .live
-                    .shells
-                    .lock()
+                    .clone_shell_handle(&args.execution_id)
                     .await
-                    .get(&args.execution_id)
-                    .cloned()
                     .ok_or_else(|| {
                         ApiError::new(ErrorCode::TargetUnavailable, "Shell is not running")
                     })?;
                 encode_result(
-                    shell.handle.write(&args.text, &args.encoding).await?,
+                    shell.write(&args.text, &args.encoding).await?,
                     ErrorCode::IoFailed,
                     "Cannot encode shell write result",
                 )

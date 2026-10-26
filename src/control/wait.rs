@@ -74,12 +74,8 @@ pub(super) async fn observe(
     let foreground = if let Some(origin) = &caller {
         control
             .live
-            .drivers
-            .lock()
+            .foreground_for_run(&origin.thread_id, &origin.run_id)
             .await
-            .get(&origin.thread_id)
-            .filter(|slot| slot.run_id == origin.run_id)
-            .map(|slot| slot.foreground.clone())
     } else {
         None
     };

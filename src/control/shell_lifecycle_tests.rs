@@ -358,7 +358,7 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
     assert!(response.ok, "{:?}", response.error);
     let shell = control
         .live
-        .shells
+        .test_shells()
         .lock()
         .await
         .get(&execution)
@@ -522,7 +522,7 @@ async fn failed_grace_owner_does_not_swallow_another_saved_stop() {
         loop {
             let shell = control
                 .live
-                .shells
+                .test_shells()
                 .lock()
                 .await
                 .iter()
@@ -600,7 +600,7 @@ async fn failed_self_stop_owner_does_not_preempt_another_saved_reply_grace() {
         loop {
             let shell = control
                 .live
-                .shells
+                .test_shells()
                 .lock()
                 .await
                 .iter()

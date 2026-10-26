@@ -56,6 +56,19 @@ impl LiveRegistry {
         }
     }
 
+    pub(super) async fn foreground_for_run(
+        &self,
+        thread: &str,
+        run: &str,
+    ) -> Option<Arc<ForegroundSlot>> {
+        self.drivers
+            .lock()
+            .await
+            .get(thread)
+            .filter(|slot| slot.run_id == run)
+            .map(|slot| slot.foreground.clone())
+    }
+
     pub(super) async fn background(&self, thread: &str) -> Result<(), ApiError> {
         let drivers = self.drivers.lock().await;
         let slot = drivers.get(thread).ok_or_else(|| {

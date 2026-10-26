@@ -30,7 +30,7 @@ async fn successful_incomplete_output_is_saved_and_cancels_unexecuted_calls() {
     }).await.unwrap();
     let handle = control
         .live
-        .shells
+        .test_shells()
         .lock()
         .await
         .get(&execution)
