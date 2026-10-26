@@ -1,6 +1,7 @@
 //! Bounded Responses SSE parsing and completed-response validation.
 
 pub mod http;
+mod reconcile;
 
 use crate::protocol::ShellToolArgs;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,48 @@ use std::collections::{BTreeMap, HashSet};
 pub const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputMismatchField {
+    Metadata,
+    Type,
+    Role,
+    Content,
+    Text,
+    Refusal,
+    CallId,
+    Name,
+    Arguments,
+    ReasoningSummary,
+    ReasoningContent,
+    EncryptedContent,
+    OutputIndex,
+}
+impl OutputMismatchField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::Type => "type",
+            Self::Role => "role",
+            Self::Content => "content",
+            Self::Text => "text",
+            Self::Refusal => "refusal",
+            Self::CallId => "call_id",
+            Self::Name => "name",
+            Self::Arguments => "arguments",
+            Self::ReasoningSummary => "reasoning_summary",
+            Self::ReasoningContent => "reasoning_content",
+            Self::EncryptedContent => "encrypted_content",
+            Self::OutputIndex => "output_index",
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputMismatch {
+    pub output_index: u64,
+    pub field: OutputMismatchField,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 #[error("{kind}: {message}")]
@@ -123,6 +166,17 @@ pub struct ModelResponse {
     pub output: Vec<Value>,
     pub calls: Vec<ToolCall>,
     pub text: String,
+    pub stream_observation: Option<StreamObservation>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamObservation {
+    pub differences: Vec<OutputMismatch>,
+    /// Whole-response delta channels; no item index is inferred. At most two.
+    pub delta_differences: Vec<OutputMismatchField>,
+    pub total_differences: usize,
+    pub partial_text: String,
+    pub partial_reasoning: String,
+    pub completed_items: BTreeMap<u64, Value>,
 }
 impl ModelResponse {
     pub fn completed(raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
@@ -234,8 +288,14 @@ impl ModelResponse {
             output,
             calls,
             text,
+            stream_observation: None,
         })
     }
+}
+
+struct DecodeFailure {
+    error: ModelError,
+    events: Vec<Value>,
 }
 
 #[derive(Debug, Default)]
@@ -247,32 +307,36 @@ pub struct SseDecoder {
 impl SseDecoder {
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Value>, ModelError> {
         self.push_until(bytes, |_| false)
+            .map_err(|failure| failure.error)
     }
     /// Stop at a complete terminal frame before interpreting any trailing bytes.
     fn push_until(
         &mut self,
         bytes: &[u8],
         mut terminal: impl FnMut(&Value) -> bool,
-    ) -> Result<Vec<Value>, ModelError> {
+    ) -> Result<Vec<Value>, DecodeFailure> {
         self.total = self
             .total
             .checked_add(bytes.len())
-            .ok_or_else(|| ModelError::new("input_limit", "Response length overflow"))?;
+            .ok_or_else(|| DecodeFailure {
+                error: ModelError::new("input_limit", "Response length overflow"),
+                events: vec![],
+            })?;
         if self.total > MAX_RESPONSE_BYTES {
-            return Err(ModelError::new(
-                "input_limit",
-                "Response byte limit exceeded",
-            ));
+            return Err(DecodeFailure {
+                error: ModelError::new("input_limit", "Response byte limit exceeded"),
+                events: vec![],
+            });
         }
         let mut events = Vec::new();
         for &byte in bytes {
             if byte != b'\n' {
                 self.line.push(byte);
                 if self.line.len() + self.data.len() > MAX_EVENT_BYTES {
-                    return Err(ModelError::new(
-                        "input_limit",
-                        "SSE event byte limit exceeded",
-                    ));
+                    return Err(DecodeFailure {
+                        error: ModelError::new("input_limit", "SSE event byte limit exceeded"),
+                        events,
+                    });
                 }
                 continue;
             }
@@ -284,9 +348,18 @@ impl SseDecoder {
                 if !self.data.is_empty() {
                     self.data.pop();
                     if self.data != b"[DONE]" {
-                        let event = serde_json::from_slice(&self.data).map_err(|_| {
-                            ModelError::new("protocol", "Malformed UTF-8/JSON in SSE")
-                        })?;
+                        let event = match serde_json::from_slice(&self.data) {
+                            Ok(event) => event,
+                            Err(_) => {
+                                return Err(DecodeFailure {
+                                    error: ModelError::new(
+                                        "protocol",
+                                        "Malformed UTF-8/JSON in SSE",
+                                    ),
+                                    events,
+                                });
+                            }
+                        };
                         let stop = terminal(&event);
                         events.push(event);
                         if stop {
@@ -301,10 +374,10 @@ impl SseDecoder {
                     .extend_from_slice(data.strip_prefix(b" ").unwrap_or(data));
                 self.data.push(b'\n');
                 if self.data.len() > MAX_EVENT_BYTES {
-                    return Err(ModelError::new(
-                        "input_limit",
-                        "SSE event byte limit exceeded",
-                    ));
+                    return Err(DecodeFailure {
+                        error: ModelError::new("input_limit", "SSE event byte limit exceeded"),
+                        events,
+                    });
                 }
             }
         }
@@ -319,8 +392,12 @@ impl SseDecoder {
 pub struct ResponseStream {
     decoder: SseDecoder,
     pub partial_text: String,
+    pub partial_reasoning: String,
     pub completed_items: BTreeMap<u64, Value>,
     terminal: Option<Result<Value, ModelError>>,
+    failed_response: Option<Value>,
+    differences: Vec<OutputMismatch>,
+    total_differences: usize,
 }
 impl ResponseStream {
     /// Parsed events can be persisted/previewed. Tools are never started here.
@@ -328,17 +405,34 @@ impl ResponseStream {
         if self.terminal.is_some() {
             return Ok(Vec::new());
         }
-        let events = self.decoder.push_until(bytes, |event| {
+        let decoded = self.decoder.push_until(bytes, |event| {
             matches!(
                 event.get("type").and_then(Value::as_str),
                 Some("response.completed" | "response.failed" | "response.incomplete" | "error")
             )
-        })?;
+        });
+        let (events, decode_error) = match decoded {
+            Ok(events) => (events, None),
+            Err(failure) => (failure.events, Some(failure.error)),
+        };
+        if decode_error.is_some() {
+            self.failed_response = events
+                .iter()
+                .rev()
+                .find_map(|event| event.get("response"))
+                .cloned();
+        }
+        // Apply the valid prefix before returning a later frame decode failure.
         for event in &events {
             match event.get("type").and_then(Value::as_str) {
                 Some("response.output_text.delta" | "response.refusal.delta") => {
                     if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                         self.partial_text.push_str(delta);
+                    }
+                }
+                Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
+                    if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                        self.partial_reasoning.push_str(delta);
                     }
                 }
                 Some("response.output_item.done") => {
@@ -358,18 +452,31 @@ impl ResponseStream {
                     let response = event.get("response").ok_or_else(|| {
                         ModelError::new("protocol", "Completed event has no response")
                     })?;
-                    let output = response
-                        .get("output")
-                        .and_then(Value::as_array)
-                        .ok_or_else(|| {
-                            ModelError::new("protocol", "Completed response has no output")
-                        })?;
+                    let Some(output) = response.get("output").and_then(Value::as_array) else {
+                        let error = ModelError::new("protocol", "Completed response has no output");
+                        self.failed_response = Some(response.clone());
+                        self.terminal = Some(Err(error.clone()));
+                        return Err(error);
+                    };
                     for (index, item) in &self.completed_items {
-                        if output.get(*index as usize) != Some(item) {
-                            return Err(ModelError::new(
-                                "protocol",
-                                "Completed output disagrees with item done",
-                            ));
+                        let final_item = usize::try_from(*index)
+                            .ok()
+                            .and_then(|index| output.get(index));
+                        if final_item != Some(item) {
+                            self.total_differences += 1;
+                            if self.differences.len() < 16 {
+                                let field = final_item.map_or(
+                                    OutputMismatchField::OutputIndex,
+                                    |final_item| {
+                                        reconcile::mismatch(item, final_item)
+                                            .unwrap_or(OutputMismatchField::Metadata)
+                                    },
+                                );
+                                self.differences.push(OutputMismatch {
+                                    output_index: *index,
+                                    field,
+                                });
+                            }
                         }
                     }
                     self.terminal = Some(Ok(response.clone()));
@@ -389,17 +496,42 @@ impl ResponseStream {
                 _ => {}
             }
         }
+        if let Some(error) = decode_error {
+            return Err(error);
+        }
         Ok(events)
     }
     pub fn is_terminal(&self) -> bool {
         self.terminal.is_some()
+    }
+    pub(crate) fn failed_response(&self) -> Option<&Value> {
+        self.failed_response.as_ref()
     }
     pub fn finish(self, tools_enabled: bool) -> Result<ModelResponse, ModelError> {
         if !self.decoder.is_at_boundary() {
             return Err(ModelError::new("incomplete", "EOF in partial SSE event"));
         }
         match self.terminal {
-            Some(Ok(raw)) => ModelResponse::completed(raw, tools_enabled),
+            Some(Ok(raw)) => {
+                let mut response = ModelResponse::completed(raw, tools_enabled)?;
+                let delta_differences = reconcile::delta_differences(
+                    &self.partial_text,
+                    &self.partial_reasoning,
+                    &response,
+                );
+                let total_differences = self.total_differences + delta_differences.len();
+                if total_differences > 0 {
+                    response.stream_observation = Some(StreamObservation {
+                        differences: self.differences,
+                        delta_differences,
+                        total_differences,
+                        partial_text: self.partial_text,
+                        partial_reasoning: self.partial_reasoning,
+                        completed_items: self.completed_items,
+                    });
+                }
+                Ok(response)
+            }
             Some(Err(e)) => Err(e),
             None => Err(ModelError::new(
                 "incomplete",

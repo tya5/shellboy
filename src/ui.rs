@@ -331,6 +331,10 @@ pub enum UiAction {
         pointer: String,
         mode: ManagementFollow,
     },
+    LoadReceived {
+        thread_id: String,
+        page: u32,
+    },
     LoadModels {
         connection: String,
         request_id: u64,
@@ -646,10 +650,20 @@ pub enum UiUpdate {
         anchor: ViewAnchor,
         message: String,
     },
+    ReceivedList {
+        title: String,
+        fields: Vec<PresentationField>,
+    },
+    IncompleteResponses {
+        thread_id: String,
+        generation: u64,
+        nodes: Vec<UiNode>,
+    },
     StreamSettled {
         thread_id: String,
         generation: u64,
         attempt_id: String,
+        received_source: Option<(String, String)>,
         ack: Option<Arc<tokio::sync::Notify>>,
     },
     ViewState {
@@ -1502,19 +1516,36 @@ impl UiState {
                     view.status = message;
                 }
             }
+            UiUpdate::ReceivedList { title, fields } => {
+                self.management
+                    .open_structured(title, 0, fields, false, false);
+                self.management.mode = management::ManagementMode::Received;
+            }
+            UiUpdate::IncompleteResponses {
+                thread_id,
+                generation,
+                nodes,
+            } => {
+                if let Some(view) = self.view_for(&thread_id, generation) {
+                    view.on_incomplete_responses(nodes);
+                }
+            }
             UiUpdate::StreamSettled {
                 thread_id,
                 generation,
                 attempt_id,
+                received_source,
                 ack,
             } => {
                 if let Some(ack) = ack {
                     ack.notify_one();
                 }
-                if let Some(view) = self.view_for(&thread_id, generation)
-                    && let Some(action) = view.settle_stream(&attempt_id)
-                {
-                    self.deferred_actions.push(action);
+                if let Some(view) = self.view_for(&thread_id, generation) {
+                    if let Some((source, kind)) = received_source {
+                        view.retain_incomplete_stream(&attempt_id, source, &kind);
+                    } else if let Some(action) = view.settle_stream(&attempt_id) {
+                        self.deferred_actions.push(action);
+                    }
                 }
             }
             UiUpdate::ViewState {
@@ -2392,6 +2423,29 @@ impl UiState {
                 self.details = Some(details::Details::new(self.view(), true));
                 vec![]
             }
+            "/received" => {
+                let Some(thread_id) = thread_id else {
+                    return self.command_error("保存済みの会話を選択してください");
+                };
+                let page = if argument.is_empty() {
+                    1
+                } else {
+                    match argument.parse::<u32>() {
+                        Ok(page) if page > 0 => page,
+                        _ => {
+                            return self
+                                .command_error("/received または /received 1以上のページ番号");
+                        }
+                    }
+                };
+                self.invalidate_management();
+                self.management.open_text(ManagementView {
+                    title: "受信記録 · 読込み中".into(),
+                    text: String::new(),
+                    scroll: 0,
+                });
+                vec![UiAction::LoadReceived { thread_id, page }]
+            }
             "/retry" => {
                 let Some(snapshot) = &self.view().activity.snapshot else {
                     return self
@@ -3034,6 +3088,12 @@ impl UiState {
             management::Outcome::Close => {
                 self.invalidate_management();
                 vec![]
+            }
+            management::Outcome::Original(node_id) => {
+                let mut detail = details::Details::new(self.view(), false);
+                let action = detail.open_source(node_id, &mut self.next_detail_request);
+                self.details = Some(detail);
+                vec![action]
             }
             management::Outcome::Operations => {
                 self.open_operations(None);

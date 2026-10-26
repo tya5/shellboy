@@ -477,13 +477,21 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
         ));
     }
     let text = if let Some(body) = &row.payload {
-        let value: Value = serde_json::from_str(body).map_err(|_| {
-            ApiError::new(
-                ErrorCode::InvalidState,
-                "stored history payload is malformed",
-            )
-        })?;
-        text_of_payload(&value)
+        if matches!(
+            row.kind.as_str(),
+            "incomplete_response" | "model_stream_observation"
+        ) {
+            // Audit originals are exact saved JSON, independent of replay projection.
+            body.clone()
+        } else {
+            let value: Value = serde_json::from_str(body).map_err(|_| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    "stored history payload is malformed",
+                )
+            })?;
+            text_of_payload(&value)
+        }
     } else {
         String::new()
     };

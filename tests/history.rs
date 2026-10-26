@@ -544,3 +544,31 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
     assert!(history.list(wrong_run).await.unwrap().items.is_empty());
     database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn audit_received_originals_page_exact_saved_json_without_changing_replay_text() {
+    let (_dir, db, history) = repository().await;
+    for kind in ["incomplete_response", "model_stream_observation"] {
+        let source = kind.to_owned();
+        let saved=json!({"partial_reasoning":"理由🦀","partial_text":"保存済み本文".repeat(30),"completed_items":{},"raw_response":{"output":[]}}).to_string();
+        let expected = saved.clone();
+        let kind = kind.to_owned();
+        db.call(move|db|{db.execute("INSERT INTO node(id,kind,payload_json,payload_bytes,created_at)VALUES(?1,?1,?2,length(?2),'now')",rusqlite::params![kind,saved])?;Ok(())}).await.unwrap();
+        let mut cursor = None;
+        let mut actual = String::new();
+        loop {
+            let page = history.get(body(&source, 47, cursor)).await.unwrap();
+            actual.push_str(&page.text);
+            if page.next_cursor.is_none() {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+        assert_eq!(actual, expected);
+        assert_eq!(
+            text_of_payload(&serde_json::from_str::<Value>(&actual).unwrap()),
+            ""
+        );
+    }
+    db.shutdown().await.unwrap();
+}

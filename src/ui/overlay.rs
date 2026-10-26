@@ -66,7 +66,8 @@ impl UiState {
         fn needs_scope(action: &UiAction) -> bool {
             match action {
                 UiAction::SubmittedCommand { action, .. } => needs_scope(action),
-                UiAction::Manage(_)
+                UiAction::LoadReceived { .. }
+                | UiAction::Manage(_)
                 | UiAction::ReloadAttachments { .. }
                 | UiAction::IndexPreview(_)
                 | UiAction::FollowManagement { .. }

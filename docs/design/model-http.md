@@ -22,8 +22,20 @@ HTTP失敗本文は64 KiBまで読み、messageを16,384文字・provider code�
 
 公式参照: [Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events)、[Embeddings](https://developers.openai.com/api/reference/resources/embeddings/methods/create)。
 
-2026-10-24の実endpoint診断を受け、最初の完全なterminal SSE frameをdecode境界とする。`error`、`response.failed`、`response.incomplete`、`response.completed` のframeが空行まで完了したら、同じHTTP chunk内の後続event/未完了frameを解析しない。HTTP chunkの分かれ方によって元provider errorが `Event after terminal response` や `EOF in partial SSE event` へ置き換わる問題を防ぐ。terminal frame自体のJSON不正・未完了やcompleted outputの整合性検査は引き続き失敗になる。最初の終端が失敗なら、その後のcompletedで成功へ変えない。一般用途の `SseDecoder::push` は全eventを解析し、Responsesのstreamだけが終端までのdecodeを選ぶ。これは[公式event定義](https://developers.openai.com/api/reference/resources/responses/streaming-events)を基にしたtransportの境界判断で、後続eventをモデル出力として解釈する拡張ではない。全byte分割点とローカルHTTPで回帰を検証し、課金残高回復後の実endpoint正常完了は別途必要とする。
+2026-10-24の実endpoint診断を受け、最初の完全なterminal SSE frameをdecode境界とする。`error`、`response.failed`、`response.incomplete`、`response.completed` のframeが空行まで完了したら、同じHTTP chunk内の後続event/未完了frameを解析しない。HTTP chunkの分かれ方によって元provider errorが `Event after terminal response` や `EOF in partial SSE event` へ置き換わる問題を防ぐ。terminal frame自体のJSON不正・未完了や、最終responseそのものの形式検証は引き続き失敗になる。最初の終端が失敗なら、その後のcompletedで成功へ変えない。一般用途の `SseDecoder::push` は全eventを解析し、Responsesのstreamだけが終端までのdecodeを選ぶ。これは[公式event定義](https://developers.openai.com/api/reference/resources/responses/streaming-events)を基にしたtransportの境界判断で、後続eventをモデル出力として解釈する拡張ではない。全byte分割点とローカルHTTPで回帰を検証し、課金残高回復後の実endpoint正常完了は別途必要とする。
 
 ## HTTP error本文の上限境界（M13）
 
 保持本文は既存64KiB以内とし、超過byteを実際に観測した場合にHTTP error body truncatedを付ける。ちょうど上限でEOFになった本文を省略扱いにしない。上限到達後は次の非空chunk又はEOFを既存cancel観測の下で確認し、追加chunkを本文へ保持しない。診断文字数上限、資格情報のredact、provider分類と自動再試行条件は維持する。
+
+## ストリーム完了時の差分と受信証跡
+
+output_item.doneとresponse.completed.outputの一致をAPI保証として扱わない。最終responseそのものを既存の完了状態・対応形式・ツール引数で検証し、その正本だけを採用する。途中とのJSON差分はメタデータに限らず復旧待ちの理由にしない。ツールは最終responseの採用transaction成功後に実行する。未知形式や不正な最終データ、通信失敗、未完了、保存失敗は既存の失敗経路を維持する。
+
+item doneとの差分があれば先頭16件までの固定分類とoutput_indexをStreamObservationへ保持する。受信した回答・平文推論deltaと最終本文が異なる場合も、response全体のdelta_differencesへ固定分類を保存する（架空のoutput_indexは付けない）。total_differencesは両種類の合計とする。分類はmessage本文/refusal/content/role、function_callのcall_id/name/引数、reasoningのsummary/content/encrypted_content、index、その他metadataとし、分類は警告・調査用であり受理可否を決めない。引数は既存ShellToolArgsとして同値なら整形・既定値の差と扱う。最終raw JSONは書き換えない。
+
+成功した差分観測は同じ採用transaction内でpath外のmodel_stream_observation audit nodeへ保存する。payloadはattempt_id、differences、delta_differences、total_differences、partial_text、partial_reasoning、completed_items、raw_response。モデル再送・semantic索引・採用pathへは追加しない。通常ログは既存有限writerで対象ID・固定分類・index/fieldだけを記録する。本文・任意provider文字列は通常ログへ入れない。
+
+同一HTTP chunk内に正常eventと不正JSONがあっても、先に解析できたeventは保持する。失敗時は最終response解析で失敗しても取得済みrawを失わず、既存AttemptFailure/incomplete_responseへ回答と読み出し可能な推論delta、completed_items、raw_responseを保存する。保存された回答と推論はUIの受信表示・一覧・原文cursorから到達可能にする。会話表示用の有限窓と保存原文を区別し、復旧待ちになっただけでは受信文章を消さない。受信したencrypted_contentを平文推論の代わりとして表示しない。
+
+公式の[item doneとcompleted](https://developers.openai.com/api/reference/resources/responses/streaming-events) を参照した。途中と最終の同一性を追加の必須条件にしていたのはShellboy独自実装であり、その差分をAPI違反と断定しない。会社環境の実SSEによる確認は未実施で、合成streamで両方の正本・保存・表示境界を試験する。

@@ -687,7 +687,7 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
         })
         .await
         .unwrap();
-    let body = json!({"error":{"kind":"late"},"partial_text":"saved partial","completed_items":[],"raw_response":{"fixture":"raw bytes represented as JSON"}});
+    let mut body = json!({"error":{"kind":"late"},"partial_text":"saved partial","completed_items":[],"raw_response":{"fixture":"raw bytes represented as JSON"}});
     recover(
         &control,
         &snapshot,
@@ -696,6 +696,7 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
     )
     .await
     .unwrap();
+    body["attempt_id"] = json!("late-cancelled");
     control
         .store
         .database

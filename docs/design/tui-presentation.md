@@ -461,3 +461,23 @@ driverは継続入力へ取り込む通知を、既存event IDを持つShellboy 
 表示が示すのはShellboyが当該通知を継続入力へ取り込んだことであり、新しいTurnを起動した唯一の原因、モデルによる観測完了、回答成功、副作用の再実行を保証するものではない。既に進行中のTurnへ届いた結果も同じ意味で扱う。event IDがない古い/合成envelope、未知のkind、通知でないcontext観測では因果を推測せず、既存の事実表示を保つ。event ID・元payload・通知対象はF6原文/詳細で確認できる。開始/待機/復旧/停止の現在状態は既存activity投影が担当する。
 
 復旧再開eventの過去失敗の抜粋でも、typed ModelError.messageを使用する。完全fieldは既存のModelError全体の表示値を維持し、利用者の理由自体に含まれる `provider:` 等の文字列を推測で除去しない。保存済みJSON・原文参照・IDは変更しない。内部のTurnという名称は人向け表示で「応答処理」とする。
+
+## 失敗したモデル要求の受信本文
+
+モデル要求の失敗で、表示済みの有料本文を確定回答へ偽装せず、同時に画面から消さない。`incomplete_response` は既存どおり監査用nodeとし、Threadの採用path・モデル再送manifestへ追加しない。`model_attempt.error_json` と同じ保存bodyを持つ監査nodeのIDを原文の正本にする。UIの未確定表示と原文取得はこのIDへ結ぶ。
+
+streamの終了時、保存済み未確定sourceがある場合は、既存の暫定本文窓を「未確定の受信本文・再送対象外」として保持する。保存sourceのない取消・未受信は従来どおり暫定表示を閉じる。後続の履歴更新、Thread再選択、アプリ再起動では、保存済みbodyから最新2件を既存64KiB本文窓へ投影する。UIの本文cache予算とcanonical ordinalは増やさず、未確定項目を採用pathの件数へ混ぜない。最新2件の表示だけを古い失敗への唯一の到達手段にはせず、有限pageの未確定受信一覧から総件数・source ID・本文原文へ到達できるようにする。
+
+失敗本文はchannelごとに非空の `partial_reasoning` / `partial_text` を優先し、それがなければ `raw_response.output`、さらに `completed_items` の平文推論/message/refusalを表示する。代替候補を連結して同じ回答を重複させず、tool引数・未知metadata・encrypted reasoningを会話本文へ混ぜない。保存原文を変更せず、表示窓・省略と未確定であることを明記する。表示済み推論と最終回答の文字位置が一致するとは推測しない。
+
+取得・投影は既存DB/presentation workerで行う。新しいCore操作、業務event、永続表、独立workerは追加しない。失敗中の保持、原文へのsource一致、再選択/再起動での復元、古い失敗の発見、通常成功時の二重表示抑止、採用path/再送への非混入を合成データで確認する。
+
+成功時の `model_stream_observation` も同じ読取り専用の受信一覧へ含め、失敗とは分けて「ストリーム差分・最終確定済み」と表示する。最終応答は通常の採用履歴にあり、差分記録を再送しない。channelごとにpartial_reasoning/partial_textを優先し、失敗時はfinal→done、成功時差分はdone→finalを代替候補とする。途中内容を最終内容で上書きせず、暗号化推論は表示しない。
+
+一覧は `/received [page]`、1page32件、総件数・前後page・分類・Turn・保存時刻を既存管理popupへ表示し、Enterで実source IDの既存原文readerへ進む。表示一覧は現在のDBを読むものでsnapshot予約ではない。最新previewは2件、それぞれ最大64KiB窓。保存envelopeのRust側materializeは1MiBまで、大きいenvelopeはSQLiteから各partial channel先頭16k Unicode字を取得し、省略を明示する。既存body cacheを超えて保持せず、UI OS threadでDB/JSON/Markdown処理をしない。
+
+原文APIは `incomplete_response` / `model_stream_observation` の2kindだけ保存payload_json bytesをUTF-8 textとして既存cursorで返す。本文previewの文字位置を監査JSONのbyte位置とみなさず、一般payload visitor・検索本文・モデル再送は変更しない。保存fieldがない古い記録へ本文や推論を捏造しない。
+
+metadataだけの成功差分と、tool/encryptedだけで表示本文がない成功差分は通常previewから除外する。最終確定本文は通常nodeで読めるため重複表示を避けるもので、保存・一覧総件数・原文からは除かない。実際に回答/平文推論が異なる成功記録と失敗本文は表示する。
+
+成功監査はStreamSettled時の即時保持対象にせず、保存previewの分類後にだけ表示する。metadata-only記録の瞬間的な重複表示を避ける。`delta_differences` が非空の成功記録はmetadata-only抑止の対象外とする。

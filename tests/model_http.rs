@@ -519,3 +519,125 @@ async fn http_error_body_marks_truncation_only_after_an_observed_excess_byte() {
         assert_eq!(server.await.unwrap(), 1);
     }
 }
+
+#[tokio::test]
+async fn malformed_terminal_keeps_latest_raw_answer_reasoning_and_completed_items() {
+    let item = json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"paid received text"}]});
+    let raw = json!({"id":"bad-final","status":"completed","output":null});
+    let body = sse(&[
+        json!({"type":"response.created","response":{"id":"old-created","status":"in_progress"}}),
+        json!({"type":"response.reasoning_summary_text.delta","delta":"paid reasoning"}),
+        json!({"type":"response.output_text.delta","delta":"paid received text"}),
+        json!({"type":"response.output_item.done","output_index":0,"item":item}),
+        json!({"type":"response.completed","response":raw}),
+    ]);
+    let (client, _, task) = fake(200, "text/event-stream", body, 7).await;
+    let failure = client
+        .response(
+            response_request("fixture", vec![], None, true),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(failure.error.kind, "protocol");
+    assert_eq!(failure.raw_response, Some(raw));
+    assert_eq!(failure.partial_text, "paid received text");
+    assert_eq!(failure.partial_reasoning, "paid reasoning");
+    assert_eq!(failure.completed_items[&0], item);
+    assert_eq!(task.await.unwrap(), 1, "no automatic retry");
+}
+
+#[tokio::test]
+async fn differing_stream_tool_payload_uses_only_valid_final_arguments_without_retry() {
+    let old = json!({"type":"function_call","id":"old-id","call_id":"call","name":"shell","arguments":"{\"command\":\"echo received\"}","status":"completed"});
+    let final_item = json!({"type":"function_call","id":"final-id","call_id":"call","name":"shell","arguments":"{\"command\":\"echo final\"}","status":"completed"});
+    let raw = json!({"id":"final-response","status":"completed","output":[final_item]});
+    let body = sse(&[
+        json!({"type":"response.output_item.done","output_index":0,"item":old}),
+        json!({"type":"response.completed","response":raw}),
+    ]);
+    let (client, _, task) = fake(200, "text/event-stream", body, 3).await;
+    let response = client
+        .response(
+            response_request("fixture", vec![], None, true),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.raw, raw);
+    assert_eq!(response.calls.len(), 1);
+    assert_eq!(
+        response.calls[0].args.as_ref().unwrap().command,
+        "echo final"
+    );
+    let observation = response.stream_observation.unwrap();
+    assert_eq!(observation.completed_items[&0], old);
+    assert_eq!(observation.total_differences, 1);
+    assert_eq!(
+        observation.differences[0].field,
+        shellboy::model::OutputMismatchField::Arguments
+    );
+    assert_eq!(task.await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn malformed_sse_preserves_valid_received_prefix_for_whole_and_fragmented_bodies() {
+    let created = json!({"id":"created-before-error","status":"in_progress"});
+    let item = json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"paid done"}]} );
+    let mut body = sse(&[
+        json!({"type":"response.created","response":created}),
+        json!({"type":"response.output_text.delta","delta":"paid answer"}),
+        json!({"type":"response.reasoning_text.delta","delta":"paid reasoning"}),
+        json!({"type":"response.output_item.done","output_index":0,"item":item}),
+    ]);
+    body.extend_from_slice(b"data: {broken\n\n");
+    for fragment in [1, body.len()] {
+        let (client, _, task) = fake(200, "text/event-stream", body.clone(), fragment).await;
+        let failure = client
+            .response(
+                response_request("fixture", vec![], None, true),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(failure.error.kind, "protocol");
+        assert_eq!(failure.partial_text, "paid answer");
+        assert_eq!(failure.partial_reasoning, "paid reasoning");
+        assert_eq!(failure.completed_items[&0], item);
+        assert_eq!(failure.raw_response, Some(created.clone()));
+        assert_eq!(task.await.unwrap(), 1, "no automatic retry");
+    }
+}
+
+#[tokio::test]
+async fn delta_difference_with_equal_item_done_is_preserved_without_rejecting_final_response() {
+    use shellboy::model::OutputMismatchField as Field;
+    let item = json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"final answer"}]} );
+    let raw = json!({"id":"final-response","status":"completed","output":[item]});
+    let body = sse(&[
+        json!({"type":"response.output_text.delta","delta":"paid old answer"}),
+        json!({"type":"response.output_item.done","output_index":0,"item":item}),
+        json!({"type":"response.completed","response":raw}),
+    ]);
+    let (client, _, task) = fake(200, "text/event-stream", body, 3).await;
+    let response = client
+        .response(
+            response_request("fixture", vec![], None, true),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.raw, raw);
+    assert_eq!(response.text, "final answer");
+    assert!(response.calls.is_empty());
+    let observation = response.stream_observation.unwrap();
+    assert!(observation.differences.is_empty());
+    assert_eq!(observation.delta_differences, vec![Field::Text]);
+    assert_eq!(observation.total_differences, 1);
+    assert_eq!(observation.partial_text, "paid old answer");
+    assert_eq!(task.await.unwrap(), 1);
+}

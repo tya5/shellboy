@@ -22,6 +22,7 @@ const MODEL_CATALOG_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 pub struct AttemptFailure {
     pub error: ModelError,
     pub partial_text: String,
+    pub partial_reasoning: String,
     pub completed_items: BTreeMap<u64, Value>,
     pub raw_response: Option<Value>,
 }
@@ -30,6 +31,7 @@ impl From<ModelError> for AttemptFailure {
         Self {
             error,
             partial_text: String::new(),
+            partial_reasoning: String::new(),
             completed_items: BTreeMap::new(),
             raw_response: None,
         }
@@ -308,12 +310,14 @@ impl HttpModelClient {
             return Err(failure(cancelled(), &parsed, raw_response));
         }
         let partial_text = parsed.partial_text.clone();
+        let partial_reasoning = parsed.partial_reasoning.clone();
         let completed_items = parsed.completed_items.clone();
         parsed
             .finish(tools_enabled)
             .map_err(|error| AttemptFailure {
                 error: redact(error, &secrets),
                 partial_text,
+                partial_reasoning,
                 completed_items,
                 raw_response,
             })
@@ -440,6 +444,7 @@ fn raw_failure(error: ModelError, raw: Value) -> AttemptFailure {
     AttemptFailure {
         error,
         partial_text,
+        partial_reasoning: String::new(),
         completed_items,
         raw_response: Some(raw),
     }
@@ -452,8 +457,9 @@ fn failure(
     AttemptFailure {
         error,
         partial_text: parsed.partial_text.clone(),
+        partial_reasoning: parsed.partial_reasoning.clone(),
         completed_items: parsed.completed_items.clone(),
-        raw_response,
+        raw_response: parsed.failed_response().cloned().or(raw_response),
     }
 }
 async fn send_event(

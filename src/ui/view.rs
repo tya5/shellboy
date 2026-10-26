@@ -1457,7 +1457,9 @@ impl ThreadView {
         self.nodes
             .iter()
             .rev()
-            .filter(|node| self.provisional_nodes.contains(&node.node_id))
+            .filter(|node| {
+                self.provisional_nodes.contains(&node.node_id) && node.role != "received_response"
+            })
             .take(2)
             .map(|node| UiNode {
                 node_id: node.node_id.clone(),
@@ -1478,7 +1480,13 @@ impl ThreadView {
         let previous = self
             .provisional_nodes
             .iter()
-            .filter(|id| id.as_str() != current)
+            .filter(|id| {
+                id.as_str() != current
+                    && !self
+                        .nodes
+                        .iter()
+                        .any(|n| &n.node_id == *id && n.role == "received_response")
+            })
             .cloned()
             .collect::<Vec<_>>();
         previous
@@ -1709,5 +1717,130 @@ mod completion_notice_tests {
             },
         });
         assert!(ui.view().follow);
+    }
+}
+
+impl ThreadView {
+    pub(super) fn retain_incomplete_stream(&mut self, attempt: &str, source: String, kind: &str) {
+        if self.nodes.iter().any(|n| n.node_id == source) {
+            self.provisional_nodes.remove(attempt);
+            self.nodes.retain(|n| n.node_id != attempt);
+            if self.anchor.node_id.as_deref() == Some(attempt) {
+                self.anchor.node_id = Some(source);
+                self.anchor.char_offset = 0;
+            }
+            self.mark_source_changed();
+            return;
+        }
+        if let Some(node) = self.nodes.iter_mut().find(|n| n.node_id == attempt) {
+            self.provisional_nodes.remove(attempt);
+            self.provisional_nodes.insert(source.clone());
+            if self.anchor.node_id.as_deref() == Some(attempt) {
+                self.anchor.node_id = Some(source.clone());
+            }
+            node.node_id = source;
+            node.role = "received_response".into();
+            node.presentation.kind = crate::presentation::PresentationKind::Interrupted;
+            node.presentation.title = if kind == "model_stream_observation" {
+                "ストリーム差分 · 最終応答は確定済み"
+            } else {
+                "未確定の受信本文 · モデル再送対象外"
+            }
+            .into();
+            node.presentation.provisional_stream = false;
+            for block in &mut node.presentation.blocks {
+                block.source_exact = false;
+            }
+            node.presentation.projection_stamp = None;
+            self.mark_source_changed();
+        }
+    }
+    pub(super) fn on_incomplete_responses(&mut self, nodes: Vec<UiNode>) {
+        let ids = nodes
+            .iter()
+            .map(|n| n.node_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let previous = self.nodes.len();
+        self.nodes
+            .retain(|n| n.role != "received_response" || ids.contains(&n.node_id));
+        let mut changed = previous != self.nodes.len();
+        self.provisional_nodes
+            .retain(|id| self.nodes.iter().any(|n| &n.node_id == id));
+        for incoming in nodes {
+            self.provisional_nodes.insert(incoming.node_id.clone());
+            if let Some(existing) = self
+                .nodes
+                .iter_mut()
+                .find(|n| n.node_id == incoming.node_id)
+            {
+                if !existing.same_projection(&incoming) {
+                    if !self.follow && self.anchor.node_id.as_deref() == Some(&incoming.node_id) {
+                        existing.total_chars = incoming.total_chars;
+                    } else {
+                        *existing = incoming;
+                    }
+                    changed = true;
+                }
+            } else {
+                self.nodes.push(incoming);
+                changed = true;
+            }
+        }
+        if changed {
+            self.mark_source_changed();
+        }
+    }
+}
+
+#[cfg(test)]
+mod received_tests {
+    use super::*;
+    #[test]
+    fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        ui.apply(UiUpdate::Stream {
+            thread_id: "t".into(),
+            generation,
+            node_id: "a".into(),
+            role: "assistant".into(),
+            text: "受信本文".into(),
+            base_char_offset: 0,
+            total_chars: 4,
+            reasoning_ranges: vec![],
+            presentation: crate::presentation::project_stream_window("受信本文", 0, &[], 80),
+            ack: None,
+        });
+        ui.apply(UiUpdate::StreamSettled {
+            thread_id: "t".into(),
+            generation,
+            attempt_id: "a".into(),
+            received_source: Some(("audit".into(), "incomplete_response".into())),
+            ack: None,
+        });
+        assert_eq!(ui.view().nodes()[0].text, "受信本文");
+        assert_eq!(ui.view().nodes()[0].node_id, "audit");
+        assert!(ui.view().nodes()[0].presentation.title.contains("未確定"));
+        ui.apply(UiUpdate::Stream {
+            thread_id: "t".into(),
+            generation,
+            node_id: "next".into(),
+            role: "assistant".into(),
+            text: "次".into(),
+            base_char_offset: 0,
+            total_chars: 1,
+            reasoning_ranges: vec![],
+            presentation: Default::default(),
+            ack: Some(Arc::new(tokio::sync::Notify::new())),
+        });
+        assert!(ui.view().nodes().iter().any(|n| n.node_id == "audit"));
+        ui.select_thread("other".into());
+        ui.apply(UiUpdate::IncompleteResponses {
+            thread_id: "t".into(),
+            generation: generation + 100,
+            nodes: vec![],
+        });
+        assert_eq!(ui.view().thread_id.as_deref(), Some("other"));
     }
 }

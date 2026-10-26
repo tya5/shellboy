@@ -133,8 +133,47 @@ pub(super) async fn drive(
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
         }
         let response = match outcome {
-            Ok(value) => value,
+            Ok(value) => {
+                if let Some(observation) = &value.stream_observation {
+                    // Fixed, bounded classifications only. Adoption owns the received audit data.
+                    for difference in &observation.differences {
+                        control.diagnostics.record_model_stream_difference(
+                            crate::diagnostics::DiagnosticIds {
+                                thread_id: Some(snapshot.thread.clone()),
+                                run_id: Some(snapshot.run.clone()),
+                                turn_id: Some(snapshot.turn.clone()),
+                                execution_id: None,
+                            },
+                            &attempt,
+                            difference,
+                        );
+                    }
+                    for field in &observation.delta_differences {
+                        control.diagnostics.record_model_stream_delta_difference(
+                            crate::diagnostics::DiagnosticIds {
+                                thread_id: Some(snapshot.thread.clone()),
+                                run_id: Some(snapshot.run.clone()),
+                                turn_id: Some(snapshot.turn.clone()),
+                                execution_id: None,
+                            },
+                            &attempt,
+                            *field,
+                        );
+                    }
+                }
+                value
+            }
             Err(failure) => {
+                control.diagnostics.record_model_failure(
+                    crate::diagnostics::DiagnosticIds {
+                        thread_id: Some(snapshot.thread.clone()),
+                        run_id: Some(snapshot.run.clone()),
+                        turn_id: Some(snapshot.turn.clone()),
+                        execution_id: None,
+                    },
+                    &attempt,
+                    &failure.error,
+                );
                 overflow::retry_or_recover(
                     &control,
                     &snapshot,
@@ -307,15 +346,14 @@ async fn recover_preparation(
         Ok(Some(turn))
     }).await.map_err(storage_error)?;
     if let Some(turn) = target {
-        control.diagnostics.record(
-            crate::diagnostics::DiagnosticEvent::ModelFailure,
-            crate::diagnostics::DiagnosticIds {
+        control
+            .diagnostics
+            .record_preparation_failure(crate::diagnostics::DiagnosticIds {
                 thread_id: Some(target_thread.clone()),
                 run_id: Some(target_run.clone()),
                 turn_id: Some(turn),
                 execution_id: None,
-            },
-        );
+            });
         control.changed(&target_thread);
         control.nudge_owner(&target_run).await;
     }
@@ -330,21 +368,25 @@ async fn recover(
     error: ApiError,
     attempt: Option<(String, Value)>,
 ) -> Result<(), ApiError> {
-    control.diagnostics.record(
-        crate::diagnostics::DiagnosticEvent::ModelFailure,
-        crate::diagnostics::DiagnosticIds {
-            thread_id: Some(snapshot.thread.clone()),
-            run_id: Some(snapshot.run.clone()),
-            turn_id: Some(snapshot.turn.clone()),
-            execution_id: None,
-        },
-    );
+    // An attempt failure was already classified at the typed ModelError boundary.
+    if attempt.is_none() {
+        control.diagnostics.record(
+            crate::diagnostics::DiagnosticEvent::ModelFailure,
+            crate::diagnostics::DiagnosticIds {
+                thread_id: Some(snapshot.thread.clone()),
+                run_id: Some(snapshot.run.clone()),
+                turn_id: Some(snapshot.turn.clone()),
+                execution_id: None,
+            },
+        );
+    }
     let thread_id = snapshot.thread.clone();
     let run_id = snapshot.run.clone();
     let snapshot = snapshot.clone();
     control.store.database.call(move|db|{let tx=db.transaction()?;
         recover_turn_tx(&tx,&snapshot.thread,&snapshot.run,&snapshot.turn,snapshot.generation,&error)?;
-        if let Some((attempt,body))=attempt{
+        if let Some((attempt,mut body))=attempt{
+            body["attempt_id"] = json!(attempt);
             super::state::incomplete_attempt(&tx, &attempt, &body, &now())?;
             tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,?2,'incomplete_response',?3,?4,?5)",params![id(),snapshot.turn,now(),body.to_string(),body.to_string().len()as i64])?;
             // Audit-only nodes are roots through their live Turn, without being

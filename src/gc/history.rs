@@ -161,7 +161,7 @@ fn tombstone_node(
     )
     .map_err(sql_error)?;
     if kind == "incomplete_response" {
-        tx.execute("UPDATE model_attempt SET error_json=CASE WHEN json_valid(error_json) THEN json_remove(error_json,'$.partial_text','$.completed_items','$.raw_response') ELSE error_json END WHERE turn_id=?1",[turn]).map_err(sql_error)?;
+        tx.execute("UPDATE model_attempt SET error_json=CASE WHEN json_valid(error_json) THEN json_remove(error_json,'$.partial_text','$.partial_reasoning','$.completed_items','$.raw_response') ELSE error_json END WHERE turn_id=?1",[turn]).map_err(sql_error)?;
     }
     Ok(())
 }

@@ -188,6 +188,8 @@ RAMのbody/layout/history/画像Base64 cache予算はストレージ保持量と
 
 通常の診断ログはdata-dirの `logs/shellboy.log`（ローテーションあり）です。macOS既定は `~/Library/Application Support/shellboy/data/logs/shellboy.log`。起動・終了・DB／モデル／shellの失敗などのイベント名、時刻、対象IDを記録します。会話本文・API資格情報・完全なエラー本文を常時保存するログではありません。
 
+Windowsの既定は `%LOCALAPPDATA%\shellboy\data\logs\shellboy.log` です。保存先を変更した場合は指定したdata-dirの下を確認します。モデル失敗の `model_failure` は固定分類と `attempt_id` を記録します。`model_stream_difference` は途中と最終応答の差分を示す診断で、それだけでは失敗や復旧待ちを意味しません。ログのThread/Run/Turn/attempt IDで対象を照合し、本文と最終応答は同じThreadの `/received` から保存原文を確認します。原文には会話やツール引数が含まれるため、そのまま外部へ共有しないでください。
+
 stack overflow等のfatal abortでは正常終了処理を通らず、原因本文がファイルへ記録されない場合があります。端末の標準エラーの文面と、落ちた時刻・画面・直前の操作も調査に使います。正常shutdownがないことだけで原因までは断定しません。
 
 ### operation receiptの容量で拒否された場合
@@ -197,3 +199,7 @@ stack overflow等のfatal abortでは正常終了処理を通らず、原因本�
 現在instanceのreceiptは期限削除しないため、同instanceの記録だけで満ちると新しい `storage collect` も容量不足になる場合があります。内部GCは継続します。現在作業を通常終了し、利用者が明示的にownerを再起動すると、不要になった旧terminal receiptを回収できます。旧pending intentや保護参照を無理に削除せず、自動再起動もしません。保存outcomeは1件8MiB、operation receipt専用予算は256MiBで、SQLiteファイルの物理上限ではありません。
 
 GC結果のmanaged_deleted/managed_failuresは各128件までの詳細です。managed_deleted_count/managed_failure_countが実数、managed_details_truncatedが省略の有無を示します。詳細の省略は回収処理自体の省略を意味しません。
+
+### 失敗時に受信した本文
+
+画面に流れた本文は、復旧待ちへ入っても保存済み原文があれば「未確定の受信本文」として読み続けられます。`/received` の一覧は古い失敗や成功時のストリーム差分にも到達でき、Enterで保存原文を開きます。詳しいページ操作は[受信記録](tui.md#保存した受信記録を読む)を参照してください。未確定の本文を残すことと、モデル再試行でその本文を採用することは別です。

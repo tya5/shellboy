@@ -349,3 +349,38 @@ fn mutation_owner_survives_saved_draft_install_receipt_body_eviction_and_other_r
     assert_eq!(ui.view().status, notice);
     assert_eq!(ui.view().draft.draft_id, saved_id);
 }
+
+#[test]
+fn received_list_opens_an_off_path_original_and_rejects_closed_list_results() {
+    fn owner(action: &UiAction) -> ManagementContext {
+        match action {
+            UiAction::SubmittedCommand { action, .. } => owner(action),
+            UiAction::ManagementIntent { context, .. } => context.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.select_thread("a".into());
+    ui.insert("/received", false);
+    let actions = ui.event(key(KeyCode::Enter));
+    let context = owner(&actions[0]);
+    let report = || UiUpdate::ScopedManagement {
+        context: context.clone(),
+        update: Box::new(UiUpdate::ReceivedList {
+            title: "受信記録 · 35件".into(),
+            fields: vec![PresentationField {
+                key: "/received/source/old-audit".into(),
+                label: "古い失敗".into(),
+                value: "old-audit".into(),
+                ..Default::default()
+            }],
+        }),
+    };
+    ui.apply(report());
+    let actions = ui.event(key(KeyCode::Enter));
+    assert!(matches!(&actions[0],UiAction::LoadOriginal{node_id,..}if node_id=="old-audit"));
+    ui.event(key(KeyCode::Esc));
+    ui.event(key(KeyCode::Esc));
+    ui.apply(report());
+    assert!(ui.management.is_none());
+}

@@ -183,6 +183,14 @@ impl<'a> HistoryReader<'a> {
         reply
             .deliver(self.updates, nodes, info, anchor.unwrap_or_default())
             .await;
+        received::refresh(
+            self.control,
+            self.updates,
+            &reply.target.thread,
+            reply.target.generation,
+            self.width,
+        )
+        .await?;
         Ok(())
     }
     pub(super) async fn window(
@@ -216,6 +224,14 @@ impl<'a> HistoryReader<'a> {
                 )
             })?;
             reply.deliver(self.updates, nodes, info, anchor).await;
+            received::refresh(
+                self.control,
+                self.updates,
+                &reply.target.thread,
+                reply.target.generation,
+                self.width,
+            )
+            .await?;
             Ok(())
         }
         .await;
@@ -271,6 +287,14 @@ impl<'a> HistoryReader<'a> {
                 },
             )
             .await;
+            received::refresh(
+                self.control,
+                self.updates,
+                &reply.thread,
+                reply.generation,
+                self.width,
+            )
+            .await?;
             Ok(())
         }
         .await;

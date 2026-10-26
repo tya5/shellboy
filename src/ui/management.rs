@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ManagementMode {
     General,
+    Received,
     Status,
     Index,
     Attachments,
@@ -48,6 +49,7 @@ impl Default for ManagementPopup {
     }
 }
 pub(super) enum Outcome {
+    Original(String),
     Actions(Vec<UiAction>),
     Close,
     Operations,
@@ -206,6 +208,9 @@ impl ManagementPopup {
             ManagementMode::General if list_mode => {
                 "Esc 戻る · Tab/Shift+Tab 選択 · Enter 詳細 · C コピー\nO 参照 · S 出力原文 · A 操作 · PgUp/PgDn 閲覧"
             }
+            ManagementMode::Received => {
+                "Esc 戻る · ↑↓ 選択 · Enter 原文／ページ · C IDコピー\n/received ページ番号 で全受信記録を表示"
+            }
             ManagementMode::General | ManagementMode::Status => {
                 "Esc 戻る · ↑↓/PgUp/PgDn 閲覧\nW 明示waitの観測取消 · A 操作"
             }
@@ -231,6 +236,25 @@ impl ManagementPopup {
             .max(1)
     }
     pub(super) fn key(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Outcome {
+        if self.mode == ManagementMode::Received
+            && key.code == KeyCode::Enter
+            && let Some(field) = self.structured().and_then(|s| s.fields.get(s.selected))
+        {
+            if field.key.starts_with("/received/source/") {
+                return Outcome::Original(field.value.clone());
+            }
+            if let Some(page) = field
+                .key
+                .strip_prefix("/received/page/")
+                .and_then(|p| p.parse::<u32>().ok())
+            {
+                return Outcome::Actions(vec![UiAction::LoadReceived {
+                    thread_id: field.value.clone(),
+                    page,
+                }]);
+            }
+        }
+
         if key.code == KeyCode::Char('w') {
             return Outcome::Actions(vec![UiAction::CancelWait]);
         }

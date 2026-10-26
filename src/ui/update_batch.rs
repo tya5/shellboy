@@ -12,6 +12,7 @@ impl UiUpdate {
             | Self::StreamCommitted { .. }
             | Self::Stream { .. }
             | Self::StreamSettled { .. }
+            | Self::IncompleteResponses { .. }
             | Self::ViewState { .. }
             | Self::NodeWindow { .. }
             | Self::EditRequestLoaded { .. } => true,
@@ -23,6 +24,7 @@ impl UiUpdate {
             | Self::Models { .. }
             | Self::RecalledInput { .. }
             | Self::OriginalPage { .. }
+            | Self::ReceivedList { .. }
             | Self::StructuredManagement { .. }
             | Self::ManagementDetail { .. }
             | Self::Initialize { .. }

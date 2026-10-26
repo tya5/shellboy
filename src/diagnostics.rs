@@ -1,4 +1,5 @@
-//! Bounded nonblocking diagnostics. Only event names and generated IDs are logged.
+//! Bounded nonblocking diagnostics: generated IDs and fixed model classifications only.
+//! Model/provider text and request/response bodies never enter the writer queue.
 use crate::config::Logging;
 use serde::Serialize;
 use std::{
@@ -20,6 +21,7 @@ pub enum DiagnosticEvent {
     Shutdown,
     DatabaseFailure,
     ModelFailure,
+    ModelStreamDifference,
     ShellFailure,
     StorageLimit,
     IndexPaused,
@@ -41,13 +43,89 @@ struct Entry {
     event: DiagnosticEvent,
     ids: DiagnosticIds,
     dropped: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<ModelFailureDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_difference: Option<ModelFailureDetails>,
+}
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ModelFailureReason {
+    Preparation,
+    Recovery,
+    StreamDifference,
+    StreamDeltaDifference,
+    Protocol,
+    Transport,
+    Provider,
+    Http,
+    Incomplete,
+    InputLimit,
+    UnsupportedItem,
+    Cancelled,
+    ConsumerClosed,
+    Configuration,
+    Timeout,
+    Unknown,
+}
+#[derive(Serialize)]
+struct ModelFailureDetails {
+    reason: ModelFailureReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attempt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_index: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    field: Option<crate::model::OutputMismatchField>,
+}
+impl ModelFailureDetails {
+    fn stage(reason: ModelFailureReason) -> Self {
+        Self {
+            reason,
+            attempt_id: None,
+            output_index: None,
+            field: None,
+        }
+    }
+    fn attempt(attempt_id: &str, error: &crate::model::ModelError) -> Self {
+        // This is an exact allowlist, never a message/provider-code substring check.
+        let reason = match error.kind.as_str() {
+            "protocol" => ModelFailureReason::Protocol,
+            "transport" => ModelFailureReason::Transport,
+            "provider" => ModelFailureReason::Provider,
+            "http" => ModelFailureReason::Http,
+            "incomplete" => ModelFailureReason::Incomplete,
+            "input_limit" => ModelFailureReason::InputLimit,
+            "unsupported_item" => ModelFailureReason::UnsupportedItem,
+            "cancelled" => ModelFailureReason::Cancelled,
+            "consumer_closed" => ModelFailureReason::ConsumerClosed,
+            "config_missing"
+            | "config_missing_credentials"
+            | "config_invalid"
+            | "dimension_mismatch" => ModelFailureReason::Configuration,
+            "timeout" => ModelFailureReason::Timeout,
+            _ => ModelFailureReason::Unknown,
+        };
+        Self {
+            reason,
+            attempt_id: Some(sanitize_id(attempt_id)),
+            output_index: None,
+            field: None,
+        }
+    }
+}
+struct Record {
+    event: DiagnosticEvent,
+    ids: DiagnosticIds,
+    failure: Option<ModelFailureDetails>,
+    stream_difference: Option<ModelFailureDetails>,
 }
 struct Health {
     failed: AtomicBool,
     dropped: AtomicU64,
 }
 struct Shared {
-    sender: Mutex<Option<SyncSender<(DiagnosticEvent, DiagnosticIds)>>>,
+    sender: Mutex<Option<SyncSender<Record>>>,
     join: Mutex<Option<JoinHandle<()>>>,
     health: Arc<Health>,
 }
@@ -69,13 +147,21 @@ impl Diagnostics {
             .spawn(move || {
                 let mut writer: Option<File> = None;
                 let mut bytes = 0u64;
-                while let Ok((event, ids)) = receiver.recv() {
+                while let Ok(Record {
+                    event,
+                    ids,
+                    failure,
+                    stream_difference,
+                }) = receiver.recv()
+                {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
                     let entry = Entry {
                         at: chrono::Utc::now().to_rfc3339(),
                         event,
                         ids,
                         dropped,
+                        failure,
+                        stream_difference,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -145,7 +231,80 @@ impl Diagnostics {
         }
     }
     /// Finite try_send only. This method is safe to call on the UI main thread.
-    pub fn record(&self, event: DiagnosticEvent, mut ids: DiagnosticIds) {
+    pub fn record(&self, event: DiagnosticEvent, ids: DiagnosticIds) {
+        let failure = matches!(event, DiagnosticEvent::ModelFailure)
+            .then(|| ModelFailureDetails::stage(ModelFailureReason::Recovery));
+        self.enqueue(event, ids, failure, None);
+    }
+    /// Preserve fixed failure facts before model errors become public recovery errors.
+    /// No error text, provider code, endpoint, or response body is queued.
+    pub fn record_model_failure(
+        &self,
+        ids: DiagnosticIds,
+        attempt_id: &str,
+        error: &crate::model::ModelError,
+    ) {
+        self.enqueue(
+            DiagnosticEvent::ModelFailure,
+            ids,
+            Some(ModelFailureDetails::attempt(attempt_id, error)),
+            None,
+        );
+    }
+    /// A difference is an observation, not a failed or rejected final response.
+    /// Only the fixed field category is logged; neither received value is copied.
+    pub fn record_model_stream_difference(
+        &self,
+        ids: DiagnosticIds,
+        attempt_id: &str,
+        difference: &crate::model::OutputMismatch,
+    ) {
+        self.enqueue(
+            DiagnosticEvent::ModelStreamDifference,
+            ids,
+            None,
+            Some(ModelFailureDetails {
+                reason: ModelFailureReason::StreamDifference,
+                attempt_id: Some(sanitize_id(attempt_id)),
+                output_index: Some(difference.output_index),
+                field: Some(difference.field),
+            }),
+        );
+    }
+    /// Response-wide delta columns have no authoritative output-item index.
+    pub fn record_model_stream_delta_difference(
+        &self,
+        ids: DiagnosticIds,
+        attempt_id: &str,
+        field: crate::model::OutputMismatchField,
+    ) {
+        self.enqueue(
+            DiagnosticEvent::ModelStreamDifference,
+            ids,
+            None,
+            Some(ModelFailureDetails {
+                reason: ModelFailureReason::StreamDeltaDifference,
+                attempt_id: Some(sanitize_id(attempt_id)),
+                output_index: None,
+                field: Some(field),
+            }),
+        );
+    }
+    pub(crate) fn record_preparation_failure(&self, ids: DiagnosticIds) {
+        self.enqueue(
+            DiagnosticEvent::ModelFailure,
+            ids,
+            Some(ModelFailureDetails::stage(ModelFailureReason::Preparation)),
+            None,
+        );
+    }
+    fn enqueue(
+        &self,
+        event: DiagnosticEvent,
+        mut ids: DiagnosticIds,
+        failure: Option<ModelFailureDetails>,
+        stream_difference: Option<ModelFailureDetails>,
+    ) {
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
             &mut ids.thread_id,
@@ -156,20 +315,22 @@ impl Diagnostics {
         .into_iter()
         .flatten()
         {
-            *id = id
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || "-_:".contains(*c))
-                .take(128)
-                .collect();
+            *id = sanitize_id(id);
         }
         let Ok(sender) = self.shared.sender.try_lock() else {
             self.shared.health.dropped.fetch_add(1, Ordering::Relaxed);
             return;
         };
-        if sender
-            .as_ref()
-            .is_none_or(|sender| sender.try_send((event, ids)).is_err())
-        {
+        if sender.as_ref().is_none_or(|sender| {
+            sender
+                .try_send(Record {
+                    event,
+                    ids,
+                    failure,
+                    stream_difference,
+                })
+                .is_err()
+        }) {
             self.shared.health.dropped.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -227,4 +388,11 @@ fn rotate(directory: &Path, files: usize) -> std::io::Result<()> {
         std::fs::rename(current, directory.join("shellboy.log.1"))?;
     }
     Ok(())
+}
+
+fn sanitize_id(id: &str) -> String {
+    id.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || "-_:".contains(*c))
+        .take(128)
+        .collect()
 }

@@ -60,6 +60,52 @@ fn scalar(db: &Connection, sql: &str) -> rusqlite::Result<i64> {
 }
 
 #[tokio::test]
+async fn received_audits_survive_live_thread_gc_then_release_all_paid_channels_on_deletion() {
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        let body = serde_json::json!({"attempt_id":"audit-attempt","partial_text":"paid answer","partial_reasoning":"paid reasoning","completed_items":{"0":{"text":"done"}},"raw_response":{"output":[]},"error":{"kind":"protocol"}}).to_string();
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('audit-attempt','turn',0,0,'p','m',0,'incomplete','{}',?1,'now')",[&body])?;
+        for (id,kind) in [("failed-audit","incomplete_response"),("successful-audit","model_stream_observation")] {
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,'turn',?2,'now',?3,length(?3))",params![id,kind,body])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    assert_eq!(
+        f.gc.collect(StorageCategory::History, now())
+            .await
+            .unwrap()
+            .nodes_tombstoned,
+        0
+    );
+    f.db.call(|db| {
+        assert_eq!(scalar(db,"SELECT count(*) FROM node WHERE payload_json IS NOT NULL")?,2);
+        assert_eq!(scalar(db,"SELECT count(*) FROM thread_path")?,0);
+        db.execute_batch("UPDATE thread SET deleted_at='now' WHERE id='live'; UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'; INSERT INTO gc_job VALUES('after-delete','history',(SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'),NULL,'pending',NULL);")?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        f.gc.collect(StorageCategory::History, now())
+            .await
+            .unwrap()
+            .nodes_tombstoned,
+        2
+    );
+    f.db.call(|db| {
+        assert_eq!(scalar(db,"SELECT count(*) FROM node WHERE payload_json IS NULL AND deleted_reason='thread_deleted_unreachable'")?,2);
+        let saved:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='audit-attempt'",[],|r|r.get(0))?;
+        let saved:serde_json::Value=serde_json::from_str(&saved).unwrap();
+        for key in ["partial_text","partial_reasoning","completed_items","raw_response"] {
+            assert!(saved.get(key).is_none(),"retained paid channel {key}");
+        }
+        assert_eq!(saved["attempt_id"],"audit-attempt");
+        assert_eq!(saved["error"]["kind"],"protocol");
+        Ok(())
+    }).await.unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn raw_retention_respects_live_and_pins_then_expires_durably() {
     let mut config = Config::default();
     config.retention.tool_raw_bytes = 10;

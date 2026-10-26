@@ -292,11 +292,12 @@ impl Prepared {
                 use rusqlite::OptionalExtension;
                 db.query_row("SELECT node_id FROM output_item WHERE attempt_id=?1 AND node_id IS NOT NULL ORDER BY ordinal LIMIT 1", [&frame.ticket.attempt], |row| row.get(0)).optional()?
             } else { None };
+            let received_source=if ended && committed.is_none(){super::received::source(db,&frame.ticket.attempt)?.filter(|(_,kind)|kind=="incomplete_response")}else{None};
             let ack = Arc::new(Notify::new());
             let update = match frame.node.take() {
                 Some(node) => UiUpdate::Stream { thread_id: frame.ticket.thread.clone(), generation: frame.ticket.generation, node_id: node.node_id, role: node.role, text: node.text, base_char_offset: node.base_char_offset, total_chars: node.total_chars, reasoning_ranges: node.reasoning_ranges, presentation: node.presentation, ack: Some(ack.clone()) },
                 None if committed.is_some() => UiUpdate::StreamCommitted { thread_id: frame.ticket.thread.clone(), generation: frame.ticket.generation, attempt_id: frame.ticket.attempt.clone(), node_id: committed.as_ref().unwrap().clone() },
-                None => UiUpdate::StreamSettled { thread_id: frame.ticket.thread.clone(), generation: frame.ticket.generation, attempt_id: frame.ticket.attempt.clone(), ack: Some(ack.clone()) },
+                None => UiUpdate::StreamSettled { thread_id: frame.ticket.thread.clone(), generation: frame.ticket.generation, attempt_id: frame.ticket.attempt.clone(), received_source, ack: Some(ack.clone()) },
             };
             match updates.try_send(update) {
                 Ok(()) => { if ended && committed.is_some() { ack.notify_one(); } Ok(Admission::Queued { ended, ack, cancel }) },

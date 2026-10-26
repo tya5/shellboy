@@ -87,7 +87,7 @@ fn completed_commentary_empty_and_refusal_are_normal_answers() {
 }
 
 #[test]
-fn incomplete_status_unknown_items_and_inconsistent_done_are_errors() {
+fn incomplete_and_unknown_final_responses_fail_but_item_differences_are_observations() {
     let mut response = completed(vec![]);
     response["status"] = json!("incomplete");
     assert_eq!(
@@ -105,13 +105,16 @@ fn incomplete_status_unknown_items_and_inconsistent_done_are_errors() {
     );
     let mut stream = ResponseStream::default();
     stream.push(event(&json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","encrypted_content":"final"}})).as_bytes()).unwrap();
-    assert!(
-        stream
-            .push(
-                event(&json!({"type":"response.completed","response":completed(vec![])}))
-                    .as_bytes()
-            )
-            .is_err()
+    stream
+        .push(event(&json!({"type":"response.completed","response":completed(vec![])})).as_bytes())
+        .unwrap();
+    let response = stream.finish(true).unwrap();
+    assert!(response.output.is_empty());
+    let observation = response.stream_observation.unwrap();
+    assert_eq!(observation.total_differences, 1);
+    assert_eq!(
+        observation.completed_items[&0]["encrypted_content"],
+        "final"
     );
 }
 
@@ -208,4 +211,213 @@ fn completed_terminal_boundary_ignores_only_bytes_after_the_complete_frame() {
         .push(b"data: {\"type\":\"error\",\"message\":\"unfinished\"}")
         .unwrap();
     assert_eq!(stream.finish(false).unwrap_err().kind, "incomplete");
+}
+
+#[test]
+fn proxy_metadata_variation_uses_final_json_and_keeps_both_received_sources() {
+    let done = json!({"type":"message","id":"stream-id","status":"in_progress","role":"assistant","content":[{"type":"output_text","text":"受信済み","annotations":null,"logprobs":[]}],"provider_extension":{"stage":"item-done"}});
+    let final_item = json!({"type":"message","id":"final-id","status":"completed","phase":"final","role":"assistant","content":[{"type":"output_text","text":"受信済み","annotations":[],"logprobs":null}],"provider_extension":{"stage":"final"}});
+    let raw = completed(vec![final_item.clone()]);
+    let wire = event(&json!({"type":"response.output_text.delta","delta":"受信済み"}))
+        + &event(&json!({"type":"response.output_item.done","output_index":0,"item":done}))
+        + &event(&json!({"type":"response.completed","response":raw}));
+    for split in 0..=wire.len() {
+        let mut stream = ResponseStream::default();
+        stream.push(&wire.as_bytes()[..split]).unwrap();
+        stream.push(&wire.as_bytes()[split..]).unwrap();
+        let response = stream.finish(true).unwrap();
+        assert_eq!(response.raw, raw);
+        assert_eq!(response.output, vec![final_item.clone()]);
+        assert_eq!(response.text, "受信済み");
+        let observation = response.stream_observation.unwrap();
+        assert_eq!(observation.completed_items[&0], done);
+        assert_eq!(observation.partial_text, "受信済み");
+        assert_eq!(observation.total_differences, 1);
+        assert_eq!(
+            observation.differences[0].field,
+            shellboy::model::OutputMismatchField::Metadata
+        );
+    }
+}
+
+#[test]
+fn final_payload_changes_are_observations_and_only_final_tool_arguments_are_accepted() {
+    let mut stream = ResponseStream::default();
+    let old = call("call-old", r#"{"command":"echo before"}"#);
+    let new = call("call-final", r#"{"command":"echo after"}"#);
+    stream
+        .push(
+            event(&json!({"type":"response.reasoning_summary_text.delta","delta":"受信した推論"}))
+                .as_bytes(),
+        )
+        .unwrap();
+    stream
+        .push(
+            event(&json!({"type":"response.output_item.done","output_index":0,"item":old}))
+                .as_bytes(),
+        )
+        .unwrap();
+    assert!(!stream.is_terminal());
+    stream
+        .push(
+            event(&json!({"type":"response.completed","response":completed(vec![new.clone()])}))
+                .as_bytes(),
+        )
+        .unwrap();
+    let response = stream.finish(true).unwrap();
+    assert_eq!(response.calls.len(), 1);
+    assert_eq!(response.calls[0].call_id, "call-final");
+    assert_eq!(
+        response.calls[0].args.as_ref().unwrap().command,
+        "echo after"
+    );
+    assert_eq!(response.output, vec![new]);
+    let observation = response.stream_observation.unwrap();
+    assert_eq!(observation.completed_items[&0], old);
+    assert_eq!(observation.partial_reasoning, "受信した推論");
+}
+
+#[test]
+fn difference_detail_is_bounded_while_all_received_items_are_preserved() {
+    let mut stream = ResponseStream::default();
+    let mut output = Vec::new();
+    for index in 0..32 {
+        let item = json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"received"}],"provider_extra":index});
+        stream
+            .push(
+                event(
+                    &json!({"type":"response.output_item.done","output_index":index,"item":item}),
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        output.push(json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"final"}]}));
+    }
+    stream
+        .push(event(&json!({"type":"response.completed","response":completed(output)})).as_bytes())
+        .unwrap();
+    let response = stream.finish(true).unwrap();
+    let observation = response.stream_observation.unwrap();
+    assert_eq!(observation.total_differences, 32);
+    assert_eq!(observation.differences.len(), 16);
+    assert_eq!(observation.completed_items.len(), 32);
+    assert!(
+        observation
+            .differences
+            .iter()
+            .all(|difference| difference.field == shellboy::model::OutputMismatchField::Text)
+    );
+}
+
+#[test]
+fn malformed_final_payload_still_fails_even_when_received_item_was_valid() {
+    let mut stream = ResponseStream::default();
+    stream.push(event(&json!({"type":"response.output_item.done","output_index":0,"item":call("safe",r#"{"command":"echo ignored"}"#)})).as_bytes()).unwrap();
+    let malformed = json!({"status":"completed","output":null});
+    assert!(
+        stream
+            .push(event(&json!({"type":"response.completed","response":malformed})).as_bytes())
+            .is_err()
+    );
+    assert!(stream.is_terminal());
+    stream
+        .push(event(&json!({"type":"response.completed","response":completed(vec![])})).as_bytes())
+        .unwrap();
+    assert_eq!(stream.finish(true).unwrap_err().kind, "protocol");
+}
+
+#[test]
+fn delta_only_changes_are_indexless_observations_and_do_not_change_final_adoption() {
+    use shellboy::model::OutputMismatchField as Field;
+    let output = vec![
+        json!({"type":"reasoning","summary":[{"type":"summary_text","text":"final reasoning"}]}),
+        json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"final answer"}]}),
+    ];
+    let raw = completed(output.clone());
+    for with_done in [false, true] {
+        let mut body =
+            event(&json!({"type":"response.output_text.delta","delta":"paid old answer"}));
+        body += &event(
+            &json!({"type":"response.reasoning_summary_text.delta","delta":"paid old reasoning"}),
+        );
+        if with_done {
+            for (index, item) in output.iter().enumerate() {
+                body += &event(
+                    &json!({"type":"response.output_item.done","output_index":index,"item":item}),
+                );
+            }
+        }
+        body += &event(&json!({"type":"response.completed","response":raw}));
+        for split in 0..=body.len() {
+            let mut stream = ResponseStream::default();
+            stream.push(&body.as_bytes()[..split]).unwrap();
+            stream.push(&body.as_bytes()[split..]).unwrap();
+            let response = stream.finish(true).unwrap();
+            assert_eq!(response.raw, raw);
+            assert_eq!(response.output, output);
+            assert_eq!(response.text, "final answer");
+            assert!(response.calls.is_empty());
+            let observation = response.stream_observation.unwrap();
+            assert!(
+                observation.differences.is_empty(),
+                "no fabricated item index"
+            );
+            assert_eq!(
+                observation.delta_differences,
+                vec![Field::Text, Field::ReasoningContent]
+            );
+            assert_eq!(observation.total_differences, 2);
+            assert_eq!(observation.partial_text, "paid old answer");
+            assert_eq!(observation.partial_reasoning, "paid old reasoning");
+        }
+    }
+}
+
+#[test]
+fn matching_or_absent_delta_channels_do_not_create_observations() {
+    let output = vec![
+        json!({"type":"reasoning","summary":[{"type":"summary_text","text":"summary"}],"content":[{"type":"reasoning_text","text":"content"}],"encrypted_content":"opaque"}),
+        json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}),
+    ];
+    for deltas in [false, true] {
+        let mut stream = ResponseStream::default();
+        if deltas {
+            for (kind, text) in [
+                ("response.output_text.delta", "answer"),
+                ("response.reasoning_summary_text.delta", "summary"),
+                ("response.reasoning_text.delta", "content"),
+            ] {
+                stream
+                    .push(event(&json!({"type":kind,"delta":text})).as_bytes())
+                    .unwrap();
+            }
+        }
+        stream
+            .push(
+                event(&json!({"type":"response.completed","response":completed(output.clone())}))
+                    .as_bytes(),
+            )
+            .unwrap();
+        assert!(stream.finish(true).unwrap().stream_observation.is_none());
+    }
+}
+
+#[test]
+fn malformed_later_frame_keeps_received_prefix_at_every_chunk_split() {
+    let item = json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"paid done text"}]} );
+    let mut body = event(&json!({"type":"response.output_text.delta","delta":"paid answer 🦀"}));
+    body += &event(&json!({"type":"response.reasoning_text.delta","delta":"paid reasoning"}));
+    body += &event(&json!({"type":"response.output_item.done","output_index":0,"item":item}));
+    body += "data: {malformed\n\n";
+    for split in 0..=body.len() {
+        let mut stream = ResponseStream::default();
+        let failure = match stream.push(&body.as_bytes()[..split]) {
+            Err(error) => error,
+            Ok(_) => stream.push(&body.as_bytes()[split..]).unwrap_err(),
+        };
+        assert_eq!(failure.kind, "protocol", "split {split}");
+        assert_eq!(stream.partial_text, "paid answer 🦀", "split {split}");
+        assert_eq!(stream.partial_reasoning, "paid reasoning", "split {split}");
+        assert_eq!(stream.completed_items[&0], item, "split {split}");
+    }
 }

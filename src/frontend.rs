@@ -6,6 +6,7 @@ mod draft_images;
 mod draft_saver;
 mod history_reader;
 mod input_history;
+mod received;
 use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
 mod management;
 mod management_state;
@@ -715,6 +716,16 @@ async fn run_with_clipboard_slots(
                         if let Some(thread) = &selection.active_thread {
                             streams.invalidate(thread);
                         }
+                    }
+                    UiAction::LoadReceived{thread_id,page}=>{
+                        let control=control.clone();let sender=updates.clone();
+                        let reply_context=context.clone();
+                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move{
+                            match received::list(&control,thread_id,page).await{
+                                Ok((title,fields))=>management_update(&sender,reply_context,UiUpdate::ReceivedList{title,fields}).await,
+                                Err(error)=>management_status(&sender,reply_context,error).await,
+                            }
+                        }){management_status(&updates,context,"読取り枠が満杯です。再操作してください").await;}
                     }
                     UiAction::LoadModels {
                         connection,
@@ -2826,7 +2837,14 @@ impl RawNode {
             .and_then(|value| serde_json::from_str::<Value>(value).ok())
         {
             Some(payload) => {
-                let (text, ranges) = display_payload(&payload);
+                let (text, ranges) = if matches!(
+                    self.kind.as_str(),
+                    "incomplete_response" | "model_stream_observation"
+                ) {
+                    received::body(&payload)
+                } else {
+                    display_payload(&payload)
+                };
                 (payload, text, ranges)
             }
             None => {
@@ -2921,6 +2939,24 @@ impl RawNode {
         let (text, base_char_offset, total_chars) = window(&text, offset);
         let window_end = base_char_offset + text.chars().count();
         reasoning_ranges.retain(|range| range.1 > base_char_offset && range.0 < window_end);
+        if matches!(
+            kind.as_str(),
+            "incomplete_response" | "model_stream_observation"
+        ) {
+            return received::project(
+                &kind,
+                UiNode {
+                    node_id,
+                    text,
+                    base_char_offset,
+                    total_chars,
+                    reasoning_ranges,
+                    ..Default::default()
+                },
+                render_width,
+                false,
+            );
+        }
         let mut presentation =
             crate::presentation::project(&kind, &payload, &text, base_char_offset);
         crate::presentation::render_markdown(&mut presentation, render_width.max(1));

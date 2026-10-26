@@ -382,6 +382,10 @@ impl Details {
         fields.sort_by_key(|field| crate::presentation::fields::group(&field.key).0);
         fields
     }
+    pub(super) fn open_source(&mut self, node_id: String, next: &mut u64) -> UiAction {
+        self.node_id = node_id;
+        self.original(None, next)
+    }
     fn original(&mut self, cursor: Option<String>, next: &mut u64) -> UiAction {
         *next = next.wrapping_add(1);
         self.request_id = *next;

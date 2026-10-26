@@ -59,7 +59,7 @@ pub(super) async fn retry_or_recover(
 
     if failure.error.is_context_limit() && overflow.available() {
         let attempt_id = attempt.clone();
-        let body = json!({"error":failure.error,"partial_text":failure.partial_text,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+        let body = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
         let transition = control
             .store
             .database
@@ -97,7 +97,7 @@ pub(super) async fn retry_or_recover(
         }
     }
     let error=ApiError::new(ErrorCode::IoFailed,failure.error.to_string()).hint("Inspect the incomplete response and explicitly retry this Run; tools already saved are not re-executed");
-    let saved = json!({"error":failure.error,"partial_text":failure.partial_text,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+    let saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
     recover(control, snapshot, error.clone(), Some((attempt, saved))).await?;
     Err(error)
 }

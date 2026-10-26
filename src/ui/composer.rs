@@ -9,6 +9,10 @@ struct CommandHint {
 }
 const COMMANDS: &[CommandHint] = &[
     CommandHint {
+        name: "/received",
+        help: "受信記録（失敗・ストリーム差分）を読む",
+    },
+    CommandHint {
         name: "/status",
         help: "作業状態・背景コマンド・子の作業を確認",
     },
