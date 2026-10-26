@@ -2960,6 +2960,22 @@ async fn upgrade_keeps_legacy_search_and_reuses_ready_candidate_until_explicit_s
             |reason| reason.contains(&candidate) && reason.contains("Explicitly select")
         )
     );
+    f.db.call(|db| {
+        db.execute("INSERT INTO app_meta(key,value) SELECT 'index.pause.'||substr(key,13,length(key)-19),'test pause reason' FROM app_meta WHERE key LIKE 'index.group.%.active'", [])?;
+        Ok(())
+    }).await.unwrap();
+    let paused = current.status(args()).await.unwrap();
+    assert!(paused.paused);
+    let reason = paused.reason.as_deref().unwrap();
+    assert!(reason.contains("test pause reason"));
+    assert!(reason.contains(&candidate));
+    assert!(reason.contains("excluded from default semantic search until selection"));
+    f.db.call(|db| {
+        db.execute("DELETE FROM app_meta WHERE key LIKE 'index.pause.%'", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     let hits = current.search("cat", 10).await.unwrap();
     assert_eq!(
         hits.iter()

@@ -595,12 +595,14 @@ fn read_status(
     if keys.is_empty() {
         status.reason = Some("Embedding connection/model is not configured".into());
     }
-    if status.reason.is_none()
-        && let Some(candidate) = upgrade_candidate
-    {
-        status.reason = Some(format!(
-            "Legacy search selection is preserved; current-policy sources are indexed into candidate {candidate}. Explicitly select this candidate after all authorized inputs succeed, or rebuild the intended sources"
-        ));
+    if let Some(candidate) = upgrade_candidate {
+        let selection = format!(
+            "Legacy search selection is preserved; new history in candidate {candidate} is excluded from default semantic search until selection. Explicitly select this candidate after all authorized inputs succeed; old history then requires authorized rebuild/backfill to join the selected space"
+        );
+        status.reason = Some(match status.reason {
+            Some(reason) => format!("{reason}; {selection}"),
+            None => selection,
+        });
     }
 
     Ok(status)
