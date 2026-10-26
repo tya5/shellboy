@@ -52,6 +52,11 @@ fn color(node: &UiNode) -> Color {
         PresentationKind::Unknown => theme::TEXT,
     }
 }
+// Private layout metadata in the existing marker channel. Link identities are
+// RGB; this non-RGB value is ignored by hit-testing and stripped by borrowed().
+const EXCERPT_GAP_MARKER: Color = Color::Indexed(255);
+const OUTPUT_ROW_MARKER: Color = Color::Indexed(254);
+
 #[derive(Clone, Copy)]
 enum LineRole {
     Meta,
@@ -292,14 +297,32 @@ fn node_lines_inner(
                     output.truncate(3);
                     output.push(Line::from(Span::styled(
                         format!("… 出力抜粋（表示{count}行中{}行省略）· F6 詳細", count - 5),
-                        Style::default().fg(theme::MUTED),
+                        Style::default()
+                            .fg(theme::MUTED)
+                            .underline_color(EXCERPT_GAP_MARKER),
                     )));
                     output.extend(tail);
                 }
                 output = hanging_wrap(output, width.saturating_sub(2).max(1));
                 for line in &mut output {
-                    line.spans
-                        .insert(0, Span::styled("  │ ", Style::default().fg(guide_color)));
+                    let marker = if line
+                        .spans
+                        .iter()
+                        .any(|span| span.style.underline_color == Some(EXCERPT_GAP_MARKER))
+                    {
+                        EXCERPT_GAP_MARKER
+                    } else {
+                        OUTPUT_ROW_MARKER
+                    };
+                    // The guide owns the row tag; keep every actual URL's RGB
+                    // marker and unavailable-target marker exactly as supplied.
+                    line.spans.insert(
+                        0,
+                        Span::styled(
+                            "  │ ",
+                            Style::default().fg(guide_color).underline_color(marker),
+                        ),
+                    );
                 }
                 out.extend(output);
             } else {
@@ -860,16 +883,18 @@ pub(super) fn history(
                 .map(|s| s.content.as_ref())
                 .collect::<String>();
             let text = source_candidate(&text);
-            if line.spans.iter().any(|span| {
-                span.style.fg == Some(theme::MUTED)
-                    && span.content.trim_start().starts_with("… 出力抜粋（表示")
-            }) {
+            let gap_row = line
+                .spans
+                .iter()
+                .any(|span| span.style.underline_color == Some(EXCERPT_GAP_MARKER));
+            if gap_row {
                 excerpt_jump = true;
             }
-            let output_body = line.spans.iter().any(|span| {
-                matches!(span.style.fg, Some(color) if color == theme::TEXT || color == theme::LINK)
-                    && !span.content.trim().is_empty()
-            });
+            let output_body = !gap_row
+                && line
+                    .spans
+                    .iter()
+                    .any(|span| span.style.underline_color == Some(OUTPUT_ROW_MARKER));
             // Exact visible substrings give original character positions for
             // plain text, code and Markdown prose. Generated decoration maps to
             // the preceding source position, never a fabricated character ratio.
@@ -1083,6 +1108,80 @@ pub(super) fn link_regions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn excerpt_gap_metadata_survives_wrapping_without_becoming_a_terminal_link() {
+        let gap = Line::from(Span::styled(
+            "… 出力抜粋（表示120行中115行省略）· F6 詳細",
+            Style::default()
+                .fg(theme::MUTED)
+                .underline_color(EXCERPT_GAP_MARKER),
+        ));
+        let mut rows = hanging_wrap(vec![gap], 16);
+        assert!(rows.len() > 1);
+        for row in &mut rows {
+            row.spans
+                .insert(0, Span::styled("  │ ", Style::default().fg(theme::MUTED)));
+        }
+        let rows = hanging_wrap(rows, 20);
+        assert!(rows.iter().all(|row| {
+            row.spans
+                .iter()
+                .any(|span| span.style.underline_color == Some(EXCERPT_GAP_MARKER))
+        }));
+        assert!(
+            borrowed(&rows)
+                .iter()
+                .flat_map(|row| &row.spans)
+                .all(|span| span.style.underline_color.is_none())
+        );
+        assert!(
+            link_regions(
+                &rows,
+                &[std::sync::Arc::from("https://example.invalid/not-gap")],
+                20,
+                rows.len() as u16,
+                0
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn typed_output_guides_preserve_rgb_links_and_unavailable_target_markers() {
+        let url = "https://example.invalid/output";
+        let rows = vec![Line::from(vec![
+            Span::styled(
+                "│ ",
+                Style::default()
+                    .fg(theme::MUTED)
+                    .underline_color(OUTPUT_ROW_MARKER),
+            ),
+            Span::styled(
+                url,
+                Style::default()
+                    .fg(theme::TEXT)
+                    .underline_color(crate::terminal_links::marker_color(0)),
+            ),
+            Span::styled(
+                " unavailable",
+                Style::default().underline_color(Color::Reset),
+            ),
+        ])];
+        let regions = link_regions(&rows, &[std::sync::Arc::from(url)], 100, 1, 0);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url.as_ref(), url);
+        assert_eq!(
+            regions[0].x, 2,
+            "the typed guide must never become part of the clickable URL"
+        );
+        assert!(
+            borrowed(&rows)
+                .iter()
+                .flat_map(|row| &row.spans)
+                .all(|span| span.style.underline_color.is_none())
+        );
+    }
+
     #[test]
     fn wrapped_group_headers_cannot_consume_matching_stdout_source() {
         use crate::presentation::{NodePresentation, PresentationBlock, ToolPresentation};
@@ -2249,13 +2348,24 @@ mod tests {
                     .find(|span| span.content.contains("#2 printf fixture"))
                     .unwrap();
                 assert!(
-                    header
-                        .content
-                        .starts_with(&format!("{mark} #2 printf fixture")),
+                    header.content.starts_with(&format!(
+                        "{} #2 printf fixture",
+                        if kind == "assistant_response" {
+                            "↳"
+                        } else {
+                            mark
+                        }
+                    )),
                     "{}",
                     header.content
                 );
                 assert_eq!(header.style.fg, Some(color));
+                if kind == "assistant_response" {
+                    assert!(
+                        !header.content.contains("終了"),
+                        "terminal facts belong to the result heading"
+                    );
+                }
             }
         }
     }

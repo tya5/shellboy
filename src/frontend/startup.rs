@@ -203,7 +203,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            version, 8,
+            version,
+            crate::storage::SCHEMA_VERSION,
             "cancel does not pretend completed migration was rolled back"
         );
     }
