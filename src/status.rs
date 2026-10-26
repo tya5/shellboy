@@ -45,6 +45,7 @@ pub struct StatusSnapshot {
     pub fingerprint: String,
     pub filters: StatusArgs,
     pub items: Vec<WorkItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     #[serde(default)]
     pub receipt_budget: Value,

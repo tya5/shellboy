@@ -204,6 +204,17 @@ async fn pagination_continues_across_state_changes_but_rejects_filter_changes() 
     let mut page = first;
     let mut ids = Vec::new();
     loop {
+        let wire = serde_json::to_value(&page).unwrap();
+        assert_eq!(
+            wire.as_object().unwrap().contains_key("next_cursor"),
+            page.next_cursor.is_some(),
+            "terminal status pages omit the cursor; continued pages carry it"
+        );
+        assert_eq!(
+            serde_json::from_value::<shellboy::status::StatusSnapshot>(wire).unwrap(),
+            page,
+            "an omitted terminal cursor remains readable"
+        );
         ids.extend(page.items.iter().map(|i| (i.kind.clone(), i.id.clone())));
         let Some(cursor) = page.next_cursor else {
             break;
