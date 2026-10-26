@@ -222,7 +222,7 @@ RuntimeOperation mapは既存Controlに残す。別のRegistry classへControl/S
 
 assign_messageは送信transaction内のRun/Turn割当・明示再開・hold判断を所有し、MessageAssignmentとして従来の6局所結果を返す。停止中Runへの入力は未割当heldのまま、recovery_waitへのモデル入力は割当済みheldのままとする。この通常送信経路では人間の明示入力だけが同Turnの世代を進め、また人間/生存する直接ownerの明示再始動だけが従来の未割当heldを新Run/Turnへ割り当てる。既に割当済みreceiptの帰属は変更しない。親owner認可、context記録、held receipt再受付、Run/Turn生成は元のSQL・時刻/ID採取順序で同一transactionに残し、user node/索引許可/receipt保存/Thread revision更新/wake効果の順序を変えない。
 
-TxCtxは追加しない。既存Transactionの借用、caller、operation ID、時刻をまとめるだけでは新しい振る舞いの所有にならず、順序やerrorの意味が異なる呼出しへ汎用引数束を渡す層が増える。Run/Turnの生成もclock回数が異なる呼出しを無理に一律化せず、明示の割当policyとdriverの自発イベント処理の境界を保つ。query/receiptは既採用P2のread-only境界を維持し、今回の整理で新しいreceiptや暗黙処理を追加しない。
+TxCtxは追加しない。既存Transactionの借用、caller、operation ID、時刻をまとめるだけでは新しい振る舞いの所有にならず、順序やerrorの意味が異なる呼出しへ汎用引数束を渡す層が増える。Run/Turn生成はcallerのclock回数と時刻を保持して共通保存境界だけをまとめ、明示の割当policyとdriverの自発イベント処理の境界を保つ。query/receiptは既採用P2のread-only境界を維持し、今回の整理で新しいreceiptや暗黙処理を追加しない。
 
 ### 中断snapshotの保存責務（R1-6）
 
@@ -255,3 +255,9 @@ model_attemptのpreparing/inflight→incompleteは既存通り。failed→incomp
 message割当、既存Runへのevent/添付到着、snapshot以前の準備失敗で必要なTurn作成は、state::create_turn_txへUUID発行・preparing INSERT・context::turn_startedをまとめる。作成するかの判定、Run/Threadの検証、transactionの開始/commit、wake/復旧方針は各callerに残す。helperはrusqlite::Resultを返し、DB受付の既存sql_errorとdriver側のStorageErrorへの変換を維持する。
 
 created_atとturn_startedの時刻は別引数で受け取り、DB受付は従来のrequest時刻を両方に、driverは従来通り別々に採取した時刻を渡す。event actorは既存context::turn_started内部のshellboyを維持する。復旧の対象Turn/Runやreceiptの解放範囲はこの構造変更では変更せず、新しい状態・worker・transactionを加えない。
+
+### 明示復旧の対象Turnとreceipt（PR2-10・挙動）
+
+人間の新指示と明示Run retryは、認可後に解決した一つのrecovery_wait Turn ID/generationへ再開を束縛する。state::resume_recovery_turn_txがTurn/Run/Thread/generation/生存Runを同じUPDATEで照合し、成功した場合だけそのTurn/Run/Threadに割り当て済みのheld recovery_wait receiptを再受付する。過去の別Turnのheld receiptや別hold reasonをRun全体から解放しない。0件ならcallerの既存競合/状態エラーへ戻し、receipt・context eventを変更しない。
+
+モデルの通常messageは引き続きheld、人間の新指示は通常wake、retryは人間または生存直接ownerの認可とquiet wakeを維持する。context actor/payloadはcallerの既存形式で同一transactionへ記録する。Turn再開・receipt再受付・eventはcommit/rollbackを共有し、途中状態は公開しない。新たな状態・receipt・queue・workerは追加しない。

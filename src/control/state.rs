@@ -29,6 +29,34 @@ pub(super) fn create_turn_tx(
     Ok(turn)
 }
 
+/// Resume one observed recovery Turn and only its held recovery input.
+/// Authorization, context actor and wake policy remain at each admission caller.
+pub(super) fn resume_recovery_turn_tx(
+    tx: &rusqlite::Transaction<'_>,
+    thread: &str,
+    run: &str,
+    turn: &str,
+    generation: i64,
+    at: &str,
+) -> rusqlite::Result<bool> {
+    let changed = tx.execute(
+        "UPDATE turn SET state='preparing',generation=generation+1,recovery_reason_json=NULL
+         WHERE id=?1 AND thread_id=?2 AND run_id=?3 AND generation=?4 AND state='recovery_wait'
+         AND EXISTS(SELECT 1 FROM run r WHERE r.id=turn.run_id AND r.state='live')",
+        params![turn, thread, run, generation],
+    )?;
+    if changed != 1 {
+        return Ok(false);
+    }
+    tx.execute(
+        "UPDATE receipt SET state='accepted',hold_reason=NULL,updated_at=?4
+        WHERE turn_id=?1 AND target_thread_id=?2 AND run_id=?3
+        AND state='held' AND hold_reason='recovery_wait'",
+        params![turn, thread, run, at],
+    )?;
+    Ok(true)
+}
+
 /// A DB transition result, not a second in-memory attempt state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AttemptTransition {

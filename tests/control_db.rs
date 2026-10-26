@@ -1564,3 +1564,83 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         .unwrap();
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_releases_nothing() {
+    for retry in [false, true] {
+        for suppress in [false, true] {
+            let (_directory, store) = store().await;
+            let thread = create(&store, None).await;
+            let (accepted, _) = send(&store, &thread.thread_id, "current instruction").await;
+            let run = accepted.run_id.clone().unwrap();
+            let turn = accepted.turn_id.clone().unwrap();
+            let target_thread = thread.thread_id.clone();
+            let target_run = run.clone();
+            let target_turn = turn.clone();
+            store.database.call(move |db| {
+                let tx = db.transaction()?;
+                tx.execute("UPDATE turn SET state='recovery_wait',generation=4,recovery_reason_json='{\"reason\":\"fixture\"}' WHERE id=?1",[&target_turn])?;
+                tx.execute("UPDATE receipt SET state='held',hold_reason='recovery_wait',updated_at='keep-current' WHERE turn_id=?1",[&target_turn])?;
+                // A stale/imported older receipt must not be revived by retrying
+                // another Turn in the same Run. Its assignment stays immutable.
+                tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('older-turn',?1,?2,'completed','before','before')",rusqlite::params![target_thread,target_run])?;
+                tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('older-message','older-turn','user','before','{}'),('other-held',?1,'user','now','{}')",[&target_turn])?;
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason)VALUES('older-receipt','old-op','{}',?1,'older-message',?2,'older-turn','held','before','keep-older','recovery_wait'),('other-receipt','other-op','{}',?1,'other-held',?2,?3,'held','before','keep-other','stopping')",rusqlite::params![target_thread,target_run,target_turn])?;
+                if suppress {
+                    tx.execute_batch("CREATE TRIGGER suppress_recovery BEFORE UPDATE OF state ON turn WHEN OLD.state='recovery_wait' AND NEW.state='preparing' BEGIN SELECT RAISE(IGNORE); END;")?;
+                }
+                tx.commit()?;
+                Ok(())
+            }).await.unwrap();
+            let command = if retry {
+                Command::RunRetry(RunTarget {
+                    run_id: run.clone(),
+                })
+            } else {
+                Command::MessageSend(MessageSendArgs {
+                    thread_id: Some(thread.thread_id.clone()),
+                    text: "explicit human recovery".into(),
+                })
+            };
+            let result = store.execute(request(command), None).await;
+            if suppress {
+                assert_eq!(
+                    result.unwrap_err().code,
+                    if retry {
+                        ErrorCode::InvalidState
+                    } else {
+                        ErrorCode::OperationConflict
+                    }
+                );
+            } else {
+                let effects = result.unwrap();
+                if retry {
+                    assert!(effects.wake_threads.is_empty());
+                    assert_eq!(effects.quiet_wake_threads, vec![thread.thread_id.clone()]);
+                } else {
+                    assert_eq!(effects.wake_threads, vec![thread.thread_id.clone()]);
+                    assert!(effects.quiet_wake_threads.is_empty());
+                }
+            }
+            let current_message = accepted.message_id;
+            store.database.call(move |db| {
+                let current:(String,i64,Option<String>)=db.query_row("SELECT state,generation,recovery_reason_json FROM turn WHERE id=?1",[turn],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+                assert_eq!(current.0, if suppress {"recovery_wait"}else{"preparing"});
+                assert_eq!(current.1, if suppress {4}else{5});
+                assert_eq!(current.2.is_some(),suppress);
+                let receipt:(String,Option<String>)=db.query_row("SELECT state,hold_reason FROM receipt WHERE message_node_id=?1",[current_message],|row|Ok((row.get(0)?,row.get(1)?)))?;
+                assert_eq!(receipt,if suppress {("held".into(),Some("recovery_wait".into()))}else{("accepted".into(),None)});
+                for (id,reason,updated) in [("older-receipt","recovery_wait","keep-older"),("other-receipt","stopping","keep-other")] {
+                    let row:(String,String,String)=db.query_row("SELECT state,hold_reason,updated_at FROM receipt WHERE id=?1",[id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+                    assert_eq!(row,("held".into(),reason.into(),updated.into()));
+                }
+                assert_eq!(db.query_row("SELECT state FROM turn WHERE id='older-turn'",[],|row|row.get::<_,String>(0))?,"completed");
+                let events:i64=db.query_row("SELECT COUNT(*) FROM event WHERE kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='recovery_resumed'",[],|row|row.get(0))?;
+                assert_eq!(events,i64::from(!suppress));
+                assert_eq!(db.query_row("SELECT state FROM run WHERE id=?1",[run],|row|row.get::<_,String>(0))?,"live");
+                Ok(())
+            }).await.unwrap();
+            store.database.shutdown().await.unwrap();
+        }
+    }
+}

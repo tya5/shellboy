@@ -1027,16 +1027,23 @@ fn assign_message(
             reason = Some("stopping");
         } else {
             assigned_run = Some(run_id.clone());
-            let turn:Option<(String,String)>=tx.query_row("SELECT id,state FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[&run_id],|row| Ok((row.get(0)?,row.get(1)?))).optional().map_err(sql_error)?;
-            if let Some((turn_id, state)) = turn {
+            let turn:Option<(String,String,i64)>=tx.query_row("SELECT id,state,generation FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[&run_id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(sql_error)?;
+            if let Some((turn_id, state, generation)) = turn {
                 assignment = Assignment::ExistingTurn;
                 if state == "recovery_wait" && caller.is_some() {
                     status = DeliveryStatus::Held;
                     reason = Some("recovery_wait");
                 } else {
                     if state == "recovery_wait" {
-                        if tx.execute("UPDATE turn SET state='preparing',generation=generation+1,recovery_reason_json=NULL WHERE id=?1 AND state='recovery_wait' AND EXISTS(SELECT 1 FROM run r WHERE r.id=turn.run_id AND r.state='live')",[&turn_id]).map_err(sql_error)? != 1 {
-                            return Err(error(ErrorCode::OperationConflict,"Turn changed before explicit recovery resume"));
+                        if !super::state::resume_recovery_turn_tx(
+                            tx, id, &run_id, &turn_id, generation, now,
+                        )
+                        .map_err(sql_error)?
+                        {
+                            return Err(error(
+                                ErrorCode::OperationConflict,
+                                "Turn changed before explicit recovery resume",
+                            ));
                         }
                         super::context::record(
                             tx,
@@ -1047,7 +1054,6 @@ fn assign_message(
                             now,
                         )
                         .map_err(sql_error)?;
-                        tx.execute("UPDATE receipt SET state='accepted',hold_reason=NULL,updated_at=?2 WHERE turn_id=?1 AND state='held' AND hold_reason='recovery_wait'",params![turn_id,now]).map_err(sql_error)?;
                     }
                     wake = true;
                 }
@@ -1507,14 +1513,28 @@ fn retry_run(
             ));
         }
     }
-    let changed=tx.execute("UPDATE turn SET state='preparing',generation=generation+1,recovery_reason_json=NULL WHERE run_id=?1 AND state='recovery_wait'",[id]).map_err(sql_error)?;
-    if changed != 1 {
+    let recovery: Option<(String, i64)> = tx
+        .query_row(
+            "SELECT id,generation FROM turn WHERE run_id=?1 AND state='recovery_wait'",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(sql_error)?;
+    let Some((turn, generation)) = recovery else {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "Run has no recoverable Turn",
+        ));
+    };
+    if !super::state::resume_recovery_turn_tx(tx, &details.thread_id, id, &turn, generation, now)
+        .map_err(sql_error)?
+    {
         return Err(error(
             ErrorCode::InvalidState,
             "Run has no recoverable Turn",
         ));
     }
-    tx.execute("UPDATE receipt SET state='accepted',hold_reason=NULL,updated_at=?2 WHERE run_id=?1 AND state='held' AND hold_reason='recovery_wait'",params![id,now]).map_err(sql_error)?;
     super::context::record(
         tx,
         &details.thread_id,
