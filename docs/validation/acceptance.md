@@ -13,7 +13,7 @@
 
 最終sourceの `cargo clippy --locked --all-targets -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` は成功しました。staged秘密情報検査は検出0件です。
 
-今回のsourceで全69群の標準checkは再実行していません。Windows/Linux native CI、push・release・Issue #3のクローズは未実施です。利用者の保存データ、設定、実行中owner、インストール済みbinaryは変更していません。
+push前に `305e088` で `sh scripts/check.sh` を再実行し、終了0、fmt・strict all-target Clippy・全69群の1,103 passed / 0 failed / 15 ignoredを確認しました。Windows/Linux native CIの今回sourceでの結果、release・Issue #3のクローズは本記録時点では未確認・未実施です。利用者の保存データ、設定、実行中owner、インストール済みbinaryは変更していません。
 
 ## Issue #8: HTTP期限・取消し・受信経過（未リリース）
 

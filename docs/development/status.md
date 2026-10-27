@@ -8,7 +8,7 @@ TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の�
 
 文書のみのcommit `211750e` の [CI 40420705214](https://github.com/tya5/shellboy/actions/runs/40420705214) はmacOS/Linux成功、Windowsで起動取消し試験1件が失敗しました。v0.1.2の3 OS成功は当時の記録として維持します。旧試験の外部SQLite writer解除を2.3秒遅らせるとmacOSでも同じエラーを再現でき、製品の2秒のbusy timeoutと試験の通知待ちが競合する条件を確認しました。Windowsで実際に発生した待機時間は未確定です。
 
-起動進捗callbackの同じ呼出しで取消す試験へ変更し、実移行完了・close・owner解放・endpoint未公開を検証します。受付済みwriterの所有保持は既存storage試験で別に保証します。製品のtimeoutや取消し順序は変更していません。検証結果は [検証状況](../validation/acceptance.md) に記録します。修正後のWindows native CI、push、Issue #3のクローズは未実施です。
+起動進捗callbackの同じ呼出しで取消す試験へ変更し、実移行完了・close・owner解放・endpoint未公開を検証します。受付済みwriterの所有保持は既存storage試験で別に保証します。製品のtimeoutや取消し順序は変更していません。検証結果は [検証状況](../validation/acceptance.md) に記録します。`305e088` のpush前標準checkは全69群1,103 passed / 0 failed / 15 ignoredで成功しました。修正後のWindows native CI結果、release、Issue #3のクローズは本記録時点では未確認・未実施です。
 
 ## Issue #8: HTTP停滞対策（未リリース）
 
