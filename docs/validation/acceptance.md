@@ -1,6 +1,20 @@
 # 検証状況
 
-更新: 2026-10-27。最新のv0.1.2検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
+更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
+
+## v0.1.3公開時の最終検証
+
+2026-10-27、tag `v0.1.3` / commit `bbb9758d8cee85a6a1cc43dfc9e9015508f6f95c` で検証しました。下記は途中の変更ごとの結果を置き換える最終sourceの結果です。後続の公開記録commitは文書だけを更新します。
+
+- macOS ARM64 / Rust 1.99.1の `sh scripts/check.sh` は終了0。fmt・strict all-target Clippy・70群の1,127 passed / 0 failed / 15 ignoredが成功しました。各test executableの初回起動待ちが長いため、別途 `--list` の読み取り専用列挙を8並列で実施しました。列挙結果は成功件数へ加算していません。ローカル試験の完了待ちの間にmainをpushしてCIも並行実施し、両方の成功後にtagをpushしました。
+- [CI 40482476917](https://github.com/tya5/shellboy/actions/runs/40482476917) は3 OS成功。all-target試験はWindows 1,022 passed / 0 failed / 10 ignored、macOS 1,127 / 0 / 15、Linux 1,128 / 0 / 14。Windowsの独立したoverflow診断1件も成功し、all-targetの件数へ二重計上しません。
+- [Release 40484109212](https://github.com/tya5/shellboy/actions/runs/40484109212) はnativeのWindows x64・macOS ARM64・Linux x64でlocked release buildとversion/help起動を確認し、3 archiveとSHA256SUMSを公開しました。
+- 公開URLから認証なしで4 assetを取得し、3 archiveのSHA-256を照合しました。Windows ZIPの整合性と、各archiveの実行ファイル・MIT LICENSE・README・設定例・利用/Agentガイドの同梱を確認しました。非公開snapshot・個人cacheの同梱はありません。
+- 公開macOS binaryのversion/helpが成功し、ローカルの `~/.local/bin/shellboy` へ原子的に配置しました。配布版と配置版のSHA-256一致、配置後の `shellboy 0.1.3` を確認しました。旧binaryはGit管理外へ退避し、利用者の設定・既定DB・利用中ownerを変更していません。
+- 公開source時点の全履歴81 commitのgitleaks検査は検出0件でした。公開記録commitの差分と全履歴も検査します。
+
+DB schemaはv0.1.2と同じv9でmigration追加はありません。既存設定は新項目を省略でき、CLI・保存先も変更していません。旧版へ戻す場合、新しい接続設定keyを設定ファイルから除く必要があります。実会社proxy/Windows対話端末や実モデルへの追加課金を伴う確認は行っていません。600秒の無受信既定値は暫定であり、company proxyでの測定保証ではありません。
+
 
 ## Thread一覧の状態色（未リリース）
 

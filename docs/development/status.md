@@ -1,34 +1,34 @@
 # 開発状況
 
-更新: 2026-10-27。v0.1.3の公開準備中です。#6/#7/#8、Thread一覧の状態色と起動取消し試験修正をまとめ、標準checkと3 OSのCI成功後に新しいtagを公開します。v0.1.2とはDB schema v9・既存設定・CLIを維持し、新しい接続設定は省略時に既定値を使います。
+更新: 2026-10-27。検証済みcommit `bbb9758` を [v0.1.3](https://github.com/tya5/shellboy/releases/tag/v0.1.3) として公開しました。#6/#7/#8、Thread一覧の状態色、起動取消し試験の安定化を含みます。ローカル標準checkは70群1,127 passed / 0 failed / 15 ignored、[3 OSのnative CI](https://github.com/tya5/shellboy/actions/runs/40482476917) と [配布ビルド・起動確認・公開](https://github.com/tya5/shellboy/actions/runs/40484109212) はすべて成功しました。全archiveの認証なしダウンロード・SHA-256・同梱内容を確認し、ローカルbinaryも公開macOS版0.1.3へ更新しました。設定・既定DB・利用中ownerは変更していません。
 
-前回公開時の記録: Issue #6の受信記録表示と、#8へ統合した#7の有限再試行をローカルsourceへ実装しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
+v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
-## Thread一覧の状態色（未リリース）
+## Thread一覧の状態色（v0.1.3）
 
 取得済みの状態に応じてタイトルと状態欄を色分けしました。実行/準備/稼働はシアン、待機/停止処理中は黄色、復旧待ち/失敗は赤、完了は緑、それ以外は通常の前景色です。文字・親子/現在Threadのmarker・選択背景は維持し、狭い画面でもタイトル色を使います。一覧page更新で同じIDの状態が変わると色も変わります。Core・一覧取得/更新の契約は変更していません。対象テスト13件が成功しました。検証範囲は [検証状況](../validation/acceptance.md) に記録します。
 
-## Issue #6: 受信記録の注意表示（未リリース）
+## Issue #6: 受信記録の注意表示（v0.1.3）
 
 途中で切れた応答のpreviewは、元Turnが現在復旧待ちの間だけ注意色にし、回復・停止・処理再開後は通常通知へ変えます。空本文の非表示、監査原文、元Turn・source ID、モデル再送対象外は維持します。スクロール位置を固定している本文窓にも最新の表示分類を反映し、通常通知の省略groupで本文を隠しません。
 
 受信一覧は通常のRust子moduleへ投影を分け、ローカル時刻・同Turnの元依頼の有限抜粋・保存状態で見分けられるようにしました。ページ32件と原文への導線は維持しています。新しいCore状態・表・worker・event・依存は追加していません。対象6群571件と最終all-target strict Clippy・fmtが成功しました。検証結果と未実施は [検証状況](../validation/acceptance.md) に記録します。
 
-## Issue #7: 未受信時の有限再試行（未リリース）
+## Issue #7: 未受信時の有限再試行（v0.1.3）
 
 #8のHTTP期限・受信観測を利用して、会話の未受信一時失敗だけを既定2回再試行します。接続別の回数・待機上限、Retry-After、取消し可能な待機、既存attemptへの失敗/回数/重複課金可能性の記録とTUIの回数表示を追加しました。予算はTurn/generation内で共有し、tool成功やcontext圧縮では復活させません。受信済み断片、timeout、認証・形式エラーは再送しません。新しい表・worker・queue・EngineEvent・依存は追加していません。
 
 `3569524` の標準checkは70群1,120 passed / 0 failed / 15 ignoredで成功しました。対象9群535件も成功していますが二重計上しません。その後の上限到達時のTUI段階名の補正は対象4群474件と最終all-target strict Clippy・fmtが成功しました。全体結果と最終表示差分の検証範囲は [検証状況](../validation/acceptance.md) に記録します。先行 `13b96a1` の [CI](https://github.com/tya5/shellboy/actions/runs/40449915241) は3 OSとも成功しましたが、今回#7のnative CI成功には読み替えません。利用者の設定・保存データ・利用中owner・インストール済みbinaryは変更していません。
 
-## 公開後のWindows CI失敗の切分け（未リリース）
+## 公開後のWindows CI失敗の切分け（v0.1.3）
 
 文書のみのcommit `211750e` の [CI 40420705214](https://github.com/tya5/shellboy/actions/runs/40420705214) はmacOS/Linux成功、Windowsで起動取消し試験1件が失敗しました。v0.1.2の3 OS成功は当時の記録として維持します。旧試験の外部SQLite writer解除を2.3秒遅らせるとmacOSでも同じエラーを再現でき、製品の2秒のbusy timeoutと試験の通知待ちが競合する条件を確認しました。Windowsで実際に発生した待機時間は未確定です。
 
 起動進捗callbackの同じ呼出しで取消す試験へ変更し、実移行完了・close・owner解放・endpoint未公開を検証します。受付済みwriterの所有保持は既存storage試験で別に保証します。製品のtimeoutや取消し順序は変更していません。検証結果は [検証状況](../validation/acceptance.md) に記録します。`305e088` のpush前標準checkは全69群1,103 passed / 0 failed / 15 ignoredで成功しました。修正後のWindows native CI結果、release、Issue #3のクローズは本記録時点では未確認・未実施です。
 
-## Issue #8: HTTP停滞対策（未リリース）
+## Issue #8: HTTP停滞対策（v0.1.3）
 
 接続別のHTTP期限を共通化しました。会話・要約は無受信600秒（0で無効）、embeddingは要求全体60秒、モデル一覧は同設定と20秒の短い方です。ヘッダー待ち・本文・エラー本文を対象とし、timeoutには段階・経過・設定名を残します。索引は既存retry/pauseへ渡し、検索には呼出し元切断・owner停止を伝播します。TUIは30秒以上の無受信を既存footerへ補足し、途中本文は復旧待ちでも保全します。新しい表・worker・queue・依存は追加していません。
 
