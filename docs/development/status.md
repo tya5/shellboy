@@ -1,8 +1,14 @@
 # 開発状況
 
-更新: 2026-10-27。Issue #8のHTTP停滞対策と統合し、Issue #7の未受信時の有限再試行をローカルsourceへ実装しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
+更新: 2026-10-27。Issue #6の受信記録表示と、#8へ統合した#7の有限再試行をローカルsourceへ実装しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
+
+## Issue #6: 受信記録の注意表示（未リリース）
+
+途中で切れた応答のpreviewは、元Turnが現在復旧待ちの間だけ注意色にし、回復・停止・処理再開後は通常通知へ変えます。空本文の非表示、監査原文、元Turn・source ID、モデル再送対象外は維持します。スクロール位置を固定している本文窓にも最新の表示分類を反映し、通常通知の省略groupで本文を隠しません。
+
+受信一覧は通常のRust子moduleへ投影を分け、ローカル時刻・同Turnの元依頼の有限抜粋・保存状態で見分けられるようにしました。ページ32件と原文への導線は維持しています。新しいCore状態・表・worker・event・依存は追加していません。対象6群571件と最終all-target strict Clippy・fmtが成功しました。検証結果と未実施は [検証状況](../validation/acceptance.md) に記録します。
 
 ## Issue #7: 未受信時の有限再試行（未リリース）
 

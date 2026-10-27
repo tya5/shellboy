@@ -592,7 +592,10 @@ fn node_lines(
     lines
 }
 fn quiet_event(node: &UiNode) -> bool {
-    node.presentation.kind == PresentationKind::Event && !node.presentation.requires_attention()
+    // Received audit previews retain their paid body even after recovery ends.
+    node.role != "received_response"
+        && node.presentation.kind == PresentationKind::Event
+        && !node.presentation.requires_attention()
 }
 
 fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {

@@ -1902,11 +1902,14 @@ impl ThreadView {
             }
             node.node_id = source;
             node.role = "received_response".into();
-            node.presentation.kind = crate::presentation::PresentationKind::Interrupted;
+            // Saved Turn state is not part of StreamSettled. Keep the paid
+            // preview neutral until its DB projection confirms recovery_wait.
+            node.presentation.kind = crate::presentation::PresentationKind::Event;
+            node.presentation.event_class = crate::presentation::EventClass::Change;
             node.presentation.title = if kind == "model_stream_observation" {
                 "ストリーム差分 · 最終応答は確定済み"
             } else {
-                "未確定の受信本文 · モデル再送対象外"
+                "途中で切れた応答（保存済み・会話には含めない） · /received 一覧"
             }
             .into();
             node.presentation.provisional_stream = false;
@@ -1951,6 +1954,14 @@ impl ThreadView {
                     changed = true;
                     if !self.follow && self.anchor.node_id.as_deref() == Some(&incoming.node_id) {
                         existing.total_chars = incoming.total_chars;
+                        // The saved Turn state may change without a new source
+                        // window. Refresh its metadata while retaining the
+                        // paused viewport's body, blocks and character offsets.
+                        existing.presentation.kind = incoming.presentation.kind;
+                        existing.presentation.event_class = incoming.presentation.event_class;
+                        existing.presentation.title = incoming.presentation.title.clone();
+                        existing.presentation.fields = incoming.presentation.fields.clone();
+                        existing.presentation.projection_stamp = None;
                         incoming = existing;
                     }
                 }
@@ -1973,6 +1984,128 @@ impl ThreadView {
 #[cfg(test)]
 mod received_tests {
     use super::*;
+    #[test]
+    fn anchored_received_preview_refreshes_state_color_without_replacing_its_body_window() {
+        use crate::presentation::{EventClass, PresentationField, PresentationKind};
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        let title = "途中で切れた応答（保存済み・会話には含めない） · /received 一覧";
+        let mut paid = UiNode {
+            node_id: "paid".into(),
+            role: "received_response".into(),
+            text: "cached body window".into(),
+            base_char_offset: 100,
+            total_chars: 200,
+            reasoning_ranges: vec![(100, 102)],
+            presentation: crate::presentation::project_stream_window(
+                "cached body window",
+                100,
+                &[(100, 102)],
+                160,
+            ),
+        };
+        paid.presentation.kind = PresentationKind::Interrupted;
+        paid.presentation.event_class = EventClass::Attention;
+        paid.presentation.title = title.into();
+        paid.presentation.projection_stamp = Some([1; 32]);
+        let body_blocks = paid.presentation.blocks.clone();
+        ui.view_mut().nodes = vec![
+            UiNode {
+                node_id: "selected-predecessor".into(),
+                role: "user".into(),
+                text: "saved request".into(),
+                total_chars: 13,
+                ..Default::default()
+            },
+            paid,
+        ];
+        ui.view_mut().selection_revision = 7;
+        ui.view_mut().received_revision = 10;
+        ui.view_mut().follow = false;
+        ui.view_mut().reasoning_expanded.insert("paid".into());
+        ui.view_mut().anchor = ViewAnchor {
+            node_id: Some("paid".into()),
+            char_offset: 103,
+        };
+        let anchor = ui.view().anchor.clone();
+        for recovery in [false, true, false] {
+            // A fresh DB projection contains only the leading body window,
+            // while this paused viewport is 100 characters into the same source.
+            let mut incoming = UiNode {
+                node_id: "paid".into(),
+                role: "received_response".into(),
+                text: "different leading window".into(),
+                total_chars: 200,
+                presentation: crate::presentation::project_stream_window(
+                    "different leading window",
+                    0,
+                    &[],
+                    160,
+                ),
+                ..Default::default()
+            };
+            incoming.presentation.kind = if recovery {
+                PresentationKind::Interrupted
+            } else {
+                PresentationKind::Event
+            };
+            incoming.presentation.event_class = if recovery {
+                EventClass::Attention
+            } else {
+                EventClass::Change
+            };
+            incoming.presentation.title = title.into();
+            incoming.presentation.fields = vec![PresentationField {
+                key: "/source_node_id".into(),
+                label: "保存原文".into(),
+                value: "saved-source-uuid".into(),
+                ..Default::default()
+            }];
+            let before = ui.view().history_revision;
+            ui.dirty = false;
+            ui.apply(UiUpdate::IncompleteResponses {
+                thread_id: "t".into(),
+                generation,
+                selection_revision: 7,
+                view_revision: None,
+                root_revision: 10,
+                nodes: vec![("selected-predecessor".into(), incoming)],
+            });
+            let view = ui.view();
+            let saved = &view.nodes[1];
+            assert_eq!(saved.text, "cached body window");
+            assert_eq!(saved.base_char_offset, 100);
+            assert_eq!(saved.reasoning_ranges, [(100, 102)]);
+            assert_eq!(saved.presentation.blocks, body_blocks);
+            assert_eq!(saved.presentation.fields[0].value, "saved-source-uuid");
+            assert_eq!(saved.presentation.title, title);
+            assert_eq!(saved.presentation.projection_stamp, None);
+            assert_eq!(view.anchor, anchor);
+            assert_eq!(view.received_revision, 10);
+            assert!(view.history_revision > before);
+            assert!(ui.dirty);
+            let lines = presentation::history(view, 160).0;
+            assert!(
+                presentation::plain(&lines).contains("body window"),
+                "a neutral audit preview must retain its body"
+            );
+            let heading = lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .find(|span| span.content.contains("途中で切れた応答"))
+                .unwrap();
+            assert_eq!(
+                heading.style.fg,
+                Some(if recovery {
+                    theme::ATTENTION
+                } else {
+                    theme::MUTED
+                })
+            );
+        }
+    }
+
     #[test]
     fn saved_previews_stay_in_their_turn_and_do_not_leak_into_other_pages() {
         fn node(id: &str, role: &str) -> UiNode {
@@ -2220,7 +2353,20 @@ mod received_tests {
         });
         assert_eq!(ui.view().nodes()[0].text, "受信本文");
         assert_eq!(ui.view().nodes()[0].node_id, "audit");
-        assert!(ui.view().nodes()[0].presentation.title.contains("未確定"));
+        assert!(
+            ui.view().nodes()[0]
+                .presentation
+                .title
+                .contains("途中で切れた応答")
+        );
+        assert_eq!(
+            ui.view().nodes()[0].presentation.kind,
+            crate::presentation::PresentationKind::Event
+        );
+        assert_eq!(
+            ui.view().nodes()[0].presentation.event_class,
+            crate::presentation::EventClass::Change
+        );
         ui.apply(UiUpdate::Stream {
             thread_id: "t".into(),
             generation,

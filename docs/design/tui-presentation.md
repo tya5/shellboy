@@ -510,3 +510,11 @@ group見出しの折返し行数は通常描画と同じtool_header_lines/hangin
 抜粋gapの識別は表示文字列やTEXT/MUTEDの色差に依存しない。既存underline_color内部marker欄へ非RGBのprivate excerpt markerを付け、wrap後の全gap行でも構造的に識別する。リンクmarkerはRGBなので混同せず、borrowed描画が内部markerを除去する。新しい永続状態/workerはなく、色なし・fgが同じpaletteでも実tail候補だけが追加走査予算を使う。
 
 実出力行も既存guide spanへ別の非RGB private tagを付けて識別し、fgの値で実本文か判定しない。既存RGBリンク/Reset unavailable targetのspanを上書きせず、guideのタグだけでgap全wrap行と実出力を区別する。表示時には両タグを除去し、リンクhit-testでもguideをリンク対象へしない。
+
+## 解決後の受信記録（Issue #6）
+
+失敗した応答のpreviewは、元のTurnが現在recovery_waitの間だけInterrupted/Attentionとする。completed/stopped/再試行中など判断待ちでない場合はEvent/Changeへ投影し、「途中で切れた応答（保存済み・会話には含めない）」と表示する。色から最終回答への採用や回復成功を推測しない。空本文は会話へ出さず一覧に残し、元Turn・attempt・原文sourceを付け替えない。保存JSON・採用経路・モデル再送は変更しない。
+
+初期のstream保持は状態未取得のため通常通知とし、既存DB投影で元Turnの状態を確認して分類する。再読・再起動・本文window取得も同じ保存済みTurn状態を用いる。スクロール位置を保持する既存previewのwindowにも最新の表示分類・見出し・source fieldを反映し、本文/offset/anchorは保持する。既存Changed/世代・view/root revision照合を用い、新しいCore状態・表・worker・eventを追加しない。
+
+受信一覧の投影はreceived/list.rsへ局所分割する。32件ページ・原文source/pageキーを維持し、人向けローカル時刻・元Turnの保存済み状態・同じTurnへ割当済みreceiptの依頼抜粋を表示する。別TurnやThread件名を依頼の代わりに使わず、本文がない場合は取得済みと偽らない。SQL側で抜粋を80字に制限し、制御文字・改行を既存sanitizeで表示用に正規化する。

@@ -2925,6 +2925,7 @@ pub fn display_payload(payload: &Value) -> (String, Vec<(usize, usize)>) {
 /// Read payload bytes on the DB worker; decode/project only on the bounded pool.
 struct RawNode {
     id: String,
+    received_recovery_wait: bool,
     kind: String,
     payload: Option<String>,
     reason: Option<String>,
@@ -3055,6 +3056,7 @@ impl RawNode {
                 },
                 render_width,
                 false,
+                self.received_recovery_wait,
             );
         }
         let mut presentation =

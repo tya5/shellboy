@@ -2,6 +2,19 @@
 
 更新: 2026-10-27。最新のv0.1.2検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #6: 解決後の受信記録表示（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `3852333` から本節と同じcommitの表示差分で確認しました。`cargo test --locked --lib --test frontend --test frontend_activity --test tui_recovery --test ui --test ui_scroll_refresh --no-fail-fast` の統合5群111件が成功し、その後のfixture/旧文言期待値の修正後に `cargo test --locked --lib` の460 passed / 0 failed / 3 ignoredが成功しました。合計6群571件、重複実行は加算しません。最後の変更は試験fixtureのみで、成功した統合試験から製品コードは変わっていません。
+
+- 元Turnのrecovery_wait→running→recovery_wait→stopped/completedの各保存状態で、previewとF6本文windowの分類を確認しました。DataOwnerを終了・再起動しても完了後は通常通知となり、監査payload・attempt error JSON・採用pathを変更しないことを検証しました。
+- 同じroot_revisionの再読でも、スクロール固定中の色を注意→通常→注意→通常へ更新。本文窓・offset100・reasoning・anchorを保持し、再描画と実TestBackendの見出し色・本文表示を検証しました。通常Event省略groupへ受信本文を隠しません。
+- 既存の空本文非表示、過去35件の32件ページング、source IDと原文cursor、同Turn配置、遅着・窓revision・スクロールの回帰も成功しました。
+- 一覧は同Turnの割当receiptから元依頼を取得し、別Turnの依頼やThread件名へ取り違えません。SQL80字制限、35件/2page、ローカル時刻、状態分類、制御文字の正規化を検証しました。
+
+最終sourceのall-target strict Clippy、fmt/diffは成功しました。差分の秘密情報検査は検出0件、文書の相対リンク500件は欠落0件です。
+
+今回70群の標準check全体は再実行していません。先行#7実装の全体結果は下記と区別します。実provider/会社proxy、実端末GUIのキャプチャ、Windows/Linuxの今回sourceでのnative CIは未実施です。利用者の設定・保存データ・利用中owner・インストール済みbinaryは変更していません。push・release・Issueクローズも行っていません。
+
 ## Issue #7: 未受信時の有限再試行とIssue #8の統合（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1で実施しました。実装commit `3569524` の `sh scripts/check.sh` は終了0、fmt・strict all-target Clippy・70群の1,120 passed / 0 failed / 15 ignoredです。先行対象9群535件も成功しましたが標準結果へ二重計上しません。

@@ -323,7 +323,7 @@ impl<'a> HistoryReader<'a> {
                 .call(move |db| {
                     Ok(db
                         .query_row(
-                            "SELECT id,kind,payload_json,deleted_reason FROM node WHERE id=?1",
+                            "SELECT n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END FROM node n WHERE n.id=?1",
                             [&node_id],
                             |r| {
                                 Ok(RawNode {
@@ -331,6 +331,7 @@ impl<'a> HistoryReader<'a> {
                                     kind: r.get(1)?,
                                     payload: r.get(2)?,
                                     reason: r.get(3)?,
+                                    received_recovery_wait: r.get(4)?,
                                 })
                             },
                         )
@@ -538,11 +539,11 @@ fn history_rows(
 ) -> rusqlite::Result<Vec<PathNode>> {
     let (sql, bound) = match range {
         PathRange::From(bound) => (
-            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal LIMIT 50",
+            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal LIMIT 50",
             bound,
         ),
         PathRange::Before(bound) => (
-            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal<?2 ORDER BY p.ordinal DESC LIMIT 50",
+            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal<?2 ORDER BY p.ordinal DESC LIMIT 50",
             bound,
         ),
     };
@@ -563,6 +564,7 @@ fn raw_node_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PathNode> {
             kind: row.get(2)?,
             payload: row.get(3)?,
             reason: row.get(4)?,
+            received_recovery_wait: row.get(5)?,
         },
     })
 }

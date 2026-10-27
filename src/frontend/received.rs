@@ -1,10 +1,11 @@
 //! Read-only display of saved failed responses; never a model replay source.
 use super::*;
+mod list;
 use crate::presentation::{EventClass, PresentationKind};
 use rusqlite::OptionalExtension;
 
 pub(super) const ROLE: &str = "received_response";
-pub(super) const TITLE: &str = "未確定の受信本文 · モデル再送対象外";
+pub(super) const TITLE: &str = "途中で切れた応答（保存済み・会話には含めない）";
 const SAVED_BYTES: usize = 1024 * 1024;
 
 pub(super) fn source(
@@ -94,7 +95,13 @@ pub(super) fn body(payload: &Value) -> (String, Vec<(usize, usize)>) {
     (text, ranges)
 }
 
-pub(super) fn project(kind: &str, mut node: UiNode, width: u16, omitted: bool) -> UiNode {
+pub(super) fn project(
+    kind: &str,
+    mut node: UiNode,
+    width: u16,
+    omitted: bool,
+    recovery_wait: bool,
+) -> UiNode {
     let mut p = crate::presentation::project_stream_window(
         &node.text,
         node.base_char_offset,
@@ -102,12 +109,12 @@ pub(super) fn project(kind: &str, mut node: UiNode, width: u16, omitted: bool) -
         width,
     );
     let observation = kind == "model_stream_observation";
-    p.kind = if observation {
+    p.kind = if observation || !recovery_wait {
         PresentationKind::Event
     } else {
         PresentationKind::Interrupted
     };
-    p.event_class = if observation {
+    p.event_class = if observation || !recovery_wait {
         EventClass::Change
     } else {
         EventClass::Attention
@@ -166,6 +173,7 @@ struct PreviewRow {
     saved: Option<String>,
     differences: Option<String>,
     delta_differences: Option<String>,
+    recovery_wait: bool,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Scope {
@@ -196,14 +204,14 @@ pub(super) async fn refresh(
           substr(json_extract(n.payload_json,'$.delta_differences'),1,4096),
           (SELECT p.node_id FROM thread_path p JOIN node prior ON prior.id=p.node_id
            WHERE p.thread_id=u.thread_id AND prior.turn_id=n.turn_id AND prior.rowid<n.rowid
-           ORDER BY p.ordinal DESC LIMIT 1)
+           ORDER BY p.ordinal DESC LIMIT 1),u.state='recovery_wait'
           FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id
           WHERE u.thread_id=?1 AND t.deleted_at IS NULL
             AND n.kind IN ('incomplete_response','model_stream_observation')
             AND n.deleted_reason IS NULL AND json_valid(n.payload_json)
           ORDER BY n.rowid DESC LIMIT 2"#)?;
         let rows=statement.query_map(rusqlite::params![target,SAVED_BYTES as i64],|r|Ok(PreviewRow{
-            id:r.get(0)?,after:r.get(8)?,kind:r.get(1)?,partial:r.get(2)?,reasoning:r.get(3)?,total:r.get(4)?,saved:r.get(5)?,differences:r.get(6)?,delta_differences:r.get(7)?
+            id:r.get(0)?,after:r.get(8)?,kind:r.get(1)?,partial:r.get(2)?,reasoning:r.get(3)?,total:r.get(4)?,saved:r.get(5)?,differences:r.get(6)?,delta_differences:r.get(7)?,recovery_wait:r.get(9)?
         }))?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(Some((rows,root_revision)))
     }).await.map_err(storage_error)?;
@@ -220,7 +228,7 @@ pub(super) async fn refresh(
         let omitted=!full_saved && row.total>known as i64;
         let(text,base,total)=window(&text,None);
         reasoning.retain(|range|range.1>base && range.0<base+text.chars().count());
-        let mut node=project(&row.kind,UiNode{node_id:row.id,text,base_char_offset:base,total_chars:total,reasoning_ranges:reasoning,..Default::default()},width,!full_saved);
+        let mut node=project(&row.kind,UiNode{node_id:row.id,text,base_char_offset:base,total_chars:total,reasoning_ranges:reasoning,..Default::default()},width,!full_saved,row.recovery_wait);
         if omitted{node.presentation.body_omitted_chars=(row.total as usize).saturating_sub(known);}
         streams::seal_node(&mut node);
         Some((after,node))
@@ -245,66 +253,7 @@ pub(super) async fn list(
     thread: String,
     page: u32,
 ) -> Result<(String, Vec<crate::presentation::PresentationField>), ApiError> {
-    if page == 0 {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "Page must be positive",
-        ));
-    }
-    let count_thread = thread.clone();
-    let (total,rows)=control.store.database.call(move|db|{
-        let total:i64=db.query_row("SELECT count(*) FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id WHERE u.thread_id=?1 AND t.deleted_at IS NULL AND n.kind IN ('incomplete_response','model_stream_observation') AND n.deleted_reason IS NULL",[&count_thread],|r|r.get(0))?;
-        let mut statement=db.prepare("SELECT n.id,u.id,n.created_at,n.kind,substr(json_extract(n.payload_json,'$.partial_text'),1,80) FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id WHERE u.thread_id=?1 AND t.deleted_at IS NULL AND n.kind IN ('incomplete_response','model_stream_observation') AND n.deleted_reason IS NULL ORDER BY n.rowid DESC LIMIT 32 OFFSET ?2")?;
-        let rows=statement.query_map(rusqlite::params![count_thread,i64::from(page.saturating_sub(1))*32],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok((total,rows))
-    }).await.map_err(storage_error)?;
-    presentation_work(move || {
-        let mut fields = Vec::new();
-        if page > 1 {
-            fields.push(crate::presentation::PresentationField {
-                key: format!("/received/page/{}", page - 1),
-                label: "前の32件".into(),
-                value: thread.clone(),
-                ..Default::default()
-            });
-        }
-        for (id, turn, at, kind, excerpt) in rows {
-            fields.push(crate::presentation::PresentationField {
-                key: format!("/received/source/{id}"),
-                label: format!(
-                    "{} · {} · Turn {}",
-                    crate::presentation::fields::local_time(&at).unwrap_or(at),
-                    if kind == "model_stream_observation" {
-                        "差分・最終確定済み"
-                    } else {
-                        "未確定"
-                    },
-                    turn.chars().take(8).collect::<String>(),
-                ),
-                display: Some(
-                    excerpt
-                        .filter(|text| !text.trim().is_empty())
-                        .map(|text| text.lines().next().unwrap_or("").chars().take(80).collect())
-                        .unwrap_or_else(|| "受信記録を開く".into()),
-                ),
-                value: id,
-                ..Default::default()
-            });
-        }
-        if u64::from(page) * 32 < total as u64 {
-            fields.push(crate::presentation::PresentationField {
-                key: format!("/received/page/{}", page + 1),
-                label: "次の32件".into(),
-                value: thread,
-                ..Default::default()
-            });
-        }
-        (
-            format!("受信記録 · {total}件 · {page}ページ · Enter 原文 / Esc 閉じる"),
-            fields,
-        )
-    })
-    .await
+    list::read(control, thread, page).await
 }
 
 #[cfg(test)]
@@ -500,7 +449,7 @@ mod tests {
         );
         assert_eq!(nodes[0].1.text, "理由\n有料本文33");
         assert_eq!(nodes[0].1.reasoning_ranges, [(0, 2)]);
-        assert!(nodes[0].1.presentation.title.contains("未確定"));
+        assert!(nodes[0].1.presentation.title.contains("途中で切れた応答"));
         assert!(nodes[1].1.presentation.title.contains("確定済み"));
         let (title, first) = list(&control, "t".into(), 1).await.unwrap();
         assert!(title.contains("35件"));
@@ -567,7 +516,7 @@ mod tests {
         let (title, latest) = list(&control, "t".into(), 1).await.unwrap();
         assert!(title.contains("36件"));
         let empty = latest.iter().find(|field| field.value == "empty").unwrap();
-        assert_eq!(empty.displayed(), "受信記録を開く");
+        assert_eq!(empty.displayed(), "依頼本文なし");
         refresh(
             &control,
             &tx,
@@ -628,6 +577,152 @@ mod tests {
             })
             .await
             .unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn attention_follows_the_source_turn_and_survives_reopen_without_rewriting_audit() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let data = root.path().join("data");
+        let owner = crate::app::DataOwner::start(
+            Some(config.clone()),
+            Some(data.clone()),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let payload = json!({"attempt_id":"a","partial_text":"paid answer","partial_reasoning":"paid reasoning","error":{"kind":"transport","message":"fixture"}}).to_string();
+        let saved = payload.clone();
+        owner.db.call(move |db| {
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','fixture','fixture','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','recovery_wait','now'); INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('anchor','u','user_message','now','{}',2); INSERT INTO thread_path(thread_id,node_id,ordinal)VALUES('t','anchor',0); UPDATE thread SET cursor_node_id='anchor' WHERE id='t';")?;
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('audit','u','incomplete_response','now',?1,length(?1))", [&saved])?;
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('a','u',0,0,'fixture','fixture',0,'incomplete','{}',?1,'now')", [&saved])?;
+            Ok(())
+        }).await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        for (state, attention) in [
+            ("recovery_wait", true),
+            ("running", false),
+            ("recovery_wait", true),
+            ("stopped", false),
+            ("completed", false),
+        ] {
+            let state = state.to_owned();
+            owner
+                .db
+                .call(move |db| {
+                    db.execute("UPDATE turn SET state=?1 WHERE id='u'", [state])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            refresh(
+                &control,
+                &tx,
+                "t",
+                1,
+                80,
+                Scope {
+                    selection_revision: 0,
+                    view_revision: None,
+                },
+            )
+            .await
+            .unwrap();
+            let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
+                panic!()
+            };
+            assert_eq!(nodes.len(), 1);
+            let preview = &nodes[0].1;
+            assert_eq!(preview.text, "paid reasoning\npaid answer");
+            assert_eq!(preview.node_id, "audit");
+            assert_eq!(preview.presentation.requires_attention(), attention);
+            assert_eq!(
+                preview.presentation.kind,
+                if attention {
+                    PresentationKind::Interrupted
+                } else {
+                    PresentationKind::Event
+                }
+            );
+            assert!(
+                preview
+                    .presentation
+                    .fields
+                    .iter()
+                    .any(|field| field.key == "/source_node_id" && field.value == "audit")
+            );
+            let window = super::super::history_reader::HistoryReader::new(&control, &tx, 80)
+                .node("audit".into(), 5)
+                .await
+                .unwrap();
+            assert_eq!(
+                window.presentation.requires_attention(),
+                attention,
+                "F6/body window must use source Turn state too"
+            );
+        }
+        // The observed response is complete; leave no unrelated live Run for
+        // shutdown interruption capture to append to this synthetic path.
+        owner
+            .db
+            .call(|db| {
+                db.execute("UPDATE run SET state='completed' WHERE id='r'", [])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        let owner = crate::app::DataOwner::start(Some(config), Some(data), root.path().into())
+            .await
+            .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        refresh(
+            &control,
+            &tx,
+            "t",
+            2,
+            80,
+            Scope {
+                selection_revision: 0,
+                view_revision: None,
+            },
+        )
+        .await
+        .unwrap();
+        let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
+            panic!()
+        };
+        assert_eq!(nodes.len(), 1);
+        assert!(!nodes[0].1.presentation.requires_attention());
+        let original = owner
+            .db
+            .call(|db| {
+                Ok((
+                    db.query_row(
+                        "SELECT payload_json FROM node WHERE id='audit'",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )?,
+                    db.query_row(
+                        "SELECT error_json FROM model_attempt WHERE id='a'",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )?,
+                    db.query_row(
+                        "SELECT count(*) FROM thread_path WHERE thread_id='t'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(original, (payload.clone(), payload, 1));
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
