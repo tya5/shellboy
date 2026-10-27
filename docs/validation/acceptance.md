@@ -2,6 +2,12 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## ローカル配置の確認（2026-10-27）
+
+利用者の明示指示により、source `90cf354`の検証済みdebug binaryを`~/.local/bin/shellboy`へ配置しました。SHA-256は`6e56157fd7857749fe86dcb39660368e7ecaade15d8819e7de2eaf9bbe4fa38e`で、直前の全体check・PTY確認に使った実行ファイルと一致します。旧版をGit管理外へ保存し、同一directoryの一時fileから原子的に置換しました。
+
+配置後の`--version`は0.1.3、`--help`は正常終了、`docs get --id shellboy/configuration --limit-bytes 200`は有効JSONかつok:trueでした。shellからの短い実行名も同じ配置先へ解決しました。リリースの版番号は変更しておらず、既定config/DBや起動中processを変更していません。今回の差分は配置記録だけで、製品sourceの全体testは前節の結果を参照します。push/releaseは行っていません。
+
 ## Issue #11〜#14: 接続再利用後の最終検証（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1。#11/#12は`1a1ab57`、#13は`1bcc19a`へ分け、#14の接続再利用を本節と同じcommitへまとめます。既定データ・設定・利用中ownerは変更せず、以下の保存/端末確認は一時DBと合成入力だけで行いました。
