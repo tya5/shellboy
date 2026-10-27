@@ -65,9 +65,10 @@ async fn same_epoch_preserves_reasoning_without_encrypted_content_and_never_fabr
     ]);
     let payload = json!({"reasoning_epoch":0,"output":output});
     f.append("t", "answer", payload.clone()).await;
-    let original = output.as_array().unwrap().clone();
+    let mut original = output.as_array().unwrap().clone();
+    original[3].as_object_mut().unwrap().remove("id");
     assert_eq!(f.load(&cache, "t").await.materialize(), original);
-    // A cache hit must not normalize missing/null opaque content or drop IDs.
+    // A cache hit preserves opaque reasoning, including its original IDs.
     assert_eq!(f.load(&cache, "t").await.materialize(), original);
     f.db.call(|db| {
         db.execute(
@@ -116,7 +117,9 @@ async fn unchanged_path_hits_and_append_decodes_only_new_nodes_without_modifying
     assert_eq!(cache.stats().parsed_nodes, 2);
     assert_eq!(cache.stats().append_hits, 1);
     let mut expected = vec![original.clone()];
-    expected.extend(answer["output"].as_array().unwrap().iter().cloned());
+    let mut projected = answer["output"].as_array().unwrap().clone();
+    projected[1].as_object_mut().unwrap().remove("id");
+    expected.extend(projected);
     assert_eq!(appended.materialize(), expected);
     assert_eq!(first.materialize(), vec![original]);
     f.db.call(move |db| {
@@ -322,7 +325,9 @@ async fn event_conversion_preserves_tool_items_and_keeps_internal_metadata_out_o
     let items = lease.materialize();
     assert_eq!(items.len(), 3);
     assert!(items[0].get("event_id").is_none());
-    assert_eq!(items[1], call);
+    let mut projected_call = call;
+    projected_call.as_object_mut().unwrap().remove("id");
+    assert_eq!(items[1], projected_call);
     assert_eq!(items[2], result);
     f.db.call(|db| {
         let body: String =
@@ -372,5 +377,60 @@ async fn sparse_lru_metadata_is_reclaimed_and_all_allocated_container_capacity_i
     assert_eq!(cache.stats().metadata_bytes, 0);
     assert_eq!(cache.stats().retained_bytes, 0);
     assert_eq!(cache.stats().live_bytes, 0);
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn outbound_ids_are_removed_across_wrappers_and_stored_spill_without_rewriting_sources() {
+    let f = Fixture::new().await;
+    f.thread("t").await;
+    let message = json!({"type":"message","id":"chatcmpl-msg","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"answer","annotations":[]}],"extension":{"id":"nested"}});
+    let call = json!({"type":"function_call","id":"chatcmpl-call","call_id":"call-shared","name":"shell","arguments":"{}","status":"completed","phase":"commentary"});
+    let reasoning =
+        json!({"type":"reasoning","id":"rs-original","summary":[],"encrypted_content":"opaque"});
+    let result = json!({"type":"function_call_output","id":"result-unchanged","call_id":"call-shared","output":"ok"});
+    let mut direct = message.clone();
+    direct.as_object_mut().unwrap().remove("type");
+    direct["event_id"] = json!("internal");
+    let payloads = [
+        direct,
+        json!({"item":message}),
+        json!({"item":call}),
+        json!({"output":[message,call,reasoning,result],"reasoning_epoch":0,"spill_version":1,"source_node_ids":["original"]}),
+    ];
+    for (i, payload) in payloads.iter().enumerate() {
+        f.append("t", &format!("n{i}"), payload.clone()).await;
+    }
+    let mut projected_message = message.clone();
+    projected_message.as_object_mut().unwrap().remove("id");
+    let mut projected_direct = projected_message.clone();
+    projected_direct.as_object_mut().unwrap().remove("type");
+    let mut projected_call = call.clone();
+    projected_call.as_object_mut().unwrap().remove("id");
+    let expected = vec![
+        projected_direct,
+        projected_message.clone(),
+        projected_call.clone(),
+        projected_message,
+        projected_call,
+        reasoning,
+        result,
+    ];
+    let cache = ReplayCache::new(1_000_000);
+    assert_eq!(f.load(&cache, "t").await.materialize(), expected);
+    assert_eq!(f.load(&cache, "t").await.materialize(), expected);
+    f.db.call(move |db| {
+        for (i, payload) in payloads.iter().enumerate() {
+            let raw: String = db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1",
+                [format!("n{i}")],
+                |r| r.get(0),
+            )?;
+            assert_eq!(serde_json::from_str::<Value>(&raw).unwrap(), *payload);
+        }
+        Ok(())
+    })
+    .await
+    .unwrap();
     f.db.shutdown().await.unwrap();
 }

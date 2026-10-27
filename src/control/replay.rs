@@ -11,7 +11,7 @@ use std::{
     },
 };
 
-const ADAPTER_VERSION: u32 = 1;
+const ADAPTER_VERSION: u32 = 2;
 const TOOL_SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Context {
@@ -325,18 +325,32 @@ fn convert(mut value: Value, epoch: i64) -> Vec<Value> {
                 item.get("type").and_then(Value::as_str) != Some("reasoning")
                     || stored_epoch == Some(epoch)
             })
+            .map(outbound_item)
             .collect();
     }
     if let Some(object) = value.as_object_mut() {
         if let Some(item) = object.remove("item") {
-            return vec![item];
+            return vec![outbound_item(item)];
         }
         if object.contains_key("role") {
             object.remove("event_id");
-            return vec![value];
+            return vec![outbound_item(value)];
         }
     }
     Vec::new()
+}
+// Provider-local item identities are not conversation identities. Normalize only
+// the outbound copy; call_id still pairs calls/results and reasoning is opaque.
+fn outbound_item(mut item: Value) -> Value {
+    let message_or_call = match item.get("type").and_then(Value::as_str) {
+        Some("message" | "function_call") => true,
+        None => item.get("role").is_some(),
+        _ => false,
+    };
+    if message_or_call && let Some(object) = item.as_object_mut() {
+        object.remove("id");
+    }
+    item
 }
 // serde_json::Value owns nested strings, Vec capacity and map allocations. The
 // per-map-entry allowance conservatively covers tree-node pointers/alignment.
@@ -354,5 +368,48 @@ fn heap_bytes(value: &Value) -> usize {
                     .sum::<usize>()
         }
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn old_adapter_cache_is_rebuilt_from_unchanged_database() {
+        let root = tempfile::tempdir().unwrap();
+        let worker = crate::storage::DbWorker::open(root.path().join("db"))
+            .await
+            .unwrap();
+        worker.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/AGENTS.md','p','m','now')", [])?;
+            let tx = db.transaction()?;
+            crate::history::append_node(&tx, "t", "n", None, "fixture", &json!({"output":[{"type":"message","id":"chatcmpl-old","role":"assistant","content":[],"status":"completed"}]}), "now")?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let cache = ReplayCache::new(1_000_000);
+        let run = cache.clone();
+        worker.call(move |db| {
+            drop(run.load(db, "t")?);
+            {
+                let mut state = run.state.lock().unwrap();
+                let entry = state.entries.get_mut("t").unwrap();
+                entry.context.adapter_version = 1;
+                // Simulate a retained old conversion, rather than merely testing
+                // version equality: a stale frame must never reach the request.
+                let frame = Arc::get_mut(&mut entry.frames[0]).unwrap();
+                frame.items[0] = json!({"type":"message","id":"chatcmpl-stale"});
+            }
+            let lease = run.load(db, "t")?;
+            assert_eq!(lease.materialize(), vec![json!({"type":"message","role":"assistant","content":[],"status":"completed"})]);
+            let saved: String = db.query_row("SELECT payload_json FROM node WHERE id='n'", [], |r| r.get(0))?;
+            assert_eq!(serde_json::from_str::<Value>(&saved).unwrap()["output"][0]["id"], "chatcmpl-old");
+            assert_eq!(run.stats().parsed_nodes, 2);
+            assert_eq!(run.stats().hits, 0);
+            Ok(())
+        }).await.unwrap();
+        worker.shutdown().await.unwrap();
     }
 }

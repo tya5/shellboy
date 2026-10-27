@@ -206,3 +206,12 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 - 理由: 提案のmintty一律非対応やWSLからWindows版起動不可能という一般化は採用しない。mintty公式はConPTY対応を説明しており、Windows/WSL相互運用自体と製品が採用している構成は別である。未確認を保証/非対応と取り違えず、まずWindows Terminal等からWindows版、WSL内はLinux版へ案内する。
 - 検証: macOSの実binary/PTYとloopback mockで、親PATHをOS標準directoryだけにして絶対パス起動し、モデルのBashが短い名前で同じCLIのversion/docsを実行できた。Windows/Git Bash/pwsh/mintty/WSL実機へ結果を読み替えない。
 - 影響: ドキュメントだけを変更し、shell adapter、PATH優先順位、保存schema、依存は変更しない。Windows実機での組合せごとの受入は環境が得られた時点で別途記録する。
+
+
+## 2026-10-27: provider固有の項目IDは送信用copyから除く（Issue #10）
+
+- 判断: replay adapterを2へ上げ、message（type省略のrole形式を含む）とfunction_callの直下idを共通変換で外す。IDのprefixを判定する方式にはしない。call_id、phase、status、未知フィールド、reasoningは変更しない。
+- 理由: 接続先で有効なitem ID形式が異なり、特定prefixだけの許可/拒否ではproxy変換に追従できない。toolの対応はcall_idで維持する。元JSONをDBへ残し、送信copyのみに適用すれば監査と再送を両立できる。OpenAI Docsの[function calling](https://developers.openai.com/api/docs/guides/function-calling)もcall_idで結果を関連付け、reasoning項目の再送を案内している。
+- 影響: 通常履歴・item wrapper・spill内outputへ同じ変換を適用する。spillの保存時点ではIDを除去せず、古いspillを含めAPIへ送る際に正規化する。新しいschema、設定、worker、自動HTTP400再試行は追加しない。
+- 境界: 既存のowner再起動は復旧待ちを含む旧Runを停止するため、停止済みRunへの/retryを新たに許可しない。再オープンした同じThreadで新しい依頼を送る場合と、生存owner内の復旧待ちへの明示/retryを確認する。
+- 再確認条件: reasoningのID/暗号化本文に別provider互換問題が確認された場合は、そのprovider入力契約とepochを別途検討する。今回のmessage/function_callの処置をreasoningへ拡張しない。

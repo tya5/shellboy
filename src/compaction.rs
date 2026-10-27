@@ -1131,9 +1131,9 @@ mod tests {
                 INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','attempt','u','completed','now');
                 INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g','call',0,'shell','{}','completed');")?;
             for (id, payload) in [
-                ("call", json!({"group_id":"g","output":[{"type":"function_call","call_id":"call","name":"shell","arguments":"{}"}]})),
+                ("call", json!({"group_id":"g","output":[{"type":"function_call","id":"chatcmpl-spilled-call","call_id":"call","name":"shell","arguments":"{}"}]})),
                 ("audit", json!({"text":"AUDIT-ONLY"})),
-                ("human", json!({"role":"user","content":"PRESERVE-HUMAN","event_id":"internal-event"})),
+                ("human", json!({"role":"user","id":"chatcmpl-spilled-human","content":"PRESERVE-HUMAN","event_id":"internal-event"})),
                 ("result", json!({"group_id":"g","item":{"type":"function_call_output","call_id":"call","output":"{}"}})),
             ] {history::append_node(&tx,"t",id,None,"message",&payload,"now")?;}
             tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','call','result','completed')",[])?;
@@ -1153,8 +1153,23 @@ mod tests {
             let output=payload["output"].as_array().unwrap();
             assert_eq!(output.len(),3);
             assert_eq!(output[0]["type"],"function_call");
-            assert_eq!(output[1],json!({"role":"user","content":"PRESERVE-HUMAN"}));
+            assert_eq!(output[1],json!({"role":"user","id":"chatcmpl-spilled-human","content":"PRESERVE-HUMAN"}));
             assert_eq!(output[2]["type"],"function_call_output");
+            assert_eq!(output[0]["id"],"chatcmpl-spilled-call");
+            let lease=crate::control::replay::ReplayCache::new(1_000_000).load(db,"t")?;
+            let projected=lease.materialize();
+            assert_eq!(projected.len(),3);
+            assert!(projected[0].get("id").is_none());
+            assert_eq!(projected[0]["call_id"],"call");
+            assert_eq!(projected[1],json!({"role":"user","content":"PRESERVE-HUMAN"}));
+            assert_eq!(projected[2],output[2]);
+            let unchanged:String=db.query_row("SELECT payload_json FROM node WHERE kind='spill'",[],|r|r.get(0))?;
+            assert_eq!(unchanged,body,"sending must not rewrite saved spill JSON");
+            for (id, expected) in [("call","chatcmpl-spilled-call"),("human","chatcmpl-spilled-human")] {
+                let raw:String=db.query_row("SELECT payload_json FROM node WHERE id=?1",[id],|r|r.get(0))?;
+                let original:Value=serde_json::from_str(&raw).unwrap();
+                assert_eq!(if id=="call" {&original["output"][0]["id"]} else {&original["id"]},expected);
+            }
             assert_eq!(payload["source_node_ids"],json!(["call","audit","human","result"]));
             assert_eq!(db.query_row("SELECT COUNT(*) FROM replacement_source WHERE source_node_id IN ('audit','human')",[],|r|r.get::<_,i64>(0))?,2);
             Ok(())

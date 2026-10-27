@@ -6,7 +6,7 @@
 
 cacheの文脈はThread ID、selection revision、profile revision、profile/model、reasoning epoch、固定adapter/tool schema版を持つ。同じ文脈と同じ経路はhit。profile/model/epoch/adapter/tool変換条件が変わらず既存経路の完全なprefixへ通常appendした場合は、既存nodeの変換済みitemをArcで再利用し、新しいsuffixだけをDBから読んで変換する。経路の置換・巻戻し・compaction・実profile/model/epoch変更・同経路のselection revision変更は対象Threadを再構築する。fork先は別Threadのentryであり元Threadのentryを変更しない。profile revisionは観測・API直前CASのため記録するが、effort/cwdだけの変更では全履歴を再変換しない。要求ごとのeffort等の値は履歴itemへ埋め込まずrequest設定として組み立てる。
 
-API itemは immutable な変換結果として保持する。reasoning itemは対応nodeのepochが現在のepochと一致するときだけ送信対象へ入れる。model A→B→Aでもepochを戻さず、旧opaqueを復活させない。tool call/result、item ID、phase等の元API項目は維持する。event envelopeの内部event_idだけを送信用copyから外し、DB JSONを更新しない。暗号化reasoningを平文へ変換・索引化しない。
+API itemは immutable な変換結果として保持する。reasoning itemは対応nodeのepochが現在のepochと一致するときだけ送信対象へ入れる。model A→B→Aでもepochを戻さず、旧opaqueを復活させない。送信用copyではmessage（type省略のrole形式を含む）とfunction_callの直下idだけを外す。接続先・adapter固有IDを別接続先へ持ち込まないためで、call_id、phase、status、content、未知フィールドとネストしたidは維持する。function_call_outputやreasoningのidは変更しない。event envelopeの内部event_idも従来どおり外し、DB JSONを更新しない。通常output・item wrapper・直接role・spill内outputの全経路に同じ送信変換を適用する。spillの保存JSONやsummary用の出典原文は変更しない。adapter版を2へ更新し、旧版cacheは再利用しない。cacheは非永続なので既存DBも再起動時に現行変換で読み直す。HTTP 400を理由とする自動再送は追加せず、既存の明示/retryで同じ変換を使う。暗号化reasoningを平文へ変換・索引化しない。
 
 `cache.history_bytes` を全Threadの保持entry合計へ適用し、Thread単位LRUで回収する。重みはUTF-8 serialized長だけでなく、Value配列/文字列capacity/JSON map構造とnode metadataを含む保守的なRAM見積りとする。appendで再利用したArcの本文は一回だけ数える。0は保持cache無効で、要求処理を拒否しない。entry自体が枠を超える場合も非cacheの作業領域として要求を組み立てる。
 
@@ -18,7 +18,7 @@ DB transactionが失敗したcacheの一時entryに依存してHTTPを開始し�
 
 ## 境界の検証
 
-`tests/replay_cache.rs` は7件で、通常appendの変換件数、共有LRUとpin clone、0/過大entry、経路置換/巻戻し/版変更、effort-only再利用、model epoch、rollback後の再照合を確認する。実driverのA→B→Aと原文保持は `tests/runtime_features.rs` が別に担当する。
+`tests/replay_cache.rs` は9件で、通常appendの変換件数、共有LRUとpin clone、0/過大entry、経路置換/巻戻し/版変更、effort-only再利用、model epoch、rollback後の再照合を確認する。実driverのA→B→Aと原文保持は `tests/runtime_features.rs` が別に担当する。
 
 失敗HTTPのlease解除位置も確認した。初期接続では成功応答の分岐後だけ解除しており、context超過から要約待ちへ入る間に旧要求の13,156byteがpinされた。既存のoverflow結合試験に、summary HTTPが保留中のpinned_bytes=0を追加すると失敗した。解除をHTTP outcome取得直後（成功/失敗/取消しの分岐前）へ移し、同target13件と全targets Clippyの成功を確認した。要約を待つために終了済み要求のpinを保持しない。
 

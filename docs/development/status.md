@@ -4,6 +4,12 @@
 
 v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
+## Issue #10: 接続先固有の履歴item ID（未リリース）
+
+送信用copyからmessage/function_callの直下idだけを外し、call_id・phase・status・未知フィールド・同epoch reasoningを維持します。通常履歴・wrapper・直接role・保存済みspillに共通適用し、adapter版を2へ上げました。元DBとspill原文は書き換えません。
+
+既存DBの再オープン、生存owner内のHTTP400復旧待ち→明示/retry、実spillの再送、旧adapter cacheの再構築を確認しました。対象6群553 passed / 0 failed / 3 ignored、最終all-target strict Clippy・fmtが成功しました。owner再起動で停止する旧Runをretryする新仕様は加えていません。同じThreadの履歴を使った新しい依頼は現行変換を使います。ローカルLiteLLM/lunaの合成2要求は正常完了しましたが、reasoningは返らず、その実provider再送とWindows社内proxyは未検証です。最終テスト結果は [検証状況](../validation/acceptance.md) に記録します。push・release・インストール済みbinaryの更新は行いません。
+
 ## Issue #4: 環境別の起動ガイドとPATH（未リリース）
 
 設定ガイドに端末・起動元shell・モデル用shellの区別と、Windows PowerShell/Git Bash、mintty、WSL、macOS/Linuxの構成を追加しました。PowerShell 7とGit BashのTOML例、避けるランチャー、Windows版からWSL shellを使う構成が対象外であることを示します。minttyはConPTY対応があるため一律非対応とはせず、未検証の構成として案内します。

@@ -2,6 +2,18 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #10: 接続先が混在する履歴の再送（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `609b244` から本節と同じcommitの変更です。送信用projectionだけでmessage/function_callの直下idを除去し、保存JSON、call_id、phase/status、未知・ネストフィールド、同epoch reasoningを保持します。
+
+- 最終 `cargo test --locked --lib --test replay_cache --test runtime_features --test runtime --test model --test model_http --no-fail-fast` は6群553 passed / 0 failed / 3 ignored。実Compactorによるspill生成→ReplayCache送信変換、保存spill/元nodeの不変、通常/wrapper/直接roleのprojection、同epoch reasoningとepoch切替、旧adapterのstale frame破棄を確認しました。先行4群513件は最終群に含むため重複計上しません。
+- 最終all-target strict Clippyは成功。初回は追加テストの固定fixture配列をVecにした警告1件で失敗し、arrayへ直して再実行しました。製品コードは6群成功時から変更していません。最終replay_cache群の再実行も9 passed / 0 failedです（553件に重複加算しません）。fmt/diffと変更文書の相対リンク34件は成功。全70群の標準testとWindows/Linux native CIは未実施です。
+- 既存DBを閉じて再オープン後にRunを開始し、mock HTTP400→復旧待ち→明示RunRetry→正常完了、保存済みJSON文字列の不変を確認しました。不正なmessage/function_call idが残ればmockが拒否します。自動HTTP400再試行は加えていません。
+- ownerの正常終了・クラッシュ再起動は既存Runを停止する契約です。再起動を挟んだ同じRunへのretry成功は主張せず、同じThreadの保存履歴を再オープンした場合と、生存owner内のretryを確認します。
+- `127.0.0.1:4000/v1/responses` の `gpt-5.6-luna` に合成データだけで2要求を送り、どちらもHTTP200/completed（約1.56秒・1.44秒）。実際の回答messageと合成function_call/resultのIDを送信copyから除いた再送が受理されました。この確認はPython製の最小HTTP probeであり、Rust製品のprojectionは別の回帰で検証します。store:false・非stream・最大出力512、ユーザー履歴/configは送信せず、shellを実行していません。proxyからreasoningが返らなかったため、実際のreasoning/暗号化本文の再送は未検証です。
+
+Windows/会社Azure proxy、他モデル、reasoningやfunction_call_output固有IDのprovider互換は今回の成功に含めません。新schema/設定/worker/依存は追加せず、既定データ・owner・インストール済みbinaryは変更しません。push・releaseは行いません。
+
 ## Issue #4: 環境別の起動案内とPATH（未リリース）
 
 2026-10-27、変更前HEAD `eab140b`、macOS ARM64 / Rust 1.99.1。今回の差分はガイド・判断記録・検証記録だけです。起動環境の案内はRustのshell adapterとcurrent_exeによるPATH追加に照合しました。

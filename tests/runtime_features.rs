@@ -1154,6 +1154,162 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_recovery() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let original_owner = owner(root.path(), &url).await;
+    let original_control = Control::new(&original_owner, root.path().into());
+    let thread = thread(&original_control).await;
+    let reasoning = json!({"type":"reasoning","id":"rs-retained","status":"completed","summary":[],"encrypted_content":"opaque-same-epoch"});
+    let message = json!({"type":"message","id":"chatcmpl-proxy-answer","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"previous provider answer"}],"provider_extension":{"id":"nested-id-kept","value":7}});
+    let call = json!({"type":"function_call","id":"chatcmpl-proxy-call","call_id":"call-kept-exactly","name":"shell","arguments":"{\"command\":\"printf historical\"}","phase":"commentary","status":"completed","provider_extension":{"id":"nested-call-id-kept"}});
+    let result = json!({"type":"function_call_output","call_id":"call-kept-exactly","output":"historical result"});
+    let target = thread.clone();
+    let saved_reasoning = reasoning.clone();
+    let saved_message = message.clone();
+    let saved_call = call.clone();
+    let saved_result = result.clone();
+    let original_bodies = original_control.store.database.call(move |db| {
+        let epoch: i64 = db.query_row("SELECT reasoning_epoch FROM thread WHERE id=?1", [&target], |r| r.get(0))?;
+        let tx = db.transaction()?;
+        shellboy::history::append_node(&tx, &target, "legacy-provider-response", None, "assistant_response", &json!({"reasoning_epoch":epoch,"output":[saved_reasoning,saved_message,saved_call]}), "2026-10-01T00:00:00Z")?;
+        shellboy::history::append_node(&tx, &target, "legacy-provider-result", None, "tool_result", &json!({"item":saved_result}), "2026-10-01T00:00:01Z")?;
+        let bodies = ["legacy-provider-response", "legacy-provider-result"].into_iter().map(|id| {
+            tx.query_row("SELECT payload_json FROM node WHERE id=?1", [id], |r| r.get::<_, String>(0))
+        }).collect::<rusqlite::Result<Vec<_>>>()?;
+        tx.commit()?;
+        Ok(bodies)
+    }).await.unwrap();
+    original_control.shutdown().await.unwrap();
+    drop(original_control);
+    original_owner.shutdown().await.unwrap();
+
+    // Reopen existing persisted history before starting the recoverable Run.
+    // Graceful owner shutdown intentionally terminates live Runs; it is not a
+    // supported way to retain an in-flight RunRetry target across a restart.
+    let reopened = DataOwner::start(
+        Some(root.path().join("config.toml")),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&reopened, root.path().into());
+    let accepted: MessageAccepted = serde_json::from_value(
+        request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(thread.clone()),
+                text: "continue existing provider history".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let mut expected_message = message;
+    expected_message.as_object_mut().unwrap().remove("id");
+    let mut expected_call = call;
+    expected_call.as_object_mut().unwrap().remove("id");
+    let check_input = |body: &Value| {
+        let items = body["input"].as_array().unwrap();
+        assert!(
+            items.contains(&reasoning),
+            "same-epoch reasoning must remain exact"
+        );
+        assert!(
+            items.contains(&expected_message),
+            "message phase/status/unknown fields must survive"
+        );
+        assert!(
+            items.contains(&expected_call),
+            "function call linkage and unknown fields must survive"
+        );
+        assert!(
+            items.contains(&result),
+            "completed tool result must remain linked"
+        );
+        assert!(!items.iter().any(|item| matches!(
+            item["type"].as_str(),
+            Some("message" | "function_call")
+        ) && item.get("id").is_some()));
+    };
+    let first = incoming(&mut receive).await;
+    check_input(&first.body);
+    first
+        .reply
+        .send((
+            400,
+            json!({"error":{"code":"fixture_recovery","message":"explicit retry required"}}),
+        ))
+        .unwrap();
+    settled(&control, &thread).await;
+    let turn = accepted.turn_id.unwrap();
+    let target = turn.clone();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let state: String =
+                db.query_row("SELECT state FROM turn WHERE id=?1", [target], |r| r.get(0))?;
+            assert_eq!(state, "recovery_wait");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        receive.try_recv().is_err(),
+        "HTTP400 must not automatically retry"
+    );
+    request(
+        &control,
+        Command::RunRetry(RunTarget {
+            run_id: accepted.run_id.unwrap(),
+        }),
+    )
+    .await;
+    let retry = incoming(&mut receive).await;
+    check_input(&retry.body);
+    // Model a Responses backend that rejects provider-specific output item IDs.
+    let rejects_ids = retry.body["input"].as_array().unwrap().iter().any(|item| {
+        matches!(item["type"].as_str(), Some("message" | "function_call"))
+            && item.get("id").is_some()
+    });
+    retry.reply.send(if rejects_ids {
+        (400, json!({"error":{"code":"invalid_value","message":"item.id must have a Responses-compatible prefix"}}))
+    } else {
+        (200, answer("existing history and explicit recovery succeeded"))
+    }).unwrap();
+    settled(&control, &thread).await;
+    control
+        .store
+        .database
+        .call(move |db| {
+            let state: String =
+                db.query_row("SELECT state FROM turn WHERE id=?1", [turn], |r| r.get(0))?;
+            assert_eq!(state, "completed");
+            for (id, original) in ["legacy-provider-response", "legacy-provider-result"]
+                .into_iter()
+                .zip(original_bodies)
+            {
+                let saved: String =
+                    db.query_row("SELECT payload_json FROM node WHERE id=?1", [id], |r| {
+                        r.get(0)
+                    })?;
+                assert_eq!(
+                    saved, original,
+                    "outbound normalization must not mutate persisted JSON"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    control.shutdown().await.unwrap();
+    reopened.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_message_retry() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
