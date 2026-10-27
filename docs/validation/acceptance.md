@@ -2,6 +2,19 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #4: 環境別の起動案内とPATH（未リリース）
+
+2026-10-27、変更前HEAD `eab140b`、macOS ARM64 / Rust 1.99.1。今回の差分はガイド・判断記録・検証記録だけです。起動環境の案内はRustのshell adapterとcurrent_exeによるPATH追加に照合しました。
+
+- `cargo test --locked --lib docs::tests` と同じfilterでガイド単体8 passed / 0 failed。最後の差分はmintty URLのfragment除去、未確認環境の表現限定、空白パス例の文言整合だけです。後続の最終 `cargo test --locked --test docs_cli --test docs_proxy --no-fail-fast` はdocs CLI3 passed / 0 failed、実API opt-in1 ignored。最初のfilter付きコマンドで統合群は0件だったため、最終はfilterなしで実行し、0件実行を成功件数に加算しません。
+- 設定ガイドのTOMLコードblock3件をPython tomllibでparseし、PowerShell 7/Git Bashのliteral backslashを含む構文が有効なことを確認。配置先や実行ファイルの存在は各環境で設定する前提です。
+- 実PATH確認は `eab140b` のdebug実binary（SHA-256 `47cf1aee9abe16c1508b7c946206bb1cb0521dc55f9bc020c01355f83834edfb`）を絶対パスでmacOS PTYへ起動。親PATHを `/usr/bin:/bin:/usr/sbin:/sbin` だけにし、モデル用Bashを `/bin/bash` に固定しました。loopback HTTP mockからshellを呼び、`command -v shellboy`が同じbinaryへ解決し、`shellboy --version`・設定ガイドgetが成功、markerを次のモデル要求が受け取り、mock合計2要求・TUI終了0でした。ガイドの文面変更後に同じ実PATH試験を繰り返してはいませんが、該当Rust処理は変更していません。
+- fixtureのdata/configは一時領域で破棄し、既定の設定・DB・ownerは変更していません。モデル/API/embeddingの外部要求はありません。
+- Windows/PowerShellのpipe・Job等のnative CIは公開済み版の記録を参照します。Windows Terminal/WezTerm/Git Bash/pwsh/mintty/WSLでの今回の対話実機確認は未実施。mintty公式のConPTY対応とGit for Windows公式のbin wrapper説明に照合し、一律に非対応とする提案は採用していません。
+
+fmt/diff、文書相対リンク、差分の秘密情報検査をcommit前に確認します。今回push・release・ローカルbinaryの置換は行いません。
+
+
 ## Issue #9: 明示的な全画面再描画（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `7dc1726` から本節と同じcommitの差分を確認しました。最終 `cargo test --locked --lib --test ui --test tui_process --test terminal_links --test tui_shutdown --no-fail-fast` は5群549 passed / 0 failed / 3 ignoredです。

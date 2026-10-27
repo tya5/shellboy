@@ -4,6 +4,61 @@
 
 設定はowner（サブコマンドなしの `shellboy`）起動時に読むTOMLです。現行 `src/config.rs` のキーと既定値に対応します。省略した節・キーには既定値が入り、未知キー、型違い、不正な組合せは `config_invalid` で拒否します。ファイルを書き換えても稼働ownerへhot reloadされません。
 
+## 環境別の起動方法
+
+TUIを表示する**端末**、Shellboyを起動する**利用者のshell**、モデルのコマンドを実行する**設定内のshell**は別のものです。PowerShellから起動してモデルにはGit Bashを使わせる構成もできます。配布binaryは [Releases](https://github.com/tya5/shellboy/releases) からOS・CPUに合うものを選びます。
+
+| 環境・用途 | TUIを起動する場所 | 使うbinary | モデルのshell設定 |
+|---|---|---|---|
+| Windows / PowerShell | Windows TerminalやWezTermのPowerShell、又はPowerShellのコンソール | Windows版 | 既定の`powershell.exe`。PowerShell 7は`executable`を指定 |
+| Windows / Git Bashを使わせる | 同上。起動元はPowerShellでもよい | Windows版 | `kind = "bash"`とGit for Windowsの`bin\bash.exe`を指定 |
+| Git Bashの窓（mintty） | 直接のTUI起動は構成依存・未検証。まずWindows Terminalなどへ切り替える | Windows版 | 上のWindows用設定と同じ。端末を変える操作とは別 |
+| WSL | WSLの中の対話端末 | Linux版 | 既定のBash。`XDG_RUNTIME_DIR`の手動設定は不要 |
+| macOS / Linux | 各OSの対話端末 | 各OS版 | 既定のBash |
+
+Windows TerminalのプロファイルにGit Bashを設定して起動する場合も、minttyを新しく開く`git-bash.exe`ではなくGit for Windowsの`bin\bash.exe`を使います。端末起動用プロファイルと、以下のモデル用`[shell]`設定は別々に指定します。
+
+### Windowsのshell設定例
+
+既定はWindows PowerShellです。起動元がPowerShell 7でも、モデル用shellを自動的にpwshへ切り替えることはありません。PowerShell 7を明示する例:
+
+```toml
+[shell]
+kind = "powershell"
+executable = 'C:\Program Files\PowerShell\7\pwsh.exe'
+```
+
+Git Bashをモデル用shellにする例:
+
+```toml
+[shell]
+kind = "bash"
+executable = 'C:\Program Files\Git\bin\bash.exe'
+```
+
+この2例は選択肢です。同じ設定ファイルに`[shell]`を重複させず、利用する方だけを選び、インストール先が違えば実在するパスへ変えます。`Git\bin\bash.exe`はMSYSTEMやPATHを整えて内部のBashを起動するため、環境準備を省く`Git\usr\bin\bash.exe`の直接指定よりこちらを使います。[Git for Windowsの説明](https://gitforwindows.org/git-wrapper.html)も参照してください。
+
+`git-bash.exe`は端末を開くランチャーなので、モデル用shellの実行ファイルには使いません。`C:\Windows\System32\bash.exe`はWSLランチャーで、Git Bashとして使おうとするとshell実行時に拒否されます。モデルのcommandは選んだshellの構文で書きます（[shellガイド](shell.md#powershellの引数)）。
+
+PowerShellから、空白を含むパスに置いたWindows版を絶対パスで起動する例:
+
+```powershell
+Set-Location C:\work\project
+& 'C:\Program Files\Shellboy\shellboy.exe' --config 'C:\config\shellboy.toml'
+```
+
+### minttyとWSLの区別
+
+minttyのPTYとネイティブWindowsのコンソールAPIの組合せでは、raw modeや入力・画面制御がうまくつながらないことがあります。ただしConPTY対応で状況が変わるため、すべての構成で起動不可能とは断定しません。[minttyの公式説明](https://mintty.github.io/mintty.1.html)を参照してください。
+
+mintty上でのShellboyの対話実機確認は未実施です。問題時はまずWindows TerminalやWezTermのPowerShellで起動してください。minttyでの`winpty shellboy.exe`やConPTY設定は代替候補ですが、Shellboyでの動作確認はできていません。`winpty`を使う場合も別途その実行ファイルが必要です。
+
+WSLでは、そのLinux環境内にLinux版を配置して起動します。Windows本体からWSLのBashをモデル用shellとして起動する構成は対象外です。WSLからWindowsプログラムを呼べることと、Shellboyで採用している構成は区別してください。WSLの保存先・設定はLinux側のものを使います。
+
+### 確認済みの範囲
+
+Windows native CIでPowerShellのpipe実行・終了・環境変数・子プロセス管理などを確認していますが、Windows Terminal/WezTermの対話操作やGit Bash/pwsh/minttyの実機受入を代替するものではありません。これらとWSL実機の確認は未実施です。macOSでは実binaryを絶対パスで起動し、親PATHからその配置先を外した状態でも、モデルのBashから短い名前でCLIを実行できることを確認しました。詳しい条件は [検証状況](../validation/acceptance.md) のIssue #4を参照してください。
+
 ## ソースからの最小導入
 
 リポジトリを配置した環境で、[開発環境の前提とOS別準備](../development/setup.md) を確認してください。固定Rust toolchain（`rust-toolchain.toml`）と、bundled SQLite等をビルドするCツールチェーンが必要です。設定・データ・資格情報はソースツリーへ入れません。
@@ -16,9 +71,11 @@ cargo build --locked --release --bin shellboy
 ./target/release/shellboy --config /absolute/path/config.toml
 ```
 
-最後のコマンドは対話端末からTUIを起動します。上の最小接続例を自分の環境へ合わせて保存し、資格情報の環境変数を先に設定してください。PowerShellではリポジトリへ移動して同じcargoコマンドを実行し、`./target/release/shellboy.exe --config C:/absolute/path/config.toml` で起動します。OS別の実機確認範囲はsetupの検証記録と区別してください。
+最後のコマンドは対話端末からTUIを起動します。後述の最小接続例を自分の環境へ合わせて保存し、資格情報の環境変数を先に設定してください。PowerShellではリポジトリへ移動して同じcargoコマンドを実行し、`./target/release/shellboy.exe --config C:/absolute/path/config.toml` で起動します。OS別の実機確認範囲はsetupの検証記録と区別してください。
 
-モデルのshellからも `shellboy` CLIを呼ぶため、生成binaryをPATH上のディレクトリへ配置するか、起動前にそのディレクトリをPATHへ追加します。例えばBashでリポジトリ内から `export PATH="$PWD/target/release:$PATH"`、PowerShellで `$env:PATH = "$PWD/target/release;$env:PATH"` とします。PATH追加はその端末の環境です。恒久配置する場合は自分のOSのユーザー用binを使い、更新時は稼働ownerを終了してから置き換えます。
+モデルのshellを起動するとき、Shellboyは自分の実行ファイルがあるディレクトリを、そのshellのPATHの先頭へ自動で追加します。**モデルからCLIを呼ぶためだけのPATH設定は不要**です。Shellboy自体を絶対パスで起動した場合も同じです。
+
+利用者が自分の端末から `shellboy` という短い名前で起動・CLI操作したい場合は、配置先を利用者側のPATHへ登録してください。Bashならリポジトリ内から `export PATH="$PWD/target/release:$PATH"`、PowerShellなら `$env:PATH = "$PWD/target/release;$env:PATH"` のように設定できます。絶対パスを指定して呼ぶ場合はこの登録も不要です。PATH追加はその端末の環境です。恒久配置する場合は自分のOSのユーザー用binを使い、更新時は稼働ownerを終了してから置き換えます。
 
 ## 配置と優先順位
 

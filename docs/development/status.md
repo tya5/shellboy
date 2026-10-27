@@ -4,6 +4,12 @@
 
 v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
+## Issue #4: 環境別の起動ガイドとPATH（未リリース）
+
+設定ガイドに端末・起動元shell・モデル用shellの区別と、Windows PowerShell/Git Bash、mintty、WSL、macOS/Linuxの構成を追加しました。PowerShell 7とGit BashのTOML例、避けるランチャー、Windows版からWSL shellを使う構成が対象外であることを示します。minttyはConPTY対応があるため一律非対応とはせず、未検証の構成として案内します。
+
+モデル用shellのPATHは自動設定される実装へ説明を修正しました。macOSの実binaryを配置先なしの親PATHから絶対パスで起動し、モデルのBashから短いCLI名でversion/docsを実行できました。ガイド単体8件と最終CLI3件、TOML例3件、相対リンク検査が成功しました。Windows/WSLの対話実機は未実施です。製品Rustコード・設定・保存データ・公開版・ローカルbinaryの変更はありません。
+
 ## Issue #9: Ctrl+Lの全画面再描画（未リリース）
 
 通常UI・一覧・詳細・popup・選択固定中のCtrl+Lで、状態を保持して画面と差分buffer・リンク領域を無効化します。送信/改行へ同じキーを割り当てた場合は設定を優先し、helpへ無効理由を表示します。再描画予約はbool一つへ集約し、既存max_fpsで処理します。Core操作・表・worker・queue・依存は増やしていません。

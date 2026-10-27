@@ -29,7 +29,7 @@ IDやreceiptは調査の詳細情報です。普段は状態と理由を読み�
 
 作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、子Run、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.md#slash操作一覧)と[CLIの作業状態](cli-reference.md#共通構文と接続)を参照してください。
 
-[設定・導入](configuration.md) に従ってビルド・インストールと接続設定を行った後、ターミナルで次を実行します。例はBash/zsh用です。
+まず[環境別の起動方法](configuration.md#環境別の起動方法)で、端末・OS版binary・モデル用shellの組合せを選びます。[設定・導入](configuration.md) に従ってビルド・インストールと接続設定を行った後、ターミナルで次を実行します。例はBash/zsh用です。
 
 ```sh
 command -v shellboy
@@ -38,7 +38,7 @@ cd /path/to/project
 shellboy
 ```
 
-`/path/to/project`は実在する作業フォルダーへ置き換えます。PATH上で見つからない場合は、インストール先の `bin` ディレクトリをPATHへ追加してください。接続先と資格情報の設定は [設定・導入](configuration.md) を参照してください。ソースcheckoutからのビルド手順は[開発環境](../development/setup.md)にもあります。
+`/path/to/project`は実在する作業フォルダーへ置き換えます。短い名前がPATH上で見つからない場合は、インストール先のディレクトリを利用者のPATHへ追加するか、binaryを絶対パスで呼んでください。モデル用shellのCLI探索にはShellboyがPATHを自動設定します。接続先と資格情報の設定は [設定・導入](configuration.md) を参照してください。ソースcheckoutからのビルド手順は[開発環境](../development/setup.md)にもあります。
 
 設定と保存先を明示する場合は次の形です。
 

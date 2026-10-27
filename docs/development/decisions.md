@@ -199,3 +199,10 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 - 理由: 初回の実PTY試験で、固定Ratatui版のTerminal::clearがget_cursor_positionのDSR応答を待つと確認した。実際のサイズ変更と同じ内部clear_viewportを使えば、端末への往復照会を増やさず、画面と差分bufferとリンクmetadataを無効化できる。
 - 影響: 選択固定中も手動再描画だけを許可する。送信/改行へのCtrl+L設定は優先し、ヘルプで無効理由を示す。周期的repaintや文字幅方針の変更は含めない。
 - 再確認条件: Ratatui更新時にclear/resizeのcursor照会・buffer無効化契約を見直す。Windows実端末での表示ずれ原因は別途確認する。
+
+## 2026-10-27: 環境別の起動案内は実装と確認範囲を分ける（Issue #4）
+
+- 判断: 端末・起動元shell・モデル用shellを分け、Windows/PowerShell、Windows/Git Bash、mintty、WSL、macOS/Linuxの構成と設定例をガイドへ追加する。モデル用PATHはcurrent_exe親を自動追加する実装へ記述を合わせる。
+- 理由: 提案のmintty一律非対応やWSLからWindows版起動不可能という一般化は採用しない。mintty公式はConPTY対応を説明しており、Windows/WSL相互運用自体と製品が採用している構成は別である。未確認を保証/非対応と取り違えず、まずWindows Terminal等からWindows版、WSL内はLinux版へ案内する。
+- 検証: macOSの実binary/PTYとloopback mockで、親PATHをOS標準directoryだけにして絶対パス起動し、モデルのBashが短い名前で同じCLIのversion/docsを実行できた。Windows/Git Bash/pwsh/mintty/WSL実機へ結果を読み替えない。
+- 影響: ドキュメントだけを変更し、shell adapter、PATH優先順位、保存schema、依存は変更しない。Windows実機での組合せごとの受入は環境が得られた時点で別途記録する。
