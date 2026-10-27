@@ -40,7 +40,7 @@ async fn an_already_queued_management_result_stays_durable_but_cannot_reopen_a_c
                 if matches!(&update,UiUpdate::ScopedManagement{update,..} if matches!(update.as_ref(),UiUpdate::StructuredManagement{..})) {return update;}
                 ui.apply(update);for action in ui.take_deferred_actions(){sender.try_send(action).unwrap();}
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
     }).await.unwrap();
     let count = control
@@ -88,13 +88,5 @@ async fn an_already_queued_management_result_stays_durable_but_cannot_reopen_a_c
         "closing the view does not cancel or repeat a committed mutation"
     );
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while !bridge.is_finished() {
-            super::drain(&incoming);
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    super::finish_bridge(bridge, &incoming).await;
 }

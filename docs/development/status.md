@@ -8,7 +8,7 @@ v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編�
 
 #15のThread session header、任意prompt_cache_key、正確なattemptに結び付くcached_tokensのF6表示を実装しました。#4/#9/#10の文書と再描画試験、#11のHTTP error本文timeout再試行、#13の要求文脈整理、#14の正常SSE後の有限drainと会話経路のpool検証を含みます。追加レビューで見つかった使用量SQLの巨大値の一時複製、drain取消し時の受信推論欠落も修正しました。新schema・依存・worker・queueは追加していません。
 
-最終標準checkは70群1,179 passed / 0 failed / 19 ignored、fmtと全target strict Clippy、履歴/差分の秘密情報検査が成功しました。LiteLLM/lunaの合成4要求も成功し、header有効/無効とも2回目に23,040/23,267 cached_tokensを確認しました。header単体の改善効果とは断定しません。初回pushのCIはLinux/macOS成功、Windowsの既存checkpoint観測試験1件が失敗したため、登録と更新の競合・idle機会の待機を試験側で修正しました。製品の保存処理は変えず、fmt・全target strict Clippyと対象3件が成功しました。修正をpushして3 OS CIを再確認し、成功後にv0.1.4を配布します。公開結果は [acceptance](../validation/acceptance.md) へ追記します。既定データ・設定・利用中processは変更しません。
+最終標準checkは70群1,179 passed / 0 failed / 19 ignored、fmtと全target strict Clippy、履歴/差分の秘密情報検査が成功しました。LiteLLM/lunaの合成4要求も成功し、header有効/無効とも2回目に23,040/23,267 cached_tokensを確認しました。header単体の改善効果とは断定しません。初回pushのCIはLinux/macOS成功、Windowsの既存checkpoint観測試験1件が失敗したため、登録と更新の競合・idle機会の待機を試験側で修正しました。製品の保存処理は変えず、fmt・全target strict Clippyと対象3件が成功しました。次のWindows CIではcheckpointが成功し、別の既存管理画面試験で終了待ちだけがtimeoutしたため、fixture cleanupの共通化・直接await・進捗診断を追加し、Windowsの独立DB fixture同時数を2へ抑えました。製品の終了処理と明示的な並行性試験は変更しません。最終3 OS CIを再確認し、成功後にv0.1.4を配布します。公開結果は [acceptance](../validation/acceptance.md) へ追記します。既定データ・設定・利用中processは変更しません。
 
 ## ローカル試用バイナリ更新（2026-10-27）
 

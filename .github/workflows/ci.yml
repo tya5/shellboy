@@ -31,5 +31,9 @@ jobs:
       - name: Diagnose native Windows overflow recovery
         if: runner.os == 'Windows'
         run: cargo test --locked --test runtime_features both_overflow_retries_preserve_call_groups_and_never_execute_saved_tools_twice -- --exact --nocapture
+      - name: Bound concurrent Windows database fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"RUST_TEST_THREADS=2" >> $env:GITHUB_ENV'
       - name: Tests
         run: cargo test --locked --all-targets --no-fail-fast

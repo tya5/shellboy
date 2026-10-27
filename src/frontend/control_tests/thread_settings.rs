@@ -151,13 +151,5 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         .await
         .unwrap();
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        while !bridge.is_finished() {
-            super::drain(&incoming);
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    super::finish_bridge(bridge, &incoming).await;
 }

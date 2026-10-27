@@ -244,6 +244,44 @@ fn drain(updates: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>) {
     while updates.try_recv().is_ok() {}
 }
 
+// These tests assert eventual cleanup, not the UI's shutdown grace. Await the
+// task directly while draining its bounded update channel, instead of keeping
+// a test runtime busy with yield_now polling during filesystem/IPC shutdown.
+async fn finish_bridge(
+    mut bridge: tokio::task::JoinHandle<Result<(), crate::protocol::ApiError>>,
+    incoming: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>,
+) {
+    let watchdog_seconds = if cfg!(windows) { 30 } else { 15 };
+    let mut last_progress = None;
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(watchdog_seconds), async {
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(5));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            while let Ok(update) = incoming.try_recv() {
+                if let crate::ui::UiUpdate::ShutdownProgress {
+                    elapsed_ms,
+                    detail,
+                    force_available,
+                } = update
+                {
+                    last_progress = Some((elapsed_ms, detail, force_available));
+                }
+            }
+            tokio::select! {
+                result = &mut bridge => return result,
+                _ = tick.tick() => {},
+            }
+        }
+    })
+    .await;
+    let joined = completed.unwrap_or_else(|_| {
+        panic!("frontend cleanup watchdog expired; last progress: {last_progress:?}")
+    });
+    joined
+        .expect("frontend task panicked during cleanup")
+        .expect("frontend graceful cleanup failed");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting() {
     use crate::protocol::{Command, WaitArgs, WaitCondition};
@@ -336,15 +374,7 @@ async fn cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting() 
         .unwrap();
     assert_eq!(other, "live");
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -406,15 +436,7 @@ async fn saturated_queue_quit_persists_prior_send_and_latest_snapshot_without_st
         owner,
         server,
     ));
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
     let db = rusqlite::Connection::open(root.path().join("data/shellboy.db")).unwrap();
     let count:i64=db.query_row("SELECT COUNT(*) FROM node WHERE kind='user' AND payload_json LIKE '%preserved queued message%'",[],|row|row.get(0)).unwrap();
     assert_eq!(count, 1);
@@ -644,15 +666,7 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
         .await
         .unwrap();
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -730,15 +744,7 @@ async fn slash_queue_rejection_and_domain_error_recover_input_but_success_releas
         .unwrap();
     }
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -793,15 +799,7 @@ async fn send_preparation_failure_keeps_newer_input_and_the_original_snapshot() 
     assert_eq!(ui.view().pending[&revision].snapshot.text, "original");
     assert!(ui.view().status.contains(&format!("/restore {revision}")));
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
 }
 
 #[tokio::test]
@@ -1101,15 +1099,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     assert_eq!(refreshed.base_char_offset, original.base_char_offset);
     assert_eq!(ui.view().anchor.node_id.as_deref(), Some("call-node"));
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
 }
 
 mod management_scope;
@@ -1312,19 +1302,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
         );
         assert_eq!(ui.management.as_ref().unwrap().title, "作業状態");
         sender.try_send(UiAction::Quit).unwrap();
-        // This checks eventual cleanup, not the UI shutdown grace. Windows
-        // filesystem/IPC/log joins need headroom beyond that 5-second grace
-        // when the native suite runs many fixtures concurrently.
-        let cleanup_seconds = if cfg!(windows) { 30 } else { 5 };
-        tokio::time::timeout(std::time::Duration::from_secs(cleanup_seconds), async {
-            while !bridge.is_finished() {
-                drain(&incoming);
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("scoped mutation fixture must finish graceful cleanup");
-        bridge.await.unwrap().unwrap();
+        finish_bridge(bridge, &incoming).await;
     }
 }
 
@@ -1450,15 +1428,7 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
         );
     }
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1504,15 +1474,7 @@ async fn quit_preserves_rejected_inactive_and_active_drafts_at_saturated_admissi
         owner,
         server,
     ));
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
     let db = rusqlite::Connection::open(root.path().join("data/shellboy.db")).unwrap();
     for (thread, expected) in [
         ("thread", "inactive latest 日本語"),
@@ -1573,15 +1535,7 @@ async fn quit_before_initial_draft_restore_cannot_mask_an_existing_saved_draft()
         owner,
         server,
     ));
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !bridge.is_finished() {
-            drain(&incoming);
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
-    bridge.await.unwrap().unwrap();
+    finish_bridge(bridge, &incoming).await;
     let db = rusqlite::Connection::open(root.path().join("data/shellboy.db")).unwrap();
     let (count, raw): (i64, String) = db
         .query_row(
