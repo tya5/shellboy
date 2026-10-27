@@ -247,7 +247,7 @@ fn drain(updates: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>) {
 // These tests assert eventual cleanup, not the UI's shutdown grace. Await the
 // task directly while draining its bounded update channel, instead of keeping
 // a test runtime busy with yield_now polling during filesystem/IPC shutdown.
-async fn finish_bridge(
+pub(super) async fn finish_bridge(
     mut bridge: tokio::task::JoinHandle<Result<(), crate::protocol::ApiError>>,
     incoming: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>,
 ) {

@@ -79,3 +79,19 @@ Thread一覧のdrawはtimezone解決・日時解析を行わない。既存の�
 ## 状態色（2026-10-27）
 
 一覧の取得済みThreadSummary.stateだけを表示へ投影し、タイトルと状態cellを同じ色にする。preparing/running/liveはシアン、waiting/stoppingは黄色、recovery_wait/failedは赤、completedは緑、stopped/idle/draft/未知値は既存の通常/選択行の前景色を継承する。状態名の文字と現在Thread/選択/親子の既存markerは保持し、色だけを唯一の情報にしない。状態列を省く狭幅でもタイトル色を維持する。選択背景・太字を残し、選択行の共通前景色で状態色を上書きしない。既存page更新で同じIDのstateが変われば再描画へ反映し、専用pollerやCore状態を追加しない。
+
+## 一覧からの削除（Issue #19）
+
+保存済み会話を選び、DeleteまたはCtrl+Dで削除確認を開く。macOSのBackspaceに相当するdeleteキーは絞り込み削除として維持し、fn+deleteとCtrl+Dを削除入口にする。通常の文字入力・Backspaceは変えない。未保存のローカル下書き行をCoreのThread削除へ送らない。
+
+確認は既存popup枠を使い、既存`thread.delete_preview`で現在の削除可否、live/stopping Run、子の数、直接共有・replacement source・添付参照数を表示する。参照数を回収容量やGCの完全到達可能性へ読み替えない。「子の会話も一緒に削除」は既定falseで、切替えるたびにpreviewを読み直す。子があることだけではUI独自に削除を禁止せず、Coreの`deletable_now`へ従う。
+
+Yは最新previewが同じ対象・descendants・要求IDに一致し、削除可能なときだけ実行する。取得中・失敗・blockedでは受け付けない。N/Escは何も削除せず確認を閉じる。実行は既存`thread.delete`を呼び、Coreが現在のRun等を再判定する。確認後に状態が変わった失敗は一覧に表示し、成功として行を消さない。
+
+UI-localの要求/返答だけを追加し、永続operation・Core command/event・table・workerは増やさない。Frontendは既存の有限command admission・DB/file worker・読取りtaskを使う。UIのOSスレッドでI/Oや待機をしない。previewは要求ID/対象/descendantsを照合して遅い応答を捨て、閉じた確認を再表示しない。受理済み削除の完了は確認の開閉とは独立して反映する。
+
+成功後は、UIが既知の会話IDだけをDB workerで削除済みと照合し、一覧・記憶view・保存下書きbacklog・一時画像の所有を回収する。子孫の全IDを別のCore操作で無制限列挙しない。外部添付ファイルや共有元の履歴をUIから消さない。古い一覧・選択・下書き応答が削除した会話を復活させないよう既存generation/所有の境界を更新する。
+
+背景会話を削除した場合は一覧を保ち、隣の可視行（末尾なら直前）へ選択を移す。現在開いている会話が削除された場合は、削除済みviewを再保存せず新しい下書きへ移る。フィルター、折りたたみ、ページ取得中の遅着にも同じ原則を使う。
+
+確認は一時DBと合成データで、取消し、blocked、子の既定と切替え、確認後のRun開始、遅いpreview/成功、現在会話の破棄と背景会話の選択維持を試験する。macOSではPTY入力も確認し、Windows Terminal実機がない場合は未実施と記録する。

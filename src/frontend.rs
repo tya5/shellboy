@@ -7,6 +7,7 @@ mod draft_saver;
 mod history_reader;
 mod input_history;
 mod received;
+mod thread_deletion;
 use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
 mod management;
 mod management_state;
@@ -246,6 +247,13 @@ fn trace_send(
     );
 }
 enum BackgroundResult {
+    ThreadDeletion {
+        request_id: u64,
+        args: ThreadDeleteArgs,
+        execute: bool,
+        known_thread_ids: Vec<String>,
+        result: Result<thread_deletion::Outcome, ApiError>,
+    },
     StreamFrame {
         ticket: streaming::Ticket,
         result: Result<streaming::Outcome, ApiError>,
@@ -274,6 +282,7 @@ enum BackgroundResult {
         result: Result<Value, ApiError>,
     },
     Image {
+        ticket: u64,
         draft_id: String,
         revision: u64,
         position: usize,
@@ -1061,6 +1070,37 @@ async fn run_with_clipboard_slots(
                                 }
                             }
                         });
+                    }
+                    UiAction::ThreadDeletion { request_id, args, execute, mut known_thread_ids } => {
+                        known_thread_ids.extend(selection.generations.keys().cloned());
+                        known_thread_ids.extend(selection.active_thread.iter().cloned());
+                        known_thread_ids.extend(draft_saver.threads().cloned());
+                        known_thread_ids.extend(images.threads().cloned());
+                        known_thread_ids.sort();
+                        known_thread_ids.dedup();
+                        if known_thread_ids.len() > thread_deletion::MAX_KNOWN_THREADS {
+                            update(&updates, UiUpdate::ThreadDeletion { request_id, args, execute, result: Err(ApiError::new(ErrorCode::InvalidArgument, "削除確認の会話件数が上限を超えました。一覧を更新してください")) }).await;
+                            continue;
+                        }
+                        let control = control.clone();
+                        let results = background_tx.clone();
+                        let action_args = args.clone();
+                        let refusal_args = args.clone();
+                        let work = async move {
+                            let result = thread_deletion::run(&control, action_args, execute).await;
+                            let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, known_thread_ids, result }).await;
+                        };
+                        if execute {
+                            let Ok(permit) = command_slots.clone().try_acquire_owned() else {
+                                // The work future owns its arguments but has not polled or mutated.
+                                drop(work);
+                                update(&updates, UiUpdate::ThreadDeletion { request_id, args: refusal_args, execute, result: Err(ApiError::new(ErrorCode::InvalidState, "操作キューが満杯です。削除は未受付です")) }).await;
+                                continue;
+                            };
+                            spawn_work(&mut workers, permit, work);
+                        } else if !spawn_read(&mut read_workers, &read_slots, &read_cancel, work) {
+                            update(&updates, UiUpdate::ThreadDeletion { request_id, args: refusal_args, execute, result: Err(ApiError::new(ErrorCode::InvalidState, "読取りキューが満杯です。削除確認を再操作してください")) }).await;
+                        }
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
                         let title = command_title(&command);
@@ -1870,6 +1910,7 @@ async fn run_with_clipboard_slots(
                         anchor,
                         follow,
                     } => {
+                        images.associate(&draft.draft_id, &thread_id);
                         images.release(
                             &draft.draft_id,
                             draft.revision,
@@ -1916,7 +1957,7 @@ async fn run_with_clipboard_slots(
                         draft_id,
                         revision,
                         position,
-                        ..
+                        thread_id,
                     } => {
                         let Ok(permit) = clipboard_slots.clone().try_acquire_owned() else {
                             command_outcome::<()>(
@@ -1948,6 +1989,7 @@ async fn run_with_clipboard_slots(
                             },
                         )
                         .await;
+                        let ticket = images.begin_image(&draft_id, thread_id.as_deref());
                         let clipboard = clipboard.clone();
                         let attachments = control.attachments.clone();
                         let timeout = control.store.config.io.file_prepare_timeout_ms;
@@ -1961,9 +2003,10 @@ async fn run_with_clipboard_slots(
                             }
                             .await;
                             command_outcome(&outcomes, submission, &result).await;
-                            if !has_submission || result.is_ok() {
+                            {
                                 let _ = sender
                                     .send(BackgroundResult::Image {
+                                        ticket,
                                         draft_id,
                                         revision,
                                         position,
@@ -2282,6 +2325,42 @@ async fn run_with_clipboard_slots(
                 }
             },
             result=background_rx.recv()=> match result {
+                Some(BackgroundResult::ThreadDeletion { request_id, args, execute, mut known_thread_ids, result }) => {
+                    let result = match result {
+                        Ok(thread_deletion::Outcome::Preview(value)) => Ok(ThreadDeletionReply::Preview(value)),
+                        Ok(thread_deletion::Outcome::Applied) => {
+                            known_thread_ids.push(args.thread_id.clone());
+                            known_thread_ids.extend(selection.generations.keys().cloned());
+                            known_thread_ids.extend(selection.active_thread.iter().cloned());
+                            known_thread_ids.extend(draft_saver.threads().cloned());
+                            known_thread_ids.extend(images.threads().cloned());
+                            match thread_deletion::cleanup(&control, known_thread_ids).await {
+                                Ok((deleted, drafts)) => {
+                                    let ids: HashSet<_> = deleted.iter().cloned().collect();
+                                    draft_saver.forget_threads(&ids);
+                                    images.forget_threads(&ids, &drafts);
+                                    selection.generations.retain(|thread, _| !ids.contains(thread));
+                                    dirty_threads.retain(|thread| !ids.contains(thread));
+                                    refreshing.retain(|thread| !ids.contains(thread));
+                                    pending.retain(|_, value| !ids.contains(&value.0));
+                                    if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
+                                        selection.activate_draft(uuid::Uuid::new_v4().to_string());
+                                        streams.clear();
+                                        stream_retry = None;
+                                    }
+                                    Ok(ThreadDeletionReply::Deleted(deleted))
+                                }
+                                Err(error) => {
+                                    let error = error.details(serde_json::json!({"deletion_accepted":true,"thread_id":args.thread_id}));
+                                    let _ = checked_storage::<()>(&control, Err(error.clone())).await;
+                                    Err(error)
+                                },
+                            }
+                        }
+                        Err(error) => Err(error),
+                    };
+                    update(&updates, UiUpdate::ThreadDeletion { request_id, args, execute, result }).await;
+                }
                 Some(BackgroundResult::StreamFrame { ticket, result }) => {
                     stream_inflight = false;
                     match result {
@@ -2428,6 +2507,7 @@ async fn run_with_clipboard_slots(
                             .await;
                         }
                         if let Some(thread) = thread {
+                            images.associate(&draft_id, &thread);
                             selection.sent(&thread, &draft_id);
                             dirty_threads.insert(thread);
                         }
@@ -2469,11 +2549,14 @@ async fn run_with_clipboard_slots(
                     }
                 },
                 Some(BackgroundResult::Image {
+                    ticket,
                     draft_id,
                     revision,
                     position,
                     result,
-                }) => match result {
+                }) => {
+                    if !images.accept_image(ticket) { continue; }
+                    match result {
                     Ok(image) => {
                         let attachment = UiAttachment {
                             id: image.id.clone(),
@@ -2503,6 +2586,8 @@ async fn run_with_clipboard_slots(
                         )
                         .await
                     }
+                    }
+                    images.prune_owners();
                 },
                 Some(BackgroundResult::Copied {
                     scope,
@@ -2809,7 +2894,7 @@ async fn save_draft(
     follow: bool,
 ) -> Result<(), ApiError> {
     let result = async {
-    control.store.database.call(move|db|{let tx=db.transaction()?;let body=serde_json::to_string(&draft).map_err(|error|crate::storage::StorageError::Configuration(error.to_string()))?;tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,?3,?4,'editing',?5)ON CONFLICT(id)DO UPDATE SET revision=excluded.revision,body_json=excluded.body_json,updated_at=excluded.updated_at WHERE excluded.revision>=draft.revision",rusqlite::params![draft.draft_id,thread,draft.revision as i64,body,chrono::Utc::now().to_rfc3339()])?;tx.execute("INSERT INTO view_state(thread_id,anchor_node_id,anchor_offset,follow_tail,input_state_json)VALUES(?1,?2,?3,?4,'{}')ON CONFLICT(thread_id)DO UPDATE SET anchor_node_id=excluded.anchor_node_id,anchor_offset=excluded.anchor_offset,follow_tail=excluded.follow_tail",rusqlite::params![thread,anchor.node_id,anchor.char_offset as i64,follow])?;tx.commit()?;Ok(())}).await.map_err(storage_error)
+    control.store.database.call(move|db|{let tx=db.transaction()?;let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",[&thread],|row|row.get(0))?;if !live{return Ok(());}let body=serde_json::to_string(&draft).map_err(|error|crate::storage::StorageError::Configuration(error.to_string()))?;tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,?3,?4,'editing',?5)ON CONFLICT(id)DO UPDATE SET revision=excluded.revision,body_json=excluded.body_json,updated_at=excluded.updated_at WHERE excluded.revision>=draft.revision",rusqlite::params![draft.draft_id,thread,draft.revision as i64,body,chrono::Utc::now().to_rfc3339()])?;tx.execute("INSERT INTO view_state(thread_id,anchor_node_id,anchor_offset,follow_tail,input_state_json)VALUES(?1,?2,?3,?4,'{}')ON CONFLICT(thread_id)DO UPDATE SET anchor_node_id=excluded.anchor_node_id,anchor_offset=excluded.anchor_offset,follow_tail=excluded.follow_tail",rusqlite::params![thread,anchor.node_id,anchor.char_offset as i64,follow])?;tx.commit()?;Ok(())}).await.map_err(storage_error)
 
     }.await;
     checked_storage(control, result).await

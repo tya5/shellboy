@@ -2,7 +2,7 @@
 use super::theme;
 use super::{UiAction, popup};
 use crate::protocol::ThreadSummary;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pulldown_cmark::{Event, Options, Parser, TagEnd};
 use ratatui::{
     Frame,
@@ -40,6 +40,7 @@ pub(super) struct ThreadBrowser {
     next_cursor: Option<String>,
     loading: bool,
     error: Option<String>,
+    notice: Option<String>,
     preferred: Option<String>,
     generation: u64,
     filter_deadline: Option<Instant>,
@@ -49,6 +50,7 @@ pub(super) enum ThreadOutcome {
     None,
     Load(Box<UiAction>),
     Open(String),
+    Delete(String),
     Info(String),
 }
 
@@ -90,6 +92,7 @@ impl ThreadBrowser {
         self.generation += 1;
         self.loading = true;
         self.error = None;
+        self.notice = None;
     }
     fn begin(&mut self, cursor: Option<String>) -> UiAction {
         self.filter_deadline = None;
@@ -132,6 +135,49 @@ impl ThreadBrowser {
             self.loading = false;
             self.error = Some(error);
         }
+    }
+    pub fn notice(&mut self, message: String) {
+        self.notice = Some(message);
+    }
+    /// Apply confirmed deletion facts without accepting an older list response
+    /// that could put a removed row back. Preserve filtering and pagination.
+    pub fn remove_deleted(&mut self, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        let deleted: BTreeSet<_> = ids.iter().map(String::as_str).collect();
+        let old_visible = self.visible_indices();
+        let position = old_visible
+            .iter()
+            .position(|index| *index == self.selected)
+            .unwrap_or(0);
+        let surviving_selection = self
+            .items
+            .get(self.selected)
+            .filter(|thread| !deleted.contains(thread.thread_id.as_str()))
+            .map(|thread| thread.thread_id.clone());
+        let refresh_filter = self.visible && (self.loading || self.filter_deadline.is_some());
+        self.generation = self.generation.wrapping_add(1);
+        self.filter_deadline = refresh_filter.then(Instant::now);
+        self.loading = refresh_filter;
+        self.error = None;
+        self.notice = None;
+        self.preferred = None;
+        self.items
+            .retain(|thread| !deleted.contains(thread.thread_id.as_str()));
+        self.collapsed.retain(|id| !deleted.contains(id.as_str()));
+        self.display_times
+            .retain(|id, _| !deleted.contains(id.as_str()));
+        let visible = self.visible_indices();
+        self.selected = surviving_selection
+            .and_then(|id| self.items.iter().position(|thread| thread.thread_id == id))
+            .filter(|index| visible.contains(index))
+            .or_else(|| {
+                visible
+                    .get(position.min(visible.len().saturating_sub(1)))
+                    .copied()
+            })
+            .unwrap_or(0);
     }
     #[allow(clippy::too_many_arguments)]
     pub fn apply(
@@ -189,6 +235,21 @@ impl ThreadBrowser {
         self.key_at(key, Instant::now())
     }
     fn key_at(&mut self, key: KeyEvent, now: Instant) -> ThreadOutcome {
+        if key.kind == KeyEventKind::Release {
+            return ThreadOutcome::None;
+        }
+        if key.code == KeyCode::Delete
+            || (matches!(key.code, KeyCode::Char('d' | 'D'))
+                && key.modifiers == KeyModifiers::CONTROL)
+        {
+            return self.items.get(self.selected).map_or(ThreadOutcome::None, |thread| {
+                if thread.thread_id.starts_with("draft:") {
+                    ThreadOutcome::Info("未送信の下書きはこの一覧から削除できません。切り替えて本文や添付を編集してください".into())
+                } else {
+                    ThreadOutcome::Delete(thread.thread_id.clone())
+                }
+            });
+        }
         if matches!(
             key.code,
             KeyCode::Up
@@ -211,7 +272,7 @@ impl ThreadBrowser {
             KeyCode::F(1) => {
                 if let Some(thread) = self.items.get(self.selected) {
                     return ThreadOutcome::Info(format!(
-                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\n更新日時: {}\n\n{}",
+                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
                         thread.thread_id,
                         thread.title,
                         thread.cwd,
@@ -496,13 +557,14 @@ impl ThreadBrowser {
             format!("取得失敗 · Esc戻る\nCtrl+R再取得 · {}", one_line(error))
         } else {
             let mut keys = if footer_width >= 90 {
-                "Esc戻る · ↑↓選択 · ←→展開 · Enter切替 · F1会話情報 · Ctrl+R再取得".to_owned()
+                "Esc戻る · ↑↓選択 · ←→展開 · Enter切替 · F1会話情報\nDelete/Ctrl+D 削除確認 · Ctrl+R再取得 · 文字/Backspace絞込".to_owned()
+            } else if footer_width >= 45 {
+                "Esc戻る Enter切替 Delete/Ctrl+D削除\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得"
+                    .to_owned()
             } else if footer_width >= 30 {
-                "Esc戻る Enter切替 F1会話情報\n↑↓選択 ←→開閉 Ctrl+R再取得".to_owned()
-            } else if footer_width >= 19 {
-                "Esc戻る Enter切替\nF1情報 Ctrl+R再取得".to_owned()
+                "Esc戻る Enter切替 Ctrl+D削除\n↑↓選択 ←→開閉 F1情報".to_owned()
             } else if footer_width >= 17 {
-                "Esc戻る Enter切替\nF1情報".to_owned()
+                "Esc戻る Enter切替\nCtrl+D削除 F1情報".to_owned()
             } else {
                 "Esc戻る".to_owned()
             };
@@ -516,7 +578,10 @@ impl ThreadBrowser {
         };
         let context = match error {
             Some(error) => format!("取得失敗 {} · 検索 › {}", one_line(error), one_line(filter)),
-            None => format!("検索 › {}", one_line(filter)),
+            None => match &self.notice {
+                Some(notice) => format!("{} · 検索 › {}", one_line(notice), one_line(filter)),
+                None => format!("検索 › {}", one_line(filter)),
+            },
         };
         let inner = popup::panel(frame, area, &title, &context, &footer_text);
         if inner.width == 0 || inner.height == 0 {
@@ -850,6 +915,148 @@ mod tests {
             "{tiny}"
         );
     }
+    #[test]
+    fn deletion_keys_only_request_confirmation_and_preserve_filter_editing() {
+        let mut browser = ThreadBrowser {
+            visible: true,
+            items: vec![thread("first", None), thread("chosen", None)],
+            selected: 1,
+            filter: "query".into(),
+            ..Default::default()
+        };
+        let generation = browser.generation();
+        for key in [
+            KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        ] {
+            assert!(matches!(browser.key(key), ThreadOutcome::Delete(id) if id == "chosen"));
+            assert_eq!(browser.items.len(), 2, "confirmation is not deletion");
+            assert_eq!(browser.filter(), "query");
+            assert_eq!(browser.generation(), generation);
+        }
+        let release =
+            KeyEvent::new_with_kind(KeyCode::Delete, KeyModifiers::NONE, KeyEventKind::Release);
+        assert!(matches!(browser.key(release), ThreadOutcome::None));
+        browser.key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert_eq!(browser.filter(), "queryd");
+        browser.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(browser.filter(), "query");
+        browser.items[1].thread_id = "draft:local".into();
+        assert!(
+            matches!(browser.key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
+            ThreadOutcome::Info(message) if message.contains("未送信の下書き"))
+        );
+        browser.items.clear();
+        assert!(matches!(
+            browser.key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
+            ThreadOutcome::None
+        ));
+    }
+
+    #[test]
+    fn confirmed_deletion_selects_visible_neighbor_and_fences_older_pages() {
+        let mut browser = ThreadBrowser {
+            visible: true,
+            items: vec![
+                thread("parent", None),
+                thread("child", Some("parent")),
+                thread("chosen", None),
+                thread("next", None),
+            ],
+            selected: 2,
+            filter: "fixture".into(),
+            next_cursor: Some("page-two".into()),
+            ..Default::default()
+        };
+        browser.collapsed.insert("parent".into());
+        let old_generation = browser.generation();
+        browser.remove_deleted(&["chosen".into()]);
+        assert_eq!(browser.items[browser.selected].thread_id, "next");
+        assert_eq!(browser.filter(), "fixture");
+        assert_eq!(browser.next_cursor(), Some("page-two"));
+        assert!(browser.collapsed.contains("parent"));
+        assert!(!browser.apply(
+            old_generation,
+            None,
+            vec![thread("chosen", None)],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        assert!(!browser.items.iter().any(|row| row.thread_id == "chosen"));
+        browser.remove_deleted(&["next".into()]);
+        assert_eq!(browser.items[browser.selected].thread_id, "parent");
+        browser.remove_deleted(&["parent".into()]);
+        assert_eq!(browser.items[browser.selected].thread_id, "child");
+        assert!(!browser.collapsed.contains("parent"));
+        browser.remove_deleted(&["child".into()]);
+        assert!(browser.items.is_empty());
+        assert_eq!(browser.selected, 0);
+    }
+
+    #[test]
+    fn deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads() {
+        let mut browser = ThreadBrowser {
+            visible: true,
+            loading: true,
+            items: vec![thread("first", None), thread("chosen", None)],
+            selected: 1,
+            filter: "latest".into(),
+            ..Default::default()
+        };
+        browser.remove_deleted(&["first".into()]);
+        assert_eq!(browser.items[browser.selected].thread_id, "chosen");
+        let generation = browser.generation();
+        assert!(
+            matches!(browser.take_filter_request(Instant::now() + Duration::from_secs(1)),
+            Some(UiAction::LoadThreads { generation: g, cursor: None, filter })
+            if g == generation && filter == "latest")
+        );
+        assert!(
+            browser
+                .take_filter_request(Instant::now() + Duration::from_secs(1))
+                .is_none()
+        );
+        browser.close();
+        browser.remove_deleted(&["chosen".into()]);
+        assert!(browser.filter_wait(Instant::now()).is_none());
+        assert!(!browser.loading);
+    }
+
+    #[test]
+    fn deletion_notice_and_selected_information_keep_the_next_keys_visible() {
+        let mut browser = ThreadBrowser {
+            visible: true,
+            items: vec![thread("chosen", None)],
+            ..Default::default()
+        };
+        browser.notice("削除できません: 作業開始後に状態が変わりました".into());
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+        terminal
+            .draw(|frame| browser.draw(frame, frame.area(), None))
+            .unwrap();
+        let shown = text(terminal.backend().buffer());
+        assert!(shown.contains("削除できません"), "{shown}");
+        assert!(!shown.contains("取得失敗"), "{shown}");
+        assert!(shown.contains("Delete/Ctrl+D"), "{shown}");
+        let ThreadOutcome::Info(info) =
+            browser.key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE))
+        else {
+            panic!("selected item information expected");
+        };
+        for key in [
+            "Delete / Ctrl+D",
+            "fn+delete",
+            "D/Space",
+            "N/Esc",
+            "Backspace",
+        ] {
+            assert!(info.contains(key), "{info}");
+        }
+    }
+
     #[test]
     fn prepared_times_are_bound_to_id_and_raw_revision_and_draw_only_reads_labels() {
         let mut row = thread("t", None);

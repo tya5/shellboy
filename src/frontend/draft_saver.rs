@@ -63,6 +63,12 @@ impl DraftSaver {
         }
         None
     }
+    pub(super) fn threads(&self) -> impl Iterator<Item = &String> {
+        self.backlog.keys()
+    }
+    pub(super) fn forget_threads(&mut self, deleted: &HashSet<String>) {
+        self.backlog.retain(|thread, _| !deleted.contains(thread));
+    }
     pub(super) async fn finish(self) -> tokio::task::JoinHandle<Result<(), ApiError>> {
         for (thread, (draft, anchor, follow)) in self.backlog {
             let _ = self.sender.send((thread, draft, anchor, follow)).await;

@@ -69,7 +69,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | 採用対象 | 適用する設計 | 境界 |
 |---|---|---|
 | Markdown、コード強調、リンク、構造化出力 | [TUI表示](tui-presentation.md)、[popup共通基盤](tui-popup-framework.md) | OSSを利用。会話欄へ管理JSONを流さず、原文/完全値は別導線で保持 |
-| 親子Thread一覧・タイトル・モデル選択・入力補完 | [Thread一覧](thread-browser.md)、[models](models.md)、[composer](composer.md) | 系譜とRun所有は別。Threadとモデルの取得/変更は既存操作を共用 |
+| 親子Thread一覧・一覧からの削除・タイトル・モデル選択・入力補完 | [Thread一覧](thread-browser.md)、[models](models.md)、[composer](composer.md) | 系譜とRun所有は別。Threadとモデルの取得/変更は既存操作を共用 |
 | activityとスクロール | [activity](tui-activity-indicator.md)、[scroll](tui-scrolling.md) | 既存情報を投影し、Turn/Run/背景処理を区別。新しいコア状態は不要 |
 | raw期限とcanonical検索 | [index](index.md)、[gc](gc.md) | raw期限/encoding変更はtool_rawだけを無効化し、保存済み引用/添付パスを期限で検索から消さない。旧欠落分の暗黙有料再構築はしない |
 | 添付所属・順序 | [添付provenance](attachment-provenance.md)、[attachments](attachments.md) | 元source/要素位置を維持。後のmessageへ付替えない |

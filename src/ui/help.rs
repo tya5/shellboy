@@ -80,6 +80,14 @@ impl Page {
         page.entry("PgUp / PgDn", "会話を画面単位で前後に読む");
         page.entry("Ctrl+End", "会話の末尾へ戻り、新しい出力に追従する");
         page.entry("Ctrl+T", "会話一覧を開く（/threads）");
+        page.entry(
+            "一覧内 Delete / Ctrl+D",
+            "選んだ会話の削除影響を確認する。まだ削除しない",
+        );
+        page.note("削除確認ではD/Spaceで子孫も含めるか変更。影響の取得中や実行中の作業がある場合はYで実行できません。Yで削除、N/Escで一覧へ戻ります。文字入力とBackspaceは一覧の絞り込みです。");
+        page.note(
+            "macOSのノートのdeleteはBackspaceです。削除確認にはCtrl+Dかfn+deleteを使ってください。",
+        );
         page.entry("Ctrl+N", "新しい会話の下書きを作る（/new）");
         page.entry("/switch ID", "指定した会話へ切り替える");
         page.entry("↑ / ↓", "入力の先頭行で送信履歴を呼び出す。↓で新しい履歴へ");
@@ -326,6 +334,27 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn thread_deletion_help_distinguishes_confirmation_from_filter_editing() {
+        let shown = Page::guide(&Config::default())
+            .lines(160)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for expected in [
+            "Delete / Ctrl+D",
+            "まだ削除しない",
+            "D/Space",
+            "Yで実行できません",
+            "N/Esc",
+            "fn+delete",
+            "Backspace",
+        ] {
+            assert!(shown.contains(expected), "{expected}: {shown}");
+        }
+    }
+
     #[test]
     fn guide_columns_align_and_narrow_layout_keeps_notes_distinct() {
         let page = Page {

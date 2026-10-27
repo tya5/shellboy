@@ -32,6 +32,11 @@ pub(super) struct Request {
     pub action: UiAction,
 }
 impl Autosave {
+    pub(super) fn forget_views(&mut self, keys: &BTreeSet<String>) {
+        self.dirty.retain(|key| !keys.contains(key));
+        self.queued.retain(|key| !keys.contains(key));
+        self.admitted.retain(|key, _| !keys.contains(key));
+    }
     pub(super) fn pending(&self) -> bool {
         !self.dirty.is_empty()
     }

@@ -9,8 +9,8 @@ use crate::{
     config::Config,
     protocol::{
         AttachmentRemoveArgs, Command, ContextEditAction, ContextEditArgs, HistorySearchArgs,
-        IndexArgs, IndexScope, StatusArgs, ThreadDetails, ThreadForkArgs, ThreadSetArgs,
-        ThreadSummary, ThreadTarget,
+        IndexArgs, IndexScope, StatusArgs, ThreadDeleteArgs, ThreadDetails, ThreadForkArgs,
+        ThreadSetArgs, ThreadSummary, ThreadTarget,
     },
 };
 
@@ -37,6 +37,7 @@ pub mod startup;
 mod terminal_guard;
 pub(crate) mod theme;
 use terminal_guard::TerminalGuard;
+mod thread_deletion;
 mod threads;
 mod view;
 use draft::{adjust_folds, prev_grapheme};
@@ -317,6 +318,12 @@ impl CopyScope {
 }
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    ThreadDeletion {
+        request_id: u64,
+        args: ThreadDeleteArgs,
+        execute: bool,
+        known_thread_ids: Vec<String>,
+    },
     ManagementIntent {
         context: ManagementContext,
         action: Box<UiAction>,
@@ -497,6 +504,12 @@ pub enum UiAction {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    ThreadDeletion {
+        request_id: u64,
+        args: ThreadDeleteArgs,
+        execute: bool,
+        result: Result<ThreadDeletionReply, crate::protocol::ApiError>,
+    },
     /// Committed recovery transition from any Thread, independent of selection.
     RecoveryBell,
     ScopedManagement {
@@ -770,7 +783,13 @@ pub struct ManagementView {
     pub scroll: u16,
 }
 #[derive(Clone, Debug)]
+pub enum ThreadDeletionReply {
+    Preview(serde_json::Value),
+    Deleted(Vec<String>),
+}
+#[derive(Clone, Debug)]
 enum Confirmation {
+    ThreadDeletion(thread_deletion::DeletionDialog),
     EditStop {
         draft_id: String,
         revision: u64,
@@ -941,8 +960,16 @@ const MANAGEMENT_DETAIL_FOOTER: &str =
 const CONFIRMATION_FOOTER: &str = "N / Esc 戻る · Y 実行\n↑↓/PgUp/PgDn 閲覧";
 const CONFIRMATION_CONTEXT: &str = "内容を確認してください";
 impl Confirmation {
+    fn footer(&self) -> &'static str {
+        if matches!(self, Self::ThreadDeletion(_)) {
+            thread_deletion::FOOTER
+        } else {
+            CONFIRMATION_FOOTER
+        }
+    }
     fn layout(&self, area: Rect) -> (String, u16) {
         let text = match self {
+                Confirmation::ThreadDeletion(dialog)=>dialog.text(),
                 Confirmation::EditStop{run_id,..}=>format!("旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"),
                 Confirmation::Index{command,detail}=>format!("索引処理の実行確認 · {}\n{detail}",match command { Command::IndexBackfill(_)=>"backfill", Command::IndexRetry(_)=>"retry", Command::IndexRebuild(_)=>"rebuild", _=>"索引操作" }),
                 Confirmation::Operation{detail,..}=>detail.clone(),
@@ -951,7 +978,7 @@ impl Confirmation {
         let width = popup::reader_width(popup::body_area(
             area,
             CONFIRMATION_CONTEXT,
-            CONFIRMATION_FOOTER,
+            self.footer(),
             None,
         ))
         .max(1);
@@ -959,21 +986,16 @@ impl Confirmation {
             .wrap(Wrap { trim: false })
             .line_count(width);
         // Border 2 + context 2 + divider 1 + the common footer's at most two rows.
-        let overhead = 5 + CONFIRMATION_FOOTER.lines().count().clamp(1, 2);
+        let overhead = 5 + self.footer().lines().count().clamp(1, 2);
         let height = rows.saturating_add(overhead).clamp(8, u16::MAX as usize) as u16;
         (text, height)
     }
     fn page(&self, area: Rect) -> u16 {
         let (_, height) = self.layout(area);
-        popup::body_area(
-            area,
-            CONFIRMATION_CONTEXT,
-            CONFIRMATION_FOOTER,
-            Some(height),
-        )
-        .height
-        .saturating_sub(1)
-        .max(1)
+        popup::body_area(area, CONFIRMATION_CONTEXT, self.footer(), Some(height))
+            .height
+            .saturating_sub(1)
+            .max(1)
     }
 }
 pub struct UiState {
@@ -1017,6 +1039,7 @@ pub struct UiState {
     next_model_request: u64,
     next_detail_request: u64,
     next_input_request: u64,
+    next_thread_deletion_request: u64,
     command_rejected: bool,
 }
 impl UiState {
@@ -1083,6 +1106,7 @@ impl UiState {
             retention_passes: 0,
             next_detail_request: 0,
             next_input_request: 0,
+            next_thread_deletion_request: 0,
         }
     }
     pub fn view(&self) -> &ThreadView {
@@ -1356,6 +1380,12 @@ impl UiState {
             _ => None,
         };
         match update {
+            UiUpdate::ThreadDeletion {
+                request_id,
+                args,
+                execute,
+                result,
+            } => self.apply_thread_deletion(request_id, args, execute, result),
             UiUpdate::RecoveryBell => unreachable!("handled before selected-view updates"),
             UiUpdate::ScopedManagement { .. } => {
                 unreachable!("scoped result handled before normal updates")
@@ -2038,6 +2068,24 @@ impl UiState {
                 view_revision: Some(*view_revision),
                 message: "履歴の再取得キューが満杯です。スクロールで再試行できます".into(),
             });
+            return;
+        }
+        if let UiAction::ThreadDeletion {
+            request_id,
+            args,
+            execute,
+            ..
+        } = action
+        {
+            self.apply_thread_deletion(
+                *request_id,
+                args.clone(),
+                *execute,
+                Err(crate::protocol::ApiError::new(
+                    crate::protocol::ErrorCode::InvalidState,
+                    "処理キューが満杯です。削除は未受付です。もう一度開いてください",
+                )),
+            );
             return;
         }
         if let UiAction::LoadModels { request_id, .. } = action {
@@ -3186,6 +3234,9 @@ impl UiState {
         }
     }
     fn confirmation_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
+        if matches!(self.confirmation, Some(Confirmation::ThreadDeletion(_))) {
+            return self.thread_deletion_key(key);
+        }
         let page = self.confirmation.as_ref().map_or(1, |confirmation| {
             confirmation.page(popup::viewport(self.viewport))
         });
@@ -3224,6 +3275,9 @@ impl UiState {
                 vec![UiAction::Manage(command)]
             }
             Some(Confirmation::Operation { command, .. }) => vec![UiAction::Manage(command)],
+            Some(Confirmation::ThreadDeletion(_)) => {
+                unreachable!("thread deletion owns its confirmation")
+            }
             Some(Confirmation::ForceQuit) => vec![UiAction::ForceQuit],
             None => vec![],
         }
@@ -3306,7 +3360,7 @@ impl UiState {
                 area,
                 "実行の確認",
                 CONFIRMATION_CONTEXT,
-                CONFIRMATION_FOOTER,
+                confirmation.footer(),
                 height,
             );
             let lines = text
@@ -3334,6 +3388,7 @@ impl UiState {
     }
     fn thread_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         match self.thread_browser.key(key) {
+            threads::ThreadOutcome::Delete(thread) => self.begin_thread_deletion(thread),
             threads::ThreadOutcome::None => vec![],
             threads::ThreadOutcome::Load(action) => vec![*action],
             threads::ThreadOutcome::Open(thread) => self.select_thread(thread),
