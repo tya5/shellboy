@@ -16,18 +16,18 @@ Rust製の軽量なターミナル向けAIエージェント環境です。モ�
 
 ## バイナリのダウンロード
 
-[Releases](https://github.com/tya5/shellboy/releases) でWindows x64、macOS Apple Silicon、Linux x64向けの配布物と `SHA256SUMS` を提供します。v0.1.4の配布先は [v0.1.4](https://github.com/tya5/shellboy/releases/tag/v0.1.4) です。
+[Releases](https://github.com/tya5/shellboy/releases) でWindows x64、macOS Apple Silicon、Linux x64向けの配布物と `SHA256SUMS` を提供します。v0.1.5の配布先は [v0.1.5](https://github.com/tya5/shellboy/releases/tag/v0.1.5) です。
 
-Windowsは `shellboy-v0.1.4-x86_64-pc-windows-msvc.zip` をダウンロードして展開します。PowerShellの例:
+Windowsは `shellboy-v0.1.5-x86_64-pc-windows-msvc.zip` をダウンロードして展開します。PowerShellの例:
 
 ```powershell
-Expand-Archive .\shellboy-v0.1.4-x86_64-pc-windows-msvc.zip -DestinationPath .
-.\shellboy-v0.1.4-x86_64-pc-windows-msvc\shellboy.exe --help
+Expand-Archive .\shellboy-v0.1.5-x86_64-pc-windows-msvc.zip -DestinationPath .
+.\shellboy-v0.1.5-x86_64-pc-windows-msvc\shellboy.exe --help
 ```
 
 接続先とモデルは [設定ガイド](docs/guides/configuration.md) に従って設定してください。既知のreceipt予算・索引切替・巨大raw検索の制限は [既知の制限](docs/development/known-limitations.md) に記載しています。
 
-v0.1.4はv0.1.3と同じschema v9を使い、v0.1.3の設定・保存データを引き継げます。Thread session識別・部分出力の再試行・復旧通知には既定値があり、既存設定の編集は不要です。新設定を記入した設定ファイルは旧版では未知の項目として拒否されるため、戻す場合はその項目を取り除いてください。v0.1.1以前からの更新ではschema v9の索引2本を追加し、更新後のDBを旧binaryで開けません。旧版へ戻す手順は [保存設計](docs/design/storage.md) を参照してください。
+v0.1.5はv0.1.4と同じschema v9を使い、既存の設定・保存データを引き継げます。入力範囲の省略・復元と切断後の縮小、会話一覧からの削除を追加しました。更新前のバックアップを推奨します。新しい範囲編集後の旧版への巻戻しは検証していません。v0.1.1以前からの更新ではschema v9の索引2本を追加し、更新後のDBを旧binaryで開けません。旧版へ戻す手順は [保存設計](docs/design/storage.md) を参照してください。
 
 ## ビルドと起動
 
