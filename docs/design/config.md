@@ -16,6 +16,16 @@
 
 検証: `cargo test --test config` は既定値、全節の未知キー、型違い、数値関係、接続参照、URL/認証矛盾、秘密伏せ、パス優先順位、明示/既定設定ファイルを対象とする。OS注入によるパス試験は各OSでの実機動作検証を代替しない。shell実行、lock、実proxyはこのモジュールの試験範囲外。
 
+## Thread単位のセッション識別
+
+`connections.<名前>.session_header` はboolで既定true。会話と要約のResponses要求に、対象Thread UUIDだけを値とする `x-shellboy-session-id` を自動設定する。同じThreadの追加要求・再試行・モデル切替でも同じ値を使い、子Threadとforkは各自のThread UUIDを使う。会話本文・タイトル・cwd・ユーザー名は識別子へ含めない。embeddingとモデル一覧には自動付与しない。
+
+自動設定がtrueの場合、Responses要求では大文字小文字を問わず同名の固定 `headers` 値をThread UUIDで置き換える。ほかの固定headerを変更せず、固定headerの検証規則も変えない。falseは自動付与だけを停止するため、利用者が `headers` へ明示した同名headerは残る。embedding・モデル一覧でも固定headersは従来どおり適用する。
+
+`connections.<名前>.prompt_cache_key` はboolで既定false。明示trueの場合だけ、会話と要約のResponses要求本文へ同じThread UUIDの `prompt_cache_key` を付ける。falseならこの自動設定項目を本文へ追加しない。providerがこのフィールドを受理する場合に有効化する。キャッシュhitや同一上流への接続、障害解消を保証しない。
+
+両値ともRust DefaultとTOML省略時を揃え、文字列・整数などbool以外を拒否する。owner再起動後の要求へ反映する。LiteLLM側のroutingでは `x-litellm-session-id` やtrace ID等が優先される構成があるため、意図せず全Thread共通の固定識別headerを併用しない。接続先側の設定・優先順位は [設定ガイド](../guides/configuration.md#thread単位のセッション識別) と [model HTTP](model-http.md) を参照する。
+
 ## 接続ごとのTLS検証
 
 `connections.<名前>.ssl_verify` はboolで既定true。明示falseの場合だけ、その接続のHTTPS証明書検証を無効化する。HTTP APIへの直接接続では検証対象がない。HTTPS中継プロキシを経由する場合は、そのプロキシ証明書にも同じ設定を適用する。ConnectionのRust DefaultとTOML省略時をともにtrueへ揃え、文字列や数値は拒否する。ownerは起動時の設定を保持するため変更後は再起動する。独立RAGは実行時に読む同じ接続設定を使う。接続CLIからownerのTLS設定を上書きしない。

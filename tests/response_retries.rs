@@ -667,27 +667,58 @@ async fn stalled_empty_or_partial_response_retries_but_partial_optout_waits_for_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn issue8_stalled_error_body_keeps_http_status_but_does_not_retry() {
-    let mut fixture = Fixture::new(2, 10, 500).await;
-    fixture.incoming().await.reply.send(Reply {
-        bytes: b"HTTP/1.1 503 Fixture\r\nContent-Type: application/json\r\nContent-Length: 99999\r\nRetry-After: 0\r\nConnection: close\r\n\r\n{".to_vec(),
-        hold_open: true,
-    }).ok().unwrap();
-    assert_eq!(fixture.settled().await, "recovery_wait");
-    let attempts = fixture.attempts().await;
-    assert_eq!(attempts.len(), 1);
-    let saved = attempts[0].1.as_ref().unwrap();
-    assert_eq!(saved["error"]["kind"], "timeout");
-    assert_eq!(saved["error"]["status"], 503);
-    assert!(
-        saved["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("connections.fixture.stream_idle_timeout_ms")
-    );
-    assert!(saved.get("automatic_retry").is_none());
-    fixture.no_more_requests().await;
-    fixture.close().await;
+async fn stalled_error_body_preserves_retryable_status_and_can_recover() {
+    for status in [429, 500, 502, 503, 504] {
+        let mut fixture = Fixture::new(2, 10, 500).await;
+        fixture.incoming().await.reply.send(Reply {
+            bytes: format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: 99999\r\nRetry-After: 0\r\nConnection: close\r\n\r\n{{").into_bytes(),
+            hold_open: true,
+        }).ok().unwrap();
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(Reply::success())
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "completed", "status {status}");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 2, "status {status}");
+        assert_eq!(attempts[0].0, "failed");
+        let saved = attempts[0].1.as_ref().unwrap();
+        assert_eq!(saved["error"]["kind"], "timeout");
+        assert_eq!(saved["error"]["status"], status);
+        assert!(
+            saved["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("connections.fixture.stream_idle_timeout_ms")
+        );
+        assert_eq!(saved["automatic_retry"]["number"], 1);
+        assert_eq!(attempts[1].0, "completed");
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stalled_permanent_error_body_is_not_retried() {
+    for status in [400, 401, 403, 501] {
+        let mut fixture = Fixture::new(2, 10, 500).await;
+        fixture.incoming().await.reply.send(Reply {
+            bytes: format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: 99999\r\nConnection: close\r\n\r\n{{").into_bytes(),
+            hold_open:true,
+        }).ok().unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait", "status {status}");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        let saved = attempts[0].1.as_ref().unwrap();
+        assert_eq!(saved["error"]["kind"], "timeout");
+        assert_eq!(saved["error"]["status"], status);
+        assert!(saved.get("automatic_retry").is_none());
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -60,6 +60,8 @@ pub struct Connection {
     pub default_effort: Option<String>,
     pub headers: BTreeMap<String, String>,
     pub ssl_verify: bool,
+    pub session_header: bool,
+    pub prompt_cache_key: bool,
     pub stream_idle_timeout_ms: u64,
     pub request_timeout_ms: u64,
     pub response_max_retries: u32,
@@ -74,6 +76,8 @@ impl Default for Connection {
             default_effort: None,
             headers: BTreeMap::new(),
             ssl_verify: true,
+            session_header: true,
+            prompt_cache_key: false,
             stream_idle_timeout_ms: 600_000,
             request_timeout_ms: 60_000,
             response_max_retries: 8,
@@ -90,6 +94,8 @@ impl fmt::Debug for Connection {
             .field("default_effort", &self.default_effort)
             .field("headers", &"[redacted]")
             .field("ssl_verify", &self.ssl_verify)
+            .field("session_header", &self.session_header)
+            .field("prompt_cache_key", &self.prompt_cache_key)
             .field("stream_idle_timeout_ms", &self.stream_idle_timeout_ms)
             .field("request_timeout_ms", &self.request_timeout_ms)
             .field("response_max_retries", &self.response_max_retries)

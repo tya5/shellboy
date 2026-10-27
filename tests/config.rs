@@ -581,3 +581,39 @@ fn response_partial_retry_and_ui_bell_are_strict_default_on_booleans() {
         )).is_err());
     }
 }
+
+#[test]
+fn thread_session_settings_have_independent_defaults_and_boolean_overrides() {
+    let rust_defaults = Connection::default();
+    assert!(rust_defaults.session_header);
+    assert!(!rust_defaults.prompt_cache_key);
+    let serde_defaults: Connection = toml::from_str("base_url='https://example.test/v1'").unwrap();
+    assert!(serde_defaults.session_header);
+    assert!(!serde_defaults.prompt_cache_key);
+    let config = Config::parse(
+        "[connections.defaulted]\nbase_url='https://example.test/v1'\n\
+         [connections.enabled]\nbase_url='https://example.test/v1'\nsession_header=true\nprompt_cache_key=true\n\
+         [connections.disabled]\nbase_url='https://example.test/v1'\nsession_header=false\nprompt_cache_key=false\n",
+    ).unwrap();
+    assert!(config.connections["defaulted"].session_header);
+    assert!(!config.connections["defaulted"].prompt_cache_key);
+    assert!(config.connections["enabled"].session_header);
+    assert!(config.connections["enabled"].prompt_cache_key);
+    assert!(!config.connections["disabled"].session_header);
+    assert!(!config.connections["disabled"].prompt_cache_key);
+    let debug = format!("{:?}", config.connections["defaulted"]);
+    assert!(debug.contains("session_header: true"));
+    assert!(debug.contains("prompt_cache_key: false"));
+    assert!(!debug.contains("https://example.test"));
+}
+
+#[test]
+fn thread_session_settings_reject_non_boolean_values() {
+    for key in ["session_header", "prompt_cache_key"] {
+        for value in ["'true'", "'false'", "0", "1", "1.5", "[]", "{}"] {
+            let source =
+                format!("[connections.proxy]\nbase_url='https://example.test/v1'\n{key}={value}\n");
+            assert!(Config::parse(&source).is_err(), "accepted {key}={value}");
+        }
+    }
+}

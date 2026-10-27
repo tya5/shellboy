@@ -8,6 +8,10 @@ base_url = "https://proxy.example/v1"
 api_key_env = "SHELLBOY_API_KEY"
 # Set false only to disable certificate verification for this connection.
 # ssl_verify = true
+# Conversation/summary Responses headers identify each Thread automatically.
+# session_header = true
+# Optional Responses body key; enable only when supported by your provider.
+# prompt_cache_key = false
 # Maximum inactivity while waiting for stream headers or the next received chunk.
 # 0 disables this limit; active streams have no total-duration limit.
 # stream_idle_timeout_ms = 600000

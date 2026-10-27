@@ -43,6 +43,14 @@ impl Events {
     }
 }
 
+/// Borrowed state for one HTTP request; no identity or secrets outlive it.
+struct RequestContext<'a> {
+    cancel: &'a CancellationToken,
+    deadline: &'a mut Deadline,
+    events: Option<&'a Events>,
+    secrets: &'a [String],
+}
+
 #[derive(Debug)]
 pub struct EmbeddingResponse {
     /// Vectors in the same order as input, independent of provider data order.
@@ -112,11 +120,20 @@ impl HttpModelClient {
         request: Option<&Value>,
         cancel: &CancellationToken,
         deadline: &Deadline,
+        session_header: Option<&HeaderValue>,
     ) -> Result<(Response, Vec<String>), ModelError> {
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
-        let (headers, secrets) = self.headers()?;
+        let (mut headers, mut secrets) = self.headers()?;
+        if matches!(endpoint, ApiEndpoint::Responses)
+            && let Some(value) = session_header
+        {
+            headers.insert("x-shellboy-session-id", value.clone());
+            if let Ok(value) = value.to_str() {
+                secrets.push(value.to_owned());
+            }
+        }
         let endpoint_kind = endpoint;
         let endpoint = self
             .connection
@@ -159,6 +176,7 @@ impl HttpModelClient {
                 None,
                 cancel,
                 deadline,
+                None,
             )
             .await?;
         deadline.received();
@@ -166,11 +184,13 @@ impl HttpModelClient {
             response,
             MAX_MODEL_CATALOG_BYTES,
             "Proxy returned malformed model list JSON",
-            cancel,
-            deadline,
+            &mut RequestContext {
+                cancel,
+                deadline,
+                events: None,
+                secrets: &secrets,
+            },
             None,
-            None,
-            &secrets,
         )
         .await?
         .into_result()?;
@@ -229,6 +249,7 @@ impl HttpModelClient {
                 Some(&request),
                 &cancel,
                 &deadline,
+                None,
             )
             .await?;
         deadline.received();
@@ -236,11 +257,13 @@ impl HttpModelClient {
             response,
             MAX_EMBEDDING_BYTES,
             "Malformed embeddings JSON",
-            &cancel,
-            &mut deadline,
+            &mut RequestContext {
+                cancel: &cancel,
+                deadline: &mut deadline,
+                events: None,
+                secrets: &secrets,
+            },
             None,
-            None,
-            &secrets,
         )
         .await?
         .into_result()?;
@@ -390,7 +413,7 @@ mod observation_tests {
             });
             let (send, mut receive) = mpsc::channel(4);
             let response = tokio::spawn(async move {
-                client.response_observed(json!({"model":"fixture"}), CancellationToken::new(), Some(send)).await
+                client.response_observed("fixture-thread", json!({"model":"fixture"}), CancellationToken::new(), Some(send)).await
             });
             // Headers and the first partial error-body bytes are distinct
             // transport facts, even though neither is an assistant delta.

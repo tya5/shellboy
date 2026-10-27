@@ -8,7 +8,7 @@ HTTP(S)プロキシはreqwestの既存環境変数 `HTTP_PROXY` / `HTTPS_PROXY` 
 
 TLS設定は接続profileごとの `ssl_verify`（既定true）をクライアント生成時に適用する。falseはreqwestの `tls_danger_accept_invalid_certs(true)` に対応する。使用中のrustlsでは証明書チェーン・有効期限・ホスト名などの検証が省略され、自己署名の許可だけには限定されない。暗号化とSNIは維持する。HTTPS中継プロキシを利用する場合はAPI宛先がHTTPでもプロキシ証明書へ同じ検証設定を適用する。会話・要約・embedding・モデル一覧で同じクライアントを使い、他接続へ設定を伝播させない。redirect禁止とretry禁止は維持する。検証無効化を制御するライブラリの環境変数はなく、Shellboy独自のグローバル環境変数も追加しない。
 
-`response(request, CancellationToken, Option<mpsc::Sender<Value>>)` は `ModelResponse` または `AttemptFailure` を返す。失敗は元のModelError、部分本文、完了済みraw item、取得済みのraw responseを保持する。HTTPエラー時はモデル出力を捏造しない。SSEは `ResponseStream` を用いてバイト単位の分断・UTF-8分断・CRLFを復元し、completed全体を検査する。terminalイベントを受け取った時点でHTTP本文を閉じるため、proxyが接続を保持しても完了を待ち続けない。terminal前のEOFは以下の会話Driver再試行または復旧の対象。未知出力形式は元responseを保持した互換性エラー。
+`response(request, CancellationToken, Option<mpsc::Sender<Value>>)` は `ModelResponse` または `AttemptFailure` を返す。失敗は元のModelError、部分本文、完了済みraw item、取得済みのraw responseを保持する。HTTPエラー時はモデル出力を捏造しない。SSEは `ResponseStream` を用いてバイト単位の分断・UTF-8分断・CRLFを復元し、completed全体を検査する。terminalイベントで解析を終え、正常responseの検証後だけHTTP本文を最大1秒・64KiBまで読み捨て、HTTP/1.1 poolへの返却を試みる。末尾をモデル出力として解析せず、受信エラー・上限超過で完成済みresponseを失敗へ変更しない。取消しは優先し、proxyが接続を保持しても無期限に待たない。terminal前のEOFは以下の会話Driver再試行または復旧の対象。未知出力形式は元responseを保持した互換性エラー。
 
 任意のevent senderは有限チャネルで、満杯時はasync backpressureを掛ける。senderの送信待ちも取消し可能。受信側が閉じた場合は `consumer_closed` として失敗し、最終イベントを捨てた成功を返さない。送信の成功はチャネルへの引渡しであり、DB commitの完了ではない。採用・永続化・generation照合はControl/DB側の責務。イベントの到着自体でshellを開始しない。
 
@@ -24,6 +24,14 @@ HTTP失敗本文は64 KiBまで読み、messageを16,384文字・provider code�
 
 2026-10-24の実endpoint診断を受け、最初の完全なterminal SSE frameをdecode境界とする。`error`、`response.failed`、`response.incomplete`、`response.completed` のframeが空行まで完了したら、同じHTTP chunk内の後続event/未完了frameを解析しない。HTTP chunkの分かれ方によって元provider errorが `Event after terminal response` や `EOF in partial SSE event` へ置き換わる問題を防ぐ。terminal frame自体のJSON不正・未完了や、最終responseそのものの形式検証は引き続き失敗になる。最初の終端が失敗なら、その後のcompletedで成功へ変えない。一般用途の `SseDecoder::push` は全eventを解析し、Responsesのstreamだけが終端までのdecodeを選ぶ。これは[公式event定義](https://developers.openai.com/api/reference/resources/responses/streaming-events)を基にしたtransportの境界判断で、後続eventをモデル出力として解釈する拡張ではない。全byte分割点とローカルHTTPで回帰を検証し、課金残高回復後の実endpoint正常完了は別途必要とする。
 
+## Threadごとの要求識別（Issue #15）
+
+会話DriverとCompactorは要求ごとに実Thread UUIDを渡す。接続ごとの `session_header=true`（既定）でResponses要求に `x-shellboy-session-id` を付け、`prompt_cache_key=false`（既定）を明示trueにした場合だけ同じ値を本文へ追加する。同ThreadのTurn・試行・要約・再起動後の続行で同じIDを使う。子ThreadとforkはそれぞれのThread UUIDを使う。共有client・pool・接続設定へ特定Threadの値を保存しない。
+
+自動headerは同名の固定headerを大文字小文字によらず要求単位で上書きする。無効化は自動付与だけを止め、明示headersは従来どおり維持する。Thread文脈を持たない低水準 `response`、embedding、モデル一覧には自動header/body fieldを足さない。伝送するThread IDはASCII英数字・hyphen・underscoreの1〜64byteへ制限し、不正値は送信前に拒否する。通常のThread UUIDは36byte。キャッシュhitや切断頻度の改善は接続先次第で保証しない。
+
+F6は採用assistant nodeからindexed output_item.node_idを経由して正確なmodel_attemptへ到達し、保存済みusageのcached_tokensを表示する。同Turnの最新attemptを推測しない。履歴pageごとに1回の既存DB worker読取を使い、最大2候補・usage 64KiBで表示を制限する。0・未報告・不正・関連不明を区別し、保存原文とschemaは変えない。
+
 ## 接続別clientの寿命（Issue #14）
 
 ControlのStoreがimmutableなHttpClients表を所有し、会話Driver・Compactor・索引worker・意味検索・モデル一覧へ同じArcを共有する。表は設定の接続名ごとに一つのHttpModelClient（又は初期化エラー）で、entry数は起動設定の接続数に固定する。通常のRust constructorを使い、runtimeの追加cache、mutex、worker、queue、永続表は持たない。独立テスト向けconstructorは独立の表を構築でき、独立RAGは従来どおりコマンド単位のProfileのclientを使う。
@@ -32,7 +40,7 @@ URL/静的headerとclientの構築・検証はowner初期化時に行い、要�
 
 reqwestのpool_idle_timeoutを45秒にする。提案範囲30〜60秒の中間を、proxyに閉じられた古いidle接続を長く残さない初期値として選ぶ。会社proxyの実測最適値や切断回避保証とはしない。新しい設定keyやpool_max_idle_per_hostの独自上限は加えない。接続別base_url/ssl_verify/期限は隔離し、redirect禁止・HTTP client自身のretry禁止を維持する。接続の失敗は会話Driverの通常の再試行判断へ渡す。
 
-[固定reqwest版のClient](https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html)は内部poolを持ち、cloneで共有する。poolへ戻せる完全読取応答は再利用できるが、SSEのterminal後にHTTP本文をまだ読み切っていない場合は接続が破棄され得る。再利用のために未受信本文をdrainしたり、proxyが閉じるまで待ったりせず、既存のterminal終了・取消し境界を優先する。常に全Responses要求が同じTCP接続になるとは保証しない。
+[固定reqwest版のClient](https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html)は内部poolを持ち、cloneで共有する。poolへ戻せる完全読取応答は再利用できるが、SSEのterminal後にHTTP本文をまだ読み切っていない場合は接続が破棄され得る。正常terminalの検証後だけ、最大1秒・64KiBの本文読捨てで再利用を試みる。後続byteをSSEとして解析せず、失敗や上限超過では接続再利用を諦める。取消しは受信済み本文・推論・最終rawを保全して優先する。常に全Responses要求が同じTCP接続になるとは保証しない。
 
 表の寿命はControl/Store/Index/Compactorのowner文脈と要求中cloneの所有に従う。停止時は既存の要求取消し・worker終了・drainを行い、最後の所有cloneがなくなればpoolも解放する。停止後も保持される外部Control参照を無視して即時破棄を約束しない。
 
@@ -62,7 +70,7 @@ transportのheader/非空body受信は、driver向けの既存32枠event channel
 
 ## 会話の連続一時失敗の再試行（Issue #7、#11）
 
-HTTP clientは一要求一POSTを維持し、会話Driverが追加試行を管理する。HTTP429/500/502/503/504の通常エラーと、正常な終端に至る前のtransport切断・EOF・受信停滞timeoutを対象にする。取消し、protocol/JSON不正、失敗terminal、未知/不正な完成response、その他status、HTTP200内のproviderエラーは自動再試行しない。HTTP失敗本文の収集中に期限が切れた場合は、通常のHTTPエラーとは分けて従来どおり復旧へ進む。
+HTTP clientは一要求一POSTを維持し、会話Driverが追加試行を管理する。HTTP429/500/502/503/504の通常エラーと、正常な終端に至る前のtransport切断・EOF・受信停滞timeoutを対象にする。取消し、protocol/JSON不正、失敗terminal、未知/不正な完成response、その他status、HTTP200内のproviderエラーは自動再試行しない。HTTP失敗本文のtimeout・切断でも429/500/502/503/504は対象とし、その他statusは復旧へ進む。
 
 SSEのresponse.created/in_progress、コメント・heartbeatだけは生成出力として数えない。output_item/content_partの追加・完了、本文/refusal/推論/tool引数のdelta等を観測した時点で出力ありとする。HTTPの生存観測と再試行用の出力観測を区別する。JSONの完成前に通信が切れた場合は、非空の本文を保守的に部分出力とする。接続別response_retry_partialは既定trueで、部分出力がある場合も同じ条件で再試行する。falseなら部分出力後は復旧待ちとし、metadataのみ/出力なしの一時失敗は引き続き対象とする。
 
@@ -93,3 +101,7 @@ sendはHTTP methodを受け取ってGET/POSTの手順を共有する。モデル
 [SSE標準](https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation) に従い、stream先頭のBOMを一つだけ除去し、CR/LF/CRLFを同じ行境界とする。CR直後のLFだけをchunkを跨いで抑止する。終端frameは空行で確定し、未完了frameをEOFでflushしない。`[DONE]`単独やSSEのevent名だけから完成responseを捏造しない。既存の完成JSON検証・tool採用境界・上限・取消し・retry条件は変えない。
 
 EOFのModelErrorには受信byte数、解析JSON event数、item done数、DONE marker数、未解析行/イベントのbyte数、最後のJSON eventの固定分類を付ける。本文・任意event名・URL・資格情報は含めず、既存attempt error経路で保存/照会する。Windows専用の改行変換や別のparserはなく、実会社環境での原因確定はこの診断と受信側の追加観測を必要とする。新しい表・event・worker・依存は追加しない。
+
+## HTTP要求内の共通文脈（Issue #13レビュー）
+
+cancel・Deadline・有限event sender・redaction対象を局所RequestContextへまとめ、JSON/SSE/HTTP error本文へ借用する。response_json/response_sseはclient状態に依存しない関数とする。非2xxはhttp_errorを直接呼び、成功しないことをexpectで仮定しない。stream deltaの受信分類と固定診断分類は同じclassify_stream_eventから導出する。要求をまたぐ状態や再試行の判断は持ち込まない。

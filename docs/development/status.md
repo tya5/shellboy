@@ -4,6 +4,12 @@
 
 v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
+## v0.1.4: Issue #15とレビュア指摘への対応
+
+#15のThread session header、任意prompt_cache_key、正確なattemptに結び付くcached_tokensのF6表示を実装しました。#4/#9/#10の文書と再描画試験、#11のHTTP error本文timeout再試行、#13の要求文脈整理、#14の正常SSE後の有限drainと会話経路のpool検証を含みます。追加レビューで見つかった使用量SQLの巨大値の一時複製、drain取消し時の受信推論欠落も修正しました。新schema・依存・worker・queueは追加していません。
+
+最終標準checkは70群1,179 passed / 0 failed / 19 ignored、fmtと全target strict Clippy、履歴/差分の秘密情報検査が成功しました。LiteLLM/lunaの合成4要求も成功し、header有効/無効とも2回目に23,040/23,267 cached_tokensを確認しました。header単体の改善効果とは断定しません。利用者の指示でpushし、3 OS CI成功後にv0.1.4を配布します。公開結果は [acceptance](../validation/acceptance.md) へ追記します。既定データ・設定・利用中processは変更しません。
+
 ## ローカル試用バイナリ更新（2026-10-27）
 
 利用者の指示で、`90cf354`までの修正を含む検証済みdebug binaryを`~/.local/bin/shellboy`へ原子的に配置しました。ビルド元と配置後のSHA-256一致、help/version、同梱設定ガイドの取得を確認済みです。旧binaryはGit管理外へ退避しました。表示versionは未リリースのため0.1.3のままですが、EOF修正と#9/#4/#10〜#14を含みます。起動中のprocessは切り替えず、次回起動から適用されます。設定・既定DB・push/releaseは変更していません。

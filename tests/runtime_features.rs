@@ -10,6 +10,7 @@ use tokio::{
 };
 struct Incoming {
     body: Value,
+    session: Option<String>,
     reply: oneshot::Sender<(u16, Value)>,
 }
 async fn proxy() -> (
@@ -27,7 +28,7 @@ async fn proxy() -> (
             tokio::spawn(async move {
                 let mut bytes = Vec::new();
                 let mut chunk = [0; 8192];
-                let body = loop {
+                let (body, session) = loop {
                     let n = stream.read(&mut chunk).await.unwrap();
                     if n == 0 {
                         return;
@@ -44,12 +45,28 @@ async fn proxy() -> (
                             })
                             .unwrap();
                         if bytes.len() >= i + 4 + length {
-                            break serde_json::from_slice(&bytes[i + 4..i + 4 + length]).unwrap();
+                            let session = head.lines().find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("x-shellboy-session-id")
+                                    .then(|| value.trim().to_owned())
+                            });
+                            break (
+                                serde_json::from_slice(&bytes[i + 4..i + 4 + length]).unwrap(),
+                                session,
+                            );
                         }
                     }
                 };
                 let (reply, result) = oneshot::channel();
-                if send.send(Incoming { body, reply }).await.is_err() {
+                if send
+                    .send(Incoming {
+                        body,
+                        session,
+                        reply,
+                    })
+                    .await
+                    .is_err()
+                {
                     return;
                 }
                 let Ok((status, body)) = result.await else {
@@ -326,6 +343,8 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
     }
     send(&control, &thread, "current task").await;
     let ordinary = incoming(&mut receive).await;
+    assert_eq!(ordinary.session.as_deref(), Some(thread.as_str()));
+    assert!(ordinary.body.get("prompt_cache_key").is_none());
     let accepted = timeout(
         Duration::from_millis(500),
         request(
@@ -345,6 +364,8 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
     );
     ordinary.reply.send((200, answer("last answer"))).unwrap();
     let summary = incoming(&mut receive).await;
+    assert_eq!(summary.session.as_deref(), Some(thread.as_str()));
+    assert!(summary.body.get("prompt_cache_key").is_none());
     assert_eq!(summary.body["tools"], json!([]));
     assert_eq!(summary.body["store"], false);
     summary
@@ -1234,6 +1255,7 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
         ) && item.get("id").is_some()));
     };
     let first = incoming(&mut receive).await;
+    assert_eq!(first.session.as_deref(), Some(thread.as_str()));
     check_input(&first.body);
     first
         .reply
@@ -1268,6 +1290,7 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
     )
     .await;
     let retry = incoming(&mut receive).await;
+    assert_eq!(retry.session.as_deref(), Some(thread.as_str()));
     check_input(&retry.body);
     // Model a Responses backend that rejects provider-specific output item IDs.
     let rejects_ids = retry.body["input"].as_array().unwrap().iter().any(|item| {
@@ -1786,6 +1809,75 @@ async fn quit_during_the_first_tool_cancels_the_next_call_without_restarting_the
         })
         .await
         .unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and_fork_ids() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let parent = thread(&control).await;
+    let accepted: MessageAccepted = serde_json::from_value(
+        request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(parent.clone()),
+                text: "synthetic session parent".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let first = incoming(&mut receive).await;
+    assert_eq!(first.session.as_deref(), Some(parent.as_str()));
+    assert!(first.body.get("prompt_cache_key").is_none());
+    first.reply.send((200, answer("parent response"))).unwrap();
+    settled(&control, &parent).await;
+    let child = request(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            parent_id: Some(parent.clone()),
+            cwd: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fork = request(
+        &control,
+        Command::ThreadFork(ThreadForkArgs {
+            thread_id: parent.clone(),
+            node_id: accepted.message_id,
+            cwd: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(parent, child);
+    assert_ne!(parent, fork);
+    assert_ne!(child, fork);
+    for target in [&parent, &child, &fork] {
+        uuid::Uuid::parse_str(target).expect("session source must be the real Thread UUID");
+        send(&control, target, "synthetic session followup").await;
+        let actual = incoming(&mut receive).await;
+        assert_eq!(actual.session.as_deref(), Some(target.as_str()));
+        assert!(actual.body.get("prompt_cache_key").is_none());
+        actual
+            .reply
+            .send((200, answer("distinct session response")))
+            .unwrap();
+        settled(&control, target).await;
+    }
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

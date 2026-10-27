@@ -51,13 +51,15 @@ Set-Location C:\work\project
 
 minttyのPTYとネイティブWindowsのコンソールAPIの組合せでは、raw modeや入力・画面制御がうまくつながらないことがあります。ただしConPTY対応で状況が変わるため、すべての構成で起動不可能とは断定しません。[minttyの公式説明](https://mintty.github.io/mintty.1.html)を参照してください。
 
-mintty上でのShellboyの対話実機確認は未実施です。問題時はまずWindows TerminalやWezTermのPowerShellで起動してください。minttyでの`winpty shellboy.exe`やConPTY設定は代替候補ですが、Shellboyでの動作確認はできていません。`winpty`を使う場合も別途その実行ファイルが必要です。
+minttyからは利用者の環境で起動できなかった報告があります。Git for Windowsの版とConPTY設定は未特定で、開発側の対話実機受入は未実施です。問題時はまずWindows TerminalやWezTermのPowerShellで起動してください。minttyでの`winpty shellboy.exe`やConPTY設定は代替候補ですが、Shellboyでの動作確認はできていません。`winpty`を使う場合も別途その実行ファイルが必要です。
 
 WSLでは、そのLinux環境内にLinux版を配置して起動します。Windows本体からWSLのBashをモデル用shellとして起動する構成は対象外です。WSLからWindowsプログラムを呼べることと、Shellboyで採用している構成は区別してください。WSLの保存先・設定はLinux側のものを使います。
 
+WSLの端末からWindows版の`shellboy.exe`を起動すると、WSL側だけで設定したAPIキーなどの環境変数は自動では渡りません。明示的な受け渡しには[WSLENV](https://learn.microsoft.com/en-us/windows/wsl/filesystems#share-environment-variables-between-windows-and-wsl-with-wslenv)の登録と方向指定の確認が必要です。利用者からも資格情報が渡らなかった報告があるため、WSL内ではLinux版を使ってください。
+
 ### 確認済みの範囲
 
-Windows native CIでPowerShellのpipe実行・終了・環境変数・子プロセス管理などを確認していますが、Windows Terminal/WezTermの対話操作やGit Bash/pwsh/minttyの実機受入を代替するものではありません。これらとWSL実機の確認は未実施です。macOSでは実binaryを絶対パスで起動し、親PATHからその配置先を外した状態でも、モデルのBashから短い名前でCLIを実行できることを確認しました。詳しい条件は [検証状況](../validation/acceptance.md) のIssue #4を参照してください。
+Windowsでは、PowerShellから起動し、モデル用shellにGit Bashを設定した構成が利用者のWezTerm + herdr環境で日常的に使われています。これは利用報告であり、開発側の正式な対話実機受入とは区別します。Windows native CIでPowerShellのpipe実行・終了・環境変数・子プロセス管理などを確認していますが、Windows Terminal/WezTermの対話操作やGit Bash/pwsh/minttyの実機受入を代替するものではありません。開発側ではこれらとWSL実機の確認は未実施です。Windowsでの残る確認には、親PATHにShellboyの配置先がない条件で、Git Bashの`bin\bash.exe` wrapper起動後も短い名前の`shellboy`でCLIを呼べることを含みます。macOSでは実binaryを絶対パスで起動し、親PATHからその配置先を外した状態でも、モデルのBashから短い名前でCLIを実行できることを確認しました。詳しい条件は [検証状況](../validation/acceptance.md) のIssue #4を参照してください。
 
 ## ソースからの最小導入
 
@@ -115,6 +117,8 @@ base_url = "https://proxy.example/v1"
 api_key_env = "SHELLBOY_PROXY_API_KEY"
 # default_effort = "low"
 # ssl_verify = true
+# session_header = true
+# prompt_cache_key = false
 # stream_idle_timeout_ms = 600000
 # request_timeout_ms = 60000
 # response_max_retries = 8
@@ -139,7 +143,19 @@ Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLB
 
 モデル一覧はTUIの `/models` または `shellboy model list` で取得し、現在のThreadのモデルは `/models` で選択するか `shellboy thread set --model MODEL_ID` で変更できます。利用可能なモデルは接続先の設定に依存します。
 
-ownerは接続ごとのHTTPクライアントを再利用します。TOMLやHTTP(S) proxy/NO_PROXYの環境設定を変えた場合はownerを再起動してください。APIキーなどの環境変数参照headerは要求ごとに読みますが、別のshellでexportしても既存ownerのプロセス環境は変わりません。未完のSSE本文を無理に読み切って接続を再利用する処理は加えていません。
+ownerは接続ごとのHTTPクライアントを再利用します。TOMLやHTTP(S) proxy/NO_PROXYの環境設定を変えた場合はownerを再起動してください。APIキーなどの環境変数参照headerは要求ごとに読みますが、別のshellでexportしても既存ownerのプロセス環境は変わりません。正常完了したSSEだけ、最大1秒・64KiBの後続本文読捨てで接続再利用を試みます。完了後の後処理の失敗だけで回答を復旧待ちへ戻しません。取消しは優先します。
+
+## Thread単位のセッション識別
+
+既定の `connections.<名前>.session_header = true` では、会話と要約のResponses要求に `x-shellboy-session-id` headerを送り、Thread UUIDを渡します。同じ会話では再試行やモデル切替後も同じ値を使い、子会話やforkは別のThread UUIDになります。会話本文・タイトル・作業場所などは値へ含めません。embeddingとモデル一覧には自動付与しません。
+
+自動付与が有効な場合、`headers` に大文字小文字違いを含む同名headerを指定していても、Responses要求ではThread UUIDを優先します。`session_header = false` は自動付与だけを無効にし、明示した固定headersはそのまま送ります。ほかの固定headerや、embedding・モデル一覧への固定headersの適用は変わりません。
+
+`prompt_cache_key = true` を同じ接続節へ指定すると、会話と要約の要求本文にもThread UUIDを `prompt_cache_key` として送ります。既定は `false` で本文へ追加しません。この項目を受け付けないproviderでは無効のまま使ってください。両設定とも変更後はownerを再起動します。
+
+これらは接続先が使える識別情報であり、キャッシュhit・同一backendへの振り分け・通信障害の解消を保証しません。LiteLLM等を使う場合は接続先のsession routing設定も確認してください。`x-litellm-session-id` やtrace IDが優先される構成では、そちらへ固定値を指定するとShellboyのThread識別より優先される可能性があります。会話ごとの分離が目的なら、全会話共通の固定識別headerを併用しないでください。
+
+完成した回答のF6詳細では、保存されたモデル要求の `usage.input_tokens_details.cached_tokens` を「入力キャッシュ」として確認できます。数値0と未報告は区別します。古い記録や不正な値からキャッシュhitを推測せず、対応するモデル要求IDも表示します。
 
 ## HTTPの待機時間
 
@@ -153,7 +169,9 @@ ownerは接続ごとのHTTPクライアントを再利用します。TOMLやHTTP
 
 `response_retry_max_delay_ms` は指数バックオフの1回の待機上限で、既定60,000ms、指定範囲1〜300,000msです。サーバーからの `Retry-After` はこの設定と別で最大600,000ms（10分）まで待ちます。停止すると待機も取消します。 Retry-Afterが600秒（10分）を超える場合、600秒に短縮して再送せず、指定待機時間を保存・表示して復旧待ちにします。
 
-`response_retry_partial` は既定 `true` です。本文やtool引数を一部受信した後でも、一時的な通信切断・EOF・無通信期限なら再試行します。`false` にすると、部分出力がある失敗は自動再送せず復旧待ちにします。metadataやheartbeatだけで出力がない要求は `false` でも再試行対象です。認証・設定・入力形式・明示provider失敗などは自動再送しません。
+`response_retry_partial` は既定 `true` です。本文やtool引数を一部受信した後でも、一時的な通信切断・EOF・無通信期限なら再試行します。推論の項目（暗号化された推論を含む）の `response.output_item.added` も部分出力として数えるため、本文がまだ空でも `false` では自動再送しません。`false` にすると、部分出力がある失敗は自動再送せず復旧待ちにします。metadataやheartbeatだけで出力がない要求は `false` でも再試行対象です。認証・設定・入力形式・明示provider失敗などは自動再送しません。
+
+無通信のまま毎回600秒で失敗し、Retry-Afterの指定がない例では、最初の要求と8回の追加試行が600秒×9、待機が1+2+4+8+16+32+60+60=183秒で、復旧待ちまで約5,583秒（93分）かかります。全体期限ではなく、受信やRetry-Afterによってさらに長くなることもあります。短くしたい場合は `stream_idle_timeout_ms` と `response_max_retries` を調整してください。HTTP 429/500/502/503/504のエラー本文の受信が停滞した場合も再試行対象です。
 
 対象は会話だけで、要約・embedding・モデル一覧の再試行方針は変更しません。設定変更はowner再起動後に反映されます。上流が処理済みなのに接続だけ失敗した場合の重複課金までは防げません。失敗と再試行は既存attemptへ記録し、部分受信の本文も保存します。最終responseが採用される前のtool callは実行しません。
 
@@ -201,6 +219,7 @@ shellboy
 |---|---|---|
 | root | `data_dir` = OS既定、`default_connection` / `default_model` = 未設定、`connections` = 空 | 保存先・新規会話の既定 |
 | `connections.<名前>` | `ssl_verify=true`、接続URL/認証/effort/headerは上記 | 接続単位のTLS検証。既定で検証あり |
+| `connections.<名前>` | `session_header=true`, `prompt_cache_key=false` | 会話・要約のThread識別headerと任意のキャッシュ識別本文 |
 | `connections.<名前>` | `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | ストリームの無通信期限（0で無効）・非ストリームの全体期限（最小1000ms） |
 | `connections.<名前>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | 会話の連続一時失敗の再試行（0〜20回、0で無効）・指数待機上限（1〜300000ms）・部分受信後も再試行 |
 | `embedding` | `connection` / `model` = 未設定 | 索引・検索API |

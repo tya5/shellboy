@@ -1,9 +1,11 @@
 //! Responses reception preserves bounded recovery data and reports facts only.
-use super::body::{read_json, redact};
+use super::body::{http_error, read_json, redact};
 use super::*;
 use crate::model::{MAX_RESPONSE_BYTES, ModelResponse, ResponseStream};
 use futures_util::StreamExt;
 use std::collections::BTreeMap;
+const TERMINAL_DRAIN_BYTES: usize = 64 * 1024;
+const TERMINAL_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ResponseReceived {
@@ -59,26 +61,41 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<Value>>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Plain))
+        self.response_inner(request, cancel, events.map(Events::Plain), None)
+            .await
+    }
+    /// Attach the continuing Thread identity only to this Responses request.
+    /// A shared client never owns the identity of a particular conversation.
+    #[allow(clippy::result_large_err)]
+    pub async fn response_for_thread(
+        &self,
+        thread: &str,
+        request: Value,
+        cancel: CancellationToken,
+        events: Option<mpsc::Sender<Value>>,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        self.response_inner(request, cancel, events.map(Events::Plain), Some(thread))
             .await
     }
     // Preserve the same bounded recovery payload as response().
     #[allow(clippy::result_large_err)]
     pub(crate) async fn response_observed(
         &self,
+        thread: &str,
         request: Value,
         cancel: CancellationToken,
         events: Option<mpsc::Sender<ObservedEvent>>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Observed))
+        self.response_inner(request, cancel, events.map(Events::Observed), Some(thread))
             .await
     }
     #[allow(clippy::result_large_err)]
     async fn response_inner(
         &self,
-        request: Value,
+        mut request: Value,
         cancel: CancellationToken,
         events: Option<Events>,
+        thread: Option<&str>,
     ) -> Result<ModelResponse, AttemptFailure> {
         let mut deadline = Deadline::new(
             ApiEndpoint::Responses,
@@ -86,22 +103,70 @@ impl HttpModelClient {
             &self.connection_name,
         )?;
         let mut facts = ResponseFacts::default();
-        self.response_attempt(request, cancel, events, &mut deadline, &mut facts)
-            .await
-            .map_err(|mut failure| {
-                failure.facts = facts;
-                failure
-            })
+        let session_header = self.prepare_session(thread, &mut request)?;
+        self.response_attempt(
+            request,
+            RequestContext {
+                cancel: &cancel,
+                deadline: &mut deadline,
+                events: events.as_ref(),
+                secrets: &[],
+            },
+            &mut facts,
+            session_header,
+        )
+        .await
+        .map_err(|mut failure| {
+            failure.facts = facts;
+            failure
+        })
+    }
+    fn prepare_session(
+        &self,
+        thread: Option<&str>,
+        request: &mut Value,
+    ) -> Result<Option<HeaderValue>, ModelError> {
+        let Some(thread) =
+            thread.filter(|_| self.connection.session_header || self.connection.prompt_cache_key)
+        else {
+            return Ok(None);
+        };
+        // Real Thread IDs are UUIDs. Accept short internal fixture IDs too, but
+        // never put control characters or an oversized identifier on the wire.
+        if thread.is_empty()
+            || thread.len() > 64
+            || !thread
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err(ModelError::new(
+                "input_invalid",
+                "Thread session ID must contain 1 to 64 ASCII letters, digits, hyphens or underscores",
+            ));
+        }
+        if self.connection.prompt_cache_key {
+            request
+                .as_object_mut()
+                .ok_or_else(|| ModelError::new("protocol", "Responses request must be an object"))?
+                .insert("prompt_cache_key".into(), json!(thread));
+        }
+        if self.connection.session_header {
+            let mut value = HeaderValue::from_str(thread)
+                .map_err(|_| ModelError::new("input_invalid", "Invalid Thread session header"))?;
+            value.set_sensitive(true);
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
     }
     // Keep the existing bounded recovery payload intact across body parsing.
     #[allow(clippy::result_large_err)]
     async fn response_attempt(
         &self,
         mut request: Value,
-        cancel: CancellationToken,
-        events: Option<Events>,
-        deadline: &mut Deadline,
+        context: RequestContext<'_>,
         facts: &mut ResponseFacts,
+        session_header: Option<HeaderValue>,
     ) -> Result<ModelResponse, AttemptFailure> {
         let Some(object) = request.as_object_mut() else {
             return Err(ModelError::new("protocol", "Responses request must be an object").into());
@@ -117,13 +182,20 @@ impl HttpModelClient {
                 ApiEndpoint::Responses,
                 reqwest::Method::POST,
                 Some(&request),
-                &cancel,
-                deadline,
+                context.cancel,
+                context.deadline,
+                session_header.as_ref(),
             )
             .await?;
-        deadline.received();
-        if let Some(events) = &events {
-            events.received(deadline.received_at());
+        let mut context = RequestContext {
+            cancel: context.cancel,
+            deadline: context.deadline,
+            events: context.events,
+            secrets: &secrets,
+        };
+        context.deadline.received();
+        if let Some(events) = context.events {
+            events.received(context.deadline.received_at());
         }
         let status = response.status();
         facts.status = Some(status.as_u16());
@@ -134,20 +206,7 @@ impl HttpModelClient {
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
                 .and_then(parse_retry_after);
-            return Err(read_json(
-                response,
-                MAX_RESPONSE_BYTES,
-                "Proxy returned malformed JSON",
-                &cancel,
-                deadline,
-                events.as_ref(),
-                None,
-                &secrets,
-            )
-            .await
-            .err()
-            .expect("non-success HTTP status yields an error")
-            .into());
+            return Err(http_error(response, &mut context).await.into());
         }
         let content_type = response
             .headers()
@@ -159,161 +218,167 @@ impl HttpModelClient {
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        if content_type == "application/json" {
-            return self
-                .response_json(
-                    response,
-                    &cancel,
-                    events.as_ref(),
-                    deadline,
-                    facts,
-                    &secrets,
-                    tools_enabled,
-                )
-                .await;
-        }
-        if content_type != "text/event-stream" {
-            return Err(ModelError::new(
+        match content_type.as_str() {
+            "application/json" => response_json(response, &mut context, facts, tools_enabled).await,
+            "text/event-stream" => response_sse(response, &mut context, facts, tools_enabled).await,
+            _ => Err(ModelError::new(
                 "protocol",
                 "Expected text/event-stream or application/json from Responses endpoint",
             )
-            .into());
+            .into()),
         }
-        self.response_sse(
-            response,
-            &cancel,
-            events.as_ref(),
-            deadline,
-            facts,
-            &secrets,
-            tools_enabled,
+    }
+}
+#[allow(clippy::result_large_err)]
+async fn response_json(
+    response: Response,
+    context: &mut RequestContext<'_>,
+    facts: &mut ResponseFacts,
+    tools_enabled: bool,
+) -> Result<ModelResponse, AttemptFailure> {
+    let body = read_json(
+        response,
+        MAX_RESPONSE_BYTES,
+        "Proxy returned malformed JSON",
+        context,
+        Some(&mut *facts),
+    )
+    .await?;
+    facts.terminal_received = true;
+    let raw = body.raw;
+    let result = match body.provider_error {
+        Some(error) => Err(error),
+        None => ModelResponse::completed(raw.clone(), tools_enabled),
+    };
+    let event_type = if raw.get("error").is_some_and(|e| !e.is_null()) {
+        "response.failed"
+    } else if raw.get("status").and_then(Value::as_str) == Some("completed") {
+        "response.completed"
+    } else {
+        "response.incomplete"
+    };
+    let event = json!({"type":event_type,"response":raw});
+    if let Some(sender) = context.events {
+        send_event(
+            sender,
+            event,
+            context.cancel,
+            context.deadline.received_at(),
         )
         .await
+        .map_err(|error| raw_failure(error, raw.clone()))?;
     }
-    #[allow(clippy::too_many_arguments, clippy::result_large_err)]
-    async fn response_json(
-        &self,
-        response: Response,
-        cancel: &CancellationToken,
-        events: Option<&Events>,
-        deadline: &mut Deadline,
-        facts: &mut ResponseFacts,
-        secrets: &[String],
-        tools_enabled: bool,
-    ) -> Result<ModelResponse, AttemptFailure> {
-        let body = read_json(
-            response,
-            MAX_RESPONSE_BYTES,
-            "Proxy returned malformed JSON",
-            cancel,
-            deadline,
-            events,
-            Some(&mut *facts),
-            secrets,
-        )
-        .await?;
-        facts.terminal_received = true;
-        let raw = body.raw;
-        let result = match body.provider_error {
-            Some(error) => Err(error),
-            None => ModelResponse::completed(raw.clone(), tools_enabled),
+    result.map_err(|error| raw_failure(error, raw))
+}
+#[allow(clippy::result_large_err)]
+async fn response_sse(
+    response: Response,
+    context: &mut RequestContext<'_>,
+    facts: &mut ResponseFacts,
+    tools_enabled: bool,
+) -> Result<ModelResponse, AttemptFailure> {
+    let mut stream = response.bytes_stream();
+    let mut parsed = ResponseStream::default();
+    let mut raw_response = None;
+    loop {
+        let next = match context
+            .deadline
+            .wait(context.cancel, "receiving response body", stream.next())
+            .await
+        {
+            Ok(next) => next,
+            Err(error) => return Err(failure(error, &parsed, raw_response)),
         };
-        let event_type = if raw.get("error").is_some_and(|e| !e.is_null()) {
-            "response.failed"
-        } else if raw.get("status").and_then(Value::as_str) == Some("completed") {
-            "response.completed"
-        } else {
-            "response.incomplete"
+        let Some(chunk) = next else {
+            break;
         };
-        let event = json!({"type":event_type,"response":raw});
-        if let Some(sender) = events {
-            send_event(sender, event, cancel, deadline.received_at())
-                .await
-                .map_err(|error| raw_failure(error, raw.clone()))?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                return Err(failure(
+                    transport_error(error, "receiving response body"),
+                    &parsed,
+                    raw_response,
+                ));
+            }
+        };
+        if !chunk.is_empty() {
+            context.deadline.received();
+            if let Some(events) = context.events {
+                events.received(context.deadline.received_at());
+            }
         }
-        result.map_err(|error| raw_failure(error, raw))
-    }
-    #[allow(clippy::too_many_arguments, clippy::result_large_err)]
-    async fn response_sse(
-        &self,
-        response: Response,
-        cancel: &CancellationToken,
-        events: Option<&Events>,
-        deadline: &mut Deadline,
-        facts: &mut ResponseFacts,
-        secrets: &[String],
-        tools_enabled: bool,
-    ) -> Result<ModelResponse, AttemptFailure> {
-        let mut stream = response.bytes_stream();
-        let mut parsed = ResponseStream::default();
-        let mut raw_response = None;
-        loop {
-            let next = match deadline
-                .wait(cancel, "receiving response body", stream.next())
+        let pushed = parsed.push(&chunk);
+        facts.observe_stream(&parsed);
+        let values = match pushed {
+            Ok(values) => values,
+            Err(error) => {
+                return Err(failure(
+                    redact(error, context.secrets),
+                    &parsed,
+                    raw_response,
+                ));
+            }
+        };
+        for value in values {
+            if let Some(raw) = value.get("response") {
+                raw_response = Some(raw.clone());
+            }
+            if let Some(sender) = context.events
+                && let Err(error) = send_event(
+                    sender,
+                    value,
+                    context.cancel,
+                    context.deadline.received_at(),
+                )
                 .await
             {
-                Ok(next) => next,
-                Err(error) => return Err(failure(error, &parsed, raw_response)),
-            };
-            let Some(chunk) = next else {
-                break;
-            };
-            let chunk = match chunk {
-                Ok(chunk) => chunk,
-                Err(error) => {
-                    return Err(failure(
-                        transport_error(error, "receiving response body"),
-                        &parsed,
-                        raw_response,
-                    ));
-                }
-            };
-            if !chunk.is_empty() {
-                deadline.received();
-                if let Some(events) = &events {
-                    events.received(deadline.received_at());
-                }
-            }
-            let pushed = parsed.push(&chunk);
-            facts.observe_stream(&parsed);
-            let values = match pushed {
-                Ok(values) => values,
-                Err(error) => return Err(failure(redact(error, secrets), &parsed, raw_response)),
-            };
-            for value in values {
-                if let Some(raw) = value.get("response") {
-                    raw_response = Some(raw.clone());
-                }
-                if let Some(sender) = &events
-                    && let Err(error) =
-                        send_event(sender, value, cancel, deadline.received_at()).await
-                {
-                    return Err(failure(error, &parsed, raw_response));
-                }
-            }
-            // A terminal SSE event is the protocol boundary. Waiting for a proxy
-            // to close its HTTP connection would retain resources indefinitely.
-            if parsed.is_terminal() {
-                break;
+                return Err(failure(error, &parsed, raw_response));
             }
         }
-        if cancel.is_cancelled() {
-            return Err(failure(cancelled(), &parsed, raw_response));
+        // A terminal SSE event is the protocol boundary. Waiting for a proxy
+        // to close its HTTP connection would retain resources indefinitely.
+        if parsed.is_terminal() {
+            break;
         }
-        let partial_text = parsed.partial_text.clone();
-        let partial_reasoning = parsed.partial_reasoning.clone();
-        let completed_items = parsed.completed_items.clone();
-        parsed
-            .finish(tools_enabled)
-            .map_err(|error| AttemptFailure {
-                error: redact(error, secrets),
-                partial_text,
-                partial_reasoning,
-                completed_items,
-                raw_response,
-                facts: ResponseFacts::default(),
-            })
     }
+    if context.cancel.is_cancelled() {
+        return Err(failure(cancelled(), &parsed, raw_response));
+    }
+    let partial_text = parsed.partial_text.clone();
+    let partial_reasoning = parsed.partial_reasoning.clone();
+    let completed_items = parsed.completed_items.clone();
+    let response = parsed
+        .finish(tools_enabled)
+        .map_err(|error| AttemptFailure {
+            error: redact(error, context.secrets),
+            partial_text: partial_text.clone(),
+            partial_reasoning: partial_reasoning.clone(),
+            completed_items: completed_items.clone(),
+            raw_response,
+            facts: ResponseFacts::default(),
+        })?;
+    // Validation already established the response boundary. Only resource
+    // cleanup remains: trailing bytes are opaque and cannot change success.
+    // Bound both time and bytes rather than waiting for a proxy to close.
+    let drain = async {
+        let mut received = 0usize;
+        while let Some(Ok(chunk)) = stream.next().await {
+            received = received.saturating_add(chunk.len());
+            if received >= TERMINAL_DRAIN_BYTES {
+                break;
+            }
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = context.cancel.cancelled() => return Err(AttemptFailure {
+            error: cancelled(), partial_text, partial_reasoning, completed_items,
+            raw_response: Some(response.raw), facts: ResponseFacts::default(),
+        }),
+        _ = tokio::time::timeout(TERMINAL_DRAIN_TIMEOUT, drain) => {},
+    }
+    Ok(response)
 }
 fn raw_failure(error: ModelError, raw: Value) -> AttemptFailure {
     let mut partial_text = String::new();

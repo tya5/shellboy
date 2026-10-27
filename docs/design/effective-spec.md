@@ -44,6 +44,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | owner一覧 | 既定50件、最大200件 | [protocol](protocol.md)。cursorはscope/版/watermarkへ束縛 |
 | owner本文取得 | 既定/最大64KiB、rawはraw bytesと専用decoder/cursor | [protocol](protocol.md)、[output](output.md) |
 | docs検索/本文 | 検索既定10件・最大100件、本文既定16KiB・最大64KiB | [docs/RAG採用仕様](docs-and-rag-spec.md)。owner履歴検索の50件上限と混同しない |
+| Thread session | 会話・要約のResponsesへThread UUIDのheaderを既定付与。本文prompt_cache_keyは任意・既定無効。embedding/一覧へ自動付与しない | [model HTTP](model-http.md)、[config](config.md) |
 | 接続先/モデル | Responses proxy経由、利用可能モデル・context長・価格の内蔵カタログなし | [models](models.md)、[model HTTP](model-http.md)。特定proxy製品への実装依存なし |
 | 再試行 | 明示context超過は自動圧縮最大2段階。指定HTTPエラー/未終端の通信切断・EOF・停滞timeoutを連続失敗あたり既定8回再試行し、正常採用でリセット。部分出力後も既定で再試行し接続設定で無効化可能 | [compaction](compaction.md)、[recovery guide](../guides/recovery-and-storage.md) |
 | HTTP期限 | 接続確立は固定30秒。Responsesは接続別受信停滞600000ms（0で無効）、embeddingは全体60000ms、モデル一覧は全体設定と20000msの短い方 | [model HTTP](model-http.md)、[config](config.md)。timeoutは索引の既存retry/pauseへ渡す。生成全体期限は追加しない。会話の停滞timeoutは再試行条件に従う。要約/索引/RAGの再試行は変更しない |

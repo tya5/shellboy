@@ -508,7 +508,10 @@ impl Compactor {
                 snapshot.effort.as_deref(),
                 false,
             );
-            let response = match client.response(request, cancel.clone(), None).await {
+            let response = match client
+                .response_for_thread(thread, request, cancel.clone(), None)
+                .await
+            {
                 Ok(response) => response,
                 Err(failure) => {
                     if failure.error.is_context_limit() && end - start > 1 && depth < 8 {

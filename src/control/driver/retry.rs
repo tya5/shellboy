@@ -22,11 +22,17 @@ fn classify_retry(
     if facts.terminal_received || error.is_context_limit() {
         return RetryPolicy::Ineligible;
     }
+    let transient_status = matches!(facts.status, Some(429 | 500 | 502 | 503 | 504));
     let eligible = match error.kind.as_str() {
-        "http" | "provider" => matches!(facts.status, Some(429 | 500 | 502 | 503 | 504)),
-        "transport" | "timeout" | "incomplete" => facts
-            .status
-            .is_none_or(|status| (200..300).contains(&status)),
+        "http" | "provider" => transient_status,
+        // An unfinished error body may fail before it can be decoded. Its
+        // saved retryable HTTP status remains authoritative for this policy.
+        "transport" | "timeout" | "incomplete" => {
+            transient_status
+                || facts
+                    .status
+                    .is_none_or(|status| (200..300).contains(&status))
+        }
         _ => false,
     };
     let partial_output = facts.received == ResponseReceived::Output;
@@ -220,6 +226,8 @@ mod tests {
                 Some(200),
                 Some(400),
                 Some(401),
+                Some(403),
+                Some(404),
                 Some(429),
                 Some(500),
                 Some(501),
@@ -244,7 +252,9 @@ mod tests {
                                         matches!(status, Some(429 | 500 | 502 | 503 | 504))
                                     }
                                     "transport" | "timeout" | "incomplete" => {
-                                        status.is_none() || status == Some(200)
+                                        status.is_none()
+                                            || status == Some(200)
+                                            || matches!(status, Some(429 | 500 | 502 | 503 | 504))
                                     }
                                     _ => false,
                                 };

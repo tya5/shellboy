@@ -18,6 +18,8 @@ Threadごとに下書き、node ID＋Unicode本文位置anchor、追従状態を
 
 F2または `/select` は選択・コピーモード。入った瞬間だけモード表示を描画し、mouse captureを解除、その後は背景更新を保持して画面の再描画を凍結する。F2/Escはキーボードだけで解除でき、元の追従状態を維持して再描画する。OS clipboardの読取り・コピー成功推測は行わない。本文/コードblockのコピーは `/copy` actionをworkerへ送り、DB原文の取得とOS/OSC52アダプタをUI外で扱う。Ctrl+Cをコピーキーへ置換しない。
 
+選択固定中も更新はメモリへ適用する。明示Ctrl+Lだけは固定中でも最新状態を一度描き直し、固定後の応答が表示される。選択モード・追従設定・source anchorを操作では変更せず、追従中の実表示位置は最新内容に合わせて進み得る。その後の自動描画は再び凍結する。固定時点の画面snapshotは追加しない。
+
 基本コマンド `/help /threads /new /fork /compact /model /effort /cwd` と、添付・画像・copy補助を実装。Thread一覧はID/title/cwd/parent/state/更新時刻/抜粋、filterとpageを持つ。run/turn/所有処理の詳細はThread snapshot・Progress更新とControlの詳細取得を使う。statusには意味のある状態、実経過時間、実際に開始したtool回数をworkerから表示する。UI自身は実行開始回数を推測しない。
 
 既存Threadの `/effort none` は公開thread.setの `effort: ""` を未指定へのリセットとして渡す（通常のeffortは空文字不可）。この具体化はrootの設定変更処理と合わせ、TOMLの空effort許可へ拡張しない。

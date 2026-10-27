@@ -845,3 +845,305 @@ async fn complete_json_validation_failure_is_a_response_boundary_not_interrupted
         assert_eq!(server.await.unwrap(), 1);
     }
 }
+
+struct SessionFixture {
+    client: HttpModelClient,
+    requests: mpsc::Receiver<Request>,
+    accepts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    server: JoinHandle<()>,
+}
+impl Drop for SessionFixture {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+async fn session_fixture(mut connection: Connection) -> SessionFixture {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    connection.base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let client = HttpModelClient::new(connection).unwrap();
+    let accepts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = accepts.clone();
+    let (send, requests) = mpsc::channel(16);
+    let server = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut reader = BufReader::new(stream);
+            loop {
+                let mut head = String::new();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                        break;
+                    }
+                    head.push_str(&line);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                if head.is_empty() {
+                    break;
+                }
+                let length = head
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                let mut bytes = vec![0; length];
+                if reader.read_exact(&mut bytes).await.is_err() {
+                    break;
+                }
+                let body = if bytes.is_empty() {
+                    Value::Null
+                } else {
+                    serde_json::from_slice(&bytes).unwrap()
+                };
+                let response = if head.starts_with("GET /v1/models ") {
+                    json!({"data":[{"id":"fixture"}]})
+                } else if head.starts_with("POST /v1/embeddings ") {
+                    json!({"data":[{"index":0,"embedding":[1.0]}]})
+                } else {
+                    final_response("ok")
+                };
+                send.send(Request { head, body }).await.unwrap();
+                let response = response.to_string();
+                let wire = format!(
+                    "HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{response}",
+                    response.len()
+                );
+                if reader.get_mut().write_all(wire.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    SessionFixture {
+        client,
+        requests,
+        accepts,
+        server,
+    }
+}
+fn session_values(request: &Request) -> Vec<&str> {
+    request
+        .head
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("x-shellboy-session-id")
+                .then_some(value.trim())
+        })
+        .collect()
+}
+fn session_request() -> Value {
+    response_request("fixture", vec![], None, false)
+}
+
+#[tokio::test]
+async fn automatic_session_is_per_request_stable_and_does_not_leak_through_a_pooled_client() {
+    let mut fixture = session_fixture(Connection::default()).await;
+    for thread in ["thread-a", "thread-a", "thread-b"] {
+        fixture
+            .client
+            .clone()
+            .response_for_thread(thread, session_request(), CancellationToken::new(), None)
+            .await
+            .unwrap();
+        let request = fixture.requests.recv().await.unwrap();
+        assert_eq!(session_values(&request), [thread]);
+        assert!(request.body.get("prompt_cache_key").is_none());
+    }
+    fixture
+        .client
+        .response(session_request(), CancellationToken::new(), None)
+        .await
+        .unwrap();
+    assert!(session_values(&fixture.requests.recv().await.unwrap()).is_empty());
+    fixture
+        .client
+        .embeddings(
+            "fixture",
+            &["synthetic".into()],
+            Some(1),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let embedding = fixture.requests.recv().await.unwrap();
+    assert!(session_values(&embedding).is_empty());
+    assert!(embedding.body.get("prompt_cache_key").is_none());
+    fixture
+        .client
+        .models(CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(session_values(&fixture.requests.recv().await.unwrap()).is_empty());
+    fixture
+        .client
+        .response_for_thread(
+            "thread-a",
+            session_request(),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        session_values(&fixture.requests.recv().await.unwrap()),
+        ["thread-a"]
+    );
+    assert_eq!(fixture.accepts.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn session_header_and_prompt_cache_key_can_be_selected_independently() {
+    for (header, cache) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut fixture = session_fixture(Connection {
+            session_header: header,
+            prompt_cache_key: cache,
+            ..Default::default()
+        })
+        .await;
+        fixture
+            .client
+            .response_for_thread(
+                "thread-switches",
+                session_request(),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        let request = fixture.requests.recv().await.unwrap();
+        assert_eq!(
+            session_values(&request),
+            if header {
+                vec!["thread-switches"]
+            } else {
+                vec![]
+            }
+        );
+        assert_eq!(
+            request.body.get("prompt_cache_key"),
+            cache
+                .then(|| Value::String("thread-switches".into()))
+                .as_ref()
+        );
+        fixture
+            .client
+            .response_for_thread(
+                "thread-other",
+                session_request(),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        let other = fixture.requests.recv().await.unwrap();
+        assert_eq!(
+            session_values(&other),
+            if header { vec!["thread-other"] } else { vec![] }
+        );
+        assert_eq!(
+            other.body.get("prompt_cache_key"),
+            cache.then(|| Value::String("thread-other".into())).as_ref()
+        );
+        // A no-context call cannot inherit either automatic field.
+        fixture
+            .client
+            .response(session_request(), CancellationToken::new(), None)
+            .await
+            .unwrap();
+        let plain = fixture.requests.recv().await.unwrap();
+        assert!(session_values(&plain).is_empty());
+        assert!(plain.body.get("prompt_cache_key").is_none());
+    }
+}
+
+#[tokio::test]
+async fn automatic_session_overrides_case_insensitive_static_header_and_opt_out_preserves_it() {
+    for auto in [true, false] {
+        let mut fixture = session_fixture(Connection {
+            session_header: auto,
+            headers: BTreeMap::from([("X-Shellboy-Session-ID".into(), "static-session".into())]),
+            ..Default::default()
+        })
+        .await;
+        fixture
+            .client
+            .response_for_thread(
+                "thread-dynamic",
+                session_request(),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            session_values(&fixture.requests.recv().await.unwrap()),
+            [if auto {
+                "thread-dynamic"
+            } else {
+                "static-session"
+            }]
+        );
+        // The static header is user configuration, so unrelated endpoints keep it.
+        fixture
+            .client
+            .models(CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            session_values(&fixture.requests.recv().await.unwrap()),
+            ["static-session"]
+        );
+    }
+}
+
+#[tokio::test]
+async fn automatic_session_rejects_invalid_context_before_io_without_echoing_it() {
+    for (header, cache) in [(true, false), (false, true)] {
+        let fixture = session_fixture(Connection {
+            session_header: header,
+            prompt_cache_key: cache,
+            ..Default::default()
+        })
+        .await;
+        for thread in [
+            "private-session\r\nX-Injected: bad".to_owned(),
+            "a".repeat(65),
+            String::new(),
+        ] {
+            let failure = fixture
+                .client
+                .response_for_thread(&thread, session_request(), CancellationToken::new(), None)
+                .await
+                .unwrap_err();
+            assert_eq!(failure.error.kind, "input_invalid");
+            if !thread.is_empty() {
+                assert!(!failure.error.message.contains(&thread));
+            }
+            assert_eq!(fixture.accepts.load(std::sync::atomic::Ordering::SeqCst), 0);
+        }
+    }
+    let mut disabled = session_fixture(Connection {
+        session_header: false,
+        prompt_cache_key: false,
+        ..Default::default()
+    })
+    .await;
+    disabled
+        .client
+        .response_for_thread(
+            "unused\ncontext",
+            session_request(),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(session_values(&disabled.requests.recv().await.unwrap()).is_empty());
+}

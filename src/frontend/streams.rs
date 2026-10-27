@@ -20,6 +20,7 @@ pub(super) async fn enrich(
 ) -> Result<(), ApiError> {
     super::tools::enrich(control, nodes).await?;
     super::recovery::enrich(control, nodes).await?;
+    super::usage::enrich(control, nodes).await?;
     // One history page has one finite I/O allowance, not 50 independent deadlines.
     let deadline = Instant::now()
         + Duration::from_millis(control.store.config.io.file_prepare_timeout_ms.min(1000));

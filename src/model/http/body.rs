@@ -16,28 +16,26 @@ impl JsonBody {
         }
     }
 }
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn read_json(
     response: Response,
     max: usize,
     malformed: &str,
-    cancel: &CancellationToken,
-    deadline: &mut Deadline,
-    events: Option<&Events>,
+    context: &mut RequestContext<'_>,
     facts: Option<&mut ResponseFacts>,
-    secrets: &[String],
 ) -> Result<JsonBody, ModelError> {
     let status = response.status();
     if !status.is_success() {
-        return Err(http_error(response, cancel, secrets, deadline, events).await);
+        return Err(http_error(response, context).await);
     }
-    let bytes = bounded_body(response, max, cancel, deadline, events, facts).await?;
+    let bytes = bounded_body(response, max, context, facts).await?;
     let raw: Value =
         serde_json::from_slice(&bytes).map_err(|_| ModelError::new("protocol", malformed))?;
-    let provider_error = raw
-        .get("error")
-        .filter(|error| !error.is_null())
-        .map(|_| redact(ModelError::provider(Some(status.as_u16()), &raw), secrets));
+    let provider_error = raw.get("error").filter(|error| !error.is_null()).map(|_| {
+        redact(
+            ModelError::provider(Some(status.as_u16()), &raw),
+            context.secrets,
+        )
+    });
     Ok(JsonBody {
         raw,
         provider_error,
@@ -47,28 +45,27 @@ pub(super) async fn read_json(
 async fn bounded_body(
     response: Response,
     max: usize,
-    cancel: &CancellationToken,
-    deadline: &mut Deadline,
-    events: Option<&Events>,
+    context: &mut RequestContext<'_>,
     mut facts: Option<&mut ResponseFacts>,
 ) -> Result<Vec<u8>, ModelError> {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     loop {
-        let next = deadline
-            .wait(cancel, "receiving response body", stream.next())
+        let next = context
+            .deadline
+            .wait(context.cancel, "receiving response body", stream.next())
             .await?;
         let Some(chunk) = next else {
             return Ok(body);
         };
         let chunk = chunk.map_err(|error| transport_error(error, "receiving response body"))?;
         if !chunk.is_empty() {
-            deadline.received();
+            context.deadline.received();
             if let Some(facts) = &mut facts {
                 facts.received = ResponseReceived::Output;
             }
-            if let Some(events) = events {
-                events.received(deadline.received_at());
+            if let Some(events) = context.events {
+                events.received(context.deadline.received_at());
             }
         }
         if chunk.len() > max.saturating_sub(body.len()) {
@@ -80,20 +77,15 @@ async fn bounded_body(
         body.extend_from_slice(&chunk);
     }
 }
-pub(super) async fn http_error(
-    response: Response,
-    cancel: &CancellationToken,
-    secrets: &[String],
-    deadline: &mut Deadline,
-    events: Option<&Events>,
-) -> ModelError {
+pub(super) async fn http_error(response: Response, context: &mut RequestContext<'_>) -> ModelError {
     let status = response.status().as_u16();
     let mut stream = response.bytes_stream();
     let mut body = Vec::new();
     let mut truncated = false;
     loop {
-        let next = match deadline
-            .wait(cancel, "receiving HTTP error body", stream.next())
+        let next = match context
+            .deadline
+            .wait(context.cancel, "receiving HTTP error body", stream.next())
             .await
         {
             Ok(next) => next,
@@ -109,9 +101,9 @@ pub(super) async fn http_error(
             break;
         };
         if !chunk.is_empty() {
-            deadline.received();
-            if let Some(events) = events {
-                events.received(deadline.received_at());
+            context.deadline.received();
+            if let Some(events) = context.events {
+                events.received(context.deadline.received_at());
             }
         }
         let take = chunk.len().min(MAX_ERROR_BYTES - body.len());
@@ -139,7 +131,7 @@ pub(super) async fn http_error(
     if truncated {
         error.message.push_str(" [HTTP error body truncated]");
     }
-    redact(error, secrets)
+    redact(error, context.secrets)
 }
 pub(super) fn redact(mut error: ModelError, secrets: &[String]) -> ModelError {
     for secret in secrets.iter().filter(|s| !s.is_empty()) {

@@ -165,6 +165,66 @@ mod tests {
         }
     }
     #[test]
+    fn selection_redraw_displays_updates_received_while_frozen_then_freezes_again() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("fixture-thread".into());
+        ui.insert("retained draft", false);
+        let generation = ui.view().generation;
+        let update = |text: &str| UiUpdate::Stream {
+            thread_id: "fixture-thread".into(),
+            generation,
+            node_id: "streamed-answer".into(),
+            role: "assistant".into(),
+            text: text.into(),
+            base_char_offset: 0,
+            total_chars: text.chars().count(),
+            reasoning_ranges: vec![],
+            presentation: Default::default(),
+            ack: None,
+        };
+        ui.apply(update("BEFORE_FREEZE"));
+        ui.event(Event::Key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
+        let links = Rc::new(RefCell::new(LinkSnapshot::default()));
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        draw_terminal(&mut terminal, &mut ui, &links).unwrap();
+        let frozen = terminal.backend().buffer().clone();
+        let draft = ui.view().draft.clone();
+        let follow = ui.view().follow;
+        let frame = Duration::from_millis(100);
+        ui.dirty = false;
+
+        let (sender, updates) = std::sync::mpsc::sync_channel(2);
+        sender.send(update("ARRIVED_WHILE_FROZEN")).unwrap();
+        ui.drain_updates(&updates);
+        assert!(!ui.draw_due(false, frame, frame));
+        assert_eq!(terminal.backend().buffer(), &frozen);
+        assert!(ui.event(repaint()).is_empty());
+        assert!(ui.draw_due(false, frame, frame));
+        draw_terminal(&mut terminal, &mut ui, &links).unwrap();
+        let refreshed = terminal.backend().buffer().clone();
+        let mut shown = String::new();
+        for y in 0..refreshed.area.height {
+            let mut x = 0;
+            while x < refreshed.area.width {
+                let symbol = refreshed[(x, y)].symbol();
+                shown.push_str(symbol);
+                x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+            }
+            shown.push('\n');
+        }
+        assert!(shown.contains("ARRIVED_WHILE_FROZEN"));
+        assert!(shown.contains("表示固定"));
+        assert!(!shown.contains("BEFORE_FREEZE"));
+        assert_eq!(ui.view().draft, draft);
+        assert_eq!(ui.view().follow, follow);
+        assert!(ui.selection_mode);
+
+        sender.send(update("AFTER_MANUAL_REDRAW")).unwrap();
+        ui.drain_updates(&updates);
+        assert!(!ui.draw_due(false, frame, frame));
+        assert_eq!(terminal.backend().buffer(), &refreshed);
+    }
+    #[test]
     fn configured_send_and_newline_win_and_help_explains_the_conflict() {
         for send in [true, false] {
             let mut config = Config::default();

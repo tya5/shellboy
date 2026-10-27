@@ -255,6 +255,7 @@ pub(crate) fn group(pointer: &str) -> (u8, &'static str) {
             | "updated_at"
             | "observed_at"
             | "activity_at"
+            | "cached_tokens"
     ) {
         return (1, "実行");
     }

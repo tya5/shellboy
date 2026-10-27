@@ -500,17 +500,17 @@ impl ResponseStream {
                     _ => {}
                 }
             }
-            self.last_event = Some(match event.get("type").and_then(Value::as_str) {
-                Some("response.output_text.delta" | "response.refusal.delta") => "text_delta",
-                Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
-                    "reasoning_delta"
-                }
-                Some("response.output_item.done") => "item_done",
-                Some(
-                    "response.completed" | "response.failed" | "response.incomplete" | "error",
-                ) => "terminal",
-                Some(_) => "other",
-                None => "untyped",
+            self.last_event = Some(match classification {
+                StreamEventKind::TextDelta => "text_delta",
+                StreamEventKind::ReasoningDelta => "reasoning_delta",
+                _ => match event.get("type").and_then(Value::as_str) {
+                    Some("response.output_item.done") => "item_done",
+                    Some(
+                        "response.completed" | "response.failed" | "response.incomplete" | "error",
+                    ) => "terminal",
+                    Some(_) => "other",
+                    None => "untyped",
+                },
             });
             match event.get("type").and_then(Value::as_str) {
                 Some("response.output_item.done") => {

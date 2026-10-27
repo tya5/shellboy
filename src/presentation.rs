@@ -19,7 +19,7 @@ use std::borrow::Cow;
 use std::mem::size_of;
 
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
-const MAX_FIELDS: usize = 128;
+pub(crate) const MAX_FIELDS: usize = 128;
 const MAX_LINKS: usize = 128;
 const MAX_BLOCKS: usize = 128;
 

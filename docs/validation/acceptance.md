@@ -1,6 +1,14 @@
 # 検証状況
 
-更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
+更新: 2026-10-27。最新のv0.1.4検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
+
+## v0.1.4: Issue #15・追加レビューの検証
+
+2026-10-27、macOS ARM64 / Rust 1.99.1。利用者が指定した#4/#9/#10/#11/#13/#14のレビュア指摘14件と#15を対象に、実装・文書・回帰試験を追加しました。最初の標準checkはstrict Clippy成功、単体484 passed / 1 failed / 6 ignoredでした。失敗は追加したCtrl+L試験が日本語のwide cell継続セルまで文字列化したためで、表示に合わせてUnicode幅で走査する試験へ直しました。製品の再描画処理をその失敗に合わせて変更していません。
+
+並行レビューで使用量SQLのwindow処理に巨大usageを含める問題を見つけ、IDだけを順位付けしてから64KiB制限付きで本文へjoinする構成へ修正しました。SSE後処理中の取消しでも受信済み推論・本文・完了item・最終rawを保全し、最終rawと異なる途中deltaを含む取消し試験で確認します。最終 `sh scripts/check.sh` は終了0。fmt・全target strict Clippy・70群1,179 passed / 0 failed / 19 ignoredが成功しました。SSEの直接2要求/Control会話2Turnとも1 TCP、後続本文の停滞・巨大末尾・取消しでの上限と受信証跡保持、Thread/子/fork/要約/再起動後retryのID、設定独立切替を含みます。履歴全90commitと今回staged差分のgitleaks検査は検出0。Windows対話端末・会社proxy・大contextのEOF低減は未検証です。3 OS CI・配布結果は確定後に追記します。
+
+最終sourceから生成したunit test実行ファイルを使い、既存ローカルLiteLLMのgpt-5.6-lunaへopt-in合成probeを正確に4要求送信しました（別枠1 passed）。同じ合成入力、各最大出力512・effort low・90秒上限・store:false、API自動再送なし。入力23,267 tokens、header無効の初回/2回目はcached_tokens=0/23,040、header有効も0/23,040（約99.0%）でした。所要時間は順に2984/2600/1374/1507msです。無効でもhitしているため、header単体の因果効果や速度改善は主張しません。本文prompt_cache_keyはこのprobeでは既定false、on/off独立性はmockで検証します。利用者の会話・既定DB・15万token超の負荷・会社proxyを使った検証ではありません。#15に既存の利用者による17.6k入力の報告もありますが、本測定とは別の証拠です。
 
 ## ローカル配置の確認（2026-10-27）
 
