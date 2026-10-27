@@ -2,6 +2,24 @@
 
 更新: 2026-10-27。最新のv0.1.2検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #7: 未受信時の有限再試行とIssue #8の統合（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1で実施しました。実装commit `3569524` の `sh scripts/check.sh` は終了0、fmt・strict all-target Clippy・70群の1,120 passed / 0 failed / 15 ignoredです。先行対象9群535件も成功しましたが標準結果へ二重計上しません。
+
+| 確認対象 | 実施と結果 |
+|---|---|
+| 対象HTTPと待機 | 実Controlとloopback HTTP mockで429/500/502/503/504の本文受信後エラーから回復。秒・HTTP-dateのRetry-Afterを接続別10ms上限で制限。HTTP client単独は依然一要求一POST |
+| 回数と停止 | 設定0/2の正確な要求数、上限到達の復旧待ちと保存回数、30秒待機中のRun停止/owner終了で追加要求なしを検証 |
+| 受信の境界 | headers前切断・本文0bytes切断・空SSEの正常EOFは対象。1byte、comment、推論、tool引数、平文、JSON断片の受信後は再送しない。未完成toolの実行0件 |
+| #8との統合 | 本文未受信の停滞timeoutを再送しない。503エラー本文が途中停止した場合もtimeout/status503/正しい接続設定keyを保ち、再送しない。既存HTTP期限6試験も成功 |
+| 予算共有 | 503→tool成功→503→tool成功→明示context超過/spill→503の6要求で、shell/result各2件、spill1件、generation不変、再試行予算2/2のまま復旧待ち。成功/圧縮で補充しない |
+| 保存と表示 | 失敗attemptに予約回数・上限・待機・重複課金可能性を保存。TUIの通常色の回数表示、成功後解除、最新同generationへの限定、#8受信時計の切替を検証 |
+| 設定と従来復旧 | 既定2/30000ms、範囲0〜5と1〜300000ms、負数/型/上限拒否。明示復旧fixtureは回数0とし、添付・RunRetry・TUI復旧の従来契約を維持 |
+
+全体check後の差分は `src/frontend/activity.rs` の復旧理由の表示投影だけです。回数付きの上限到達診断でも既知のモデル要求段階を示し、保存済み回数から構成した文全体との完全一致を条件にします。metadata欠落・不正値・不一致・古いgeneration・状態不一致は段階不明を保ち、元JSONを変更しません。`cargo test --locked --lib --test frontend_activity --test tui_recovery --test response_retries --no-fail-fast` は474 passed / 0 failed / 3 ignored（455+7+2+10）でした。最終sourceの `cargo clippy --locked --all-targets -- -D warnings`、fmt/diffも成功しました。この小さな表示差分後に70群全体は再実行しておらず、先行実装の標準結果とは区別します。
+
+最終差分の秘密情報検査は検出0件、公開文書の相対リンク499件は欠落0件です。先行公開commit `13b96a1` の [native CI](https://github.com/tya5/shellboy/actions/runs/40449915241) は3 OS成功ですが、今回#7のnative検証には読み替えません。今回は合成入力・一時DB・loopback mockだけで、実provider/会社proxy、Windows/Linuxの今回sourceでのnative CIは未実施です。設定・利用者DB・利用中owner・インストール済みbinaryは変更していません。push・release・Issueクローズは行っていません。
+
 ## 公開後のWindows CI起動取消し試験（未リリース）
 
 対象は本節と同じcommitの `src/frontend/startup.rs`（変更前のローカルHEAD `41baf46`）、macOS ARM64 / Rust 1.99.1です。[公開CI 40420705214](https://github.com/tya5/shellboy/actions/runs/40420705214) は文書のみの `211750e` でmacOS/Linux成功、Windowsの `cancellation_during_migration_preparation_keeps_lock_until_writer_finishes` だけが `SaveFailed / SQLite: database is locked` で失敗しました。先行v0.1.2の3 OS成功とは区別します。

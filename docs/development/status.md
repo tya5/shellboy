@@ -1,8 +1,14 @@
 # 開発状況
 
-更新: 2026-10-27。Issue #8のHTTP停滞対策をローカルsourceで実装・検証しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
+更新: 2026-10-27。Issue #8のHTTP停滞対策と統合し、Issue #7の未受信時の有限再試行をローカルsourceへ実装しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
+
+## Issue #7: 未受信時の有限再試行（未リリース）
+
+#8のHTTP期限・受信観測を利用して、会話の未受信一時失敗だけを既定2回再試行します。接続別の回数・待機上限、Retry-After、取消し可能な待機、既存attemptへの失敗/回数/重複課金可能性の記録とTUIの回数表示を追加しました。予算はTurn/generation内で共有し、tool成功やcontext圧縮では復活させません。受信済み断片、timeout、認証・形式エラーは再送しません。新しい表・worker・queue・EngineEvent・依存は追加していません。
+
+`3569524` の標準checkは70群1,120 passed / 0 failed / 15 ignoredで成功しました。対象9群535件も成功していますが二重計上しません。その後の上限到達時のTUI段階名の補正は対象4群474件と最終all-target strict Clippy・fmtが成功しました。全体結果と最終表示差分の検証範囲は [検証状況](../validation/acceptance.md) に記録します。先行 `13b96a1` の [CI](https://github.com/tya5/shellboy/actions/runs/40449915241) は3 OSとも成功しましたが、今回#7のnative CI成功には読み替えません。利用者の設定・保存データ・利用中owner・インストール済みbinaryは変更していません。
 
 ## 公開後のWindows CI失敗の切分け（未リリース）
 

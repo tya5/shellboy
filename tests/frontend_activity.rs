@@ -614,3 +614,135 @@ async fn retry_projection_requires_current_failed_attempt_and_live_running_turn(
     assert!(next.automatic_retry.is_none());
     db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn exhausted_retry_recovery_stage_requires_exact_saved_model_and_counts() {
+    use serde_json::json;
+    use shellboy::{
+        model::ModelError,
+        protocol::{ApiError, ErrorCode},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let db = DbWorker::open(root.path().join("db")).await.unwrap();
+    change(&db, "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES('u','t','r','recovery_wait',2,'now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',2,0,'p','m',0,'incomplete','{}','now');").await;
+    let model = ModelError::new("provider", "rate limited; original provider message");
+    let suffix = " (automatic retries exhausted: 2/2)";
+    let message = format!("{model}{suffix}");
+    // Only the complete typed diagnostic, with current-generation incomplete
+    // ownership, is proof that the recovery failure came from this model.
+    for (metadata, reason, generation, state, known) in [
+        (
+            Some(json!({"retries":2,"limit":2})),
+            message.clone(),
+            2,
+            "incomplete",
+            true,
+        ),
+        (None, message.clone(), 2, "incomplete", false),
+        (
+            Some(json!({"retries":1,"limit":2})),
+            message.clone(),
+            2,
+            "incomplete",
+            false,
+        ),
+        (
+            Some(json!({"retries":2,"limit":1})),
+            message.clone(),
+            2,
+            "incomplete",
+            false,
+        ),
+        (
+            Some(json!({"retries":0,"limit":0})),
+            message.clone(),
+            2,
+            "incomplete",
+            false,
+        ),
+        (
+            Some(json!({"retries":6,"limit":6})),
+            message.clone(),
+            2,
+            "incomplete",
+            false,
+        ),
+        (
+            Some(json!({"retries":"2","limit":2})),
+            message.clone(),
+            2,
+            "incomplete",
+            false,
+        ),
+        (Some(json!(2)), message.clone(), 2, "incomplete", false),
+        (
+            Some(json!({"retries":2,"limit":2})),
+            format!("provider: forged reason{suffix}"),
+            2,
+            "incomplete",
+            false,
+        ),
+        (
+            Some(json!({"retries":2,"limit":2})),
+            message.clone(),
+            1,
+            "incomplete",
+            false,
+        ),
+        (
+            Some(json!({"retries":2,"limit":2})),
+            message.clone(),
+            2,
+            "failed",
+            false,
+        ),
+    ] {
+        let mut saved = json!({"error": &model});
+        if let Some(metadata) = metadata {
+            saved["automatic_retry_exhausted"] = metadata;
+        }
+        let saved = saved.to_string();
+        let recovery = serde_json::to_string(&ApiError::new(ErrorCode::IoFailed, &reason)).unwrap();
+        let original = (recovery.clone(), saved.clone());
+        db.call(move |db| {
+            db.execute("UPDATE turn SET recovery_reason_json=?1", [recovery])?;
+            db.execute(
+                "UPDATE model_attempt SET error_json=?1,generation=?2,state=?3",
+                rusqlite::params![saved, generation, state],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let recovery = projection(&db).await.snapshot.recovery.unwrap();
+        if known {
+            assert_eq!(recovery.stage, "モデル要求");
+            assert_eq!(recovery.message, format!("{}{suffix}", model.message));
+        } else {
+            assert_eq!(recovery.stage, "処理（段階の記録なし）");
+            assert_eq!(recovery.message, reason);
+        }
+        let unchanged = db
+            .call(|db| {
+                Ok((
+                    db.query_row(
+                        "SELECT recovery_reason_json FROM turn WHERE id='u'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?,
+                    db.query_row(
+                        "SELECT error_json FROM model_attempt WHERE id='a'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            unchanged, original,
+            "projection must not rewrite provider diagnostics or counts"
+        );
+    }
+    db.shutdown().await.unwrap();
+}

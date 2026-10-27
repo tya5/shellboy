@@ -30,6 +30,32 @@ struct SavedAttempt {
     generation: i64,
     error: Option<String>,
     automatic_retry: Option<String>,
+    automatic_retry_exhausted: Option<String>,
+}
+/// Match only complete diagnostics constructed from the typed saved facts.
+/// Provider text and the durable attempt remain unchanged.
+fn model_failure_message(
+    message: &str,
+    model: &crate::model::ModelError,
+    exhausted: Option<&str>,
+) -> Option<String> {
+    if message == model.to_string() {
+        return Some(model.message.clone());
+    }
+    #[derive(serde::Deserialize)]
+    struct Exhausted {
+        retries: u32,
+        limit: u32,
+    }
+    let counts: Exhausted = serde_json::from_str(exhausted?).ok()?;
+    if !(1..=5).contains(&counts.limit) || counts.retries < counts.limit || counts.retries > 5 {
+        return None;
+    }
+    let suffix = format!(
+        " (automatic retries exhausted: {}/{})",
+        counts.retries, counts.limit
+    );
+    (message == format!("{model}{suffix}")).then(|| format!("{}{suffix}", model.message))
 }
 impl Projection {
     pub fn label(&self) -> &'static str {
@@ -98,9 +124,9 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Er
     {
         let attempt = db
             .query_row(
-                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
+                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END,CASE WHEN json_valid(error_json) THEN CASE WHEN json_type(error_json,'$.automatic_retry_exhausted')='object' THEN json_extract(error_json,'$.automatic_retry_exhausted') ELSE NULL END ELSE NULL END FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
                 rusqlite::params![turn_id,reason.is_some()],
-                |r| Ok(SavedAttempt { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)? }),
+                |r| Ok(SavedAttempt { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)?,automatic_retry_exhausted:r.get(5)? }),
             )
             .optional()?;
         if let Some(reason) = reason
@@ -118,16 +144,18 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Er
                 generation: attempt_generation,
                 state: attempt_saved_state,
                 error: Some(body),
+                automatic_retry_exhausted,
                 ..
             }) = &attempt
                 && *attempt_generation == generation
                 && attempt_saved_state == "incomplete"
                 && let Ok(model) = serde_json::from_str::<crate::model::ModelError>(body)
-                && message == model.to_string()
+                && let Some(projected_message) =
+                    model_failure_message(&message, &model, automatic_retry_exhausted.as_deref())
             {
                 // This exact typed match proves the prefix is our ModelError
                 // diagnostic kind; retain canonical JSON and project only the message.
-                message = model.message.clone();
+                message = projected_message;
                 stage = if model.is_context_limit() {
                     "モデル要求（入力容量超過）"
                 } else {
