@@ -3,7 +3,7 @@ use crate::{
     app::storage_error,
     config::Config,
     history,
-    model::{self, http::HttpModelClient},
+    model::{self, http::HttpClients},
     protocol::{ApiError, ErrorCode},
     storage::{DbWorker, StorageError},
 };
@@ -46,6 +46,7 @@ const SUMMARY_PROMPT: &str = "Summarize the following conversation as Markdown w
 
 #[derive(Clone)]
 pub struct Compactor {
+    clients: Arc<HttpClients>,
     database: DbWorker,
     config: Arc<Config>,
 }
@@ -247,7 +248,19 @@ fn resolve_turn_boundary(
 
 impl Compactor {
     pub fn new(database: DbWorker, config: Arc<Config>) -> Self {
-        Self { database, config }
+        let clients = Arc::new(HttpClients::new(&config));
+        Self::with_clients(database, config, clients)
+    }
+    pub(crate) fn with_clients(
+        database: DbWorker,
+        config: Arc<Config>,
+        clients: Arc<HttpClients>,
+    ) -> Self {
+        Self {
+            database,
+            config,
+            clients,
+        }
     }
 
     async fn snapshot(&self, thread: &str, for_summary: bool) -> Result<Snapshot, ApiError> {
@@ -443,18 +456,18 @@ impl Compactor {
             });
         }
         let groups = &snapshot.groups[..count];
-        let connection = self
-            .config
+        self.config
             .connections
             .get(&snapshot.profile)
-            .cloned()
             .ok_or_else(|| {
                 ApiError::new(
                     ErrorCode::ConfigInvalid,
                     "Summary connection is not configured",
                 )
             })?;
-        let client = HttpModelClient::for_connection(&snapshot.profile, connection)
+        let client = self
+            .clients
+            .get(&snapshot.profile)
             .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
         let mut segments = segments(groups, snapshot.epoch)?;
         segments.reverse();

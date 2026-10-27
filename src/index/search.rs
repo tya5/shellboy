@@ -103,18 +103,15 @@ impl IndexService {
         let Some(space) = space else {
             return Ok(Vec::new());
         };
-        let connection = self
-            .config
-            .connections
+        self.config.connections.get(&space.profile).ok_or_else(|| {
+            err(
+                ErrorCode::ConfigInvalid,
+                "Selected index space connection is not configured",
+            )
+        })?;
+        let client = self
+            .clients
             .get(&space.profile)
-            .cloned()
-            .ok_or_else(|| {
-                err(
-                    ErrorCode::ConfigInvalid,
-                    "Selected index space connection is not configured",
-                )
-            })?;
-        let client = HttpModelClient::for_connection(&space.profile, connection)
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
         let response = client
             .embeddings(

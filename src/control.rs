@@ -136,6 +136,11 @@ impl Control {
             owner.instance_id.clone(),
         );
         let index = store.index.clone();
+        let compactor = crate::compaction::Compactor::with_clients(
+            owner.db.clone(),
+            config.clone(),
+            store.clients.clone(),
+        );
         let attachments = Arc::new(crate::attachments::AttachmentService::new(
             owner.db.clone(),
             &config,
@@ -156,7 +161,7 @@ impl Control {
             index,
             index_workers: tokio::sync::OnceCell::new(),
             shutdown_context: tokio::sync::OnceCell::new(),
-            compactor: crate::compaction::Compactor::new(owner.db.clone(), config.clone()),
+            compactor,
             boundaries: Mutex::new(HashMap::new()),
             compact_tasks: Mutex::new(HashMap::new()),
             shell: ShellSupervisor::new(&config),

@@ -2,6 +2,19 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #11〜#14: 接続再利用後の最終検証（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1。#11/#12は`1a1ab57`、#13は`1bcc19a`へ分け、#14の接続再利用を本節と同じcommitへまとめます。既定データ・設定・利用中ownerは変更せず、以下の保存/端末確認は一時DBと合成入力だけで行いました。
+
+- 最終 `sh scripts/check.sh` は終了0。fmt・全target strict Clippy・70群1,164 passed / 0 failed / 18 ignoredが成功しました。最初の標準checkはruntimeの5件が失敗しました。いずれも途中EOF/停滞後の即時復旧を前提とする手動復旧fixtureで、新既定では再試行中だったためです。新しい既定の対象判定は変更せず、これらのfixtureへresponse_retry_partial=falseを明示して全targetを再実行しました。新既定/optout/待機/途中tool非実行はresponse_retriesが引き続き検証します。
+- client単体では、catalog→embedding→JSON Responsesを取得する3要求が1 TCP、Control経由のcatalog2要求も1 TCPでした。別profileのURL/header/TLS/期限設定の分離、profile初期化失敗の局所化、サーバーがConnection: closeを返した後の新規接続も確認しました。TLS/期限の分離試験自体は設定値とHTTP接続先の確認であり、2つのHTTPS profileを同時に実行する試験ではありません。実際のTLS/期限の振舞いは既存model_tls/http_deadlines回帰と区別します。
+- 別process・current-thread runtimeの限定試験で、同じclient/1 TCPを使った次要求へ新しい環境変数のAuthorization値が反映されました。親test processの資格情報は変更していません。資格情報子試験は親試験内で実行され、別の成功数として加算しません。
+- 最終debug binary（SHA-256 `6e56157fd7857749fe86dcb39660368e7ecaade15d8819e7de2eaf9bbe4fa38e`）のmacOS PTYで、HTTP1.1のkeep-aliveを通知しながら初回応答後にTCPを閉じるloopback mockを確認。1回のshell出力を次入力で受け取り、同じTurnの2要求/2 TCPで正常回答し終了0でした。これは予告のない切断後に新規接続できた確認で、必ずstale socketへ書き込むraceを強制した証拠ではありません。
+- 最終sourceの実時間outage試験も既定値で明示実行し、61秒のHTTP503障害を越えて63.18秒で成功しました（別枠1 passed、標準ignoredの実行）。外部proxyの障害を発生させたものではありません。
+- ローカルLiteLLM `127.0.0.1:4000/v1` / `gpt-5.6-luna` へ合成の短い応答を4要求だけ送るopt-in probeを実行し成功（別枠1 passed）。要求ごとにclient生成した2標本は1485/1358ms、共有した2標本は1440/1466msでした。各最大出力512・45秒上限・store:false。計測はclient取得後から応答完了までで、client生成費用は含みません。4標本では速度向上を確認できず、loopbackでのモデル生成時間をTCP/TLS handshakeの効果と読み替えません。利用者履歴や実会話は送信していません。
+
+最終binaryのベルもPTYで再確認し、起動時0、有効時は復旧でBEL1、無効時0、両方正常終了でした。fmt/diffと文書相対リンク485件（欠落0）は成功。差分の秘密情報検査をcommit前に実施します。Windows/Linux native CI・会社proxy、端末GUIの実音/点滅・マルチプレクサでの体感は未実施です。public releaseとインストール済みbinaryはv0.1.3のままです。push/releaseは行いません。
+
 ## Issue #13: HTTP処理の構造整理（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `1a1ab57`。#11/#12の動作変更から分け、HTTP層に散らばった再送許可を受信事実へ移し、Driverのclassify_retryへ集約しました。Error.kindやDB保存形式、client生成時点は変更していません。

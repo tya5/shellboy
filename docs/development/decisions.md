@@ -238,3 +238,11 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 - 理由: Issue #11の動作を維持しつつ、EOF・HTTPエラー・transportごとの読取経路に再試行ポリシーを重複させない。完全なJSON responseの検証失敗と未終端EOFを別の事実として扱い、ModelError.kindの永続形式を変更しない。
 - 影響: 新しいworker/queue/依存/永続状態を追加しない。分類関数はDriverとResponseStreamで共有し、Deadlineは時間だけを持つ。HTTP methodとJSON本文の共通手順を抽出する。clientの再利用という挙動変更は別commitに分ける。
 - 再確認条件: 新event形式や別のHTTP要求を足す場合、受信の事実とポリシーを混同せず、同じ表形式の判定試験と既存の期限/原文保全回帰を通す。
+
+
+## 2026-10-27: ownerの接続別HTTP clientを共有する（Issue #14）
+
+- 判断: Control配下のStoreが、設定接続数に固定されたHttpClients表を構築し、会話・要約・索引・意味検索・モデル一覧へ共有する。各entryはclient又は初期化エラーで、mutex/動的登録/worker/queueを増やさない。独立テスト/RAGの従来constructorは維持する。
+- 理由: reqwestの内部poolを要求ごとに捨てず、TCP/TLS初期化の繰返しを減らせるため。静的な接続設定と、要求ごとに読む資格情報を分ける。起動時に全体を失敗させず、使わない接続のbuilder失敗も要求時のエラーとして保持する。
+- 影響: pool_idle_timeoutは45秒（提案30〜60秒の中間）を初期値とし、実会社proxyの最適値とはしない。API key/headerは送信ごと、HTTP(S) proxy/no-proxyはclient構築時なので後者の変更にはowner再起動が必要。SSEのterminal時点終了を維持し、再利用できない接続のためのdrainを追加しない。再試行は#11のDriverのみが判断する。
+- 再確認条件: 会社proxyで古い接続の失敗や接続再利用率を実測できたらidle値を見直す。小さな実proxy標本から速度向上や原因解消を断定しない。全profile数/同時要求数は既存設定と所有に従い、pool保持をプロセスRSS上限とは扱わない。

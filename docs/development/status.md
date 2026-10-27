@@ -4,6 +4,12 @@
 
 v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
+## Issue #14: ownerのHTTPクライアント再利用（未リリース）
+
+#13を`1bcc19a`へ分けた後、Store所有の接続別client表を会話・要約・索引・意味検索・モデル一覧で共有しました。idle poolは45秒、APIキー/headerは要求ごとに解決し、SSE terminalでの終了時点は維持します。HTTP(S) proxy/no-proxyの環境設定変更は再起動後の反映です。独立RAGとテストのconstructorは維持し、新worker/queue/永続表は増やしていません。
+
+mockの複数要求1 TCP、Control経由の再利用、設定分離、資格情報差替え、接続の再確立が成功。実binary/PTYでも、keep-aliveと通知した接続を予告なく閉じるmockに対し、同じTurnが2本目のTCPで正常完了しました。LiteLLM/lunaの合成4要求は約1.36〜1.49秒で完了しましたが、速度優位の証明とはしません。最終標準checkはfmt・全target strict Clippy・70群1,164 passed / 0 failed / 18 ignoredが成功しました。最終sourceの63.18秒outage試験とベルPTY再確認も成功しています。詳細と未実施は [acceptance](../validation/acceptance.md) へ記録します。インストール済みbinary・既定データ・push/releaseは変更していません。
+
 ## Issue #13: HTTP受信の事実と再試行判定を整理（未リリース）
 
 #11/#12を`1a1ab57`へ分けた後、HTTP層の再送許可をResponseFactsへ置換し、Driverの1関数で対象を判定する構成へ整理しました。event分類を共有し、期限を時間管理だけにし、非stream JSON読取とGET/POST送信を共通化しました。保存形式・再試行挙動・接続clientの寿命は変えていません。

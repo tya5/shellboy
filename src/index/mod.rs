@@ -5,7 +5,7 @@ use crate::{
     config::Config,
     control::output::ShellOutputReader,
     history,
-    model::{ModelError, http::HttpModelClient},
+    model::ModelError,
     protocol::{
         ApiError, ErrorCode, HistorySearchArgs, IndexArgs, IndexScope, IndexStatus, NodeProvenance,
         SearchMatch,
@@ -121,6 +121,7 @@ enum ClaimResult {
     Ready(Box<Claimed>),
 }
 pub struct IndexService {
+    clients: Arc<crate::model::http::HttpClients>,
     database: DbWorker,
     config: Arc<Config>,
     notify: Arc<Notify>,
@@ -148,9 +149,19 @@ impl IndexService {
         Self::with_instance(database, config, format!("index-{}", id()))
     }
     pub fn with_instance(database: DbWorker, config: Arc<Config>, instance: String) -> Arc<Self> {
+        let clients = Arc::new(crate::model::http::HttpClients::new(&config));
+        Self::with_clients(database, config, instance, clients)
+    }
+    pub(crate) fn with_clients(
+        database: DbWorker,
+        config: Arc<Config>,
+        instance: String,
+        clients: Arc<crate::model::http::HttpClients>,
+    ) -> Arc<Self> {
         let profile_key = identity::profile_key(&config);
         let legacy_profile_key = identity::legacy_profile_key(&config);
         Arc::new(Self {
+            clients,
             reader: ShellOutputReader::new(database.clone(), instance),
             source_slots: Arc::new(Semaphore::new(config.indexing.concurrency.max(1))),
             database,
@@ -722,8 +733,8 @@ impl IndexService {
             .map(|s| s.model.as_str())
             .or(self.config.embedding.model.as_deref())
             .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding model missing"))?;
-        let result = if let Some(connection) = self.config.connections.get(connection_name) {
-            match HttpModelClient::for_connection(connection_name, connection.clone()) {
+        let result = if self.config.connections.contains_key(connection_name) {
+            match self.clients.get(connection_name) {
                 Ok(client) => {
                     client
                         .embeddings(

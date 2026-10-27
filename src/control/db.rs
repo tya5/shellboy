@@ -51,6 +51,7 @@ pub enum RuntimeReservation {
 
 #[derive(Clone)]
 pub struct Store {
+    pub(crate) clients: Arc<crate::model::http::HttpClients>,
     pub database: DbWorker,
     pub config: Arc<Config>,
     pub index: Arc<crate::index::IndexService>,
@@ -83,12 +84,15 @@ impl Store {
         startup_cwd: PathBuf,
         instance_id: String,
     ) -> Self {
+        let clients = Arc::new(crate::model::http::HttpClients::new(&config));
         Self {
-            index: crate::index::IndexService::with_instance(
+            index: crate::index::IndexService::with_clients(
                 database.clone(),
                 config.clone(),
                 instance_id.clone(),
+                clients.clone(),
             ),
+            clients,
             database,
             config,
             startup_cwd,

@@ -2,7 +2,7 @@
 
 API境界・接続契約・[adapter契約](adapters.md) を具体化する。HTTP要求は `src/model/http.rs`、Responses受信は `src/model/http/response.rs`、本文処理は `src/model/http/body.rs`、期限は `src/model/http/deadline.rs` に分ける。ローカルHTTP fixtureは `tests/model_http.rs`。初期のAPI・接続仕様資料は非同梱。
 
-`HttpModelClient::new(Connection)` でURL・headerの静的契約を検査し、接続profileを固定する。資格情報の環境変数は要求を始める直前に取得する。認証不足ならHTTPを開始しない。Responses要求は同API rootの `/responses` へ一回POSTし、`stream:true` / `store:false` を強制する。model/effort/input/tool指定は要求側が組み立てた値を維持する。redirect、HTTPクライアントのretry、別APIへのfallbackは無効。接続確立timeoutは固定30秒。生成全体の期限は付けず、接続別の受信停滞期限と利用者の取消しで中断可能とする。
+`HttpModelClient::new(Connection)` でURL・headerの静的契約を検査し、接続profileを固定する。資格情報の環境変数は要求を始める直前に取得する。owner内では接続profileごとに構築した共有clientを使い、要求ごとにtransportやpoolを作り直さない。認証不足ならHTTPを開始しない。Responses要求は同API rootの `/responses` へ一回POSTし、`stream:true` / `store:false` を強制する。model/effort/input/tool指定は要求側が組み立てた値を維持する。redirect、HTTPクライアントのretry、別APIへのfallbackは無効。接続確立timeoutは固定30秒。生成全体の期限は付けず、接続別の受信停滞期限と利用者の取消しで中断可能とする。
 
 HTTP(S)プロキシはreqwestの既存環境変数 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` と `NO_PROXY` を利用する。接続別TOMLのproxyキーや独自の除外判定は追加しない。依存のdefault-features=falseを維持し、OS GUIのsystem-proxy取得やSOCKS featureは有効にしない。
 
@@ -23,6 +23,18 @@ HTTP失敗本文は64 KiBまで読み、messageを16,384文字・provider code�
 公式参照: [Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events)、[Embeddings](https://developers.openai.com/api/reference/resources/embeddings/methods/create)。
 
 2026-10-24の実endpoint診断を受け、最初の完全なterminal SSE frameをdecode境界とする。`error`、`response.failed`、`response.incomplete`、`response.completed` のframeが空行まで完了したら、同じHTTP chunk内の後続event/未完了frameを解析しない。HTTP chunkの分かれ方によって元provider errorが `Event after terminal response` や `EOF in partial SSE event` へ置き換わる問題を防ぐ。terminal frame自体のJSON不正・未完了や、最終responseそのものの形式検証は引き続き失敗になる。最初の終端が失敗なら、その後のcompletedで成功へ変えない。一般用途の `SseDecoder::push` は全eventを解析し、Responsesのstreamだけが終端までのdecodeを選ぶ。これは[公式event定義](https://developers.openai.com/api/reference/resources/responses/streaming-events)を基にしたtransportの境界判断で、後続eventをモデル出力として解釈する拡張ではない。全byte分割点とローカルHTTPで回帰を検証し、課金残高回復後の実endpoint正常完了は別途必要とする。
+
+## 接続別clientの寿命（Issue #14）
+
+ControlのStoreがimmutableなHttpClients表を所有し、会話Driver・Compactor・索引worker・意味検索・モデル一覧へ同じArcを共有する。表は設定の接続名ごとに一つのHttpModelClient（又は初期化エラー）で、entry数は起動設定の接続数に固定する。通常のRust constructorを使い、runtimeの追加cache、mutex、worker、queue、永続表は持たない。独立テスト向けconstructorは独立の表を構築でき、独立RAGは従来どおりコマンド単位のProfileのclientを使う。
+
+URL/静的headerとclientの構築・検証はowner初期化時に行い、要求時は軽いcloneを取得する。使わない接続のclient初期化エラーは表に保持し、その接続の操作開始時に返す。動いている間のTOML変更を読み直さない。資格情報/環境変数headerは各HTTP要求の直前に解決し、clientへ秘密値を固定しない。HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXYはreqwestがclient構築時に読むため、変更はownerの再起動後に反映する。別processのshellの環境変更が既に動いているownerへ伝わるという意味ではない。
+
+reqwestのpool_idle_timeoutを45秒にする。提案範囲30〜60秒の中間を、proxyに閉じられた古いidle接続を長く残さない初期値として選ぶ。会社proxyの実測最適値や切断回避保証とはしない。新しい設定keyやpool_max_idle_per_hostの独自上限は加えない。接続別base_url/ssl_verify/期限は隔離し、redirect禁止・HTTP client自身のretry禁止を維持する。接続の失敗は会話Driverの通常の再試行判断へ渡す。
+
+[固定reqwest版のClient](https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html)は内部poolを持ち、cloneで共有する。poolへ戻せる完全読取応答は再利用できるが、SSEのterminal後にHTTP本文をまだ読み切っていない場合は接続が破棄され得る。再利用のために未受信本文をdrainしたり、proxyが閉じるまで待ったりせず、既存のterminal終了・取消し境界を優先する。常に全Responses要求が同じTCP接続になるとは保証しない。
+
+表の寿命はControl/Store/Index/Compactorのowner文脈と要求中cloneの所有に従う。停止時は既存の要求取消し・worker終了・drainを行い、最後の所有cloneがなくなればpoolも解放する。停止後も保持される外部Control参照を無視して即時破棄を約束しない。
 
 ## HTTP error本文の上限境界（M13）
 

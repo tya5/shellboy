@@ -129,7 +129,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 
 Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLBOY_PROXY_API_KEY = '…'` のようにプロセス環境へ設定します。秘密値を履歴や共有設定へ残さない方法は各環境で選んでください。binary自体は `credentials.env` を自動読込みしません。
 
-`base_url` はHTTP(S)のAPIルートです。末尾の `/responses`・`/embeddings` はshellboyが付加します。URL内のユーザー名/パスワード、query、fragment、既に付いたendpoint末尾は拒否します。`api_key_env` は環境変数の**名前**で、接続開始直前に値を読み `Authorization: Bearer ...` にします。未設定/空の値や改行入り値はエラーです。
+`base_url` はHTTP(S)のAPIルートです。末尾の `/responses`・`/embeddings` はshellboyが付加します。URL内のユーザー名/パスワード、query、fragment、既に付いたendpoint末尾は拒否します。`api_key_env` は環境変数の**名前**で、要求送信直前に値を読み `Authorization: Bearer ...` にします。未設定/空の値や改行入り値はエラーです。
 
 `connections.<名前>.headers` は任意のHTTP header辞書です。header名は大文字小文字を無視して重複不可、値の不正な制御文字は拒否します。`api_key_env` とAuthorization headerは併用不可です。headerへ秘密値を直接書くより環境変数参照を使ってください。`default_effort` は省略可能な非空文字列で、接続先が受け付ける値を指定します。モデル容量・effort対応のカタログは内蔵しません。
 
@@ -138,6 +138,8 @@ Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLB
 会話はResponses、索引と検索クエリはEmbeddings APIを使います。`embedding.connection` と `embedding.model` は両方省略、または両方指定です。接続名は定義済みである必要があります。embedding変更時は別空間として扱い、過去データ全件を無断で再索引化しません。明示backfill/rebuildと費用の考え方は [履歴と検索](history-and-search.md) を参照してください。検索にもAPI利用が生じます。
 
 モデル一覧はTUIの `/models` または `shellboy model list` で取得し、現在のThreadのモデルは `/models` で選択するか `shellboy thread set --model MODEL_ID` で変更できます。利用可能なモデルは接続先の設定に依存します。
+
+ownerは接続ごとのHTTPクライアントを再利用します。TOMLやHTTP(S) proxy/NO_PROXYの環境設定を変えた場合はownerを再起動してください。APIキーなどの環境変数参照headerは要求ごとに読みますが、別のshellでexportしても既存ownerのプロセス環境は変わりません。未完のSSE本文を無理に読み切って接続を再利用する処理は加えていません。
 
 ## HTTPの待機時間
 

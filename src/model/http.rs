@@ -2,6 +2,8 @@
 use super::ModelError;
 use crate::config::{ApiEndpoint, Config, Connection};
 mod body;
+mod clients;
+pub(crate) use clients::HttpClients;
 mod deadline;
 mod response;
 use body::read_json;
@@ -69,6 +71,7 @@ impl HttpModelClient {
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .connect_timeout(std::time::Duration::from_secs(30))
+            .pool_idle_timeout(std::time::Duration::from_secs(45))
             .build()
             .map_err(|_| ModelError::new("transport", "Unable to initialize HTTP client"))?;
         Ok(Self {

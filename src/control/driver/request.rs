@@ -94,13 +94,12 @@ pub(super) fn model_client(
     control: &Control,
     snapshot: &Snapshot,
 ) -> Result<HttpModelClient, ApiError> {
-    let Some(connection) = control
+    if !control
         .store
         .config
         .connections
-        .get(&snapshot.profile)
-        .cloned()
-    else {
+        .contains_key(&snapshot.profile)
+    {
         let error = ApiError::new(
             ErrorCode::ConfigInvalid,
             "Model connection is not configured",
@@ -112,7 +111,7 @@ pub(super) fn model_client(
         let error = ApiError::new(ErrorCode::ConfigInvalid, "Thread model is not configured");
         return Err(error);
     }
-    let client = match HttpModelClient::for_connection(&snapshot.profile, connection) {
+    let client = match control.store.clients.get(&snapshot.profile) {
         Ok(client) => client,
         Err(error) => {
             let error = ApiError::new(ErrorCode::ConfigInvalid, error.to_string());

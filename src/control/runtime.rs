@@ -365,17 +365,18 @@ impl Control {
                     "No default connection is configured",
                 )
             })?;
-        let profile = self
-            .store
+        self.store
             .config
             .connections
             .get(&connection)
-            .cloned()
             .ok_or_else(|| {
                 ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
             })?;
         let fetch = async {
-            let client = crate::model::http::HttpModelClient::for_connection(&connection, profile)
+            let client = self
+                .store
+                .clients
+                .get(&connection)
                 .map_err(model_list_error)?;
             client
                 .models(self.stop.child_token())
