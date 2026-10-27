@@ -233,3 +233,11 @@ Quitの後も保存と所有処理の停止が終わるまでは、Runが短時�
 会話・要約が受信停滞期限に達した場合は、受信済みの本文を保全して復旧待ちになります。エラーのheader/body段階・経過ms・設定keyを確認してください。設定ガイドの`connections.<名前>.stream_idle_timeout_ms`は既定600000で、長い無通信を許すモデルには増やすか、0で期限を無効にできます。接続確立の固定30秒と手動取消しは有効なままです。未知の失敗で自動再送はしません。
 
 embedding・意味検索・RAGは`connections.<名前>.request_timeout_ms`（既定60000、最小1000）の要求全体期限を使います。モデル一覧は同設定と20000msの短い方です。索引workerのtimeoutは既存の有限retryへ渡し、続く失敗はspaceをpauseします。statusの失敗理由を確認して接続や設定を直し、明示retryします。ownerの設定変更は再起動後に反映されます。検索CLIの切断・owner停止時は残った検索HTTPも取り消します。
+
+## EOFによる未完了を調べる
+
+`EOF before response.completed` は、HTTP本文が終了した時点でShellboyがcompletedイベントを認識できなかったことを示します。API側が送信しなかったことまでは、この文言だけでは分かりません。
+
+修正版では保存される失敗理由に `received_bytes`（受信量）、`parsed_events`（解析できたJSON数）、`completed_items`、`done_markers`、`pending_line_bytes` / `pending_data_bytes`（末尾の未完了量）、`last_event`（固定分類）を含みます。`/received`の保存原文などで同じTurn/attemptの理由を確認し、共有時は本文全体でなくこれらの診断値を使ってください。通常ログの`model_failure`は従来どおり分類とattempt IDであり、完全なエラー本文を自動記録するものではありません。
+
+`last_event=untyped` はJSONに文字列のtypeがなかった場合、`done_markers`は`[DONE]`の受信数です。いずれもcompleted responseの存在を保証しません。受信量があって解析数0でも、コメントだけの受信などがあり得るため原因を断定しないでください。最後の空行まで届かないイベントは未完了のまま保持し、自動で回答やtool実行として確定しません。

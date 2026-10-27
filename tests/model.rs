@@ -421,3 +421,146 @@ fn malformed_later_frame_keeps_received_prefix_at_every_chunk_split() {
         assert_eq!(stream.completed_items[&0], item, "split {split}");
     }
 }
+
+#[test]
+fn sse_framing_leading_bom_preserves_completed_at_every_split() {
+    let raw = completed(vec![
+        json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"日本語😀"}]}),
+    ]);
+    // A one-event stream exposes a lost first data line without an earlier created event.
+    let wire = format!(
+        "\u{feff}{}",
+        event(&json!({"type":"response.completed","response":raw}))
+    );
+    for split in 0..=wire.len() {
+        let mut stream = ResponseStream::default();
+        stream.push(&wire.as_bytes()[..split]).unwrap();
+        stream.push(&wire.as_bytes()[split..]).unwrap();
+        let result = stream
+            .finish(false)
+            .unwrap_or_else(|e| panic!("split {split}: {e}"));
+        assert_eq!(result.raw, raw);
+        assert_eq!(result.text, "日本語😀");
+    }
+}
+
+#[test]
+fn sse_framing_bare_cr_terminal_after_lf_delta_is_not_lost() {
+    let raw = completed(vec![
+        json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"complete"}]}),
+    ]);
+    for ending in ["\r\r", "\r\n\n", "\r\r\n"] {
+        let wire = format!(
+            "data: {}\n\ndata: {}{ending}",
+            json!({"type":"response.output_text.delta","delta":"complete"}),
+            json!({"type":"response.completed","response":raw})
+        );
+        for split in 0..=wire.len() {
+            let mut stream = ResponseStream::default();
+            stream.push(&wire.as_bytes()[..split]).unwrap();
+            stream.push(&wire.as_bytes()[split..]).unwrap();
+            assert_eq!(stream.partial_text, "complete");
+            assert_eq!(
+                stream
+                    .finish(false)
+                    .unwrap_or_else(|e| panic!("split {split}: {e}"))
+                    .raw,
+                raw
+            );
+        }
+    }
+}
+
+#[test]
+fn sse_framing_all_standard_line_endings_preserve_multiline_data_and_utf8() {
+    let raw = completed(vec![
+        json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"日😀"}]}),
+    ]);
+    for newline in ["\n", "\r\n", "\r"] {
+        let wire = format!(
+            "\u{feff}: first comment{newline}{newline}event: response.completed{newline}data: {{\"type\":\"response.completed\",{newline}data: \"response\":{raw}}}{newline}{newline}"
+        );
+        for split in 0..=wire.len() {
+            let mut stream = ResponseStream::default();
+            stream.push(&wire.as_bytes()[..split]).unwrap();
+            stream.push(&wire.as_bytes()[split..]).unwrap();
+            assert_eq!(stream.finish(false).unwrap().raw, raw);
+        }
+        let mut stream = ResponseStream::default();
+        for byte in wire.as_bytes() {
+            stream.push(&[*byte]).unwrap();
+        }
+        assert_eq!(stream.finish(false).unwrap().text, "日😀");
+    }
+}
+
+#[test]
+fn sse_framing_eof_never_dispatches_an_unterminated_terminal_frame() {
+    let raw = completed(vec![]);
+    for newline in ["\n", "\r\n", "\r"] {
+        for ending in ["", newline] {
+            let wire = format!(
+                "data: {}{ending}",
+                json!({"type":"response.completed","response":raw})
+            );
+            let mut stream = ResponseStream::default();
+            for byte in wire.as_bytes() {
+                stream.push(&[*byte]).unwrap();
+            }
+            let error = stream.finish(false).unwrap_err();
+            assert_eq!(error.kind, "incomplete");
+            assert!(error.message.starts_with("EOF in partial SSE event"));
+            assert!(error.message.contains("parsed_events=0"));
+        }
+    }
+}
+
+#[test]
+fn sse_framing_strips_only_one_bom_at_the_start_of_the_stream() {
+    let frame = event(&json!({"type":"response.completed","response":completed(vec![])}));
+    for wire in [
+        format!("\u{feff}\u{feff}{frame}"),
+        format!(": earlier\n\n\u{feff}{frame}"),
+    ] {
+        let mut stream = ResponseStream::default();
+        for byte in wire.as_bytes() {
+            stream.push(&[*byte]).unwrap();
+        }
+        let error = stream.finish(false).unwrap_err();
+        assert!(error.message.starts_with("EOF before response.completed"));
+        assert!(error.message.contains("parsed_events=0"));
+    }
+}
+
+#[test]
+fn eof_diagnostics_distinguish_untyped_done_only_and_truncated_frames_without_content() {
+    let secret = "synthetic-body-not-a-diagnostic";
+    let mut stream = ResponseStream::default();
+    let wire = format!(
+        "data: {{\"type\":\"response.output_text.delta\",\"delta\":\"{secret}\"}}\n\ndata: {{\"response\":{{\"status\":\"completed\"}}}}\n\ndata: [DONE]\n\n"
+    );
+    stream.push(wire.as_bytes()).unwrap();
+    let error = stream.finish(false).unwrap_err();
+    assert!(
+        error
+            .message
+            .contains(&format!("received_bytes={}", wire.len()))
+    );
+    for fact in [
+        "parsed_events=2",
+        "done_markers=1",
+        "pending_line_bytes=0",
+        "pending_data_bytes=0",
+        "last_event=untyped",
+    ] {
+        assert!(error.message.contains(fact), "{}", error.message);
+    }
+    assert!(!error.message.contains(secret));
+    let mut stream = ResponseStream::default();
+    stream
+        .push(event(&json!({"type":secret})).as_bytes())
+        .unwrap();
+    let error = stream.finish(false).unwrap_err();
+    assert!(error.message.contains("last_event=other"));
+    assert!(!error.message.contains(secret));
+}

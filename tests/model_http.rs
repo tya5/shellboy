@@ -642,3 +642,59 @@ async fn delta_difference_with_equal_item_done_is_preserved_without_rejecting_fi
     assert_eq!(observation.partial_text, "paid old answer");
     assert_eq!(task.await.unwrap(), 1);
 }
+
+#[tokio::test]
+async fn valid_sse_framing_survives_immediate_http_eof_without_losing_completed() {
+    let raw = final_response("frame completed before connection close");
+    let completed = json!({"type":"response.completed","response":raw});
+    for body in [
+        format!("\u{feff}data: {completed}\n\n"),
+        format!("data: {completed}\r\r"),
+        format!(
+            "data: {{\"type\":\"response.output_text.delta\",\"delta\":\"frame completed before connection close\"}}\n\ndata: {completed}\r\r"
+        ),
+    ] {
+        let (client, _, server) = fake(200, "text/event-stream", body.into_bytes(), 1).await;
+        let (tx, mut rx) = mpsc::channel(8);
+        let result = client
+            .response(
+                response_request("fixture", vec![], None, false),
+                CancellationToken::new(),
+                Some(tx),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.raw, raw);
+        let mut events = Vec::new();
+        while let Some(event) = rx.recv().await {
+            events.push(event);
+        }
+        assert_eq!(events.last().unwrap(), &completed);
+        assert_eq!(server.await.unwrap(), 1);
+    }
+}
+
+#[tokio::test]
+async fn done_marker_without_typed_terminal_stays_incomplete_and_has_safe_diagnostics() {
+    let body = b"event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[]}}\n\ndata: [DONE]\n\n".to_vec();
+    let (client, _, server) = fake(200, "text/event-stream", body, 1).await;
+    let failure = client
+        .response(
+            response_request("fixture", vec![], None, false),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        failure
+            .error
+            .message
+            .starts_with("EOF before response.completed")
+    );
+    assert!(failure.error.message.contains("parsed_events=1"));
+    assert!(failure.error.message.contains("done_markers=1"));
+    assert!(failure.error.message.contains("last_event=untyped"));
+    assert!(failure.retry.is_none());
+    assert_eq!(server.await.unwrap(), 1);
+}

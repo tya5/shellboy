@@ -185,3 +185,10 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 受信記録そのものと現在の対処要否を分け、元Turnのrecovery_waitだけを注意色の根拠にする。後の別Turnが完了したことを古い失敗の解決とみなさず、各sourceの元Turnを参照する。途中本文は確定回答へ変更せず、原文・同Turn対応・再送対象外を維持する。現在のTurn状態は既存DB workerで読み、Frontend/既存UiUpdateで色を投影する。UIがanchor保持のため古い本文windowを残す場合も表示分類は更新する。
 
 一覧は同Turn割当receiptの最初の依頼を有限抜粋として使い、無ければ不明を示す。続く追加指示すべてを1行に列挙せず、Turn短縮IDを補助に残す。通常のRust子moduleへ一覧SQL/投影を分けるだけで、汎用一覧frameworkや新しい永続状態は足さない。
+
+## 2026-10-27: EOFの監査をtransport推測より先に行う
+
+- 判断: BOM/CR単独で受信済みcompletedを取りこぼす自前SSE decoderを修正する。空行未到達・DONEのみ・JSON type欠落を自動成功扱いにはしない。
+- 理由: 修正前テストでBOMは実報告と同文言、CR単独はpartial EOFを再現した。HTTP受信順序にEOF追い越しは見つからず、Windows専用decoderも存在しない。BOM/CRは仕様上有効だが、会社Windowsの実wireが未観測なので頻発原因の確定とは分ける。
+- 調査性: 受信/解析/残留byte数と固定分類を既存errorに記録し、実データを新たに自動ログしない。Coreの状態・保存schemaや完成条件を緩めず、小さなtransport修正に限定する。
+- 再確認条件: 修正版でも頻発する場合、完了を示す受信データがどの形式で到着したかを診断結果から絞り、SSE event名や非標準終端の扱いを別途判断する。

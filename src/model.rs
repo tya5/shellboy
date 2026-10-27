@@ -303,6 +303,10 @@ pub struct SseDecoder {
     line: Vec<u8>,
     data: Vec<u8>,
     total: usize,
+    after_cr: bool,
+    first_line_seen: bool,
+    json_events: usize,
+    done_markers: usize,
 }
 impl SseDecoder {
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Value>, ModelError> {
@@ -330,7 +334,13 @@ impl SseDecoder {
         }
         let mut events = Vec::new();
         for &byte in bytes {
-            if byte != b'\n' {
+            if self.after_cr {
+                self.after_cr = false;
+                if byte == b'\n' {
+                    continue;
+                }
+            }
+            if byte != b'\n' && byte != b'\r' {
                 self.line.push(byte);
                 if self.line.len() + self.data.len() > MAX_EVENT_BYTES {
                     return Err(DecodeFailure {
@@ -340,9 +350,15 @@ impl SseDecoder {
                 }
                 continue;
             }
+            // CR is a line end itself; consume only an immediately following LF.
+            // Keep this across chunks, including a split CRLF pair.
+            self.after_cr = byte == b'\r';
             let mut line = std::mem::take(&mut self.line);
-            if line.last() == Some(&b'\r') {
-                line.pop();
+            if !self.first_line_seen {
+                self.first_line_seen = true;
+                if line.starts_with(b"\xef\xbb\xbf") {
+                    line.drain(..3);
+                }
             }
             if line.is_empty() {
                 if !self.data.is_empty() {
@@ -360,12 +376,15 @@ impl SseDecoder {
                                 });
                             }
                         };
+                        self.json_events += 1;
                         let stop = terminal(&event);
                         events.push(event);
                         if stop {
                             self.data.clear();
                             break;
                         }
+                    } else {
+                        self.done_markers += 1;
                     }
                     self.data.clear();
                 }
@@ -386,6 +405,19 @@ impl SseDecoder {
     pub fn is_at_boundary(&self) -> bool {
         self.line.is_empty() && self.data.is_empty()
     }
+    fn eof_diagnostic(&self, completed_items: usize, last_event: Option<&str>) -> String {
+        // Counts and a fixed classification only: never leak response text or event names.
+        format!(
+            "received_bytes={}, parsed_events={}, completed_items={}, done_markers={}, pending_line_bytes={}, pending_data_bytes={}, last_event={}",
+            self.total,
+            self.json_events,
+            completed_items,
+            self.done_markers,
+            self.line.len(),
+            self.data.len(),
+            last_event.unwrap_or("none")
+        )
+    }
 }
 
 #[derive(Debug, Default)]
@@ -398,6 +430,7 @@ pub struct ResponseStream {
     failed_response: Option<Value>,
     differences: Vec<OutputMismatch>,
     total_differences: usize,
+    last_event: Option<&'static str>,
 }
 impl ResponseStream {
     /// Parsed events can be persisted/previewed. Tools are never started here.
@@ -424,6 +457,18 @@ impl ResponseStream {
         }
         // Apply the valid prefix before returning a later frame decode failure.
         for event in &events {
+            self.last_event = Some(match event.get("type").and_then(Value::as_str) {
+                Some("response.output_text.delta" | "response.refusal.delta") => "text_delta",
+                Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
+                    "reasoning_delta"
+                }
+                Some("response.output_item.done") => "item_done",
+                Some(
+                    "response.completed" | "response.failed" | "response.incomplete" | "error",
+                ) => "terminal",
+                Some(_) => "other",
+                None => "untyped",
+            });
             match event.get("type").and_then(Value::as_str) {
                 Some("response.output_text.delta" | "response.refusal.delta") => {
                     if let Some(delta) = event.get("delta").and_then(Value::as_str) {
@@ -509,7 +554,14 @@ impl ResponseStream {
     }
     pub fn finish(self, tools_enabled: bool) -> Result<ModelResponse, ModelError> {
         if !self.decoder.is_at_boundary() {
-            return Err(ModelError::new("incomplete", "EOF in partial SSE event"));
+            return Err(ModelError::new(
+                "incomplete",
+                format!(
+                    "EOF in partial SSE event ({})",
+                    self.decoder
+                        .eof_diagnostic(self.completed_items.len(), self.last_event)
+                ),
+            ));
         }
         match self.terminal {
             Some(Ok(raw)) => {
@@ -535,7 +587,11 @@ impl ResponseStream {
             Some(Err(e)) => Err(e),
             None => Err(ModelError::new(
                 "incomplete",
-                "EOF before response.completed",
+                format!(
+                    "EOF before response.completed ({})",
+                    self.decoder
+                        .eof_diagnostic(self.completed_items.len(), self.last_event)
+                ),
             )),
         }
     }

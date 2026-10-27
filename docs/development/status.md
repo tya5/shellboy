@@ -4,6 +4,13 @@
 
 v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
+## EOF実装監査とSSE framing修正（未リリース）
+
+Windows/v0.1.2のEOF頻発報告を受け、自前parserで先頭BOMとCR単独改行によるcompleted取りこぼしを再現し、修正しました。BOMの単一completed streamは報告と同じEOF文言、CR単独はpartial EOFです。通常のcreated先行streamではBOMだけで頻発を説明できず、会社Windowsの実原因は未確定です。HTTP受信loopにEOF通知の追い越しやWindows専用parserは見つかっていません。
+
+既存の完成条件・tool採用・retry条件は維持し、EOFに本文なしの受信/解析カウンタと固定分類を追加します。対象8群529件（重複排除）と最終all-target strict Clippy・fmtが成功しました。修正はローカルsourceのみで、公開済み0.1.3とインストール済みbinaryには未反映です。検証範囲と環境の区別は [検証状況](../validation/acceptance.md) に記録しています。
+
+
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
 ## Thread一覧の状態色（v0.1.3）

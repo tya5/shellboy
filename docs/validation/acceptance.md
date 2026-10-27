@@ -2,6 +2,19 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## EOF実装監査とSSE framing（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1、公開済みv0.1.3から本節と同じcommitの変更を検証しました。報告元はWindows/v0.1.2であり、Windows実機・会社proxyの現象そのものは再現していません。v0.1.2〜v0.1.3で該当parserの終端判定は同じです。
+
+- 修正前の `cargo test --locked --test model sse_framing_ -- --nocapture` は追加2件が失敗。BOM付き単一completedイベントは `EOF before response.completed`、LF deltaの後のCR単独終端は `EOF in partial SSE event` を再現しました。実障害の原因確定とは区別します。
+- 修正後の `cargo test --locked --lib --test model --test model_http --test http_deadlines --test response_retries --test frontend_activity --test tui_recovery --no-fail-fast` は7群526 passed / 0 failed / 3 ignored。全byte splitとbyte単位のBOM/CR/LF/CRLF、UTF-8、複数data行、正常completed直後のHTTP close、終端不在/未完了での失敗・再送制限を確認しました。
+- その後の変更は混在CRLF/LF・CR/CRLFの明示fixtureとガイド。最終の `cargo test --locked --lib --test model --test docs_cli --no-fail-fast` は3群486 passed / 0 failed / 3 ignored。単体461件・model22件は重複計上せず、先行5統合群43件とdocs CLI3件を合わせて8群529 passed / 0 failed / 3 ignoredです。製品のparserは先行7群成功時から変更していません。
+- 最終sourceの `cargo clippy --locked --all-targets -- -D warnings` とfmt/diffが成功しました。文書相対リンク492件の欠落は0件。差分の秘密情報検査をcommit前に実施します。
+- EOF診断は受信byte数・解析JSON数・item done数・DONE marker数・残留byte数・固定のevent分類だけです。合成の本文/type値をエラーへ出さないことをテストしました。通常diagnostic logへエラー全文は追加せず、既存のattempt error保存/受信原文経路を利用します。
+
+HTTP受信はchunkを解析後に次を読む単一loopで、EOF追い越しやWindows専用parserは見つかりませんでした。SSEのevent名だけ、DONEだけ、空行未到達のJSONをcompletedへ昇格する変更は行っていません。通常のcreated先行streamならBOMだけでは頻発を説明できず、会社環境での原因は未確定です。全70群の標準test、Windows/Linux native CI、実モデルへの追加要求は未実施。push・release・インストール済みbinaryの変更は行いません。
+
+
 ## v0.1.3公開時の最終検証
 
 2026-10-27、tag `v0.1.3` / commit `bbb9758d8cee85a6a1cc43dfc9e9015508f6f95c` で検証しました。下記は途中の変更ごとの結果を置き換える最終sourceの結果です。後続の公開記録commitは文書だけを更新します。

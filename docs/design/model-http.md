@@ -57,3 +57,11 @@ HTTP clientは従来どおり一要求一POSTとし、会話Driverだけが再�
 失敗attemptをfailedへ保存し、error_json.automatic_retryにnumber/limit/delay_ms/possible_duplicate_chargeを残してからChanged通知と取消し可能なsleepへ進む。この記録は次の試行を予約した事実で、HTTP再送済みの証明ではない。待機中の停止なら次のattemptは作らない。上流の二重処理・重複課金は防げない。次の要求は通常の受付/CAS/容量/添付/選択境界を再検証する。待機中はThread境界lockを保持せず、Run停止・owner停止を優先する。上限到達時は既存の復旧待ちにし、automatic_retry_exhaustedのretries/limitと最後のエラーを保存する。各実HTTP要求は新しいattempt、次要求のDeadlineも新しい要求で開始する。embedding/catalog/要約の再試行方針は変更しない。
 
 TUIは最新の同generationのfailed attemptのautomatic_retryを既存投影で読み、通常色のアニメーションと再試行回数を表示する。新しい表・永続状態・worker・queue・EngineEvent・依存を足さない。
+
+## EOF判定の実装監査とSSEの行境界
+
+2026-10-27、Windowsのv0.1.2利用でのEOF頻発報告を受け、自前decoderを先に監査した。HTTP読み取りは一つのloopでchunk受信→同期decode→次の受信の順であり、別経路のEOF通知が未解析chunkを追い越す構造はない。ただしLF/CRLF以外の行境界と先頭BOMに欠陥があった。先頭BOM付きdata行だけのcompleted streamは実装が最初の行を無視して正確に `EOF before response.completed` を返し、CR単独区切りは終端を解析できずpartial EOFとなる。通常のcreated先行streamでBOMだけが今回の頻発原因だとは断定しない。
+
+[SSE標準](https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation) に従い、stream先頭のBOMを一つだけ除去し、CR/LF/CRLFを同じ行境界とする。CR直後のLFだけをchunkを跨いで抑止する。終端frameは空行で確定し、未完了frameをEOFでflushしない。`[DONE]`単独やSSEのevent名だけから完成responseを捏造しない。既存の完成JSON検証・tool採用境界・上限・取消し・retry条件は変えない。
+
+EOFのModelErrorには受信byte数、解析JSON event数、item done数、DONE marker数、未解析行/イベントのbyte数、最後のJSON eventの固定分類を付ける。本文・任意event名・URL・資格情報は含めず、既存attempt error経路で保存/照会する。Windows専用の改行変換や別のparserはなく、実会社環境での原因確定はこの診断と受信側の追加観測を必要とする。新しい表・event・worker・依存は追加しない。
