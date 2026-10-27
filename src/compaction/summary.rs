@@ -4,6 +4,7 @@ pub(super) struct SummaryAdoption {
     pub(super) snapshot: Snapshot,
     pub(super) sources: Vec<Source>,
     pub(super) payload: Value,
+    pub(super) start: usize,
     pub(super) count: usize,
     pub(super) result: CompactResult,
 }
@@ -20,7 +21,11 @@ impl SummaryAdoption {
         }
         validate(tx, &self.snapshot)?;
         let node = store_replacement(tx, &self.snapshot, &self.sources, &self.payload, FORMAT)?;
-        let mut path = vec![node.clone()];
+        let mut path = self.snapshot.groups[..self.start]
+            .iter()
+            .flat_map(|group| group.sources.iter().map(|source| source.id.clone()))
+            .collect::<Vec<_>>();
+        path.push(node.clone());
         path.extend(
             self.snapshot.groups[self.count..]
                 .iter()

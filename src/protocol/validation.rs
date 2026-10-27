@@ -52,6 +52,45 @@ impl ThreadListArgs {
     }
 }
 
+impl ContextEditArgs {
+    pub fn validate(&self) -> Result<(), ApiError> {
+        for (name, value) in [
+            ("thread_id", &self.thread_id),
+            ("from_node_id", &self.from_node_id),
+            ("to_node_id", &self.to_node_id),
+        ] {
+            optional_nonempty(value.as_deref(), name)?;
+            if value.as_ref().is_some_and(|value| value.len() > 1024) {
+                return Err(invalid(format!("{name} must not exceed 1024 bytes")));
+            }
+        }
+        match self.action {
+            ContextEditAction::Spill | ContextEditAction::Summary | ContextEditAction::Omit => {
+                if self.from_node_id.is_none() || self.to_node_id.is_none() {
+                    return Err(invalid(
+                        "spill, summary and omit require both from_node_id and to_node_id",
+                    ));
+                }
+            }
+            ContextEditAction::Trim => {
+                if self.from_node_id.is_some() || self.to_node_id.is_none() {
+                    return Err(invalid(
+                        "trim requires only to_node_id (inclusive removed prefix end)",
+                    ));
+                }
+            }
+            ContextEditAction::Restore => {
+                if self.to_node_id.is_some() {
+                    return Err(invalid(
+                        "restore accepts only an optional from_node_id marker",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 impl ThreadCreateArgs {
     fn validate(&self) -> Result<(), ApiError> {
         for (name, value) in [
@@ -265,6 +304,7 @@ impl Command {
             Self::ThreadGet(a) | Self::AttachmentList(a) | Self::Compact(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")
             }
+            Self::ContextEdit(a) => a.validate(),
             Self::ThreadCreate(a) => a.validate(),
             Self::ThreadFork(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {

@@ -1,4 +1,5 @@
 //! Independent operation admission and per-Thread drivers on one async runtime.
+mod compact;
 mod foreground;
 pub(crate) mod interruption;
 mod live;
@@ -697,6 +698,23 @@ impl Control {
                             .await?;
                         self.store.execute_with_plan(request, origin, plan).await
                     }
+                    Command::ThreadGet(_) => {
+                        let mut effects = self.store.execute(request, origin).await?;
+                        if let Some(thread) = effects
+                            .result
+                            .get("thread_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                        {
+                            effects.result["context_usage"] =
+                                match self.compactor.context_metrics(&thread).await {
+                                    Ok(metrics) => metrics,
+                                    Err(error) if error.is_storage_failure() => return Err(error),
+                                    Err(error) => json!({"available":false,"error":error}),
+                                };
+                        }
+                        Ok(effects)
+                    }
                     _ => self.store.execute(request, origin).await,
                 },
             }
@@ -784,141 +802,6 @@ impl Control {
             self.changed(&thread);
             self.kick_quiet(thread).await;
         }
-    }
-    fn queue_compact(
-        self: &Arc<Self>,
-        thread: String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
-        let control = self.clone();
-        Box::pin(async move {
-            if control.stop.is_cancelled() {
-                return;
-            }
-            let mut tasks = control.compact_tasks.lock().await;
-            if tasks.contains_key(&thread) {
-                return;
-            }
-            let token = control.stop.child_token();
-            tasks.insert(thread.clone(), token.clone());
-            drop(tasks);
-            tokio::spawn(async move {
-                let boundary = control.boundary(&thread).await;
-                loop {
-                    let guard = tokio::select! {biased;_=token.cancelled()=>None,guard=boundary.lock()=>Some(guard)};
-                    let target = thread.clone();
-                    let operations = control
-                        .store
-                        .database
-                        .call(move |db| {
-                            use rusqlite::OptionalExtension;
-                            let tx = db.transaction()?;
-                            let key = crate::compaction::CompactionKeys::new(&target).pending();
-                            let body: Option<String> = tx
-                                .query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
-                                    r.get(0)
-                                })
-                                .optional()?;
-                            tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
-                            if let Some(body) = &body {
-                                tx.execute(
-                                    "INSERT OR REPLACE INTO app_meta(key,value)VALUES(?1,?2)",
-                                    rusqlite::params![
-                                        crate::compaction::CompactionKeys::new(&target).inflight(),
-                                        body
-                                    ],
-                                )?;
-                            }
-                            tx.commit()?;
-                            Ok(body
-                                .and_then(|body| serde_json::from_str::<Vec<String>>(&body).ok())
-                                .unwrap_or_default())
-                        })
-                        .await;
-                    let operations = match operations {
-                        Ok(value) => value,
-                        Err(_) => {
-                            control.fail_storage().await;
-                            break;
-                        }
-                    };
-                    if operations.is_empty() {
-                        break;
-                    }
-                    let result = if guard.is_none() {
-                        Err(ApiError::new(
-                            ErrorCode::InvalidState,
-                            "Queued compaction cancelled by stop",
-                        ))
-                    } else if let Err(error) = control.gc.require_capacity().await {
-                        Err(error)
-                    } else {
-                        match control
-                            .compactor
-                            .spill_cancellable(&thread, false, token.clone())
-                            .await
-                        {
-                            Err(error) => Err(error),
-                            Ok(spill) => match control
-                                .compactor
-                                .summarize(&thread, false, token.clone())
-                                .await
-                            {
-                                Err(error) => Err(error),
-                                Ok(mut summary) => {
-                                    summary.spilled_groups += spill.spilled_groups;
-                                    summary.source_nodes += spill.source_nodes;
-                                    summary.original_node_ids.extend(spill.original_node_ids);
-                                    summary.no_target = summary.no_target && spill.no_target;
-                                    encode_result(
-                                        summary,
-                                        ErrorCode::InvalidState,
-                                        "Cannot encode compact result",
-                                    )
-                                }
-                            },
-                        }
-                    };
-                    let outcome = match &result {
-                        Ok(value) => json!({"result":value}),
-                        Err(error) => json!({"error":error}),
-                    };
-                    let inflight = crate::compaction::CompactionKeys::new(&thread).inflight();
-                    let save_failed = result
-                        .as_ref()
-                        .err()
-                        .is_some_and(|error| error.is_storage_failure());
-                    let saved=control.store.database.call(move|db|{let tx=db.transaction()?;tx.execute("DELETE FROM app_meta WHERE key=?1",[inflight])?;for operation in operations{let downstream=json!({"kind":"compact","state":if result.is_ok(){"completed"}else{"failed"},"outcome":outcome,"ended_at":chrono::Utc::now().to_rfc3339()});tx.execute("INSERT OR REPLACE INTO app_meta(key,value) VALUES(?1,?2)",rusqlite::params![crate::compaction::CompactionKeys::result(&operation),downstream.to_string()])?;}tx.commit()?;Ok(())}).await;
-                    if saved.is_err() || save_failed {
-                        control.fail_storage().await;
-                        break;
-                    }
-                    drop(guard);
-                    control.changed(&thread);
-                    if token.is_cancelled() {
-                        break;
-                    }
-                }
-                control.compact_tasks.lock().await.remove(&thread);
-                control.changed.notify_waiters();
-                if !control.stop.is_cancelled() {
-                    let key = crate::compaction::CompactionKeys::new(&thread).pending();
-                    if matches!(
-                        control
-                            .store
-                            .database
-                            .call(move |db| Ok(db.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
-                                [key],
-                                |r| r.get::<_, bool>(0)
-                            )?))
-                            .await,
-                        Ok(true)
-                    ) {
-                        control.queue_compact(thread).await;
-                    }
-                }
-            });
-        })
     }
 
     async fn stop_run(&self, run_id: &str) {

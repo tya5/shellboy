@@ -68,6 +68,14 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         ..Default::default()
     };
     p.fields = fields_of_value(payload);
+    if matches!(kind, "spill" | "context_trim")
+        && payload.get("context_trim").is_some_and(Value::is_object)
+    {
+        // A trim is a reversible input replacement, not a routine lifecycle
+        // event. Keep its notice visible and its canonical text unchanged.
+        p.kind = PresentationKind::Spill;
+        p.title = CONTEXT_TRIM_TITLE.into();
+    }
     if let Some(reason) = payload.get("tombstone_reason").and_then(Value::as_str) {
         p.title = format!("原文回収済み · {reason}");
         p.kind = PresentationKind::Unknown;

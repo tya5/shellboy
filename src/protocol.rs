@@ -375,6 +375,19 @@ macro_rules! args {
     };
 }
 args!(ThreadTarget { #[serde(default)] thread_id: Option<String> });
+states!(ContextEditAction {
+    Spill,
+    Summary,
+    Trim,
+    Omit,
+    Restore
+});
+args!(ContextEditArgs {
+    #[serde(default)] thread_id: Option<String>,
+    action: ContextEditAction,
+    #[serde(default)] from_node_id: Option<String>,
+    #[serde(default)] to_node_id: Option<String>
+});
 args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String> });
 args!(ModelListResult { connection: String, models: Vec<String> });
 args!(ThreadCreateArgs { #[serde(default)] connection: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default)] parent_id: Option<String> });
@@ -569,6 +582,8 @@ pub enum Command {
     AttachmentRemove(AttachmentRemoveArgs),
     #[serde(rename = "compact")]
     Compact(ThreadTarget),
+    #[serde(rename = "context.edit")]
+    ContextEdit(ContextEditArgs),
     #[serde(rename = "index.status")]
     IndexStatus(IndexArgs),
     #[serde(rename = "index.preview")]
@@ -762,7 +777,7 @@ fn frame_io(error: std::io::Error) -> ApiError {
 
 // Core result records deliberately retain provider-specific bodies as JSON payloads.
 args!(ThreadSummary { thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, updated_at: String, excerpt: String });
-args!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String> });
+args!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String> });
 args!(MessageDetails { #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String> });
 args!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] owner_run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>, owned_run_ids: Vec<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
 args!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, turn_id: String, run_id: String, thread_id: String, state: TurnState, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });

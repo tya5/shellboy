@@ -23,6 +23,10 @@ api_key_env = "SHELLBOY_API_KEY"
 # response_retry_max_delay_ms = 60000
 # Retry interrupted partial streams; false keeps partial failures for manual recovery.
 # response_retry_partial = true
+# After eligible retries are exhausted, trim large input deterministically once per Turn.
+# auto_trim_on_disconnect = true
+# Optional positive estimated-token threshold and target; default >75000, target half.
+# compact_hint_tokens = 75000
 # default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
 
 # Embeddings are optional. Enabling them indexes newly finalized conversation

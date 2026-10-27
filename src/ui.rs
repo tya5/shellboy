@@ -8,8 +8,9 @@ use crate::presentation::{NodePresentation, PresentationField};
 use crate::{
     config::Config,
     protocol::{
-        AttachmentRemoveArgs, Command, HistorySearchArgs, IndexArgs, IndexScope, StatusArgs,
-        ThreadDetails, ThreadForkArgs, ThreadSetArgs, ThreadSummary, ThreadTarget,
+        AttachmentRemoveArgs, Command, ContextEditAction, ContextEditArgs, HistorySearchArgs,
+        IndexArgs, IndexScope, StatusArgs, ThreadDetails, ThreadForkArgs, ThreadSetArgs,
+        ThreadSummary, ThreadTarget,
     },
 };
 
@@ -2811,9 +2812,20 @@ impl UiState {
                 vec![]
             }
             "/paste" => self.paste_command(argument),
+            "/restore" if argument.is_empty() => {
+                let Some(thread_id) = thread_id else {
+                    return self.command_error("入力範囲の復元は保存済み会話で /restore を実行してください。下書きの復元は /restore 番号です");
+                };
+                vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
+                    thread_id: Some(thread_id),
+                    action: ContextEditAction::Restore,
+                    from_node_id: None,
+                    to_node_id: None,
+                }))]
+            }
             "/restore" => {
                 let Some(revision) = argument.parse::<u64>().ok() else {
-                    return self.command_error("/restore <revision> を指定してください");
+                    return self.command_error("引数なしの /restore は入力範囲の復元、/restore 番号は失敗した下書きの復元です");
                 };
                 if let Some(pending) = self.view().pending.get(&revision)
                     && let Some(node_id) = &pending.source_node_id
@@ -3580,22 +3592,28 @@ fn draw_recovery(frame: &mut Frame<'_>, area: Rect, snapshot: &activity::Activit
         Line::from(title),
         Line::from(format!("{} · {reason}", recovery.stage)),
     ];
+    let reduction_row = u16::from(snapshot.context_reduction.is_some() && area.height >= 4);
+    if reduction_row > 0
+        && let Some(summary) = &snapshot.context_reduction
+    {
+        lines.push(Line::from(summary.clone()));
+    }
     if !current && let Some(reason) = &recovery.stop_reason {
         let label = match reason.as_str() {
             "explicit_stop" => "人による停止",
             "shutdown" | "app_shutdown" => "アプリ終了",
             _ => "停止理由はF8の詳細で確認",
         };
-        if area.height >= 4 {
+        if area.height >= 4 + reduction_row {
             lines.push(Line::from(label));
         }
-    } else if area.height >= 4 {
+    } else if area.height >= 4 + reduction_row {
         lines.push(Line::from(format!(
             "依頼は保存済み · 未反映指示 {}件 · 保存済みツール結果 {}件",
             recovery.pending_messages, recovery.saved_tool_results
         )));
     }
-    if area.height >= 5 {
+    if area.height >= 5 + reduction_row {
         lines.push(Line::from(format!(
             "動作中shell {}件 · 回収未完了 {}件 · 副作用は詳細で確認",
             recovery.live_shells, recovery.uncollected_shells
@@ -3721,6 +3739,15 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         &view.status
     };
     let mut status_parts = vec![follow.to_owned()];
+    if activity_phase.is_active()
+        && let Some(summary) = view
+            .activity
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.context_reduction.as_ref())
+    {
+        status_parts.insert(0, summary.clone());
+    }
     if let Some((phase, count, started)) = send {
         let mut note = String::new();
         if phase != activity_phase {
@@ -4480,6 +4507,7 @@ mod layout_cache_tests {
         let revision = ui.view().history_revision();
         let generation = ui.view().generation;
         let snapshot = ActivitySnapshot {
+            context_reduction: None,
             automatic_retry: None,
             recovery: None,
             run_id: Some("run".into()),

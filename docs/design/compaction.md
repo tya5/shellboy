@@ -10,7 +10,7 @@
 
 要約promptの見出しは「目的」「制約」「現在状態」「未解決・次作業」「重要参照」。見出し欠落を理由に追加APIを呼ばない。空の要約は原文を失う恐れがあるため採用を拒否する。出典IDはShellboyが付ける。
 
-Driverは明確なcontext超過だけ、古いspill→通常retry1→最新spillと要約→通常retry2を行う。spill対象なしならretry1を省略する。未知エラー・通信障害では自動retryしない。実行済みtoolは再実行しない。回数はTurn/generation単位で保持し、手動圧縮でリセットしない。
+Driverは明確なcontext超過だけ、古いspill→通常retry1→最新spillと要約→通常retry2を行う。spill対象なしならretry1を省略する。通信の一時失敗はDriverの連続再試行予算で扱い、明示context超過とは混同しない。実行済みtoolは再実行しない。回数はTurn/generation単位で保持し、手動圧縮でリセットしない。
 
 第二段階では最新spillと要約のいずれかが採用されれば通常retry2へ進む。最新spillの後に要約対象prefixがなくても、採用済みspillによる削減を無視しない（M7）。両方がno_targetなら進捗を捏造せず復旧待ちへ進む。要約の実エラーは従来どおり復旧へ返し、spill成功だけで隠さない。既存の最大二段階とtool結果の再利用を維持し、新しい状態・API・workerは追加しない。
 
@@ -103,3 +103,41 @@ StatementStatus::VmStep/FullscanStepを比較する。時刻の偶然に依存�
 covering index seek・sortなし、duplicate receiptとfanoutの扱いを検査する。既存のnested summary/spill、
 legacy/shared境界、正確な小予算/production65,536境界で、超過時には要約HTTP前にInvalidStateとなり
 元経路を維持する条件も保つ。LIMITを走査時間上限とは称さない。
+
+
+## 範囲選択と編集の共通化（Issue #16〜#18）
+
+`compaction/policy.rs` はsnapshotだけから完結groupの添字範囲を返す純粋な規則を持つ。旧手動compactとcontext超過2段階の選択規則を保ち、spill・summaryの採用は従来どおり別transactionとする。`compaction/range.rs` は全編集に共通する境界検証を担当する。未完結group・実行中call・保護node、group途中のnode ID、逆順・重複範囲を拒否し、黙って丸めない。エラーには近傍16組までの使用可能な始終node候補を返す。
+
+部品は、指定範囲のspill、summary、決定文への置換（omit）の3種類。prefixの省略も途中の省略も同じomit採用を使う。前後の経路を保持し、置換・出典・添付除外と`select_path`を既存の短いtransactionへまとめる。新しいtable・worker・queue・event・依存は追加しない。編集は既存Thread境界へ並べ、進行中の通信やtoolを遡って変更せず、次の要求から適用する。
+
+### 通信切断後の決定論的縮小
+
+対象の一時失敗で再試行を使い切ったとき、接続設定`auto_trim_on_disconnect=true`ならTurn/generationごとに一度だけ縮小を検討する。正常応答の採用で連続再試行回数は戻るが、この一度の枠は戻らない。context超過は既存2段階の処理を使う。
+
+`compact_hint_tokens`は正の整数で、明示時は起動の目安と縮小目標の両方に使う。未指定時は推定75,000 tokens超を起動目安とし、失敗時点の推定の半分を目標とする。モデルのcontext上限を意味しない。推定は同じ接続・モデルの直近成功attemptのinput_tokens/入力文字数比を使い、記録がなければUnicode文字数/4を使う。実送信前のmanifestへ入力JSONの文字数を保存し、旧attemptから値を捏造しない。固定指示・添付等との差があるため正確なtokenizerやproviderの受入保証ではない。
+
+古い完結tool groupをspillし、足りなければ古い安全なgroupから省略する。現在Turn最初の依頼を含むgroup、最新group、未完結・保護groupは残す。目標まで下がる計画ができたときだけ、spillとomitを一つのtransactionで採用する。この新しい自動縮小内の原子性は、既存手動compactのspill/summaryを別々に採用する契約を変更しない。目標へ到達できなければ、添付除外を含め何も変更せず通常の復旧待ちへ進む。
+
+省略位置には`context_trim` metadataを持つdeveloper通知を置く。理由、元nodeの始終IDと件数、概算、spill件数、原文取得・範囲要約・復元方法、実行済み副作用は取り消していないこと、添付は自動復活しないことを伝える。元nodeは`replacement_source`、Threadとの関係は`thread_replacement`で保持する。縮小結果はattemptの`error_json.automatic_trim`にも保存し、次のattemptとの突合を可能にする。縮小が採用された場合だけ連続再試行予算を一度補充する。
+
+### 明示編集と復元
+
+- `compact --spill --from NODE --to NODE` / `--summary`：inclusiveな完結groupの始終ID。明示spillは最新完結tool groupも選べる。
+- `compact --omit --from NODE --to NODE`：prefixまたは途中範囲を通知一つへ置換する。現在の依頼を含む指定は拒否する。
+- `compact --trim --to NODE`：先頭から指定したnodeまで（inclusive）のomit。
+- `compact --restore [--from MARKER]`：選択経路上の指定marker（省略時は最後に作成されたもの）を原文へ戻す。TUIの引数なし`/restore`も同じ操作。既存`/restore 番号`は失敗下書きの復元として維持する。
+
+受付は従来compactと同じ不変receiptとdownstreamを使う。引数はreceiptの`context_edit`へ保存し、同じThreadの明示編集を順に独立実行する。連続する引数なしcompactは従来どおり一回へまとめ、明示編集を越えて結合しない。新しい永続キューは作らない。引数なしcompactは旧規則のまま。結果には編集前後・目標・無効になるキャッシュsuffixの推定tokens、元node件数、marker ID、警告を含める。
+
+復元は現在のmarker位置へ元の順序を挿入する。省略時の経路全体を再採用せず、後から追加されたnodeを保持する。自動縮小で途中に現在の依頼を残した場合は、markerの元順序と保持anchorを照合して重複を除く。曖昧・失われたanchor、遅いselection/profile/generation変更や停止は拒否する。省略の監査とGCの根は`thread_replacement`へ残す。添付はexcludedを維持し、復帰が必要なら新しい添付IDで明示的に追加する。
+
+省略元の始終IDでsummaryを要求したときは、元データを内部で読み、既存の分割・キャッシュ・raw監査・拒否判定を使ってmarker位置へ要約を採用する。モデルへrawを読み直させない。最初の実装では一つのmarkerの省略元全体を対象とし、部分的な隠れた範囲は使用可能な全体境界を示して拒否する。`--focus`、終点の巻き戻しは追加しない。
+
+復旧・動作中のTUI概要は、同じTurn/generationの直近256 attemptから縮小の数値だけを投影する。取得範囲外は「縮小なし」と断定せず概要を表示しない。markerの原文・元attemptの記録は別途参照できる。巨大なerror JSON全体をUIへ渡さず、新しい追跡tableやindexは追加しない。
+
+省略markerの原文と保持anchorは合計65,536 nodeまでとし、復元の有限provenance予算と一致させる。上限超過は無変更で拒否し、小さい範囲へ案内する。自動縮小の規則はDB/HTTPに触れない純粋な計画関数とし、各groupの送信projection文字数を一度数えて差分で目標判定する。候補ごとに全履歴本文を複製しない。
+
+サイズ補正は同Thread・接続・モデルの直近64成功attemptを有限に調べ、有効なusageと入力文字数がある最新のものを使う。送信manifestの`history_characters`で固定指示・添付等の差を分離し、同selectionのinflight記録があればその差を優先する。過去の添付projection等を固定分として推定するため、省略による添付除外後の減少を保守的に見積もることがある。`context_usage`は補正元attempt ID・方法・測定できていない対象を返す。
+
+構造分離の測定（`7dfc96d`→`5ee28ba`、関数の宣言から閉じ括弧まで）: `spill_cancellable`は125→10行、`summarize`は150→15行。旧範囲の公開選択入口は純粋な`spill_ranges`/`summary_range`の2か所へ分離した。完結/保護の判定は`range::group_error`の一か所を規則と共通validatorから利用する。始終IDの組境界変換と採用時CASはそれぞれ別責務として残し、同一規則を二重に実装しない。

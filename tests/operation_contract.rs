@@ -58,6 +58,137 @@ async fn thread(store: &Store) -> String {
 }
 
 #[tokio::test]
+async fn explicit_context_edit_keeps_each_intent_in_the_protected_original_receipt() {
+    let (_root, store) = fixture().await;
+    let thread = thread(&store).await;
+    let edit = |action, from: Option<&str>, to: Option<&str>| {
+        Command::ContextEdit(ContextEditArgs {
+            thread_id: Some(thread.clone()),
+            action,
+            from_node_id: from.map(str::to_owned),
+            to_node_id: to.map(str::to_owned),
+        })
+    };
+    let first = request(
+        "first",
+        edit(ContextEditAction::Spill, Some("a"), Some("b")),
+    );
+    let second = request("first", edit(ContextEditAction::Trim, None, Some("c")));
+    let accepted = store.execute(first.clone(), None).await.unwrap();
+    let other = store.execute(second.clone(), None).await.unwrap();
+    assert_eq!(accepted.result["context_edit"]["action"], "spill");
+    assert_eq!(other.result["context_edit"]["action"], "trim");
+    assert_eq!(
+        store.execute(first.clone(), None).await.unwrap().result,
+        accepted.result
+    );
+    let changed = Request::new(first.operation_id.clone(), second.command.clone());
+    assert_eq!(
+        store.execute(changed, None).await.unwrap_err().code,
+        ErrorCode::OperationConflict
+    );
+    let pending_thread = thread.clone();
+    let ids = store
+        .database
+        .call(move |db| {
+            let body: String = db.query_row(
+                "SELECT value FROM app_meta WHERE key=?1",
+                [format!("compact.pending.{pending_thread}")],
+                |row| row.get(0),
+            )?;
+            Ok(serde_json::from_str::<Vec<String>>(&body).unwrap())
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        ids,
+        vec![first.operation_id.clone(), second.operation_id.clone()],
+        "independent actions stay ordered; replay does not append again"
+    );
+    for operation in [&first.operation_id, &second.operation_id] {
+        let details = inspect(&store, operation).await;
+        assert_eq!(details["downstream"]["state"], "queued");
+    }
+    let older = first.operation_id.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE operation_receipt SET created_at='2000-01-01' WHERE operation_id=?1",
+                [older],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    store.collect_receipts().await.unwrap();
+    assert_eq!(
+        store.execute(first, None).await.unwrap().result,
+        accepted.result,
+        "pending receipt protects the stored edit arguments from expiry"
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn stopping_thread_remains_observable_when_context_metrics_are_temporarily_unavailable() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = shellboy::control::Control::new(&owner, root.path().into());
+    let created = control
+        .request(request(
+            &owner.instance_id,
+            Command::ThreadCreate(ThreadCreateArgs {
+                cwd: None,
+                connection: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            }),
+        ))
+        .await;
+    assert!(created.ok, "{created:?}");
+    let thread = created.result.unwrap()["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let stopped_thread = thread.clone();
+    owner.db.call(move|db| {
+        db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('stopping-run',?1,'stopping','now')",[stopped_thread])?;
+        Ok(())
+    }).await.unwrap();
+    let details = control
+        .request(request(
+            &owner.instance_id,
+            Command::ThreadGet(ThreadTarget {
+                thread_id: Some(thread.clone()),
+            }),
+        ))
+        .await;
+    assert!(
+        details.ok,
+        "stopping metadata remains readable: {details:?}"
+    );
+    let result = details.result.unwrap();
+    assert_eq!(result["thread_id"], thread);
+    assert_eq!(result["run_id"], "stopping-run");
+    assert_eq!(result["context_usage"]["available"], false);
+    assert!(result["context_usage"]["error"].is_object());
+    let decoded: ThreadDetails = serde_json::from_value(result).unwrap();
+    assert!(decoded.context_usage.is_some());
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn lost_response_replays_original_acceptance_after_message_progress_and_restart() {
     let (_dir, store) = fixture().await;
     let thread = thread(&store).await;
@@ -872,4 +1003,126 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
         .await
         .unwrap();
     store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_results() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = shellboy::control::Control::new(&owner, root.path().into());
+    let created = control
+        .request(request(
+            &owner.instance_id,
+            Command::ThreadCreate(ThreadCreateArgs {
+                cwd: None,
+                connection: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            }),
+        ))
+        .await;
+    assert!(created.ok, "{created:?}");
+    let thread = created.result.unwrap()["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let target = thread.clone();
+    owner
+        .db
+        .call(move |db| {
+            let tx = db.transaction()?;
+            for id in ["before", "omit-a", "omit-b", "after"] {
+                shellboy::history::append_node(
+                    &tx,
+                    &target,
+                    id,
+                    None,
+                    "user_message",
+                    &json!({"role":"user","content":id}),
+                    "now",
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for action in [ContextEditAction::Omit, ContextEditAction::Restore] {
+        let omit = action == ContextEditAction::Omit;
+        let req = request(
+            &owner.instance_id,
+            Command::ContextEdit(ContextEditArgs {
+                thread_id: Some(thread.clone()),
+                action,
+                from_node_id: omit.then(|| "omit-a".into()),
+                to_node_id: omit.then(|| "omit-b".into()),
+            }),
+        );
+        let accepted = control.request(req.clone()).await;
+        assert!(accepted.ok, "{accepted:?}");
+        assert_eq!(accepted.result.as_ref().unwrap()["status"], "queued");
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let status = control
+                    .request(request(
+                        &owner.instance_id,
+                        Command::OperationGet(OperationTarget {
+                            operation_id: req.operation_id.clone(),
+                        }),
+                    ))
+                    .await;
+                assert!(status.ok, "{status:?}");
+                let downstream = status.result.unwrap()["downstream"].clone();
+                match downstream["state"].as_str() {
+                    Some("completed") => break downstream["outcome"]["result"].clone(),
+                    Some("failed") => panic!("context edit failed: {downstream}"),
+                    _ => tokio::time::sleep(std::time::Duration::from_millis(5)).await,
+                }
+            }
+        })
+        .await
+        .expect("queued context edit did not finish");
+        assert!(outcome["after_tokens"].is_u64());
+        assert!(outcome["cache_invalidated_tokens"].is_u64());
+        let replay = control.request(req).await;
+        assert_eq!(
+            replay.result, accepted.result,
+            "replay returns immutable acceptance, not a second edit"
+        );
+        let selected_thread = thread.clone();
+        owner
+            .db
+            .call(move |db| {
+                let path = db
+                    .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+                    .query_map([selected_thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                if omit {
+                    assert_eq!(path.len(), 3);
+                    assert_eq!(path[0], "before");
+                    assert_eq!(path[2], "after");
+                } else {
+                    assert_eq!(path, ["before", "omit-a", "omit-b", "after"]);
+                }
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM replacement", [], |row| row
+                        .get::<_, i64>(0))?,
+                    1
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
 }

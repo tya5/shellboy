@@ -1,0 +1,364 @@
+//! Plan first, then adopt deterministic reductions in one fenced transaction.
+use super::*;
+
+struct TrimPlan {
+    spills: Vec<(usize, Value)>,
+    omitted: HashSet<usize>,
+    marker: Option<Value>,
+    after: u64,
+}
+
+fn protected_request(snapshot: &Snapshot) -> Option<usize> {
+    policy::turn_boundary(snapshot, snapshot.current_turn.as_deref())
+}
+fn omission_ranges(omitted: &HashSet<usize>, count: usize) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index < count {
+        if !omitted.contains(&index) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < count && omitted.contains(&index) {
+            index += 1;
+        }
+        ranges.push(start..index);
+    }
+    ranges
+}
+fn projected(snapshot: &Snapshot, plan: &TrimPlan) -> Snapshot {
+    let mut reduced = snapshot.clone();
+    reduced.groups.clear();
+    let mut marked = false;
+    for (index, group) in snapshot.groups.iter().enumerate() {
+        if plan.omitted.contains(&index) {
+            if !marked && let Some(marker) = &plan.marker {
+                let mut source = group.sources[0].clone();
+                source.payload = marker.clone();
+                reduced.groups.push(Group {
+                    sources: vec![source],
+                    complete: true,
+                    tool: false,
+                });
+                marked = true;
+            }
+        } else if let Some((_, payload)) = plan.spills.iter().find(|(ordinal, _)| *ordinal == index)
+        {
+            let mut source = group.sources[0].clone();
+            source.payload = payload.clone();
+            reduced.groups.push(Group {
+                sources: vec![source],
+                complete: true,
+                tool: false,
+            });
+        } else {
+            reduced.groups.push(group.clone());
+        }
+    }
+    reduced
+}
+fn marker_payload(
+    snapshot: &Snapshot,
+    omitted: &HashSet<usize>,
+    before: u64,
+    spilled: usize,
+    reason: &str,
+) -> Option<Value> {
+    let first = (0..snapshot.groups.len()).find(|index| omitted.contains(index))?;
+    let last = (0..snapshot.groups.len()).rfind(|index| omitted.contains(index))?;
+    let sources: Vec<_> = (first..=last)
+        .filter(|index| omitted.contains(index))
+        .flat_map(|index| snapshot.groups[index].sources.iter())
+        .collect();
+    let original_order: Vec<_> = snapshot.groups[first..=last]
+        .iter()
+        .flat_map(|group| group.sources.iter().map(|source| &source.id))
+        .collect();
+    let retained: Vec<_> = (first..=last)
+        .filter(|index| !omitted.contains(index))
+        .flat_map(|index| {
+            snapshot.groups[index]
+                .sources
+                .iter()
+                .map(|source| &source.id)
+        })
+        .collect();
+    let ids: Vec<_> = sources.iter().map(|source| &source.id).collect();
+    let first_id = ids.first()?;
+    let last_id = ids.last()?;
+    let mut payload = marker_item(first_id, last_id, ids.len(), before, spilled, reason);
+    payload["context_trim"]["original_order"] = json!(original_order);
+    payload["context_trim"]["retained_node_ids"] = json!(retained);
+    payload["source_node_ids"] = json!(ids);
+    Some(payload)
+}
+fn marker_item(
+    first_id: &str,
+    last_id: &str,
+    count: usize,
+    before: u64,
+    spilled: usize,
+    reason: &str,
+) -> Value {
+    let notice = format!(
+        "Shellboy context notice: older history was omitted after {}. {} source nodes ({} through {}); input estimate before reduction: {} tokens; {} tool groups spilled. The current user request and latest group remain. Original data is retained: use shellboy history get --node <source_node_id> with a bounded limit, use shellboy compact --summary --from <first_node_id> --to <last_node_id> to summarize this omitted range without reading raw data into the conversation, or shellboy compact --restore to restore the omitted range at this marker. Executed actions and side effects have not been undone. Replaced-source attachments remain excluded; attach again explicitly if needed.",
+        if reason == "disconnect" {
+            "exhausted connection retries on a large input"
+        } else {
+            "an explicit context trim request"
+        },
+        count,
+        first_id,
+        last_id,
+        before,
+        spilled
+    );
+    json!({"item":{"role":"developer","content":[{"type":"input_text","text":notice}]},"context_trim":{"version":1,"omitted_nodes":count,"estimated_tokens":before,"spilled_groups":spilled,"reason":reason,"first_node_id":first_id,"last_node_id":last_id}})
+}
+fn history_total(contributions: u64) -> u64 {
+    if contributions == 0 {
+        2
+    } else {
+        1 + contributions
+    }
+}
+/// Pure selection/sizing policy. Scan each original projection once; planning
+/// never copies all history payloads once per candidate group.
+fn disconnect_plan(snapshot: &Snapshot, target: u64) -> TrimPlan {
+    let before = estimated_tokens(snapshot);
+    let mut plan = TrimPlan {
+        spills: Vec::new(),
+        omitted: HashSet::new(),
+        marker: None,
+        after: before,
+    };
+    if before <= target {
+        return plan;
+    }
+    let request = protected_request(snapshot);
+    let mut contributions: Vec<u64> = snapshot
+        .groups
+        .iter()
+        .map(|group| {
+            group
+                .sources
+                .iter()
+                .map(|source| projection_characters(&source.payload, snapshot.epoch))
+                .sum()
+        })
+        .collect();
+    let mut remaining = contributions.iter().sum::<u64>();
+    for index in policy::spill_ranges(snapshot, false).into_iter().flatten() {
+        if Some(index) == request || index + 1 == snapshot.groups.len() {
+            continue;
+        }
+        if let Some(payload) = spill_payload(&snapshot.groups[index]) {
+            let changed = projection_characters(&payload, snapshot.epoch);
+            if changed < contributions[index] {
+                remaining = remaining
+                    .saturating_sub(contributions[index])
+                    .saturating_add(changed);
+                contributions[index] = changed;
+                plan.spills.push((index, payload));
+                plan.after = tokens_from_history_characters(snapshot, history_total(remaining));
+                if plan.after <= target {
+                    break;
+                }
+            }
+        }
+    }
+    plan.after = tokens_from_history_characters(snapshot, history_total(remaining));
+    if plan.after > target {
+        let spilled_indexes: HashSet<_> = plan.spills.iter().map(|(index, _)| *index).collect();
+        let mut retained_spills = spilled_indexes.len();
+        let mut first_id: Option<&str> = None;
+        let mut omitted_count = 0;
+        for (index, contribution) in contributions
+            .iter()
+            .enumerate()
+            .take(snapshot.groups.len().saturating_sub(1))
+        {
+            if Some(index) == request || !range::group_is_safe(snapshot, index) {
+                continue;
+            }
+            let group = &snapshot.groups[index];
+            let first = first_id.get_or_insert(&group.sources[0].id);
+            let last = &group.sources.last().expect("whole group").id;
+            plan.omitted.insert(index);
+            omitted_count += group.sources.len();
+            remaining = remaining.saturating_sub(*contribution);
+            if spilled_indexes.contains(&index) {
+                retained_spills -= 1;
+            }
+            let marker = marker_item(
+                first,
+                last,
+                omitted_count,
+                before,
+                retained_spills,
+                "disconnect",
+            );
+            let marker_chars = projection_characters(&marker, snapshot.epoch);
+            plan.after = tokens_from_history_characters(
+                snapshot,
+                history_total(remaining.saturating_add(marker_chars)),
+            );
+            if plan.after <= target {
+                plan.marker = marker_payload(
+                    snapshot,
+                    &plan.omitted,
+                    before,
+                    retained_spills,
+                    "disconnect",
+                );
+                break;
+            }
+        }
+    }
+    plan
+}
+
+impl Compactor {
+    pub(super) async fn trim_to_target(
+        &self,
+        snapshot: Snapshot,
+        target: u64,
+        cancel: CancellationToken,
+    ) -> Result<ContextEditResult, ApiError> {
+        let before = estimated_tokens(&snapshot);
+        let plan = disconnect_plan(&snapshot, target);
+        // Do not leave a partial spill or attachment exclusion behind when the
+        // mandatory retained suffix is larger than the requested target.
+        if plan.after > target || (plan.spills.is_empty() && plan.omitted.is_empty()) {
+            return Ok(ContextEditResult { compact: CompactResult { no_target: true, ..Default::default() }, before_tokens: before, after_tokens: before, target_tokens: target, warnings: vec!["No safe reduction can reach the target while retaining the current request and latest group".into()], ..Default::default() });
+        }
+        self.adopt_trim(snapshot, plan, before, target, cancel, true)
+            .await
+    }
+    pub(super) async fn trim_before(
+        &self,
+        snapshot: Snapshot,
+        to_node: &str,
+        cancel: CancellationToken,
+    ) -> Result<ContextEditResult, ApiError> {
+        let first = snapshot
+            .groups
+            .first()
+            .and_then(|group| group.sources.first())
+            .ok_or_else(|| invalid("Cannot trim an empty path"))?;
+        let selected = range::from_nodes(&snapshot, &first.id, to_node)?;
+        self.omit_range(snapshot, selected, cancel).await
+    }
+    /// Prefix trimming and a middle shortcut use the same validated operation.
+    pub(super) async fn omit_range(
+        &self,
+        snapshot: Snapshot,
+        selected: Range<usize>,
+        cancel: CancellationToken,
+    ) -> Result<ContextEditResult, ApiError> {
+        range::validate(
+            &snapshot,
+            std::slice::from_ref(&selected),
+            range::RangeMode::Trim,
+        )?;
+        let omitted: HashSet<_> = selected.collect();
+        let before = estimated_tokens(&snapshot);
+        let marker = marker_payload(&snapshot, &omitted, before, 0, "manual");
+        let target = self
+            .config
+            .connections
+            .get(&snapshot.profile)
+            .and_then(|connection| connection.compact_hint_tokens)
+            .unwrap_or(75_000);
+        let mut plan = TrimPlan {
+            spills: Vec::new(),
+            omitted,
+            marker,
+            after: 0,
+        };
+        plan.after = estimated_tokens(&projected(&snapshot, &plan));
+        self.adopt_trim(snapshot, plan, before, target, cancel, false)
+            .await
+    }
+    async fn adopt_trim(
+        &self,
+        snapshot: Snapshot,
+        plan: TrimPlan,
+        before: u64,
+        target: u64,
+        cancel: CancellationToken,
+        automatic: bool,
+    ) -> Result<ContextEditResult, ApiError> {
+        let ranges = omission_ranges(&plan.omitted, snapshot.groups.len());
+        range::validate(&snapshot, &ranges, range::RangeMode::Trim)?;
+        let spill_ranges: Vec<_> = plan
+            .spills
+            .iter()
+            .filter(|(index, _)| !plan.omitted.contains(index))
+            .map(|(index, _)| *index..*index + 1)
+            .collect();
+        range::validate(&snapshot, &spill_ranges, range::RangeMode::Spill)?;
+        let first_changed = plan
+            .omitted
+            .iter()
+            .copied()
+            .chain(plan.spills.iter().map(|(index, _)| *index))
+            .min()
+            .unwrap_or(0);
+        let cache_invalidated = estimated_suffix_tokens(&snapshot, first_changed);
+        let source_count: usize = snapshot
+            .groups
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| plan.omitted.contains(index))
+            .map(|(_, group)| group.sources.len())
+            .sum();
+        let original_span_count = plan
+            .marker
+            .as_ref()
+            .and_then(|payload| payload.pointer("/context_trim/original_order"))
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        if source_count > TURN_BOUNDARY_IDS || original_span_count > TURN_BOUNDARY_IDS {
+            return Err(invalid("Context omission exceeds the bounded restore provenance budget").hint("Choose a smaller whole-group range (at most 65536 source and retained-anchor nodes)"));
+        }
+        if !plan.omitted.is_empty() && plan.marker.is_none() {
+            return Err(invalid("Context omission has no valid replacement marker"));
+        }
+        let spill_payloads: HashMap<_, _> = plan
+            .spills
+            .iter()
+            .map(|(index, payload)| (*index, payload.clone()))
+            .collect();
+        self.database.call(move |db| {
+            let tx = db.transaction()?;
+            if cancel.is_cancelled() { return Err(StorageError::from(invalid("Context edit cancelled before adoption"))); }
+            validate(&tx, &snapshot)?;
+            let sources: Vec<_> = snapshot.groups.iter().enumerate().filter(|(index, _)| plan.omitted.contains(index)).flat_map(|(_, group)| group.sources.clone()).collect();
+            let marker = plan.marker.as_ref().map(|payload| store_replacement(&tx, &snapshot, &sources, payload, "context-trim-v1")).transpose()?;
+            let mut path = Vec::new();
+            let mut marked = false;
+            let mut spilled = 0;
+            let mut original_ids: Vec<_> = sources.iter().map(|source| source.id.clone()).collect();
+            for (index, group) in snapshot.groups.iter().enumerate() {
+                if plan.omitted.contains(&index) {
+                    if !marked { if let Some(marker) = &marker { path.push(marker.clone()); } marked = true; }
+                } else if let Some(payload) = spill_payloads.get(&index) {
+                    path.push(store_replacement(&tx, &snapshot, &group.sources, payload, "spill-v1")?);
+                    spilled += 1;
+                    original_ids.extend(group.sources.iter().map(|source| source.id.clone()));
+                } else { path.extend(group.sources.iter().map(|source| source.id.clone())); }
+            }
+            let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_tokens: before, after_tokens: plan.after, target_tokens: target, omitted_nodes: sources.len(), marker_node_id: marker, cache_invalidated_tokens: cache_invalidated, warnings: vec!["Attachments excluded by a context replacement are not automatically reactivated by restore".into()] };
+            history::select_path(&tx, &snapshot.thread, snapshot.revision, &path, &timestamp())?;
+            if automatic && let Some((turn, generation)) = &snapshot.turn_fence {
+                // Make the reason durable with the path change, even if owner
+                // exits before Driver records the failed transport attempt.
+                tx.execute("UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim',json(?1)) WHERE turn_id=?2 AND generation=?3 AND state='inflight'", params![serde_json::to_string(&result).expect("context result"),turn,generation])?;
+            }
+            tx.commit()?;
+            Ok(result)
+        }).await.map_err(storage_error)
+    }
+}

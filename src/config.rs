@@ -67,6 +67,8 @@ pub struct Connection {
     pub response_max_retries: u32,
     pub response_retry_max_delay_ms: u64,
     pub response_retry_partial: bool,
+    pub auto_trim_on_disconnect: bool,
+    pub compact_hint_tokens: Option<u64>,
 }
 impl Default for Connection {
     fn default() -> Self {
@@ -83,6 +85,8 @@ impl Default for Connection {
             response_max_retries: 8,
             response_retry_max_delay_ms: 60_000,
             response_retry_partial: true,
+            auto_trim_on_disconnect: true,
+            compact_hint_tokens: None,
         }
     }
 }
@@ -104,6 +108,8 @@ impl fmt::Debug for Connection {
                 &self.response_retry_max_delay_ms,
             )
             .field("response_retry_partial", &self.response_retry_partial)
+            .field("auto_trim_on_disconnect", &self.auto_trim_on_disconnect)
+            .field("compact_hint_tokens", &self.compact_hint_tokens)
             .finish()
     }
 }

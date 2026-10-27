@@ -16,10 +16,14 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod edit;
 mod keys;
+pub use edit::ContextEditResult;
 mod policy;
+mod range;
 mod summary;
 pub(crate) use keys::CompactionKeys;
+#[cfg(test)]
 use policy::*;
 use std::ops::Range;
 use summary::SummaryAdoption;
@@ -78,12 +82,16 @@ struct Snapshot {
     model: String,
     effort: Option<String>,
     groups: Vec<Group>,
+    // Additional immutable source facts needed when a selected marker is
+    // expanded virtually for summary generation before atomic adoption.
+    extra_sources: Vec<Source>,
     protected: HashSet<String>,
     latest_complete_turn: Option<String>,
     current_turn: Option<String>,
     turn_boundaries: HashMap<String, String>,
     turn_fence: Option<(String, i64)>,
     run_fence: Option<String>,
+    estimate: edit::TokenEstimate,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CompactResult {
@@ -269,7 +277,8 @@ impl Compactor {
     async fn snapshot(&self, thread: &str, for_summary: bool) -> Result<Snapshot, ApiError> {
         let thread = thread.to_owned();
         self.database.call(move |db| {
-            let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?)))?;
+            let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
+            let estimate=edit::TokenEstimate::load(db,&thread,&data.3,&data.4,data.0)?;
             let current_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
             let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
@@ -284,7 +293,7 @@ impl Compactor {
             for (id,turn,revision,body,deleted) in rows {
                 let payload:Value=if let Some(body)=body {serde_json::from_str(&body).map_err(|e|StorageError::Schema(e.to_string()))?}else{json!({"role":"developer","content":[{"type":"input_text","text":format!("Original node {id} is unavailable: {}",deleted.unwrap_or_else(||"missing payload".into()))}]})};
                 if let Some(group)=payload.get("group_id").and_then(Value::as_str) && seen.insert(group.to_owned()) {
-                    let complete:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))",[group],|r|r.get(0))?;
+                    let complete:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))",[group],|r|r.get(0))?;
                     if complete {completed.insert(group.to_owned());}
                 }
                 let hash=key(&(revision,&payload));
@@ -302,7 +311,7 @@ impl Compactor {
                     }
                 }
             }
-            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence})
+            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,estimate})
         }).await.map_err(storage_error)
     }
 
@@ -332,57 +341,21 @@ impl Compactor {
         ranges: Vec<Range<usize>>,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
+        range::validate(&snapshot, &ranges, range::RangeMode::Spill)?;
         let mut replacements = Vec::new();
         for ordinal in ranges.into_iter().flatten() {
             let group = &snapshot.groups[ordinal];
-            let mut output = Vec::new();
-            for source in &group.sources {
-                if let Some(items) = source.payload.get("output").and_then(Value::as_array) {
-                    output.extend(items.clone());
-                }
-                // A whole span can contain a normal input accepted while the
-                // tool ran. Preserve its replay projection after its receipt
-                // has been consumed; source references alone are not its text.
-                if source
-                    .payload
-                    .get("output")
-                    .and_then(Value::as_array)
-                    .is_none()
-                    && source.payload.get("item").is_none()
-                    && source.payload.get("role").is_some()
-                {
-                    let mut message = source.payload.clone();
-                    message.as_object_mut().unwrap().remove("event_id");
-                    output.push(message);
-                }
-                if let Some(item) = source.payload.get("item") {
-                    if item.get("type").and_then(Value::as_str) == Some("function_call_output") {
-                        let call = item.get("call_id").and_then(Value::as_str).unwrap_or("");
-                        let body = item
-                            .get("output")
-                            .and_then(Value::as_str)
-                            .and_then(|s| serde_json::from_str::<Value>(s).ok())
-                            .unwrap_or(Value::Null);
-                        let command = group
-                            .sources
-                            .iter()
-                            .filter_map(|s| s.payload.get("output").and_then(Value::as_array))
-                            .flatten()
-                            .find(|v| v.get("call_id").and_then(Value::as_str) == Some(call))
-                            .and_then(|v| v.get("arguments"))
-                            .cloned();
-                        let omitted = json!({"omitted":true,"call_id":call,"command_arguments":command,"status":body.get("status"),"execution_id":body.get("execution_id"),"exit_code":body.get("exit_code"),"original_node_id":source.id,"retrieve":"shellboy history get --node-id <original_node_id>"});
-                        output.push(json!({"type":"function_call_output","call_id":call,"output":omitted.to_string()}));
-                    } else {
-                        output.push(item.clone());
-                    }
-                }
-            }
-            if output.is_empty() {
+            if !group.tool
+                || group
+                    .sources
+                    .iter()
+                    .all(|source| source.payload.get("spill_version").is_some())
+            {
                 continue;
             }
-            let payload = json!({"output":output,"reasoning_epoch":group.sources.first().and_then(|n|n.payload.get("reasoning_epoch")).cloned().unwrap_or(Value::Null),"spill_version":1,"source_node_ids":group.sources.iter().map(|s|&s.id).collect::<Vec<_>>()});
-            replacements.push((ordinal, payload));
+            if let Some(payload) = spill_payload(group) {
+                replacements.push((ordinal, payload));
+            }
         }
         if replacements.is_empty() {
             return Ok(CompactResult {
@@ -456,8 +429,13 @@ impl Compactor {
         range: Range<usize>,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
+        range::validate(
+            &snapshot,
+            std::slice::from_ref(&range),
+            range::RangeMode::Summary,
+        )?;
         let count = range.end;
-        let groups = &snapshot.groups[range];
+        let groups = &snapshot.groups[range.clone()];
         self.config
             .connections
             .get(&snapshot.profile)
@@ -574,6 +552,7 @@ impl Compactor {
             snapshot,
             sources,
             payload,
+            start: range.start,
             count,
             result: CompactResult {
                 source_nodes: originals.len(),
@@ -593,6 +572,59 @@ impl Compactor {
             .await
             .map_err(storage_error)
     }
+}
+
+/// The immutable spill projection is shared by explicit spills and the atomic
+/// disconnect-trim planner; neither operation changes the source payload.
+fn spill_payload(group: &Group) -> Option<Value> {
+    let mut output = Vec::new();
+    for source in &group.sources {
+        if let Some(items) = source.payload.get("output").and_then(Value::as_array) {
+            output.extend(items.clone());
+        }
+        // A whole span can contain a normal input accepted while the
+        // tool ran. Preserve its replay projection after its receipt
+        // has been consumed; source references alone are not its text.
+        if source
+            .payload
+            .get("output")
+            .and_then(Value::as_array)
+            .is_none()
+            && source.payload.get("item").is_none()
+            && source.payload.get("role").is_some()
+        {
+            let mut message = source.payload.clone();
+            message.as_object_mut().unwrap().remove("event_id");
+            output.push(message);
+        }
+        if let Some(item) = source.payload.get("item") {
+            if item.get("type").and_then(Value::as_str) == Some("function_call_output") {
+                let call = item.get("call_id").and_then(Value::as_str).unwrap_or("");
+                let body = item
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                    .unwrap_or(Value::Null);
+                let command = group
+                    .sources
+                    .iter()
+                    .filter_map(|s| s.payload.get("output").and_then(Value::as_array))
+                    .flatten()
+                    .find(|v| v.get("call_id").and_then(Value::as_str) == Some(call))
+                    .and_then(|v| v.get("arguments"))
+                    .cloned();
+                let omitted = json!({"omitted":true,"call_id":call,"command_arguments":command,"status":body.get("status"),"execution_id":body.get("execution_id"),"exit_code":body.get("exit_code"),"original_node_id":source.id,"retrieve":"shellboy history get --node <original_node_id>"});
+                output.push(json!({"type":"function_call_output","call_id":call,"output":omitted.to_string()}));
+            } else {
+                output.push(item.clone());
+            }
+        }
+    }
+    if output.is_empty() {
+        return None;
+    }
+    let payload = json!({"output":output,"reasoning_epoch":group.sources.first().and_then(|n|n.payload.get("reasoning_epoch")).cloned().unwrap_or(Value::Null),"spill_version":1,"source_node_ids":group.sources.iter().map(|s|&s.id).collect::<Vec<_>>()});
+    Some(payload)
 }
 
 fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageError> {
@@ -616,7 +648,12 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
     if let Some((turn, generation)) = &s.turn_fence
         && !tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND generation=?2 AND state IN ('preparing','running','waiting','recovery_wait'))",params![turn,generation],|r|r.get::<_,bool>(0))?{return Err(StorageError::from(invalid("Compaction Turn generation changed before adoption")));}
 
-    for source in s.groups.iter().flat_map(|g| &g.sources) {
+    for source in s
+        .groups
+        .iter()
+        .flat_map(|g| &g.sources)
+        .chain(s.extra_sources.iter())
+    {
         let (revision, body): (i64, Option<String>) = tx.query_row(
             "SELECT payload_revision,payload_json FROM node WHERE id=?1",
             [&source.id],
@@ -787,7 +824,7 @@ fn render(source: &Source, epoch: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn source(id: &str, turn: Option<&str>, payload: Value) -> Source {
+    pub(super) fn source(id: &str, turn: Option<&str>, payload: Value) -> Source {
         Source {
             id: id.into(),
             turn: turn.map(str::to_owned),
@@ -797,7 +834,7 @@ mod tests {
             attachments: Vec::new(),
         }
     }
-    fn fixture_snapshot(groups: Vec<Group>) -> Snapshot {
+    pub(super) fn fixture_snapshot(groups: Vec<Group>) -> Snapshot {
         Snapshot {
             thread: "t".into(),
             revision: 0,
@@ -807,12 +844,14 @@ mod tests {
             model: "fixture".into(),
             effort: None,
             groups,
+            extra_sources: Vec::new(),
             protected: HashSet::new(),
             latest_complete_turn: Some("last".into()),
             current_turn: Some("current".into()),
             turn_boundaries: HashMap::new(),
             turn_fence: None,
             run_fence: None,
+            estimate: edit::TokenEstimate::default(),
         }
     }
     #[test]
@@ -903,7 +942,7 @@ mod tests {
         s.protected.insert("first".into());
         assert_eq!(prefix_count(&s, true), 0);
     }
-    fn staged_snapshot() -> Snapshot {
+    pub(super) fn staged_snapshot() -> Snapshot {
         let group = |id, turn, size| Group {
             sources: vec![source(id, turn, json!({"text":"あ".repeat(size)}))],
             complete: true,
@@ -1090,6 +1129,8 @@ mod tests {
             assert_eq!(output[0]["type"],"function_call");
             assert_eq!(output[1],json!({"role":"user","id":"chatcmpl-spilled-human","content":"PRESERVE-HUMAN"}));
             assert_eq!(output[2]["type"],"function_call_output");
+            let placeholder:Value=serde_json::from_str(output[2]["output"].as_str().unwrap()).unwrap();
+            assert_eq!(placeholder["retrieve"], "shellboy history get --node <original_node_id>");
             assert_eq!(output[0]["id"],"chatcmpl-spilled-call");
             let lease=crate::control::replay::ReplayCache::new(1_000_000).load(db,"t")?;
             let projected=lease.materialize();
@@ -1223,6 +1264,47 @@ mod tests {
             },
         );
         config
+    }
+    #[tokio::test]
+    async fn explicit_middle_summary_retains_prefix_suffix_and_exact_provenance() {
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"middle summary"}]}]});
+        let (url, server) = summary_proxy(vec![raw]).await;
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            for id in ["before", "middle-a", "middle-b", "after"] {
+                history::append_node(
+                    &tx,
+                    "t",
+                    id,
+                    None,
+                    "message",
+                    &json!({"role":"user","content":id}),
+                    "now",
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let snapshot = compactor.snapshot("t", true).await.unwrap();
+        let result = compactor
+            .summarize_snapshot(snapshot, 1..3, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result.original_node_ids, ["middle-a", "middle-b"]);
+        let summary = result.summary_node_id.unwrap();
+        let selected=db.call(move|db| {
+            let path=db.prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?.query_map([],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+            assert_eq!(path,vec!["before".to_owned(),summary.clone(),"after".to_owned()]);
+            let sources=db.prepare("SELECT s.source_node_id FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id WHERE r.output_node_id=?1 ORDER BY s.ordinal")?.query_map([summary],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+            Ok(sources)
+        }).await.unwrap();
+        assert_eq!(selected, ["middle-a", "middle-b"]);
+        assert_eq!(server.await.unwrap(), 1);
+        db.shutdown().await.unwrap();
     }
     #[tokio::test]
     async fn nested_summary_and_spills_preserve_current_turn_boundary() {

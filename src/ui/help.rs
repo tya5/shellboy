@@ -176,6 +176,10 @@ impl Page {
         );
         page.entry("/compact", "会話の要約・圧縮を依頼する");
         page.entry(
+            "/restore（引数なし）",
+            "現在の会話で、縮小した入力範囲を元に戻す。後から付いた履歴も残す",
+        );
+        page.entry(
             "/reasoning [項目ID]",
             "モデルから返された推論テキストの表示を切り替える",
         );

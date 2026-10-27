@@ -71,3 +71,6 @@ slash全体はUI状態操作を含むため表駆動化しない。help/readout�
 入力pathは共通の「絶対ならそのまま、相対なら指定cwdへjoin」とUTF-8可否だけを共有し、解釈責務は混ぜない。CLI thread create/fork/setのcwd文字列は従来通りownerで解釈する相対値を保持し、CLI attachmentだけ既存の字句正規化を行う。TUI slash/formはThread cwdから解決する。symlink解決・存在検査やcwd全般の字句正規化は追加しない。TUIの操作pathが非UTF-8になる場合は、local draft変更またはwire生成より前に明示拒否する。表示用display()の置換文字と、操作先を変えてしまうto_string_lossyは区別する。非UTF-8の現在cwdでもUTF-8の絶対path指定は可能。
 
 mainはstandalone JSON応答・owner RPC・TUI寿命を局所関数へ分ける。docs/ragへのoperation-id拒否、cwd取得、TUIのterminal確認→非同期起動進捗→取消し時owner close→bridge起動→終了drainの順序は維持する。standaloneの種類は既存CliCommandのmatchで分岐し、expect/unreachableを置かない。応答protocol_versionは既存PROTOCOL_VERSIONを正本とし公開JSONを変えない。詳細fieldから参照種別への対応はprivate UI TargetKindに寄せ、detailsの取得操作選択と操作フォームの参照context生成の双方で使う。source_node_id等の原文導線、currentと選択参照の区別は既存の別責務として保つ。新registry・公開wire optional分割は導入しない。
+
+
+範囲編集は `shellboy compact --spill|--summary|--omit --from NODE --to NODE [--thread ID]`、先頭省略は `--trim --to NODE`、復元は `--restore [--from MARKER]` とする。モードは排他的。元の引数なしcompactを保持する。wireの`context.edit`は既存compactの受付/安全境界/receipt/downstreamへ接続する。[圧縮設計](compaction.md)を参照。

@@ -70,6 +70,18 @@ fn suggestions_draw_filter_select_and_complete_without_executing() {
     assert!(ui.management.is_none());
     assert!(!screen(&mut ui, 100, 30).contains("Tab/Enter 補完"));
 }
+
+#[test]
+fn restore_completion_explains_the_context_and_draft_argument_distinction() {
+    let mut ui = state();
+    type_text(&mut ui, "/rest");
+    let shown = screen(&mut ui, 120, 30);
+    assert!(shown.contains("/restore"));
+    assert!(shown.contains("入力範囲"));
+    assert!(shown.contains("下書き"));
+    assert!(key(&mut ui, KeyCode::Tab).is_empty());
+    assert_eq!(ui.view().draft.text, "/restore ");
+}
 #[test]
 fn completion_and_recalled_text_respect_the_current_draft_byte_limit() {
     let mut config = Config::default();

@@ -1,4 +1,5 @@
 //! One read projection for the existing progress cadence; no new core state.
+mod reduction;
 use crate::{
     control::Control,
     protocol::ApiError,
@@ -122,6 +123,7 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Er
         recovery_reason: reason,
     }) = turn
     {
+        snapshot.context_reduction = reduction::summary(db, &turn_id, generation)?;
         let attempt = db
             .query_row(
                 "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END,CASE WHEN json_valid(error_json) THEN CASE WHEN json_type(error_json,'$.automatic_retry_exhausted')='object' THEN json_extract(error_json,'$.automatic_retry_exhausted') ELSE NULL END ELSE NULL END FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",

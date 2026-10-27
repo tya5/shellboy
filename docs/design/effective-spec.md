@@ -46,7 +46,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | docs検索/本文 | 検索既定10件・最大100件、本文既定16KiB・最大64KiB | [docs/RAG採用仕様](docs-and-rag-spec.md)。owner履歴検索の50件上限と混同しない |
 | Thread session | 会話・要約のResponsesへThread UUIDのheaderを既定付与。本文prompt_cache_keyは任意・既定無効。embedding/一覧へ自動付与しない | [model HTTP](model-http.md)、[config](config.md) |
 | 接続先/モデル | Responses proxy経由、利用可能モデル・context長・価格の内蔵カタログなし | [models](models.md)、[model HTTP](model-http.md)。特定proxy製品への実装依存なし |
-| 再試行 | 明示context超過は自動圧縮最大2段階。指定HTTPエラー/未終端の通信切断・EOF・停滞timeoutを連続失敗あたり既定8回再試行し、正常採用でリセット。部分出力後も既定で再試行し接続設定で無効化可能 | [compaction](compaction.md)、[recovery guide](../guides/recovery-and-storage.md) |
+| 再試行 | 明示context超過は自動圧縮最大2段階。指定HTTPエラー/未終端の通信切断・EOF・停滞timeoutを連続失敗あたり既定8回再試行し、正常採用でリセット。部分出力後も既定で再試行し接続設定で無効化可能。大きい入力の予算消費後はTurn/generationごと一度だけ決定論的縮小を検討 | [compaction](compaction.md)、[recovery guide](../guides/recovery-and-storage.md) |
 | HTTP期限 | 接続確立は固定30秒。Responsesは接続別受信停滞600000ms（0で無効）、embeddingは全体60000ms、モデル一覧は全体設定と20000msの短い方 | [model HTTP](model-http.md)、[config](config.md)。timeoutは索引の既存retry/pauseへ渡す。生成全体期限は追加しない。会話の停滞timeoutは再試行条件に従う。要約/索引/RAGの再試行は変更しない |
 | ストリーム完了 | 検証済み最終responseを採用。途中との差分は診断・保存だけとし、差分だけで復旧待ちにしない | [model HTTP](model-http.md)。ツールは最終responseの採用成功後だけ実行し、失敗時の受信本文も保存・参照可能にする |
 | Unix IPC | XDGが利用不能でも専用0700一時領域を自動用意。接続両側でpeer uidを照合 | [protocol](protocol.md)。モデルshellはSHELLBOY_SOCKET、人CLIはendpoint.jsonで接続し、保存先祖先をsocket配置条件にしない |
@@ -104,3 +104,6 @@ Ctrl+Cの現在Run停止、CLI `run stop`。TUIの `/retry` を現在の復旧�
 新しい公開操作・永続表・Core event・worker・queue・依存を加える場合は、既存責務では不足する理由、代替案、上限、所有者、寿命、終了時回収、互換を対象設計へ記録する。新しい汎用frameworkや状態機械を局所整理の目的で導入しない。
 
 受入は [検証状況](../validation/acceptance.md) で実施と未実施を分ける。改名前の全件チェック、過去の私的ログ、合成mock、手順の記述を、現在のsourceの全環境成功として扱わない。強制終了後の孤児完全回収、外部ファイルの過去実体復元、全OS・モデル・介入順序の網羅は保証しない。実機のないOSや端末は未実施とする。
+
+
+Issue #16〜#18の範囲選択・明示spill/summary・prefix/途中omit・復元は[圧縮と採用](compaction.md)に従う。共通のgroup境界検証と既存replacement/Thread経路を使い、原文を削除しない。Thread getの`context_usage`は直近成功usageと現在経路の概算を区別し、キャッシュhitや将来の受入可能性を保証しない。

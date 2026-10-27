@@ -2,6 +2,45 @@ use serde_json::json;
 use shellboy::{history::text_of_payload, presentation::*};
 
 #[test]
+fn trim_markers_remain_visible_replacement_notices_with_immutable_source_text() {
+    let notice = "Input prefix removed: first..last. Files and shell effects are unchanged. Use shellboy history get --node first to inspect only needed context.";
+    let payload = json!({
+        "context_trim":{"version":1,"omitted_nodes":2,"first_node_id":"first","last_node_id":"last","estimated_tokens":1000},
+        "source_node_ids":["first","last"],
+        "item":{"role":"developer","content":[{"type":"input_text","text":notice}]},
+    });
+    let before = payload.clone();
+    let text = text_of_payload(&payload);
+    assert_eq!(text, notice);
+    for kind in ["spill", "context_trim"] {
+        let projected = project(kind, &payload, &text, 0);
+        assert_eq!(projected.kind, PresentationKind::Spill);
+        assert_eq!(projected.title, "入力範囲を縮小（原文は保持）");
+        assert!(
+            projected
+                .blocks
+                .iter()
+                .any(|block| block.text.contains("Files and shell effects"))
+        );
+        assert!(
+            projected
+                .fields
+                .iter()
+                .any(|field| field.key == "/context_trim/omitted_nodes" && field.value == "2")
+        );
+    }
+    let user = project("user", &payload, &text, 0);
+    assert_eq!(
+        user.kind,
+        PresentationKind::User,
+        "user data cannot masquerade as a saved trim marker"
+    );
+    let plain_spill = project("spill", &json!({"context_trim":false}), "ordinary spill", 0);
+    assert_eq!(plain_spill.title, "原文参照");
+    assert_eq!(payload, before);
+}
+
+#[test]
 fn persisted_result_notifications_explain_continuation_and_keep_the_original_evidence() {
     for (kind, expected) in [
         ("shell_ended", "コマンド結果を受けて続行"),

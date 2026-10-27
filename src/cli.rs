@@ -88,7 +88,7 @@ pub enum CliCommand {
     /// Attach a path; shorthand for attachment add --path PATH.
     Attach(AttachOptions),
     /// Request compaction at the next safe boundary.
-    Compact(ThreadOptions),
+    Compact(CompactOptions),
     /// Inspect and manage the owner conversation embedding index.
     Index {
         #[command(subcommand)]
@@ -256,6 +256,33 @@ pub struct StatusOptions {
 pub struct ThreadOptions {
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
+}
+#[derive(Debug, Clone, Args)]
+#[command(group(clap::ArgGroup::new("edit_action").args(["spill", "summary", "trim", "omit", "restore"]).multiple(false)))]
+pub struct CompactOptions {
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    /// Spill completed tool groups in the exact inclusive node range; no model request.
+    #[arg(long)]
+    pub spill: bool,
+    /// Summarize the exact inclusive node range using the configured model.
+    #[arg(long)]
+    pub summary: bool,
+    /// Remove the selected prefix through --to, retaining provenance.
+    #[arg(long)]
+    pub trim: bool,
+    /// Omit the exact inclusive node range, keeping the earlier and later path.
+    #[arg(long)]
+    pub omit: bool,
+    /// Restore a trim marker (latest by default); retain all later nodes.
+    #[arg(long)]
+    pub restore: bool,
+    /// Inclusive first source node, or a trim marker with --restore.
+    #[arg(long = "from", requires = "edit_action")]
+    pub from_node_id: Option<String>,
+    /// Inclusive last source node, or removed prefix end with --trim.
+    #[arg(long = "to", requires = "edit_action")]
+    pub to_node_id: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadCreateOptions {
@@ -728,9 +755,32 @@ impl Cli {
                 path: absolute_attachment(a.path, startup_cwd)?,
                 kind: a.kind,
             }),
-            CliCommand::Compact(a) => C::Compact(wire::ThreadTarget {
-                thread_id: a.thread_id,
-            }),
+            CliCommand::Compact(a) => {
+                let action = if a.spill {
+                    Some(wire::ContextEditAction::Spill)
+                } else if a.summary {
+                    Some(wire::ContextEditAction::Summary)
+                } else if a.trim {
+                    Some(wire::ContextEditAction::Trim)
+                } else if a.omit {
+                    Some(wire::ContextEditAction::Omit)
+                } else if a.restore {
+                    Some(wire::ContextEditAction::Restore)
+                } else {
+                    None
+                };
+                match action {
+                    Some(action) => C::ContextEdit(wire::ContextEditArgs {
+                        thread_id: a.thread_id,
+                        action,
+                        from_node_id: a.from_node_id,
+                        to_node_id: a.to_node_id,
+                    }),
+                    None => C::Compact(wire::ThreadTarget {
+                        thread_id: a.thread_id,
+                    }),
+                }
+            }
             CliCommand::Index { command } => match command {
                 IndexCommand::Status(a) => C::IndexStatus(a.into()),
                 IndexCommand::Preview(a) => C::IndexPreview(a.into()),

@@ -146,3 +146,12 @@ Thread/Run/Turn/message/history getのcontextは、保存済み時刻・状態�
 変更操作とwaitの結果は、created_atから24時間経過後の内部保守、又はreceipt容量の圧迫時に回収される場合があります。pending/未反映参照は保護されます。同ID再送が `operation_expired` になっても、変更が未実行とは限りません。IDの期限切れ記録を残して再実行を拒否しているため、`operation get` の `result_expired` と対象の状態・履歴を調べ、新IDで同じ副作用を自動反復しないでください。
 
 読取りを繰り返してもoperation receipt予算は消費しません。変更/待機のpending予約や期限切れIDのmetadataは有限予算を使うため、無制限の受付保証はありません。`status` / `storage status` で状況を確認できます。詳しくは [復旧・容量](recovery-and-storage.md#operation-receiptの容量で拒否された場合)。
+
+
+## 入力が大きいときの経路編集
+
+`thread get` の `context_usage` で推定入力・接続の目安・直近成功usageを確認できます。入力が目安に近い、または大きなtool出力が不要になったとき、`compact --spill/--summary --from NODE --to NODE` を使えます。`--omit --from NODE --to NODE` は途中の寄り道も省略し、`--trim --to NODE` は先頭からそのnodeまでを省略します。境界は両端を含む完結groupです。現在の依頼・未完了group・最新groupの省略は拒否します。候補を見て正しい範囲へ修正してください。
+
+受付はqueuedで、operation getのdownstream完了まで確認します。同じoperation IDの再送で二重編集しません。実行中の要求ではなく次の要求から反映されます。まれに大きくまとめて編集し、編集を繰り返してキャッシュを無駄に外さないでください。
+
+省略通知の元node始終IDは、その範囲を `--summary --from ... --to ...` で要約するためにも使えます。省略元は一つのmarkerの全体を指定します。大量の原文を読み直して入力を増やすより、範囲要約を優先してください。必要な原文は `history get --node NODE --limit-bytes BYTES` で小さく取得します。`compact --restore [--from MARKER]` で元の範囲を戻せますが、後続の会話は残り、除外済み添付は自動で復活しません。実行済みの操作を再実行する前に現在状態を確かめてください。詳細は[入力の大きさと範囲編集](history-and-search.md#入力の大きさと範囲編集)。

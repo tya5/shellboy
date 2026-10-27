@@ -2,6 +2,46 @@ use serde_json::{Value, json};
 use shellboy::protocol::*;
 
 #[test]
+fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
+    for (action, from, to, valid) in [
+        (ContextEditAction::Spill, Some("a"), Some("b"), true),
+        (ContextEditAction::Summary, Some("a"), Some("b"), true),
+        (ContextEditAction::Omit, Some("a"), Some("b"), true),
+        (ContextEditAction::Trim, None, Some("b"), true),
+        (ContextEditAction::Restore, None, None, true),
+        (ContextEditAction::Restore, Some("marker"), None, true),
+        (ContextEditAction::Spill, None, Some("b"), false),
+        (ContextEditAction::Summary, Some("a"), None, false),
+        (ContextEditAction::Omit, None, Some("b"), false),
+        (ContextEditAction::Omit, Some("a"), None, false),
+        (ContextEditAction::Trim, Some("a"), Some("b"), false),
+        (ContextEditAction::Trim, None, None, false),
+        (ContextEditAction::Restore, None, Some("b"), false),
+    ] {
+        let command = Command::ContextEdit(ContextEditArgs {
+            thread_id: Some("t".into()),
+            action,
+            from_node_id: from.map(str::to_owned),
+            to_node_id: to.map(str::to_owned),
+        });
+        assert_eq!(command.validate().is_ok(), valid, "{command:?}");
+        assert!(!command.is_read_only());
+    }
+    for id in [" ".into(), "x".repeat(1025)] {
+        assert!(
+            Command::ContextEdit(ContextEditArgs {
+                thread_id: None,
+                action: ContextEditAction::Restore,
+                from_node_id: Some(id),
+                to_node_id: None,
+            })
+            .validate()
+            .is_err()
+        );
+    }
+}
+
+#[test]
 fn all_public_commands_have_typed_roundtrip_fixtures() {
     let fixtures = [
         ("status", json!({})),
@@ -52,6 +92,10 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
             json!({"thread_id":"t","attachment_id":"a"}),
         ),
         ("compact", json!({"thread_id":"t"})),
+        (
+            "context.edit",
+            json!({"thread_id":"t","action":"spill","from_node_id":"a","to_node_id":"b"}),
+        ),
         ("index.status", json!({})),
         ("index.preview", json!({"scope":"all"})),
         ("index.backfill", json!({"scope":"all"})),
@@ -60,7 +104,7 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
         ("storage.status", json!({})),
         ("storage.collect", json!({})),
     ];
-    assert_eq!(fixtures.len(), 37);
+    assert_eq!(fixtures.len(), 38);
     for (command, args) in fixtures {
         let request = Request::from_value(json!({"protocol_version":1,"operation_id":"instance:nonce","command":command,"args":args})).unwrap_or_else(|e| panic!("{command}: {e}"));
         assert_eq!(request.command.name(), command);

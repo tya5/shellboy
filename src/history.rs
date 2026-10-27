@@ -76,6 +76,7 @@ impl History {
                     [&id],
                     |row| {
                         Ok(ThreadDetails {
+                            context_usage: None,
                             context: None,
                             thread_id: id.clone(),
                             title: String::new(),

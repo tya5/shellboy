@@ -1882,3 +1882,66 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_unicode_request_input_characters_are_saved_before_http_and_retained_with_usage() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let target = thread(&control).await;
+    send(&control, &target, "入力文字数の記録 🦀 \"quoted\"\n次の行").await;
+    let sent = incoming(&mut receive).await;
+    let serialized_input = sent.body["input"].to_string();
+    let characters = serialized_input.chars().count() as u64;
+    assert!(
+        serialized_input.len() as u64 > characters,
+        "fixture must distinguish UTF-8 bytes"
+    );
+    let replay_thread = target.clone();
+    let history_characters =
+        control
+            .store
+            .database
+            .call(move |db| {
+                let (state, manifest): (String, String) = db.query_row(
+            "SELECT state,input_manifest_json FROM model_attempt ORDER BY rowid DESC LIMIT 1", [],
+            |row| Ok((row.get(0)?, row.get(1)?)))?;
+                assert_eq!(
+                    state, "inflight",
+                    "measurement must be durable before HTTP completes"
+                );
+                let manifest: Value = serde_json::from_str(&manifest).unwrap();
+                assert_eq!(manifest["input_characters"], characters);
+                let replay = shellboy::control::replay::ReplayCache::new(1_000_000)
+                    .load(db, &replay_thread)?;
+                let serialized_history = json!(replay.materialize()).to_string();
+                let history_characters = serialized_history.chars().count() as u64;
+                assert_eq!(manifest["history_characters"], history_characters);
+                assert!(history_characters <= characters);
+                assert!(
+                    serialized_history.len() as u64 > history_characters,
+                    "history fixture also distinguishes Unicode scalar count from bytes"
+                );
+                Ok(history_characters)
+            })
+            .await
+            .unwrap();
+    let mut completed = answer("calibrated response");
+    completed["usage"] = json!({"input_tokens":123,"output_tokens":4,"total_tokens":127});
+    sent.reply.send((200, completed)).unwrap();
+    settled(&control, &target).await;
+    control.store.database.call(move |db| {
+        let (manifest, usage): (String, String) = db.query_row(
+            "SELECT input_manifest_json,usage_json FROM model_attempt WHERE state='completed' ORDER BY rowid DESC LIMIT 1", [],
+            |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let manifest: Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(manifest["input_characters"], characters);
+        assert_eq!(manifest["history_characters"], history_characters);
+        assert_eq!(serde_json::from_str::<Value>(&usage).unwrap()["input_tokens"], 123);
+        Ok(())
+    }).await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}

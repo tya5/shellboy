@@ -5,6 +5,7 @@ mod request;
 mod retry;
 mod shell_output;
 mod tools;
+mod trim;
 use adoption::adopt_response;
 use overflow::OverflowBudget;
 use request::{AdmittedRequest, Instructions, prepare_attempt, stream_response};
@@ -57,6 +58,8 @@ async fn admit_attempt(
     snapshot: &Snapshot,
     attempt: &str,
     attempt_attachments: Arc<crate::attachments::PreparedAttachments>,
+    input_characters: u64,
+    history_characters: u64,
 ) -> Result<bool, ApiError> {
     let current = snapshot.clone();
     let attempt_id = attempt.to_owned();
@@ -65,7 +68,13 @@ async fn admit_attempt(
         .database
         .call(move |db| {
             let tx = db.transaction()?;
-            let admitted = current.admit_attempt_tx(&tx, &attempt_id, &attempt_attachments)?;
+            let admitted = current.admit_attempt_tx(
+                &tx,
+                &attempt_id,
+                &attempt_attachments,
+                input_characters,
+                history_characters,
+            )?;
             if !admitted {
                 return Ok(false);
             }

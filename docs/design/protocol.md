@@ -227,3 +227,6 @@ HistoryListのsinceは原契約のoffset付きRFC3339をprotocolの事前検証�
 ## 観測の再照会と結果失効（Issue #3）
 
 get/list/search/preview/statusはreceiptを作らず、同IDでも再観測する。変更操作とwaitは保存済み要求照合を維持する。現instanceの終端結果は24時間経過後の保守又は圧迫時に結果本文を縮退できるが、pending/未反映参照を保護しID/hash等は保持する。同ID再送はoperation_expiredで、変更を再実行しない。別内容はoperation_conflict。operation.get/statusのresult_expiredとreplay_policyで区別し、読取り自身の照会IDは受付記録の対象ではない。既存error code・wire版・frame上限は維持する。詳細は [operation設計](operation-observability.md) を正本とする。
+
+
+`context.edit`は`thread_id`（省略可能）、`action`（spill/summary/omit/trim/restore）、`from_node_id` / `to_node_id`（モード別）を持つ。受付結果は既存compact同様のqueuedと`context_edit`引数を含み、receiptを上書きせず後続結果をdownstreamで返す。Thread詳細には`context_usage`を追加する。停止中など推定の非storageエラーは`available:false`/errorとして表現し、Thread照会自体を失敗させない。詳細は[圧縮設計](compaction.md)。

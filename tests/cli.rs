@@ -104,6 +104,20 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
             "attachment.remove",
         ),
         (&["compact", "--thread", "t"], "compact"),
+        (
+            &["compact", "--spill", "--from", "a", "--to", "b"],
+            "context.edit",
+        ),
+        (
+            &["compact", "--summary", "--from", "a", "--to", "b"],
+            "context.edit",
+        ),
+        (&["compact", "--trim", "--to", "b"], "context.edit"),
+        (
+            &["compact", "--omit", "--from", "a", "--to", "b"],
+            "context.edit",
+        ),
+        (&["compact", "--restore"], "context.edit"),
         (&["index", "status"], "index.status"),
         (&["index", "backfill", "--scope", "all"], "index.backfill"),
         (&["index", "preview", "--scope", "all"], "index.preview"),
@@ -115,10 +129,83 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
             "storage.collect",
         ),
     ];
-    assert_eq!(cases.len(), 37);
+    assert_eq!(cases.len(), 42);
     for (args, name) in cases {
         let command = convert(args).await;
         assert_eq!(serde_json::to_value(command).unwrap()["command"], *name);
+    }
+}
+
+#[tokio::test]
+async fn compact_edit_modes_keep_exact_range_and_reject_ambiguous_arguments() {
+    use shellboy::protocol::{ContextEditAction, ContextEditArgs};
+    for (arguments, action, from, to) in [
+        (
+            vec!["--spill", "--from", "a", "--to", "b"],
+            ContextEditAction::Spill,
+            Some("a"),
+            Some("b"),
+        ),
+        (
+            vec!["--summary", "--from", "a", "--to", "b"],
+            ContextEditAction::Summary,
+            Some("a"),
+            Some("b"),
+        ),
+        (
+            vec!["--trim", "--to", "b"],
+            ContextEditAction::Trim,
+            None,
+            Some("b"),
+        ),
+        (
+            vec!["--omit", "--from", "a", "--to", "b"],
+            ContextEditAction::Omit,
+            Some("a"),
+            Some("b"),
+        ),
+        (
+            vec!["--restore", "--from", "marker"],
+            ContextEditAction::Restore,
+            Some("marker"),
+            None,
+        ),
+        (vec!["--restore"], ContextEditAction::Restore, None, None),
+    ] {
+        let mut args = vec!["compact", "--thread", "t"];
+        args.extend(arguments);
+        assert_eq!(
+            convert(&args).await,
+            Command::ContextEdit(ContextEditArgs {
+                thread_id: Some("t".into()),
+                action,
+                from_node_id: from.map(str::to_owned),
+                to_node_id: to.map(str::to_owned),
+            })
+        );
+    }
+    for arguments in [
+        vec!["--spill", "--summary", "--from", "a", "--to", "b"],
+        vec!["--spill", "--from", "a"],
+        vec!["--summary", "--to", "b"],
+        vec!["--omit", "--from", "a"],
+        vec!["--omit", "--to", "b"],
+        vec!["--omit", "--trim", "--from", "a", "--to", "b"],
+        vec!["--trim"],
+        vec!["--trim", "--from", "a", "--to", "b"],
+        vec!["--restore", "--to", "b"],
+        vec!["--from", "a", "--to", "b"],
+    ] {
+        let mut args = vec!["shellboy", "compact"];
+        args.extend(arguments);
+        if let Ok(cli) = Cli::try_parse_from(args.clone()) {
+            assert!(
+                cli.into_command_with_stdin(cwd(), &mut &b""[..])
+                    .await
+                    .is_err(),
+                "{args:?}"
+            );
+        }
     }
 }
 

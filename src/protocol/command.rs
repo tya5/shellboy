@@ -41,6 +41,7 @@ impl Command {
             Self::AttachmentList(_) => ("attachment.list", CommandRoute::Database),
             Self::AttachmentRemove(_) => ("attachment.remove", CommandRoute::Database),
             Self::Compact(_) => ("compact", CommandRoute::Database),
+            Self::ContextEdit(_) => ("context.edit", CommandRoute::Database),
             Self::IndexStatus(_) => ("index.status", CommandRoute::Runtime),
             Self::IndexPreview(_) => ("index.preview", CommandRoute::Runtime),
             Self::IndexBackfill(_) => ("index.backfill", CommandRoute::Runtime),
@@ -101,6 +102,7 @@ impl Command {
             | Self::AttachmentList(_)
             | Self::AttachmentRemove(_)
             | Self::Compact(_)
+            | Self::ContextEdit(_)
             | Self::IndexStatus(_) => false,
         }
     }
@@ -136,6 +138,7 @@ impl Command {
             | Self::AttachmentList(_)
             | Self::AttachmentRemove(_)
             | Self::Compact(_)
+            | Self::ContextEdit(_)
             | Self::IndexStatus(_)
             | Self::IndexPreview(_)
             | Self::IndexBackfill(_)
@@ -157,7 +160,8 @@ impl Command {
             | Self::RunStop(_)
             | Self::AttachmentAdd(_)
             | Self::AttachmentRemove(_)
-            | Self::Compact(_) => true,
+            | Self::Compact(_)
+            | Self::ContextEdit(_) => true,
             Self::Status(_)
             | Self::ModelList(_)
             | Self::ThreadList(_)
@@ -223,6 +227,7 @@ impl Command {
             | Self::AttachmentAdd(_)
             | Self::AttachmentRemove(_)
             | Self::Compact(_)
+            | Self::ContextEdit(_)
             | Self::IndexBackfill(_)
             | Self::IndexRetry(_)
             | Self::IndexRebuild(_)

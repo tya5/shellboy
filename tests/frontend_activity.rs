@@ -7,6 +7,125 @@ use shellboy::{
 async fn projection(db: &DbWorker) -> Projection {
     db.call(|db| Ok(activity::project(db, "t")?)).await.unwrap()
 }
+
+#[tokio::test]
+async fn automatic_reduction_summary_survives_later_failures_without_crossing_generation() {
+    use serde_json::{Value, json};
+    use shellboy::{
+        protocol::{ApiError, ErrorCode},
+        ui::{UiState, UiUpdate},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let db = DbWorker::open(root.path().join("db")).await.unwrap();
+    change(&db,"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES('u','t','r','recovery_wait',2,'now');").await;
+    let original=json!({
+        "raw_response":{"opaque":"x".repeat(1024*1024)},
+        "automatic_trim":{"before_tokens":90000,"after_tokens":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}},
+    }).to_string();
+    let saved = original.clone();
+    let reason = serde_json::to_string(&ApiError::new(
+        ErrorCode::IoFailed,
+        "connection failed again",
+    ))
+    .unwrap();
+    db.call(move|db| {
+        db.execute("UPDATE turn SET recovery_reason_json=?1 WHERE id='u'",[reason])?;
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('trimmed','u',2,0,'p','m',0,'failed','{}',?1,'now')",[saved])?;
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('latest','u',2,0,'p','m',0,'incomplete','{}','{}','now')",[])?;
+        Ok(())
+    }).await.unwrap();
+    let observed = projection(&db).await;
+    let summary = observed.snapshot.context_reduction.clone().unwrap();
+    assert!(summary.contains("spill 3組"));
+    assert!(summary.contains("省略 7件"));
+    assert!(summary.contains("90000→40000"));
+    assert!(
+        summary.len() < 256,
+        "only bounded numeric facts are projected"
+    );
+    assert_eq!(
+        observed.snapshot.recovery.as_ref().unwrap().message,
+        "connection failed again"
+    );
+    let mut ui = UiState::new(&shellboy::config::Config::default(), root.path().into());
+    ui.select_thread("t".into());
+    ui.apply(UiUpdate::Activity {
+        thread_id: "t".into(),
+        generation: ui.view().generation,
+        epoch: 1,
+        snapshot: observed.snapshot,
+        observed_at: std::time::Instant::now(),
+    });
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 30)).unwrap();
+    terminal
+        .draw(|frame| shellboy::ui::draw(frame, &mut ui))
+        .unwrap();
+    use unicode_width::UnicodeWidthStr;
+    let buffer = terminal.backend().buffer();
+    let mut shown = String::new();
+    for y in 0..30 {
+        let mut x = 0;
+        while x < 140 {
+            let symbol = buffer[(x, y)].symbol();
+            shown.push_str(symbol);
+            x += symbol.width().max(1) as u16;
+        }
+        shown.push('\n');
+    }
+    assert!(shown.contains(&summary), "{shown}");
+    // The current attempt has no automatic_trim; earlier evidence remains in
+    // the activity summary while the next retry wait is running too.
+    change(&db,"UPDATE turn SET state='running',recovery_reason_json=NULL; UPDATE model_attempt SET state='failed',error_json='{\"automatic_retry\":{\"number\":1,\"limit\":8,\"delay_ms\":1000}}' WHERE id='latest';").await;
+    let retry = projection(&db).await;
+    assert_eq!(retry.snapshot.phase, ActivityPhase::Retrying);
+    assert_eq!(
+        retry.snapshot.context_reduction.as_deref(),
+        Some(summary.as_str())
+    );
+    change(&db, "UPDATE turn SET generation=3;").await;
+    assert!(projection(&db).await.snapshot.context_reduction.is_none());
+    let retained = db
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT error_json FROM model_attempt WHERE id='trimmed'",
+                [],
+                |row| row.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        retained, original,
+        "display projection never edits paid source evidence"
+    );
+    change(&db, "UPDATE turn SET generation=2;").await;
+    let base: Value = serde_json::from_str(&original).unwrap();
+    for invalid in [
+        json!(-1),
+        json!(true),
+        json!(1.5),
+        json!("x".repeat(128 * 1024)),
+        json!(u64::MAX),
+    ] {
+        let mut body = base.clone();
+        body["automatic_trim"]["omitted_nodes"] = invalid;
+        let body = body.to_string();
+        db.call(move |db| {
+            db.execute(
+                "UPDATE model_attempt SET error_json=?1 WHERE id='trimmed'",
+                [body],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(
+            projection(&db).await.snapshot.context_reduction.is_none(),
+            "invalid counts must not become confident display facts"
+        );
+    }
+    db.shutdown().await.unwrap();
+}
 async fn change(db: &DbWorker, sql: &str) {
     let sql = sql.to_owned();
     db.call(move |db| {

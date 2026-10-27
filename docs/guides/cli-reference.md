@@ -268,3 +268,10 @@ list/get/readのcursorは不透明な継続tokenです。返された文字列�
 ### v0.1.2の非推奨alias
 
 `status --operation ID` は `operation get --operation ID` と同じ照会へ正規化し、stderrで移行先を案内します。v0.1.2の1リリースだけ残し、次リリースで削除します。JSON stdoutのresultは正規照会の結果です。通常の作業一覧filterとの併用は拒否します。
+
+
+## compactの範囲指定
+
+引数なしの `compact` は従来のspill→要約です。`--spill` / `--summary` / `--omit` と `--from NODE --to NODE` で範囲を両端inclusiveに指定できます。`--omit`はprefixにも途中にも使え、API要求なしで通知へ置換します。`--trim --to NODE` は先頭からの省略、`--restore [--from MARKER]` は省略の復元です。モードは併用できません。全モードは `--thread THREAD` と通常のoperation ID指定に対応し、queued/downstreamの契約を共用します。使用できない境界では `valid_boundaries` を確認します。
+
+`thread get` の `context_usage` は現在推定、接続の目安、直近成功の実測usageを返します。編集結果は `before_tokens` / `after_tokens` / `target_tokens` / `cache_invalidated_tokens`、`omitted_nodes`、`marker_node_id` と `warnings` を含みます。正確なtokenizer値やキャッシュhitの保証ではありません。手順と注意は[履歴と検索](history-and-search.md#入力の大きさと範囲編集)。

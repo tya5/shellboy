@@ -142,7 +142,8 @@ block番号を指定して操作する場合は次を使います。
 | `/reasoning [NODE_ID]` | 返却された推論テキストの開閉 |
 | `/select` | 選択・コピーモード切替 |
 | `/paste ID show\|edit\|remove` | 貼付けblockの操作 |
-| `/restore REVISION` | 失敗・取消しsnapshot復元 |
+| `/restore` | 選択中で最後に作成した省略markerの入力範囲を復元。後続会話は保持、添付は自動復活しない |
+| `/restore REVISION` | 失敗・取消しの下書きsnapshot復元 |
 | `/cancel` | 現在Threadを中断 |
 | `/background` | foreground shellを背景化 |
 | `/quit` | 通常終了 |

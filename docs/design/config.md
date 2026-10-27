@@ -65,3 +65,6 @@ TUIは一つの端末sessionを先に開き、設定/保存先・owner lock・DB
 失敗は既存のtyped ApiErrorを人向け表示し、Enter/Esc/終了キーで確認後に端末を戻す。初期化失敗後のDB writerは閉じてから結果を返す。端末自体が壊れた場合は端末sessionを終了してから初期化/cleanupの完了を待ち、成功として扱わない。起動画面はUI-onlyかつ一回限りで、会話下書きや管理popupの状態へ混ぜない。
 
 取消単位は既存DataOwner初期化全体とし、途中futureをdropしない。既にこの単位へ入った場合、終了要求後もlock取得・migration・中断整理まで完了しうる。migration済みの変更を巻き戻したとは表示しない。その後のControl開始・接続口公開は次の取消検査で止める。これ以上細かい取消APIやCore状態を増やさず、実writerとlockの寿命を一貫させるための選択である。
+
+
+`connections.<名前>.auto_trim_on_disconnect` はbool/既定true。`compact_hint_tokens` はOption<u64>/既定None、指定0はConfigInvalidとする。詳細は[圧縮設計](compaction.md)の起動目安・目標・推定方式に従う。unknown field拒否・Rust DefaultとTOML省略値の一致を維持する。

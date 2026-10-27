@@ -36,6 +36,34 @@ fn command_actions(actions: &[UiAction]) -> Vec<UiAction> {
         .collect()
 }
 
+#[test]
+fn argumentless_restore_edits_only_the_current_saved_threads_input_range() {
+    use shellboy::protocol::{Command, ContextEditAction, ContextEditArgs};
+    let mut ui = state();
+    ui.select_thread("current-thread".into());
+    ui.insert("/restore", false);
+    let actions = command_actions(&enter(&mut ui));
+    assert_eq!(actions.len(), 1);
+    assert!(
+        matches!(&actions[0], UiAction::Command(Command::ContextEdit(ContextEditArgs {
+        thread_id: Some(thread), action: ContextEditAction::Restore,
+        from_node_id: None, to_node_id: None,
+    })) if thread == "current-thread")
+    );
+
+    let mut unsaved = state();
+    unsaved.insert("/restore", false);
+    assert!(enter(&mut unsaved).is_empty());
+    assert!(unsaved.view().status.contains("保存済み会話"));
+
+    let mut invalid = state();
+    invalid.select_thread("current-thread".into());
+    invalid.insert("/restore not-a-draft-number", false);
+    assert!(enter(&mut invalid).is_empty());
+    assert!(invalid.view().status.contains("引数なし"));
+    assert!(invalid.view().status.contains("下書き"));
+}
+
 fn cwd() -> PathBuf {
     std::env::temp_dir()
 }

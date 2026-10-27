@@ -157,7 +157,7 @@ async fn human_acceptance_between_next_and_prepare_refreshes_source_before_http(
     let manifest = prepared.manifest.clone();
     let attempt = id();
     assert!(
-        admit_attempt(&control, &refreshed, &attempt, Arc::new(prepared))
+        admit_attempt(&control, &refreshed, &attempt, Arc::new(prepared), 0, 0)
             .await
             .unwrap()
     );
@@ -295,10 +295,17 @@ async fn permanent_adoption_error_is_typed_recovers_and_leaves_no_partial_attemp
     // Intentionally skip binding: this permanent contract violation used to
     // be flattened to false and cause the driver to repeat preparation.
     assert_eq!(
-        admit_attempt(&control, &snapshot, "invalid-unbound", Arc::new(prepared))
-            .await
-            .unwrap_err()
-            .code,
+        admit_attempt(
+            &control,
+            &snapshot,
+            "invalid-unbound",
+            Arc::new(prepared),
+            0,
+            0
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::InvalidState
     );
     assert!(matches!(
@@ -524,10 +531,17 @@ async fn adoption_selection_conflict_rolls_back_without_entering_recovery() {
         .unwrap();
     snapshot.selection += 1;
     assert_eq!(
-        admit_attempt(&control, &snapshot, "cas-conflict", Arc::new(prepared))
-            .await
-            .unwrap_err()
-            .code,
+        admit_attempt(
+            &control,
+            &snapshot,
+            "cas-conflict",
+            Arc::new(prepared),
+            0,
+            0
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::OperationConflict
     );
     assert!(matches!(
@@ -582,7 +596,9 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
             &control,
             &snapshot,
             "deduplicated-attempt",
-            prepared.clone()
+            prepared.clone(),
+            0,
+            0
         )
         .await
         .unwrap()
@@ -654,9 +670,16 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
             .unwrap(),
     );
     assert!(
-        admit_attempt(&control, &snapshot, "late-cancelled", prepared.clone())
-            .await
-            .unwrap()
+        admit_attempt(
+            &control,
+            &snapshot,
+            "late-cancelled",
+            prepared.clone(),
+            0,
+            0
+        )
+        .await
+        .unwrap()
     );
     let before = control
         .store
@@ -846,7 +869,7 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
                 .unwrap(),
         );
         assert!(
-            admit_attempt(&control, &snapshot, "tool-attempt", prepared.clone())
+            admit_attempt(&control, &snapshot, "tool-attempt", prepared.clone(), 0, 0)
                 .await
                 .unwrap()
         );
@@ -984,7 +1007,7 @@ async fn suppressed_turn_start_is_a_conflict_and_keeps_the_saved_request_ready()
     );
     control.store.database.call(|db| {db.execute_batch("CREATE TRIGGER suppress_turn_start BEFORE UPDATE OF state ON turn WHEN NEW.state='running' BEGIN SELECT RAISE(IGNORE); END;")?;Ok(())}).await.unwrap();
     assert_eq!(
-        admit_attempt(&control, &snapshot, "unadmitted", prepared.clone())
+        admit_attempt(&control, &snapshot, "unadmitted", prepared.clone(), 0, 0)
             .await
             .unwrap_err()
             .code,

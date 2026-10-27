@@ -10,12 +10,8 @@ pub(super) fn spill_ranges(snapshot: &Snapshot, include_latest: bool) -> Vec<Ran
         .enumerate()
         .filter_map(|(ordinal, group)| {
             if !group.tool
-                || !group.complete
+                || !range::group_is_safe(snapshot, ordinal)
                 || (!include_latest && latest == Some(ordinal))
-                || group
-                    .sources
-                    .iter()
-                    .any(|s| snapshot.protected.contains(&s.id))
                 || group
                     .sources
                     .iter()
@@ -109,10 +105,37 @@ pub(super) fn safe_prefix(s: &Snapshot) -> usize {
     s.groups
         .iter()
         .enumerate()
-        .position(|(i, g)| {
-            !g.complete
-                || Some(i) == latest_tool
-                || g.sources.iter().any(|n| s.protected.contains(&n.id))
-        })
+        .position(|(i, _)| !range::group_is_safe(s, i) || Some(i) == latest_tool)
         .unwrap_or(s.groups.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compaction::tests::staged_snapshot;
+
+    #[test]
+    fn manual_and_overflow_policy_tables_keep_existing_group_ranges() {
+        let mut snapshot = staged_snapshot();
+        assert_eq!(summary_range(&snapshot, false), Some(0..1));
+        assert_eq!(summary_range(&snapshot, true), Some(0..4));
+        for (latest, expected) in [
+            (false, std::iter::once(3..4).collect()),
+            (true, vec![3..4, 5..6]),
+        ] {
+            assert_eq!(spill_ranges(&snapshot, latest), expected);
+        }
+        snapshot.protected.insert("a-result".into());
+        assert!(spill_ranges(&snapshot, false).is_empty());
+        assert_eq!(spill_ranges(&snapshot, true), vec![5..6]);
+        assert_eq!(summary_range(&snapshot, true), Some(0..3));
+        snapshot.protected.clear();
+        snapshot.groups[5].complete = false;
+        assert!(spill_ranges(&snapshot, false).is_empty());
+        assert_eq!(spill_ranges(&snapshot, true), vec![3..4]);
+        for source in &mut snapshot.groups[3].sources {
+            source.payload["spill_version"] = json!(1);
+        }
+        assert!(spill_ranges(&snapshot, true).is_empty());
+    }
 }

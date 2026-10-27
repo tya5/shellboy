@@ -771,26 +771,15 @@ impl Store {
             Command::RunStop(args) => stop_run(tx, &args.run_id, caller, now),
             Command::RunRetry(args) => retry_run(tx, &args.run_id, caller, now),
             Command::Compact(args) => {
-                let thread = target(args.thread_id.as_deref(), caller)?;
-                thread_details(tx, &thread)?;
-                let key = crate::compaction::CompactionKeys::new(&thread).pending();
-                let pending: Option<String> = tx
-                    .query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
-                        r.get(0)
-                    })
-                    .optional()
-                    .map_err(sql_error)?;
-                let mut operations: Vec<String> = pending
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default();
-                operations.push(operation_id.into());
-                tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![key,serde_json::to_string(&operations).unwrap()]).map_err(sql_error)?;
-                Ok(MutationResult {
-                    result: json!({"thread_id":thread,"status":"queued","operation_id":operation_id}),
-                    compact_threads: vec![thread],
-                    ..Default::default()
-                })
+                queue_compact_tx(tx, args.thread_id.as_deref(), caller, operation_id, None)
             }
+            Command::ContextEdit(args) => queue_compact_tx(
+                tx,
+                args.thread_id.as_deref(),
+                caller,
+                operation_id,
+                Some(args),
+            ),
             Command::AttachmentList(args) => MutationResult::value(crate::attachments::list_tx(
                 tx,
                 &target(args.thread_id.as_deref(), caller)?,
@@ -1148,6 +1137,47 @@ fn actor(caller: Option<&Origin>) -> Value {
     caller.map(|value|json!({"kind":"shell","thread_id":value.thread_id,"run_id":value.run_id,"execution_id":value.execution_id})).unwrap_or_else(||json!({"kind":"human"}))
 }
 
+fn queue_compact_tx(
+    tx: &Transaction<'_>,
+    thread: Option<&str>,
+    caller: Option<&Origin>,
+    operation_id: &str,
+    edit: Option<&ContextEditArgs>,
+) -> Result<MutationResult> {
+    let thread = target(thread, caller)?;
+    thread_details(tx, &thread)?;
+    let key = crate::compaction::CompactionKeys::new(&thread).pending();
+    let pending: Option<String> = tx
+        .query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(sql_error)?;
+    let mut operations: Vec<String> = match pending {
+        Some(body) => serde_json::from_str(&body).map_err(|_| {
+            error(
+                ErrorCode::InvalidState,
+                "Pending compaction metadata is malformed",
+            )
+        })?,
+        None => Vec::new(),
+    };
+    operations.push(operation_id.into());
+    tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![key,serde_json::to_string(&operations).unwrap()]).map_err(sql_error)?;
+    let mut result = json!({"thread_id":thread,"status":"queued","operation_id":operation_id});
+    if let Some(edit) = edit {
+        let mut edit = edit.clone();
+        edit.thread_id = Some(thread.clone());
+        result["context_edit"] = serde_json::to_value(edit)
+            .map_err(|_| error(ErrorCode::InvalidState, "Cannot encode context edit"))?;
+    }
+    Ok(MutationResult {
+        result,
+        compact_threads: vec![thread],
+        ..Default::default()
+    })
+}
+
 fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
     id.map(str::to_owned)
         .or_else(|| caller.map(|caller| caller.thread_id.clone()))
@@ -1160,7 +1190,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails{thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails{context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection

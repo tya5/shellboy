@@ -126,7 +126,7 @@ const COMMANDS: &[CommandHint] = &[
     },
     CommandHint {
         name: "/restore",
-        help: "送信snapshotを復元",
+        help: "入力範囲を戻す。番号付きは失敗した下書きを復元",
     },
     CommandHint {
         name: "/retry",

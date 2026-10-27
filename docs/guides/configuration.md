@@ -124,6 +124,8 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # response_max_retries = 8
 # response_retry_max_delay_ms = 60000
 # response_retry_partial = true
+# auto_trim_on_disconnect = true
+# compact_hint_tokens = 75000
 
 # 任意。設定する場合は二つとも指定する。
 # [embedding]
@@ -221,6 +223,7 @@ shellboy
 | `connections.<名前>` | `ssl_verify=true`、接続URL/認証/effort/headerは上記 | 接続単位のTLS検証。既定で検証あり |
 | `connections.<名前>` | `session_header=true`, `prompt_cache_key=false` | 会話・要約のThread識別headerと任意のキャッシュ識別本文 |
 | `connections.<名前>` | `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | ストリームの無通信期限（0で無効）・非ストリームの全体期限（最小1000ms） |
+| `connections.<名前>` | `auto_trim_on_disconnect=true`, `compact_hint_tokens` 未指定 | 大きい入力で連続再試行を消費した後、一度だけ決定論的縮小を検討 |
 | `connections.<名前>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | 会話の連続一時失敗の再試行（0〜20回、0で無効）・指数待機上限（1〜300000ms）・部分受信後も再試行 |
 | `embedding` | `connection` / `model` = 未設定 | 索引・検索API |
 | `shell` | `kind` = Unix `bash` / Windows `powershell`、`executable` = 自動、`env` = 空辞書 | shell種別・実行ファイル・追加環境。WSL直接起動の指定ではない |
@@ -249,3 +252,10 @@ raw/managed保持期限と会話保持は別です。会話・推論・要約に
 ## 照合先
 
 キー・既定・検証・OSパスは [config.rs](../../src/config.rs)、Threadへの設定保存は [DB操作](../../src/control/db.rs)、AGENTS読取りは [instructions.rs](../../src/instructions.rs)、送信境界は [driver.rs](../../src/control/driver.rs) と照合しています。設定の契約は [設定設計](../design/config.md) を参照してください。
+
+
+### 接続断後の縮小設定
+
+`connections.<名前>.auto_trim_on_disconnect` は既定trueです。会話の連続再試行を使い切った大きい入力に対し、Turn/generationごと一度だけAPI不要のspill/省略を検討します。`false`で無効です。`compact_hint_tokens` は省略可能な正の整数で、指定時は起動目安と縮小目標です。0、負数、小数、文字列は拒否します。未指定時は推定75,000 tokens超で検討し、その時点の推定の半分を目標にします。context上限の設定ではありません。owner再起動後に適用されます。
+
+推定は保存された直近成功usageと入力文字数から求め、利用できない場合は4文字/tokenを使います。送信前に正確なtokensは分からず、添付・多言語・provider差があります。挙動と復元は[接続断後の復旧](recovery-and-storage.md#接続断の再試行後に入力を縮める)を参照してください。

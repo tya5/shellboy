@@ -145,13 +145,28 @@ impl Fixture {
         idle_ms: u64,
         partial: bool,
     ) -> Self {
+        Self::with_trim_fixture(retries, max_delay_ms, idle_ms, partial, None).await
+    }
+
+    async fn with_trim_fixture(
+        retries: u32,
+        max_delay_ms: u64,
+        idle_ms: u64,
+        partial: bool,
+        trim: Option<(u64, bool)>,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
         let (url, requests, server) = proxy().await;
         let config = root.path().join("config.toml");
+        let trim_settings = trim
+            .map(|(hint, enabled)| {
+                format!("compact_hint_tokens={hint}\nauto_trim_on_disconnect={enabled}\n")
+            })
+            .unwrap_or_default();
         std::fs::write(
             &config,
             format!(
-                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_retry_partial={partial}\n"
+                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_retry_partial={partial}\n{trim_settings}"
             ),
         )
         .unwrap();
@@ -177,6 +192,18 @@ impl Fixture {
             .as_str()
             .unwrap()
             .to_owned();
+        if trim.is_some() {
+            let target = thread.clone();
+            control.store.database.call(move |db| {
+                let tx = db.transaction()?;
+                shellboy::history::append_node(&tx, &target, "old-large-context", None, "user_message",
+                    &json!({"role":"user","content":[{"type":"input_text","text":format!("DENSE_OLD_CONTEXT {}", "x".repeat(80_000))}]}), "2026-10-01T00:00:00Z")?;
+                shellboy::history::append_node(&tx, &target, "old-answer", None, "assistant_response",
+                    &json!({"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"old completed response"}]}]}), "2026-10-01T00:00:01Z")?;
+                tx.commit()?;
+                Ok(())
+            }).await.unwrap();
+        }
         let accepted = serde_json::from_value(
             request(
                 &control,
@@ -888,5 +915,85 @@ async fn default_retry_policy_survives_a_minute_long_proxy_outage() {
     let attempts = fixture.attempts().await;
     assert!(attempts.len() >= 7);
     assert_eq!(attempts.last().unwrap().0, "completed");
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exhausted_disconnect_retries_trim_large_history_once_without_a_summary_request() {
+    for enabled in [true, false] {
+        let mut fixture =
+            Fixture::with_trim_fixture(1, 10, 5_000, true, Some((2_000, enabled))).await;
+        for _ in 0..2 {
+            let original = fixture.incoming().await;
+            assert!(original.body.to_string().contains("DENSE_OLD_CONTEXT"));
+            original.reply.send(Reply::error(503, "")).ok().unwrap();
+        }
+        if enabled {
+            let trimmed = fixture.incoming().await;
+            assert!(!trimmed.body.to_string().contains("DENSE_OLD_CONTEXT"));
+            assert!(
+                trimmed
+                    .body
+                    .to_string()
+                    .contains("synthetic retry regression")
+            );
+            assert_eq!(
+                trimmed.body["tools"].as_array().unwrap().len(),
+                1,
+                "deterministic trim must not issue a summary request"
+            );
+            trimmed.reply.send(Reply::success()).ok().unwrap();
+            assert_eq!(fixture.settled().await, "completed");
+            assert_eq!(fixture.attempts().await.len(), 3);
+        } else {
+            assert_eq!(fixture.settled().await, "recovery_wait");
+            assert_eq!(fixture.attempts().await.len(), 2);
+        }
+        fixture.control.store.database.call(move |db| {
+            let records: Vec<String> = db.prepare("SELECT error_json FROM model_attempt WHERE json_type(error_json,'$.automatic_trim')='object'")?
+                .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
+            assert_eq!(records.len(), usize::from(enabled));
+            if let Some(record) = records.first() {
+                let audit: Value = serde_json::from_str(record).unwrap();
+                let trim = &audit["automatic_trim"];
+                assert!(trim["before_tokens"].as_u64().unwrap() > trim["after_tokens"].as_u64().unwrap());
+                assert!(trim["after_tokens"].as_u64().unwrap() <= 2_000);
+                assert!(trim["omitted_nodes"].as_u64().unwrap() > 0);
+            }
+            let original: String = db.query_row("SELECT payload_json FROM node WHERE id='old-large-context'", [], |row| row.get(0))?;
+            assert!(original.contains("DENSE_OLD_CONTEXT"));
+            assert!(original.len() > 80_000, "trim must retain the paid original node");
+            assert_eq!(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get::<_,i64>(0))?, 0);
+            Ok(())
+        }).await.unwrap();
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disconnect_trim_renews_retries_once_then_enters_recovery() {
+    let mut fixture = Fixture::with_trim_fixture(1, 10, 5_000, true, Some((2_000, true))).await;
+    for index in 0..4 {
+        let incoming = fixture.incoming().await;
+        assert_eq!(
+            incoming.body.to_string().contains("DENSE_OLD_CONTEXT"),
+            index < 2
+        );
+        incoming.reply.send(Reply::error(503, "")).ok().unwrap();
+    }
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 4);
+    assert_eq!(
+        attempts
+            .iter()
+            .filter(|(_, error)| error
+                .as_ref()
+                .is_some_and(|value| value.get("automatic_trim").is_some()))
+            .count(),
+        1
+    );
+    fixture.no_more_requests().await;
     fixture.close().await;
 }

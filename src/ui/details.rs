@@ -101,6 +101,11 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
         PresentationKind::ToolResult => format!("shell結果 · {}", safe(&node.presentation.title)),
         PresentationKind::Event => format!("状態変更 · {}", safe(&node.presentation.title)),
         PresentationKind::Summary => "会話の要約".into(),
+        PresentationKind::Spill
+            if node.presentation.title == crate::presentation::CONTEXT_TRIM_TITLE =>
+        {
+            crate::presentation::CONTEXT_TRIM_TITLE.into()
+        }
         PresentationKind::Spill => "原文への参照".into(),
         PresentationKind::Interrupted if !node.presentation.title.is_empty() => {
             safe(&node.presentation.title)

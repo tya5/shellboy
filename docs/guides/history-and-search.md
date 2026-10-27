@@ -178,3 +178,27 @@ shellboy index rebuild --scope all
 検索は削除済みnodeや回収済み本文、古い索引を除きます。Thread削除と共有nodeの削除は別で、他Thread等に保持される原文は全体検索で見つかり得ます。provenanceのorigin_thread_idは生成元の記録であり、そのThreadが現在操作可能とは限りません。検索は原文をpinしないので、後からgetしたときのtombstone_reasonも確認します。
 
 relationsのcursorは初回より後の追加関係を含めませんが、全DBのsnapshotや本文の保持期限を予約するものではありません。対象nodeのrevisionが変わればCursorExpiredです。関係先のmetadataはページ取得時点の値です。再検索や現在値の照会はreceiptを作らず、同じoperation IDでも再観測します。cursorのsnapshot条件や有効期限は別に維持されます。semantic再検索ではquery embeddingの費用が再発生し得ます。
+
+
+## 入力の大きさと範囲編集
+
+`shellboy thread get --thread THREAD_ID` の `context_usage` で、現在の推定入力と `compact_hint_tokens`、直近に成功した要求の `input_tokens` / `cached_tokens` を確認できます。推定と実測usageは別の値です。停止中など取得できない場合は `available:false` と理由を返し、Threadの他の詳細は参照できます。
+
+```sh
+shellboy compact --spill --thread THREAD_ID --from FIRST_NODE --to LAST_NODE
+shellboy compact --summary --thread THREAD_ID --from FIRST_NODE --to LAST_NODE
+shellboy compact --omit --thread THREAD_ID --from FIRST_NODE --to LAST_NODE
+shellboy compact --trim --thread THREAD_ID --to LAST_OMITTED_NODE
+shellboy compact --restore --thread THREAD_ID
+shellboy compact --restore --thread THREAD_ID --from MARKER_NODE
+```
+
+`from/to` は経路順で両端を含み、tool callと結果を一つの組として選びます。`spill`は結果本文を原文参照へ置き換え、コマンドや終了状態を残します。`summary`は既存の要約APIを使います。`omit`は先頭や途中の範囲を決まった通知一つへ置換し、前後を保持します。`trim`は先頭から `to` までの省略です。省略対象に現在Turnの最初の依頼、最新の組、未完結tool groupや保護nodeは指定できません。不正な境界では候補を返し、勝手に切り直しません。
+
+どれも既存compactと同じqueued受付です。返却されたoperation IDでdownstreamを照会し、完了と結果を確認してください。各編集はそのThreadの安全境界で順番に行われ、次のモデル要求から反映されます。同じID/要求の再送で編集を二重適用しません。
+
+省略後も原文は残ります。`restore`は選択経路上の最新marker（`--from`指定時はそのmarker）へ元の範囲を戻し、後から続いた会話を保持します。TUIは引数なし `/restore` です。添付は自動では送信対象に戻りません。必要なら新しい添付IDで追加してください。目安を超える復元には警告が付きます。
+
+省略された文脈を短く戻す場合、通知の最初/最後の元node IDで `--summary --from ... --to ...` を指定できます。一つのmarkerの省略元全体が対象です。隠れた範囲の一部だけを指定した場合は拒否し、全体境界へ案内します。原文を大量に `history get` で読み直すと、その読み取り結果自体が会話の入力を増やします。
+
+編集はまれに、まとまった範囲で行ってください。書き換えた位置以降のプロンプトキャッシュが外れる可能性があります。結果の `before_tokens` / `after_tokens` / `cache_invalidated_tokens` は概算で、キャッシュhitや接続の成功を保証しません。実行済みコマンドやファイル変更は、省略や復元によって取り消されません。

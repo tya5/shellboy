@@ -102,7 +102,7 @@ shellboy run retry --run RUN_ID
 
 接続先が混ざった履歴の項目IDでHTTP400になっていた会話は、修正版への更新・owner再起動後、同じ会話で新しい依頼を送って続けてください。再起動で停止した旧Runへの`/retry`は使えません。同じ会話の保存履歴は送信時に新しい変換を通り、message／function_callの接続先固有IDだけが外れます。保存原文は保持し、reasoning等の別のprovider制約まで解消する保証ではありません。
 
-明示されたcontext容量超過だけが自動圧縮・最大2段階のretry対象です。不明な通信失敗、byte上限、proxy障害をcontext超過と推測して自動圧縮することはありません。手動の `/compact` は [履歴と検索](history-and-search.md) を参照してください。
+明示されたcontext容量超過は自動圧縮・最大2段階のretry対象です。通信障害をcontext超過と推測しません。一方、対象の一時失敗で再試行を使い切り、入力が大きい場合は、次の決定論的縮小を一度だけ検討します。手動の `/compact` は [履歴と検索](history-and-search.md) を参照してください。
 
 ## 中断と終了
 
@@ -249,3 +249,14 @@ embedding・意味検索・RAGは`connections.<名前>.request_timeout_ms`（既
 修正版では保存される失敗理由に `received_bytes`（受信量）、`parsed_events`（解析できたJSON数）、`completed_items`、`done_markers`、`pending_line_bytes` / `pending_data_bytes`（末尾の未完了量）、`last_event`（固定分類）を含みます。`/received`の保存原文などで同じTurn/attemptの理由を確認し、共有時は本文全体でなくこれらの診断値を使ってください。通常ログの`model_failure`は従来どおり分類とattempt IDであり、完全なエラー本文を自動記録するものではありません。
 
 `last_event=untyped` はJSONに文字列のtypeがなかった場合、`done_markers`は`[DONE]`の受信数です。いずれもcompleted responseの存在を保証しません。受信量があって解析数0でも、コメントだけの受信などがあり得るため原因を断定しないでください。最後の空行まで届かないイベントは未完了のまま保持し、自動で回答やtool実行として確定しません。
+
+
+## 接続断の再試行後に入力を縮める
+
+接続の `auto_trim_on_disconnect` は既定trueです。対象となる切断・EOF・停滞・HTTP一時エラーで連続再試行を使い切り、推定入力が目安を超えたときだけ、Turn/generationごとに一度、古い完結tool結果のspillと古いgroupの省略を試みます。要約APIは呼びません。`response_max_retries=0` または `auto_trim_on_disconnect=false` では行いません。
+
+`compact_hint_tokens` は省略可能な正の整数です。指定時は起動目安と縮小目標の両方、未指定時は75,000推定tokens超を起動目安にし、失敗時点の推定の半分を目標にします。現在の依頼と最新group等を残して目標へ到達できない場合、spillや添付除外も適用せず従来の復旧待ちになります。
+
+縮小を採用すると決まった通知が会話に残り、元nodeの範囲と件数、概算、復元方法を示します。その後の再試行予算を一度補充します。正常応答があっても同じTurn/generationの縮小枠は戻りません。再び失敗が続けば復旧待ちです。縮小により失敗が改善する保証はなく、元nodeの読み直し・範囲要約・復元が可能です。
+
+TUIの引数なし `/restore` またはCLI `shellboy compact --restore --thread THREAD` で、省略範囲を戻せます。追加された後続会話は残し、添付はexcludedのままです。`/restore 番号` は別機能の失敗下書き復元です。詳細は[履歴と検索](history-and-search.md#入力の大きさと範囲編集)。

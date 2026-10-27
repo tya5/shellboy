@@ -20,6 +20,7 @@ use std::mem::size_of;
 
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_FIELDS: usize = 128;
+pub(crate) const CONTEXT_TRIM_TITLE: &str = "入力範囲を縮小（原文は保持）";
 const MAX_LINKS: usize = 128;
 const MAX_BLOCKS: usize = 128;
 

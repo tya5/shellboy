@@ -617,3 +617,39 @@ fn thread_session_settings_reject_non_boolean_values() {
         }
     }
 }
+
+#[test]
+fn disconnect_trim_settings_have_defaults_and_strict_connection_overrides() {
+    let defaults = Connection::default();
+    assert!(defaults.auto_trim_on_disconnect);
+    assert_eq!(defaults.compact_hint_tokens, None);
+    let defaulted: Connection = toml::from_str("base_url='https://example.test/v1'").unwrap();
+    assert!(defaulted.auto_trim_on_disconnect);
+    assert_eq!(defaulted.compact_hint_tokens, None);
+    let config = Config::parse("[connections.proxy]\nbase_url='https://example.test/v1'\nauto_trim_on_disconnect=false\ncompact_hint_tokens=1\n").unwrap();
+    assert!(!config.connections["proxy"].auto_trim_on_disconnect);
+    assert_eq!(config.connections["proxy"].compact_hint_tokens, Some(1));
+    let debug = format!("{:?}", config.connections["proxy"]);
+    assert!(debug.contains("auto_trim_on_disconnect: false"));
+    assert!(debug.contains("compact_hint_tokens: Some(1)"));
+    for (key, values) in [
+        (
+            "auto_trim_on_disconnect",
+            vec!["'false'", "0", "1", "[]", "{}"],
+        ),
+        (
+            "compact_hint_tokens",
+            vec!["0", "-1", "'75000'", "1.5", "true", "[]", "{}"],
+        ),
+    ] {
+        for value in values {
+            assert!(
+                Config::parse(&format!(
+                    "[connections.proxy]\nbase_url='https://example.test/v1'\n{key}={value}\n"
+                ))
+                .is_err(),
+                "accepted {key}={value}"
+            );
+        }
+    }
+}

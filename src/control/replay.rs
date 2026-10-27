@@ -316,7 +316,7 @@ impl ReplayCache {
         Ok(lease)
     }
 }
-fn convert(mut value: Value, epoch: i64) -> Vec<Value> {
+pub(crate) fn convert(mut value: Value, epoch: i64) -> Vec<Value> {
     let stored_epoch = value.get("reasoning_epoch").and_then(Value::as_i64);
     if let Some(output) = value.get_mut("output").and_then(Value::as_array_mut) {
         return std::mem::take(output)

@@ -52,6 +52,7 @@ pub(super) struct RetryBudget {
     turn: String,
     generation: i64,
     used: u32,
+    trim_used: bool,
 }
 impl RetryBudget {
     pub(super) fn observe(&mut self, turn: &str, generation: i64) {
@@ -59,11 +60,26 @@ impl RetryBudget {
             self.turn = turn.into();
             self.generation = generation;
             self.used = 0;
+            self.trim_used = false;
         }
     }
     /// Reset only after the completed response has been durably adopted.
     pub(super) fn succeeded(&mut self) {
         self.used = 0;
+    }
+    /// This safety net is consumed once per Turn/generation, even if no safe
+    /// reduction exists. Ordinary successful tool responses do not replenish it.
+    fn begin_trim(&mut self, enabled: bool, limit: u32, policy: RetryPolicy) -> bool {
+        if !enabled
+            || limit == 0
+            || self.used < limit
+            || self.trim_used
+            || !matches!(policy, RetryPolicy::Retry { .. })
+        {
+            return false;
+        }
+        self.trim_used = true;
+        true
     }
     fn delay(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Option<Duration> {
         (self.used < limit).then(|| {
@@ -143,6 +159,23 @@ pub(super) async fn retry_or_recover(
             _ = slot.stop.cancelled() => {},
             _ = tokio::time::sleep(delay) => {},
         }
+        return Ok(());
+    }
+    if budget.begin_trim(connection.auto_trim_on_disconnect, limit, policy)
+        && trim::try_trim(
+            control,
+            snapshot,
+            slot,
+            &attempt,
+            &mut failure,
+            connection.compact_hint_tokens,
+            budget.used,
+            limit,
+        )
+        .await?
+    {
+        // Only an adopted reduction renews consecutive retry capacity.
+        budget.succeeded();
         return Ok(());
     }
     if let RetryPolicy::Deferred(delay) = policy {
@@ -298,5 +331,36 @@ mod tests {
                 }
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod trim_budget_tests {
+    use super::*;
+    #[test]
+    fn disconnect_trim_is_once_per_turn_generation_and_requires_exhausted_eligible_retries() {
+        let retry = RetryPolicy::Retry {
+            partial_output: false,
+        };
+        let mut budget = RetryBudget::default();
+        budget.observe("turn", 1);
+        assert!(!budget.begin_trim(true, 2, retry));
+        budget.used = 2;
+        assert!(!budget.begin_trim(false, 2, retry));
+        assert!(!budget.begin_trim(true, 0, retry));
+        assert!(!budget.begin_trim(true, 2, RetryPolicy::Ineligible));
+        assert!(!budget.begin_trim(true, 2, RetryPolicy::Deferred(Duration::from_secs(601))));
+        assert!(budget.begin_trim(true, 2, retry));
+        budget.succeeded();
+        budget.used = 2;
+        assert!(!budget.begin_trim(true, 2, retry));
+        budget.observe("turn", 1);
+        assert!(!budget.begin_trim(true, 2, retry));
+        budget.observe("turn", 2);
+        budget.used = 2;
+        assert!(budget.begin_trim(true, 2, retry));
+        budget.observe("other", 2);
+        budget.used = 2;
+        assert!(budget.begin_trim(true, 2, retry));
     }
 }

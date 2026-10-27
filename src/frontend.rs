@@ -340,6 +340,7 @@ fn command_title(command: &Command) -> String {
         Command::AttachmentList(_) => "添付一覧",
         Command::AttachmentRemove(_) => "添付の除外",
         Command::Compact(_) => "会話の要約",
+        Command::ContextEdit(_) => "会話の入力範囲を編集",
         Command::IndexStatus(_) => "索引の状態",
         Command::IndexPreview(_) => "索引の費用対象の確認",
         Command::IndexBackfill(_) => "未索引資料の追加",
