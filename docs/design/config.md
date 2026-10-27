@@ -20,6 +20,12 @@
 
 `connections.<名前>.ssl_verify` はboolで既定true。明示falseの場合だけ、その接続のHTTPS証明書検証を無効化する。HTTP APIへの直接接続では検証対象がない。HTTPS中継プロキシを経由する場合は、そのプロキシ証明書にも同じ設定を適用する。ConnectionのRust DefaultとTOML省略時をともにtrueへ揃え、文字列や数値は拒否する。ownerは起動時の設定を保持するため変更後は再起動する。独立RAGは実行時に読む同じ接続設定を使う。接続CLIからownerのTLS設定を上書きしない。
 
+## 接続ごとのHTTP待機期限
+
+`connections.<名前>.stream_idle_timeout_ms` は非負整数で既定600,000ms。会話・要約のストリーミングResponses要求で、応答header待機と各受信chunkの間の無通信時間を制限する。0は無通信期限を無効化する。受信が続く間の全体時間に上限を置かず、SSE heartbeatも受信として扱う。
+
+`connections.<名前>.request_timeout_ms` は1,000以上の整数で既定60,000ms。embeddingなど非ストリーミングHTTP要求の全体期限に使う。モデル一覧は同設定と20,000msの短い方を適用する。両設定は接続ごとに独立し、Rust DefaultとTOML省略時の値を揃える。負数・文字列・小数・範囲外整数は拒否する。設定変更はowner再起動後の要求へ適用する。期間の加算はHTTP側でchecked操作を行い、OSの時計で表現できない期限をpanicや即時timeoutへ変換しない。
+
 ## R3-6: 設定検証の局所化
 
 Connection内のURL/effort/credential名/header検証はConnectionへ、数値・範囲・retry整合・env・path/keyは各sectionへ移す。Configは既定接続とembeddingの参照関係を持つ。first errorを維持するため、数値positive→worker容量→local相互条件→connection内容→section間参照→env/path/keyの順序を明示し、単にsectionごとの一括検証へ並べ替えない。Ui/Shellなどは既存の段階に合わせた小さな検証関数を持つ。

@@ -1,4 +1,4 @@
-//! Model catalog CLI/control boundaries against an isolated loopback HTTP server.
+//! Model catalog and query-observation IPC boundaries against isolated HTTP servers.
 use serde_json::{Value, json};
 use shellboy::{app::DataOwner, control::Control, protocol::*};
 use std::sync::Arc;
@@ -609,4 +609,147 @@ async fn runtime_observations_keep_receipts_constant_and_release_raw_output_pins
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn history_search_ipc_disconnect_closes_embedding_http_and_next_observation_succeeds() {
+    use sha2::Digest;
+    let root = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (entered, stalled) = oneshot::channel();
+    let (closed, disconnected) = oneshot::channel();
+    let http = tokio::spawn(async move {
+        let mut entered = Some(entered);
+        let mut closed = Some(closed);
+        for index in 0..3 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let split = loop {
+                let mut byte = [0];
+                assert_eq!(stream.read(&mut byte).await.unwrap(), 1);
+                request.push(byte[0]);
+                if request.ends_with(b"\r\n\r\n") {
+                    break request.len();
+                }
+            };
+            let head = String::from_utf8_lossy(&request);
+            assert!(head.starts_with("POST /v1/embeddings HTTP/1.1"));
+            let length: usize = head
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|value| value.trim().parse().unwrap())
+                })
+                .unwrap();
+            request.resize(split + length, 0);
+            stream.read_exact(&mut request[split..]).await.unwrap();
+            if index == 1 {
+                entered.take().unwrap().send(()).unwrap();
+                // No headers are sent. Socket close must come from IPC caller
+                // cancellation, well before the configured 60-second timeout.
+                let mut byte = [0];
+                assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
+                closed.take().unwrap().send(()).unwrap();
+            } else {
+                let body = json!({"data":[{"index":0,"embedding":[1.0,0.0,0.0]}]}).to_string();
+                stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
+        }
+    });
+    let config = root.path().join("config.toml");
+    std::fs::write(&config,format!("[connections.embed]\nbase_url='{url}'\nrequest_timeout_ms=60000\n[embedding]\nconnection='embed'\nmodel='fixture-embedding'\n")).unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    owner.db.call(|db| {
+        let body = json!({"role":"user","content":[{"type":"input_text","text":"cat fixture"}]}).to_string();
+        let hash = sha2::Sha256::digest(body.as_bytes()).iter().map(|byte|format!("{byte:02x}")).collect::<String>();
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('ipc-search-source','user','2026-01-01T00:00:00Z',?1,?2,?3)",rusqlite::params![body,body.len() as i64,hash])?;
+        Ok(())
+    }).await.unwrap();
+    control
+        .index
+        .enqueue_new(&["ipc-search-source".into()])
+        .await
+        .unwrap();
+    for _ in 0..4 {
+        if !control
+            .index
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+        {
+            break;
+        }
+    }
+    assert_eq!(
+        control
+            .index
+            .status(IndexArgs::default())
+            .await
+            .unwrap()
+            .done,
+        1
+    );
+    let (send, receive) = mpsc::channel(8);
+    let local = shellboy::ipc::LocalServer::bind(&owner, send)
+        .await
+        .unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    let directory = owner.loaded.data_dir.clone();
+    let query = || {
+        Command::HistorySearch(HistorySearchArgs {
+            query: "cat".into(),
+            ..Default::default()
+        })
+    };
+    let command = query();
+    let observer =
+        tokio::spawn(async move { shellboy::ipc::call(&directory, command, None, None).await });
+    timeout(Duration::from_secs(5), stalled)
+        .await
+        .unwrap()
+        .unwrap();
+    observer.abort();
+    assert!(observer.await.unwrap_err().is_cancelled());
+    timeout(Duration::from_secs(5), disconnected)
+        .await
+        .expect("IPC disconnect must close query HTTP before request_timeout_ms=60000")
+        .unwrap();
+    let next = timeout(
+        Duration::from_secs(5),
+        shellboy::ipc::call(&owner.loaded.data_dir, query(), None, None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(next.ok, "{:?}", next.error);
+    assert_eq!(next.result.unwrap().as_array().unwrap().len(), 1);
+    owner
+        .db
+        .call(|db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM operation_receipt", [], |row| row
+                    .get::<_, i64>(0))?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(5), http)
+        .await
+        .unwrap()
+        .unwrap();
+    local.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    serving.await.unwrap();
 }

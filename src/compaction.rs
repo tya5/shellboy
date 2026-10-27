@@ -454,7 +454,7 @@ impl Compactor {
                     "Summary connection is not configured",
                 )
             })?;
-        let client = HttpModelClient::new(connection)
+        let client = HttpModelClient::for_connection(&snapshot.profile, connection)
             .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
         let mut segments = segments(groups, snapshot.epoch)?;
         segments.reverse();
@@ -1269,6 +1269,7 @@ mod tests {
                 headers: Default::default(),
                 default_effort: None,
                 ssl_verify: true,
+                ..Default::default()
             },
         );
         config

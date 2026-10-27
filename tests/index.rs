@@ -143,12 +143,16 @@ struct Fixture {
     proxy: Proxy,
 }
 impl Fixture {
-    async fn new(mut config: Config) -> Self {
+    async fn new(config: Config) -> Self {
+        Self::with_request_timeout(config, 60_000).await
+    }
+    async fn with_request_timeout(mut config: Config, request_timeout_ms: u64) -> Self {
         let proxy = Proxy::new().await;
         config.connections = BTreeMap::from([(
             "embed".into(),
             Connection {
                 base_url: proxy.url.clone(),
+                request_timeout_ms,
                 ..Connection::default()
             },
         )]);
@@ -3190,5 +3194,115 @@ async fn owner_search_verifies_and_completes_pre_g5_query_metadata_without_guess
     })
     .await
     .unwrap();
+    f.close().await;
+}
+
+async fn expire_embedding(f: &Fixture) {
+    let (entered, _started) = oneshot::channel();
+    let (release, held) = oneshot::channel();
+    f.proxy.push(Reply::Wait(entered, held, 3));
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            f.service.process_one(CancellationToken::new()),
+        )
+        .await
+        .expect("embedding deadline must release the worker slot")
+        .unwrap()
+    );
+    let _ = release.send(());
+}
+
+#[tokio::test]
+async fn stalled_embeddings_retry_then_pause_and_manual_retry_restores_pending_work() {
+    let mut config = Config::default();
+    config.indexing.retries = 1;
+    config.indexing.retry_delays_ms = vec![60_000];
+    config.indexing.common_failure_pause_count = 1;
+    let f = Fixture::with_request_timeout(config, 1_000).await;
+    f.node("stalled", "cat timeout fixture").await;
+    f.service.enqueue_new(&["stalled".into()]).await.unwrap();
+    expire_embedding(&f).await;
+    let first = f.service.status(args()).await.unwrap();
+    assert!(!first.paused);
+    assert_eq!(
+        first.failed, 0,
+        "first timeout schedules the permitted retry"
+    );
+    let timeouts = f.db.call(|db| {
+        let errors: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key LIKE 'index.bootstrap.%' AND json_extract(value,'$.error.kind')='timeout' AND json_extract(value,'$.next_at') IS NOT NULL", [], |row| row.get(0))?;
+        db.execute("UPDATE app_meta SET value=json_set(value,'$.next_at','2000-01-01T00:00:00Z') WHERE key LIKE 'index.bootstrap.%' AND json_extract(value,'$.error.kind')='timeout'", [])?;
+        Ok(errors)
+    }).await.unwrap();
+    assert_eq!(timeouts, 1);
+    expire_embedding(&f).await;
+    f.node("later", "cat later fixture").await;
+    f.service.enqueue_new(&["later".into()]).await.unwrap();
+    let status = f.service.status(args()).await.unwrap();
+    assert!(status.paused);
+    assert_eq!(status.failed, 1);
+    assert_eq!(status.pending, 1);
+    assert!(
+        !f.service
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        f.proxy.count(),
+        2,
+        "pause prevents the next paid HTTP input"
+    );
+    f.service.retry(args()).await.unwrap();
+    f.drain().await;
+    assert_eq!(f.service.status(args()).await.unwrap().done, 2);
+    assert_eq!(f.proxy.count(), 4);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query() {
+    let f = Fixture::new(Config::default()).await;
+    f.node("source", "cat search fixture").await;
+    f.service.enqueue_new(&["source".into()]).await.unwrap();
+    f.drain().await;
+    let before = f.service.status(args()).await.unwrap();
+    {
+        let (entered, started) = oneshot::channel();
+        let (release, held) = oneshot::channel();
+        f.proxy.push(Reply::Wait(entered, held, 3));
+        let cancel = CancellationToken::new();
+        let token = cancel.clone();
+        let service = f.service.clone();
+        let query = tokio::spawn(async move {
+            service
+                .search_filtered_cancellable(
+                    &shellboy::protocol::HistorySearchArgs {
+                        query: "cat".into(),
+                        ..Default::default()
+                    },
+                    token,
+                )
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(3), started)
+            .await
+            .unwrap()
+            .unwrap();
+        cancel.cancel();
+        let error = tokio::time::timeout(std::time::Duration::from_secs(3), query)
+            .await
+            .expect("cancellation must not wait for the HTTP deadline")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.code, shellboy::protocol::ErrorCode::InvalidState);
+        let _ = release.send(());
+        let after = f.service.status(args()).await.unwrap();
+        assert_eq!(after.done, before.done);
+        assert_eq!(after.failed, before.failed);
+        assert_eq!(after.paused, before.paused);
+    }
+    assert!(!f.service.search("cat", 10).await.unwrap().is_empty());
+    assert_eq!(f.proxy.count(), 3);
     f.close().await;
 }

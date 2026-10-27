@@ -2639,6 +2639,15 @@ async fn run_with_clipboard_slots(
                         streams.observe(thread_id, node_id, stream_char_offset, &text, reasoning);
                     }
                 }
+                Ok(EngineEvent::ModelReceive { thread_id, attempt_id, observed_at }) => {
+                    if selection.active_thread.as_deref() == Some(&thread_id)
+                        && let Some(generation) = selection.generations.get(&thread_id).copied()
+                    {
+                        update(&updates, UiUpdate::ModelReceive {
+                            thread_id, generation, attempt_id, observed_at,
+                        }).await;
+                    }
+                }
                 Ok(EngineEvent::Error { thread_id, error }) => {
                     status(&updates, Some(thread_id), error).await
                 }

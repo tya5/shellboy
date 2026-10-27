@@ -236,3 +236,9 @@ RAGの内部SpaceDescriptorは従来6項目にoptional query_profile_keyを加�
 検索時の可視性照合は一query内でnodeごとにcacheするが、異なるsourceが共有する置換の逆向き経路は繰返し辿る。従ってchunk件数だけでなく、distinct source数×到達可能consumer経路の大きさがコストへ影響する。source reverse indexとUNIONによるcycle終了は維持するが、深い共有DAG全体に対する定数時間やlatency上限は保証しない。
 
 実装内の診断試験は、実DbWorker/bundled SQLiteで256個の削除所有sourceを深さ0/8/64の共有summary列へ繋ぎ、live rootあり/削除後の全source判定を実際のsearchable関数で計時する。これはprovider時間・KNN・本文decodeを含まない可視性照合だけの測定であり、全検索latencyや最大規模の合格を意味しない。時間を固定hardgateにせず、計測値を検証記録へ残す。巨大/複雑な実DAGの問題が実証された場合は、root判定の共有化を既存read job内で検討し、永続可視cacheや新workerの導入を先取りしない。
+
+## HTTP停止期限と検索の取消し（Issue #8）
+
+Embeddingの全要求は接続設定 `request_timeout_ms`（既定60,000ms）のHTTP全体期限に従う。期限超過の `ModelError.kind=timeout` は一時障害として既存の有限retryと連続失敗pauseへ渡す。期限切れだけで即時無制限再送せず、既定の許可済入力・attempt・遅延を維持する。
+
+履歴検索のquery embeddingも同じ期限を使い、CLI切断tokenとowner停止tokenで待機中HTTPを中止する。直接API呼出しの `search_filtered` もowner停止に従い、明示caller tokenを必要とする経路は `search_filtered_cancellable` を使う。検索の取消しはindex workerの許可・pause・jobを変更せず、取消し後の再検索は外部課金が再発し得る。DB workerに既に投入した短い照会の巻戻しや、provider側の処理/課金取消しは保証しない。新worker・queue・表を加えない。

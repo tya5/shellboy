@@ -100,7 +100,7 @@ impl ModelError {
                     Some("input_too_long" | "max_tokens_per_input_exceeded" | "tokens_exceeded")
                 ),
             transient: matches!(self.status, Some(408 | 429 | 500..=599))
-                || self.kind == "transport",
+                || matches!(self.kind.as_str(), "transport" | "timeout"),
             rate_limited: self.status == Some(429),
         }
     }
@@ -556,6 +556,16 @@ mod embedding_failure_tests {
         let rate = ModelError::provider(Some(429), &json!({})).embedding_failure();
         assert!(rate.rate_limited && rate.transient);
         assert!(!rate.credentials_or_credit);
+        assert!(
+            ModelError::new("timeout", "bounded")
+                .embedding_failure()
+                .transient
+        );
+        assert!(
+            !ModelError::new("cancelled", "bounded")
+                .embedding_failure()
+                .transient
+        );
         let mut transport = ModelError::new("transport", "bounded");
         transport.status = Some(402);
         let facts = transport.embedding_failure();

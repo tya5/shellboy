@@ -515,6 +515,12 @@ pub enum UiUpdate {
         snapshot: activity::ActivitySnapshot,
         observed_at: Instant,
     },
+    ModelReceive {
+        thread_id: String,
+        generation: u64,
+        attempt_id: String,
+        observed_at: Instant,
+    },
     ActivityUnavailable {
         thread_id: String,
         generation: u64,
@@ -1238,6 +1244,22 @@ impl UiState {
         {
             return;
         }
+        if let UiUpdate::ModelReceive {
+            thread_id,
+            generation,
+            attempt_id,
+            observed_at,
+        } = update
+        {
+            let view = self.active_view_mut();
+            if view.thread_id.as_deref() == Some(&thread_id)
+                && view.generation == generation
+                && view.activity.receive_at(&attempt_id, observed_at)
+            {
+                self.dirty = true;
+            }
+            return;
+        }
         if let UiUpdate::ActivityUnavailable {
             thread_id,
             generation,
@@ -1325,7 +1347,9 @@ impl UiState {
                 unreachable!("scoped result handled before normal updates")
             }
             UiUpdate::CommandOutcome { .. } => unreachable!("handled before normal UI updates"),
-            UiUpdate::Activity { .. } | UiUpdate::ActivityUnavailable { .. } => {
+            UiUpdate::Activity { .. }
+            | UiUpdate::ActivityUnavailable { .. }
+            | UiUpdate::ModelReceive { .. } => {
                 unreachable!("activity handled before general updates")
             }
             UiUpdate::ToolFacts {
@@ -3713,6 +3737,9 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
             format!("観測経過{seconds}秒")
         });
     }
+    if let Some(note) = view.activity.receive_gap_note(Instant::now()) {
+        status_parts.push(note);
+    }
     if view.tool_calls > 0 {
         status_parts.push(format!("ツール{}回", view.tool_calls));
     }
@@ -4305,6 +4332,68 @@ mod layout_cache_tests {
                 assert!(actions.is_empty(), "all sources are cached");
             }
         }
+    }
+
+    #[test]
+    fn receive_gap_updates_are_scoped_and_preserve_history_layout() {
+        let at = Instant::now();
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        history(&mut ui, "t", "unchanged conversation");
+        let layout = ui.history_layout(80, 20);
+        let revision = ui.view().history_revision();
+        let generation = ui.view().generation;
+        ui.apply(UiUpdate::Activity {
+            thread_id: "t".into(),
+            generation,
+            epoch: 1,
+            observed_at: at,
+            snapshot: activity::ActivitySnapshot {
+                attempt_id: Some("attempt".into()),
+                phase: activity::ActivityPhase::AwaitingModel,
+                ..Default::default()
+            },
+        });
+        let receive = |thread: &str, generation, attempt: &str| UiUpdate::ModelReceive {
+            thread_id: thread.into(),
+            generation,
+            attempt_id: attempt.into(),
+            observed_at: at + Duration::from_secs(31),
+        };
+        ui.dirty = false;
+        ui.apply(receive("other", generation, "attempt"));
+        ui.apply(receive("t", generation + 1, "attempt"));
+        ui.apply(receive("t", generation, "stale"));
+        assert!(!ui.dirty);
+        assert!(
+            ui.view()
+                .activity
+                .receive_gap_note(at + Duration::from_secs(31))
+                .is_some()
+        );
+        ui.apply(receive("t", generation, "attempt"));
+        assert!(
+            ui.dirty,
+            "receipt clears the visible silence hint immediately"
+        );
+        assert_eq!(
+            ui.view()
+                .activity
+                .receive_gap_note(at + Duration::from_secs(31)),
+            None
+        );
+        assert_eq!(ui.view().history_revision(), revision);
+        assert!(Arc::ptr_eq(&layout, &ui.history_layout(80, 20)));
+        assert!(ui.take_deferred_actions().is_empty());
+        ui.select_thread("other".into());
+        ui.select_thread("t".into());
+        ui.apply(receive("t", generation, "attempt"));
+        assert_eq!(
+            ui.view()
+                .activity
+                .receive_gap_note(at + Duration::from_secs(999)),
+            None
+        );
     }
 
     #[test]

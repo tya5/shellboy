@@ -50,6 +50,12 @@ pub enum EngineEvent {
         reasoning: bool,
         stream_char_offset: usize,
     },
+    /// Ephemeral transport observation; never persisted or included in model input.
+    ModelReceive {
+        thread_id: String,
+        attempt_id: String,
+        observed_at: std::time::Instant,
+    },
     Notice {
         thread_id: String,
         foreground_release: Option<(String, ForegroundRelease)>,

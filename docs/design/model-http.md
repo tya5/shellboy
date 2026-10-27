@@ -2,7 +2,7 @@
 
 API境界・接続契約・[adapter契約](adapters.md) を具体化する。実装は `src/model/http.rs`、ローカルHTTP fixtureは `tests/model_http.rs`。初期のAPI・接続仕様資料は非同梱。
 
-`HttpModelClient::new(Connection)` でURL・headerの静的契約を検査し、接続profileを固定する。資格情報の環境変数は要求を始める直前に取得する。認証不足ならHTTPを開始しない。Responses要求は同API rootの `/responses` へ一回POSTし、`stream:true` / `store:false` を強制する。model/effort/input/tool指定は要求側が組み立てた値を維持する。redirect、HTTPクライアントのretry、別APIへのfallbackは無効。接続確立timeoutは30秒、生成全体は利用者の取消しで中断可能とする。
+`HttpModelClient::new(Connection)` でURL・headerの静的契約を検査し、接続profileを固定する。資格情報の環境変数は要求を始める直前に取得する。認証不足ならHTTPを開始しない。Responses要求は同API rootの `/responses` へ一回POSTし、`stream:true` / `store:false` を強制する。model/effort/input/tool指定は要求側が組み立てた値を維持する。redirect、HTTPクライアントのretry、別APIへのfallbackは無効。接続確立timeoutは固定30秒。生成全体の期限は付けず、接続別の受信停滞期限と利用者の取消しで中断可能とする。
 
 HTTP(S)プロキシはreqwestの既存環境変数 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` と `NO_PROXY` を利用する。接続別TOMLのproxyキーや独自の除外判定は追加しない。依存のdefault-features=falseを維持し、OS GUIのsystem-proxy取得やSOCKS featureは有効にしない。
 
@@ -39,3 +39,11 @@ item doneとの差分があれば先頭16件までの固定分類とoutput_index
 同一HTTP chunk内に正常eventと不正JSONがあっても、先に解析できたeventは保持する。失敗時は最終response解析で失敗しても取得済みrawを失わず、既存AttemptFailure/incomplete_responseへ回答と読み出し可能な推論delta、completed_items、raw_responseを保存する。保存された回答と推論はUIの受信表示・一覧・原文cursorから到達可能にする。会話表示用の有限窓と保存原文を区別し、復旧待ちになっただけでは受信文章を消さない。受信したencrypted_contentを平文推論の代わりとして表示しない。
 
 公式の[item doneとcompleted](https://developers.openai.com/api/reference/resources/responses/streaming-events) を参照した。途中と最終の同一性を追加の必須条件にしていたのはShellboy独自実装であり、その差分をAPI違反と断定しない。会社環境の実SSEによる確認は未実施で、合成streamで両方の正本・保存・表示境界を試験する。
+
+## 接続別のHTTP期限（Issue #8）
+
+HTTP層がApiEndpointごとに同じ期限を適用する。Responses（会話・要約）は最後に非空のbody byte又はheaderを受信してからの受信停滞期限 `stream_idle_timeout_ms`（既定600000ms、0で無効）。header待ちも開始時点から対象とし、長時間の生成全体へ固定期限は付けない。SSEコメントや未完frameも受信として扱う。embeddingは要求全体の `request_timeout_ms`（既定60000ms、最小1000）、モデル一覧は同設定と20000msの小さい方。HTTP失敗本文にも同じ期限を適用し、呼出し側のRAG90秒timeoutは撤去する。
+
+取消しを優先して観測する。期限切れはModelError kind `timeout` とし、header/bodyの段階、観測経過、接続名を含む設定keyをローカルで生成する。provider本文やURLを期限切れ診断へ混ぜない。接続確立期限のreqwest errorもtimeoutへ分類する。SSEの部分本文・完了済みitem・raw responseは既存AttemptFailureで保全する。変更の自動再送は追加しない（受信前自動retryは別Issue #7の設計対象）。
+
+transportのheader/非空body受信は、driver向けの既存32枠event channelでのみ単調時刻とともに渡す。通常response()のmodel event契約は維持し、driver向けresponse_observed()だけ型付きの受信通知を使う。driverからUIへの追加通知は先頭即時、その後最大1回/秒に制限し、最終受信の表示には1秒未満の観測差を許容する。HTTP期限自体は間引かない。単独通知はtry_sendで飽和時にまとめ、model eventへも元の受信時刻を添えることでbackpressure後の補完を行う。provider JSONや保存eventへ混入させず、UIは既存の活動時計で30秒以上の無受信を投影する。新しい表・worker・queue・永続lifecycleは追加しない。

@@ -421,3 +421,68 @@ fn tls_verification_rejects_non_boolean_values() {
         assert!(Config::parse(&source).is_err(), "accepted {value}");
     }
 }
+
+#[test]
+fn http_timeouts_have_defaults_and_independent_connection_overrides() {
+    let defaults = Connection::default();
+    assert_eq!(defaults.stream_idle_timeout_ms, 600_000);
+    assert_eq!(defaults.request_timeout_ms, 60_000);
+    let direct: Connection = toml::from_str("base_url='https://example.test/v1'").unwrap();
+    assert_eq!(direct.stream_idle_timeout_ms, 600_000);
+    assert_eq!(direct.request_timeout_ms, 60_000);
+    let config = Config::parse(
+        "[connections.defaulted]\nbase_url='https://example.test/v1'\n\
+         [connections.unlimited]\nbase_url='https://example.test/v1'\nstream_idle_timeout_ms=0\nrequest_timeout_ms=1000\n\
+         [connections.long_running]\nbase_url='https://example.test/v1'\nstream_idle_timeout_ms=1800000\nrequest_timeout_ms=120000\n",
+    )
+    .unwrap();
+    assert_eq!(
+        config.connections["defaulted"].stream_idle_timeout_ms,
+        600_000
+    );
+    assert_eq!(config.connections["defaulted"].request_timeout_ms, 60_000);
+    assert_eq!(config.connections["unlimited"].stream_idle_timeout_ms, 0);
+    assert_eq!(config.connections["unlimited"].request_timeout_ms, 1_000);
+    assert_eq!(
+        config.connections["long_running"].stream_idle_timeout_ms,
+        1_800_000
+    );
+    assert_eq!(
+        config.connections["long_running"].request_timeout_ms,
+        120_000
+    );
+    let debug = format!("{:?}", config.connections["unlimited"]);
+    assert!(debug.contains("stream_idle_timeout_ms: 0"));
+    assert!(debug.contains("request_timeout_ms: 1000"));
+    assert!(!debug.contains("https://example.test"));
+}
+
+#[test]
+fn http_timeouts_reject_invalid_values_without_clamping() {
+    for key in ["stream_idle_timeout_ms", "request_timeout_ms"] {
+        for value in [
+            "-1",
+            "'60000'",
+            "1.5",
+            "true",
+            "[]",
+            "{}",
+            "18446744073709551616",
+        ] {
+            let source =
+                format!("[connections.proxy]\nbase_url='https://example.test/v1'\n{key}={value}\n");
+            assert!(Config::parse(&source).is_err(), "accepted {key}={value}");
+        }
+    }
+    for value in [0, 1, 999] {
+        let source = format!(
+            "[connections.proxy]\nbase_url='https://example.test/v1'\nrequest_timeout_ms={value}\n"
+        );
+        let error = Config::parse(&source).unwrap_err();
+        assert!(
+            matches!(error, ConfigError::Invalid { key, .. } if key == "connections.proxy.request_timeout_ms")
+        );
+    }
+    let config = Config::parse("[connections.proxy]\nbase_url='https://example.test/v1'\nstream_idle_timeout_ms=1\nrequest_timeout_ms=1000\n").unwrap();
+    assert_eq!(config.connections["proxy"].stream_idle_timeout_ms, 1);
+}

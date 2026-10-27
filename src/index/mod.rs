@@ -723,7 +723,7 @@ impl IndexService {
             .or(self.config.embedding.model.as_deref())
             .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding model missing"))?;
         let result = if let Some(connection) = self.config.connections.get(connection_name) {
-            match HttpModelClient::new(connection.clone()) {
+            match HttpModelClient::for_connection(connection_name, connection.clone()) {
                 Ok(client) => {
                     client
                         .embeddings(
@@ -802,6 +802,19 @@ impl IndexService {
 #[cfg(test)]
 mod idle_tests {
     use super::*;
+    #[tokio::test]
+    async fn owner_stop_rejects_search_before_query_or_http_work() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(temp.path().join("stopped-search.sqlite"))
+            .await
+            .unwrap();
+        let service = IndexService::new(db.clone(), Arc::new(Config::default()));
+        service.cancel();
+        let error = service.search("synthetic query", 10).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(error.message.contains("owner stopped"));
+        db.shutdown().await.unwrap();
+    }
     #[tokio::test]
     async fn wait_idle_retains_detached_blocking_parser_permit_until_actual_completion() {
         let temp = tempfile::tempdir().unwrap();

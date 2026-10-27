@@ -2702,3 +2702,97 @@ async fn explicit_foreground_wait_is_durable_and_human_backgrounding_releases_on
         close(control, owner, server).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stalled_stream_enters_durable_recovery_and_preserves_received_text_without_replay() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (closed, disconnected) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let _request = read_request(&mut stream).await;
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let event = format!(
+            "data: {}\n\n",
+            json!({"type":"response.output_text.delta","delta":"timeout text must remain available"})
+        );
+        stream.write_all(event.as_bytes()).await.unwrap();
+        // Keep the HTTP response open: recovery must come from receive
+        // inactivity, rather than EOF or an explicit incomplete event.
+        let mut byte = [0];
+        assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
+        let _ = closed.send(());
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("config.toml");
+    std::fs::write(&config, format!("default_connection='test'\ndefault_model='fixture'\n[connections.test]\nbase_url='{url}'\nstream_idle_timeout_ms=1000\n")).unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(directory.path().join("data")),
+        directory.path().to_path_buf(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, directory.path().to_path_buf());
+    let accepted = start(&control).await;
+    let turn = accepted.turn_id.clone().unwrap();
+    state(&control, "turn", &turn, "recovery_wait").await;
+    timeout(Duration::from_secs(3), disconnected)
+        .await
+        .unwrap()
+        .unwrap();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let reason: String = db.query_row(
+                "SELECT recovery_reason_json FROM turn WHERE id=?1",
+                [&turn],
+                |row| row.get(0),
+            )?;
+            let reason: Value = serde_json::from_str(&reason).unwrap();
+            assert!(reason.to_string().contains("timeout"));
+            assert!(
+                reason
+                    .to_string()
+                    .contains("connections.test.stream_idle_timeout_ms")
+            );
+            let (attempt_state, error): (String, String) = db.query_row(
+                "SELECT state,error_json FROM model_attempt WHERE turn_id=?1",
+                [&turn],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert!(matches!(attempt_state.as_str(), "failed" | "incomplete"));
+            assert!(error.contains("timeout text must remain available"));
+            assert!(error.contains("timeout"));
+            let received: String = db.query_row(
+                "SELECT payload_json FROM node WHERE turn_id=?1 AND kind='incomplete_response'",
+                [&turn],
+                |row| row.get(0),
+            )?;
+            assert!(received.contains("timeout text must remain available"));
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM model_attempt WHERE turn_id=?1",
+                    [&turn],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                1,
+                "timeout must not automatically resend the conversation"
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM shell_execution", [], |row| row
+                    .get::<_, i64>(0))?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    close(control, owner, server).await;
+}

@@ -8,6 +8,11 @@ base_url = "https://proxy.example/v1"
 api_key_env = "SHELLBOY_API_KEY"
 # Set false only to disable certificate verification for this connection.
 # ssl_verify = true
+# Maximum inactivity while waiting for stream headers or the next received chunk.
+# 0 disables this limit; active streams have no total-duration limit.
+# stream_idle_timeout_ms = 600000
+# Total timeout for non-streaming requests (models, embeddings); minimum 1000.
+# request_timeout_ms = 60000
 # default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
 
 # Embeddings are optional. Enabling them indexes newly finalized conversation

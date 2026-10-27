@@ -261,7 +261,9 @@ impl Control {
                 "Cannot encode collection result",
             ),
             Command::HistorySearch(args) => encode_result(
-                self.index.search_filtered(&args).await?,
+                self.index
+                    .search_filtered_cancellable(&args, disconnected)
+                    .await?,
                 ErrorCode::InvalidState,
                 "Cannot encode search result",
             ),
@@ -373,8 +375,8 @@ impl Control {
                 ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
             })?;
         let fetch = async {
-            let client =
-                crate::model::http::HttpModelClient::new(profile).map_err(model_list_error)?;
+            let client = crate::model::http::HttpModelClient::for_connection(&connection, profile)
+                .map_err(model_list_error)?;
             client
                 .models(self.stop.child_token())
                 .await

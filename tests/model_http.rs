@@ -66,6 +66,7 @@ async fn fake(
         api_key_env: None,
         default_effort: None,
         headers: BTreeMap::from([("Authorization".into(), "Bearer fake-private-key".into())]),
+        ..Default::default()
     };
     let (tx, rx) = oneshot::channel();
     let content_type = content_type.to_owned();

@@ -67,6 +67,12 @@ impl Connection {
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         nonempty(&format!("connections.{name}"), name)?;
         api_root(&self.base_url).map_err(|_| invalid(format!("connections.{name}.base_url"), "provide an HTTP(S) API root without credentials/query/fragment or /responses or /embeddings suffix"))?;
+        if self.request_timeout_ms < 1_000 {
+            return Err(invalid(
+                format!("connections.{name}.request_timeout_ms"),
+                "must be at least 1000 milliseconds",
+            ));
+        }
         if let Some(effort) = &self.default_effort {
             nonempty(&format!("connections.{name}.default_effort"), effort)?;
         }

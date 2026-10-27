@@ -112,7 +112,7 @@ pub(super) fn model_client(
         let error = ApiError::new(ErrorCode::ConfigInvalid, "Thread model is not configured");
         return Err(error);
     }
-    let client = match HttpModelClient::new(connection) {
+    let client = match HttpModelClient::for_connection(&snapshot.profile, connection) {
         Ok(client) => client,
         Err(error) => {
             let error = ApiError::new(ErrorCode::ConfigInvalid, error.to_string());
@@ -153,14 +153,30 @@ pub(super) async fn stream_response(
     request: Value,
     stop: &CancellationToken,
 ) -> Result<model::ModelResponse, model::http::AttemptFailure> {
-    let (send, mut receive) = mpsc::channel::<Value>(32);
+    let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
     let mut stream_chars = 0usize;
-    let response = client.response(request, stop.clone(), Some(send));
+    let mut last_receive_notice: Option<std::time::Instant> = None;
+    let response = client.response_observed(request, stop.clone(), Some(send));
     tokio::pin!(response);
     loop {
         tokio::select! {
             result=&mut response=>break result,
             Some(event)=receive.recv()=>{
+                let (event, observed_at) = match event {
+                    model::http::ObservedEvent::Received(at) => (None, at),
+                    model::http::ObservedEvent::Model { value, received_at } => (Some(value), received_at),
+                };
+                // Bound additional UI traffic, including byte-sized keepalives.
+                // A receipt after a long silence is always forwarded immediately.
+                if last_receive_notice.is_none_or(|last| observed_at.saturating_duration_since(last) >= std::time::Duration::from_secs(1)) {
+                    last_receive_notice = Some(observed_at);
+                    let _ = control.events.send(EngineEvent::ModelReceive {
+                        thread_id: thread.into(),
+                        attempt_id: attempt.into(),
+                        observed_at,
+                    });
+                }
+                let Some(event) = event else { continue; };
                 let kind=event.get("type").and_then(Value::as_str).unwrap_or("");
                 let reasoning=matches!(kind,"response.reasoning_summary_text.delta"|"response.reasoning_text.delta");
                 if (reasoning || matches!(kind,"response.output_text.delta"|"response.refusal.delta")) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();let _=control.events.send(EngineEvent::Stream{thread_id:thread.into(),node_id:attempt.into(),text:delta.into(),reasoning,stream_char_offset});}

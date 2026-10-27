@@ -21,6 +21,7 @@ impl UiUpdate {
             | Self::CommandOutcome { .. }
             | Self::Activity { .. }
             | Self::ActivityUnavailable { .. }
+            | Self::ModelReceive { .. }
             | Self::Models { .. }
             | Self::RecalledInput { .. }
             | Self::OriginalPage { .. }

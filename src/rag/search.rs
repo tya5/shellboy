@@ -4,10 +4,7 @@ use crate::{
     model::http::HttpModelClient,
 };
 use rusqlite::{OptionalExtension, params};
-use std::{
-    collections::{BTreeMap, HashSet},
-    time::Duration,
-};
+use std::collections::{BTreeMap, HashSet};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Context {
@@ -61,7 +58,7 @@ pub(super) fn embedding_profile(context: &Context) -> Result<Profile> {
         )
         .as_bytes(),
     );
-    let client = HttpModelClient::new(connection.clone())
+    let client = HttpModelClient::for_connection(name, connection.clone())
         .map_err(|_| err("config_invalid", "Cannot initialize embedding connection"))?;
     Ok(Profile {
         id,
@@ -76,39 +73,34 @@ pub(super) async fn embed(
     texts: &[String],
     dimension: Option<usize>,
 ) -> Result<crate::model::http::EmbeddingResponse> {
-    let cancel = CancellationToken::new();
-    match tokio::time::timeout(
-        Duration::from_secs(90),
-        profile
-            .client
-            .embeddings(&profile.model, texts, dimension, cancel.clone()),
-    )
-    .await
-    {
-        Ok(Ok(response)) => {
-            if response.dimension > crate::storage::MAX_VECTOR_DIMENSIONS {
-                return Err(err(
-                    "index_incompatible",
-                    "Embedding dimension exceeds sqlite-vec limit 8192",
-                ));
-            }
-            Ok(response)
-        }
-        Ok(Err(error)) => Err(err(
-            if error.embedding_failure().credentials_or_credit
-                || error.embedding_failure().rate_limited
-            {
-                "embedding_paused"
-            } else {
-                "embedding_failed"
-            },
-            format!("Embedding request failed ({})", error.kind),
-        )),
-        Err(_) => {
-            cancel.cancel();
-            Err(err("embedding_failed", "Embedding request timed out"))
-        }
+    let response = profile
+        .client
+        .embeddings(&profile.model, texts, dimension, CancellationToken::new())
+        .await
+        .map_err(|error| {
+            let failure = error.embedding_failure();
+            err(
+                if failure.credentials_or_credit || failure.rate_limited {
+                    "embedding_paused"
+                } else {
+                    "embedding_failed"
+                },
+                if error.kind == "timeout" {
+                    // Timeout diagnostics are generated locally by the HTTP
+                    // client; provider errors remain redacted to their kind.
+                    format!("Embedding request failed (timeout): {}", error.message)
+                } else {
+                    format!("Embedding request failed ({})", error.kind)
+                },
+            )
+        })?;
+    if response.dimension > crate::storage::MAX_VECTOR_DIMENSIONS {
+        return Err(err(
+            "index_incompatible",
+            "Embedding dimension exceeds sqlite-vec limit 8192",
+        ));
     }
+    Ok(response)
 }
 pub(super) async fn embed_revision(
     s: &mut store::Store,

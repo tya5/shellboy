@@ -31,6 +31,27 @@ impl IndexService {
         &self,
         args: &HistorySearchArgs,
     ) -> Result<Vec<IndexHit>, ApiError> {
+        self.search_filtered_cancellable(args, self.stop.child_token())
+            .await
+    }
+    /// Query HTTP follows both the caller's lifetime and owner shutdown. Dropping
+    /// this bounded future aborts the transport; queued short DB work may finish.
+    pub async fn search_filtered_cancellable(
+        &self,
+        args: &HistorySearchArgs,
+        cancel: CancellationToken,
+    ) -> Result<Vec<IndexHit>, ApiError> {
+        tokio::select! { biased;
+            _ = self.stop.cancelled() => Err(err(ErrorCode::InvalidState, "Index owner stopped the search")),
+            _ = cancel.cancelled() => Err(err(ErrorCode::InvalidState, "Search caller disconnected")),
+            result = self.search_filtered_inner(args, cancel.clone()) => result,
+        }
+    }
+    async fn search_filtered_inner(
+        &self,
+        args: &HistorySearchArgs,
+        cancel: CancellationToken,
+    ) -> Result<Vec<IndexHit>, ApiError> {
         crate::protocol::Command::HistorySearch(args.clone()).validate()?;
         let args = args.clone();
         if let Some(thread) = &args.thread_id {
@@ -93,14 +114,14 @@ impl IndexService {
                     "Selected index space connection is not configured",
                 )
             })?;
-        let client = HttpModelClient::new(connection)
+        let client = HttpModelClient::for_connection(&space.profile, connection)
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
         let response = client
             .embeddings(
                 &space.model,
                 std::slice::from_ref(&args.query),
                 Some(space.dimension),
-                CancellationToken::new(),
+                cancel,
             )
             .await
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;

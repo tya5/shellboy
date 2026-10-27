@@ -2,6 +2,8 @@
 use super::{MAX_RESPONSE_BYTES, ModelError, ModelResponse, ResponseStream};
 use crate::config::{ApiEndpoint, Config, Connection};
 use futures_util::StreamExt;
+mod deadline;
+use deadline::{Deadline, transport_error};
 use reqwest::{
     Client, Response,
     header::{HeaderMap, HeaderName, HeaderValue},
@@ -16,7 +18,25 @@ const MAX_EMBEDDING_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MODEL_CATALOG_BYTES: usize = 2 * 1024 * 1024;
 const MAX_MODEL_CATALOG_ENTRIES: usize = 10_000;
 const MAX_MODEL_ID_BYTES: usize = 1024;
-const MODEL_CATALOG_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Bounded, ephemeral observations on the driver's existing event channel.
+pub(crate) enum ObservedEvent {
+    Received(std::time::Instant),
+    Model {
+        value: Value,
+        received_at: std::time::Instant,
+    },
+}
+enum Events {
+    Plain(mpsc::Sender<Value>),
+    Observed(mpsc::Sender<ObservedEvent>),
+}
+impl Events {
+    fn received(&self, at: std::time::Instant) {
+        if let Self::Observed(sender) = self {
+            let _ = sender.try_send(ObservedEvent::Received(at));
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct AttemptFailure {
@@ -48,13 +68,15 @@ pub struct EmbeddingResponse {
 pub struct HttpModelClient {
     client: Client,
     connection: Connection,
+    connection_name: String,
 }
 impl HttpModelClient {
     pub fn new(connection: Connection) -> Result<Self, ModelError> {
+        Self::for_connection("selected", connection)
+    }
+    pub fn for_connection(name: &str, connection: Connection) -> Result<Self, ModelError> {
         let mut config = Config::default();
-        config
-            .connections
-            .insert("selected".into(), connection.clone());
+        config.connections.insert(name.into(), connection.clone());
         config
             .validate()
             .map_err(|e| ModelError::new("config_invalid", e.to_string()))?;
@@ -65,7 +87,11 @@ impl HttpModelClient {
             .connect_timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|_| ModelError::new("transport", "Unable to initialize HTTP client"))?;
-        Ok(Self { client, connection })
+        Ok(Self {
+            client,
+            connection,
+            connection_name: name.into(),
+        })
     }
     fn headers(&self) -> Result<(HeaderMap, Vec<String>), ModelError> {
         let credentials = self
@@ -97,6 +123,7 @@ impl HttpModelClient {
         endpoint: ApiEndpoint,
         request: &Value,
         cancel: &CancellationToken,
+        deadline: &Deadline,
     ) -> Result<(Response, Vec<String>), ModelError> {
         if cancel.is_cancelled() {
             return Err(cancelled());
@@ -117,50 +144,44 @@ impl HttpModelClient {
             .headers(headers)
             .header(reqwest::header::ACCEPT, accept)
             .json(request);
-        tokio::select! {
-            biased;
-            _ = cancel.cancelled() => Err(cancelled()),
-            response = request.send() => response.map(|r| (r, secrets)).map_err(|_| ModelError::new("transport", "HTTP request failed before response headers; inspect proxy connectivity and TLS settings")),
-        }
+        deadline
+            .wait(cancel, "waiting for response headers", request.send())
+            .await?
+            .map(|response| (response, secrets))
+            .map_err(|error| transport_error(error, "before response headers"))
     }
     /// Fetch the configured proxy's catalog without embedding a product-specific model list.
     /// The deadline includes both response headers and the complete bounded body.
     pub async fn models(&self, cancel: CancellationToken) -> Result<Vec<String>, ModelError> {
-        if cancel.is_cancelled() {
-            return Err(cancelled());
-        }
-        tokio::select! {
-            biased;
-            _ = cancel.cancelled() => Err(cancelled()),
-            result = tokio::time::timeout(MODEL_CATALOG_TIMEOUT, self.models_request(&cancel)) => {
-                result.unwrap_or_else(|_| Err(ModelError::new("timeout", "Model list request timed out after 20 seconds")))
-            }
-        }
+        let mut deadline =
+            Deadline::new(ApiEndpoint::Models, &self.connection, &self.connection_name)?;
+        self.models_request(&cancel, &mut deadline).await
     }
-    async fn models_request(&self, cancel: &CancellationToken) -> Result<Vec<String>, ModelError> {
+    async fn models_request(
+        &self,
+        cancel: &CancellationToken,
+        deadline: &mut Deadline,
+    ) -> Result<Vec<String>, ModelError> {
         let (headers, secrets) = self.headers()?;
         let endpoint = self
             .connection
             .endpoint(ApiEndpoint::Models)
             .map_err(|e| ModelError::new("config_invalid", e.to_string()))?;
-        let response = self
+        let request = self
             .client
             .get(endpoint)
             .headers(headers)
-            .header(reqwest::header::ACCEPT, "application/json")
-            .send()
-            .await
-            .map_err(|_| {
-                ModelError::new(
-                    "transport",
-                    "Unable to retrieve model list; inspect proxy connectivity and TLS settings",
-                )
-            })?;
+            .header(reqwest::header::ACCEPT, "application/json");
+        let response = deadline
+            .wait(cancel, "waiting for response headers", request.send())
+            .await?
+            .map_err(|error| transport_error(error, "before response headers"))?;
+        deadline.received();
         let status = response.status();
         if !status.is_success() {
-            return Err(http_error(response, cancel, &secrets).await);
+            return Err(http_error(response, cancel, &secrets, deadline).await);
         }
-        let bytes = bounded_body(response, MAX_MODEL_CATALOG_BYTES, cancel).await?;
+        let bytes = bounded_body(response, MAX_MODEL_CATALOG_BYTES, cancel, deadline, None).await?;
         let raw: Value = serde_json::from_slice(&bytes)
             .map_err(|_| ModelError::new("protocol", "Proxy returned malformed model list JSON"))?;
         if raw.get("error").is_some_and(|e| !e.is_null()) {
@@ -202,10 +223,36 @@ impl HttpModelClient {
     #[allow(clippy::result_large_err)]
     pub async fn response(
         &self,
-        mut request: Value,
+        request: Value,
         cancel: CancellationToken,
         events: Option<mpsc::Sender<Value>>,
     ) -> Result<ModelResponse, AttemptFailure> {
+        self.response_inner(request, cancel, events.map(Events::Plain))
+            .await
+    }
+    // Preserve the same bounded recovery payload as response().
+    #[allow(clippy::result_large_err)]
+    pub(crate) async fn response_observed(
+        &self,
+        request: Value,
+        cancel: CancellationToken,
+        events: Option<mpsc::Sender<ObservedEvent>>,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        self.response_inner(request, cancel, events.map(Events::Observed))
+            .await
+    }
+    #[allow(clippy::result_large_err)]
+    async fn response_inner(
+        &self,
+        mut request: Value,
+        cancel: CancellationToken,
+        events: Option<Events>,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        let mut deadline = Deadline::new(
+            ApiEndpoint::Responses,
+            &self.connection,
+            &self.connection_name,
+        )?;
         let Some(object) = request.as_object_mut() else {
             return Err(ModelError::new("protocol", "Responses request must be an object").into());
         };
@@ -215,10 +262,18 @@ impl HttpModelClient {
             .get("tools")
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
-        let (response, secrets) = self.send(ApiEndpoint::Responses, &request, &cancel).await?;
+        let (response, secrets) = self
+            .send(ApiEndpoint::Responses, &request, &cancel, &deadline)
+            .await?;
+        deadline.received();
+        if let Some(events) = &events {
+            events.received(deadline.received_at());
+        }
         let status = response.status();
         if !status.is_success() {
-            return Err(http_error(response, &cancel, &secrets).await.into());
+            return Err(http_error(response, &cancel, &secrets, &mut deadline)
+                .await
+                .into());
         }
         let content_type = response
             .headers()
@@ -231,7 +286,14 @@ impl HttpModelClient {
             .trim()
             .to_ascii_lowercase();
         if content_type == "application/json" {
-            let bytes = bounded_body(response, MAX_RESPONSE_BYTES, &cancel).await?;
+            let bytes = bounded_body(
+                response,
+                MAX_RESPONSE_BYTES,
+                &cancel,
+                &mut deadline,
+                events.as_ref(),
+            )
+            .await?;
             let raw: Value = serde_json::from_slice(&bytes)
                 .map_err(|_| ModelError::new("protocol", "Proxy returned malformed JSON"))?;
             let result = if raw.get("error").is_some_and(|e| !e.is_null()) {
@@ -251,7 +313,7 @@ impl HttpModelClient {
             };
             let event = json!({"type":event_type,"response":raw});
             if let Some(sender) = &events {
-                send_event(sender, event, &cancel)
+                send_event(sender, event, &cancel, deadline.received_at())
                     .await
                     .map_err(|error| raw_failure(error, raw.clone()))?;
             }
@@ -268,24 +330,32 @@ impl HttpModelClient {
         let mut parsed = ResponseStream::default();
         let mut raw_response = None;
         loop {
-            let next = tokio::select! {
-                biased;
-                _ = cancel.cancelled() => return Err(failure(cancelled(), &parsed, raw_response)),
-                next = stream.next() => next,
+            let next = match deadline
+                .wait(&cancel, "receiving response body", stream.next())
+                .await
+            {
+                Ok(next) => next,
+                Err(error) => return Err(failure(error, &parsed, raw_response)),
             };
             let Some(chunk) = next else {
                 break;
             };
             let chunk = match chunk {
                 Ok(chunk) => chunk,
-                Err(_) => {
+                Err(error) => {
                     return Err(failure(
-                        ModelError::new("transport", "HTTP stream interrupted"),
+                        transport_error(error, "receiving response body"),
                         &parsed,
                         raw_response,
                     ));
                 }
             };
+            if !chunk.is_empty() {
+                deadline.received();
+                if let Some(events) = &events {
+                    events.received(deadline.received_at());
+                }
+            }
             let values = match parsed.push(&chunk) {
                 Ok(values) => values,
                 Err(error) => return Err(failure(redact(error, &secrets), &parsed, raw_response)),
@@ -295,7 +365,8 @@ impl HttpModelClient {
                     raw_response = Some(raw.clone());
                 }
                 if let Some(sender) = &events
-                    && let Err(error) = send_event(sender, value, &cancel).await
+                    && let Err(error) =
+                        send_event(sender, value, &cancel, deadline.received_at()).await
                 {
                     return Err(failure(error, &parsed, raw_response));
                 }
@@ -335,15 +406,22 @@ impl HttpModelClient {
                 "Embedding model/input must be nonempty and dimension positive",
             ));
         }
+        let mut deadline = Deadline::new(
+            ApiEndpoint::Embeddings,
+            &self.connection,
+            &self.connection_name,
+        )?;
         let request = json!({"model":model,"input":input,"encoding_format":"float"});
         let (response, secrets) = self
-            .send(ApiEndpoint::Embeddings, &request, &cancel)
+            .send(ApiEndpoint::Embeddings, &request, &cancel, &deadline)
             .await?;
+        deadline.received();
         let status = response.status();
         if !status.is_success() {
-            return Err(http_error(response, &cancel, &secrets).await);
+            return Err(http_error(response, &cancel, &secrets, &mut deadline).await);
         }
-        let bytes = bounded_body(response, MAX_EMBEDDING_BYTES, &cancel).await?;
+        let bytes =
+            bounded_body(response, MAX_EMBEDDING_BYTES, &cancel, &mut deadline, None).await?;
         let raw: Value = serde_json::from_slice(&bytes)
             .map_err(|_| ModelError::new("protocol", "Malformed embeddings JSON"))?;
         if raw.get("error").is_some_and(|e| !e.is_null()) {
@@ -463,29 +541,45 @@ fn failure(
     }
 }
 async fn send_event(
-    sender: &mpsc::Sender<Value>,
+    sender: &Events,
     value: Value,
     cancel: &CancellationToken,
+    received_at: std::time::Instant,
 ) -> Result<(), ModelError> {
     tokio::select! {
         biased;
         _ = cancel.cancelled() => Err(cancelled()),
-        result = sender.send(value) => result.map_err(|_| ModelError::new("consumer_closed", "Model event consumer closed before persistence")),
+        result = async {
+            match sender {
+                Events::Plain(sender) => sender.send(value).await.map_err(|_| ()),
+                Events::Observed(sender) => sender.send(ObservedEvent::Model { value, received_at }).await.map_err(|_| ()),
+            }
+        } => result.map_err(|_| ModelError::new("consumer_closed", "Model event consumer closed before persistence")),
     }
 }
 async fn bounded_body(
     response: Response,
     max: usize,
     cancel: &CancellationToken,
+    deadline: &mut Deadline,
+    events: Option<&Events>,
 ) -> Result<Vec<u8>, ModelError> {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     loop {
-        let next = tokio::select! { biased; _ = cancel.cancelled() => return Err(cancelled()), next = stream.next() => next };
+        let next = deadline
+            .wait(cancel, "receiving response body", stream.next())
+            .await?;
         let Some(chunk) = next else {
             return Ok(body);
         };
-        let chunk = chunk.map_err(|_| ModelError::new("transport", "HTTP body interrupted"))?;
+        let chunk = chunk.map_err(|error| transport_error(error, "receiving response body"))?;
+        if !chunk.is_empty() {
+            deadline.received();
+            if let Some(events) = events {
+                events.received(deadline.received_at());
+            }
+        }
         if chunk.len() > max.saturating_sub(body.len()) {
             return Err(ModelError::new(
                 "input_limit",
@@ -499,19 +593,32 @@ async fn http_error(
     response: Response,
     cancel: &CancellationToken,
     secrets: &[String],
+    deadline: &mut Deadline,
 ) -> ModelError {
     let status = response.status().as_u16();
     let mut stream = response.bytes_stream();
     let mut body = Vec::new();
     let mut truncated = false;
     loop {
-        let next = tokio::select! { biased; _ = cancel.cancelled() => return cancelled(), next = stream.next() => next };
+        let next = match deadline
+            .wait(cancel, "receiving HTTP error body", stream.next())
+            .await
+        {
+            Ok(next) => next,
+            Err(mut error) => {
+                error.status = Some(status);
+                return error;
+            }
+        };
         let Some(chunk) = next else {
             break;
         };
         let Ok(chunk) = chunk else {
             break;
         };
+        if !chunk.is_empty() {
+            deadline.received();
+        }
         let take = chunk.len().min(MAX_ERROR_BYTES - body.len());
         body.extend_from_slice(&chunk[..take]);
         if take < chunk.len() {
@@ -554,4 +661,33 @@ fn redact(mut error: ModelError, secrets: &[String]) -> ModelError {
         .provider_code
         .map(|code| code.chars().take(256).collect());
     error
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    #[tokio::test]
+    async fn model_event_preserves_receive_time_when_heartbeat_notification_is_full() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let events = Events::Observed(sender);
+        let before = std::time::Instant::now();
+        events.received(before);
+        let after = before + std::time::Duration::from_secs(1);
+        events.received(after);
+        let model = json!({"type":"response.output_text.delta","delta":"ok"});
+        let cancel = CancellationToken::new();
+        let send = send_event(&events, model.clone(), &cancel, after);
+        let receive = async {
+            assert!(
+                matches!(receiver.recv().await, Some(ObservedEvent::Received(at)) if at == before)
+            );
+            let Some(ObservedEvent::Model { value, received_at }) = receiver.recv().await else {
+                panic!("model event lost")
+            };
+            assert_eq!(value, model);
+            assert_eq!(received_at, after);
+        };
+        let (result, ()) = tokio::join!(send, receive);
+        result.unwrap();
+    }
 }

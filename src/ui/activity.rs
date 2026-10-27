@@ -103,6 +103,7 @@ pub(super) struct ActivityView {
     pub snapshot: Option<ActivitySnapshot>,
     epoch: Option<u64>,
     received_attempt: Option<String>,
+    receive: Option<ReceiveObservation>,
     clock: Option<ObservedClock>,
 }
 impl ActivityView {
@@ -130,6 +131,25 @@ impl ActivityView {
         if snapshot.phase != ActivityPhase::AwaitingModel {
             self.received_attempt = None;
         }
+        if snapshot.phase == ActivityPhase::AwaitingModel {
+            if let Some(attempt) = &snapshot.attempt_id {
+                if self
+                    .receive
+                    .as_ref()
+                    .is_none_or(|receive| receive.attempt != *attempt)
+                {
+                    self.receive = Some(ReceiveObservation {
+                        attempt: attempt.clone(),
+                        observed_at: at,
+                        received: false,
+                    });
+                }
+            } else {
+                self.receive = None;
+            }
+        } else {
+            self.receive = None;
+        }
         let changed = self.snapshot.as_ref() != Some(&snapshot);
         self.snapshot = Some(snapshot);
         changed
@@ -139,12 +159,13 @@ impl ActivityView {
             return false;
         }
         self.epoch = Some(epoch);
+        let had_receive = self.receive.take().is_some();
         if let Some(clock) = &mut self.clock {
             let running = clock.running;
             clock.observe(at, false);
-            running
+            running || had_receive
         } else {
-            false
+            had_receive
         }
     }
     pub fn advance_clock(&mut self, at: Instant) {
@@ -177,6 +198,54 @@ impl ActivityView {
         }
     }
 
+    /// Headers and any body bytes are liveness observations, not assistant text.
+    /// Keep one candidate when an observation precedes its saved projection.
+    pub fn receive_at(&mut self, attempt: &str, at: Instant) -> bool {
+        if let Some(snapshot) = &self.snapshot {
+            if snapshot.phase == ActivityPhase::AwaitingModel {
+                if snapshot.attempt_id.as_deref() != Some(attempt) {
+                    return false;
+                }
+            } else if snapshot.attempt_id.as_deref() == Some(attempt) {
+                return false;
+            }
+        }
+        let was_visible = self.receive_gap_note(at).is_some();
+        match &mut self.receive {
+            Some(receive) if receive.attempt == attempt => {
+                receive.observed_at = receive.observed_at.max(at);
+                receive.received = true;
+            }
+            _ => {
+                self.receive = Some(ReceiveObservation {
+                    attempt: attempt.into(),
+                    observed_at: at,
+                    received: true,
+                })
+            }
+        }
+        was_visible
+    }
+
+    pub fn receive_gap_note(&self, now: Instant) -> Option<String> {
+        let snapshot = self.snapshot.as_ref()?;
+        let receive = self.receive.as_ref()?;
+        if snapshot.phase != ActivityPhase::AwaitingModel
+            || snapshot.attempt_id.as_deref() != Some(receive.attempt.as_str())
+        {
+            return None;
+        }
+        let seconds = now.saturating_duration_since(receive.observed_at).as_secs();
+        if seconds < 30 {
+            return None;
+        }
+        Some(if receive.received {
+            format!("最後の受信から{seconds}秒")
+        } else {
+            format!("受信待ち{seconds}秒（画面の観測開始から）")
+        })
+    }
+
     pub fn phase(&self) -> ActivityPhase {
         let Some(snapshot) = &self.snapshot else {
             return ActivityPhase::Idle;
@@ -190,6 +259,14 @@ impl ActivityView {
             snapshot.phase
         }
     }
+}
+
+/// One visible attempt only; timestamps are monotonic UI observations.
+#[derive(Clone, Debug)]
+struct ReceiveObservation {
+    attempt: String,
+    observed_at: Instant,
+    received: bool,
 }
 
 /// One local observation interval accumulator, never a persisted Turn duration.
@@ -308,6 +385,92 @@ impl Animation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn awaiting(attempt: &str) -> ActivitySnapshot {
+        ActivitySnapshot {
+            run_id: Some("run".into()),
+            turn_id: Some("turn".into()),
+            attempt_id: Some(attempt.into()),
+            phase: ActivityPhase::AwaitingModel,
+            turn_in_progress: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn receive_gap_tracks_headers_and_bytes_without_inventing_text_progress() {
+        let at = Instant::now();
+        let mut view = ActivityView::default();
+        view.accept_at(1, awaiting("a"), at);
+        assert_eq!(view.receive_gap_note(at + Duration::from_secs(29)), None);
+        assert_eq!(
+            view.receive_gap_note(at + Duration::from_secs(30))
+                .as_deref(),
+            Some("受信待ち30秒（画面の観測開始から）")
+        );
+        // Header arrival, then keepalive/comment/partial-frame bytes use the
+        // same transport observation; neither is an assistant text delta.
+        assert!(view.receive_at("a", at + Duration::from_secs(31)));
+        assert_eq!(view.phase(), ActivityPhase::AwaitingModel);
+        assert_eq!(view.receive_gap_note(at + Duration::from_secs(60)), None);
+        assert_eq!(
+            view.receive_gap_note(at + Duration::from_secs(61))
+                .as_deref(),
+            Some("最後の受信から30秒")
+        );
+        assert!(view.receive_at("a", at + Duration::from_secs(62)));
+        view.receive_at("a", at + Duration::from_secs(12));
+        assert_eq!(
+            view.receive_gap_note(at + Duration::from_secs(91)),
+            None,
+            "late delivery cannot reverse the last receipt"
+        );
+        view.stream("a");
+        assert_eq!(view.phase(), ActivityPhase::Receiving);
+        assert_eq!(
+            view.receive_gap_note(at + Duration::from_secs(92))
+                .as_deref(),
+            Some("最後の受信から30秒")
+        );
+    }
+
+    #[test]
+    fn receive_gap_is_attempt_scoped_and_resets_on_terminal_or_lost_observation() {
+        let at = Instant::now();
+        let mut view = ActivityView::default();
+        // Transport headers may race the saved inflight projection.
+        view.receive_at("a", at);
+        view.accept_at(1, awaiting("a"), at + Duration::from_secs(10));
+        assert_eq!(
+            view.receive_gap_note(at + Duration::from_secs(30))
+                .as_deref(),
+            Some("最後の受信から30秒")
+        );
+        assert!(!view.receive_at("old", at + Duration::from_secs(31)));
+        view.accept_at(2, awaiting("b"), at + Duration::from_secs(40));
+        assert_eq!(view.receive_gap_note(at + Duration::from_secs(69)), None);
+        view.receive_at("a", at + Duration::from_secs(70));
+        assert_eq!(
+            view.receive_gap_note(at + Duration::from_secs(70))
+                .as_deref(),
+            Some("受信待ち30秒（画面の観測開始から）")
+        );
+        assert!(!view.accept_at(1, awaiting("a"), at + Duration::from_secs(75)));
+        view.unavailable_at(2, at + Duration::from_secs(80));
+        assert_eq!(view.receive_gap_note(at + Duration::from_secs(999)), None);
+        view.accept_at(3, awaiting("b"), at + Duration::from_secs(1000));
+        assert_eq!(view.receive_gap_note(at + Duration::from_secs(1029)), None);
+        view.accept_at(
+            4,
+            ActivitySnapshot {
+                phase: ActivityPhase::Completed,
+                ..awaiting("b")
+            },
+            at + Duration::from_secs(1030),
+        );
+        view.receive_at("b", at + Duration::from_secs(1040));
+        assert_eq!(view.receive_gap_note(at + Duration::from_secs(9999)), None);
+    }
+
     #[test]
     fn animation_is_bounded_and_stops_without_changing_text() {
         let now = Instant::now();
