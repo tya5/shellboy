@@ -293,12 +293,13 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
         name: name.into(),
         model: model.into(),
         endpoint_hash: hash(connection.base_url.as_bytes()),
-        client: crate::model::http::HttpModelClient::new(connection.clone()).map_err(|_| {
-            err(
-                "config_invalid",
-                "Cannot initialize history embedding connection",
-            )
-        })?,
+        client: crate::model::http::HttpModelClient::for_connection(name, connection.clone())
+            .map_err(|_| {
+                err(
+                    "config_invalid",
+                    "Cannot initialize history embedding connection",
+                )
+            })?,
     };
     let dimension = descriptor.dimension;
     let response = search::embed(&profile, &[query.into()], Some(dimension)).await?;
