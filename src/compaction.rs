@@ -17,8 +17,11 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 mod keys;
+mod policy;
 mod summary;
 pub(crate) use keys::CompactionKeys;
+use policy::*;
+use std::ops::Range;
 use summary::SummaryAdoption;
 
 const SEGMENT_CHARS: usize = 64_000;
@@ -320,27 +323,18 @@ impl Compactor {
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, false).await?;
-        let latest = snapshot.groups.iter().rposition(|g| g.tool && g.complete);
+        let ranges = policy::spill_ranges(&snapshot, include_latest);
+        self.spill_snapshot(snapshot, ranges, cancel).await
+    }
+    async fn spill_snapshot(
+        &self,
+        snapshot: Snapshot,
+        ranges: Vec<Range<usize>>,
+        cancel: CancellationToken,
+    ) -> Result<CompactResult, ApiError> {
         let mut replacements = Vec::new();
-        for (ordinal, group) in snapshot.groups.iter().enumerate() {
-            if !group.tool
-                || !group.complete
-                || (!include_latest && latest == Some(ordinal))
-                || group
-                    .sources
-                    .iter()
-                    .any(|s| snapshot.protected.contains(&s.id))
-            {
-                continue;
-            }
-            // Already-spilled groups are single immutable replacement nodes.
-            if group
-                .sources
-                .iter()
-                .all(|s| s.payload.get("spill_version").is_some())
-            {
-                continue;
-            }
+        for ordinal in ranges.into_iter().flatten() {
+            let group = &snapshot.groups[ordinal];
             let mut output = Vec::new();
             for source in &group.sources {
                 if let Some(items) = source.payload.get("output").and_then(Value::as_array) {
@@ -448,14 +442,22 @@ impl Compactor {
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
-        let count = prefix_count(&snapshot, allow_protected_suffix);
-        if count == 0 {
+        let Some(range) = policy::summary_range(&snapshot, allow_protected_suffix) else {
             return Ok(CompactResult {
                 no_target: true,
                 ..Default::default()
             });
-        }
-        let groups = &snapshot.groups[..count];
+        };
+        self.summarize_snapshot(snapshot, range, cancel).await
+    }
+    async fn summarize_snapshot(
+        &self,
+        snapshot: Snapshot,
+        range: Range<usize>,
+        cancel: CancellationToken,
+    ) -> Result<CompactResult, ApiError> {
+        let count = range.end;
+        let groups = &snapshot.groups[range];
         self.config
             .connections
             .get(&snapshot.profile)
@@ -509,7 +511,7 @@ impl Compactor {
                 false,
             );
             let response = match client
-                .response_for_thread(thread, request, cancel.clone(), None)
+                .response_for_thread(&snapshot.thread, request, cancel.clone(), None)
                 .await
             {
                 Ok(response) => response,
@@ -716,89 +718,6 @@ fn source_groups(sources: Vec<Source>, completed: &HashSet<String>) -> Vec<Group
         }
     }
     groups
-}
-fn prefix_count(s: &Snapshot, allow_suffix: bool) -> usize {
-    if !allow_suffix {
-        return normal_prefix(s);
-    }
-    overflow_prefix(s, completed_prefix(s))
-}
-fn normal_prefix(s: &Snapshot) -> usize {
-    normal_boundary(s).min(safe_prefix(s))
-}
-fn completed_prefix(s: &Snapshot) -> usize {
-    // Release the latest completed Turn before considering current-Turn groups.
-    let current = turn_boundary(s, s.current_turn.as_deref());
-    current
-        .unwrap_or(s.groups.len())
-        .min(safe_prefix(s))
-        .min(s.groups.len().saturating_sub(1))
-}
-fn overflow_prefix(s: &Snapshot, completed: usize) -> usize {
-    // This is the existing summary segment sizing baseline, not an estimate of
-    // provider context capacity. Release only the oldest whole groups needed
-    // to bring the remaining suffix below it, without crossing a hard fence.
-    let safe = safe_prefix(s).min(s.groups.len().saturating_sub(1));
-    if completed >= safe {
-        return completed;
-    }
-    let sizes: Vec<_> = s.groups[completed..]
-        .iter()
-        .map(|g| {
-            g.sources
-                .iter()
-                .map(|n| render(n, s.epoch).chars().count())
-                .sum::<usize>()
-        })
-        .collect();
-    let mut remaining = sizes.iter().sum::<usize>();
-    let mut count = completed;
-    if completed <= normal_prefix(s) && completed < safe {
-        // Explicit overflow still requires progress below 64K: provider limits
-        // may be smaller. Do not count summarizing just the origin user as
-        // progress when an older complete tool group (or its spill) is eligible.
-        let first_tool = s.groups[completed..safe].iter().position(|g| {
-            g.tool
-                || g.sources
-                    .iter()
-                    .any(|n| n.payload.get("spill_version").is_some())
-        });
-        count += first_tool.map_or(1, |index| index + 1);
-        remaining = remaining.saturating_sub(sizes[..count - completed].iter().sum());
-    }
-    while count < safe && remaining > SEGMENT_CHARS {
-        remaining = remaining.saturating_sub(sizes[count - completed]);
-        count += 1;
-    }
-    count
-}
-fn turn_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize> {
-    let turn = turn?;
-    let boundary = s.turn_boundaries.get(turn);
-    s.groups.iter().position(|g| {
-        g.sources
-            .iter()
-            .any(|n| n.turn.as_deref() == Some(turn) || boundary.is_some_and(|id| *id == n.id))
-    })
-}
-fn normal_boundary(s: &Snapshot) -> usize {
-    [s.current_turn.as_deref(), s.latest_complete_turn.as_deref()]
-        .into_iter()
-        .filter_map(|turn| turn_boundary(s, turn))
-        .min()
-        .unwrap_or(s.groups.len())
-}
-fn safe_prefix(s: &Snapshot) -> usize {
-    let latest_tool = s.groups.iter().rposition(|g| g.complete && g.tool);
-    s.groups
-        .iter()
-        .enumerate()
-        .position(|(i, g)| {
-            !g.complete
-                || Some(i) == latest_tool
-                || g.sources.iter().any(|n| s.protected.contains(&n.id))
-        })
-        .unwrap_or(s.groups.len())
 }
 fn segments(groups: &[Group], epoch: i64) -> Result<Vec<(usize, usize, u8)>, ApiError> {
     let mut result = Vec::new();
