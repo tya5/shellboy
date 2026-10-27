@@ -2,6 +2,22 @@
 
 更新: 2026-10-27。最新のv0.1.4検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## v0.1.4公開・配布物とローカル更新
+
+2026-10-27、tag `v0.1.4` / source `60847e3` を [公開](https://github.com/tya5/shellboy/releases/tag/v0.1.4) しました。製品変更は `2387144` まで、`30d48d5` と `60847e3` はfixture・CI・記録の変更です。[最終native CI 40516537195](https://github.com/tya5/shellboy/actions/runs/40516537195) のTests stepは各70群、macOS 1,179 passed / 0 failed / 19 ignored、Linux 1,180 / 0 / 18、Windows 1,074 / 0 / 14でした。別stepで再実行したWindows診断は二重計上しません。fmt/strict Clippyも3 OSで成功。対象を減らさず、Windowsは独立fixture同時数を2としました。
+
+[配布workflow 40518207186](https://github.com/tya5/shellboy/actions/runs/40518207186) は3 OSのnative release build、help/version、packaging、checksum、公開の全jobが成功しました。Latest releaseもv0.1.4です。3 archiveとSHA256SUMSを認証headerなしのcurlで取得し、全checksum一致・MIT/README/config/同梱ガイド・Windows PE x64 / Linux ELF x64 / macOS Mach-O arm64を確認しました。SHA-256は次のとおりです。
+
+| archive | SHA-256 |
+|---|---|
+| `shellboy-v0.1.4-x86_64-pc-windows-msvc.zip` | `851e4f3f495f8dc0ef434a3a7c95a841b43e0780899634983d9db33f247784d8` |
+| `shellboy-v0.1.4-aarch64-apple-darwin.tar.gz` | `940db94a34644f3ee2964a6fe6739ffc12241b1c4f59fbf2b2e8dd859bf987ab` |
+| `shellboy-v0.1.4-x86_64-unknown-linux-gnu.tar.gz` | `fbc3e6edda422430e87db6ec0239fe820578c8f739f2fd20fa3b47d0911ef3a1` |
+
+公開macOS binaryを実行しversion=0.1.4、help正常終了、docs getの設定ガイドがok:trueかつsession_headerを含むことを確認しました。旧binaryをGit管理外へ退避し、同directory内の一時fileから `~/.local/bin/shellboy` へ原子的に置換しました。配置後SHA-256は `c014c22c4c0b9f09abd57dbbb90f576e5772dd71da48c5e2d662440df76723d4` で配布binaryと一致し、version/helpを再確認しました。設定・既定DB・利用中ownerは変更していません。実行中processには再起動が必要です。
+
+Windows対話端末・会社proxy・GUIでのベル/再描画・15万token超での切断率低下は未検証で、native CIや合成probeをその実機確認へ読み替えません。#4・#9〜#15の8件へ対応内容・最終CI・公開版の結果をコメントし、再取得で本文一致を確認しました（[#15の対応記録](https://github.com/tya5/shellboy/issues/15#issuecomment-6444359131)）。旧tag・配布物は保持しています。公開後の追記はstatus/acceptanceの結果記録だけで、製品・同梱guide・workflowを変更しないため、tagの上記native CIを根拠とし記録更新だけでは再実行しません。
+
 ## v0.1.4: Issue #15・追加レビューの検証
 
 2026-10-27、macOS ARM64 / Rust 1.99.1。利用者が指定した#4/#9/#10/#11/#13/#14のレビュア指摘14件と#15を対象に、実装・文書・回帰試験を追加しました。最初の標準checkはstrict Clippy成功、単体484 passed / 1 failed / 6 ignoredでした。失敗は追加したCtrl+L試験が日本語のwide cell継続セルまで文字列化したためで、表示に合わせてUnicode幅で走査する試験へ直しました。製品の再描画処理をその失敗に合わせて変更していません。

@@ -1,14 +1,20 @@
 # 開発状況
 
-更新: 2026-10-27。検証済みcommit `bbb9758` を [v0.1.3](https://github.com/tya5/shellboy/releases/tag/v0.1.3) として公開しました。#6/#7/#8、Thread一覧の状態色、起動取消し試験の安定化を含みます。ローカル標準checkは70群1,127 passed / 0 failed / 15 ignored、[3 OSのnative CI](https://github.com/tya5/shellboy/actions/runs/40482476917) と [配布ビルド・起動確認・公開](https://github.com/tya5/shellboy/actions/runs/40484109212) はすべて成功しました。全archiveの認証なしダウンロード・SHA-256・同梱内容を確認し、ローカルbinaryも公開macOS版0.1.3へ更新しました。設定・既定DB・利用中ownerは変更していません。
+更新: 2026-10-27。検証済みsource `60847e3` を [v0.1.4](https://github.com/tya5/shellboy/releases/tag/v0.1.4) として公開しました。#15と#4/#9/#10/#11/#13/#14のレビュア指摘、#12の復旧通知を含みます。[最終3 OS CI](https://github.com/tya5/shellboy/actions/runs/40516537195) と [配布ビルド・起動確認・公開](https://github.com/tya5/shellboy/actions/runs/40518207186) は成功しました。全archiveの認証なし取得・SHA-256・同梱内容・CPU種別を確認済みです。
 
-v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
+ローカルbinaryも公開macOS版0.1.4へ更新し、配布版とのSHA-256一致とhelp/version/同梱ガイドを確認しました。binary SHA-256は `c014c22c4c0b9f09abd57dbbb90f576e5772dd71da48c5e2d662440df76723d4`。設定・既定DB・利用中processは変更せず、再起動から適用されます。v0.1.3と同じschema v9を使い、新設定を記入した後に旧版へ戻す際は新項目を除いてください。過去の未公開・未実施の記述は当時の記録で、最終公開結果は [acceptance](../validation/acceptance.md) を参照してください。
 
 ## v0.1.4: Issue #15とレビュア指摘への対応
 
 #15のThread session header、任意prompt_cache_key、正確なattemptに結び付くcached_tokensのF6表示を実装しました。#4/#9/#10の文書と再描画試験、#11のHTTP error本文timeout再試行、#13の要求文脈整理、#14の正常SSE後の有限drainと会話経路のpool検証を含みます。追加レビューで見つかった使用量SQLの巨大値の一時複製、drain取消し時の受信推論欠落も修正しました。新schema・依存・worker・queueは追加していません。
 
-最終標準checkは70群1,179 passed / 0 failed / 19 ignored、fmtと全target strict Clippy、履歴/差分の秘密情報検査が成功しました。LiteLLM/lunaの合成4要求も成功し、header有効/無効とも2回目に23,040/23,267 cached_tokensを確認しました。header単体の改善効果とは断定しません。初回pushのCIはLinux/macOS成功、Windowsの既存checkpoint観測試験1件が失敗したため、登録と更新の競合・idle機会の待機を試験側で修正しました。製品の保存処理は変えず、fmt・全target strict Clippyと対象3件が成功しました。次のWindows CIではcheckpointが成功し、別の既存管理画面試験で終了待ちだけがtimeoutしたため、fixture cleanupの共通化・直接await・進捗診断を追加し、Windowsの独立DB fixture同時数を2へ抑えました。製品の終了処理と明示的な並行性試験は変更しません。最終3 OS CIを再確認し、成功後にv0.1.4を配布します。公開結果は [acceptance](../validation/acceptance.md) へ追記します。既定データ・設定・利用中processは変更しません。
+最終標準checkは70群1,179 passed / 0 failed / 19 ignored、fmtと全target strict Clippy、履歴/差分の秘密情報検査が成功しました。LiteLLM/lunaの合成4要求も成功し、header有効/無効とも2回目に23,040/23,267 cached_tokensを確認しました。header単体の改善効果とは断定しません。初回pushのCIはLinux/macOS成功、Windowsの既存checkpoint観測試験1件が失敗したため、登録と更新の競合・idle機会の待機を試験側で修正しました。製品の保存処理は変えず、fmt・全target strict Clippyと対象3件が成功しました。次のWindows CIではcheckpointが成功し、別の既存管理画面試験で終了待ちだけがtimeoutしたため、fixture cleanupの共通化・直接await・進捗診断を追加し、Windowsの独立DB fixture同時数を2へ抑えました。製品の終了処理と明示的な並行性試験は変更しません。最終3 OS CIは全70群ずつ成功し、v0.1.4の公開と全archiveの実取得・checksum検証、ローカル更新まで完了しました。公開結果は [acceptance](../validation/acceptance.md) に記録しています。既定データ・設定・利用中processは変更しません。
+
+## v0.1.3公開時の記録
+
+更新: 2026-10-27。検証済みcommit `bbb9758` を [v0.1.3](https://github.com/tya5/shellboy/releases/tag/v0.1.3) として公開しました。#6/#7/#8、Thread一覧の状態色、起動取消し試験の安定化を含みます。ローカル標準checkは70群1,127 passed / 0 failed / 15 ignored、[3 OSのnative CI](https://github.com/tya5/shellboy/actions/runs/40482476917) と [配布ビルド・起動確認・公開](https://github.com/tya5/shellboy/actions/runs/40484109212) はすべて成功しました。全archiveの認証なしダウンロード・SHA-256・同梱内容を確認し、ローカルbinaryも公開macOS版0.1.3へ更新しました。設定・既定DB・利用中ownerは変更していません。
+
+v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
 ## ローカル試用バイナリ更新（2026-10-27）
 
