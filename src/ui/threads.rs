@@ -557,7 +557,8 @@ impl ThreadBrowser {
             format!("取得失敗 · Esc戻る\nCtrl+R再取得 · {}", one_line(error))
         } else {
             let mut keys = if footer_width >= 90 {
-                "Esc戻る · ↑↓選択 · ←→展開 · Enter切替 · F1会話情報\nDelete/Ctrl+D 削除確認 · Ctrl+R再取得 · 文字/Backspace絞込".to_owned()
+                "Esc戻る ↑↓選択 ←→展開 Enter切替 Delete/Ctrl+D削除 F1会話情報 Ctrl+R再取得"
+                    .to_owned()
             } else if footer_width >= 45 {
                 "Esc戻る Enter切替 Delete/Ctrl+D削除\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得"
                     .to_owned()
