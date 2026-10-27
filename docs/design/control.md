@@ -275,3 +275,7 @@ production TUIは起動前に既存action mailboxへownerのtool-start gateをbi
 各callと起動準備のawait後に閉鎖を検査し、Unix spawn/Windows CreateProcessW直前のSeqCst loadを開始受付の線形化点にする。Quit前にその点を通過済みの起動中処理は既存として扱い、それ以降の新しい起動は拒否する。検査からnative作成までawaitは置かない。既存starting intentを持つ拒否はstopped_before_spawn/cancelledとして保存し、spawn失敗や再起動許可を捏造しない。
 
 既に受け付けたSend/draft保存→C5中断context capture→取消し/drainの順序は維持する。Force確認の取消しや待機を選んでもgateを開き直さない。plain Tokio channelを使うRust embedderはfrontendがQuitを受信した時点で閉鎖し、production mailboxの受理時保証と区別する。
+
+## 会話HTTPの有限再試行
+
+未受信の一時失敗は [model HTTP](model-http.md#未受信の一時失敗の再試行issue-7) の条件に限り既存Driverで再試行する。failed attempt保存後にThread境界を解放して取消し可能な待機を行い、次の通常受付でgeneration/選択/容量/添付を再検証する。context超過が明示されている場合は圧縮を優先する。既存の復旧待ちを時間だけで再開しない。

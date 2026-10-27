@@ -45,6 +45,12 @@ pub struct AttemptFailure {
     pub partial_reasoning: String,
     pub completed_items: BTreeMap<u64, Value>,
     pub raw_response: Option<Value>,
+    /// Present only when transport facts permit a fresh conversation attempt.
+    pub retry: Option<ResponseRetry>,
+}
+#[derive(Debug)]
+pub struct ResponseRetry {
+    pub retry_after: Option<std::time::Duration>,
 }
 impl From<ModelError> for AttemptFailure {
     fn from(error: ModelError) -> Self {
@@ -54,6 +60,7 @@ impl From<ModelError> for AttemptFailure {
             partial_reasoning: String::new(),
             completed_items: BTreeMap::new(),
             raw_response: None,
+            retry: None,
         }
     }
 }
@@ -244,7 +251,7 @@ impl HttpModelClient {
     #[allow(clippy::result_large_err)]
     async fn response_inner(
         &self,
-        mut request: Value,
+        request: Value,
         cancel: CancellationToken,
         events: Option<Events>,
     ) -> Result<ModelResponse, AttemptFailure> {
@@ -253,6 +260,28 @@ impl HttpModelClient {
             &self.connection,
             &self.connection_name,
         )?;
+        let result = self
+            .response_attempt(request, cancel, events, &mut deadline)
+            .await;
+        result.map_err(|mut failure| {
+            if !deadline.has_body()
+                && failure.error.status.is_none()
+                && matches!(failure.error.kind.as_str(), "transport" | "incomplete")
+            {
+                failure.retry = Some(ResponseRetry { retry_after: None });
+            }
+            failure
+        })
+    }
+    // Keep the existing bounded recovery payload intact across body parsing.
+    #[allow(clippy::result_large_err)]
+    async fn response_attempt(
+        &self,
+        mut request: Value,
+        cancel: CancellationToken,
+        events: Option<Events>,
+        deadline: &mut Deadline,
+    ) -> Result<ModelResponse, AttemptFailure> {
         let Some(object) = request.as_object_mut() else {
             return Err(ModelError::new("protocol", "Responses request must be an object").into());
         };
@@ -263,7 +292,7 @@ impl HttpModelClient {
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
         let (response, secrets) = self
-            .send(ApiEndpoint::Responses, &request, &cancel, &deadline)
+            .send(ApiEndpoint::Responses, &request, &cancel, deadline)
             .await?;
         deadline.received();
         if let Some(events) = &events {
@@ -271,11 +300,19 @@ impl HttpModelClient {
         }
         let status = response.status();
         if !status.is_success() {
-            return Err(
-                http_error(response, &cancel, &secrets, &mut deadline, events.as_ref())
-                    .await
-                    .into(),
-            );
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(parse_retry_after);
+            let error = http_error(response, &cancel, &secrets, deadline, events.as_ref()).await;
+            let eligible = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
+                && matches!(error.kind.as_str(), "http" | "provider");
+            let mut failure = AttemptFailure::from(error);
+            if eligible {
+                failure.retry = Some(ResponseRetry { retry_after });
+            }
+            return Err(failure);
         }
         let content_type = response
             .headers()
@@ -292,7 +329,7 @@ impl HttpModelClient {
                 response,
                 MAX_RESPONSE_BYTES,
                 &cancel,
-                &mut deadline,
+                deadline,
                 events.as_ref(),
             )
             .await?;
@@ -353,7 +390,7 @@ impl HttpModelClient {
                 }
             };
             if !chunk.is_empty() {
-                deadline.received();
+                deadline.received_body();
                 if let Some(events) = &events {
                     events.received(deadline.received_at());
                 }
@@ -393,6 +430,7 @@ impl HttpModelClient {
                 partial_reasoning,
                 completed_items,
                 raw_response,
+                retry: None,
             })
     }
     pub async fn embeddings(
@@ -527,6 +565,7 @@ fn raw_failure(error: ModelError, raw: Value) -> AttemptFailure {
         partial_reasoning: String::new(),
         completed_items,
         raw_response: Some(raw),
+        retry: None,
     }
 }
 fn failure(
@@ -540,6 +579,7 @@ fn failure(
         partial_reasoning: parsed.partial_reasoning.clone(),
         completed_items: parsed.completed_items.clone(),
         raw_response: parsed.failed_response().cloned().or(raw_response),
+        retry: None,
     }
 }
 async fn send_event(
@@ -577,7 +617,7 @@ async fn bounded_body(
         };
         let chunk = chunk.map_err(|error| transport_error(error, "receiving response body"))?;
         if !chunk.is_empty() {
-            deadline.received();
+            deadline.received_body();
             if let Some(events) = events {
                 events.received(deadline.received_at());
             }
@@ -590,6 +630,23 @@ async fn bounded_body(
         }
         body.extend_from_slice(&chunk);
     }
+}
+fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
+    use std::time::Duration;
+    let value = value.trim();
+    let cap = Duration::from_millis(300_000);
+    if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+        // An overflowing positive seconds value is still bounded by our cap.
+        return Some(Duration::from_secs(value.parse().unwrap_or(u64::MAX)).min(cap));
+    }
+    chrono::DateTime::parse_from_rfc2822(value)
+        .ok()
+        .map(|date| {
+            date.signed_duration_since(chrono::Utc::now())
+                .to_std()
+                .unwrap_or_default()
+                .min(cap)
+        })
 }
 async fn http_error(
     response: Response,
@@ -672,6 +729,27 @@ fn redact(mut error: ModelError, secrets: &[String]) -> ModelError {
 #[cfg(test)]
 mod observation_tests {
     use super::*;
+    #[test]
+    fn retry_after_accepts_seconds_and_http_dates_but_not_arbitrary_headers() {
+        use std::time::Duration;
+        assert_eq!(parse_retry_after("2"), Some(Duration::from_secs(2)));
+        assert_eq!(parse_retry_after("0"), Some(Duration::ZERO));
+        assert_eq!(
+            parse_retry_after("999999999999999999999999999"),
+            Some(Duration::from_secs(300))
+        );
+        assert_eq!(
+            parse_retry_after("Fri, 01 Jan 2100 00:00:00 GMT"),
+            Some(Duration::from_secs(300))
+        );
+        assert_eq!(
+            parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT"),
+            Some(Duration::ZERO)
+        );
+        for invalid in ["", "-1", "1.5", "retry soon", "1, 2"] {
+            assert_eq!(parse_retry_after(invalid), None, "{invalid}");
+        }
+    }
     #[tokio::test]
     async fn model_event_preserves_receive_time_when_heartbeat_notification_is_full() {
         let (sender, mut receiver) = mpsc::channel(1);

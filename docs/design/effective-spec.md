@@ -45,8 +45,8 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | owner本文取得 | 既定/最大64KiB、rawはraw bytesと専用decoder/cursor | [protocol](protocol.md)、[output](output.md) |
 | docs検索/本文 | 検索既定10件・最大100件、本文既定16KiB・最大64KiB | [docs/RAG採用仕様](docs-and-rag-spec.md)。owner履歴検索の50件上限と混同しない |
 | 接続先/モデル | Responses proxy経由、利用可能モデル・context長・価格の内蔵カタログなし | [models](models.md)、[model HTTP](model-http.md)。特定proxy製品への実装依存なし |
-| 再試行 | 明示context超過のみ自動圧縮最大2段階。未知失敗で自動再送しない | [compaction](compaction.md)、[recovery guide](../guides/recovery-and-storage.md) |
-| HTTP期限 | 接続確立は固定30秒。Responsesは接続別受信停滞600000ms（0で無効）、embeddingは全体60000ms、モデル一覧は全体設定と20000msの短い方 | [model HTTP](model-http.md)、[config](config.md)。timeoutは索引の既存retry/pauseへ渡す。生成全体期限・新しい自動再送は追加しない |
+| 再試行 | 明示context超過は自動圧縮最大2段階。未受信の指定HTTPエラー/接続失敗だけTurn/generation内で既定2回再試行し、その他は自動再送しない | [compaction](compaction.md)、[recovery guide](../guides/recovery-and-storage.md) |
+| HTTP期限 | 接続確立は固定30秒。Responsesは接続別受信停滞600000ms（0で無効）、embeddingは全体60000ms、モデル一覧は全体設定と20000msの短い方 | [model HTTP](model-http.md)、[config](config.md)。timeoutは索引の既存retry/pauseへ渡す。生成全体期限は追加しない。停滞timeoutは会話の自動再試行対象外 |
 | ストリーム完了 | 検証済み最終responseを採用。途中との差分は診断・保存だけとし、差分だけで復旧待ちにしない | [model HTTP](model-http.md)。ツールは最終responseの採用成功後だけ実行し、失敗時の受信本文も保存・参照可能にする |
 | Unix IPC | XDGが利用不能でも専用0700一時領域を自動用意。接続両側でpeer uidを照合 | [protocol](protocol.md)。モデルshellはSHELLBOY_SOCKET、人CLIはendpoint.jsonで接続し、保存先祖先をsocket配置条件にしない |
 | origin | 発行元の誤識別防止。OSユーザー隔離やpermission engineではない | [control](control.md)、[operation](operation-observability.md)。tokenを表示/モデル入力/保存結果へ複製しない |

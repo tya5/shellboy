@@ -3768,6 +3768,18 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let mut status_spans = Vec::new();
     if has_indicator {
         status_spans.extend(state.animation.spans(activity_phase, style, Instant::now()));
+        if activity_phase == activity::ActivityPhase::Retrying
+            && let Some(retry) = view
+                .activity
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.automatic_retry.as_ref())
+        {
+            status_spans.push(Span::styled(
+                format!("（{}/{}）", retry.number, retry.limit),
+                style,
+            ));
+        }
         status_spans.push(Span::styled(" · ", style));
     }
     if view.loading {
@@ -4335,6 +4347,61 @@ mod layout_cache_tests {
     }
 
     #[test]
+    fn retry_footer_renders_saved_counts_and_clears_them_after_success() {
+        use ratatui::{Terminal, backend::TestBackend};
+        use unicode_width::UnicodeWidthStr;
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        let update = |phase, automatic_retry, epoch| UiUpdate::Activity {
+            thread_id: "t".into(),
+            generation,
+            epoch,
+            observed_at: Instant::now(),
+            snapshot: activity::ActivitySnapshot {
+                phase,
+                automatic_retry,
+                ..Default::default()
+            },
+        };
+        ui.apply(update(
+            activity::ActivityPhase::Retrying,
+            Some(activity::AutomaticRetrySnapshot {
+                number: 1,
+                limit: 2,
+            }),
+            1,
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(140, 2)).unwrap();
+        terminal
+            .draw(|frame| draw_status(frame, frame.area(), &ui))
+            .unwrap();
+        let line = |terminal: &Terminal<TestBackend>| {
+            let buffer = terminal.backend().buffer();
+            let mut text = String::new();
+            let mut x = 0;
+            while x < 140 {
+                let symbol = buffer[(x, 0)].symbol();
+                text.push_str(symbol);
+                // A wide glyph owns its following cell; its placeholder is
+                // not a rendered space between Japanese characters.
+                x += symbol.width().max(1) as u16;
+            }
+            text
+        };
+        assert!(line(&terminal).contains("一時的なエラーのため再試行中（1/2）"));
+        assert_ne!(terminal.backend().buffer()[(0, 0)].fg, theme::ATTENTION);
+        ui.apply(update(activity::ActivityPhase::Completed, None, 2));
+        terminal
+            .draw(|frame| draw_status(frame, frame.area(), &ui))
+            .unwrap();
+        assert!(line(&terminal).contains("完了"));
+        assert!(!line(&terminal).contains("再試行"));
+        assert!(!line(&terminal).contains("（1/2）"));
+        assert_ne!(terminal.backend().buffer()[(0, 0)].fg, theme::ATTENTION);
+    }
+
+    #[test]
     fn receive_gap_updates_are_scoped_and_preserve_history_layout() {
         let at = Instant::now();
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
@@ -4406,6 +4473,7 @@ mod layout_cache_tests {
         let revision = ui.view().history_revision();
         let generation = ui.view().generation;
         let snapshot = ActivitySnapshot {
+            automatic_retry: None,
             recovery: None,
             run_id: Some("run".into()),
             turn_id: Some("turn".into()),

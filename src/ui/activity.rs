@@ -11,6 +11,7 @@ pub enum ActivityPhase {
     Reflecting,
     Preparing,
     AwaitingModel,
+    Retrying,
     Receiving,
     Tools,
     Running,
@@ -31,6 +32,7 @@ impl ActivityPhase {
             Self::Reflecting => "保存済み・表示待ち",
             Self::Preparing => "準備中",
             Self::AwaitingModel => "モデル応答待ち",
+            Self::Retrying => "一時的なエラーのため再試行中",
             Self::Receiving => "応答受信中",
             Self::Tools => "ツール処理中",
             Self::Running => "処理中",
@@ -56,7 +58,11 @@ impl ActivityPhase {
             | Self::Receiving
             | Self::Tools
             | Self::Running => Motion::Shimmer,
-            Self::Waiting | Self::Background | Self::Continuing | Self::Stopping => Motion::Pulse,
+            Self::Retrying
+            | Self::Waiting
+            | Self::Background
+            | Self::Continuing
+            | Self::Stopping => Motion::Pulse,
             _ => Motion::Still,
         }
     }
@@ -82,8 +88,15 @@ pub struct RecoverySnapshot {
     pub uncollected_shells: u64,
     pub stop_reason: Option<String>,
 }
+/// Counts recorded by the failed attempt before a finite retry wait.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+pub struct AutomaticRetrySnapshot {
+    pub number: u64,
+    pub limit: u64,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivitySnapshot {
+    pub automatic_retry: Option<AutomaticRetrySnapshot>,
     pub recovery: Option<RecoverySnapshot>,
     pub run_id: Option<String>,
     pub turn_id: Option<String>,
@@ -469,6 +482,64 @@ mod tests {
         );
         view.receive_at("b", at + Duration::from_secs(1040));
         assert_eq!(view.receive_gap_note(at + Duration::from_secs(9999)), None);
+    }
+
+    #[test]
+    fn retry_wait_clears_receive_gap_and_new_attempt_restarts_observation() {
+        let at = Instant::now();
+        let mut view = ActivityView::default();
+        view.accept_at(1, awaiting("first"), at);
+        view.receive_at("first", at);
+        assert!(
+            view.receive_gap_note(at + Duration::from_secs(40))
+                .is_some()
+        );
+        let retry = ActivitySnapshot {
+            phase: ActivityPhase::Retrying,
+            automatic_retry: Some(AutomaticRetrySnapshot {
+                number: 1,
+                limit: 2,
+            }),
+            ..awaiting("first")
+        };
+        view.accept_at(2, retry, at + Duration::from_secs(41));
+        assert_eq!(view.phase(), ActivityPhase::Retrying);
+        assert!(
+            view.receive_gap_note(at + Duration::from_secs(500))
+                .is_none()
+        );
+        assert!(!view.receive_at("first", at + Duration::from_secs(42)));
+        view.stream("first");
+        assert_eq!(view.phase(), ActivityPhase::Retrying);
+        view.accept_at(3, awaiting("next"), at + Duration::from_secs(43));
+        assert_eq!(view.phase(), ActivityPhase::AwaitingModel);
+        assert!(!view.receive_at("first", at + Duration::from_secs(44)));
+        assert!(
+            view.receive_gap_note(at + Duration::from_secs(72))
+                .is_none()
+        );
+        assert_eq!(
+            view.receive_gap_note(at + Duration::from_secs(73))
+                .as_deref(),
+            Some("受信待ち30秒（画面の観測開始から）")
+        );
+        view.accept_at(
+            4,
+            ActivitySnapshot {
+                phase: ActivityPhase::Completed,
+                turn_in_progress: false,
+                ..awaiting("next")
+            },
+            at + Duration::from_secs(74),
+        );
+        assert_eq!(view.phase(), ActivityPhase::Completed);
+        assert!(!view.phase().is_active());
+        assert!(
+            view.receive_gap_note(at + Duration::from_secs(900))
+                .is_none()
+        );
+        assert!(!view.accept_at(2, awaiting("first"), at + Duration::from_secs(901)));
+        assert_eq!(view.phase(), ActivityPhase::Completed);
     }
 
     #[test]

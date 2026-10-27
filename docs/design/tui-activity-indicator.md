@@ -21,6 +21,7 @@ Enter直後から既存footerにUI内の送信段階を表示する。既存draf
 | 準備中 | 非終端Turnのpreparing | `●`＋段階文字に控えめなshimmer |
 | モデル応答待ち | 現Turnのmodel attemptがinflight、対応する受信通知をまだ観測していない | 同上 |
 | 応答受信中 | 同じattempt IDの既存Streamを観測し、そのattemptがinflight | 同上 |
+| 一時的なエラーのため再試行中（N/M） | Run live・Turn runningで、最新かつ同generationのfailed attemptに保存したautomatic_retryの回数と上限 | 既存の低速pulse。エラー色にしない |
 | ツール処理中 | 現Turnの保存済みtool groupがrunning、モデル要求のinflightではない | 同上 |
 | 処理中 | 非終端Turnで、上の内訳を確定できない | 同上 |
 | 待機中 | Turnのwaiting | `●`の低速pulse。待機対象は推測しない |
@@ -55,3 +56,9 @@ frontendは現在選択中Threadのgenerationを付け、UIはThread/generation�
 同attemptの保存済みinflightを画面で観測した時点から30秒以上、受信事実がなければfooterに`受信待ちN秒（画面の観測開始から）`を補足する。最初のheader/byte受信後の空白は`最後の受信からN秒`とする。既存のTurn観測経過とは別であり、API全体timeoutや生成失敗の断定ではない。新しいbyteの通知で補足を解除し、最新時刻から再計測する。古い時刻の遅着で時計を巻き戻さない。
 
 30秒の表示閾値は既存の局所アニメーション時計で更新する。UIでI/O・DB照会・周期要求を行わず、header/chunkごとの通知で履歴revision・本文retention・Markdown layout cacheを無効化しない。hidden overlay中のdirty停止は既存規則を使う。受信がないことだけで復旧待ちや自動再送へ進めない。既存の取消し・最終応答採用順序を維持する。
+
+## 有限の自動再試行（Issue #7）
+
+Issue #8の受信空白の観測と自動再試行の待機は区別する。Driverが既存model_attempt.error_jsonへ保存したautomatic_retry（number、limit、delay_ms等）を、既存Changedから読取projectionへ反映する。最新attemptがfailed、Turnとattemptのgenerationが一致し、Run live・Turn runningの場合だけ再試行待機を表示する。古いattempt、旧generation、復旧待ち、停止中、終端には適用しない。新しいinflight attemptを保存した後は通常のモデル応答待ちへ戻る。
+
+footerは既存の1行・同じpulseと中立的な活動色を使い、保存済みの回数・上限を `一時的なエラーのため再試行中（1/2）` の形で表示する。表示するカウントは既存snapshotへ加えるUI向けprojectionであり、コア状態・永続表・event・worker・queueは増やさない。待機中はIssue #8のattempt別受信時計を破棄し、新attemptの受信を観測してから新たに計測する。完了・復旧後も古い受信通知で待機表示や受信時計を復活させない。終了時は保存済みの終端/復旧表示を優先し、再試行を経て成功したことだけで警告色を残さない。

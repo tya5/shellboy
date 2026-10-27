@@ -64,7 +64,7 @@ async fn proxy() -> (
 }
 async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
     let config = root.join("config.toml");
-    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\n")).unwrap();
+    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n")).unwrap();
     DataOwner::start(Some(config), Some(root.join("data")), root.into())
         .await
         .unwrap()

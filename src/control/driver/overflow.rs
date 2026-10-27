@@ -46,6 +46,7 @@ impl OverflowBudget {
         self.stage = 2;
     }
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn retry_or_recover(
     control: &std::sync::Arc<super::Control>,
     snapshot: &super::Snapshot,
@@ -53,6 +54,8 @@ pub(super) async fn retry_or_recover(
     attempt: String,
     failure: super::model::http::AttemptFailure,
     overflow: &mut OverflowBudget,
+    automatic_retries: u32,
+    retry_limit: u32,
 ) -> Result<(), super::ApiError> {
     use super::*;
     let thread = &snapshot.thread;
@@ -96,8 +99,24 @@ pub(super) async fn retry_or_recover(
             }
         }
     }
-    let error=ApiError::new(ErrorCode::IoFailed,failure.error.to_string()).hint("Inspect the incomplete response and explicitly retry this Run; tools already saved are not re-executed");
-    let saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+    let exhausted = failure.retry.is_some()
+        && !failure.error.is_context_limit()
+        && automatic_retries >= retry_limit
+        && retry_limit > 0;
+    let message = if exhausted {
+        format!(
+            "{} (automatic retries exhausted: {automatic_retries}/{retry_limit})",
+            failure.error
+        )
+    } else {
+        failure.error.to_string()
+    };
+    let error=ApiError::new(ErrorCode::IoFailed,message).hint("Inspect the incomplete response and explicitly retry this Run; tools already saved are not re-executed");
+    let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+    if exhausted {
+        saved["automatic_retry_exhausted"] =
+            json!({"retries":automatic_retries,"limit":retry_limit});
+    }
     recover(control, snapshot, error.clone(), Some((attempt, saved))).await?;
     Err(error)
 }

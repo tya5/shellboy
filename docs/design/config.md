@@ -26,6 +26,12 @@
 
 `connections.<名前>.request_timeout_ms` は1,000以上の整数で既定60,000ms。embeddingなど非ストリーミングHTTP要求の全体期限に使う。モデル一覧は同設定と20,000msの短い方を適用する。両設定は接続ごとに独立し、Rust DefaultとTOML省略時の値を揃える。負数・文字列・小数・範囲外整数は拒否する。設定変更はowner再起動後の要求へ適用する。期間の加算はHTTP側でchecked操作を行い、OSの時計で表現できない期限をpanicや即時timeoutへ変換しない。
 
+## 接続ごとの会話再試行
+
+`connections.<名前>.response_max_retries` は0以上5以下の整数で既定2。初回要求に加えて行う会話Responses要求の自動再試行回数で、0は無効にする。`connections.<名前>.response_retry_max_delay_ms` は1以上300,000以下の整数で既定30,000ms。指数バックオフと `Retry-After` による1回の待機時間の上限とする。Rust DefaultとTOML省略時を揃え、負数・文字列・小数・範囲外整数は補正せず拒否する。owner再起動後の要求へ適用する。
+
+設定の消費者は会話Driverだけとし、HTTP層の透過再送、要約、embedding、モデル一覧には適用しない。受信前の一時的失敗だけが対象で、本文が空でもSSEやtool引数の断片を受信した要求は自動再試行しない。HTTPエラー本文の受信は生成ストリームの受信と区別する。`stream_idle_timeout_ms` による停滞は自動再試行の対象外で、`request_timeout_ms` の非ストリーム期限も変更しない。停止は再試行待機を取消し、既存attemptへ失敗・再試行を保存する。自動再試行は上流の未処理を保証せず、重複課金の可能性をなくす設定ではない。判定と実行順序は [model HTTP](model-http.md) に従う。
+
 ## R3-6: 設定検証の局所化
 
 Connection内のURL/effort/credential名/header検証はConnectionへ、数値・範囲・retry整合・env・path/keyは各sectionへ移す。Configは既定接続とembeddingの参照関係を持つ。first errorを維持するため、数値positive→worker容量→local相互条件→connection内容→section間参照→env/path/keyの順序を明示し、単にsectionごとの一括検証へ並べ替えない。Ui/Shellなどは既存の段階に合わせた小さな検証関数を持つ。

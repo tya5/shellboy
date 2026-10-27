@@ -486,3 +486,76 @@ fn http_timeouts_reject_invalid_values_without_clamping() {
     let config = Config::parse("[connections.proxy]\nbase_url='https://example.test/v1'\nstream_idle_timeout_ms=1\nrequest_timeout_ms=1000\n").unwrap();
     assert_eq!(config.connections["proxy"].stream_idle_timeout_ms, 1);
 }
+
+#[test]
+fn response_retries_have_defaults_and_independent_connection_overrides() {
+    let defaults = Connection::default();
+    assert_eq!(defaults.response_max_retries, 2);
+    assert_eq!(defaults.response_retry_max_delay_ms, 30_000);
+    let direct: Connection = toml::from_str("base_url='https://example.test/v1'").unwrap();
+    assert_eq!(direct.response_max_retries, 2);
+    assert_eq!(direct.response_retry_max_delay_ms, 30_000);
+    let config = Config::parse(
+        "[connections.defaulted]\nbase_url='https://example.test/v1'\n\
+         [connections.disabled]\nbase_url='https://example.test/v1'\nresponse_max_retries=0\nresponse_retry_max_delay_ms=1\n\
+         [connections.maximum]\nbase_url='https://example.test/v1'\nresponse_max_retries=5\nresponse_retry_max_delay_ms=300000\n",
+    )
+    .unwrap();
+    assert_eq!(config.connections["defaulted"].response_max_retries, 2);
+    assert_eq!(
+        config.connections["defaulted"].response_retry_max_delay_ms,
+        30_000
+    );
+    assert_eq!(config.connections["disabled"].response_max_retries, 0);
+    assert_eq!(
+        config.connections["disabled"].response_retry_max_delay_ms,
+        1
+    );
+    assert_eq!(config.connections["maximum"].response_max_retries, 5);
+    assert_eq!(
+        config.connections["maximum"].response_retry_max_delay_ms,
+        300_000
+    );
+    assert_eq!(
+        config.connections["maximum"].stream_idle_timeout_ms,
+        600_000
+    );
+    assert_eq!(config.connections["maximum"].request_timeout_ms, 60_000);
+    let debug = format!("{:?}", config.connections["maximum"]);
+    assert!(debug.contains("response_max_retries: 5"));
+    assert!(debug.contains("response_retry_max_delay_ms: 300000"));
+    assert!(!debug.contains("https://example.test"));
+}
+
+#[test]
+fn response_retries_reject_invalid_values_without_clamping() {
+    for key in ["response_max_retries", "response_retry_max_delay_ms"] {
+        for value in [
+            "-1",
+            "'2'",
+            "1.5",
+            "true",
+            "[]",
+            "{}",
+            "18446744073709551616",
+        ] {
+            let source =
+                format!("[connections.proxy]\nbase_url='https://example.test/v1'\n{key}={value}\n");
+            assert!(Config::parse(&source).is_err(), "accepted {key}={value}");
+        }
+    }
+    for (key, value) in [
+        ("response_max_retries", 6_u64),
+        ("response_max_retries", 4_294_967_296),
+        ("response_retry_max_delay_ms", 0),
+        ("response_retry_max_delay_ms", 300_001),
+    ] {
+        let source =
+            format!("[connections.proxy]\nbase_url='https://example.test/v1'\n{key}={value}\n");
+        let error = Config::parse(&source).unwrap_err();
+        assert!(
+            matches!(error, ConfigError::Invalid { key: ref actual, .. } if actual == &format!("connections.proxy.{key}")),
+            "unexpected error for {key}={value}: {error}"
+        );
+    }
+}

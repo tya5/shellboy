@@ -60,6 +60,8 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # ssl_verify = true
 # stream_idle_timeout_ms = 600000
 # request_timeout_ms = 60000
+# response_max_retries = 2
+# response_retry_max_delay_ms = 30000
 
 # 任意。設定する場合は二つとも指定する。
 # [embedding]
@@ -84,6 +86,12 @@ Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLB
 接続ごとの `stream_idle_timeout_ms` は既定600,000ms（10分）です。会話・要約のストリームで応答headerが届くまで、または最後の受信chunkから次のchunkまで、この時間を超えると復旧判断を待ちます。heartbeatも受信として数えます。応答を継続して受信している間は、10分を超えても全体の経過時間では中断しません。長時間無通信になるモデルには値を増やせます。`0` はこの無通信期限を無効にします。取消し操作と通信切断の検知は引き続き有効です。
 
 `request_timeout_ms` はモデル一覧・embeddingなどの非ストリーミング要求の全体期限で、既定60,000ms（1分）、最小1,000msです。モデル一覧はこの設定と20,000msの短い方を使うため、既定では20秒です。両設定は同じ `[connections.proxy]` に指定し、接続ごとに変更できます。ownerへ反映するには再起動します。独立RAGは実行時に読む接続設定を使います。会話・要約の待機期限になっても自動で同じ要求を再送しません。
+
+## 会話の自動再試行
+
+接続ごとの `response_max_retries` は既定2、指定範囲0〜5です。生成ストリームをまだ受信していない会話要求の一時的なHTTPエラー・接続エラーに対し、同じTurn/generation全体で最大この回数を追加試行します。成功したtool要求やcontext圧縮を挟んでも予算は補充しません。`0` で無効にできます。`response_retry_max_delay_ms` は1回の待機時間の上限で、既定30,000ms、指定範囲1〜300,000msです。指数バックオフやサーバーの `Retry-After` で長い待機が指定されてもこの上限までとします。停止すると待機も取消します。
+
+本文が空でもSSEやtool引数の断片を受信済みなら自動再試行せず、HTTPエラー本文の受信はこの判定と区別します。無通信期限になった要求も自動再試行しません。対象は会話だけで、要約・embedding・モデル一覧やその待機期限は変更しません。設定変更はowner再起動後に反映されます。上流が処理済みなのに接続だけ失敗した場合の重複課金までは防げません。失敗と再試行は既存attemptへ記録します。
 
 ## HTTP(S)プロキシと除外先
 
@@ -130,6 +138,7 @@ shellboy
 | root | `data_dir` = OS既定、`default_connection` / `default_model` = 未設定、`connections` = 空 | 保存先・新規会話の既定 |
 | `connections.<名前>` | `ssl_verify=true`、接続URL/認証/effort/headerは上記 | 接続単位のTLS検証。既定で検証あり |
 | `connections.<名前>` | `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | ストリームの無通信期限（0で無効）・非ストリームの全体期限（最小1000ms） |
+| `connections.<名前>` | `response_max_retries=2`, `response_retry_max_delay_ms=30000` | 会話の受信前一時失敗の再試行（0〜5回、0で無効）・待機上限（1〜300000ms） |
 | `embedding` | `connection` / `model` = 未設定 | 索引・検索API |
 | `shell` | `kind` = Unix `bash` / Windows `powershell`、`executable` = 自動、`env` = 空辞書 | shell種別・実行ファイル・追加環境。WSL直接起動の指定ではない |
 | `retention` | `tool_raw_days=7`, `tool_raw_bytes=1073741824`, `clipboard_days=7`, `clipboard_bytes=268435456` | raw出力7日/1GiB、managed画像7日/256MiB。使用中pin/選択/下書きは保護 |
@@ -148,7 +157,7 @@ shellboy
 
 `cache.history_bytes` は全Thread共有の送信履歴変換LRU専用です。`body_bytes` はUI本文とnode metadataの保持、`layout_bytes` は幅・折畳み等を含む描画layout LRU、`attachment_base64_bytes` は添付変換結果です。active viewportやHTTP送信中のpin等の作業領域、SQLite/OS cache、runtime資源、保存履歴を含む全プロセスRSSの上限ではありません。cache退避は履歴削除ではなく必要時に再取得します。各cache予算0は保持cacheを無効化します。使用中の作業領域までゼロになる意味ではありません。
 
-それ以外の数値は原則正整数です。例外は `connections.<名前>.stream_idle_timeout_ms=0`、`indexing.retries=0` と対応する `retry_delays_ms=[]`。retry_delaysはretriesと同数の正整数が必要です。`wait --timeout-ms 0` は設定ではなくCLIの即時観測です。worker数にはruntimeが扱える上限もあります。
+それ以外の数値は原則正整数です。例外は `connections.<名前>.stream_idle_timeout_ms=0`、`connections.<名前>.response_max_retries=0`、`indexing.retries=0` と対応する `retry_delays_ms=[]`。retry_delaysはretriesと同数の正整数が必要です。`wait --timeout-ms 0` は設定ではなくCLIの即時観測です。worker数にはruntimeが扱える上限もあります。
 
 追加制約は attachment_file ≤ attachment_request、data_warning < data_max、output_batch ≤ output_bufferです。`shell.env` は有効な環境変数名とNULを含まない値の辞書。`copy_backend` は `auto|os|osc52`。送信/改行キーはEnter等の対応キー名とCtrl/Alt/Shiftの組合せで、改行キー一覧は空不可、送信キーとの重複不可です。`shell.kind` は `bash|powershell` のみです。
 

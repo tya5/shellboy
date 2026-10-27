@@ -73,6 +73,18 @@ impl Connection {
                 "must be at least 1000 milliseconds",
             ));
         }
+        if self.response_max_retries > 5 {
+            return Err(invalid(
+                format!("connections.{name}.response_max_retries"),
+                "must be between 0 and 5",
+            ));
+        }
+        if !(1..=300_000).contains(&self.response_retry_max_delay_ms) {
+            return Err(invalid(
+                format!("connections.{name}.response_retry_max_delay_ms"),
+                "must be between 1 and 300000 milliseconds",
+            ));
+        }
         if let Some(effort) = &self.default_effort {
             nonempty(&format!("connections.{name}.default_effort"), effort)?;
         }

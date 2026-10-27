@@ -6,6 +6,7 @@ use tokio::time::Instant;
 pub(super) struct Deadline {
     started: Instant,
     received: Instant,
+    body_received: bool,
     limit: Duration,
     idle: bool,
     disabled: bool,
@@ -43,6 +44,7 @@ impl Deadline {
         Ok(Self {
             started: now,
             received: now,
+            body_received: false,
             limit,
             idle,
             disabled: idle && milliseconds == 0,
@@ -52,6 +54,13 @@ impl Deadline {
     }
     pub(super) fn received(&mut self) {
         self.received = Instant::now();
+    }
+    pub(super) fn received_body(&mut self) {
+        self.body_received = true;
+        self.received();
+    }
+    pub(super) fn has_body(&self) -> bool {
+        self.body_received
     }
     pub(super) fn received_at(&self) -> std::time::Instant {
         self.received.into_std()

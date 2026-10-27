@@ -2,6 +2,7 @@
 mod adoption;
 mod overflow;
 mod request;
+mod retry;
 mod shell_output;
 mod tools;
 use adoption::adopt_response;
@@ -88,6 +89,7 @@ pub(super) async fn drive(
 ) -> Result<(), ApiError> {
     let boundary = control.boundary(&thread).await;
     let mut overflow = OverflowBudget::default();
+    let mut retry_budget = retry::RetryBudget::default();
     let mut instructions = Instructions::default();
     loop {
         if slot.stop.is_cancelled() {
@@ -106,6 +108,7 @@ pub(super) async fn drive(
             Next::Ready(snapshot) => snapshot,
         };
         overflow.observe(&snapshot.turn, snapshot.generation);
+        retry_budget.observe(&snapshot.turn, snapshot.generation);
         if let Err(error) = control.gc.require_capacity().await {
             return fail_turn(&control, &snapshot, error).await;
         }
@@ -174,13 +177,15 @@ pub(super) async fn drive(
                     &attempt,
                     &failure.error,
                 );
-                overflow::retry_or_recover(
+                retry::retry_or_recover(
                     &control,
                     &snapshot,
                     &slot,
                     attempt,
                     failure,
+                    &mut retry_budget,
                     &mut overflow,
+                    boundary_guard,
                 )
                 .await?;
                 continue;

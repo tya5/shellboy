@@ -62,6 +62,8 @@ pub struct Connection {
     pub ssl_verify: bool,
     pub stream_idle_timeout_ms: u64,
     pub request_timeout_ms: u64,
+    pub response_max_retries: u32,
+    pub response_retry_max_delay_ms: u64,
 }
 impl Default for Connection {
     fn default() -> Self {
@@ -73,6 +75,8 @@ impl Default for Connection {
             ssl_verify: true,
             stream_idle_timeout_ms: 600_000,
             request_timeout_ms: 60_000,
+            response_max_retries: 2,
+            response_retry_max_delay_ms: 30_000,
         }
     }
 }
@@ -86,6 +90,11 @@ impl fmt::Debug for Connection {
             .field("ssl_verify", &self.ssl_verify)
             .field("stream_idle_timeout_ms", &self.stream_idle_timeout_ms)
             .field("request_timeout_ms", &self.request_timeout_ms)
+            .field("response_max_retries", &self.response_max_retries)
+            .field(
+                "response_retry_max_delay_ms",
+                &self.response_retry_max_delay_ms,
+            )
             .finish()
     }
 }

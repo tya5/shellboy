@@ -178,7 +178,7 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
         let root = tempfile::tempdir().unwrap();
         let (url, mut requests, proxy) = proxy().await;
         let config = root.path().join("config.toml");
-        std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"{url}\"\n")).unwrap();
+        std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"{url}\"\nresponse_max_retries=0\n")).unwrap();
         let owner = DataOwner::start(
             Some(config),
             Some(root.path().join("data")),

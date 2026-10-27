@@ -4,7 +4,7 @@ use crate::{
     protocol::ApiError,
     ui::{
         UiUpdate,
-        activity::{ActivityPhase, ActivitySnapshot, RecoverySnapshot},
+        activity::{ActivityPhase, ActivitySnapshot, AutomaticRetrySnapshot, RecoverySnapshot},
     },
 };
 use rusqlite::{Connection, OptionalExtension};
@@ -29,6 +29,7 @@ struct SavedAttempt {
     state: String,
     generation: i64,
     error: Option<String>,
+    automatic_retry: Option<String>,
 }
 impl Projection {
     pub fn label(&self) -> &'static str {
@@ -97,9 +98,9 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Er
     {
         let attempt = db
             .query_row(
-                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
+                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
                 rusqlite::params![turn_id,reason.is_some()],
-                |r| Ok(SavedAttempt { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)? }),
+                |r| Ok(SavedAttempt { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)? }),
             )
             .optional()?;
         if let Some(reason) = reason
@@ -156,9 +157,20 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Er
         if let Some(SavedAttempt {
             id,
             state: saved_state,
+            generation: attempt_generation,
+            automatic_retry,
             ..
         }) = attempt
         {
+            if run_state == "live"
+                && turn_state == "running"
+                && saved_state == "failed"
+                && attempt_generation == generation
+            {
+                snapshot.automatic_retry = automatic_retry
+                    .and_then(|body| serde_json::from_str::<AutomaticRetrySnapshot>(&body).ok())
+                    .filter(|retry| retry.number > 0 && retry.number <= retry.limit);
+            }
             snapshot.attempt_id = Some(id);
             attempt_state = Some(saved_state);
         }
@@ -185,6 +197,7 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Er
         (_, Some("running")) if attempt_state.as_deref() == Some("inflight") => {
             ActivityPhase::AwaitingModel
         }
+        ("live", Some("running")) if snapshot.automatic_retry.is_some() => ActivityPhase::Retrying,
         (_, Some("running")) if tool_running => ActivityPhase::Tools,
         (_, Some("running")) => ActivityPhase::Running,
         ("live", Some("completed")) if owned => ActivityPhase::Background,

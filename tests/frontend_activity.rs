@@ -542,3 +542,75 @@ async fn human_model_failure_message_keeps_saved_error_and_does_not_guess_prefix
     );
     db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn retry_projection_requires_current_failed_attempt_and_live_running_turn() {
+    let root = tempfile::tempdir().unwrap();
+    let db = DbWorker::open(root.path().join("db")).await.unwrap();
+    change(&db, r#"
+        INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/AGENTS.md','p','m','now');
+        INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','now');
+        INSERT INTO turn(id,thread_id,run_id,state,generation,created_at) VALUES('u','t','r','running',2,'now');
+        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)
+        VALUES('a','u',2,0,'p','m',0,'failed','{}','now','{"automatic_retry":{"number":1,"limit":2,"delay_ms":1000,"possible_duplicate_charge":true}}');
+    "#).await;
+    let retry = projection(&db).await;
+    assert_eq!(retry.snapshot.phase, ActivityPhase::Retrying);
+    let counts = retry.snapshot.automatic_retry.unwrap();
+    assert_eq!((counts.number, counts.limit), (1, 2));
+    assert!(retry.snapshot.turn_in_progress);
+    assert!(retry.poll_running);
+    // Old-generation metadata cannot revive a cancelled/retried Turn.
+    change(&db, "UPDATE model_attempt SET generation=1;").await;
+    assert_eq!(projection(&db).await.snapshot.phase, ActivityPhase::Running);
+    assert!(projection(&db).await.snapshot.automatic_retry.is_none());
+    change(&db, "UPDATE model_attempt SET generation=2;").await;
+    for (run, turn, expected) in [
+        ("stopping", "running", ActivityPhase::Stopping),
+        ("live", "recovery_wait", ActivityPhase::Recovery),
+        ("completed", "completed", ActivityPhase::Completed),
+        ("failed", "failed", ActivityPhase::Failed),
+        ("stopped", "stopped", ActivityPhase::Stopped),
+    ] {
+        change(
+            &db,
+            &format!("UPDATE run SET state='{run}'; UPDATE turn SET state='{turn}';"),
+        )
+        .await;
+        let saved = projection(&db).await.snapshot;
+        assert_eq!(saved.phase, expected);
+        assert!(saved.automatic_retry.is_none());
+    }
+    change(
+        &db,
+        "UPDATE run SET state='live'; UPDATE turn SET state='running';",
+    )
+    .await;
+    // No metadata, malformed metadata, and an impossible count remain ordinary activity.
+    for body in [
+        "{}",
+        "not-json",
+        r#"{"automatic_retry":{"number":0,"limit":2}}"#,
+        r#"{"automatic_retry":{"number":3,"limit":2}}"#,
+        r#"{"automatic_retry":{"number":1}}"#,
+    ] {
+        let body = body.to_owned();
+        db.call(move |db| {
+            db.execute("UPDATE model_attempt SET error_json=?1", [body])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let saved = projection(&db).await.snapshot;
+        assert_eq!(saved.phase, ActivityPhase::Running);
+        assert!(saved.automatic_retry.is_none());
+    }
+    change(&db, r#"UPDATE model_attempt SET error_json='{"automatic_retry":{"number":2,"limit":2}}';
+        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
+        VALUES('b','u',2,0,'p','m',0,'inflight','{}','now');"#).await;
+    let next = projection(&db).await.snapshot;
+    assert_eq!(next.phase, ActivityPhase::AwaitingModel);
+    assert_eq!(next.attempt_id.as_deref(), Some("b"));
+    assert!(next.automatic_retry.is_none());
+    db.shutdown().await.unwrap();
+}
