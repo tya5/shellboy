@@ -15,3 +15,9 @@ Control受付とDB commitを順序の基準にする。operation receiptを同tr
 各ThreadのDriverは一つ。モデルresponseの全toolを事前検証し、順に結果を確定する。追加指示・通知・設定変更は安全な要求境界で反映。停止/取消しは独立tokenで伝え、DB応答後・API開始直前にも世代を照合する。
 
 所有shellの出力イベントは有限byte予算を保持したままDBへ保存し、その後予算を返す。completion watchの到達だけで終端保存しない。イベント経路をdrainし、状態と原文を保存してから完了通知を配送する。
+
+## 起動の進捗と取消し試験
+
+StartupStageは観測通知で、DatabaseはDB workerの受付前に通知される。watchは中間値をまとめ得るため、通知の受信をmigration途中の同期barrierとして扱わない。起動取消しはDataOwner初期化を途中dropせず、移行・回復の終了後に実DB closeを待って返す。外部SQLite writerとの競合は既存の有限busy timeoutで失敗し得る。
+
+試験では既存の進捗callbackを通すprivate helperを使い、Database通知の同じ呼出し内で取消す。移行完了、返却後のowner lock解放、endpoint未公開を確認する。受付済みDB処理が全呼出し元のdrop後もlockを保つことは、storageのchannel同期付き所有試験で別に確認する。時計・scheduler・外部writer待機に依存した2秒以内の操作順序は要求しない。新しい公開API・状態・global test hookは追加しない。

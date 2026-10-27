@@ -48,6 +48,20 @@ pub async fn initialize(
     cancel: CancellationToken,
     progress: watch::Sender<StartupStage>,
 ) -> Result<Option<Prepared>, ApiError> {
+    initialize_reporting(config, data, cancel, move |stage| {
+        progress.send_replace(stage);
+    })
+    .await
+}
+
+// Keep reporting observational. Tests can cancel synchronously at a stage
+// without treating a coalescing watch notification as DB-worker admission.
+async fn initialize_reporting(
+    config: Option<PathBuf>,
+    data: Option<PathBuf>,
+    cancel: CancellationToken,
+    progress: impl Fn(StartupStage) + Send + Sync,
+) -> Result<Option<Prepared>, ApiError> {
     let cwd = tokio::task::spawn_blocking(std::env::current_dir)
         .await
         .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Startup path worker failed"))?
@@ -55,34 +69,30 @@ pub async fn initialize(
     if cancel.is_cancelled() {
         return Ok(None);
     }
-    let report = progress.clone();
-    let owner = DataOwner::start_with_progress(config, data, cwd.clone(), move |stage| {
-        report.send_replace(stage);
-    })
-    .await?;
+    let owner = DataOwner::start_with_progress(config, data, cwd.clone(), &progress).await?;
     if cancel.is_cancelled() {
-        progress.send_replace(StartupStage::Closing);
+        progress(StartupStage::Closing);
         owner.shutdown().await?;
         return Ok(None);
     }
-    progress.send_replace(StartupStage::Control);
+    progress(StartupStage::Control);
     let control = Control::new(&owner, cwd.clone());
     if let Err(error) = control.start().await {
-        progress.send_replace(StartupStage::Closing);
+        progress(StartupStage::Closing);
         let _ = close(owner, Some(control), None).await;
         return Err(error);
     }
     if cancel.is_cancelled() {
-        progress.send_replace(StartupStage::Closing);
+        progress(StartupStage::Closing);
         close(owner, Some(control), None).await?;
         return Ok(None);
     }
-    progress.send_replace(StartupStage::Endpoint);
+    progress(StartupStage::Endpoint);
     let (send, requests) = async_mpsc::channel(128);
     let server = match LocalServer::bind(&owner, send).await {
         Ok(server) => server,
         Err(error) => {
-            progress.send_replace(StartupStage::Closing);
+            progress(StartupStage::Closing);
             let _ = close(owner, Some(control), None).await;
             return Err(error);
         }
@@ -95,7 +105,7 @@ pub async fn initialize(
         cwd,
     };
     if cancel.is_cancelled() {
-        progress.send_replace(StartupStage::Closing);
+        progress(StartupStage::Closing);
         prepared.shutdown().await?;
         return Ok(None);
     }
@@ -133,58 +143,46 @@ mod tests {
         (root, config, data)
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cancellation_during_migration_preparation_keeps_lock_until_writer_finishes() {
+    async fn cancellation_at_database_preparation_finishes_migration_before_releasing_owner() {
         let (_root, config, data) = fixture().await;
         let path = data.join("shellboy.db");
-        let (entered, ready) = tokio::sync::oneshot::channel();
-        let (release, held) = std::sync::mpsc::channel();
-        let blocker = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let db = rusqlite::Connection::open(path).unwrap();
-            // Re-run the idempotent compatibility migration to obtain a real
-            // migration admission barrier without production delay hooks.
-            db.execute_batch("DROP INDEX node_turn; DROP INDEX receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; BEGIN IMMEDIATE").unwrap();
-            entered.send(()).unwrap();
-            held.recv_timeout(Duration::from_secs(3)).unwrap();
-            db.execute_batch("COMMIT").unwrap();
-        });
-        ready.await.unwrap();
+            // Prepare an older supported fixture before startup. No second
+            // writer remains to race the production 2-second busy timeout.
+            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX node_turn; DROP INDEX receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; COMMIT;").unwrap();
+        }).await.unwrap();
         let token = CancellationToken::new();
-        let (send, mut progress) = watch::channel(StartupStage::Configuration);
-        let task = tokio::spawn(initialize(
-            Some(config),
-            Some(data.clone()),
-            token.clone(),
-            send,
-        ));
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                if *progress.borrow() == StartupStage::Database {
-                    break;
-                }
-                progress.changed().await.unwrap();
-            }
-        })
+        let cancel = token.clone();
+        let initializing_data = data.clone();
+        let (send, progress) = watch::channel(StartupStage::Configuration);
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            initialize_reporting(
+                Some(config),
+                Some(data.clone()),
+                token.clone(),
+                move |stage| {
+                    send.send_replace(stage);
+                    if stage == StartupStage::Database {
+                        assert!(
+                            OwnerLock::acquire(&initializing_data).is_err(),
+                            "owner is held when database preparation starts"
+                        );
+                        cancel.cancel();
+                    }
+                },
+            ),
+        )
         .await
+        .expect("cancelled startup did not close")
         .unwrap();
-        token.cancel();
         assert!(
-            !task.is_finished(),
-            "cancellation cannot abort admitted DB initialization"
+            token.is_cancelled(),
+            "the database preparation stage was reached"
         );
-        assert!(
-            OwnerLock::acquire(&data).is_err(),
-            "initializing writer retains ownership"
-        );
-        release.send(()).unwrap();
-        blocker.await.unwrap();
-        assert!(
-            tokio::time::timeout(Duration::from_secs(3), task)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap()
-                .is_none()
-        );
+        assert!(result.is_none());
+        assert_eq!(*progress.borrow(), StartupStage::Closing);
         assert!(
             OwnerLock::acquire(&data).is_ok(),
             "cancel result follows actual writer close"
@@ -207,6 +205,8 @@ mod tests {
             crate::storage::SCHEMA_VERSION,
             "cancel does not pretend completed migration was rolled back"
         );
+        // Actual admitted-writer lifetime is separately exercised without
+        // SQLite contention by storage::owner_guard_outlives_all_callers_until_actual_writer_close.
     }
     #[tokio::test]
     async fn abandoned_ready_delivery_closes_owner_and_endpoint_without_core_admission() {

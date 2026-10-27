@@ -4,6 +4,12 @@
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
+## 公開後のWindows CI失敗の切分け（未リリース）
+
+文書のみのcommit `211750e` の [CI 40420705214](https://github.com/tya5/shellboy/actions/runs/40420705214) はmacOS/Linux成功、Windowsで起動取消し試験1件が失敗しました。v0.1.2の3 OS成功は当時の記録として維持します。旧試験の外部SQLite writer解除を2.3秒遅らせるとmacOSでも同じエラーを再現でき、製品の2秒のbusy timeoutと試験の通知待ちが競合する条件を確認しました。Windowsで実際に発生した待機時間は未確定です。
+
+起動進捗callbackの同じ呼出しで取消す試験へ変更し、実移行完了・close・owner解放・endpoint未公開を検証します。受付済みwriterの所有保持は既存storage試験で別に保証します。製品のtimeoutや取消し順序は変更していません。検証結果は [検証状況](../validation/acceptance.md) に記録します。修正後のWindows native CI、push、Issue #3のクローズは未実施です。
+
 ## Issue #8: HTTP停滞対策（未リリース）
 
 接続別のHTTP期限を共通化しました。会話・要約は無受信600秒（0で無効）、embeddingは要求全体60秒、モデル一覧は同設定と20秒の短い方です。ヘッダー待ち・本文・エラー本文を対象とし、timeoutには段階・経過・設定名を残します。索引は既存retry/pauseへ渡し、検索には呼出し元切断・owner停止を伝播します。TUIは30秒以上の無受信を既存footerへ補足し、途中本文は復旧待ちでも保全します。新しい表・worker・queue・依存は追加していません。

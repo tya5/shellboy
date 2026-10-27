@@ -2,6 +2,19 @@
 
 更新: 2026-10-27。最新のv0.1.2検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## 公開後のWindows CI起動取消し試験（未リリース）
+
+対象は本節と同じcommitの `src/frontend/startup.rs`（変更前のローカルHEAD `41baf46`）、macOS ARM64 / Rust 1.99.1です。[公開CI 40420705214](https://github.com/tya5/shellboy/actions/runs/40420705214) は文書のみの `211750e` でmacOS/Linux成功、Windowsの `cancellation_during_migration_preparation_keeps_lock_until_writer_finishes` だけが `SaveFailed / SQLite: database is locked` で失敗しました。先行v0.1.2の3 OS成功とは区別します。
+
+- 原因条件の再現：旧試験で外部writerの解除前に一時的に2.3秒待つと、同じエラーで意図した失敗（終了101、2.33秒）になりました。この診断用遅延は除去済みです。製品の2秒busy timeoutを越す試験側競合を確認しましたが、Windowsでの実際のscheduler待ち時間は測定していません。
+- 修正後の `cargo test --locked --lib frontend::startup::tests -- --nocapture`：3 passed / 0 failed。Database準備時の同期取消し、実移行、終了とowner解放、endpoint未公開、失敗時rollback、未受取Readyの終了を確認しました。
+- 同じlibtest binaryを4プロセス並列・各 `--test-threads=3` で20回実行：20回とも3 passed / 0 failed。独立した60試験が増えたとは数えません。
+- `cargo test --locked --test storage --test app_ipc --test tui_process`：24 passed / 0 failed / 0 ignored。受付済みwriterが全呼出し元drop後もlockを保持する既存storage試験、移行の原子性、実IPC、local mockに接続する実TUI processを含みます。
+
+最終sourceの `cargo clippy --locked --all-targets -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` は成功しました。staged秘密情報検査は検出0件です。
+
+今回のsourceで全69群の標準checkは再実行していません。Windows/Linux native CI、push・release・Issue #3のクローズは未実施です。利用者の保存データ、設定、実行中owner、インストール済みbinaryは変更していません。
+
 ## Issue #8: HTTP期限・取消し・受信経過（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1で実施しました。`6aeac45` の `sh scripts/check.sh` は終了0、fmt・strict all-target Clippy・69群の1,102 passed / 0 failed / 15 ignoredです。先行の対象テスト8群576件も成功しましたが、標準結果へ二重計上しません。
