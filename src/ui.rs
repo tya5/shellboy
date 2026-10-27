@@ -2834,7 +2834,10 @@ impl UiState {
                 vec![UiAction::PasteImage {
                     draft_id: view.draft.draft_id.clone(),
                     revision: view.draft.revision,
-                    thread_id: view.thread_id.clone(),
+                    thread_id: view
+                        .thread_id
+                        .clone()
+                        .or_else(|| view.draft.edit.as_ref().map(|edit| edit.thread_id.clone())),
                     position: view.draft.cursor,
                 }]
             }

@@ -6,6 +6,7 @@ use shellboy::{
     protocol::{ApiError, ErrorCode, ThreadDeleteArgs, ThreadSummary},
     ui::{ThreadDeletionReply, UiAction, UiState, UiUpdate, draw},
 };
+use unicode_width::UnicodeWidthStr;
 
 fn key(ui: &mut UiState, code: KeyCode) -> Vec<UiAction> {
     ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
@@ -70,13 +71,20 @@ fn accept(ui: &mut UiState, id: u64, args: &ThreadDeleteArgs, deletable: bool) {
 fn screen(ui: &mut UiState) -> String {
     let mut terminal = Terminal::new(TestBackend::new(110, 45)).unwrap();
     terminal.draw(|frame| draw(frame, ui)).unwrap();
-    terminal
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect()
+    let buffer = terminal.backend().buffer();
+    (buffer.area.y..buffer.area.bottom())
+        .map(|y| {
+            let mut line = String::new();
+            let mut x = buffer.area.x;
+            while x < buffer.area.right() {
+                let symbol = buffer[(x, y)].symbol();
+                line.push_str(symbol);
+                x = x.saturating_add(symbol.width().max(1) as u16);
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 fn ui() -> UiState {
     UiState::new(&Config::default(), std::env::temp_dir())
@@ -253,4 +261,54 @@ fn rejected_preview_or_execution_queue_admission_cannot_leave_an_enabled_delete(
     ui.action_rejected(&actions[0]);
     assert!(key(&mut ui, KeyCode::Char('y')).is_empty());
     assert_eq!(ui.threads().len(), 1);
+}
+
+#[test]
+fn images_in_an_edit_fork_draft_are_owned_by_the_source_thread_for_deletion() {
+    let mut ui = ui();
+    ui.select_thread("source".into());
+    let generation = ui.view().generation;
+    let revision = ui.view().draft.revision;
+    ui.apply(UiUpdate::EditRequestLoaded {
+        thread_id: "source".into(),
+        node_id: "request".into(),
+        generation,
+        draft_revision: revision,
+        text: "edited request".into(),
+        attachments: vec![],
+        run_id: None,
+    });
+    assert!(ui.view().thread_id.is_none());
+    let draft_id = ui.view().draft.draft_id.clone();
+    // Slash commands are submitted through the same Enter path as the TUI.
+    let active = ui.active.clone();
+    let draft = &mut ui.views.get_mut(&active).unwrap().draft;
+    draft.text = "/image".into();
+    draft.cursor = draft.text.len();
+    draft.literal_paste = false;
+    let actions = key(&mut ui, KeyCode::Enter);
+    fn capture_owner(action: &UiAction) -> Option<&str> {
+        match action {
+            UiAction::PasteImage { thread_id, .. } => thread_id.as_deref(),
+            UiAction::SubmittedCommand { action, .. } => capture_owner(action),
+            _ => None,
+        }
+    }
+    assert!(
+        actions
+            .iter()
+            .any(|action| capture_owner(action) == Some("source"))
+    );
+    // A deletion completed from another view must also discard this editor.
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: 0,
+        args: ThreadDeleteArgs {
+            thread_id: "source".into(),
+            descendants: false,
+        },
+        execute: true,
+        result: Ok(ThreadDeletionReply::Deleted(vec!["source".into()])),
+    });
+    assert_ne!(ui.view().draft.draft_id, draft_id);
+    assert!(ui.view().draft.edit.is_none());
 }
