@@ -29,7 +29,10 @@ unsafe extern "C" fn count_passive(
     0
 }
 
-async fn trace_checkpoints(db: &DbWorker) -> Arc<AtomicUsize> {
+async fn trace_checkpoints(
+    db: &DbWorker,
+    initialize: impl FnOnce(&Connection) -> rusqlite::Result<()> + Send + 'static,
+) -> Arc<AtomicUsize> {
     let count = Arc::new(AtomicUsize::new(0));
     let retained = Arc::into_raw(count.clone()) as usize;
     db.call(move |connection| {
@@ -45,6 +48,9 @@ async fn trace_checkpoints(db: &DbWorker) -> Arc<AtomicUsize> {
             },
             rusqlite::ffi::SQLITE_OK
         );
+        // Install the observer and mutation in one actor job: the reply can
+        // arrive before idle work, so a second job would miss that attempt.
+        initialize(connection)?;
         Ok(())
     })
     .await
@@ -90,7 +96,7 @@ async fn read_only_idle_jobs_do_not_checkpoint() {
     let db = DbWorker::open(root.path().join("fixture.db"))
         .await
         .unwrap();
-    let count = trace_checkpoints(&db).await;
+    let count = trace_checkpoints(&db, |_| Ok(())).await;
     for _ in 0..64 {
         read_job(&db).await;
         // Let the dedicated actor finish the preceding idle boundary.
@@ -105,14 +111,25 @@ async fn read_only_idle_jobs_do_not_checkpoint() {
     );
 }
 
-async fn wait_for_attempt(count: &AtomicUsize, expected: usize) {
-    tokio::time::timeout(Duration::from_secs(2), async {
+async fn wait_for_attempt(db: &DbWorker, count: &AtomicUsize, expected: usize) {
+    let observed = tokio::time::timeout(Duration::from_secs(5), async {
         while count.load(Ordering::SeqCst) < expected {
-            tokio::task::yield_now().await;
+            // Checkpoints run only at idle opportunities, never on a timer.
+            // Keep driving the actor rather than assuming a fixed sleep made
+            // one particular read job eligible on every scheduler.
+            read_job(db).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
-    .await
-    .expect("an eligible idle job must checkpoint");
+    .await;
+    assert!(
+        observed.is_ok(),
+        "idle checkpoint not observed: expected {expected}, actual {}",
+        count.load(Ordering::SeqCst)
+    );
+    // The PROFILE callback precedes the actor's checkpoint bookkeeping. A
+    // queued job is a barrier for that previous idle boundary.
+    read_job(db).await;
     assert_eq!(count.load(Ordering::SeqCst), expected);
 }
 
@@ -146,21 +163,18 @@ async fn partial_checkpoint_retries_after_interval_then_clean_reads_stay_idle() 
             .unwrap(),
         "old"
     );
-    db.call(|writer| {
+    // Deliberately make the update's own idle boundary eligible. Its trace
+    // must already be installed when the mutation's reply is delivered.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let count = trace_checkpoints(&db, |writer| {
         writer.execute(
             "UPDATE app_meta SET value='new' WHERE key='checkpoint-fixture'",
             [],
         )?;
         Ok(())
     })
-    .await
-    .unwrap();
-    let count = trace_checkpoints(&db).await;
-    // This sleep creates an eligible boundary; the actual attempt is observed
-    // through SQLite, not inferred from the reply (which precedes idle work).
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    read_job(&db).await;
-    wait_for_attempt(&count, 1).await;
+    .await;
+    wait_for_attempt(&db, &count, 1).await;
     for _ in 0..32 {
         read_job(&db).await;
     }
@@ -173,7 +187,7 @@ async fn partial_checkpoint_retries_after_interval_then_clean_reads_stay_idle() 
     reader.close().unwrap();
     tokio::time::sleep(Duration::from_millis(1100)).await;
     read_job(&db).await;
-    wait_for_attempt(&count, 2).await;
+    wait_for_attempt(&db, &count, 2).await;
     // Retry must have retained the pending write even without another mutation;
     // after full recovery the same read jobs must no longer trigger attempts.
     tokio::time::sleep(Duration::from_millis(1100)).await;

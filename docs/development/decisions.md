@@ -257,3 +257,8 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 - #13の共通要求文脈を局所型へまとめる提案を採用する。引数の重複とpanic前提を除き、再試行方針をHTTP層へ戻さない。
 - #14のSSE terminal即終了はHTTP/1.1接続をpoolへ返せない場合がある。正常terminalの検証後だけ最大1秒・64KiBの本文読捨てを採用し、終端境界と取消しを維持する。末尾エラーは完成済み応答を無効にせず、上限到達で接続再利用を諦める。過去のdrain不採用判断はこの条件付き判断へ更新する。会社proxyでの最適値は未測定で、再確認条件は遅延・接続再利用率の実測報告。
 - キャッシュによる切断低減や全provider共通のroutingは保証しない。実API確認はローカルLiteLLMへの合成入力4要求に限定し、15万tokenの負荷や会社の実会話は使わない。Windows実機なしの端末操作は対象外のまま、3 OS CIを別に確認して公開する。
+
+
+## 2026-10-27: Windows CIのcheckpoint観測競合
+
+v0.1.4候補の初回CIで、Linux/macOS成功に対しWindowsの既存idle checkpoint試験が1件timeoutしました。DB workerは返信を送ってからidle処理へ進むため、別jobでtracerを登録すると更新直後のcheckpointを観測できない場合がある。またcheckpointはperiodic workerではなくjob後のidle opportunityなので、counterを待つだけでは再試行を駆動できない。tracer登録と更新を一つのfixture jobにし、意図的にeligibleな更新境界を観測する。待機helperはread jobで有限に機会を作り、callback後はactor barrierで同期する。timeoutだけを伸ばして不明な状態を隠さず、expected/actual counterを診断へ残す。製品の保存・throttle・schemaは変更しない。
