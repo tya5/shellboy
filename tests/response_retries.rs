@@ -997,3 +997,111 @@ async fn disconnect_trim_renews_retries_once_then_enters_recovery() {
     fixture.no_more_requests().await;
     fixture.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unsuccessful_disconnect_trim_records_why_and_notifies_recovery_after_commit() {
+    for hint in [1, 100_000] {
+        let mut fixture = Fixture::with_trim_fixture(1, 10, 5_000, true, Some((hint, true))).await;
+        let mut events = fixture.control.subscribe();
+        for _ in 0..2 {
+            fixture
+                .incoming()
+                .await
+                .reply
+                .send(Reply::error(503, ""))
+                .ok()
+                .unwrap();
+        }
+        assert_eq!(fixture.settled().await, "recovery_wait");
+        let attempts = fixture.attempts().await;
+        let saved = attempts.last().unwrap().1.as_ref().unwrap();
+        assert!(
+            saved.get("automatic_trim").is_none(),
+            "unadopted attempt is not a successful trim"
+        );
+        let observation = &saved["automatic_trim_attempt"];
+        let expected = if hint == 1 {
+            "no_safe_reduction"
+        } else {
+            "below_activation_threshold"
+        };
+        assert_eq!(observation["outcome"], expected);
+        assert_eq!(observation["result"]["compact"]["no_target"], true);
+        assert_eq!(
+            observation["result"]["before_tokens"],
+            observation["result"]["after_tokens"]
+        );
+        assert!(observation["result"]["before_tokens"].as_u64().unwrap() > 0);
+        assert_eq!(observation["result"]["target_tokens"], hint);
+        if hint == 1 {
+            assert!(
+                saved["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no safe reduction")
+            );
+        } else {
+            assert!(
+                saved["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("activation threshold")
+            );
+            assert!(
+                !saved["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no safe reduction")
+            );
+        }
+        let target = fixture.accepted.thread_id.clone();
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if let shellboy::control::EngineEvent::Changed {
+                    thread_id,
+                    recovery: true,
+                } = events.recv().await.unwrap()
+                    && thread_id == target
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("committed recovery transition must notify the bell frontend");
+        fixture
+            .control
+            .store
+            .database
+            .call(|db| {
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM replacement", [], |row| row
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_context_limit_never_enters_disconnect_trim_or_renews_its_retries() {
+    let mut fixture = Fixture::with_trim_fixture(1, 10, 5_000, true, Some((2_000, true))).await;
+    fixture.incoming().await.reply.send(Reply::http(400, "application/json",
+        &json!({"error":{"code":"context_length_exceeded","message":"synthetic context overflow"}}).to_string(), "")).ok().unwrap();
+    // This indivisible legacy source exceeds the summary segment bound. The
+    // explicit overflow path stops safely; disconnect trimming must not bypass it.
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 1);
+    let error = attempts[0].1.as_ref().unwrap();
+    assert_eq!(error["error"]["provider_code"], "context_length_exceeded");
+    assert!(error.get("automatic_trim").is_none());
+    assert!(error.get("automatic_trim_attempt").is_none());
+    fixture.no_more_requests().await;
+    fixture.close().await;
+}

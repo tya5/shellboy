@@ -155,3 +155,5 @@ Thread/Run/Turn/message/history getのcontextは、保存済み時刻・状態�
 受付はqueuedで、operation getのdownstream完了まで確認します。同じoperation IDの再送で二重編集しません。実行中の要求ではなく次の要求から反映されます。まれに大きくまとめて編集し、編集を繰り返してキャッシュを無駄に外さないでください。
 
 省略通知の元node始終IDは、その範囲を `--summary --from ... --to ...` で要約するためにも使えます。省略元は一つのmarkerの全体を指定します。大量の原文を読み直して入力を増やすより、範囲要約を優先してください。必要な原文は `history get --node NODE --limit-bytes BYTES` で小さく取得します。`compact --restore [--from MARKER]` で元の範囲を戻せますが、後続の会話は残り、除外済み添付は自動で復活しません。実行済みの操作を再実行する前に現在状態を確かめてください。詳細は[入力の大きさと範囲編集](history-and-search.md#入力の大きさと範囲編集)。
+
+省略通知が現在の依頼より後ろの作業も省略したと示す場合、実行済み操作は取り消されていません。再実行前に現在のファイル・execution・履歴等を確認してください。通知の範囲だけを戻すには `compact --restore --from FIRST_OMITTED_SOURCE_NODE` を使います。明示summaryは反映済みの現在依頼も置き換えられるので、通常は現在依頼を範囲外に残します。

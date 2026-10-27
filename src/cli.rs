@@ -277,7 +277,7 @@ pub struct CompactOptions {
     /// Restore a trim marker (latest by default); retain all later nodes.
     #[arg(long)]
     pub restore: bool,
-    /// Inclusive first source node, or a trim marker with --restore.
+    /// Inclusive first source node; --restore also accepts a selected marker or its first omitted source.
     #[arg(long = "from", requires = "edit_action")]
     pub from_node_id: Option<String>,
     /// Inclusive last source node, or removed prefix end with --trim.

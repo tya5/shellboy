@@ -161,6 +161,7 @@ pub(super) async fn retry_or_recover(
         }
         return Ok(());
     }
+    let mut trim_not_applied = None;
     if budget.begin_trim(connection.auto_trim_on_disconnect, limit, policy)
         && trim::try_trim(
             control,
@@ -171,6 +172,7 @@ pub(super) async fn retry_or_recover(
             connection.compact_hint_tokens,
             budget.used,
             limit,
+            &mut trim_not_applied,
         )
         .await?
     {
@@ -194,6 +196,7 @@ pub(super) async fn retry_or_recover(
         budget.used,
         limit,
         policy,
+        trim_not_applied,
     )
     .await
 }

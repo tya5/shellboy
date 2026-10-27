@@ -275,3 +275,5 @@ list/get/readのcursorは不透明な継続tokenです。返された文字列�
 引数なしの `compact` は従来のspill→要約です。`--spill` / `--summary` / `--omit` と `--from NODE --to NODE` で範囲を両端inclusiveに指定できます。`--omit`はprefixにも途中にも使え、API要求なしで通知へ置換します。`--trim --to NODE` は先頭からの省略、`--restore [--from MARKER]` は省略の復元です。モードは併用できません。全モードは `--thread THREAD` と通常のoperation ID指定に対応し、queued/downstreamの契約を共用します。使用できない境界では `valid_boundaries` を確認します。
 
 `thread get` の `context_usage` は現在推定、接続の目安、直近成功の実測usageを返します。編集結果は `before_tokens` / `after_tokens` / `target_tokens` / `cache_invalidated_tokens`、`omitted_nodes`、`marker_node_id` と `warnings` を含みます。正確なtokenizer値やキャッシュhitの保証ではありません。手順と注意は[履歴と検索](history-and-search.md#入力の大きさと範囲編集)。
+
+`compact --restore --from ID`のIDは選択中markerか、その省略元の最初のnodeです。通知に書かれた特定範囲を戻す場合はこの指定を使います。引数なしの復元は最新作成markerを選ぶため、複数の省略がある場合に対象が異なることがあります。

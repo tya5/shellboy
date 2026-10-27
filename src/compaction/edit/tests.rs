@@ -578,3 +578,227 @@ async fn default_restore_undoes_newest_selected_edit_even_when_earlier_on_path()
     assert_eq!(fixture.path().await, ["a", "b", "c", "d", "e", "f"]);
     fixture.close().await;
 }
+
+#[tokio::test]
+async fn marker_explicitly_reports_current_turn_work_after_the_retained_request() {
+    let fixture = Fixture::new().await;
+    fixture.text("old", &"x".repeat(20_000)).await;
+    fixture.db.call(|db| {
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('run','t','live','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn','t','run','running','now');")?;Ok(())
+    }).await.unwrap();
+    fixture
+        .append(
+            "request",
+            Some("turn"),
+            json!({"role":"user","content":"retain request"}),
+        )
+        .await;
+    fixture
+        .append(
+            "work",
+            Some("turn"),
+            json!({"role":"assistant","content":"y".repeat(20_000)}),
+        )
+        .await;
+    fixture
+        .append(
+            "latest",
+            Some("turn"),
+            json!({"role":"assistant","content":"latest"}),
+        )
+        .await;
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let result = fixture
+        .compactor
+        .trim_to_target(snapshot, 1_000, CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.warnings.is_empty());
+    let marker = result.marker_node_id.unwrap();
+    let payload = fixture
+        .db
+        .call(move |db| {
+            let raw: String = db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1",
+                [marker],
+                |row| row.get(0),
+            )?;
+            Ok(serde_json::from_str::<Value>(&raw).unwrap())
+        })
+        .await
+        .unwrap();
+    assert_eq!(payload["context_trim"]["after_current_request_nodes"], 1);
+    let text = payload["item"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("1 source nodes AFTER the retained current user request"));
+    assert!(text.contains("intermediate work in the current Turn was also omitted"));
+    assert!(
+        text.contains("have NOT been undone")
+            && text.contains("Inspect the current state before repeating")
+    );
+    assert!(text.contains("compact --restore --from old"));
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn middle_omission_attachment_notice_and_warning_only_describe_new_exclusions() {
+    for attachment_state in [None, Some("active"), Some("excluded")] {
+        let fixture = Fixture::new().await;
+        for id in ["a", "b", "c", "d"] {
+            fixture.text(id, id).await;
+        }
+        if let Some(state) = attachment_state {
+            fixture.attachment("b").await;
+            if state == "excluded" {
+                fixture.db.call(|db| {db.execute("UPDATE attachment_selection SET state='excluded',reason='explicit_user_exclusion'",[])?;Ok(())}).await.unwrap();
+            }
+        }
+        let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+        let result = fixture
+            .compactor
+            .omit_range(snapshot, 1..3, CancellationToken::new())
+            .await
+            .unwrap();
+        let active = attachment_state == Some("active");
+        assert_eq!(result.warnings.len(), usize::from(active));
+        let marker = result.marker_node_id.unwrap();
+        let payload = fixture
+            .db
+            .call(move |db| {
+                let raw: String = db.query_row(
+                    "SELECT payload_json FROM node WHERE id=?1",
+                    [marker],
+                    |row| row.get(0),
+                )?;
+                Ok(serde_json::from_str::<Value>(&raw).unwrap())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            payload["context_trim"]["excluded_attachment_refs"],
+            if active { 1 } else { 0 }
+        );
+        let text = payload["item"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("a middle range of the selected history was omitted"));
+        assert_eq!(
+            text.contains("active attachment references were excluded"),
+            active
+        );
+        if active {
+            assert!(result.warnings[0].contains("1 active attachment"));
+        }
+        fixture.close().await;
+    }
+}
+
+#[tokio::test]
+async fn restore_from_first_omitted_source_targets_that_marker_instead_of_the_latest_edit() {
+    let fixture = Fixture::new().await;
+    for id in ["a", "b", "c", "d", "e", "f", "g"] {
+        fixture.text(id, id).await;
+    }
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let old = fixture
+        .compactor
+        .omit_range(snapshot, 1..3, CancellationToken::new())
+        .await
+        .unwrap()
+        .marker_node_id
+        .unwrap();
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let selected = range::from_nodes(&snapshot, "e", "e").unwrap();
+    let newer = fixture
+        .compactor
+        .omit_range(snapshot, selected, CancellationToken::new())
+        .await
+        .unwrap()
+        .marker_node_id
+        .unwrap();
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let result = fixture
+        .compactor
+        .restore_marker(snapshot, Some("b"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result.marker_node_id, Some(old));
+    assert_eq!(
+        fixture.path().await,
+        vec![
+            "a".to_owned(),
+            "b".into(),
+            "c".into(),
+            "d".into(),
+            newer,
+            "f".into(),
+            "g".into()
+        ]
+    );
+    assert!(result.warnings.is_empty());
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn ambiguous_first_source_restore_requires_an_explicit_marker_id_without_editing_the_path() {
+    let fixture = Fixture::new().await;
+    for id in ["a", "b", "c", "d", "e", "f"] {
+        fixture.text(id, id).await;
+    }
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    fixture
+        .compactor
+        .omit_range(snapshot, 1..2, CancellationToken::new())
+        .await
+        .unwrap();
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let selected = range::from_nodes(&snapshot, "d", "d").unwrap();
+    let marker = fixture
+        .compactor
+        .omit_range(snapshot, selected, CancellationToken::new())
+        .await
+        .unwrap()
+        .marker_node_id
+        .unwrap();
+    fixture.db.call(move|db| {
+        db.execute("UPDATE node SET payload_json=json_set(payload_json,'$.context_trim.first_node_id','b'),payload_revision=payload_revision+1 WHERE id=?1",[marker])?;Ok(())
+    }).await.unwrap();
+    let before = fixture.path().await;
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let error = fixture
+        .compactor
+        .restore_marker(snapshot, Some("b"), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(error.message.contains("multiple selected markers"));
+    assert_eq!(
+        error.details.unwrap()["marker_node_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(fixture.path().await, before);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn changed_attachment_selection_aborts_without_a_false_exclusion_notice_or_path_change() {
+    let fixture = Fixture::new().await;
+    for id in ["a", "b", "c"] {
+        fixture.text(id, id).await;
+    }
+    fixture.attachment("a").await;
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    fixture.db.call(|db| {db.execute("UPDATE attachment_selection SET state='excluded',reason='explicit_user_exclusion',revision=revision+1",[])?;Ok(())}).await.unwrap();
+    let before = fixture.path().await;
+    let error = fixture
+        .compactor
+        .omit_range(snapshot, 0..1, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidState);
+    assert!(error.message.contains("attachment selection changed"));
+    assert_eq!(fixture.path().await, before);
+    assert_eq!(fixture.replacement_count().await, 0);
+    fixture.close().await;
+}

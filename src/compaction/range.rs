@@ -24,7 +24,11 @@ fn group_error(snapshot: &Snapshot, index: usize) -> Option<&'static str> {
 pub(super) fn group_is_safe(snapshot: &Snapshot, index: usize) -> bool {
     group_error(snapshot, index).is_none()
 }
-fn trim_group_protected(index: usize, count: usize, current_request: Option<usize>) -> bool {
+pub(super) fn trim_group_protected(
+    index: usize,
+    count: usize,
+    current_request: Option<usize>,
+) -> bool {
     index + 1 == count || Some(index) == current_request
 }
 fn range_error(
@@ -114,6 +118,22 @@ pub(super) fn from_nodes(
     from: &str,
     to: &str,
 ) -> Result<Range<usize>, ApiError> {
+    from_nodes_with_mode(snapshot, from, to, None)
+}
+pub(super) fn from_nodes_for_mode(
+    snapshot: &Snapshot,
+    from: &str,
+    to: &str,
+    mode: RangeMode,
+) -> Result<Range<usize>, ApiError> {
+    from_nodes_with_mode(snapshot, from, to, Some(mode))
+}
+fn from_nodes_with_mode(
+    snapshot: &Snapshot,
+    from: &str,
+    to: &str,
+    mode: Option<RangeMode>,
+) -> Result<Range<usize>, ApiError> {
     let start = snapshot
         .groups
         .iter()
@@ -127,7 +147,7 @@ pub(super) fn from_nodes(
             snapshot,
             "Compaction endpoints must be nodes on the selected path",
             start.or(end),
-            None,
+            mode,
         ));
     };
     if start > end
@@ -144,10 +164,48 @@ pub(super) fn from_nodes(
             snapshot,
             "Compaction endpoints must match whole-group boundaries in path order",
             Some(start),
-            None,
+            mode,
         ));
     }
     Ok(start..end + 1)
+}
+
+/// `--trim` can only select a prefix. Its recovery candidates must not merely
+/// be safe individual groups after an intervening protected current request.
+pub(super) fn from_prefix_end(snapshot: &Snapshot, to: &str) -> Result<Range<usize>, ApiError> {
+    let from = snapshot
+        .groups
+        .first()
+        .and_then(|group| group.sources.first())
+        .ok_or_else(|| invalid("Cannot trim an empty path"))?;
+    let selected =
+        from_nodes_for_mode(snapshot, &from.id, to, RangeMode::Trim).and_then(|selected| {
+            validate(snapshot, std::slice::from_ref(&selected), RangeMode::Trim)?;
+            Ok(selected)
+        });
+    selected.map_err(|mut error| {
+        let request = policy::turn_boundary(snapshot, snapshot.current_turn.as_deref());
+        let candidates = snapshot
+            .groups
+            .iter()
+            .enumerate()
+            .take_while(|(index, _)| {
+                group_is_safe(snapshot, *index)
+                    && !trim_group_protected(*index, snapshot.groups.len(), request)
+            })
+            .take(16)
+            .filter_map(|(_, group)| {
+                group
+                    .sources
+                    .last()
+                    .map(|last| json!({"from_node_id":from.id,"to_node_id":last.id}))
+            })
+            .collect::<Vec<_>>();
+        let details = error.details.get_or_insert_with(|| json!({}));
+        details["valid_boundaries"] = json!(candidates);
+        details["boundary_scope"] = json!("prefix");
+        error
+    })
 }
 
 #[cfg(test)]
@@ -250,5 +308,49 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.details.unwrap()["valid_boundaries"], json!([]));
+    }
+    #[test]
+    fn invalid_trim_endpoints_offer_only_ranges_that_can_be_omitted() {
+        let snapshot = staged_snapshot();
+        for (from, to) in [
+            ("missing", "latest"),
+            ("a-result", "latest"),
+            ("latest", "old"),
+        ] {
+            let error = from_nodes_for_mode(&snapshot, from, to, RangeMode::Trim).unwrap_err();
+            for candidate in error.details.unwrap()["valid_boundaries"]
+                .as_array()
+                .unwrap()
+            {
+                let range = from_nodes_for_mode(
+                    &snapshot,
+                    candidate["from_node_id"].as_str().unwrap(),
+                    candidate["to_node_id"].as_str().unwrap(),
+                    RangeMode::Trim,
+                )
+                .unwrap();
+                assert!(validate(&snapshot, std::slice::from_ref(&range), RangeMode::Trim).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_prefix_trim_candidates_retain_a_fixed_start_and_cross_no_protected_group() {
+        let snapshot = staged_snapshot();
+        for to in ["missing", "current", "a-result", "latest"] {
+            let error = from_prefix_end(&snapshot, to).unwrap_err();
+            for candidate in error.details.unwrap()["valid_boundaries"]
+                .as_array()
+                .unwrap()
+            {
+                assert_eq!(candidate["from_node_id"], "old");
+                let selected =
+                    from_prefix_end(&snapshot, candidate["to_node_id"].as_str().unwrap()).unwrap();
+                assert_eq!(selected.start, 0);
+                assert!(
+                    validate(&snapshot, std::slice::from_ref(&selected), RangeMode::Trim).is_ok()
+                );
+            }
+        }
     }
 }

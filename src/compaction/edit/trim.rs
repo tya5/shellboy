@@ -58,6 +58,31 @@ fn projected(snapshot: &Snapshot, plan: &TrimPlan) -> Snapshot {
     }
     reduced
 }
+#[derive(Clone, Copy)]
+struct NoticeDetails<'a> {
+    reason: &'a str,
+    after_request_nodes: usize,
+    excluded_attachment_refs: usize,
+    start_group: usize,
+}
+fn active_attachments(group: &Group) -> usize {
+    group
+        .sources
+        .iter()
+        .flat_map(|source| &source.attachments)
+        .filter(|attachment| attachment.get("state").and_then(Value::as_str) == Some("active"))
+        .count()
+}
+fn count_active_attachments_tx(
+    tx: &rusqlite::Transaction<'_>,
+    thread: &str,
+    sources: &[&Source],
+) -> Result<usize, StorageError> {
+    let ids = serde_json::to_string(&sources.iter().map(|source| &source.id).collect::<Vec<_>>())
+        .expect("source IDs");
+    let count:i64=tx.query_row("SELECT count(*) FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id WHERE s.thread_id=?1 AND s.state='active' AND a.source_node_id IN (SELECT value FROM json_each(?2))",params![thread,ids],|row|row.get(0))?;
+    Ok(count as usize)
+}
 fn marker_payload(
     snapshot: &Snapshot,
     omitted: &HashSet<usize>,
@@ -87,7 +112,29 @@ fn marker_payload(
     let ids: Vec<_> = sources.iter().map(|source| &source.id).collect();
     let first_id = ids.first()?;
     let last_id = ids.last()?;
-    let mut payload = marker_item(first_id, last_id, ids.len(), before, spilled, reason);
+    let request = protected_request(snapshot);
+    let after_request_nodes = omitted
+        .iter()
+        .filter(|index| request.is_some_and(|request| **index > request))
+        .map(|index| snapshot.groups[*index].sources.len())
+        .sum();
+    let excluded_attachment_refs = omitted
+        .iter()
+        .map(|index| active_attachments(&snapshot.groups[*index]))
+        .sum();
+    let mut payload = marker_item(
+        first_id,
+        last_id,
+        ids.len(),
+        before,
+        spilled,
+        NoticeDetails {
+            reason,
+            after_request_nodes,
+            excluded_attachment_refs,
+            start_group: first,
+        },
+    );
     payload["context_trim"]["original_order"] = json!(original_order);
     payload["context_trim"]["retained_node_ids"] = json!(retained);
     payload["source_node_ids"] = json!(ids);
@@ -99,22 +146,38 @@ fn marker_item(
     count: usize,
     before: u64,
     spilled: usize,
-    reason: &str,
+    details: NoticeDetails<'_>,
 ) -> Value {
+    let location = if details.start_group == 0 {
+        "a range at the beginning of the selected history"
+    } else {
+        "a middle range of the selected history"
+    };
+    let reason = if details.reason == "disconnect" {
+        "exhausted connection retries on a large input"
+    } else {
+        "an explicit context edit request"
+    };
+    let work = if details.after_request_nodes > 0 {
+        format!(
+            " This includes {} source nodes AFTER the retained current user request: intermediate work in the current Turn was also omitted. Do not assume that work was never performed.",
+            details.after_request_nodes
+        )
+    } else {
+        String::new()
+    };
+    let attachment = if details.excluded_attachment_refs > 0 {
+        format!(
+            " {} active attachment references were excluded by this marker and will not be reactivated by restore; attach again explicitly with new IDs if needed.",
+            details.excluded_attachment_refs
+        )
+    } else {
+        String::new()
+    };
     let notice = format!(
-        "Shellboy context notice: older history was omitted after {}. {} source nodes ({} through {}); input estimate before reduction: {} tokens; {} tool groups spilled. The current user request and latest group remain. Original data is retained: use shellboy history get --node <source_node_id> with a bounded limit, use shellboy compact --summary --from <first_node_id> --to <last_node_id> to summarize this omitted range without reading raw data into the conversation, or shellboy compact --restore to restore the omitted range at this marker. Executed actions and side effects have not been undone. Replaced-source attachments remain excluded; attach again explicitly if needed.",
-        if reason == "disconnect" {
-            "exhausted connection retries on a large input"
-        } else {
-            "an explicit context trim request"
-        },
-        count,
-        first_id,
-        last_id,
-        before,
-        spilled
+        "Shellboy context notice: {location} was omitted after {reason}. {count} source nodes ({first_id} through {last_id}); input estimate before reduction: {before} tokens; {spilled} tool groups spilled. The active Turn's initial user request (if any) and the latest group remain.{work} Executed actions, file changes, and command side effects have NOT been undone. Inspect the current state before repeating any earlier operation. Original data is retained: use shellboy history get --node <source_node_id> with a bounded limit, use shellboy compact --summary --from {first_id} --to {last_id} to summarize this omitted range without reading raw data into the conversation, or shellboy compact --restore --from {first_id} to restore this specific omitted range.{attachment}"
     );
-    json!({"item":{"role":"developer","content":[{"type":"input_text","text":notice}]},"context_trim":{"version":1,"omitted_nodes":count,"estimated_tokens":before,"spilled_groups":spilled,"reason":reason,"first_node_id":first_id,"last_node_id":last_id}})
+    json!({"item":{"role":"developer","content":[{"type":"input_text","text":notice}]},"context_trim":{"version":1,"omitted_nodes":count,"estimated_tokens":before,"spilled_groups":spilled,"reason":details.reason,"first_node_id":first_id,"last_node_id":last_id,"after_current_request_nodes":details.after_request_nodes,"excluded_attachment_refs":details.excluded_attachment_refs}})
 }
 fn history_total(contributions: u64) -> u64 {
     if contributions == 0 {
@@ -150,7 +213,7 @@ fn disconnect_plan(snapshot: &Snapshot, target: u64) -> TrimPlan {
         .collect();
     let mut remaining = contributions.iter().sum::<u64>();
     for index in policy::spill_ranges(snapshot, false).into_iter().flatten() {
-        if Some(index) == request || index + 1 == snapshot.groups.len() {
+        if range::trim_group_protected(index, snapshot.groups.len(), request) {
             continue;
         }
         if let Some(payload) = spill_payload(&snapshot.groups[index]) {
@@ -174,12 +237,17 @@ fn disconnect_plan(snapshot: &Snapshot, target: u64) -> TrimPlan {
         let mut retained_spills = spilled_indexes.len();
         let mut first_id: Option<&str> = None;
         let mut omitted_count = 0;
+        let mut after_request_nodes = 0;
+        let mut excluded_attachment_refs = 0;
+        let mut start_group = None;
         for (index, contribution) in contributions
             .iter()
             .enumerate()
             .take(snapshot.groups.len().saturating_sub(1))
         {
-            if Some(index) == request || !range::group_is_safe(snapshot, index) {
+            if range::trim_group_protected(index, snapshot.groups.len(), request)
+                || !range::group_is_safe(snapshot, index)
+            {
                 continue;
             }
             let group = &snapshot.groups[index];
@@ -187,6 +255,11 @@ fn disconnect_plan(snapshot: &Snapshot, target: u64) -> TrimPlan {
             let last = &group.sources.last().expect("whole group").id;
             plan.omitted.insert(index);
             omitted_count += group.sources.len();
+            if request.is_some_and(|request| index > request) {
+                after_request_nodes += group.sources.len();
+            }
+            excluded_attachment_refs += active_attachments(group);
+            let start_group = *start_group.get_or_insert(index);
             remaining = remaining.saturating_sub(*contribution);
             if spilled_indexes.contains(&index) {
                 retained_spills -= 1;
@@ -197,7 +270,12 @@ fn disconnect_plan(snapshot: &Snapshot, target: u64) -> TrimPlan {
                 omitted_count,
                 before,
                 retained_spills,
-                "disconnect",
+                NoticeDetails {
+                    reason: "disconnect",
+                    after_request_nodes,
+                    excluded_attachment_refs,
+                    start_group,
+                },
             );
             let marker_chars = projection_characters(&marker, snapshot.epoch);
             plan.after = tokens_from_history_characters(
@@ -242,12 +320,7 @@ impl Compactor {
         to_node: &str,
         cancel: CancellationToken,
     ) -> Result<ContextEditResult, ApiError> {
-        let first = snapshot
-            .groups
-            .first()
-            .and_then(|group| group.sources.first())
-            .ok_or_else(|| invalid("Cannot trim an empty path"))?;
-        let selected = range::from_nodes(&snapshot, &first.id, to_node)?;
+        let selected = range::from_prefix_end(&snapshot, to_node)?;
         self.omit_range(snapshot, selected, cancel).await
     }
     /// Prefix trimming and a middle shortcut use the same validated operation.
@@ -336,6 +409,15 @@ impl Compactor {
             if cancel.is_cancelled() { return Err(StorageError::from(invalid("Context edit cancelled before adoption"))); }
             validate(&tx, &snapshot)?;
             let sources: Vec<_> = snapshot.groups.iter().enumerate().filter(|(index, _)| plan.omitted.contains(index)).flat_map(|(_, group)| group.sources.clone()).collect();
+            let omitted_refs=sources.iter().collect::<Vec<_>>();
+            let changed_refs=snapshot.groups.iter().enumerate().filter(|(index,_)|plan.omitted.contains(index)||spill_payloads.contains_key(index)).flat_map(|(_,group)|group.sources.iter()).collect::<Vec<_>>();
+            let expected_omitted=snapshot.groups.iter().enumerate().filter(|(index,_)|plan.omitted.contains(index)).map(|(_,group)|active_attachments(group)).sum::<usize>();
+            let expected_changed=snapshot.groups.iter().enumerate().filter(|(index,_)|plan.omitted.contains(index)||spill_payloads.contains_key(index)).map(|(_,group)|active_attachments(group)).sum::<usize>();
+            let omitted_attachments=count_active_attachments_tx(&tx,&snapshot.thread,&omitted_refs)?;
+            let changed_attachments=count_active_attachments_tx(&tx,&snapshot.thread,&changed_refs)?;
+            if omitted_attachments!=expected_omitted || changed_attachments!=expected_changed {
+                return Err(StorageError::from(invalid("Context edit attachment selection changed; original path retained")));
+            }
             let marker = plan.marker.as_ref().map(|payload| store_replacement(&tx, &snapshot, &sources, payload, "context-trim-v1")).transpose()?;
             let mut path = Vec::new();
             let mut marked = false;
@@ -350,7 +432,7 @@ impl Compactor {
                     original_ids.extend(group.sources.iter().map(|source| source.id.clone()));
                 } else { path.extend(group.sources.iter().map(|source| source.id.clone())); }
             }
-            let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_tokens: before, after_tokens: plan.after, target_tokens: target, omitted_nodes: sources.len(), marker_node_id: marker, cache_invalidated_tokens: cache_invalidated, warnings: vec!["Attachments excluded by a context replacement are not automatically reactivated by restore".into()] };
+            let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_tokens: before, after_tokens: plan.after, target_tokens: target, omitted_nodes: sources.len(), marker_node_id: marker, cache_invalidated_tokens: cache_invalidated, warnings: if changed_attachments>0 {vec![format!("{changed_attachments} active attachment references were excluded by this context edit and will not be automatically reactivated by restore")]}else{Vec::new()} };
             history::select_path(&tx, &snapshot.thread, snapshot.revision, &path, &timestamp())?;
             if automatic && let Some((turn, generation)) = &snapshot.turn_fence {
                 // Make the reason durable with the path change, even if owner

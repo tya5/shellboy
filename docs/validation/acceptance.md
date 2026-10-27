@@ -1,5 +1,12 @@
 # 検証状況
 
+## Issue #16〜#18レビューの追補（2026-10-28、未公開）
+
+コミット分割のMediumは判断記録へ理由を残して履歴を保持。共通の保護規則、mode別・prefix専用の正しい境界候補、現在依頼後の作業省略通知、元範囲の先頭IDによる復元、実際の添付除外だけの警告、縮小を採用しなかった理由の監査を修正しました。旧履歴の4文字/tokenの限界と、明示summaryの現在依頼の扱いもガイド・判断に記録しています。
+
+対象確認はmacOS ARM64 / Rust 1.99.1で `cargo test --locked --lib compaction` 56 passed / 0 failed、`cargo test --locked --test response_retries` 18 passed / 0 failed / 1 ignored。実MessageSend後の古いsnapshot拒否、縮小不能からのcommit後復旧通知、context超過の非対象扱いも含みます。後続#19と統合後の全体標準checkは別途記録します。実proxy/Windows実機を成功へ読み替えません。
+
+
 ## Issue #16〜#18: 範囲編集と切断後の縮小（未公開）
 
 2026-10-28、macOS ARM64 / Rust 1.99.1。#16〜#18の本文と22:18 UTCの追加コメントを確認し、途中範囲omitを含めて実装しました。構造移動は`5ee28ba`で独立させました。最初のコンパイル確認でimport漏れとSQL countのRust型を直し、Clippyの単一Range配列の表記も修正。初回の標準`sh scripts/check.sh`はfmt・全target strict Clippy・70群1,215 passed / 0 failed / 19 ignoredで成功しました。

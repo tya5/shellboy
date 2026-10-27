@@ -260,3 +260,6 @@ embedding・意味検索・RAGは`connections.<名前>.request_timeout_ms`（既
 縮小を採用すると決まった通知が会話に残り、元nodeの範囲と件数、概算、復元方法を示します。その後の再試行予算を一度補充します。正常応答があっても同じTurn/generationの縮小枠は戻りません。再び失敗が続けば復旧待ちです。縮小により失敗が改善する保証はなく、元nodeの読み直し・範囲要約・復元が可能です。
 
 TUIの引数なし `/restore` またはCLI `shellboy compact --restore --thread THREAD` で、省略範囲を戻せます。追加された後続会話は残し、添付はexcludedのままです。`/restore 番号` は別機能の失敗下書き復元です。詳細は[履歴と検索](history-and-search.md#入力の大きさと範囲編集)。
+
+
+縮小を検討して採用しなかった場合はattemptの`automatic_trim_attempt`で、閾値未満・安全な縮小では目標へ届かない・採用拒否を切り分けられます。旧会話で文字数計測がないときの4文字/token推定は、日本語等で過小評価する場合があります。最新成功要求の実測usageと合わせて確認してください。

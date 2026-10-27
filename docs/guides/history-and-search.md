@@ -202,3 +202,8 @@ shellboy compact --restore --thread THREAD_ID --from MARKER_NODE
 省略された文脈を短く戻す場合、通知の最初/最後の元node IDで `--summary --from ... --to ...` を指定できます。一つのmarkerの省略元全体が対象です。隠れた範囲の一部だけを指定した場合は拒否し、全体境界へ案内します。原文を大量に `history get` で読み直すと、その読み取り結果自体が会話の入力を増やします。
 
 編集はまれに、まとまった範囲で行ってください。書き換えた位置以降のプロンプトキャッシュが外れる可能性があります。結果の `before_tokens` / `after_tokens` / `cache_invalidated_tokens` は概算で、キャッシュhitや接続の成功を保証しません。実行済みコマンドやファイル変更は、省略や復元によって取り消されません。
+
+
+復元する範囲を通知から選ぶときは、`compact --restore --from FIRST_OMITTED_SOURCE_NODE` を使えます。`--from` は選択中marker ID、または省略元の最初のnode IDを一意に指定します。引数なしの復元は、その通知に限らず、最後に作成した選択中markerを戻します。明示`--summary`は反映済みの現在依頼も範囲に含められるため、通常は現在の依頼を範囲外にして重要な指示を残してください。
+
+旧履歴には入力文字数の計測がないため、特に日本語中心の会話では推定が小さく出ることがあります。`context_usage.last_successful_attempt.input_tokens`の実測も確認し、必要なら明示compactや接続の`compact_hint_tokens`で早めに縮小してください。未計測を正確なtoken数として扱いません。

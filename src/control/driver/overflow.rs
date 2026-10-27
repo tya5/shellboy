@@ -57,6 +57,7 @@ pub(super) async fn retry_or_recover(
     automatic_retries: u32,
     retry_limit: u32,
     retry_policy: super::retry::RetryPolicy,
+    trim_not_applied: Option<serde_json::Value>,
 ) -> Result<(), super::ApiError> {
     use super::*;
     let thread = &snapshot.thread;
@@ -118,6 +119,9 @@ pub(super) async fn retry_or_recover(
     };
     let error=ApiError::new(ErrorCode::IoFailed,message).hint("Inspect the incomplete response and explicitly retry this Run; tools already saved are not re-executed");
     let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+    if let Some(observation) = trim_not_applied {
+        saved["automatic_trim_attempt"] = observation;
+    }
     if let Some(delay) = deferred {
         saved["automatic_retry_deferred"] = json!({"retry_after_ms":delay.as_millis().min(u64::MAX as u128) as u64,"maximum_automatic_wait_ms":600_000});
     }

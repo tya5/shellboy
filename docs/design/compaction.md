@@ -141,3 +141,12 @@ legacy/shared境界、正確な小予算/production65,536境界で、超過時�
 サイズ補正は同Thread・接続・モデルの直近64成功attemptを有限に調べ、有効なusageと入力文字数がある最新のものを使う。送信manifestの`history_characters`で固定指示・添付等の差を分離し、同selectionのinflight記録があればその差を優先する。過去の添付projection等を固定分として推定するため、省略による添付除外後の減少を保守的に見積もることがある。`context_usage`は補正元attempt ID・方法・測定できていない対象を返す。
 
 構造分離の測定（`7dfc96d`→`5ee28ba`、関数の宣言から閉じ括弧まで）: `spill_cancellable`は125→10行、`summarize`は150→15行。旧範囲の公開選択入口は純粋な`spill_ranges`/`summary_range`の2か所へ分離した。完結/保護の判定は`range::group_error`の一か所を規則と共通validatorから利用する。始終IDの組境界変換と採用時CASはそれぞれ別責務として残し、同一規則を二重に実装しない。
+
+
+## レビューによる通知と診断の精度改善
+
+現在依頼より後ろの作業も省略した場合、markerの`after_current_request_nodes`と本文にその件数を明示し、実行済み副作用を確認してから再実行するよう案内する。手動の途中省略を単なる「古い履歴」と呼ばない。markerの添付件数と結果の警告は実際にactiveからexcludedへ変わる参照を対象とする。
+
+`--restore --from ID`は、選択中markerのIDを優先し、一致しなければ省略元の最初のnode IDを一意に解決する。通知はその元IDを指定した復元コマンドを示す。候補が複数なら曖昧な復元をせず拒否する。
+
+自動縮小が採用されなかった場合も、元の復旧遷移と同じ保存経路に`automatic_trim_attempt`を記録する。起動閾値未満と安全な縮小では目標に届かない状態、競合等による拒否を区別し、成功採用の`automatic_trim`やTUIの「縮小済み」と混同しない。

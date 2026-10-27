@@ -106,10 +106,11 @@ impl Compactor {
                 .await
             }
             ContextEditAction::Omit => {
-                let selected = range::from_nodes(
+                let selected = range::from_nodes_for_mode(
                     &snapshot,
                     required_endpoint(args.from_node_id.as_deref())?,
                     required_endpoint(args.to_node_id.as_deref())?,
+                    range::RangeMode::Trim,
                 )?;
                 self.omit_range(snapshot, selected, cancel).await
             }
@@ -304,8 +305,33 @@ impl Compactor {
         // "Latest" means the most recently created selected edit, not the
         // marker nearest the end of the conversation. An earlier range may
         // have been omitted after a later one.
-        let marker_id = if let Some(marker) = marker_id {
-            Some(marker.to_owned())
+        let marker_id = if let Some(requested) = marker_id {
+            let candidates = snapshot
+                .groups
+                .iter()
+                .filter(|group| group.sources.len() == 1)
+                .filter_map(|group| group.sources.first())
+                .filter(|source| marker_metadata(source).is_some())
+                .collect::<Vec<_>>();
+            if candidates.iter().any(|source| source.id == requested) {
+                Some(requested.to_owned())
+            } else {
+                let matching = candidates
+                    .iter()
+                    .filter(|source| {
+                        source
+                            .payload
+                            .pointer("/context_trim/first_node_id")
+                            .and_then(Value::as_str)
+                            == Some(requested)
+                    })
+                    .collect::<Vec<_>>();
+                match matching.as_slice() {
+                    []=>None,
+                    [source]=>Some(source.id.clone()),
+                    _=>return Err(edit_error("Restore source ID matches multiple selected markers; use an explicit marker ID").details(json!({"marker_node_ids":matching.iter().take(16).map(|source|&source.id).collect::<Vec<_>>()}))),
+                }
+            }
         } else {
             let thread = snapshot.thread.clone();
             self.database.call(move |db| {
@@ -493,3 +519,6 @@ impl Compactor {
 
 #[cfg(test)]
 mod summary_tests;
+
+#[cfg(test)]
+mod user_send_tests;

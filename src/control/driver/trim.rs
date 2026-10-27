@@ -12,6 +12,7 @@ pub(super) async fn try_trim(
     hint: Option<u64>,
     retries: u32,
     limit: u32,
+    not_applied: &mut Option<Value>,
 ) -> Result<bool, ApiError> {
     if slot.stop.is_cancelled() {
         return Ok(false);
@@ -24,6 +25,7 @@ pub(super) async fn try_trim(
         Ok(result) => result,
         Err(error) if error.is_storage_failure() => return Err(error),
         Err(error) => {
+            *not_applied = Some(json!({"outcome":"rejected","error":error}));
             failure
                 .error
                 .message
@@ -32,6 +34,22 @@ pub(super) async fn try_trim(
         }
     };
     if result.compact.no_target {
+        let below_activation = result.before_tokens <= hint.unwrap_or(75_000);
+        let (outcome, explanation) = if below_activation {
+            (
+                "below_activation_threshold",
+                "estimated input does not exceed activation threshold",
+            )
+        } else {
+            (
+                "no_safe_reduction",
+                "no safe reduction can reach the target",
+            )
+        };
+        *not_applied = Some(json!({"outcome":outcome,"result":result}));
+        failure.error.message.push_str(&format!(
+            "; automatic context trim not adopted: {explanation}"
+        ));
         return Ok(false);
     }
     let body = json!({
