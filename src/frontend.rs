@@ -2621,7 +2621,10 @@ async fn run_with_clipboard_slots(
                 None => {}
             },
             event=events.recv()=> match event {
-                Ok(EngineEvent::Changed { thread_id }) => {
+                Ok(EngineEvent::Changed { thread_id, recovery }) => {
+                    if recovery && control.store.config.ui.bell {
+                        update(&updates, UiUpdate::RecoveryBell).await;
+                    }
                     streams.invalidate(&thread_id);
                     selection.changed(&thread_id);
                     dirty_threads.insert(thread_id);

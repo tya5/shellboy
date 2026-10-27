@@ -14,6 +14,7 @@ use crate::{
 };
 
 pub mod activity;
+mod bell;
 mod chrome;
 mod composer;
 mod details;
@@ -495,6 +496,8 @@ pub enum UiAction {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    /// Committed recovery transition from any Thread, independent of selection.
+    RecoveryBell,
     ScopedManagement {
         context: ManagementContext,
         update: Box<UiUpdate>,
@@ -973,6 +976,7 @@ impl Confirmation {
     }
 }
 pub struct UiState {
+    bell: bell::Bell,
     autosave: autosave::Autosave,
     batching_updates: bool,
     retention_pending: bool,
@@ -1038,6 +1042,7 @@ impl UiState {
         let active = view.draft.draft_id.clone();
         let initialized = cwd.is_absolute();
         Self {
+            bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
             views: BTreeMap::from([(active.clone(), view)]),
             active,
@@ -1216,6 +1221,10 @@ impl UiState {
         }
     }
     fn apply_inner(&mut self, update: UiUpdate) {
+        if matches!(update, UiUpdate::RecoveryBell) {
+            self.bell.request(self.config.ui.bell, Instant::now());
+            return;
+        }
         self.touch_save_update(&update);
         if let UiUpdate::ScopedManagement { context, update } = update {
             if self.management.accepts(
@@ -1346,6 +1355,7 @@ impl UiState {
             _ => None,
         };
         match update {
+            UiUpdate::RecoveryBell => unreachable!("handled before selected-view updates"),
             UiUpdate::ScopedManagement { .. } => {
                 unreachable!("scoped result handled before normal updates")
             }
@@ -3778,10 +3788,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
                 .as_ref()
                 .and_then(|snapshot| snapshot.automatic_retry.as_ref())
         {
-            status_spans.push(Span::styled(
-                format!("（{}/{}）", retry.number, retry.limit),
-                style,
-            ));
+            status_spans.push(Span::styled(retry.label(), style));
         }
         status_spans.push(Span::styled(" · ", style));
     }
@@ -4006,6 +4013,7 @@ pub fn run_in_session(
         if state.is_stopped() {
             break;
         }
+        state.bell.flush(terminal.backend_mut(), Instant::now())?;
         for action in state.take_deferred_actions() {
             if let Err(error) = actions.try_send(action) {
                 state.deferred_actions.push(error.into_inner());
@@ -4363,6 +4371,8 @@ mod layout_cache_tests {
             Some(activity::AutomaticRetrySnapshot {
                 number: 1,
                 limit: 2,
+                delay_ms: 60_000,
+                partial_response_discarded: true,
             }),
             1,
         ));
@@ -4384,6 +4394,9 @@ mod layout_cache_tests {
             text
         };
         assert!(line(&terminal).contains("一時的なエラーのため再試行中（1/2）"));
+        assert!(line(&terminal).contains("60秒待機"));
+        assert!(line(&terminal).contains("途中応答を保存して作り直し"));
+        assert!(line(&terminal).contains("重複課金の可能性"));
         assert_ne!(terminal.backend().buffer()[(0, 0)].fg, theme::ATTENTION);
         ui.apply(update(activity::ActivityPhase::Completed, None, 2));
         terminal

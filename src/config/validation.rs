@@ -73,10 +73,10 @@ impl Connection {
                 "must be at least 1000 milliseconds",
             ));
         }
-        if self.response_max_retries > 5 {
+        if self.response_max_retries > 20 {
             return Err(invalid(
                 format!("connections.{name}.response_max_retries"),
-                "must be between 0 and 5",
+                "must be between 0 and 20",
             ));
         }
         if !(1..=300_000).contains(&self.response_retry_max_delay_ms) {

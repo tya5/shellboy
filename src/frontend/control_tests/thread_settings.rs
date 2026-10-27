@@ -45,7 +45,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         let response = control.request(request.clone()).await;
         assert!(response.ok, "{response:?}");
         assert!(
-            matches!(events.try_recv(), Ok(EngineEvent::Changed {thread_id}) if thread_id == "thread")
+            matches!(events.try_recv(), Ok(EngineEvent::Changed {thread_id, recovery: false}) if thread_id == "thread")
         );
         let details = response.result.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(15), async {

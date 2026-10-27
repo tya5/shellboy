@@ -64,6 +64,7 @@ pub struct Connection {
     pub request_timeout_ms: u64,
     pub response_max_retries: u32,
     pub response_retry_max_delay_ms: u64,
+    pub response_retry_partial: bool,
 }
 impl Default for Connection {
     fn default() -> Self {
@@ -75,8 +76,9 @@ impl Default for Connection {
             ssl_verify: true,
             stream_idle_timeout_ms: 600_000,
             request_timeout_ms: 60_000,
-            response_max_retries: 2,
-            response_retry_max_delay_ms: 30_000,
+            response_max_retries: 8,
+            response_retry_max_delay_ms: 60_000,
+            response_retry_partial: true,
         }
     }
 }
@@ -95,6 +97,7 @@ impl fmt::Debug for Connection {
                 "response_retry_max_delay_ms",
                 &self.response_retry_max_delay_ms,
             )
+            .field("response_retry_partial", &self.response_retry_partial)
             .finish()
     }
 }
@@ -291,7 +294,7 @@ pub enum CopyBackend {
     Os,
     Osc52,
 }
-section!(Ui { max_fps: u32 = 30, paste_fold_chars: usize = 1_000, paste_fold_lines: usize = 3, send_key: String = "Enter".into(), newline_keys: Vec<String> = vec!["Ctrl+J".into(), "Shift+Enter".into()], copy_backend: CopyBackend = CopyBackend::Auto });
+section!(Ui { bell: bool = true, max_fps: u32 = 30, paste_fold_chars: usize = 1_000, paste_fold_lines: usize = 3, send_key: String = "Enter".into(), newline_keys: Vec<String> = vec!["Ctrl+J".into(), "Shift+Enter".into()], copy_backend: CopyBackend = CopyBackend::Auto });
 section!(positive "logging", Logging {
     file_bytes: u64 = 5 * MIB,
     files: usize = 3

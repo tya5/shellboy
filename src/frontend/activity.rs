@@ -48,7 +48,7 @@ fn model_failure_message(
         limit: u32,
     }
     let counts: Exhausted = serde_json::from_str(exhausted?).ok()?;
-    if !(1..=5).contains(&counts.limit) || counts.retries < counts.limit || counts.retries > 5 {
+    if !(1..=20).contains(&counts.limit) || counts.retries < counts.limit || counts.retries > 20 {
         return None;
     }
     let suffix = format!(

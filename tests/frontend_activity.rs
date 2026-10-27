@@ -558,6 +558,8 @@ async fn retry_projection_requires_current_failed_attempt_and_live_running_turn(
     assert_eq!(retry.snapshot.phase, ActivityPhase::Retrying);
     let counts = retry.snapshot.automatic_retry.unwrap();
     assert_eq!((counts.number, counts.limit), (1, 2));
+    assert_eq!(counts.delay_ms, 1000);
+    assert!(!counts.partial_response_discarded);
     assert!(retry.snapshot.turn_in_progress);
     assert!(retry.poll_running);
     // Old-generation metadata cannot revive a cancelled/retried Turn.

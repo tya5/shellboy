@@ -178,6 +178,7 @@ async fn eof_retains_partial_text_and_raw_done_items() {
     assert_eq!(failure.error.kind, "incomplete");
     assert_eq!(failure.partial_text, "partial");
     assert_eq!(failure.completed_items[&0], item);
+    assert!(failure.retry.as_ref().unwrap().partial_output);
     assert_eq!(server.await.unwrap(), 1);
 }
 #[tokio::test]
@@ -200,6 +201,7 @@ async fn provider_errors_keep_explicit_code_and_never_infer_context_or_retry() {
         assert_eq!(failure.error.message, message);
         assert_eq!(failure.error.status, Some(400));
         assert_eq!(failure.error.is_context_limit(), context);
+        assert!(failure.retry.is_none());
         assert_eq!(server.await.unwrap(), 1);
     }
 }
@@ -695,6 +697,111 @@ async fn done_marker_without_typed_terminal_stays_incomplete_and_has_safe_diagno
     assert!(failure.error.message.contains("parsed_events=1"));
     assert!(failure.error.message.contains("done_markers=1"));
     assert!(failure.error.message.contains("last_event=untyped"));
-    assert!(failure.retry.is_none());
+    assert!(!failure.retry.as_ref().unwrap().partial_output);
     assert_eq!(server.await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn eof_retry_facts_use_semantic_output_rather_than_received_bytes() {
+    for (body, partial) in [
+        (Vec::new(), false),
+        (b": heartbeat\n\n".to_vec(), false),
+        (b"data: [DONE]\n\n".to_vec(), false),
+        (b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"fixture\",\"output\":[]}}\n\n".to_vec(), false),
+        (sse(&[json!({"type":"response.in_progress","response":{"output":[]}})]), false),
+        (sse(&[json!({"type":"response.reasoning_text.delta","delta":"thought"})]), true),
+        (sse(&[json!({"type":"response.function_call_arguments.delta","delta":"{"})]), true),
+        (sse(&[json!({"type":"response.output_item.added","item":{"type":"function_call"}})]), true),
+    ] {
+        let (client, _, server) = fake(200, "text/event-stream", body, 1).await;
+        let failure = client.response(response_request("fixture", vec![], None, true), CancellationToken::new(), None).await.unwrap_err();
+        assert_eq!(failure.error.kind, "incomplete");
+        assert_eq!(failure.retry.as_ref().unwrap().partial_output, partial);
+        assert_eq!(server.await.unwrap(), 1, "HTTP client never owns retries");
+    }
+}
+
+#[tokio::test]
+async fn malformed_or_terminal_invalid_streams_never_become_interrupt_retries() {
+    for body in [
+        b"data: {invalid}\n\n".to_vec(),
+        sse(&[
+            json!({"type":"response.failed","response":{"error":{"code":"unavailable","message":"failed"}}}),
+        ]),
+        sse(&[
+            json!({"type":"response.incomplete","response":{"status":"incomplete","output":[]}}),
+        ]),
+        sse(&[json!({"type":"response.completed","response":{"status":"completed"}})]),
+        sse(&[
+            json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"unknown"}]}}),
+        ]),
+        sse(&[
+            json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","role":"assistant","status":"in_progress","content":[]}]}}),
+        ]),
+    ] {
+        let (client, _, server) = fake(200, "text/event-stream", body, 2).await;
+        let failure = client
+            .response(
+                response_request("fixture", vec![], None, true),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(failure.retry.is_none(), "{}", failure.error);
+        assert_eq!(server.await.unwrap(), 1);
+    }
+}
+
+#[tokio::test]
+async fn broken_http_body_preserves_stream_observations_and_retry_facts() {
+    for (event, partial) in [
+        (
+            json!({"type":"response.created","response":{"id":"metadata","output":[]}}),
+            false,
+        ),
+        (
+            json!({"type":"response.output_text.delta","delta":"paid partial"}),
+            true,
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = HttpModelClient::new(Connection {
+            base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+            ..Default::default()
+        })
+        .unwrap();
+        let body = sse(&[event]);
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_request(&mut stream).await;
+            // Promise more HTTP bytes than are sent to force a transport-body
+            // interruption independently of the valid SSE frame boundary.
+            let head = format!(
+                "HTTP/1.1 200 Fixture\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len() + 100
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(&body).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let failure = client
+            .response(
+                response_request("fixture", vec![], None, true),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(failure.error.kind, "transport");
+        assert_eq!(failure.retry.as_ref().unwrap().partial_output, partial);
+        assert_eq!(
+            failure.partial_text,
+            if partial { "paid partial" } else { "" }
+        );
+        if !partial {
+            assert_eq!(failure.raw_response.unwrap()["id"], "metadata");
+        }
+        server.await.unwrap();
+    }
 }

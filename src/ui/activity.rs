@@ -89,10 +89,29 @@ pub struct RecoverySnapshot {
     pub stop_reason: Option<String>,
 }
 /// Counts recorded by the failed attempt before a finite retry wait.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct AutomaticRetrySnapshot {
     pub number: u64,
     pub limit: u64,
+    #[serde(default)]
+    pub delay_ms: u64,
+    #[serde(default)]
+    pub partial_response_discarded: bool,
+}
+impl AutomaticRetrySnapshot {
+    pub(super) fn label(&self) -> String {
+        format!(
+            "（{}/{}） · {}秒待機{} · 再送は重複課金の可能性",
+            self.number,
+            self.limit,
+            self.delay_ms.div_ceil(1000),
+            if self.partial_response_discarded {
+                " · 途中応答を保存して作り直し"
+            } else {
+                ""
+            }
+        )
+    }
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivitySnapshot {
@@ -499,6 +518,7 @@ mod tests {
             automatic_retry: Some(AutomaticRetrySnapshot {
                 number: 1,
                 limit: 2,
+                ..Default::default()
             }),
             ..awaiting("first")
         };

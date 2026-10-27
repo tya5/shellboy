@@ -4,6 +4,14 @@
 
 v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
+## Issue #11/#12: 長時間の再試行と復旧ベル（未リリース）
+
+会話の自動再試行を連続失敗予算へ変更し、正常応答の採用成功でリセットします。既定8回・指数待機上限60秒、metadataのみの切断/timeoutと部分応答の切断も対象にしました。部分応答は原文を保全して会話入力から除外し、response_retry_partial=falseで後者を無効化できます。Retry-Afterを600秒まで短縮せず待ち、超過は指定時間を示して復旧します。
+
+既定有効のui.bellは復旧CASのcommit後だけBELを出し、背景/子会話も対象に2秒で集約します。起動済み状態・停止・自動再試行待機では鳴らしません。新しい表・永続状態・worker・queue・依存は追加していません。既存broadcastはbest effortです。
+
+対象8群562件、別枠の61秒proxy障害（実測63.15秒）からの自動復帰、実binary/macOS PTYの有効/無効BEL数1/0を確認しました。最終静的検査と検証範囲は [acceptance](../validation/acceptance.md) に記録します。続いて#13は動作を維持するHTTP整理、#14は接続client再利用として独立commitで進めます。push・release・インストール済みbinaryの更新は行いません。
+
 ## Issue #10: 接続先固有の履歴item ID（未リリース）
 
 送信用copyからmessage/function_callの直下idだけを外し、call_id・phase・status・未知フィールド・同epoch reasoningを維持します。通常履歴・wrapper・直接role・保存済みspillに共通適用し、adapter版を2へ上げました。元DBとspill原文は書き換えません。

@@ -564,3 +564,30 @@ fn eof_diagnostics_distinguish_untyped_done_only_and_truncated_frames_without_co
     assert!(error.message.contains("last_event=other"));
     assert!(!error.message.contains(secret));
 }
+
+#[test]
+fn stream_output_observation_distinguishes_metadata_from_all_output_families() {
+    let mut metadata = ResponseStream::default();
+    metadata.push(b": heartbeat\n\n").unwrap();
+    for kind in ["response.created", "response.in_progress"] {
+        metadata
+            .push(event(&json!({"type":kind,"response":{"output":[]}})).as_bytes())
+            .unwrap();
+        assert!(!metadata.has_output(), "{kind}");
+    }
+    for value in [
+        json!({"type":"response.output_text.delta","delta":"answer"}),
+        json!({"type":"response.refusal.delta","delta":"no"}),
+        json!({"type":"response.reasoning_summary_text.delta","delta":"thought"}),
+        json!({"type":"response.reasoning_text.delta","delta":"thought"}),
+        json!({"type":"response.function_call_arguments.delta","delta":"{"}),
+        json!({"type":"response.output_item.added","item":{"type":"function_call"}}),
+        json!({"type":"response.content_part.added","part":{"type":"output_text","text":""}}),
+        json!({"type":"response.output_future_kind.delta"}),
+        json!({"type":"response.in_progress","response":{"output":[{"type":"reasoning"}]}}),
+    ] {
+        let mut stream = ResponseStream::default();
+        stream.push(event(&value).as_bytes()).unwrap();
+        assert!(stream.has_output(), "{value}");
+    }
+}

@@ -208,6 +208,7 @@ pub(super) async fn drive(
         if !may_execute {
             continue;
         }
+        retry_budget.succeeded();
         drop(prepared);
         let Some(group) = group else {
             continue;
@@ -344,9 +345,9 @@ async fn recover_preparation(
                 (turn,0)
             }
         };
-        recover_turn_tx(&tx,&thread,&run,&turn,generation,&error)?;
+        let recovered = recover_turn_tx(&tx,&thread,&run,&turn,generation,&error)?;
         tx.commit()?;
-        Ok(Some(turn))
+        Ok(recovered.then_some(turn))
     }).await.map_err(storage_error)?;
     if let Some(turn) = target {
         control
@@ -357,11 +358,33 @@ async fn recover_preparation(
                 turn_id: Some(turn),
                 execution_id: None,
             });
-        control.changed(&target_thread);
+        control.changed_with_recovery(&target_thread, true);
         control.nudge_owner(&target_run).await;
     }
     // Keep the original typed failure as the one driver error. The recovery
     // reason is persisted above; the caller must not silently report success.
+    Ok(())
+}
+
+// Audit-only received responses are retained through their live Turn, outside
+// thread_path/model replay. Share the same atomic insert/root revision boundary
+// for explicit recovery and automatic partial-response retries.
+fn save_received_failure(
+    db: &rusqlite::Connection,
+    turn: &str,
+    body: &Value,
+) -> Result<(), crate::storage::StorageError> {
+    let body = body.to_string();
+    db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,?2,'incomplete_response',?3,?4,?5)",params![id(),turn,now(),body,body.len() as i64])?;
+    if db.execute(
+        "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
+        [],
+    )? != 1
+    {
+        return Err(crate::storage::StorageError::Schema(
+            "root revision metadata missing".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -386,20 +409,30 @@ async fn recover(
     let thread_id = snapshot.thread.clone();
     let run_id = snapshot.run.clone();
     let snapshot = snapshot.clone();
-    control.store.database.call(move|db|{let tx=db.transaction()?;
-        recover_turn_tx(&tx,&snapshot.thread,&snapshot.run,&snapshot.turn,snapshot.generation,&error)?;
-        if let Some((attempt,mut body))=attempt{
-            body["attempt_id"] = json!(attempt);
-            super::state::incomplete_attempt(&tx, &attempt, &body, &now())?;
-            tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,?2,'incomplete_response',?3,?4,?5)",params![id(),snapshot.turn,now(),body.to_string(),body.to_string().len()as i64])?;
-            // Audit-only nodes are roots through their live Turn, without being
-            // selected for replay. Invalidate a GC mark made before this INSERT.
-            if tx.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",[])? != 1 {
-                return Err(crate::storage::StorageError::Schema("root revision metadata missing".into()));
+    let recovered = control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let recovered = recover_turn_tx(
+                &tx,
+                &snapshot.thread,
+                &snapshot.run,
+                &snapshot.turn,
+                snapshot.generation,
+                &error,
+            )?;
+            if let Some((attempt, mut body)) = attempt {
+                body["attempt_id"] = json!(attempt);
+                super::state::incomplete_attempt(&tx, &attempt, &body, &now())?;
+                save_received_failure(&tx, &snapshot.turn, &body)?;
             }
-        }
-        tx.commit()?;Ok(())}).await.map_err(storage_error)?;
-    control.changed(&thread_id);
+            tx.commit()?;
+            Ok(recovered)
+        })
+        .await
+        .map_err(storage_error)?;
+    control.changed_with_recovery(&thread_id, recovered);
     control.nudge_owner(&run_id).await;
     Ok(())
 }
@@ -775,3 +808,6 @@ async fn spill_and_summarize(
 
 #[cfg(test)]
 mod overflow_tests;
+
+#[cfg(test)]
+mod recovery_notification_tests;

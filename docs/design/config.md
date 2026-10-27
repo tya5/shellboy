@@ -28,9 +28,15 @@
 
 ## 接続ごとの会話再試行
 
-`connections.<名前>.response_max_retries` は0以上5以下の整数で既定2。初回要求に加えて行う会話Responses要求の自動再試行回数で、0は無効にする。`connections.<名前>.response_retry_max_delay_ms` は1以上300,000以下の整数で既定30,000ms。指数バックオフと `Retry-After` による1回の待機時間の上限とする。Rust DefaultとTOML省略時を揃え、負数・文字列・小数・範囲外整数は補正せず拒否する。owner再起動後の要求へ適用する。
+`connections.<名前>.response_max_retries` は0以上20以下の整数で既定8。会話Responses要求の連続する一時失敗に対し、初回要求に加えて行う自動再試行回数で、0は無効にする。最終responseの検証・保存・採用に成功した時点で連続失敗予算をリセットする。単なる受信開始やcontext超過の圧縮ではリセットしない。
 
-設定の消費者は会話Driverだけとし、HTTP層の透過再送、要約、embedding、モデル一覧には適用しない。受信前の一時的失敗だけが対象で、本文が空でもSSEやtool引数の断片を受信した要求は自動再試行しない。HTTPエラー本文の受信は生成ストリームの受信と区別する。`stream_idle_timeout_ms` による停滞は自動再試行の対象外で、`request_timeout_ms` の非ストリーム期限も変更しない。停止は再試行待機を取消し、既存attemptへ失敗・再試行を保存する。自動再試行は上流の未処理を保証せず、重複課金の可能性をなくす設定ではない。判定と実行順序は [model HTTP](model-http.md) に従う。
+`connections.<名前>.response_retry_max_delay_ms` は1以上300,000以下の整数で既定60,000ms。指数バックオフによる1回の待機時間の上限とする。サーバーの `Retry-After` はこの設定と別に固定600,000msを上限とする。`connections.<名前>.response_retry_partial` はboolで既定true。生成本文・tool引数を一部受信した通信切断、EOF、受信停滞timeoutも再試行対象にし、falseならそれらは復旧待ちにする。metadataやheartbeatだけで出力をまだ受け取っていない場合はfalseでも一時的な通信失敗の対象とする。Rust DefaultとTOML省略時を揃え、負数・文字列・小数・範囲外整数を補正せず拒否する。owner再起動後の要求へ適用する。
+
+設定の消費者は会話Driverだけとし、HTTP層の透過再送、要約、embedding、モデル一覧には適用しない。HTTPエラー本文は生成出力と区別し、認証・入力形式・明示provider失敗など恒久エラーを自動再送しない。部分応答を再試行するときも失敗attemptの受信本文は保存する。未採用のtool callは実行せず、停止は再試行待機を取消す。自動再試行は上流の未処理を保証せず、重複課金の可能性をなくす設定ではない。判定と実行順序は [model HTTP](model-http.md) に従う。
+
+## TUIの通知ベル
+
+`ui.bell` はboolで既定true。TUIが起動後に新たな復旧待ちを観測したとき、現在会話と背景会話のどちらも端末BELで通知する。起動時に既に存在する復旧待ちは通知せず、同じ復旧待ちの再取得・画面切替・再描画でも鳴らさない。複数の通知は2秒間隔へ集約し、ベル専用worker・永続event・保存状態を追加しない。既存UI通知からローカルに判断し、falseなら通知を無効化する。音・visual bell・画面flashの実際の表現は端末とmultiplexerの設定へ委ねる。詳細は [画面操作](../guides/tui.md#復旧待ちの通知ベル) に示す。
 
 ## R3-6: 設定検証の局所化
 
@@ -49,3 +55,5 @@ TUIは一つの端末sessionを先に開き、設定/保存先・owner lock・DB
 失敗は既存のtyped ApiErrorを人向け表示し、Enter/Esc/終了キーで確認後に端末を戻す。初期化失敗後のDB writerは閉じてから結果を返す。端末自体が壊れた場合は端末sessionを終了してから初期化/cleanupの完了を待ち、成功として扱わない。起動画面はUI-onlyかつ一回限りで、会話下書きや管理popupの状態へ混ぜない。
 
 取消単位は既存DataOwner初期化全体とし、途中futureをdropしない。既にこの単位へ入った場合、終了要求後もlock取得・migration・中断整理まで完了しうる。migration済みの変更を巻き戻したとは表示しない。その後のControl開始・接続口公開は次の取消検査で止める。これ以上細かい取消APIやCore状態を増やさず、実writerとlockの寿命を一貫させるための選択である。
+
+Retry-Afterが600秒（10分）を超える場合、600秒に短縮して再送せず、指定待機時間を保存・表示して復旧待ちにします。

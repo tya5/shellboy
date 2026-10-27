@@ -42,6 +42,8 @@ use tokio_util::sync::CancellationToken;
 pub enum EngineEvent {
     Changed {
         thread_id: String,
+        /// Committed transition fact for frontend attention; never a saved state.
+        recovery: bool,
     },
     Stream {
         thread_id: String,
@@ -239,8 +241,12 @@ impl Control {
         self.events.subscribe()
     }
     fn changed(&self, thread_id: &str) {
+        self.changed_with_recovery(thread_id, false);
+    }
+    fn changed_with_recovery(&self, thread_id: &str, recovery: bool) {
         let _ = self.events.send(EngineEvent::Changed {
             thread_id: thread_id.into(),
+            recovery,
         });
         self.changed.notify_waiters();
     }

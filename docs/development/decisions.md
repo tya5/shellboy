@@ -215,3 +215,18 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 - 影響: 通常履歴・item wrapper・spill内outputへ同じ変換を適用する。spillの保存時点ではIDを除去せず、古いspillを含めAPIへ送る際に正規化する。新しいschema、設定、worker、自動HTTP400再試行は追加しない。
 - 境界: 既存のowner再起動は復旧待ちを含む旧Runを停止するため、停止済みRunへの/retryを新たに許可しない。再オープンした同じThreadで新しい依頼を送る場合と、生存owner内の復旧待ちへの明示/retryを確認する。
 - 再確認条件: reasoningのID/暗号化本文に別provider互換問題が確認された場合は、そのprovider入力契約とepochを別途検討する。今回のmessage/function_callの処置をreasoningへ拡張しない。
+
+
+## 2026-10-27: 長時間の会話を連続失敗予算で再試行する（Issue #11）
+
+- 判断: Issue #7の「Turn全体の予算」「metadata/timeoutは対象外」を更新する。検証済み最終応答の採用後に連続失敗回数を0へ戻し、既定8回、指数待機上限60秒とする。正常終端前のEOF/transport/停滞timeoutを対象にし、生成出力ありでも既定で再試行する。response_retry_partial=falseで後者を止められる。
+- 理由: 数時間のtoolループで独立した一時失敗が累積し、前半の失敗によって後の復旧機会がなくなるため。出力のある途中応答も、未採用toolは実行されず、同じ応答の副作用を増やさずに作り直せる。ただし上流料金と生成時間は重複し得るため、証跡・表示・optoutを備える。OpenAI Docsの[streaming events](https://developers.openai.com/api/docs/guides/streaming-responses)に照合し、生存通知と生成出力を区別する。
+- 影響: 失敗attemptと部分受信監査を同じtransactionで保存し、監査本文を次のモデル入力へ再送しない。通常の採用/CAS/停止・GC境界は維持する。Retry-Afterは600秒まで指定どおり待ち、超過は復旧へ進める。指数上限で切り詰めて早期再送しない。要約/embedding/RAGの再試行、DB schema、依存、worker/queueは増やさない。
+- 再確認条件: 実proxyで連続的に復旧できない場合、固定予算と待機の実測を見直す。出力を持つ新eventや別providerのterminal契約は明示的に確認し、任意protocol失敗を通信一時失敗へ広げない。
+
+## 2026-10-27: 復旧のベルには既存Changedのcommit後の事実を使う（Issue #12）
+
+- 判断: 既存Changedに実際の復旧遷移を示すboolを付ける。UIのpending boolと単調時刻だけで2秒集約し、描画と同じ端末backendからBELを出す。
+- 理由: 選択Threadのsnapshotだけでは背景/子の復旧と速い再開を見逃す。全Threadの永続状態監視・無限の重複排除集合・専用worker/queueは増やさず、既存の復旧CASのcommit後に通知する。
+- 影響: 永続状態・wire・event種別は増やさない。既存broadcastの過負荷欠落、端末の音/点滅の無効化は到達保証の対象外とする。起動済み状態・停止・自動再試行待機では鳴らさない。
+- 再確認条件: 通知の永続配達が必要になった際は、今回のbest effortと区別して目的と費用を再検討する。

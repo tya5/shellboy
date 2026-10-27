@@ -99,7 +99,13 @@ pub(super) async fn retry_or_recover(
             }
         }
     }
+    let deferred = failure
+        .retry
+        .as_ref()
+        .and_then(|retry| retry.retry_after)
+        .filter(|delay| *delay > std::time::Duration::from_secs(600));
     let exhausted = failure.retry.is_some()
+        && deferred.is_none()
         && !failure.error.is_context_limit()
         && automatic_retries >= retry_limit
         && retry_limit > 0;
@@ -113,6 +119,9 @@ pub(super) async fn retry_or_recover(
     };
     let error=ApiError::new(ErrorCode::IoFailed,message).hint("Inspect the incomplete response and explicitly retry this Run; tools already saved are not re-executed");
     let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+    if let Some(delay) = deferred {
+        saved["automatic_retry_deferred"] = json!({"retry_after_ms":delay.as_millis().min(u64::MAX as u128) as u64,"maximum_automatic_wait_ms":600_000});
+    }
     if exhausted {
         saved["automatic_retry_exhausted"] =
             json!({"retries":automatic_retries,"limit":retry_limit});

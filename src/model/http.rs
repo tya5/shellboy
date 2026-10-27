@@ -51,6 +51,8 @@ pub struct AttemptFailure {
 #[derive(Debug)]
 pub struct ResponseRetry {
     pub retry_after: Option<std::time::Duration>,
+    /// Generated output was already observed; the driver owns the retry policy.
+    pub partial_output: bool,
 }
 impl From<ModelError> for AttemptFailure {
     fn from(error: ModelError) -> Self {
@@ -264,11 +266,16 @@ impl HttpModelClient {
             .response_attempt(request, cancel, events, &mut deadline)
             .await;
         result.map_err(|mut failure| {
-            if !deadline.has_body()
+            if failure.retry.is_none()
                 && failure.error.status.is_none()
-                && matches!(failure.error.kind.as_str(), "transport" | "incomplete")
+                && matches!(failure.error.kind.as_str(), "transport" | "timeout")
             {
-                failure.retry = Some(ResponseRetry { retry_after: None });
+                // SSE failures already carry semantic output observations. For an
+                // interrupted JSON body, conservatively treat any bytes as partial.
+                failure.retry = Some(ResponseRetry {
+                    retry_after: None,
+                    partial_output: deadline.has_body(),
+                });
             }
             failure
         })
@@ -310,7 +317,10 @@ impl HttpModelClient {
                 && matches!(error.kind.as_str(), "http" | "provider");
             let mut failure = AttemptFailure::from(error);
             if eligible {
-                failure.retry = Some(ResponseRetry { retry_after });
+                failure.retry = Some(ResponseRetry {
+                    retry_after,
+                    partial_output: false,
+                });
             }
             return Err(failure);
         }
@@ -422,15 +432,20 @@ impl HttpModelClient {
         let partial_text = parsed.partial_text.clone();
         let partial_reasoning = parsed.partial_reasoning.clone();
         let completed_items = parsed.completed_items.clone();
+        let interrupted = !parsed.is_terminal();
+        let partial_output = parsed.has_output();
         parsed
             .finish(tools_enabled)
             .map_err(|error| AttemptFailure {
+                retry: (interrupted && error.kind == "incomplete").then_some(ResponseRetry {
+                    retry_after: None,
+                    partial_output,
+                }),
                 error: redact(error, &secrets),
                 partial_text,
                 partial_reasoning,
                 completed_items,
                 raw_response,
-                retry: None,
             })
     }
     pub async fn embeddings(
@@ -573,13 +588,18 @@ fn failure(
     parsed: &ResponseStream,
     raw_response: Option<Value>,
 ) -> AttemptFailure {
+    let retry = (!parsed.is_terminal() && matches!(error.kind.as_str(), "transport" | "timeout"))
+        .then_some(ResponseRetry {
+            retry_after: None,
+            partial_output: parsed.has_output(),
+        });
     AttemptFailure {
         error,
         partial_text: parsed.partial_text.clone(),
         partial_reasoning: parsed.partial_reasoning.clone(),
         completed_items: parsed.completed_items.clone(),
         raw_response: parsed.failed_response().cloned().or(raw_response),
-        retry: None,
+        retry,
     }
 }
 async fn send_event(
@@ -634,10 +654,9 @@ async fn bounded_body(
 fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
     use std::time::Duration;
     let value = value.trim();
-    let cap = Duration::from_millis(300_000);
     if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
-        // An overflowing positive seconds value is still bounded by our cap.
-        return Some(Duration::from_secs(value.parse().unwrap_or(u64::MAX)).min(cap));
+        // Preserve long waits so the driver can decline rather than retry early.
+        return Some(Duration::from_secs(value.parse().unwrap_or(u64::MAX)));
     }
     chrono::DateTime::parse_from_rfc2822(value)
         .ok()
@@ -645,7 +664,6 @@ fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
             date.signed_duration_since(chrono::Utc::now())
                 .to_std()
                 .unwrap_or_default()
-                .min(cap)
         })
 }
 async fn http_error(
@@ -736,12 +754,13 @@ mod observation_tests {
         assert_eq!(parse_retry_after("0"), Some(Duration::ZERO));
         assert_eq!(
             parse_retry_after("999999999999999999999999999"),
-            Some(Duration::from_secs(300))
+            Some(Duration::from_secs(u64::MAX))
         );
-        assert_eq!(
-            parse_retry_after("Fri, 01 Jan 2100 00:00:00 GMT"),
-            Some(Duration::from_secs(300))
+        assert!(
+            parse_retry_after("Fri, 01 Jan 2100 00:00:00 GMT").unwrap() > Duration::from_secs(600)
         );
+        assert_eq!(parse_retry_after("600"), Some(Duration::from_secs(600)));
+        assert_eq!(parse_retry_after("601"), Some(Duration::from_secs(601)));
         assert_eq!(
             parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT"),
             Some(Duration::ZERO)

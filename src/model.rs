@@ -431,6 +431,7 @@ pub struct ResponseStream {
     differences: Vec<OutputMismatch>,
     total_differences: usize,
     last_event: Option<&'static str>,
+    output_observed: bool,
 }
 impl ResponseStream {
     /// Parsed events can be persisted/previewed. Tools are never started here.
@@ -457,6 +458,20 @@ impl ResponseStream {
         }
         // Apply the valid prefix before returning a later frame decode failure.
         for event in &events {
+            // Protocol metadata and heartbeats are not generated output. Unknown
+            // output-family events are conservative: do not silently discard them
+            // when a user has disabled retry after partial output.
+            let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+            self.output_observed |= kind.starts_with("response.output_")
+                || kind.starts_with("response.content_part.")
+                || kind.starts_with("response.function_call_arguments.")
+                || kind.starts_with("response.reasoning")
+                || kind.starts_with("response.refusal.")
+                || event
+                    .get("response")
+                    .and_then(|response| response.get("output"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|output| !output.is_empty());
             self.last_event = Some(match event.get("type").and_then(Value::as_str) {
                 Some("response.output_text.delta" | "response.refusal.delta") => "text_delta",
                 Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
@@ -545,6 +560,11 @@ impl ResponseStream {
             return Err(error);
         }
         Ok(events)
+    }
+    /// Whether any generated output item, content, or delta was observed.
+    /// Transport bytes, comments, created, and in-progress metadata alone do not count.
+    pub fn has_output(&self) -> bool {
+        self.output_observed
     }
     pub fn is_terminal(&self) -> bool {
         self.terminal.is_some()

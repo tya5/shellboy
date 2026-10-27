@@ -247,7 +247,7 @@ pub(super) fn recover_turn_tx(
     turn: &str,
     generation: i64,
     error: &ApiError,
-) -> Result<(), crate::storage::StorageError> {
+) -> Result<bool, crate::storage::StorageError> {
     let changed=tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json=?2 WHERE id=?1 AND generation=?3 AND state IN ('preparing','running','waiting')",params![turn,serde_json::to_string(error).unwrap_or_default(),generation])?;
     if changed > 0 {
         tx.execute(
@@ -262,7 +262,7 @@ pub(super) fn recover_turn_tx(
             json!({"thread_id":thread,"run_id":run,"turn_id":turn,"generation":generation,"state":"recovery_wait","error":error}),
         )?;
     }
-    Ok(())
+    Ok(changed > 0)
 }
 
 pub(super) fn owner_event(

@@ -2,6 +2,18 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #11/#12: 連続失敗の再試行と端末ベル（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `09feebe` から本節と同じcommitの変更です。合成fixtureと一時DB・loopback HTTPを使い、既定の利用者データ・設定を変更していません。
+
+- `cargo test --locked --lib --test config --test model --test model_http --test http_deadlines --test response_retries --test frontend_activity --test tui_recovery --no-fail-fast` の対象8群は562 passed / 0 failed / 4 ignored（下記の再実行を含み、重複計上なし）。初回は新規bell試験のDuration import漏れでcompile失敗。修正後は、tool周期を2→3へ増やしたfixtureのspill数期待が旧1のままで1件失敗し、最新を除く旧group2件という実際の対象に合わせて期待を2へ直しました。製品コードは変更せず、response_retries最終13 passed / 0 failed / 1 ignoredを確認しました。
+- 連続成功を挟んだ予算リセット、context圧縮だけではリセットしないこと、上限/0、metadata/partial EOF・切断・停滞timeout、partial optout、Retry-Afterの指定待機と600秒超の保留、停止・終了による待機取消しを検証。partial監査nodeは失敗attemptと同時保存し、採用path・次入力への混入と途中toolの実行がないことを確認しました。
+- ignoredの `default_retry_policy_survives_a_minute_long_proxy_outage` を明示実行し、既定予算と待機で61秒間のHTTP503障害を越え、63.15秒で正常完了（別枠1 passed）。外部APIや実利用proxyの障害を起こしたものではありません。
+- 復旧CASの更新後だけcommit後通知すること、同じ状態/旧generation/停止では通知しないこと、明示再開後の再遷移、準備失敗、非選択/子会話、起動時非再配信を確認しました。UIのbyte backendではBELだけ1byte、2秒集約、設定false、下書き/選択/overlay不変を確認しました。
+- 実debug binary（SHA-256 `c25972d458de15cbd83b89e1cab7c143b6ae321cebb62170a72ca87113601036`）をmacOS PTYで起動し、合成HTTP503再試行→400復旧を実行。起動時は無音、有効時はOSC外BEL1byte、無効時は0byte、両方とも要求2回/終了0でした。最初の補助手順は起動完了前に入力し要求0件だったため判定せず、F1表示を待つ手順で実行しました。
+
+最終all-target strict Clippyとfmt/diffは成功。変更差分の秘密情報検査をcommit前に実施します。Windows/会社proxy・端末の実音/点滅・WezTermやtmux等での体感確認、全70群の標準testはこの段階では未実施です。新しいschema/永続状態/worker/queue/依存は追加せず、外部モデルへの要求、push・release・インストール済みbinary更新は行いません。
+
 ## Issue #10: 接続先が混在する履歴の再送（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `609b244` から本節と同じcommitの変更です。送信用projectionだけでmessage/function_callの直下idを除去し、保存JSON、call_id、phase/status、未知・ネストフィールド、同epoch reasoningを保持します。

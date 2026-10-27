@@ -18,6 +18,7 @@ impl UiUpdate {
             | Self::EditRequestLoaded { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
             Self::ScopedManagement { .. }
+            | Self::RecoveryBell
             | Self::CommandOutcome { .. }
             | Self::Activity { .. }
             | Self::ActivityUnavailable { .. }

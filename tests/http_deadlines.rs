@@ -158,6 +158,7 @@ async fn stream_timeout_retains_partial_text_and_public_model_events() {
             .unwrap_err();
         assert_eq!(failure.error.kind, "timeout");
         assert_eq!(failure.partial_text, "already received");
+        assert!(failure.retry.as_ref().unwrap().partial_output);
         assert!(
             failure
                 .error
@@ -352,4 +353,27 @@ async fn separate_connections_do_not_share_stream_deadlines() {
     })
     .await
     .expect("per-connection deadline fixture failed to complete");
+}
+
+#[tokio::test]
+async fn inactivity_retry_facts_distinguish_headers_metadata_and_partial_json() {
+    timeout(Duration::from_secs(10), async {
+        let mut metadata = headers(200, "text/event-stream");
+        metadata.extend_from_slice(b": heartbeat\n\ndata: {\"type\":\"response.created\",\"response\":{\"output\":[]}}\n\n");
+        let mut json_partial = headers(200, "application/json");
+        json_partial.extend_from_slice(b"{\"output\":[");
+        for (initial, partial) in [
+            (Vec::new(), false),
+            (headers(200, "text/event-stream"), false),
+            (metadata, false),
+            (json_partial, true),
+        ] {
+            let (client, _, server) = stalled(Connection { stream_idle_timeout_ms: 500, ..Default::default() }, initial).await;
+            let failure = client.response(response_request("fixture", vec![], None, false), CancellationToken::new(), None).await.unwrap_err();
+            assert_eq!(failure.error.kind, "timeout");
+            assert_eq!(failure.retry.as_ref().unwrap().partial_output, partial);
+            server.abort();
+            let _ = server.await;
+        }
+    }).await.expect("inactivity classification escaped deadline");
 }

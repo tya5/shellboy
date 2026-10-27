@@ -136,13 +136,22 @@ struct Fixture {
 
 impl Fixture {
     async fn new(retries: u32, max_delay_ms: u64, idle_ms: u64) -> Self {
+        Self::with_partial_policy(retries, max_delay_ms, idle_ms, true).await
+    }
+
+    async fn with_partial_policy(
+        retries: u32,
+        max_delay_ms: u64,
+        idle_ms: u64,
+        partial: bool,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
         let (url, requests, server) = proxy().await;
         let config = root.path().join("config.toml");
         std::fs::write(
             &config,
             format!(
-                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\n"
+                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_retry_partial={partial}\n"
             ),
         )
         .unwrap();
@@ -299,16 +308,12 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn transient_http_errors_retry_consumed_error_bodies_with_a_bounded_retry_after() {
+async fn transient_http_errors_retry_consumed_error_bodies_with_bounded_backoff() {
     for status in [429, 500, 502, 503, 504] {
         let mut fixture = Fixture::new(2, 10, 5_000).await;
         let first = fixture.incoming().await;
         let original = first.body;
-        let retry_after = if status == 503 {
-            "Retry-After: Fri, 01 Jan 2100 00:00:00 GMT\r\n"
-        } else {
-            "Retry-After: 3600\r\n"
-        };
+        let retry_after = "Retry-After: invalid-fixture\r\n";
         first
             .reply
             .send(Reply::error(status, retry_after))
@@ -383,10 +388,10 @@ async fn retry_budget_is_exact_and_zero_disables_retries() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn retry_budget_survives_successful_tool_groups_and_context_overflow_spill() {
+async fn successful_tool_groups_reset_consecutive_budget_but_context_overflow_does_not() {
     let mut fixture = Fixture::new(2, 10, 5_000).await;
     let mut pending = fixture.incoming().await;
-    for number in 1..=2 {
+    for number in 1..=3 {
         pending.reply.send(Reply::error(503, "")).ok().unwrap();
         let retried = fixture.incoming().await;
         let response = json!({
@@ -417,6 +422,9 @@ async fn retry_budget_survives_successful_tool_groups_and_context_overflow_spill
                 })
         );
     }
+    // A transient failure before compaction belongs to the same pending chain.
+    pending.reply.send(Reply::error(503, "")).ok().unwrap();
+    let pending = fixture.incoming().await;
     pending.reply.send(Reply::http(
         400,
         "application/json",
@@ -430,6 +438,13 @@ async fn retry_budget_survives_successful_tool_groups_and_context_overflow_spill
             && serde_json::from_str::<Value>(item["output"].as_str().unwrap()).unwrap()["omitted"] == true
     }));
     spilled.reply.send(Reply::error(503, "")).ok().unwrap();
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(503, ""))
+        .ok()
+        .unwrap();
     assert_eq!(fixture.settled().await, "recovery_wait");
     let attempts = fixture.attempts().await;
     assert_eq!(
@@ -443,19 +458,25 @@ async fn retry_budget_survives_successful_tool_groups_and_context_overflow_spill
             "failed",
             "completed",
             "failed",
+            "completed",
+            "failed",
+            "failed",
+            "failed",
             "incomplete"
         ]
     );
+    for index in [0, 2, 4, 6] {
+        assert_eq!(
+            attempts[index].1.as_ref().unwrap()["automatic_retry"]["number"],
+            1
+        );
+    }
     assert_eq!(
-        attempts[0].1.as_ref().unwrap()["automatic_retry"]["number"],
-        1
-    );
-    assert_eq!(
-        attempts[2].1.as_ref().unwrap()["automatic_retry"]["number"],
+        attempts[8].1.as_ref().unwrap()["automatic_retry"]["number"],
         2
     );
     assert_eq!(
-        attempts[5].1.as_ref().unwrap()["automatic_retry_exhausted"],
+        attempts[9].1.as_ref().unwrap()["automatic_retry_exhausted"],
         json!({"retries":2,"limit":2})
     );
     let turn = fixture.accepted.turn_id.clone().unwrap();
@@ -467,12 +488,12 @@ async fn retry_budget_survives_successful_tool_groups_and_context_overflow_spill
             assert_eq!(
                 db.query_row("SELECT count(*) FROM shell_execution", [], |row| row
                     .get::<_, i64>(0))?,
-                2
+                3
             );
             assert_eq!(
                 db.query_row("SELECT count(*) FROM tool_result", [], |row| row
                     .get::<_, i64>(0))?,
-                2
+                3
             );
             assert_eq!(
                 db.query_row(
@@ -480,7 +501,7 @@ async fn retry_budget_survives_successful_tool_groups_and_context_overflow_spill
                     [],
                     |row| row.get::<_, i64>(0)
                 )?,
-                1
+                2 // Three tool groups leave two old groups eligible for spill.
             );
             assert_eq!(
                 db.query_row("SELECT generation FROM turn WHERE id=?1", [turn], |row| row
@@ -521,7 +542,7 @@ async fn losing_an_empty_response_body_retries_before_any_successful_response_by
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn any_successful_response_byte_blocks_replay_including_comments_and_tool_fragments() {
+async fn metadata_and_partial_output_transport_loss_retry_by_default_without_executing_tools() {
     let bodies = [
         ":".to_owned(),
         ": heartbeat\n\n".to_owned(),
@@ -541,23 +562,24 @@ async fn any_successful_response_byte_blocks_replay_including_comments_and_tool_
     let replies = bodies
         .iter()
         .map(|body| Reply::partial(body, false))
-        .chain([
-            Reply::http(200, "text/event-stream", ":", ""),
-            Reply { bytes: b"HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: 99999\r\nConnection: close\r\n\r\n{".to_vec(), hold_open: false },
-        ]);
+        .chain([Reply::http(200, "text/event-stream", ":", "")]);
     for reply in replies {
         let mut fixture = Fixture::new(2, 10, 5_000).await;
         fixture.incoming().await.reply.send(reply).ok().unwrap();
-        assert_eq!(fixture.settled().await, "recovery_wait");
+        let retried = fixture.incoming().await;
+        assert!(!retried.body.to_string().contains("visible partial text"));
+        assert!(!retried.body.to_string().contains("synthetic_call"));
+        retried.reply.send(Reply::success()).ok().unwrap();
+        assert_eq!(fixture.settled().await, "completed");
         let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts.len(), 2);
         assert!(
             attempts[0]
                 .1
                 .as_ref()
                 .unwrap()
                 .get("automatic_retry")
-                .is_none()
+                .is_some()
         );
         let tools: i64 = fixture
             .control
@@ -593,23 +615,55 @@ async fn permanent_http_and_successful_protocol_failures_are_not_retried() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn issue8_stall_timeout_never_automatically_retries_even_without_received_body_bytes() {
-    let mut fixture = Fixture::new(2, 10, 500).await;
-    fixture
-        .incoming()
-        .await
-        .reply
-        .send(Reply::partial("", true))
-        .ok()
-        .unwrap();
-    assert_eq!(fixture.settled().await, "recovery_wait");
-    let attempts = fixture.attempts().await;
-    assert_eq!(attempts.len(), 1);
-    let error = attempts[0].1.as_ref().unwrap();
-    assert!(error.to_string().contains("timeout"));
-    assert!(error.get("automatic_retry").is_none());
-    fixture.no_more_requests().await;
-    fixture.close().await;
+async fn stalled_empty_or_partial_response_retries_but_partial_optout_waits_for_recovery() {
+    for (body, partial, should_retry) in [
+        ("", false, true),
+        (": heartbeat\n\n", false, true),
+        (
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"timeout-partial\"}\n\n",
+            true,
+            true,
+        ),
+        (
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"timeout-partial\"}\n\n",
+            false,
+            false,
+        ),
+    ] {
+        let mut fixture = Fixture::with_partial_policy(2, 10, 300, partial).await;
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(Reply::partial(body, true))
+            .ok()
+            .unwrap();
+        if should_retry {
+            fixture
+                .incoming()
+                .await
+                .reply
+                .send(Reply::success())
+                .ok()
+                .unwrap();
+            assert_eq!(fixture.settled().await, "completed");
+            assert_eq!(fixture.attempts().await.len(), 2);
+        } else {
+            assert_eq!(fixture.settled().await, "recovery_wait");
+            assert_eq!(fixture.attempts().await.len(), 1);
+        }
+        let attempts = fixture.attempts().await;
+        assert!(
+            attempts[0]
+                .1
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains("timeout")
+        );
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -687,4 +741,121 @@ async fn owner_shutdown_cancels_a_persisted_retry_wait_without_another_request()
         .unwrap();
     fixture.server.abort();
     let _ = fixture.server.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn server_retry_after_is_honored_independently_of_short_exponential_cap() {
+    let mut fixture = Fixture::new(2, 10, 5_000).await;
+    let first = fixture.incoming().await;
+    let at = std::time::Instant::now();
+    first
+        .reply
+        .send(Reply::error(429, "Retry-After: 1\r\n"))
+        .ok()
+        .unwrap();
+    let second = fixture.incoming().await;
+    assert!(
+        at.elapsed() >= Duration::from_millis(900),
+        "server wait was shortened"
+    );
+    second.reply.send(Reply::success()).ok().unwrap();
+    assert_eq!(fixture.settled().await, "completed");
+    assert_eq!(
+        fixture.attempts().await[0].1.as_ref().unwrap()["automatic_retry"]["delay_ms"],
+        1000
+    );
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn server_retry_after_over_ten_minutes_is_deferred_instead_of_shortened() {
+    let mut fixture = Fixture::new(2, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 601\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 1);
+    let error = attempts[0].1.as_ref().unwrap();
+    assert!(error.get("automatic_retry").is_none());
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("automatic wait limit is 600s")
+    );
+    fixture.no_more_requests().await;
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn partial_retry_is_audited_outside_selected_history_and_never_replayed_or_executed() {
+    for partial_policy in [true, false] {
+        let mut fixture = Fixture::with_partial_policy(2, 10, 5_000, partial_policy).await;
+        let tool = json!({"type":"function_call","id":"unadopted_call","call_id":"must_not_execute",
+            "name":"shell","arguments":"{\"command\":\"echo never-run\"}"});
+        let body = format!(
+            "data: {}\n\ndata: {}\n\n",
+            json!({"type":"response.output_text.delta","delta":"paid-partial-fixture"}),
+            json!({"type":"response.output_item.done","output_index":0,"item":tool})
+        );
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(Reply::partial(&body, false))
+            .ok()
+            .unwrap();
+        if partial_policy {
+            let next = fixture.incoming().await;
+            assert!(!next.body.to_string().contains("paid-partial-fixture"));
+            assert!(!next.body.to_string().contains("must_not_execute"));
+            next.reply.send(Reply::success()).ok().unwrap();
+            assert_eq!(fixture.settled().await, "completed");
+        } else {
+            assert_eq!(fixture.settled().await, "recovery_wait");
+        }
+        fixture.control.store.database.call(|db| {
+            let (saved, selected): (String, i64) = db.query_row(
+                "SELECT n.payload_json, EXISTS(SELECT 1 FROM thread_path p WHERE p.node_id=n.id) FROM node n WHERE n.kind='incomplete_response'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            assert!(saved.contains("paid-partial-fixture"));
+            assert!(saved.contains("must_not_execute"));
+            assert_eq!(selected, 0, "failed partial response entered model replay");
+            assert_eq!(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get::<_, i64>(0))?, 0);
+            Ok(())
+        }).await.unwrap();
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real 61-second loopback outage; no external API or user data"]
+async fn default_retry_policy_survives_a_minute_long_proxy_outage() {
+    let defaults = shellboy::config::Connection::default();
+    let mut fixture = Fixture::new(
+        defaults.response_max_retries,
+        defaults.response_retry_max_delay_ms,
+        5_000,
+    )
+    .await;
+    let unavailable_until = std::time::Instant::now() + Duration::from_secs(61);
+    loop {
+        let incoming = fixture.incoming_with_timeout(70).await;
+        if std::time::Instant::now() >= unavailable_until {
+            incoming.reply.send(Reply::success()).ok().unwrap();
+            break;
+        }
+        incoming.reply.send(Reply::error(503, "")).ok().unwrap();
+    }
+    assert_eq!(fixture.settled().await, "completed");
+    let attempts = fixture.attempts().await;
+    assert!(attempts.len() >= 7);
+    assert_eq!(attempts.last().unwrap().0, "completed");
+    fixture.close().await;
 }

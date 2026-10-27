@@ -13,6 +13,12 @@ api_key_env = "SHELLBOY_API_KEY"
 # stream_idle_timeout_ms = 600000
 # Total timeout for non-streaming requests (models, embeddings); minimum 1000.
 # request_timeout_ms = 60000
+# Consecutive transient retries; successful adopted responses reset this budget.
+# response_max_retries = 8
+# Exponential backoff cap; Retry-After uses a separate fixed 10-minute cap.
+# response_retry_max_delay_ms = 60000
+# Retry interrupted partial streams; false keeps partial failures for manual recovery.
+# response_retry_partial = true
 # default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
 
 # Embeddings are optional. Enabling them indexes newly finalized conversation
@@ -26,3 +32,7 @@ tool_raw_days = 7
 tool_raw_bytes = 1073741824
 clipboard_days = 7
 clipboard_bytes = 268435456
+
+[ui]
+# Notify once when a new recovery wait needs attention (terminal bell).
+bell = true

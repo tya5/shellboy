@@ -8,7 +8,7 @@ HTTP(S)プロキシはreqwestの既存環境変数 `HTTP_PROXY` / `HTTPS_PROXY` 
 
 TLS設定は接続profileごとの `ssl_verify`（既定true）をクライアント生成時に適用する。falseはreqwestの `tls_danger_accept_invalid_certs(true)` に対応する。使用中のrustlsでは証明書チェーン・有効期限・ホスト名などの検証が省略され、自己署名の許可だけには限定されない。暗号化とSNIは維持する。HTTPS中継プロキシを利用する場合はAPI宛先がHTTPでもプロキシ証明書へ同じ検証設定を適用する。会話・要約・embedding・モデル一覧で同じクライアントを使い、他接続へ設定を伝播させない。redirect禁止とretry禁止は維持する。検証無効化を制御するライブラリの環境変数はなく、Shellboy独自のグローバル環境変数も追加しない。
 
-`response(request, CancellationToken, Option<mpsc::Sender<Value>>)` は `ModelResponse` または `AttemptFailure` を返す。失敗は元のModelError、部分本文、完了済みraw item、取得済みのraw responseを保持する。HTTPエラー時はモデル出力を捏造しない。SSEは `ResponseStream` を用いてバイト単位の分断・UTF-8分断・CRLFを復元し、completed全体を検査する。terminalイベントを受け取った時点でHTTP本文を閉じるため、proxyが接続を保持しても完了を待ち続けない。terminal前のEOFは復旧対象。未知出力形式は元responseを保持した互換性エラー。
+`response(request, CancellationToken, Option<mpsc::Sender<Value>>)` は `ModelResponse` または `AttemptFailure` を返す。失敗は元のModelError、部分本文、完了済みraw item、取得済みのraw responseを保持する。HTTPエラー時はモデル出力を捏造しない。SSEは `ResponseStream` を用いてバイト単位の分断・UTF-8分断・CRLFを復元し、completed全体を検査する。terminalイベントを受け取った時点でHTTP本文を閉じるため、proxyが接続を保持しても完了を待ち続けない。terminal前のEOFは以下の会話Driver再試行または復旧の対象。未知出力形式は元responseを保持した互換性エラー。
 
 任意のevent senderは有限チャネルで、満杯時はasync backpressureを掛ける。senderの送信待ちも取消し可能。受信側が閉じた場合は `consumer_closed` として失敗し、最終イベントを捨てた成功を返さない。送信の成功はチャネルへの引渡しであり、DB commitの完了ではない。採用・永続化・generation照合はControl/DB側の責務。イベントの到着自体でshellを開始しない。
 
@@ -44,19 +44,25 @@ item doneとの差分があれば先頭16件までの固定分類とoutput_index
 
 HTTP層がApiEndpointごとに同じ期限を適用する。Responses（会話・要約）は最後に非空のbody byte又はheaderを受信してからの受信停滞期限 `stream_idle_timeout_ms`（既定600000ms、0で無効）。header待ちも開始時点から対象とし、長時間の生成全体へ固定期限は付けない。SSEコメントや未完frameも受信として扱う。embeddingは要求全体の `request_timeout_ms`（既定60000ms、最小1000）、モデル一覧は同設定と20000msの小さい方。HTTP失敗本文にも同じ期限を適用し、呼出し側のRAG90秒timeoutは撤去する。
 
-取消しを優先して観測する。期限切れはModelError kind `timeout` とし、header/bodyの段階、観測経過、接続名を含む設定keyをローカルで生成する。provider本文やURLを期限切れ診断へ混ぜない。接続確立期限のreqwest errorもtimeoutへ分類する。SSEの部分本文・完了済みitem・raw responseは既存AttemptFailureで保全する。停滞timeoutは以下の会話自動再試行の対象にしない。
+取消しを優先して観測する。期限切れはModelError kind `timeout` とし、header/bodyの段階、観測経過、接続名を含む設定keyをローカルで生成する。provider本文やURLを期限切れ診断へ混ぜない。接続確立期限のreqwest errorもtimeoutへ分類する。SSEの部分本文・完了済みitem・raw responseは既存AttemptFailureで保全する。会話の停滞timeoutは以下の再試行条件で扱い、要約・索引・RAGの方針は変えない。
 
 transportのheader/非空body受信は、driver向けの既存32枠event channelでのみ単調時刻とともに渡す。通常response()のmodel event契約は維持し、driver向けresponse_observed()だけ型付きの受信通知を使う。driverからUIへの追加通知は先頭即時、その後最大1回/秒に制限し、最終受信の表示には1秒未満の観測差を許容する。HTTP期限自体は間引かない。単独通知はtry_sendで飽和時にまとめ、model eventへも元の受信時刻を添えることでbackpressure後の補完を行う。provider JSONや保存eventへ混入させず、UIは既存の活動時計で30秒以上の無受信を投影する。新しい表・worker・queue・永続lifecycleは追加しない。
 
-## 未受信の一時失敗の再試行（Issue #7）
+## 会話の連続一時失敗の再試行（Issue #7、#11）
 
-HTTP clientは従来どおり一要求一POSTとし、会話Driverだけが再試行を管理する。対象はHTTP429/500/502/503/504の通常エラー、または成功応答本文を1 byteも受け取る前のtransport失敗/空SSEのEOFに限る。HTTPエラー本文と成功応答本文は分ける。空でないSSE comment、metadata、JSON、tool引数の断片も受信済みであり、本文・推論の空文字だけから未受信を推定しない。timeout・取消し・protocol失敗、他status、HTTP200内のproviderエラーは対象外。#8の同じDeadline/body readerで受信の事実を観測する。
+HTTP clientは一要求一POSTを維持し、会話Driverが追加試行を管理する。HTTP429/500/502/503/504の通常エラーと、正常な終端に至る前のtransport切断・EOF・受信停滞timeoutを対象にする。取消し、protocol/JSON不正、失敗terminal、未知/不正な完成response、その他status、HTTP200内のproviderエラーは自動再試行しない。HTTP失敗本文の収集中に期限が切れた場合は、通常のHTTPエラーとは分けて従来どおり復旧へ進む。
 
-接続別response_max_retriesは既定2（0〜5）、response_retry_max_delay_msは既定30000ms（1〜300000）。最初1秒、次2秒の指数待機を上限で切り、Retry-Afterの秒またはHTTP dateが有効ならその値を優先し同じ上限で切る。不正値は通常待機。予算はTurn/generation内で共有し、成功やtool実行、context圧縮では補充しない。明示retryでgenerationが変わると新しい予算になる。再起動後に自動継続しない。
+SSEのresponse.created/in_progress、コメント・heartbeatだけは生成出力として数えない。output_item/content_partの追加・完了、本文/refusal/推論/tool引数のdelta等を観測した時点で出力ありとする。HTTPの生存観測と再試行用の出力観測を区別する。JSONの完成前に通信が切れた場合は、非空の本文を保守的に部分出力とする。接続別response_retry_partialは既定trueで、部分出力がある場合も同じ条件で再試行する。falseなら部分出力後は復旧待ちとし、metadataのみ/出力なしの一時失敗は引き続き対象とする。
 
-失敗attemptをfailedへ保存し、error_json.automatic_retryにnumber/limit/delay_ms/possible_duplicate_chargeを残してからChanged通知と取消し可能なsleepへ進む。この記録は次の試行を予約した事実で、HTTP再送済みの証明ではない。待機中の停止なら次のattemptは作らない。上流の二重処理・重複課金は防げない。次の要求は通常の受付/CAS/容量/添付/選択境界を再検証する。待機中はThread境界lockを保持せず、Run停止・owner停止を優先する。上限到達時は既存の復旧待ちにし、automatic_retry_exhaustedのretries/limitと最後のエラーを保存する。各実HTTP要求は新しいattempt、次要求のDeadlineも新しい要求で開始する。embedding/catalog/要約の再試行方針は変更しない。
+response_max_retriesは既定8、0〜20。連続した失敗に対する追加試行回数で、最終responseを検証・DBへ採用した後だけ0へ戻す。受信開始、tool実行だけ、context超過圧縮だけでは補充しない。Turn/generation変更でもリセットする。指数待機は1秒開始で倍にし、response_retry_max_delay_ms（既定60000、範囲1〜300000）で上限を設ける。既定8回では1/2/4/8/16/32/60/60秒、合計183秒となる。
 
-TUIは最新の同generationのfailed attemptのautomatic_retryを既存投影で読み、通常色のアニメーションと再試行回数を表示する。新しい表・永続状態・worker・queue・EngineEvent・依存を足さない。
+Retry-Afterの秒/HTTP dateが有効なら指数待機上限と別に、その指示を短縮せず待つ。固定600秒を超える場合は自動再送せず、指定待機時間と上限、automatic_retry_deferredを保全して復旧へ進む。不正な値は指数待機へ戻す。再起動後に自動継続しない。
+
+失敗attemptをfailedへ保存し、error_json.automatic_retryへnumber/limit/delay_ms/partial_response_discarded/possible_duplicate_chargeを残してからChanged通知と取消し可能なsleepへ進む。部分出力の場合は同じtransactionでincomplete_responseの監査nodeも保存し、GC root_revisionを更新する。通常の復旧保存と同じ処理を使う。保存した本文・完了item・raw responseは/receivedから参照でき、採用pathや次のモデル入力へ混入しない。失敗した途中のtool callは実行せず、正常な最終responseの採用成功後だけ実行する。
+
+記録は再試行を予定した事実で、HTTP送信済みの証明ではない。上流での生成料金の重複は防げない。各追加要求は新attemptとして通常の受付/CAS/容量/添付/選択境界を再確認する。Thread境界lockを待機中に保持せず、停止・owner終了が優先する。回数上限ではautomatic_retry_exhaustedに連続回数/上限を保存して復旧する。設定無効、永久失敗、Retry-After超過を回数上限と誤表示しない。
+
+TUIは既存projectionで同generationの最新failed attemptを読み、通常色の再試行アニメーション、回数、予定待機秒数、再送による重複課金の可能性を示す。途中応答を保存して作り直す場合も明示する。自動再試行待機は復旧待ちではないためベルを鳴らさない。新しい表、永続状態、worker、queue、依存は追加しない。
 
 ## EOF判定の実装監査とSSEの行境界
 
