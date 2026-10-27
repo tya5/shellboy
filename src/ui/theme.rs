@@ -11,6 +11,7 @@ pub(crate) const DEFAULT_BACKGROUND: Color = Color::Reset;
 pub(crate) const ACCENT: Color = Color::Cyan;
 pub(crate) const ATTENTION: Color = Color::LightRed;
 pub(crate) const WARNING: Color = Color::LightYellow;
+pub(crate) const SUCCESS: Color = Color::LightGreen;
 pub(crate) const SECTION_HEADING: Color = Color::LightCyan;
 pub(crate) const GROUP_HEADING: Color = Color::LightBlue;
 pub(crate) const REPLACEMENT: Color = Color::LightBlue;

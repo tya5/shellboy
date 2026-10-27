@@ -579,15 +579,16 @@ impl ThreadBrowser {
             let selected = row.index == selected_index;
             let current = active_thread == Some(thread.thread_id.as_str());
             let label = self.label(row, thread, selected, current, title_width);
-            let mut cells = vec![Cell::from(label)];
+            let status_style = state_style(&thread.state);
+            let mut cells = vec![Cell::from(label).style(status_style)];
             if cwd_width > 0 {
                 cells.push(Cell::from(tail_path(&thread.cwd, cwd_width)));
             }
             if state_width > 0 {
-                cells.push(Cell::from(fit(
-                    &one_line(state(&thread.state)),
-                    state_width,
-                )));
+                cells.push(
+                    Cell::from(fit(&one_line(state(&thread.state)), state_width))
+                        .style(status_style),
+                );
             }
             if time_width > 0 {
                 cells.push(Cell::from(self.short_time(thread, time_width)));
@@ -738,6 +739,18 @@ fn tail_path(path: &str, width: usize) -> String {
     format!("…{}", suffix.into_iter().rev().collect::<String>())
 }
 
+fn state_style(value: &str) -> Style {
+    Style::default().fg(match value {
+        "preparing" | "running" | "live" => theme::ACCENT,
+        "waiting" | "stopping" => theme::WARNING,
+        "recovery_wait" | "failed" => theme::ATTENTION,
+        "completed" => theme::SUCCESS,
+        // Inherit the row's foreground for inactive/unknown states so the
+        // selected row keeps its contrasting foreground on light terminals.
+        _ => return Style::default(),
+    })
+}
+
 fn state(value: &str) -> &str {
     match value {
         "preparing" => "準備",
@@ -877,6 +890,86 @@ mod tests {
             updated_at: "2026-10-25T09:30:00Z".into(),
             excerpt: "**選択した会話の抜粋**".into(),
         }
+    }
+
+    #[test]
+    fn state_colors_survive_selection_narrow_widths_and_same_id_refresh() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let states = [
+            ("running", theme::ACCENT),
+            ("preparing", theme::ACCENT),
+            ("live", theme::ACCENT),
+            ("waiting", theme::WARNING),
+            ("stopping", theme::WARNING),
+            ("recovery_wait", theme::ATTENTION),
+            ("failed", theme::ATTENTION),
+            ("completed", theme::SUCCESS),
+            ("stopped", theme::MUTED),
+            ("idle", theme::MUTED),
+            ("draft", theme::MUTED),
+            ("future_state", theme::MUTED),
+        ];
+        let items = states
+            .iter()
+            .enumerate()
+            .map(|(i, (state, _))| {
+                let mut item = thread(&format!("s{i}"), None);
+                item.title = format!("Q{i:02}");
+                item.state = (*state).into();
+                item
+            })
+            .collect::<Vec<_>>();
+        let mut tree = ThreadBrowser::default();
+        tree.open(String::new(), vec![], Some("s7".into()));
+        let generation = tree.generation();
+        assert!(tree.apply(generation, None, items.clone(), vec![], None, vec![], None));
+        let find_title = |buffer: &ratatui::buffer::Buffer, title: &str| {
+            buffer
+                .content
+                .chunks(buffer.area.width as usize)
+                .find_map(|row| {
+                    row.windows(title.len())
+                        .find(|cells| {
+                            cells.iter().map(|cell| cell.symbol()).collect::<String>() == title
+                        })
+                        .map(|cells| cells[0].clone())
+                })
+                .expect("thread title visible")
+        };
+        for width in [120, 24] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal
+                .draw(|frame| tree.draw(frame, frame.area(), None))
+                .unwrap();
+            for (i, (_, color)) in states.iter().enumerate() {
+                let cell = find_title(terminal.backend().buffer(), &format!("Q{i:02}"));
+                assert_eq!(cell.fg, *color, "width={width}, state={}", states[i].0);
+                if i == 7 {
+                    assert_eq!(cell.bg, theme::SELECTION_BACKGROUND);
+                }
+            }
+        }
+        let mut refreshed = items;
+        refreshed[7].state = "recovery_wait".into();
+        assert!(tree.apply(generation, None, refreshed, vec![], None, vec![], None));
+        assert_eq!(tree.items()[tree.selected()].thread_id, "s7");
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None))
+            .unwrap();
+        assert_eq!(
+            find_title(terminal.backend().buffer(), "Q07").fg,
+            theme::ATTENTION
+        );
+        let mut inactive = tree.items().to_vec();
+        inactive[7].state = "idle".into();
+        assert!(tree.apply(generation, None, inactive, vec![], None, vec![], None));
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None))
+            .unwrap();
+        let selected = find_title(terminal.backend().buffer(), "Q07");
+        assert_eq!(selected.fg, theme::SELECTION_FOREGROUND);
+        assert_eq!(selected.bg, theme::SELECTION_BACKGROUND);
     }
 
     #[test]

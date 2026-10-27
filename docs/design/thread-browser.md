@@ -75,3 +75,7 @@ Thread一覧のdrawはtimezone解決・日時解析を行わない。既存の�
 ## 一覧状態の所有（R4-4）
 
 既存ThreadTreeをThreadBrowserへ改名し、一覧内容・表示状態・選択・filter・cursor・loading/error・優先選択・request世代を同じ所有者へ移す。読込開始は一つのhelperでgeneration更新とloading/error初期化を行い、応答のgeneration/cursor検査・ID単位merge・2000件制限・選択復元・展開もここへ集約する。UiStateはローカル下書きの供給、Thread切替、help表示だけを担当し、keyのOutcomeを受け取る。drawはframe/area/現在Threadだけを受け取る。公開読取accessorから一覧を参照し、テストも実際のpage応答を適用して準備する。別一覧wrapper、汎用controller、Core状態は足さず、既存のキー・cursor・検索・原文詳細・現在Threadマーカの挙動を維持する。
+
+## 状態色（2026-10-27）
+
+一覧の取得済みThreadSummary.stateだけを表示へ投影し、タイトルと状態cellを同じ色にする。preparing/running/liveはシアン、waiting/stoppingは黄色、recovery_wait/failedは赤、completedは緑、stopped/idle/draft/未知値は既存の通常/選択行の前景色を継承する。状態名の文字と現在Thread/選択/親子の既存markerは保持し、色だけを唯一の情報にしない。状態列を省く狭幅でもタイトル色を維持する。選択背景・太字を残し、選択行の共通前景色で状態色を上書きしない。既存page更新で同じIDのstateが変われば再描画へ反映し、専用pollerやCore状態を追加しない。

@@ -2,6 +2,14 @@
 
 更新: 2026-10-27。最新のv0.1.2検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Thread一覧の状態色（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `029c42a` から本節と同じcommitの `src/ui/threads.rs` / `src/ui/theme.rs` の表示差分を確認しました。`cargo test --locked --lib ui::threads::tests` は13 passed / 0 failed。実TestBackendの120列/24列で既知11状態と未知状態のタイトル色を検証し、選択背景を残したまま完了の緑を保持すること、同IDの再取得で復旧待ちの赤へ変わることを確認しました。既存の森林・絞込み・page/世代・狭幅表示の回帰も同じ対象群に含みます。
+
+最終sourceの `cargo clippy --locked --lib -- -D warnings`、fmt/diffは成功しました。差分の秘密情報検査は検出0件です。
+
+一覧の取得済み状態の描画だけを変更し、追加の取得・監視や保存処理は加えていません。全体テスト、今回差分のWindows/Linux native CI、実端末GUIでの配色確認は未実施です。利用者DB・設定・インストール済みbinaryは変更していません。push・releaseは行っていません。
+
 ## Issue #6: 解決後の受信記録表示（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `3852333` から本節と同じcommitの表示差分で確認しました。`cargo test --locked --lib --test frontend --test frontend_activity --test tui_recovery --test ui --test ui_scroll_refresh --no-fail-fast` の統合5群111件が成功し、その後のfixture/旧文言期待値の修正後に `cargo test --locked --lib` の460 passed / 0 failed / 3 ignoredが成功しました。合計6群571件、重複実行は加算しません。最後の変更は試験fixtureのみで、成功した統合試験から製品コードは変わっていません。
