@@ -179,7 +179,7 @@ impl HttpModelClient {
         deadline.received();
         let status = response.status();
         if !status.is_success() {
-            return Err(http_error(response, cancel, &secrets, deadline).await);
+            return Err(http_error(response, cancel, &secrets, deadline, None).await);
         }
         let bytes = bounded_body(response, MAX_MODEL_CATALOG_BYTES, cancel, deadline, None).await?;
         let raw: Value = serde_json::from_slice(&bytes)
@@ -271,9 +271,11 @@ impl HttpModelClient {
         }
         let status = response.status();
         if !status.is_success() {
-            return Err(http_error(response, &cancel, &secrets, &mut deadline)
-                .await
-                .into());
+            return Err(
+                http_error(response, &cancel, &secrets, &mut deadline, events.as_ref())
+                    .await
+                    .into(),
+            );
         }
         let content_type = response
             .headers()
@@ -418,7 +420,7 @@ impl HttpModelClient {
         deadline.received();
         let status = response.status();
         if !status.is_success() {
-            return Err(http_error(response, &cancel, &secrets, &mut deadline).await);
+            return Err(http_error(response, &cancel, &secrets, &mut deadline, None).await);
         }
         let bytes =
             bounded_body(response, MAX_EMBEDDING_BYTES, &cancel, &mut deadline, None).await?;
@@ -594,6 +596,7 @@ async fn http_error(
     cancel: &CancellationToken,
     secrets: &[String],
     deadline: &mut Deadline,
+    events: Option<&Events>,
 ) -> ModelError {
     let status = response.status().as_u16();
     let mut stream = response.bytes_stream();
@@ -618,6 +621,9 @@ async fn http_error(
         };
         if !chunk.is_empty() {
             deadline.received();
+            if let Some(events) = events {
+                events.received(deadline.received_at());
+            }
         }
         let take = chunk.len().min(MAX_ERROR_BYTES - body.len());
         body.extend_from_slice(&chunk[..take]);
@@ -689,5 +695,55 @@ mod observation_tests {
         };
         let (result, ()) = tokio::join!(send, receive);
         result.unwrap();
+    }
+
+    #[tokio::test]
+    async fn error_body_bytes_refresh_transport_observation_before_timeout() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+            sync::oneshot,
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client = HttpModelClient::for_connection("error_body_fixture", Connection {
+                base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+                stream_idle_timeout_ms: 1000,
+                ..Default::default()
+            }).unwrap();
+            let (continue_body, wait_for_body) = oneshot::channel();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let mut bytes = [0; 1024];
+                    let count = stream.read(&mut bytes).await.unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&bytes[..count]);
+                }
+                stream.write_all(b"HTTP/1.1 503 Fixture\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":").await.unwrap();
+                wait_for_body.await.unwrap();
+                stream.write_all(b"{").await.unwrap();
+                std::future::pending::<()>().await;
+            });
+            let (send, mut receive) = mpsc::channel(4);
+            let response = tokio::spawn(async move {
+                client.response_observed(json!({"model":"fixture"}), CancellationToken::new(), Some(send)).await
+            });
+            // Headers and the first partial error-body bytes are distinct
+            // transport facts, even though neither is an assistant delta.
+            for _ in 0..2 {
+                assert!(matches!(receive.recv().await, Some(ObservedEvent::Received(_))));
+            }
+            continue_body.send(()).unwrap();
+            assert!(matches!(receive.recv().await, Some(ObservedEvent::Received(_))));
+            let failure = response.await.unwrap().unwrap_err();
+            assert_eq!(failure.error.kind, "timeout");
+            assert_eq!(failure.error.status, Some(503));
+            assert!(failure.error.message.contains("receiving HTTP error body"));
+            assert!(failure.partial_text.is_empty());
+            server.abort();
+            let _ = server.await;
+        }).await.expect("error body receive observations or deadline stalled");
     }
 }
