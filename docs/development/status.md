@@ -1,5 +1,12 @@
 # 開発状況
 
+## Issue #16〜#18（未公開）
+
+2026-10-28、#16〜#18の更新コメント（途中範囲omit）を取り込み、`e8153f6`へ実装・設計・ガイド・回帰試験をコミットしました。構造移動は`5ee28ba`へ分離。共通境界検証、切断後の決定論的縮小、範囲指定spill/summary/omit・prefix trim・復元、入力見積もり、TUIの縮小概要と`/restore`に対応しています。新規table/worker/queue/event/依存はありません。
+
+最終の標準checkはfmt・全target strict Clippy・70群1,219 passed / 0 failed / 19 ignoredで成功。CLI helpと同梱guideの実行、差分と追加2commitのgitleaks検出0を確認しました。[acceptance](../validation/acceptance.md)に根拠と未実施を記録。会社proxyの大context切断率改善・Windows実機は未確認です。省略元の要約はmarker全体単位、復元後も添付は自動再送しません。既定データ・設定・稼働process・インストール済み0.1.4を変更せず、push/releaseは行っていません。
+
+
 更新: 2026-10-27。検証済みsource `60847e3` を [v0.1.4](https://github.com/tya5/shellboy/releases/tag/v0.1.4) として公開しました。#15と#4/#9/#10/#11/#13/#14のレビュア指摘、#12の復旧通知を含みます。[最終3 OS CI](https://github.com/tya5/shellboy/actions/runs/40516537195) と [配布ビルド・起動確認・公開](https://github.com/tya5/shellboy/actions/runs/40518207186) は成功しました。全archiveの認証なし取得・SHA-256・同梱内容・CPU種別を確認済みです。
 
 ローカルbinaryも公開macOS版0.1.4へ更新し、配布版とのSHA-256一致とhelp/version/同梱ガイドを確認しました。binary SHA-256は `c014c22c4c0b9f09abd57dbbb90f576e5772dd71da48c5e2d662440df76723d4`。設定・既定DB・利用中processは変更せず、再起動から適用されます。v0.1.3と同じschema v9を使い、新設定を記入した後に旧版へ戻す際は新項目を除いてください。過去の未公開・未実施の記述は当時の記録で、最終公開結果は [acceptance](../validation/acceptance.md) を参照してください。

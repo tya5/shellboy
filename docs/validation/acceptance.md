@@ -1,5 +1,18 @@
 # 検証状況
 
+## Issue #16〜#18: 範囲編集と切断後の縮小（未公開）
+
+2026-10-28、macOS ARM64 / Rust 1.99.1。#16〜#18の本文と22:18 UTCの追加コメントを確認し、途中範囲omitを含めて実装しました。構造移動は`5ee28ba`で独立させました。最初のコンパイル確認でimport漏れとSQL countのRust型を直し、Clippyの単一Range配列の表記も修正。初回の標準`sh scripts/check.sh`はfmt・全target strict Clippy・70群1,215 passed / 0 failed / 19 ignoredで成功しました。
+
+一時DB/合成loopback HTTPで、現在の依頼を残した自動縮小、spillだけの達成、達成不能時の完全未変更、縮小後の再送成功・再失敗から復旧、同Turn/generationの一回制限、途中省略と後続保持の復元、添付excluded維持、GCの原文保持、selection/generation/停止・marker hashの遅着拒否、隠れた原文の要約とraw/cache保持、64k文字の完結group分割、operationの受付/同ID再送/downstreamを確認しました。
+
+最終レビューで旧compactの連続受付のまとめ処理を維持し、復元は最新作成markerを選ぶよう修正しました。L,L,E,Lの受付を2/1/1で処理し、明示編集を越えて結合せず、取消し済みworkerはAPI要求なしで全pendingを失敗へ回収することを検証。隠れた原文の要約時のキャッシュ無効suffixは、展開した原文ではなく編集前のmarker経路で測ります。追加試験のSQL count型もi64へ揃え、最終source `e8153f6` の `sh scripts/check.sh` は終了0、fmt・全target strict Clippy・70群1,219 passed / 0 failed / 19 ignoredでした。旧規則/通常compact/overflow/stop/receiptの既存試験も含みます。
+
+最終実行ファイルで `compact --help` に7個の新しいmode/endpoint flags、offline `docs get --id shellboy/history-and-search --limit-bytes 65536` のok:trueとomit/restore本文を確認。staged全差分と追加2commit（`7dfc96d..e8153f6`）のgitleaksは検出0。処理中・復旧枠の縮小表示、同generationの数値だけの投影、不正/巨大JSON拒否も試験済みです。実機のない環境をこの結果へ合算しません。
+
+既定DB・設定・稼働process・インストール済み0.1.4は変更していません。会社proxy、15万token超の実会話、Windows実機の端末操作、実proxyの切断率改善は未実施です。新規table/worker/queue/event/依存はありません。省略元の要約は一つのmarkerの元全体に限り、部分指定は正しい全体境界へ案内して拒否します。添付は原文復元だけでは再送対象に戻しません。push/releaseは今回の対象外です。
+
+
 更新: 2026-10-27。最新のv0.1.4検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
 ## v0.1.4公開・配布物とローカル更新
