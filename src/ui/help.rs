@@ -66,6 +66,11 @@ impl Page {
                 "現在の下書きと添付参照を消去する。送信済み依頼は保持",
             );
         }
+        if super::redraw::binding_available(config) {
+            page.entry("Ctrl+L", "画面全体を描き直す。下書き・選択・表示位置は保持");
+        } else {
+            page.entry("Ctrl+L", "画面再描画は無効（送信・改行キーの設定と重複）");
+        }
         page.entry("Ctrl+C", "現在の会話の処理を中断する");
         page.entry("Ctrl+Q / /quit", "保存・停止処理をしてアプリを終了する");
         page.entry("/", "コマンド候補を表示。↑↓で選び、Tabで補完");

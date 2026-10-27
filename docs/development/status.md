@@ -4,6 +4,12 @@
 
 v0.1.2と同じschema v9・保存先・既存CLIを使い、既存設定は編集せず引き継げます。新しい設定項目を記入した後にv0.1.2へ戻す際は、新項目を除いてください。旧tag・配布物は保持しています。以下の個別変更節にある未実施・未公開は当該変更時点の記録で、公開時点の最終結果は [検証状況](../validation/acceptance.md) のv0.1.3節を参照してください。
 
+## Issue #9: Ctrl+Lの全画面再描画（未リリース）
+
+通常UI・一覧・詳細・popup・選択固定中のCtrl+Lで、状態を保持して画面と差分buffer・リンク領域を無効化します。送信/改行へ同じキーを割り当てた場合は設定を優先し、helpへ無効理由を表示します。再描画予約はbool一つへ集約し、既存max_fpsで処理します。Core操作・表・worker・queue・依存は増やしていません。
+
+実PTYで物理cursor照会待ちを検出したため、同一viewportのresize経路でclear相当を行います。最終5群549 passed / 0 failed / 3 ignoredとall-target strict Clippy・fmtが成功しました。GUI端末の視覚確認とWindows実機検証は未実施です。保存データ・公開版・インストール済みbinaryは変更していません。
+
 ## EOF実装監査とSSE framing修正（未リリース）
 
 Windows/v0.1.2のEOF頻発報告を受け、自前parserで先頭BOMとCR単独改行によるcompleted取りこぼしを再現し、修正しました。BOMの単一completed streamは報告と同じEOF文言、CR単独はpartial EOFです。通常のcreated先行streamではBOMだけで頻発を説明できず、会社Windowsの実原因は未確定です。HTTP受信loopにEOF通知の追い越しやWindows専用parserは見つかっていません。

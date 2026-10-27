@@ -179,15 +179,21 @@ fn repeated_stable_snapshot_emits_no_cells_and_overlay_removes_existing_links() 
 #[test]
 fn terminal_clear_invalidates_link_metadata_and_redraws_current_viewport() {
     use ratatui::backend::ClearType;
-    let (mut backend, snapshot, bytes) = fixture("old link unchanged");
-    snapshot.borrow_mut().regions = vec![region(0, 3, "https://example.com")];
-    empty_draw(&mut backend);
-    backend.clear_region(ClearType::AfterCursor).unwrap();
-    snapshot.borrow_mut().regions.clear();
-    bytes.0.borrow_mut().clear();
-    empty_draw(&mut backend);
-    let text = recorded(&bytes);
-    assert!(text.contains("old link"));
-    assert!(text.contains("unchanged"));
-    assert!(!text.contains("https://"));
+    for full_screen in [false, true] {
+        let (mut backend, snapshot, bytes) = fixture("old link unchanged");
+        snapshot.borrow_mut().regions = vec![region(0, 3, "https://example.com")];
+        empty_draw(&mut backend);
+        if full_screen {
+            backend.clear().unwrap();
+        } else {
+            backend.clear_region(ClearType::AfterCursor).unwrap();
+        }
+        snapshot.borrow_mut().regions.clear();
+        bytes.0.borrow_mut().clear();
+        empty_draw(&mut backend);
+        let text = recorded(&bytes);
+        assert!(text.contains("old link"));
+        assert!(text.contains("unchanged"));
+        assert!(!text.contains("https://"));
+    }
 }

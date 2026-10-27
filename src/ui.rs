@@ -30,6 +30,7 @@ mod operations;
 mod overlay;
 mod popup;
 mod presentation;
+mod redraw;
 pub mod startup;
 mod terminal_guard;
 pub(crate) mod theme;
@@ -988,6 +989,7 @@ pub struct UiState {
     viewport: Rect,
     confirmation_scroll: u16,
     pub dirty: bool,
+    full_redraw_requested: bool,
     lifecycle: lifecycle::Lifecycle,
     // One static UI rejection, no pasted content; cleared by the next input gesture.
     input_notice: Option<&'static str>,
@@ -1047,6 +1049,7 @@ impl UiState {
             viewport: Rect::default(),
             confirmation_scroll: 0,
             dirty: true,
+            full_redraw_requested: false,
             lifecycle: Default::default(),
             input_notice: None,
             management: management::ManagementPopup::default(),
@@ -4027,20 +4030,11 @@ pub fn run_in_session(
             selecting = state.selection_mode;
         }
         state.animation_tick(Instant::now());
-        if state.dirty
-            && (!state.selection_mode || mode_changed)
-            && (mode_changed || last_draw.elapsed() >= frame_time)
-        {
-            terminal.draw(|frame| {
-                draw(frame, &mut state);
-                *link_snapshot.borrow_mut() = crate::terminal_links::LinkSnapshot {
-                    buffer: frame.buffer_mut().clone(),
-                    regions: state.visible_links.clone(),
-                };
-            })?;
+        if state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
+            redraw::draw_terminal(terminal, &mut state, link_snapshot)?;
             last_draw = Instant::now();
         }
-        let wait = if state.dirty && !state.selection_mode {
+        let wait = if state.dirty && (!state.selection_mode || state.full_redraw_requested) {
             frame_time
                 .saturating_sub(last_draw.elapsed())
                 .min(Duration::from_millis(25))

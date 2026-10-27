@@ -192,3 +192,10 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 - 理由: 修正前テストでBOMは実報告と同文言、CR単独はpartial EOFを再現した。HTTP受信順序にEOF追い越しは見つからず、Windows専用decoderも存在しない。BOM/CRは仕様上有効だが、会社Windowsの実wireが未観測なので頻発原因の確定とは分ける。
 - 調査性: 受信/解析/残留byte数と固定分類を既存errorに記録し、実データを新たに自動ログしない。Coreの状態・保存schemaや完成条件を緩めず、小さなtransport修正に限定する。
 - 再確認条件: 修正版でも頻発する場合、完了を示す受信データがどの形式で到着したかを診断結果から絞り、SSE event名や非標準終端の扱いを別途判断する。
+
+## 2026-10-27: Ctrl+Lは同一viewportの再描画へ集約する（Issue #9）
+
+- 判断: UIのbool予約一つで重複をまとめ、既存FPS制限内でfullscreen Terminal::resizeを同じareaへ呼ぶ。下書きやpopupを変更せず、Coreへ操作を送らない。
+- 理由: 初回の実PTY試験で、固定Ratatui版のTerminal::clearがget_cursor_positionのDSR応答を待つと確認した。実際のサイズ変更と同じ内部clear_viewportを使えば、端末への往復照会を増やさず、画面と差分bufferとリンクmetadataを無効化できる。
+- 影響: 選択固定中も手動再描画だけを許可する。送信/改行へのCtrl+L設定は優先し、ヘルプで無効理由を示す。周期的repaintや文字幅方針の変更は含めない。
+- 再確認条件: Ratatui更新時にclear/resizeのcursor照会・buffer無効化契約を見直す。Windows実端末での表示ずれ原因は別途確認する。

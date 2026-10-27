@@ -518,3 +518,9 @@ group見出しの折返し行数は通常描画と同じtool_header_lines/hangin
 初期のstream保持は状態未取得のため通常通知とし、既存DB投影で元Turnの状態を確認して分類する。再読・再起動・本文window取得も同じ保存済みTurn状態を用いる。スクロール位置を保持する既存previewのwindowにも最新の表示分類・見出し・source fieldを反映し、本文/offset/anchorは保持する。既存Changed/世代・view/root revision照合を用い、新しいCore状態・表・worker・eventを追加しない。
 
 受信一覧の投影はreceived/list.rsへ局所分割する。32件ページ・原文source/pageキーを維持し、人向けローカル時刻・元Turnの保存済み状態・同じTurnへ割当済みreceiptの依頼抜粋を表示する。別TurnやThread件名を依頼の代わりに使わず、本文がない場合は取得済みと偽らない。SQL側で抜粋を80字に制限し、制御文字・改行を既存sanitizeで表示用に正規化する。
+
+## 明示的な全画面再描画（Issue #9）
+
+Ctrl+Lは通常UI・一覧・詳細・popup・選択固定中のどの入力所有者でも、モデル操作を発行せず全画面再描画を予約する。下書き・revision・添付・選択・anchor・overlay・追従状態は変更しない。送信/改行へ同じキーを割り当てた場合はその設定を優先し、helpに再描画が無効な理由を示す。
+
+予約はUI所有のbool一つへ集約し、キー連打やRepeatを個別jobへ積まない。既存frame時刻とmax_fpsに従う描画直前に、同じviewportでTerminal::resizeを呼び、端末画面とRatatuiの差分bufferをリセットする。固定依存版のTerminal::clearは物理cursorの照会を待つため直接呼ばず、画面の大きさを変えないfullscreen resize経路でclear相当を行う。HyperlinkBackendのclear_regionが既にinvalidatedを立てるため、同じ経路でリンク領域を再構成する。選択固定中もこの明示描画だけは許可し、固定モード自体は解除しない。周期的full repaintや新しいworker/queue/Core状態は追加しない。幅の不一致など表示ずれの発生原因そのものの解決とは区別する。

@@ -2,6 +2,19 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #9: 明示的な全画面再描画（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `7dc1726` から本節と同じcommitの差分を確認しました。最終 `cargo test --locked --lib --test ui --test tui_process --test terminal_links --test tui_shutdown --no-fail-fast` は5群549 passed / 0 failed / 3 ignoredです。
+
+- TestBackendの描画面だけへ外部文字を書き、通常diffで残ること、Ctrl+Lの実描画経路で元bufferへ一致することを確認。composer/help/threads/details/operations/models/management/confirmation/selection/shutdownの各入力所有者で下書き・anchor・選択・overlay・notice・追従状態を保持します。
+- 設定したsend/newlineへのCtrl+L割当が優先され、helpへ無効理由を表示します。Repeat100件をbool一つにまとめ、frame時刻前は描画せず、明示操作だけ選択固定中に描画します。KeyReleaseで予約しません。
+- 実binary・macOS PTY・loopback HTTP mockで応答中の入力、完了、外部slaveへの直接文字出力、Ctrl+Lの画面消去、下書き/非追従anchorの再描画、正常終了を確認しました。初回はTerminal::clearの物理cursor照会待ちで失敗したため、固定Ratatuiの同一viewport resize経路へ修正し、全対象群を再実行して成功しました。
+- HyperlinkBackendのclear/clear_region後にリンクなしのviewport全体を再描画し、古いOSC 8 URLを出さないことを確認しました。
+- 最終all-target strict Clippy・fmt/diffは成功しました。Windows/Linux native CI、Windows Terminal/WezTerm/herdrのGUI視覚確認、実APIは未実施です。PTYの制御列確認をGUI端末の視覚的受入へ読み替えません。
+
+文字幅不一致など元の画面ずれの根因は未特定で、周期的再描画やCore変更は加えていません。今回push・release・ローカルbinaryの入替えは行いません。
+
+
 ## EOF実装監査とSSE framing（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1、公開済みv0.1.3から本節と同じcommitの変更を検証しました。報告元はWindows/v0.1.2であり、Windows実機・会社proxyの現象そのものは再現していません。v0.1.2〜v0.1.3で該当parserの終端判定は同じです。

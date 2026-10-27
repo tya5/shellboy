@@ -53,6 +53,13 @@ impl UiState {
         self.history_mouse_active()
     }
     pub fn event(&mut self, event: Event) -> Vec<UiAction> {
+        // A redraw gesture has no owner-specific input or status side effects.
+        if let Event::Key(key) = &event
+            && key.kind != KeyEventKind::Release
+            && self.request_full_redraw(*key)
+        {
+            return vec![];
+        }
         if matches!(&event, Event::Paste(_))
             || matches!(&event, Event::Key(key) if key.kind != KeyEventKind::Release)
         {

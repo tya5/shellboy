@@ -258,6 +258,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         },
         0
     );
+    let mut foreign_output = slave.try_clone().unwrap();
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
         .arg("--config")
         .arg(&config)
@@ -304,6 +305,32 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         "completed idle must stop terminal redraw bytes: {}",
         String::from_utf8_lossy(&idle)
     );
+    // An external terminal writer can invalidate the app's remembered screen.
+    foreign_output
+        .write_all(b"\x1b[3;79HFOREIGN_SCREEN_MARKER")
+        .unwrap();
+    let foreign = collect_output(&mut terminal, &mut output, Duration::from_millis(100)).await;
+    assert!(
+        foreign
+            .windows(b"FOREIGN_SCREEN_MARKER".len())
+            .any(|v| v == b"FOREIGN_SCREEN_MARKER")
+    );
+    terminal.write_all(&[0x0c]).unwrap(); // Ctrl+L
+    let repaint = collect_output(&mut terminal, &mut output, Duration::from_millis(350)).await;
+    assert!(
+        repaint.windows(4).any(|v| v == b"\x1b[2J"),
+        "manual repaint must clear the real terminal"
+    );
+    let text = emitted_text(&repaint);
+    assert!(
+        text.contains("EDITABLE_WHILE_WAITING"),
+        "draft must survive repaint: {text}"
+    );
+    assert!(
+        text.contains("Ctrl+Endで末尾へ"),
+        "scroll anchor/follow must survive repaint: {text}"
+    );
+    assert!(!text.contains("FOREIGN_SCREEN_MARKER"));
     terminal.write_all(&[0x11]).unwrap(); // Ctrl+Q after raw mode has disabled IXON.
     // A terminal emulator keeps reading while its child shuts down. Without
     // draining the master here, a final redraw can fill the PTY buffer and
