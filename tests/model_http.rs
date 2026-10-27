@@ -178,7 +178,7 @@ async fn eof_retains_partial_text_and_raw_done_items() {
     assert_eq!(failure.error.kind, "incomplete");
     assert_eq!(failure.partial_text, "partial");
     assert_eq!(failure.completed_items[&0], item);
-    assert!(failure.retry.as_ref().unwrap().partial_output);
+    assert!(failure.facts.received == shellboy::model::http::ResponseReceived::Output);
     assert_eq!(server.await.unwrap(), 1);
 }
 #[tokio::test]
@@ -201,7 +201,7 @@ async fn provider_errors_keep_explicit_code_and_never_infer_context_or_retry() {
         assert_eq!(failure.error.message, message);
         assert_eq!(failure.error.status, Some(400));
         assert_eq!(failure.error.is_context_limit(), context);
-        assert!(failure.retry.is_none());
+        assert_eq!(failure.facts.status, Some(400));
         assert_eq!(server.await.unwrap(), 1);
     }
 }
@@ -697,7 +697,10 @@ async fn done_marker_without_typed_terminal_stays_incomplete_and_has_safe_diagno
     assert!(failure.error.message.contains("parsed_events=1"));
     assert!(failure.error.message.contains("done_markers=1"));
     assert!(failure.error.message.contains("last_event=untyped"));
-    assert!(!failure.retry.as_ref().unwrap().partial_output);
+    assert_ne!(
+        failure.facts.received,
+        shellboy::model::http::ResponseReceived::Output
+    );
     assert_eq!(server.await.unwrap(), 1);
 }
 
@@ -716,7 +719,7 @@ async fn eof_retry_facts_use_semantic_output_rather_than_received_bytes() {
         let (client, _, server) = fake(200, "text/event-stream", body, 1).await;
         let failure = client.response(response_request("fixture", vec![], None, true), CancellationToken::new(), None).await.unwrap_err();
         assert_eq!(failure.error.kind, "incomplete");
-        assert_eq!(failure.retry.as_ref().unwrap().partial_output, partial);
+        assert_eq!(failure.facts.received == shellboy::model::http::ResponseReceived::Output, partial);
         assert_eq!(server.await.unwrap(), 1, "HTTP client never owns retries");
     }
 }
@@ -748,7 +751,11 @@ async fn malformed_or_terminal_invalid_streams_never_become_interrupt_retries() 
             )
             .await
             .unwrap_err();
-        assert!(failure.retry.is_none(), "{}", failure.error);
+        assert!(
+            failure.facts.terminal_received || failure.error.kind == "protocol",
+            "{}",
+            failure.error
+        );
         assert_eq!(server.await.unwrap(), 1);
     }
 }
@@ -794,7 +801,10 @@ async fn broken_http_body_preserves_stream_observations_and_retry_facts() {
             .await
             .unwrap_err();
         assert_eq!(failure.error.kind, "transport");
-        assert_eq!(failure.retry.as_ref().unwrap().partial_output, partial);
+        assert_eq!(
+            failure.facts.received == shellboy::model::http::ResponseReceived::Output,
+            partial
+        );
         assert_eq!(
             failure.partial_text,
             if partial { "paid partial" } else { "" }
@@ -803,5 +813,35 @@ async fn broken_http_body_preserves_stream_observations_and_retry_facts() {
             assert_eq!(failure.raw_response.unwrap()["id"], "metadata");
         }
         server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn complete_json_validation_failure_is_a_response_boundary_not_interrupted_transport() {
+    for raw in [
+        json!({"status":"in_progress","output":[]}),
+        json!({"status":"incomplete","output":[]}),
+        json!({"output":[]}),
+    ] {
+        let (client, _, server) = fake(
+            200,
+            "application/json",
+            serde_json::to_vec(&raw).unwrap(),
+            1,
+        )
+        .await;
+        let failure = client
+            .response(
+                response_request("fixture", vec![], None, false),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(failure.error.kind, "incomplete");
+        assert!(failure.facts.terminal_received);
+        assert_eq!(failure.facts.status, Some(200));
+        assert_eq!(failure.raw_response, Some(raw));
+        assert_eq!(server.await.unwrap(), 1);
     }
 }

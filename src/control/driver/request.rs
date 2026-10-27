@@ -177,9 +177,9 @@ pub(super) async fn stream_response(
                     });
                 }
                 let Some(event) = event else { continue; };
-                let kind=event.get("type").and_then(Value::as_str).unwrap_or("");
-                let reasoning=matches!(kind,"response.reasoning_summary_text.delta"|"response.reasoning_text.delta");
-                if (reasoning || matches!(kind,"response.output_text.delta"|"response.refusal.delta")) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();let _=control.events.send(EngineEvent::Stream{thread_id:thread.into(),node_id:attempt.into(),text:delta.into(),reasoning,stream_char_offset});}
+                let kind=model::classify_stream_event(&event);
+                let reasoning=kind==model::StreamEventKind::ReasoningDelta;
+                if matches!(kind,model::StreamEventKind::TextDelta|model::StreamEventKind::ReasoningDelta) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();let _=control.events.send(EngineEvent::Stream{thread_id:thread.into(),node_id:attempt.into(),text:delta.into(),reasoning,stream_char_offset});}
             }
         }
     }

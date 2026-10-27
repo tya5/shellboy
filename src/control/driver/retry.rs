@@ -1,8 +1,45 @@
-//! Consecutive conversation retries; the HTTP client never resends a request.
+//! Consecutive conversation retries; the HTTP client reports facts only.
 use super::*;
+use model::http::{ResponseFacts, ResponseReceived};
 use std::time::Duration;
 
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(600);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RetryPolicy {
+    Ineligible,
+    Retry { partial_output: bool },
+    Deferred(Duration),
+}
+
+/// The single policy boundary for a new chargeable conversation request.
+/// Transport readers report observations, not permission to resend.
+fn classify_retry(
+    error: &model::ModelError,
+    facts: &ResponseFacts,
+    retry_partial: bool,
+) -> RetryPolicy {
+    if facts.terminal_received || error.is_context_limit() {
+        return RetryPolicy::Ineligible;
+    }
+    let eligible = match error.kind.as_str() {
+        "http" | "provider" => matches!(facts.status, Some(429 | 500 | 502 | 503 | 504)),
+        "transport" | "timeout" | "incomplete" => facts
+            .status
+            .is_none_or(|status| (200..300).contains(&status)),
+        _ => false,
+    };
+    let partial_output = facts.received == ResponseReceived::Output;
+    if !eligible || (partial_output && !retry_partial) {
+        return RetryPolicy::Ineligible;
+    }
+    if let Some(delay) = facts.retry_after
+        && delay > MAX_RETRY_AFTER
+    {
+        return RetryPolicy::Deferred(delay);
+    }
+    RetryPolicy::Retry { partial_output }
+}
 
 #[derive(Default)]
 pub(super) struct RetryBudget {
@@ -22,19 +59,11 @@ impl RetryBudget {
     pub(super) fn succeeded(&mut self) {
         self.used = 0;
     }
-    fn delay(
-        &self,
-        limit: u32,
-        cap: Duration,
-        retry: &model::http::ResponseRetry,
-    ) -> Option<Duration> {
-        if self.used >= limit {
-            return None;
-        }
-        if let Some(delay) = retry.retry_after {
-            return (delay <= MAX_RETRY_AFTER).then_some(delay);
-        }
-        Some(Duration::from_millis(1_000u64 << self.used.min(20)).min(cap))
+    fn delay(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Option<Duration> {
+        (self.used < limit).then(|| {
+            retry_after
+                .unwrap_or_else(|| Duration::from_millis(1_000u64 << self.used.min(20)).min(cap))
+        })
     }
 }
 
@@ -51,31 +80,27 @@ pub(super) async fn retry_or_recover(
 ) -> Result<(), ApiError> {
     let connection = &control.store.config.connections[&snapshot.profile];
     let limit = connection.response_max_retries;
-    // Suppression is a per-connection policy, not a protocol/error reclassification.
-    if !connection.response_retry_partial
-        && failure
-            .retry
-            .as_ref()
-            .is_some_and(|retry| retry.partial_output)
-    {
-        failure.retry = None;
-    }
-    let delay = failure
-        .retry
-        .as_ref()
-        .filter(|_| !failure.error.is_context_limit())
-        .and_then(|retry| {
-            budget.delay(
-                limit,
-                Duration::from_millis(connection.response_retry_max_delay_ms),
-                retry,
-            )
-        });
+    let policy = classify_retry(
+        &failure.error,
+        &failure.facts,
+        connection.response_retry_partial,
+    );
+    let delay = if matches!(policy, RetryPolicy::Retry { .. }) {
+        budget.delay(
+            limit,
+            Duration::from_millis(connection.response_retry_max_delay_ms),
+            failure.facts.retry_after,
+        )
+    } else {
+        None
+    };
     if let Some(delay) = delay {
-        let partial = failure
-            .retry
-            .as_ref()
-            .is_some_and(|retry| retry.partial_output);
+        let partial = matches!(
+            policy,
+            RetryPolicy::Retry {
+                partial_output: true
+            }
+        );
         let body = json!({"error":failure.error,"partial_text":failure.partial_text,
             "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
             "raw_response":failure.raw_response,"attempt_id":attempt,
@@ -114,9 +139,7 @@ pub(super) async fn retry_or_recover(
         }
         return Ok(());
     }
-    if let Some(delay) = failure.retry.as_ref().and_then(|retry| retry.retry_after)
-        && delay > MAX_RETRY_AFTER
-    {
+    if let RetryPolicy::Deferred(delay) = policy {
         failure.error.message.push_str(&format!(
             "; server requested Retry-After {}s; automatic wait limit is 600s",
             delay.as_secs()
@@ -131,6 +154,7 @@ pub(super) async fn retry_or_recover(
         overflow,
         budget.used,
         limit,
+        policy,
     )
     .await
 }
@@ -141,44 +165,127 @@ mod tests {
     #[test]
     fn consecutive_budget_resets_only_after_adoption_or_turn_generation_change() {
         let mut budget = RetryBudget::default();
-        let hint = model::http::ResponseRetry {
-            retry_after: None,
-            partial_output: false,
-        };
         budget.observe("t", 1);
         for seconds in [1, 2, 4, 8, 16, 32, 60, 60] {
             assert_eq!(
-                budget.delay(8, Duration::from_secs(60), &hint),
+                budget.delay(8, Duration::from_secs(60), None),
                 Some(Duration::from_secs(seconds))
             );
             budget.used += 1;
             budget.observe("t", 1);
         }
-        assert_eq!(budget.delay(8, Duration::from_secs(60), &hint), None);
+        assert_eq!(budget.delay(8, Duration::from_secs(60), None), None);
         budget.succeeded();
         assert_eq!(
-            budget.delay(8, Duration::from_secs(60), &hint),
+            budget.delay(8, Duration::from_secs(60), None),
             Some(Duration::from_secs(1))
         );
         budget.used = 8;
         budget.observe("t", 2);
         assert_eq!(budget.used, 0);
-        assert_eq!(budget.delay(0, Duration::from_secs(60), &hint), None);
+        assert_eq!(budget.delay(0, Duration::from_secs(60), None), None);
         budget.used = 8;
         budget.observe("other", 2);
         assert_eq!(budget.used, 0);
     }
     #[test]
-    fn server_wait_is_never_shortened_and_longer_than_ten_minutes_is_deferred() {
+    fn server_wait_is_not_shortened_by_exponential_cap() {
         let budget = RetryBudget::default();
-        for seconds in [0, 1, 120, 600, 601] {
-            let hint = model::http::ResponseRetry {
-                retry_after: Some(Duration::from_secs(seconds)),
-                partial_output: false,
-            };
+        for seconds in [0, 1, 120, 600] {
             assert_eq!(
-                budget.delay(8, Duration::from_millis(10), &hint),
-                (seconds <= 600).then(|| Duration::from_secs(seconds))
+                budget.delay(
+                    8,
+                    Duration::from_millis(10),
+                    Some(Duration::from_secs(seconds))
+                ),
+                Some(Duration::from_secs(seconds))
+            );
+        }
+    }
+    #[test]
+    fn one_policy_classifies_error_status_reception_terminal_and_connection_optout() {
+        use ResponseReceived::{Metadata, None as NoResponse, Output};
+        for kind in [
+            "http",
+            "provider",
+            "transport",
+            "timeout",
+            "incomplete",
+            "protocol",
+            "cancelled",
+            "consumer_closed",
+        ] {
+            for status in [
+                None,
+                Some(200),
+                Some(400),
+                Some(401),
+                Some(429),
+                Some(500),
+                Some(501),
+                Some(502),
+                Some(503),
+                Some(504),
+            ] {
+                for received in [NoResponse, Metadata, Output] {
+                    for terminal_received in [false, true] {
+                        for partial_enabled in [false, true] {
+                            let facts = ResponseFacts {
+                                status,
+                                received,
+                                terminal_received,
+                                retry_after: None,
+                            };
+                            let error = model::ModelError::new(kind, "fixture");
+                            let expected = !terminal_received
+                                && (received != Output || partial_enabled)
+                                && match kind {
+                                    "http" | "provider" => {
+                                        matches!(status, Some(429 | 500 | 502 | 503 | 504))
+                                    }
+                                    "transport" | "timeout" | "incomplete" => {
+                                        status.is_none() || status == Some(200)
+                                    }
+                                    _ => false,
+                                };
+                            assert_eq!(
+                                classify_retry(&error, &facts, partial_enabled),
+                                if expected {
+                                    RetryPolicy::Retry {
+                                        partial_output: received == Output,
+                                    }
+                                } else {
+                                    RetryPolicy::Ineligible
+                                },
+                                "{kind} {facts:?} partial={partial_enabled}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let mut error = model::ModelError::new("provider", "fixture");
+        error.provider_code = Some("context_length_exceeded".into());
+        let mut facts = ResponseFacts {
+            status: Some(503),
+            ..Default::default()
+        };
+        assert_eq!(
+            classify_retry(&error, &facts, true),
+            RetryPolicy::Ineligible
+        );
+        error.provider_code = None;
+        for seconds in [0, 600, 601] {
+            facts.retry_after = Some(Duration::from_secs(seconds));
+            assert_eq!(
+                classify_retry(&error, &facts, true),
+                if seconds > 600 {
+                    RetryPolicy::Deferred(Duration::from_secs(seconds))
+                } else {
+                    RetryPolicy::Retry {
+                        partial_output: false,
+                    }
+                }
             );
         }
     }

@@ -1,0 +1,397 @@
+//! Responses reception preserves bounded recovery data and reports facts only.
+use super::body::{read_json, redact};
+use super::*;
+use crate::model::{MAX_RESPONSE_BYTES, ModelResponse, ResponseStream};
+use futures_util::StreamExt;
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ResponseReceived {
+    #[default]
+    None,
+    Metadata,
+    Output,
+}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ResponseFacts {
+    pub received: ResponseReceived,
+    pub status: Option<u16>,
+    pub retry_after: Option<std::time::Duration>,
+    /// A terminal SSE event or a fully parsed JSON response document arrived.
+    /// Validation failure after that boundary is distinct from interrupted transport.
+    pub terminal_received: bool,
+}
+impl ResponseFacts {
+    fn observe_stream(&mut self, parsed: &ResponseStream) {
+        if parsed.has_output() {
+            self.received = ResponseReceived::Output;
+        }
+        self.terminal_received = parsed.is_terminal();
+    }
+}
+#[derive(Debug)]
+pub struct AttemptFailure {
+    pub error: ModelError,
+    pub partial_text: String,
+    pub partial_reasoning: String,
+    pub completed_items: BTreeMap<u64, Value>,
+    pub raw_response: Option<Value>,
+    pub facts: ResponseFacts,
+}
+impl From<ModelError> for AttemptFailure {
+    fn from(error: ModelError) -> Self {
+        Self {
+            error,
+            partial_text: String::new(),
+            partial_reasoning: String::new(),
+            completed_items: BTreeMap::new(),
+            raw_response: None,
+            facts: ResponseFacts::default(),
+        }
+    }
+}
+impl HttpModelClient {
+    // Recovery needs the bounded partial text, items, and original response together.
+    #[allow(clippy::result_large_err)]
+    pub async fn response(
+        &self,
+        request: Value,
+        cancel: CancellationToken,
+        events: Option<mpsc::Sender<Value>>,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        self.response_inner(request, cancel, events.map(Events::Plain))
+            .await
+    }
+    // Preserve the same bounded recovery payload as response().
+    #[allow(clippy::result_large_err)]
+    pub(crate) async fn response_observed(
+        &self,
+        request: Value,
+        cancel: CancellationToken,
+        events: Option<mpsc::Sender<ObservedEvent>>,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        self.response_inner(request, cancel, events.map(Events::Observed))
+            .await
+    }
+    #[allow(clippy::result_large_err)]
+    async fn response_inner(
+        &self,
+        request: Value,
+        cancel: CancellationToken,
+        events: Option<Events>,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        let mut deadline = Deadline::new(
+            ApiEndpoint::Responses,
+            &self.connection,
+            &self.connection_name,
+        )?;
+        let mut facts = ResponseFacts::default();
+        self.response_attempt(request, cancel, events, &mut deadline, &mut facts)
+            .await
+            .map_err(|mut failure| {
+                failure.facts = facts;
+                failure
+            })
+    }
+    // Keep the existing bounded recovery payload intact across body parsing.
+    #[allow(clippy::result_large_err)]
+    async fn response_attempt(
+        &self,
+        mut request: Value,
+        cancel: CancellationToken,
+        events: Option<Events>,
+        deadline: &mut Deadline,
+        facts: &mut ResponseFacts,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        let Some(object) = request.as_object_mut() else {
+            return Err(ModelError::new("protocol", "Responses request must be an object").into());
+        };
+        object.insert("stream".into(), Value::Bool(true));
+        object.insert("store".into(), Value::Bool(false));
+        let tools_enabled = request
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty());
+        let (response, secrets) = self
+            .send(
+                ApiEndpoint::Responses,
+                reqwest::Method::POST,
+                Some(&request),
+                &cancel,
+                deadline,
+            )
+            .await?;
+        deadline.received();
+        if let Some(events) = &events {
+            events.received(deadline.received_at());
+        }
+        let status = response.status();
+        facts.status = Some(status.as_u16());
+        facts.received = ResponseReceived::Metadata;
+        if !status.is_success() {
+            facts.retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(parse_retry_after);
+            return Err(read_json(
+                response,
+                MAX_RESPONSE_BYTES,
+                "Proxy returned malformed JSON",
+                &cancel,
+                deadline,
+                events.as_ref(),
+                None,
+                &secrets,
+            )
+            .await
+            .err()
+            .expect("non-success HTTP status yields an error")
+            .into());
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if content_type == "application/json" {
+            return self
+                .response_json(
+                    response,
+                    &cancel,
+                    events.as_ref(),
+                    deadline,
+                    facts,
+                    &secrets,
+                    tools_enabled,
+                )
+                .await;
+        }
+        if content_type != "text/event-stream" {
+            return Err(ModelError::new(
+                "protocol",
+                "Expected text/event-stream or application/json from Responses endpoint",
+            )
+            .into());
+        }
+        self.response_sse(
+            response,
+            &cancel,
+            events.as_ref(),
+            deadline,
+            facts,
+            &secrets,
+            tools_enabled,
+        )
+        .await
+    }
+    #[allow(clippy::too_many_arguments, clippy::result_large_err)]
+    async fn response_json(
+        &self,
+        response: Response,
+        cancel: &CancellationToken,
+        events: Option<&Events>,
+        deadline: &mut Deadline,
+        facts: &mut ResponseFacts,
+        secrets: &[String],
+        tools_enabled: bool,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        let body = read_json(
+            response,
+            MAX_RESPONSE_BYTES,
+            "Proxy returned malformed JSON",
+            cancel,
+            deadline,
+            events,
+            Some(&mut *facts),
+            secrets,
+        )
+        .await?;
+        facts.terminal_received = true;
+        let raw = body.raw;
+        let result = match body.provider_error {
+            Some(error) => Err(error),
+            None => ModelResponse::completed(raw.clone(), tools_enabled),
+        };
+        let event_type = if raw.get("error").is_some_and(|e| !e.is_null()) {
+            "response.failed"
+        } else if raw.get("status").and_then(Value::as_str) == Some("completed") {
+            "response.completed"
+        } else {
+            "response.incomplete"
+        };
+        let event = json!({"type":event_type,"response":raw});
+        if let Some(sender) = events {
+            send_event(sender, event, cancel, deadline.received_at())
+                .await
+                .map_err(|error| raw_failure(error, raw.clone()))?;
+        }
+        result.map_err(|error| raw_failure(error, raw))
+    }
+    #[allow(clippy::too_many_arguments, clippy::result_large_err)]
+    async fn response_sse(
+        &self,
+        response: Response,
+        cancel: &CancellationToken,
+        events: Option<&Events>,
+        deadline: &mut Deadline,
+        facts: &mut ResponseFacts,
+        secrets: &[String],
+        tools_enabled: bool,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        let mut stream = response.bytes_stream();
+        let mut parsed = ResponseStream::default();
+        let mut raw_response = None;
+        loop {
+            let next = match deadline
+                .wait(cancel, "receiving response body", stream.next())
+                .await
+            {
+                Ok(next) => next,
+                Err(error) => return Err(failure(error, &parsed, raw_response)),
+            };
+            let Some(chunk) = next else {
+                break;
+            };
+            let chunk = match chunk {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    return Err(failure(
+                        transport_error(error, "receiving response body"),
+                        &parsed,
+                        raw_response,
+                    ));
+                }
+            };
+            if !chunk.is_empty() {
+                deadline.received();
+                if let Some(events) = &events {
+                    events.received(deadline.received_at());
+                }
+            }
+            let pushed = parsed.push(&chunk);
+            facts.observe_stream(&parsed);
+            let values = match pushed {
+                Ok(values) => values,
+                Err(error) => return Err(failure(redact(error, secrets), &parsed, raw_response)),
+            };
+            for value in values {
+                if let Some(raw) = value.get("response") {
+                    raw_response = Some(raw.clone());
+                }
+                if let Some(sender) = &events
+                    && let Err(error) =
+                        send_event(sender, value, cancel, deadline.received_at()).await
+                {
+                    return Err(failure(error, &parsed, raw_response));
+                }
+            }
+            // A terminal SSE event is the protocol boundary. Waiting for a proxy
+            // to close its HTTP connection would retain resources indefinitely.
+            if parsed.is_terminal() {
+                break;
+            }
+        }
+        if cancel.is_cancelled() {
+            return Err(failure(cancelled(), &parsed, raw_response));
+        }
+        let partial_text = parsed.partial_text.clone();
+        let partial_reasoning = parsed.partial_reasoning.clone();
+        let completed_items = parsed.completed_items.clone();
+        parsed
+            .finish(tools_enabled)
+            .map_err(|error| AttemptFailure {
+                error: redact(error, secrets),
+                partial_text,
+                partial_reasoning,
+                completed_items,
+                raw_response,
+                facts: ResponseFacts::default(),
+            })
+    }
+}
+fn raw_failure(error: ModelError, raw: Value) -> AttemptFailure {
+    let mut partial_text = String::new();
+    let mut completed_items = BTreeMap::new();
+    if let Some(output) = raw.get("output").and_then(Value::as_array) {
+        for (index, item) in output.iter().enumerate() {
+            if item
+                .get("status")
+                .and_then(Value::as_str)
+                .is_none_or(|s| s == "completed")
+            {
+                completed_items.insert(index as u64, item.clone());
+            }
+            if let Some(content) = item.get("content").and_then(Value::as_array) {
+                for part in content {
+                    if let Some(text) = part
+                        .get("text")
+                        .or_else(|| part.get("refusal"))
+                        .and_then(Value::as_str)
+                    {
+                        partial_text.push_str(text);
+                    }
+                }
+            }
+        }
+    }
+    AttemptFailure {
+        error,
+        partial_text,
+        partial_reasoning: String::new(),
+        completed_items,
+        raw_response: Some(raw),
+        facts: ResponseFacts::default(),
+    }
+}
+fn failure(
+    error: ModelError,
+    parsed: &ResponseStream,
+    raw_response: Option<Value>,
+) -> AttemptFailure {
+    AttemptFailure {
+        error,
+        partial_text: parsed.partial_text.clone(),
+        partial_reasoning: parsed.partial_reasoning.clone(),
+        completed_items: parsed.completed_items.clone(),
+        raw_response: parsed.failed_response().cloned().or(raw_response),
+        facts: ResponseFacts::default(),
+    }
+}
+pub(super) async fn send_event(
+    sender: &Events,
+    value: Value,
+    cancel: &CancellationToken,
+    received_at: std::time::Instant,
+) -> Result<(), ModelError> {
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(cancelled()),
+        result = async {
+            match sender {
+                Events::Plain(sender) => sender.send(value).await.map_err(|_| ()),
+                Events::Observed(sender) => sender.send(ObservedEvent::Model { value, received_at }).await.map_err(|_| ()),
+            }
+        } => result.map_err(|_| ModelError::new("consumer_closed", "Model event consumer closed before persistence")),
+    }
+}
+pub(super) fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
+    use std::time::Duration;
+    let value = value.trim();
+    if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+        // Preserve long waits so the driver can decline rather than retry early.
+        return Some(Duration::from_secs(value.parse().unwrap_or(u64::MAX)));
+    }
+    chrono::DateTime::parse_from_rfc2822(value)
+        .ok()
+        .map(|date| {
+            date.signed_duration_since(chrono::Utc::now())
+                .to_std()
+                .unwrap_or_default()
+        })
+}

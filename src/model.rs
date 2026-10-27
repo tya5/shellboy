@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 pub const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_ERROR_MESSAGE_CHARS: usize = 16_384;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -113,7 +114,7 @@ impl ModelError {
                 .and_then(Value::as_str)
                 .unwrap_or("Proxy returned an error without a message")
                 .chars()
-                .take(16_384)
+                .take(MAX_ERROR_MESSAGE_CHARS)
                 .collect(),
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
@@ -420,6 +421,38 @@ impl SseDecoder {
     }
 }
 
+/// Shared semantic event classification for recovery facts and live display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StreamEventKind {
+    Metadata,
+    Output,
+    TextDelta,
+    ReasoningDelta,
+}
+pub(crate) fn classify_stream_event(event: &Value) -> StreamEventKind {
+    let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "response.output_text.delta" | "response.refusal.delta" => StreamEventKind::TextDelta,
+        "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+            StreamEventKind::ReasoningDelta
+        }
+        _ if kind.starts_with("response.output_")
+            || kind.starts_with("response.content_part.")
+            || kind.starts_with("response.function_call_arguments.")
+            || kind.starts_with("response.reasoning")
+            || kind.starts_with("response.refusal.")
+            || event
+                .get("response")
+                .and_then(|response| response.get("output"))
+                .and_then(Value::as_array)
+                .is_some_and(|output| !output.is_empty()) =>
+        {
+            StreamEventKind::Output
+        }
+        _ => StreamEventKind::Metadata,
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ResponseStream {
     decoder: SseDecoder,
@@ -458,20 +491,15 @@ impl ResponseStream {
         }
         // Apply the valid prefix before returning a later frame decode failure.
         for event in &events {
-            // Protocol metadata and heartbeats are not generated output. Unknown
-            // output-family events are conservative: do not silently discard them
-            // when a user has disabled retry after partial output.
-            let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
-            self.output_observed |= kind.starts_with("response.output_")
-                || kind.starts_with("response.content_part.")
-                || kind.starts_with("response.function_call_arguments.")
-                || kind.starts_with("response.reasoning")
-                || kind.starts_with("response.refusal.")
-                || event
-                    .get("response")
-                    .and_then(|response| response.get("output"))
-                    .and_then(Value::as_array)
-                    .is_some_and(|output| !output.is_empty());
+            let classification = classify_stream_event(event);
+            self.output_observed |= classification != StreamEventKind::Metadata;
+            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                match classification {
+                    StreamEventKind::TextDelta => self.partial_text.push_str(delta),
+                    StreamEventKind::ReasoningDelta => self.partial_reasoning.push_str(delta),
+                    _ => {}
+                }
+            }
             self.last_event = Some(match event.get("type").and_then(Value::as_str) {
                 Some("response.output_text.delta" | "response.refusal.delta") => "text_delta",
                 Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
@@ -485,16 +513,6 @@ impl ResponseStream {
                 None => "untyped",
             });
             match event.get("type").and_then(Value::as_str) {
-                Some("response.output_text.delta" | "response.refusal.delta") => {
-                    if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                        self.partial_text.push_str(delta);
-                    }
-                }
-                Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
-                    if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                        self.partial_reasoning.push_str(delta);
-                    }
-                }
                 Some("response.output_item.done") => {
                     let index = event
                         .get("output_index")

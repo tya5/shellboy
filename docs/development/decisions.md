@@ -230,3 +230,11 @@ automatic_retryのnumberは保存後の待機を含む予約回数であり、HT
 - 理由: 選択Threadのsnapshotだけでは背景/子の復旧と速い再開を見逃す。全Threadの永続状態監視・無限の重複排除集合・専用worker/queueは増やさず、既存の復旧CASのcommit後に通知する。
 - 影響: 永続状態・wire・event種別は増やさない。既存broadcastの過負荷欠落、端末の音/点滅の無効化は到達保証の対象外とする。起動済み状態・停止・自動再試行待機では鳴らさない。
 - 再確認条件: 通知の永続配達が必要になった際は、今回のbest effortと区別して目的と費用を再検討する。
+
+
+## 2026-10-27: HTTP層は事実を返しDriverへ再試行判定を集める（Issue #13）
+
+- 判断: AttemptFailureの再送許可を受信事実ResponseFactsへ置き換え、対象判定をDriverのclassify_retryへ集約する。期限・有界JSON本文・Responses受信を通常のRust子moduleへ分ける。
+- 理由: Issue #11の動作を維持しつつ、EOF・HTTPエラー・transportごとの読取経路に再試行ポリシーを重複させない。完全なJSON responseの検証失敗と未終端EOFを別の事実として扱い、ModelError.kindの永続形式を変更しない。
+- 影響: 新しいworker/queue/依存/永続状態を追加しない。分類関数はDriverとResponseStreamで共有し、Deadlineは時間だけを持つ。HTTP methodとJSON本文の共通手順を抽出する。clientの再利用という挙動変更は別commitに分ける。
+- 再確認条件: 新event形式や別のHTTP要求を足す場合、受信の事実とポリシーを混同せず、同じ表形式の判定試験と既存の期限/原文保全回帰を通す。

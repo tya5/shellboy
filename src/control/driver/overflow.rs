@@ -56,6 +56,7 @@ pub(super) async fn retry_or_recover(
     overflow: &mut OverflowBudget,
     automatic_retries: u32,
     retry_limit: u32,
+    retry_policy: super::retry::RetryPolicy,
 ) -> Result<(), super::ApiError> {
     use super::*;
     let thread = &snapshot.thread;
@@ -99,14 +100,12 @@ pub(super) async fn retry_or_recover(
             }
         }
     }
-    let deferred = failure
-        .retry
-        .as_ref()
-        .and_then(|retry| retry.retry_after)
-        .filter(|delay| *delay > std::time::Duration::from_secs(600));
-    let exhausted = failure.retry.is_some()
-        && deferred.is_none()
-        && !failure.error.is_context_limit()
+    let deferred = if let super::retry::RetryPolicy::Deferred(delay) = retry_policy {
+        Some(delay)
+    } else {
+        None
+    };
+    let exhausted = matches!(retry_policy, super::retry::RetryPolicy::Retry { .. })
         && automatic_retries >= retry_limit
         && retry_limit > 0;
     let message = if exhausted {

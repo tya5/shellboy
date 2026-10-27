@@ -149,7 +149,7 @@ Bashでは `export SHELLBOY_PROXY_API_KEY='…'`、PowerShellでは `$env:SHELLB
 
 接続ごとの `response_max_retries` は既定8、指定範囲0〜20です。一時的なHTTPエラー・接続切断・EOF・受信停滞timeoutが連続した場合、この回数まで追加試行します。`0` で無効にできます。最終responseが検証・保存され採用された後は連続失敗回数がリセットされるため、長いtoolループの初期に失敗があっても、後の独立した一時失敗には再び予算を使えます。context超過の圧縮だけではリセットしません。
 
-`response_retry_max_delay_ms` は指数バックオフの1回の待機上限で、既定60,000ms、指定範囲1〜300,000msです。サーバーからの `Retry-After` はこの設定と別で最大600,000ms（10分）まで待ちます。停止すると待機も取消します。
+`response_retry_max_delay_ms` は指数バックオフの1回の待機上限で、既定60,000ms、指定範囲1〜300,000msです。サーバーからの `Retry-After` はこの設定と別で最大600,000ms（10分）まで待ちます。停止すると待機も取消します。 Retry-Afterが600秒（10分）を超える場合、600秒に短縮して再送せず、指定待機時間を保存・表示して復旧待ちにします。
 
 `response_retry_partial` は既定 `true` です。本文やtool引数を一部受信した後でも、一時的な通信切断・EOF・無通信期限なら再試行します。`false` にすると、部分出力がある失敗は自動再送せず復旧待ちにします。metadataやheartbeatだけで出力がない要求は `false` でも再試行対象です。認証・設定・入力形式・明示provider失敗などは自動再送しません。
 
@@ -228,5 +228,3 @@ raw/managed保持期限と会話保持は別です。会話・推論・要約に
 ## 照合先
 
 キー・既定・検証・OSパスは [config.rs](../../src/config.rs)、Threadへの設定保存は [DB操作](../../src/control/db.rs)、AGENTS読取りは [instructions.rs](../../src/instructions.rs)、送信境界は [driver.rs](../../src/control/driver.rs) と照合しています。設定の契約は [設定設計](../design/config.md) を参照してください。
-
-Retry-Afterが600秒（10分）を超える場合、600秒に短縮して再送せず、指定待機時間を保存・表示して復旧待ちにします。

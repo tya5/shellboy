@@ -2,6 +2,16 @@
 
 更新: 2026-10-27。最新のv0.1.3検証は以下の節を参照してください。初版・先行commitの結果は当時の記録として残します。
 
+## Issue #13: HTTP処理の構造整理（未リリース）
+
+2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `1a1ab57`。#11/#12の動作変更から分け、HTTP層に散らばった再送許可を受信事実へ移し、Driverのclassify_retryへ集約しました。Error.kindやDB保存形式、client生成時点は変更していません。
+
+- `cargo test --locked --lib --test config --test model --test model_http --test http_deadlines --test response_retries --test frontend_activity --test tui_recovery --no-fail-fast` は8群564 passed / 0 failed / 4 ignored。#11の対象試験を同じ動作で確認し、事実型への置換でHTTP試験のassertionを更新しています。新しいDriverの組合せ表試験と、完全なJSON文書のin_progress/incomplete等を通信中断として再送しない境界を追加しました。
+- 指数待機・Retry-After・取消し、partial原文保全/非採用、元toolの未実行、metadataと生成出力、HTTP error bodyの期限、完成済みJSONの検証失敗、SSE terminal後の待機打切りは既存回帰で成功しました。既存の61秒outage試験はこのcommitでは再実行せず、#11の結果と区別します。
+- 構造計測: http.rsの試験前の製品部分746→308行、response_attempt166→95行、HTTP側の再送許可生成4→0か所、Driverの対象判定はclassify_retryの1か所。新しいresponse.rs397行/body.rs163行を加えており、ファイル分割を総行数削減とは数えません。
+
+最終all-target strict Clippyとfmt/diffは成功。変更差分の秘密情報検査をcommit前に実施します。新しいworker/queue/永続状態/依存、API要求、既定DB/設定の変更、push・release・インストール済みbinary更新はありません。Windows/Linux native CI・会社proxy実機は未実施です。
+
 ## Issue #11/#12: 連続失敗の再試行と端末ベル（未リリース）
 
 2026-10-27、macOS ARM64 / Rust 1.99.1、変更前HEAD `09feebe` から本節と同じcommitの変更です。合成fixtureと一時DB・loopback HTTPを使い、既定の利用者データ・設定を変更していません。

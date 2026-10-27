@@ -1,6 +1,6 @@
 # Responses / embeddings HTTP transport
 
-API境界・接続契約・[adapter契約](adapters.md) を具体化する。実装は `src/model/http.rs`、ローカルHTTP fixtureは `tests/model_http.rs`。初期のAPI・接続仕様資料は非同梱。
+API境界・接続契約・[adapter契約](adapters.md) を具体化する。HTTP要求は `src/model/http.rs`、Responses受信は `src/model/http/response.rs`、本文処理は `src/model/http/body.rs`、期限は `src/model/http/deadline.rs` に分ける。ローカルHTTP fixtureは `tests/model_http.rs`。初期のAPI・接続仕様資料は非同梱。
 
 `HttpModelClient::new(Connection)` でURL・headerの静的契約を検査し、接続profileを固定する。資格情報の環境変数は要求を始める直前に取得する。認証不足ならHTTPを開始しない。Responses要求は同API rootの `/responses` へ一回POSTし、`stream:true` / `store:false` を強制する。model/effort/input/tool指定は要求側が組み立てた値を維持する。redirect、HTTPクライアントのretry、別APIへのfallbackは無効。接続確立timeoutは固定30秒。生成全体の期限は付けず、接続別の受信停滞期限と利用者の取消しで中断可能とする。
 
@@ -63,6 +63,16 @@ Retry-Afterの秒/HTTP dateが有効なら指数待機上限と別に、その�
 記録は再試行を予定した事実で、HTTP送信済みの証明ではない。上流での生成料金の重複は防げない。各追加要求は新attemptとして通常の受付/CAS/容量/添付/選択境界を再確認する。Thread境界lockを待機中に保持せず、停止・owner終了が優先する。回数上限ではautomatic_retry_exhaustedに連続回数/上限を保存して復旧する。設定無効、永久失敗、Retry-After超過を回数上限と誤表示しない。
 
 TUIは既存projectionで同generationの最新failed attemptを読み、通常色の再試行アニメーション、回数、予定待機秒数、再送による重複課金の可能性を示す。途中応答を保存して作り直す場合も明示する。自動再試行待機は復旧待ちではないためベルを鳴らさない。新しい表、永続状態、worker、queue、依存は追加しない。
+
+## 受信事実と再試行判定の分離（Issue #13）
+
+AttemptFailureはModelErrorと受信原文に加え、非永続のResponseFactsを返す。受信段階（未受信/metadata/出力）、HTTP status、Retry-After、応答境界到達を記録するだけで、HTTP層は再送の許可を返さない。応答境界はSSEのtyped terminal又は完全にparseされたJSON responseであり、その後の完成検証失敗を通信中断と混同しない。HTTPエラー本文のtimeoutなどもstatusを保持して会話Driverへ返す。
+
+Driver/retry.rsのclassify_retryが、error kind・status・受信段階・応答境界・partial optout・Retry-After上限を一度判定する。予算/待機計算と永続保存・取消しは従来のDriver責務に残す。ModelError.kindの保存形式は変更しない。ResponseFactsをDBの新しい正本状態にしない。
+
+model.rsのclassify_stream_eventをResponseStreamと表示用Driverが共用し、本文/推論delta、その他の出力、metadataを分類する。期限のDeadlineは時間だけを所有し、本文受信フラグを持たない。全体/停滞/無効はenumで表し、モデル一覧の20秒上限とエラー文字数上限は各定数を共用する。
+
+sendはHTTP methodを受け取ってGET/POSTの手順を共有する。モデル一覧・embedding・JSON Responsesは共通の有界JSON readerでstatus、HTTPエラー、本文上限、JSON、provider error、資格情報redactを処理し、各呼出し側がdata/responseを検証する。Responsesの原文保全・event配送・terminalでの終了時点・各要求の期限/取消し条件は維持する。接続clientの寿命とpoolはこの整理では変更せず、Issue #14へ分離する。
 
 ## EOF判定の実装監査とSSEの行境界
 

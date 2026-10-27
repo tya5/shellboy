@@ -30,7 +30,7 @@
 
 `connections.<名前>.response_max_retries` は0以上20以下の整数で既定8。会話Responses要求の連続する一時失敗に対し、初回要求に加えて行う自動再試行回数で、0は無効にする。最終responseの検証・保存・採用に成功した時点で連続失敗予算をリセットする。単なる受信開始やcontext超過の圧縮ではリセットしない。
 
-`connections.<名前>.response_retry_max_delay_ms` は1以上300,000以下の整数で既定60,000ms。指数バックオフによる1回の待機時間の上限とする。サーバーの `Retry-After` はこの設定と別に固定600,000msを上限とする。`connections.<名前>.response_retry_partial` はboolで既定true。生成本文・tool引数を一部受信した通信切断、EOF、受信停滞timeoutも再試行対象にし、falseならそれらは復旧待ちにする。metadataやheartbeatだけで出力をまだ受け取っていない場合はfalseでも一時的な通信失敗の対象とする。Rust DefaultとTOML省略時を揃え、負数・文字列・小数・範囲外整数を補正せず拒否する。owner再起動後の要求へ適用する。
+`connections.<名前>.response_retry_max_delay_ms` は1以上300,000以下の整数で既定60,000ms。指数バックオフによる1回の待機時間の上限とする。サーバーの `Retry-After` はこの設定と別に固定600,000msを上限とする。`connections.<名前>.response_retry_partial` はboolで既定true。生成本文・tool引数を一部受信した通信切断、EOF、受信停滞timeoutも再試行対象にし、falseならそれらは復旧待ちにする。metadataやheartbeatだけで出力をまだ受け取っていない場合はfalseでも一時的な通信失敗の対象とする。Rust DefaultとTOML省略時を揃え、負数・文字列・小数・範囲外整数を補正せず拒否する。owner再起動後の要求へ適用する。 Retry-Afterが600秒（10分）を超える場合、600秒に短縮して再送せず、指定待機時間を保存・表示して復旧待ちにします。
 
 設定の消費者は会話Driverだけとし、HTTP層の透過再送、要約、embedding、モデル一覧には適用しない。HTTPエラー本文は生成出力と区別し、認証・入力形式・明示provider失敗など恒久エラーを自動再送しない。部分応答を再試行するときも失敗attemptの受信本文は保存する。未採用のtool callは実行せず、停止は再試行待機を取消す。自動再試行は上流の未処理を保証せず、重複課金の可能性をなくす設定ではない。判定と実行順序は [model HTTP](model-http.md) に従う。
 
@@ -55,5 +55,3 @@ TUIは一つの端末sessionを先に開き、設定/保存先・owner lock・DB
 失敗は既存のtyped ApiErrorを人向け表示し、Enter/Esc/終了キーで確認後に端末を戻す。初期化失敗後のDB writerは閉じてから結果を返す。端末自体が壊れた場合は端末sessionを終了してから初期化/cleanupの完了を待ち、成功として扱わない。起動画面はUI-onlyかつ一回限りで、会話下書きや管理popupの状態へ混ぜない。
 
 取消単位は既存DataOwner初期化全体とし、途中futureをdropしない。既にこの単位へ入った場合、終了要求後もlock取得・migration・中断整理まで完了しうる。migration済みの変更を巻き戻したとは表示しない。その後のControl開始・接続口公開は次の取消検査で止める。これ以上細かい取消APIやCore状態を増やさず、実writerとlockの寿命を一貫させるための選択である。
-
-Retry-Afterが600秒（10分）を超える場合、600秒に短縮して再送せず、指定待機時間を保存・表示して復旧待ちにします。

@@ -3,14 +3,28 @@ use super::*;
 use std::{future::Future, time::Duration};
 use tokio::time::Instant;
 
+const MODEL_CATALOG_TIMEOUT_MS: u64 = 20_000;
+#[derive(Clone, Copy)]
+enum DeadlineKind {
+    Total {
+        limit: Duration,
+        endpoint: ApiEndpoint,
+    },
+    Inactivity(Duration),
+    Disabled,
+}
+impl DeadlineKind {
+    fn limit(&self) -> Duration {
+        match self {
+            Self::Total { limit, .. } | Self::Inactivity(limit) => *limit,
+            Self::Disabled => Duration::ZERO,
+        }
+    }
+}
 pub(super) struct Deadline {
     started: Instant,
     received: Instant,
-    body_received: bool,
-    limit: Duration,
-    idle: bool,
-    disabled: bool,
-    catalog: bool,
+    kind: DeadlineKind,
     setting: String,
 }
 impl Deadline {
@@ -19,23 +33,36 @@ impl Deadline {
         connection: &Connection,
         name: &str,
     ) -> Result<Self, ModelError> {
-        let idle = matches!(endpoint, ApiEndpoint::Responses);
-        let (milliseconds, key) = if idle {
-            (connection.stream_idle_timeout_ms, "stream_idle_timeout_ms")
-        } else {
-            (
-                if matches!(endpoint, ApiEndpoint::Models) {
-                    connection.request_timeout_ms.min(20_000)
+        let (kind, key) = match endpoint {
+            ApiEndpoint::Responses => {
+                let milliseconds = connection.stream_idle_timeout_ms;
+                (
+                    if milliseconds == 0 {
+                        DeadlineKind::Disabled
+                    } else {
+                        DeadlineKind::Inactivity(Duration::from_millis(milliseconds))
+                    },
+                    "stream_idle_timeout_ms",
+                )
+            }
+            _ => {
+                let milliseconds = if matches!(endpoint, ApiEndpoint::Models) {
+                    connection.request_timeout_ms.min(MODEL_CATALOG_TIMEOUT_MS)
                 } else {
                     connection.request_timeout_ms
-                },
-                "request_timeout_ms",
-            )
+                };
+                (
+                    DeadlineKind::Total {
+                        limit: Duration::from_millis(milliseconds),
+                        endpoint,
+                    },
+                    "request_timeout_ms",
+                )
+            }
         };
         let now = Instant::now();
-        let limit = Duration::from_millis(milliseconds);
         let setting = format!("connections.{name}.{key}");
-        if now.checked_add(limit).is_none() {
+        if now.checked_add(kind.limit()).is_none() {
             return Err(ModelError::new(
                 "config_invalid",
                 format!("{setting} exceeds the monotonic clock range"),
@@ -44,23 +71,12 @@ impl Deadline {
         Ok(Self {
             started: now,
             received: now,
-            body_received: false,
-            limit,
-            idle,
-            disabled: idle && milliseconds == 0,
-            catalog: matches!(endpoint, ApiEndpoint::Models),
+            kind,
             setting,
         })
     }
     pub(super) fn received(&mut self) {
         self.received = Instant::now();
-    }
-    pub(super) fn received_body(&mut self) {
-        self.body_received = true;
-        self.received();
-    }
-    pub(super) fn has_body(&self) -> bool {
-        self.body_received
     }
     pub(super) fn received_at(&self) -> std::time::Instant {
         self.received.into_std()
@@ -71,25 +87,24 @@ impl Deadline {
         stage: &str,
         future: F,
     ) -> Result<F::Output, ModelError> {
-        let deadline = if self.disabled {
-            None
-        } else {
-            Some(
-                if self.idle {
+        let deadline = match self.kind {
+            DeadlineKind::Disabled => None,
+            _ => Some(
+                (if matches!(self.kind, DeadlineKind::Inactivity(_)) {
                     self.received
                 } else {
                     self.started
-                }
-                .checked_add(self.limit)
+                })
+                .checked_add(self.kind.limit())
                 .ok_or_else(|| {
                     ModelError::new(
                         "config_invalid",
                         format!("{} exceeds the monotonic clock range", self.setting),
                     )
                 })?,
-            )
+            ),
         };
-        if !self.idle {
+        if matches!(self.kind, DeadlineKind::Total { .. }) {
             return tokio::select! {
                 biased;
                 _ = cancel.cancelled() => Err(cancelled()),
@@ -100,38 +115,47 @@ impl Deadline {
         tokio::select! {
             biased;
             _ = cancel.cancelled() => Err(cancelled()),
-            // A ready byte wins over an idle timer after local consumer backpressure.
+            // A ready byte wins after local consumer backpressure.
             result = future => Ok(result),
-            _ = async { if let Some(at) = deadline { tokio::time::sleep_until(at).await } else { std::future::pending::<()>().await } } => {
-                Err(self.timeout(stage))
-            }
+            _ = async { if let Some(at)=deadline {tokio::time::sleep_until(at).await} else {std::future::pending::<()>().await} } => Err(self.timeout(stage)),
         }
     }
     fn timeout(&self, stage: &str) -> ModelError {
-        let elapsed = if self.idle {
+        let inactivity = matches!(
+            self.kind,
+            DeadlineKind::Inactivity(_) | DeadlineKind::Disabled
+        );
+        let elapsed = if inactivity {
             self.received.elapsed()
         } else {
             self.started.elapsed()
+        };
+        let advice = if inactivity {
+            "set 0 to disable inactivity timeout".to_owned()
+        } else if matches!(
+            self.kind,
+            DeadlineKind::Total {
+                endpoint: ApiEndpoint::Models,
+                ..
+            }
+        ) {
+            format!("model list also has a fixed {MODEL_CATALOG_TIMEOUT_MS} ms cap")
+        } else {
+            "adjust the connection request timeout if needed".to_owned()
         };
         ModelError::new(
             "timeout",
             format!(
                 "HTTP {} timed out {stage} after {} ms (limit {} ms; {}; {})",
-                if self.idle {
+                if inactivity {
                     "receive inactivity"
                 } else {
                     "request"
                 },
                 elapsed.as_millis(),
-                self.limit.as_millis(),
+                self.kind.limit().as_millis(),
                 self.setting,
-                if self.idle {
-                    "set 0 to disable inactivity timeout"
-                } else if self.catalog {
-                    "model list also has a fixed 20000 ms cap"
-                } else {
-                    "adjust the connection request timeout if needed"
-                }
+                advice
             ),
         )
     }
@@ -195,12 +219,12 @@ mod tests {
             ..Default::default()
         };
         let models = Deadline::new(ApiEndpoint::Models, &config, "one").unwrap();
-        assert_eq!(models.limit, Duration::from_secs(20));
+        assert_eq!(models.kind.limit(), Duration::from_secs(20));
         let embeddings = Deadline::new(ApiEndpoint::Embeddings, &config, "one").unwrap();
-        assert_eq!(embeddings.limit, Duration::from_secs(90));
-        assert!(!embeddings.disabled);
+        assert_eq!(embeddings.kind.limit(), Duration::from_secs(90));
+        assert!(!matches!(embeddings.kind, DeadlineKind::Disabled));
         let responses = Deadline::new(ApiEndpoint::Responses, &config, "one").unwrap();
-        assert!(responses.disabled);
+        assert!(matches!(responses.kind, DeadlineKind::Disabled));
         let short = Connection {
             request_timeout_ms: 1000,
             ..config
@@ -208,7 +232,8 @@ mod tests {
         assert_eq!(
             Deadline::new(ApiEndpoint::Models, &short, "two")
                 .unwrap()
-                .limit,
+                .kind
+                .limit(),
             Duration::from_secs(1)
         );
     }

@@ -158,7 +158,7 @@ async fn stream_timeout_retains_partial_text_and_public_model_events() {
             .unwrap_err();
         assert_eq!(failure.error.kind, "timeout");
         assert_eq!(failure.partial_text, "already received");
-        assert!(failure.retry.as_ref().unwrap().partial_output);
+        assert!(failure.facts.received == shellboy::model::http::ResponseReceived::Output);
         assert!(
             failure
                 .error
@@ -371,7 +371,7 @@ async fn inactivity_retry_facts_distinguish_headers_metadata_and_partial_json() 
             let (client, _, server) = stalled(Connection { stream_idle_timeout_ms: 500, ..Default::default() }, initial).await;
             let failure = client.response(response_request("fixture", vec![], None, false), CancellationToken::new(), None).await.unwrap_err();
             assert_eq!(failure.error.kind, "timeout");
-            assert_eq!(failure.retry.as_ref().unwrap().partial_output, partial);
+            assert_eq!(failure.facts.received == shellboy::model::http::ResponseReceived::Output, partial);
             server.abort();
             let _ = server.await;
         }

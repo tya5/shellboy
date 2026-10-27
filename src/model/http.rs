@@ -1,19 +1,22 @@
 //! Native asynchronous HTTP transport. No request retry or alternate API fallback.
-use super::{MAX_RESPONSE_BYTES, ModelError, ModelResponse, ResponseStream};
+use super::ModelError;
 use crate::config::{ApiEndpoint, Config, Connection};
-use futures_util::StreamExt;
+mod body;
 mod deadline;
+mod response;
+use body::read_json;
 use deadline::{Deadline, transport_error};
 use reqwest::{
     Client, Response,
     header::{HeaderMap, HeaderName, HeaderValue},
 };
+pub use response::{AttemptFailure, ResponseFacts, ResponseReceived};
+#[cfg(test)]
+use response::{parse_retry_after, send_event};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-const MAX_ERROR_BYTES: usize = 64 * 1024;
 const MAX_EMBEDDING_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MODEL_CATALOG_BYTES: usize = 2 * 1024 * 1024;
 const MAX_MODEL_CATALOG_ENTRIES: usize = 10_000;
@@ -38,34 +41,6 @@ impl Events {
     }
 }
 
-#[derive(Debug)]
-pub struct AttemptFailure {
-    pub error: ModelError,
-    pub partial_text: String,
-    pub partial_reasoning: String,
-    pub completed_items: BTreeMap<u64, Value>,
-    pub raw_response: Option<Value>,
-    /// Present only when transport facts permit a fresh conversation attempt.
-    pub retry: Option<ResponseRetry>,
-}
-#[derive(Debug)]
-pub struct ResponseRetry {
-    pub retry_after: Option<std::time::Duration>,
-    /// Generated output was already observed; the driver owns the retry policy.
-    pub partial_output: bool,
-}
-impl From<ModelError> for AttemptFailure {
-    fn from(error: ModelError) -> Self {
-        Self {
-            error,
-            partial_text: String::new(),
-            partial_reasoning: String::new(),
-            completed_items: BTreeMap::new(),
-            raw_response: None,
-            retry: None,
-        }
-    }
-}
 #[derive(Debug)]
 pub struct EmbeddingResponse {
     /// Vectors in the same order as input, independent of provider data order.
@@ -130,7 +105,8 @@ impl HttpModelClient {
     async fn send(
         &self,
         endpoint: ApiEndpoint,
-        request: &Value,
+        method: reqwest::Method,
+        request: Option<&Value>,
         cancel: &CancellationToken,
         deadline: &Deadline,
     ) -> Result<(Response, Vec<String>), ModelError> {
@@ -147,14 +123,16 @@ impl HttpModelClient {
             ApiEndpoint::Responses => "text/event-stream, application/json",
             ApiEndpoint::Embeddings | ApiEndpoint::Models => "application/json",
         };
-        let request = self
+        let mut outgoing = self
             .client
-            .post(endpoint)
+            .request(method, endpoint)
             .headers(headers)
-            .header(reqwest::header::ACCEPT, accept)
-            .json(request);
+            .header(reqwest::header::ACCEPT, accept);
+        if let Some(body) = request {
+            outgoing = outgoing.json(body);
+        }
         deadline
-            .wait(cancel, "waiting for response headers", request.send())
+            .wait(cancel, "waiting for response headers", outgoing.send())
             .await?
             .map(|response| (response, secrets))
             .map_err(|error| transport_error(error, "before response headers"))
@@ -171,34 +149,28 @@ impl HttpModelClient {
         cancel: &CancellationToken,
         deadline: &mut Deadline,
     ) -> Result<Vec<String>, ModelError> {
-        let (headers, secrets) = self.headers()?;
-        let endpoint = self
-            .connection
-            .endpoint(ApiEndpoint::Models)
-            .map_err(|e| ModelError::new("config_invalid", e.to_string()))?;
-        let request = self
-            .client
-            .get(endpoint)
-            .headers(headers)
-            .header(reqwest::header::ACCEPT, "application/json");
-        let response = deadline
-            .wait(cancel, "waiting for response headers", request.send())
-            .await?
-            .map_err(|error| transport_error(error, "before response headers"))?;
+        let (response, secrets) = self
+            .send(
+                ApiEndpoint::Models,
+                reqwest::Method::GET,
+                None,
+                cancel,
+                deadline,
+            )
+            .await?;
         deadline.received();
-        let status = response.status();
-        if !status.is_success() {
-            return Err(http_error(response, cancel, &secrets, deadline, None).await);
-        }
-        let bytes = bounded_body(response, MAX_MODEL_CATALOG_BYTES, cancel, deadline, None).await?;
-        let raw: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| ModelError::new("protocol", "Proxy returned malformed model list JSON"))?;
-        if raw.get("error").is_some_and(|e| !e.is_null()) {
-            return Err(redact(
-                ModelError::provider(Some(status.as_u16()), &raw),
-                &secrets,
-            ));
-        }
+        let raw = read_json(
+            response,
+            MAX_MODEL_CATALOG_BYTES,
+            "Proxy returned malformed model list JSON",
+            cancel,
+            deadline,
+            None,
+            None,
+            &secrets,
+        )
+        .await?
+        .into_result()?;
         let data = raw
             .get("data")
             .and_then(Value::as_array)
@@ -228,226 +200,6 @@ impl HttpModelClient {
         models.dedup();
         Ok(models)
     }
-    // Recovery needs the bounded partial text, items, and original response together.
-    #[allow(clippy::result_large_err)]
-    pub async fn response(
-        &self,
-        request: Value,
-        cancel: CancellationToken,
-        events: Option<mpsc::Sender<Value>>,
-    ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Plain))
-            .await
-    }
-    // Preserve the same bounded recovery payload as response().
-    #[allow(clippy::result_large_err)]
-    pub(crate) async fn response_observed(
-        &self,
-        request: Value,
-        cancel: CancellationToken,
-        events: Option<mpsc::Sender<ObservedEvent>>,
-    ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Observed))
-            .await
-    }
-    #[allow(clippy::result_large_err)]
-    async fn response_inner(
-        &self,
-        request: Value,
-        cancel: CancellationToken,
-        events: Option<Events>,
-    ) -> Result<ModelResponse, AttemptFailure> {
-        let mut deadline = Deadline::new(
-            ApiEndpoint::Responses,
-            &self.connection,
-            &self.connection_name,
-        )?;
-        let result = self
-            .response_attempt(request, cancel, events, &mut deadline)
-            .await;
-        result.map_err(|mut failure| {
-            if failure.retry.is_none()
-                && failure.error.status.is_none()
-                && matches!(failure.error.kind.as_str(), "transport" | "timeout")
-            {
-                // SSE failures already carry semantic output observations. For an
-                // interrupted JSON body, conservatively treat any bytes as partial.
-                failure.retry = Some(ResponseRetry {
-                    retry_after: None,
-                    partial_output: deadline.has_body(),
-                });
-            }
-            failure
-        })
-    }
-    // Keep the existing bounded recovery payload intact across body parsing.
-    #[allow(clippy::result_large_err)]
-    async fn response_attempt(
-        &self,
-        mut request: Value,
-        cancel: CancellationToken,
-        events: Option<Events>,
-        deadline: &mut Deadline,
-    ) -> Result<ModelResponse, AttemptFailure> {
-        let Some(object) = request.as_object_mut() else {
-            return Err(ModelError::new("protocol", "Responses request must be an object").into());
-        };
-        object.insert("stream".into(), Value::Bool(true));
-        object.insert("store".into(), Value::Bool(false));
-        let tools_enabled = request
-            .get("tools")
-            .and_then(Value::as_array)
-            .is_some_and(|tools| !tools.is_empty());
-        let (response, secrets) = self
-            .send(ApiEndpoint::Responses, &request, &cancel, deadline)
-            .await?;
-        deadline.received();
-        if let Some(events) = &events {
-            events.received(deadline.received_at());
-        }
-        let status = response.status();
-        if !status.is_success() {
-            let retry_after = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(parse_retry_after);
-            let error = http_error(response, &cancel, &secrets, deadline, events.as_ref()).await;
-            let eligible = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
-                && matches!(error.kind.as_str(), "http" | "provider");
-            let mut failure = AttemptFailure::from(error);
-            if eligible {
-                failure.retry = Some(ResponseRetry {
-                    retry_after,
-                    partial_output: false,
-                });
-            }
-            return Err(failure);
-        }
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|h| h.to_str().ok())
-            .unwrap_or("")
-            .split(';')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if content_type == "application/json" {
-            let bytes = bounded_body(
-                response,
-                MAX_RESPONSE_BYTES,
-                &cancel,
-                deadline,
-                events.as_ref(),
-            )
-            .await?;
-            let raw: Value = serde_json::from_slice(&bytes)
-                .map_err(|_| ModelError::new("protocol", "Proxy returned malformed JSON"))?;
-            let result = if raw.get("error").is_some_and(|e| !e.is_null()) {
-                Err(redact(
-                    ModelError::provider(Some(status.as_u16()), &raw),
-                    &secrets,
-                ))
-            } else {
-                ModelResponse::completed(raw.clone(), tools_enabled)
-            };
-            let event_type = if raw.get("error").is_some_and(|e| !e.is_null()) {
-                "response.failed"
-            } else if raw.get("status").and_then(Value::as_str) == Some("completed") {
-                "response.completed"
-            } else {
-                "response.incomplete"
-            };
-            let event = json!({"type":event_type,"response":raw});
-            if let Some(sender) = &events {
-                send_event(sender, event, &cancel, deadline.received_at())
-                    .await
-                    .map_err(|error| raw_failure(error, raw.clone()))?;
-            }
-            return result.map_err(|error| raw_failure(error, raw));
-        }
-        if content_type != "text/event-stream" {
-            return Err(ModelError::new(
-                "protocol",
-                "Expected text/event-stream or application/json from Responses endpoint",
-            )
-            .into());
-        }
-        let mut stream = response.bytes_stream();
-        let mut parsed = ResponseStream::default();
-        let mut raw_response = None;
-        loop {
-            let next = match deadline
-                .wait(&cancel, "receiving response body", stream.next())
-                .await
-            {
-                Ok(next) => next,
-                Err(error) => return Err(failure(error, &parsed, raw_response)),
-            };
-            let Some(chunk) = next else {
-                break;
-            };
-            let chunk = match chunk {
-                Ok(chunk) => chunk,
-                Err(error) => {
-                    return Err(failure(
-                        transport_error(error, "receiving response body"),
-                        &parsed,
-                        raw_response,
-                    ));
-                }
-            };
-            if !chunk.is_empty() {
-                deadline.received_body();
-                if let Some(events) = &events {
-                    events.received(deadline.received_at());
-                }
-            }
-            let values = match parsed.push(&chunk) {
-                Ok(values) => values,
-                Err(error) => return Err(failure(redact(error, &secrets), &parsed, raw_response)),
-            };
-            for value in values {
-                if let Some(raw) = value.get("response") {
-                    raw_response = Some(raw.clone());
-                }
-                if let Some(sender) = &events
-                    && let Err(error) =
-                        send_event(sender, value, &cancel, deadline.received_at()).await
-                {
-                    return Err(failure(error, &parsed, raw_response));
-                }
-            }
-            // A terminal SSE event is the protocol boundary. Waiting for a proxy
-            // to close its HTTP connection would retain resources indefinitely.
-            if parsed.is_terminal() {
-                break;
-            }
-        }
-        if cancel.is_cancelled() {
-            return Err(failure(cancelled(), &parsed, raw_response));
-        }
-        let partial_text = parsed.partial_text.clone();
-        let partial_reasoning = parsed.partial_reasoning.clone();
-        let completed_items = parsed.completed_items.clone();
-        let interrupted = !parsed.is_terminal();
-        let partial_output = parsed.has_output();
-        parsed
-            .finish(tools_enabled)
-            .map_err(|error| AttemptFailure {
-                retry: (interrupted && error.kind == "incomplete").then_some(ResponseRetry {
-                    retry_after: None,
-                    partial_output,
-                }),
-                error: redact(error, &secrets),
-                partial_text,
-                partial_reasoning,
-                completed_items,
-                raw_response,
-            })
-    }
     pub async fn embeddings(
         &self,
         model: &str,
@@ -468,23 +220,27 @@ impl HttpModelClient {
         )?;
         let request = json!({"model":model,"input":input,"encoding_format":"float"});
         let (response, secrets) = self
-            .send(ApiEndpoint::Embeddings, &request, &cancel, &deadline)
+            .send(
+                ApiEndpoint::Embeddings,
+                reqwest::Method::POST,
+                Some(&request),
+                &cancel,
+                &deadline,
+            )
             .await?;
         deadline.received();
-        let status = response.status();
-        if !status.is_success() {
-            return Err(http_error(response, &cancel, &secrets, &mut deadline, None).await);
-        }
-        let bytes =
-            bounded_body(response, MAX_EMBEDDING_BYTES, &cancel, &mut deadline, None).await?;
-        let raw: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| ModelError::new("protocol", "Malformed embeddings JSON"))?;
-        if raw.get("error").is_some_and(|e| !e.is_null()) {
-            return Err(redact(
-                ModelError::provider(Some(status.as_u16()), &raw),
-                &secrets,
-            ));
-        }
+        let raw = read_json(
+            response,
+            MAX_EMBEDDING_BYTES,
+            "Malformed embeddings JSON",
+            &cancel,
+            &mut deadline,
+            None,
+            None,
+            &secrets,
+        )
+        .await?
+        .into_result()?;
         let data = raw
             .get("data")
             .and_then(Value::as_array)
@@ -548,200 +304,6 @@ impl HttpModelClient {
 }
 fn cancelled() -> ModelError {
     ModelError::new("cancelled", "Model request was cancelled")
-}
-fn raw_failure(error: ModelError, raw: Value) -> AttemptFailure {
-    let mut partial_text = String::new();
-    let mut completed_items = BTreeMap::new();
-    if let Some(output) = raw.get("output").and_then(Value::as_array) {
-        for (index, item) in output.iter().enumerate() {
-            if item
-                .get("status")
-                .and_then(Value::as_str)
-                .is_none_or(|s| s == "completed")
-            {
-                completed_items.insert(index as u64, item.clone());
-            }
-            if let Some(content) = item.get("content").and_then(Value::as_array) {
-                for part in content {
-                    if let Some(text) = part
-                        .get("text")
-                        .or_else(|| part.get("refusal"))
-                        .and_then(Value::as_str)
-                    {
-                        partial_text.push_str(text);
-                    }
-                }
-            }
-        }
-    }
-    AttemptFailure {
-        error,
-        partial_text,
-        partial_reasoning: String::new(),
-        completed_items,
-        raw_response: Some(raw),
-        retry: None,
-    }
-}
-fn failure(
-    error: ModelError,
-    parsed: &ResponseStream,
-    raw_response: Option<Value>,
-) -> AttemptFailure {
-    let retry = (!parsed.is_terminal() && matches!(error.kind.as_str(), "transport" | "timeout"))
-        .then_some(ResponseRetry {
-            retry_after: None,
-            partial_output: parsed.has_output(),
-        });
-    AttemptFailure {
-        error,
-        partial_text: parsed.partial_text.clone(),
-        partial_reasoning: parsed.partial_reasoning.clone(),
-        completed_items: parsed.completed_items.clone(),
-        raw_response: parsed.failed_response().cloned().or(raw_response),
-        retry,
-    }
-}
-async fn send_event(
-    sender: &Events,
-    value: Value,
-    cancel: &CancellationToken,
-    received_at: std::time::Instant,
-) -> Result<(), ModelError> {
-    tokio::select! {
-        biased;
-        _ = cancel.cancelled() => Err(cancelled()),
-        result = async {
-            match sender {
-                Events::Plain(sender) => sender.send(value).await.map_err(|_| ()),
-                Events::Observed(sender) => sender.send(ObservedEvent::Model { value, received_at }).await.map_err(|_| ()),
-            }
-        } => result.map_err(|_| ModelError::new("consumer_closed", "Model event consumer closed before persistence")),
-    }
-}
-async fn bounded_body(
-    response: Response,
-    max: usize,
-    cancel: &CancellationToken,
-    deadline: &mut Deadline,
-    events: Option<&Events>,
-) -> Result<Vec<u8>, ModelError> {
-    let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
-    loop {
-        let next = deadline
-            .wait(cancel, "receiving response body", stream.next())
-            .await?;
-        let Some(chunk) = next else {
-            return Ok(body);
-        };
-        let chunk = chunk.map_err(|error| transport_error(error, "receiving response body"))?;
-        if !chunk.is_empty() {
-            deadline.received_body();
-            if let Some(events) = events {
-                events.received(deadline.received_at());
-            }
-        }
-        if chunk.len() > max.saturating_sub(body.len()) {
-            return Err(ModelError::new(
-                "input_limit",
-                "HTTP response body exceeded byte limit",
-            ));
-        }
-        body.extend_from_slice(&chunk);
-    }
-}
-fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
-    use std::time::Duration;
-    let value = value.trim();
-    if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
-        // Preserve long waits so the driver can decline rather than retry early.
-        return Some(Duration::from_secs(value.parse().unwrap_or(u64::MAX)));
-    }
-    chrono::DateTime::parse_from_rfc2822(value)
-        .ok()
-        .map(|date| {
-            date.signed_duration_since(chrono::Utc::now())
-                .to_std()
-                .unwrap_or_default()
-        })
-}
-async fn http_error(
-    response: Response,
-    cancel: &CancellationToken,
-    secrets: &[String],
-    deadline: &mut Deadline,
-    events: Option<&Events>,
-) -> ModelError {
-    let status = response.status().as_u16();
-    let mut stream = response.bytes_stream();
-    let mut body = Vec::new();
-    let mut truncated = false;
-    loop {
-        let next = match deadline
-            .wait(cancel, "receiving HTTP error body", stream.next())
-            .await
-        {
-            Ok(next) => next,
-            Err(mut error) => {
-                error.status = Some(status);
-                return error;
-            }
-        };
-        let Some(chunk) = next else {
-            break;
-        };
-        let Ok(chunk) = chunk else {
-            break;
-        };
-        if !chunk.is_empty() {
-            deadline.received();
-            if let Some(events) = events {
-                events.received(deadline.received_at());
-            }
-        }
-        let take = chunk.len().min(MAX_ERROR_BYTES - body.len());
-        body.extend_from_slice(&chunk[..take]);
-        if take < chunk.len() {
-            truncated = true;
-            break;
-        }
-    }
-    let mut error = match serde_json::from_slice::<Value>(&body) {
-        Ok(raw) => ModelError::provider(Some(status), &raw),
-        Err(_) => ModelError {
-            kind: "http".into(),
-            message: String::from_utf8_lossy(&body)
-                .chars()
-                .take(16_384)
-                .collect(),
-            provider_code: None,
-            status: Some(status),
-        },
-    };
-    if error.message.is_empty() {
-        error.message = "Proxy returned an empty HTTP error body".into();
-    }
-    if truncated {
-        error.message.push_str(" [HTTP error body truncated]");
-    }
-    redact(error, secrets)
-}
-fn redact(mut error: ModelError, secrets: &[String]) -> ModelError {
-    for secret in secrets.iter().filter(|s| !s.is_empty()) {
-        error.message = error.message.replace(secret, "[redacted]");
-        if let Some(code) = &mut error.provider_code {
-            *code = code.replace(secret, "[redacted]");
-        }
-    }
-    if error.message.chars().count() > 16_384 {
-        error.message =
-            error.message.chars().take(16_350).collect::<String>() + " [diagnostic truncated]";
-    }
-    error.provider_code = error
-        .provider_code
-        .map(|code| code.chars().take(256).collect());
-    error
 }
 
 #[cfg(test)]
