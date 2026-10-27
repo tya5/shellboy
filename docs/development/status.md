@@ -1,8 +1,14 @@
 # 開発状況
 
-更新: 2026-10-27。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
+更新: 2026-10-27。Issue #8のHTTP停滞対策をローカルsourceで実装・検証しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
+
+## Issue #8: HTTP停滞対策（未リリース）
+
+接続別のHTTP期限を共通化しました。会話・要約は無受信600秒（0で無効）、embeddingは要求全体60秒、モデル一覧は同設定と20秒の短い方です。ヘッダー待ち・本文・エラー本文を対象とし、timeoutには段階・経過・設定名を残します。索引は既存retry/pauseへ渡し、検索には呼出し元切断・owner停止を伝播します。TUIは30秒以上の無受信を既存footerへ補足し、途中本文は復旧待ちでも保全します。新しい表・worker・queue・依存は追加していません。
+
+`6aeac45` の標準checkは69群1,102 passed / 0 failed / 15 ignored。その後の `32e3359` はHTTPエラー本文の非永続受信通知だけを補強し、単体・HTTP関連473件と最終all-target strict Clippy・fmtが成功しました。対象を分けた証拠は [検証状況](../validation/acceptance.md) に記載します。高推論の実proxy測定はHTTP400で成立せず、600秒は変更可能な暫定既定値です。未受信時の自動retryは別Issue #7として分離しています。既定DB・設定・実行中owner・インストール済みbinaryは変更していません。
 
 ## レビュー対応goal
 
