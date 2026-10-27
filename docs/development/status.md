@@ -1,6 +1,8 @@
 # 開発状況
 
-更新: 2026-10-27。Issue #6の受信記録表示と、#8へ統合した#7の有限再試行をローカルsourceへ実装しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
+更新: 2026-10-27。v0.1.3の公開準備中です。#6/#7/#8、Thread一覧の状態色と起動取消し試験修正をまとめ、標準checkと3 OSのCI成功後に新しいtagを公開します。v0.1.2とはDB schema v9・既存設定・CLIを維持し、新しい接続設定は省略時に既定値を使います。
+
+前回公開時の記録: Issue #6の受信記録表示と、#8へ統合した#7の有限再試行をローカルsourceへ実装しました（未リリース）。追加レビューとIssue #3への対応を終え、検証済みcommit `77da7e3` を [v0.1.2](https://github.com/tya5/shellboy/releases/tag/v0.1.2) として公開しました。Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供しています。ローカル標準checkと3 OSのnative CIが成功し、公開ダウンロード・チェックサム照合・ローカルバイナリ更新も完了しました。詳細は [検証状況](../validation/acceptance.md) を参照してください。
 
 TUI、同一ownerへ接続するCLI、Responses互換通信、shell、親子の会話と実行、待機、分岐履歴、要約・スピル、添付、埋め込み索引、GC、同梱ガイド、独立RAGを実装しています。責務と対象外は [適用仕様](../design/effective-spec.md) に記載します。
 
