@@ -24,9 +24,11 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (7, "0007_usage_and_source_indexes"),
     (8, "0008_receipt_accounting_compat"),
     (9, "0009_compaction_turn_indexes"),
+    (10, "0010_hot_query_indexes"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
+const HOT_QUERY_INDEX_MIGRATION: &str = include_str!("../migrations/0010_hot_query_indexes.sql");
 const INITIAL_MIGRATION: &str = include_str!("../migrations/0001_initial.sql");
 const GC_INDEX_MIGRATION: &str = include_str!("../migrations/0002_gc_indexes.sql");
 const ATTACHMENT_PROVENANCE_MIGRATION: &str =
@@ -103,6 +105,7 @@ enum Command {
 }
 
 struct Shared {
+    path: PathBuf,
     /// Taking this sender closes admission across every clone before shutdown.
     sender: Mutex<Option<mpsc::Sender<Command>>>,
     join: Mutex<Option<thread::JoinHandle<Result<(), StorageError>>>>,
@@ -166,6 +169,7 @@ impl DbWorker {
             ));
         }
         let path = path.as_ref().to_path_buf();
+        let stored_path = path.clone();
         let (sender, receiver) = mpsc::channel(capacity);
         let (ready_send, ready_receive) = oneshot::channel();
         let join = thread::Builder::new()
@@ -185,12 +189,18 @@ impl DbWorker {
         }
         Ok(Self {
             shared: Arc::new(Shared {
+                path: stored_path,
                 sender: Mutex::new(Some(sender)),
                 join: Mutex::new(Some(join)),
                 shutdown_result: Mutex::new(None),
                 shutdown_done: Notify::new(),
             }),
         })
+    }
+
+    /// The path used to open this worker, including custom database filenames.
+    pub(crate) fn path(&self) -> &Path {
+        &self.shared.path
     }
 
     /// Wait asynchronously for bounded admission, then await the durable result.
@@ -512,6 +522,12 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(COMPACTION_TURN_INDEX_MIGRATION)?;
+        transaction.commit()?;
+    }
+    if version < 10 {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        transaction.execute_batch(HOT_QUERY_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
     validate_schema(&connection)?;

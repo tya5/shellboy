@@ -530,3 +530,69 @@ async fn performance_index_service_search_1000_sources() {
     stop.cancel();
     proxy.await.unwrap();
 }
+
+/// One accepted user node already exists outside the selected path, as in
+/// driver::next. Roll back every observation so all samples adopt the same node
+/// onto the identical selected path and edge set.
+#[tokio::test]
+#[ignore = "synthetic 1k/3k selected-path adoption timing; run explicitly in isolation"]
+async fn performance_history_receipt_adoption() {
+    for count in [1_000, 3_000] {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(root.path().join("shellboy.db"))
+            .await
+            .unwrap();
+        seed_history(&db, count).await;
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            for i in 1..count {
+                tx.execute(
+                    "INSERT INTO edge(src,dst) VALUES(?1,?2)",
+                    rusqlite::params![format!("n{:06}", i - 1), format!("n{i:06}")],
+                )?;
+            }
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('pending-user','user','now','{}',2)", [])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let mut timings = Vec::new();
+        for _ in 0..5 {
+            timings.push(db.call(move |db| {
+                let tx = db.transaction()?;
+                let before: (i64, i64) = tx.query_row(
+                    "SELECT selection_revision,revision FROM thread WHERE id='history'",
+                    [], |r| Ok((r.get(0)?, r.get(1)?)),
+                )?;
+                let root_before: i64 = tx.query_row("SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'", [], |r| r.get(0))?;
+                let started = Instant::now();
+                shellboy::history::append_existing_nodes(&tx, "history", before.0 as u64, &[String::from("pending-user")], "adopted")?;
+                let elapsed = started.elapsed();
+                let state: (i64, i64, String, i64) = tx.query_row(
+                    "SELECT selection_revision,revision,cursor_node_id,(SELECT COUNT(*) FROM thread_path WHERE thread_id=t.id) FROM thread t WHERE id='history'", [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )?;
+                assert_eq!(state, (before.0 + 1, before.1 + 1, "pending-user".into(), count as i64 + 1));
+                let edges: i64 = tx.query_row("SELECT COUNT(*) FROM edge", [], |r| r.get(0))?;
+                assert_eq!(edges, count as i64);
+                let root_after: i64 = tx.query_row("SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'", [], |r| r.get(0))?;
+                assert_eq!(root_after, root_before + 1);
+                for ordinal in [0, count / 2, count - 1] {
+                    let node: String = tx.query_row("SELECT node_id FROM thread_path WHERE thread_id='history' AND ordinal=?1", [ordinal as i64], |r| r.get(0))?;
+                    assert_eq!(node, format!("n{ordinal:06}"));
+                }
+                tx.rollback()?;
+                Ok(elapsed)
+            }).await.unwrap());
+        }
+        report(
+            "history_receipt_adoption",
+            &timings,
+            serde_json::json!({
+                "path_nodes":count,"pending_nodes":1,"implementation":"append_existing_nodes",
+                "scope":"driver-equivalent selected-tail adoption inside DbWorker; no receipt query, replay, HTTP, commit/fsync, or UI; fixed fixture rolled back after every sample",
+                "sqlite_version":rusqlite::version(),"fixture":"forward linear DAG, one existing unselected user node"
+            }),
+        );
+        db.shutdown().await.unwrap();
+    }
+}

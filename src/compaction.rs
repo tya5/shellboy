@@ -281,7 +281,7 @@ impl Compactor {
             let estimate=edit::TokenEstimate::load(db,&thread,&data.3,&data.4,data.0)?;
             let current_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
-            let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
+            let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let stopping:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",[&thread],|r|r.get(0))?;
             if stopping{return Err(StorageError::from(invalid("Compaction cancelled: Run is stopping")));}
             let latest_complete_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;

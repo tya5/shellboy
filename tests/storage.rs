@@ -841,7 +841,7 @@ async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
     let worker = DbWorker::open(&path).await.unwrap();
     worker.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX node_turn; DROP INDEX receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
+    db.execute_batch("DROP INDEX node_turn; DROP INDEX receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
     db.close().unwrap();
     assert!(matches!(
         DbWorker::open(&path).await,
@@ -893,7 +893,7 @@ async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without
     let db = Connection::open(&path).unwrap();
     db.execute_batch(
         "DROP INDEX node_turn; DROP INDEX receipt_turn_source;
-        DELETE FROM schema_migration WHERE version=9; PRAGMA user_version=8;
+        DELETE FROM schema_migration WHERE version>=9; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=8;
         CREATE TABLE receipt_turn_source(blocker INTEGER);",
     )
     .unwrap();

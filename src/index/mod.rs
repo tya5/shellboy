@@ -130,6 +130,7 @@ pub struct IndexService {
     started: AtomicBool,
     reader: ShellOutputReader,
     source_slots: Arc<Semaphore>,
+    search_slots: Arc<Semaphore>,
     stop: CancellationToken,
 }
 pub struct IndexWorkers {
@@ -164,6 +165,7 @@ impl IndexService {
             clients,
             reader: ShellOutputReader::new(database.clone(), instance),
             source_slots: Arc::new(Semaphore::new(config.indexing.concurrency.max(1))),
+            search_slots: Arc::new(Semaphore::new(1)),
             database,
             config,
             notify: Arc::new(Notify::new()),
@@ -189,6 +191,13 @@ impl IndexService {
             .await
             .map_err(|_| err(ErrorCode::InvalidState, "Index source workers closed"))?;
         drop(held);
+        let search = self
+            .search_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| err(ErrorCode::InvalidState, "Index search admission closed"))?;
+        drop(search);
         Ok(())
     }
     fn key(&self) -> Result<&str, ApiError> {

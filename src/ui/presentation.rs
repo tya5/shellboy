@@ -735,9 +735,18 @@ pub(super) struct RowSource {
     pub covered_end: usize,
     pub offset: usize,
 }
+#[cfg(test)]
 pub(super) fn history(
     view: &ThreadView,
     width: u16,
+) -> (Vec<Line<'static>>, Vec<std::sync::Arc<str>>, Vec<RowSource>) {
+    history_with_cache(view, width, None, 0)
+}
+pub(super) fn history_with_cache(
+    view: &ThreadView,
+    width: u16,
+    mut cache: Option<&mut super::HistoryLayoutCache>,
+    budget: usize,
 ) -> (Vec<Line<'static>>, Vec<std::sync::Arc<str>>, Vec<RowSource>) {
     let mut links = Vec::new();
     let mut lines = Vec::new();
@@ -775,6 +784,39 @@ pub(super) fn history(
     }
     let mut index = begin;
     while index < end {
+        let unit_end = if let Some(summary) = interruption_group(&view.nodes()[index..end]) {
+            index + summary + 1
+        } else if view
+            .nodes()
+            .get(index + 1)
+            .filter(|_| index + 1 < end)
+            .is_some_and(|result| adjacent_tool_pair(&view.nodes()[index], result))
+        {
+            index + 2
+        } else if quiet_event(&view.nodes()[index]) {
+            let mut next = index + 1;
+            while next < end && quiet_event(&view.nodes()[next]) {
+                next += 1;
+            }
+            next
+        } else {
+            index + 1
+        };
+        let unit_key = cache
+            .as_ref()
+            .and_then(|_| super::RenderUnitKey::new(view, index, unit_end, width, &links));
+        if let Some(hit) = unit_key
+            .as_ref()
+            .and_then(|key| cache.as_mut().and_then(|cache| cache.unit(key)))
+        {
+            lines.extend(hit.styled.iter().cloned());
+            sources.extend_from_slice(&hit.sources);
+            links = hit.targets.clone();
+            index = unit_end;
+            continue;
+        }
+        let row_start = lines.len();
+
         let begin = index;
         let mut rendered_index = index;
         let mut group_header_rows = 0;
@@ -1008,6 +1050,19 @@ pub(super) fn history(
             offset,
         });
         lines.push(Line::default());
+        if let (Some(key), Some(cache)) = (unit_key, cache.as_mut()) {
+            cache.insert_unit(
+                key,
+                std::sync::Arc::new(super::HistoryLayout {
+                    text: String::new(),
+                    styled: lines[row_start..].to_vec(),
+                    lines: lines.len() - row_start,
+                    targets: links.clone(),
+                    sources: sources[row_start..].to_vec(),
+                }),
+                budget,
+            );
+        }
     }
     (lines, links, sources)
 }

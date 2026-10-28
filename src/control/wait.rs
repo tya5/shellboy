@@ -36,6 +36,12 @@ type Result<T> = std::result::Result<T, ApiError>;
 const WAIT_BINDING_BYTES: usize = r#","turn_wait_generation":9223372036854775807"#.len();
 #[derive(Default)]
 pub(super) struct WaitRegistry {
+    #[cfg(test)]
+    pub(super) observations: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub(super) output_commits: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub(super) output_save_micros: StdMutex<Vec<u128>>,
     entries: Arc<StdMutex<HashMap<String, Registration>>>,
 }
 #[derive(Clone)]
@@ -147,13 +153,27 @@ async fn observe_inner(
     }
     let mut guard = None;
     let mut initial = true;
+    let observes_output = args
+        .conditions
+        .iter()
+        .any(|condition| matches!(condition, WaitCondition::ShellOutput { .. }));
     loop {
+        let output_changed = control.shell_output_changed.notified();
+        tokio::pin!(output_changed);
+        if observes_output {
+            output_changed.as_mut().enable();
+        }
         let notified = control.changed.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
         let query = args.clone();
         let origin = caller.clone();
         let durable_id = operation_id.clone();
+        #[cfg(test)]
+        control
+            .waits
+            .observations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (observation, edges) = control
             .store
             .database
@@ -240,6 +260,7 @@ async fn observe_inner(
         }
         tokio::select! {
             _=notified=>{},
+            _=output_changed, if observes_output=>{},
             _=disconnected.cancelled()=>{},
             _=tokio::time::sleep(duration.saturating_sub(started.elapsed()).min(Duration::from_secs(86_400)))=>{},
             _=control.stop.cancelled()=>return outcome(&args,&observation,Some(WaitStatus::Interrupted))?.ok_or_else(||invalid("shutdown wait result missing")),
@@ -1129,6 +1150,163 @@ mod tests {
         assert!(control.waits.entries.lock().unwrap().is_empty());
         foreground.clear();
         control.live.test_drivers().lock().await.clear();
+        owner.shutdown().await.unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do() {
+        for case in 0..4 {
+            let (_directory, owner, control) = fixture().await;
+            let condition = match case {
+                0 => WaitCondition::ShellEnded {
+                    execution_id: "sa".into(),
+                },
+                1 | 3 => WaitCondition::TurnCompleted {
+                    turn_id: "ta".into(),
+                },
+                _ => WaitCondition::RunEnded {
+                    run_id: "ra".into(),
+                },
+            };
+            let watching = control.clone();
+            let mut observer = tokio::spawn(async move {
+                observe(
+                    watching,
+                    format!("lifecycle-{case}"),
+                    args(condition, 30_000),
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap()
+            });
+            pending_count(&control, 1).await;
+            let before = control
+                .waits
+                .observations
+                .load(std::sync::atomic::Ordering::Relaxed);
+            for _ in 0..100 {
+                control.shell_output_changed.notify_waiters();
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), &mut observer)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                control
+                    .waits
+                    .observations
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                before,
+                "output-only notifications must not enqueue a lifecycle observation"
+            );
+            owner.db.call(move |db| {
+                db.execute_batch(match case {
+                    0 => "UPDATE shell_execution SET state='exited',output_complete=1,exit_code=0 WHERE id='sa'",
+                    1 => "UPDATE turn SET state='completed' WHERE id='ta'",
+                    2 => "UPDATE run SET state='completed' WHERE id='ra'",
+                    _ => "UPDATE turn SET state='recovery_wait' WHERE id='ta'",
+                })?; Ok(())
+            }).await.unwrap();
+            control.changed("a");
+            let value = tokio::time::timeout(Duration::from_secs(1), observer)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                value["status"],
+                if case == 3 {
+                    "recovery_wait"
+                } else {
+                    "satisfied"
+                }
+            );
+            owner.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn output_condition_in_any_wait_observes_committed_bytes_without_lifecycle_change() {
+        let (_directory, owner, control) = fixture().await;
+        let reader = super::super::output::ShellOutputReader::new(
+            owner.db.clone(),
+            control.store.instance_id.clone(),
+        );
+        let empty = reader
+            .read(ShellReadArgs {
+                execution_id: "sa".into(),
+                cursor: None,
+                encoding: Some("UTF-8".into()),
+                limit_bytes: 100,
+            })
+            .await
+            .unwrap();
+        let query = WaitArgs {
+            conditions: vec![
+                WaitCondition::ShellEnded {
+                    execution_id: "sa".into(),
+                },
+                WaitCondition::ShellOutput {
+                    execution_id: "sa".into(),
+                    cursor: empty.cursor,
+                },
+            ],
+            timeout_ms: 30_000,
+        };
+        let watching = control.clone();
+        let observer = tokio::spawn(async move {
+            observe(
+                watching,
+                "output-any".into(),
+                query,
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+        });
+        pending_count(&control, 1).await;
+        owner.db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('sa',0,'stdout',0,x'5245414459','now')",[])?;
+            tx.execute("UPDATE shell_execution SET saved_sequence=1 WHERE id='sa'",[])?;
+            tx.commit()?; Ok(())
+        }).await.unwrap();
+        control.shell_output_changed.notify_waiters();
+        let value = tokio::time::timeout(Duration::from_secs(1), observer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(value["status"], "satisfied");
+        assert_eq!(value["matched"].as_array().unwrap().len(), 1);
+        assert_eq!(value["matched"][0]["type"], "shell_output");
+        // The same condition already satisfied before subscription must return
+        // from its initial inspection without needing a saved Notify permit.
+        let read = reader
+            .read(ShellReadArgs {
+                execution_id: "sa".into(),
+                cursor: None,
+                encoding: Some("UTF-8".into()),
+                limit_bytes: 1,
+            })
+            .await
+            .unwrap();
+        let immediate = observe(
+            control,
+            "already-output".into(),
+            args(
+                WaitCondition::ShellOutput {
+                    execution_id: "sa".into(),
+                    cursor: read.cursor,
+                },
+                0,
+            ),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(immediate["status"], "satisfied");
         owner.shutdown().await.unwrap();
     }
 }

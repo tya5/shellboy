@@ -206,7 +206,7 @@ async fn quit_bypasses_full_normal_queue_but_preserves_accepted_send_and_drafts_
     assert!(matches!(receiver.recv().await, Some(UiAction::ForceQuit)));
 }
 
-pub(super) async fn fixture() -> (
+pub(crate) async fn fixture() -> (
     tempfile::TempDir,
     crate::app::DataOwner,
     std::sync::Arc<crate::control::Control>,

@@ -8,7 +8,9 @@ mod history_reader;
 mod input_history;
 mod received;
 mod thread_deletion;
+mod update_delivery;
 use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
+use update_delivery::{BufferedUpdates, UpdateTarget};
 mod management;
 mod management_state;
 mod recovery;
@@ -88,9 +90,12 @@ impl ClipboardBackend for ClipboardAdapter {
         Box::pin(self.copy_text(text, backend, max_bytes, timeout_ms, cancel))
     }
 }
-async fn update(sender: &SyncSender<UiUpdate>, mut value: UiUpdate) {
+async fn update(sender: &impl UpdateTarget, value: UiUpdate) {
+    let Some(mut value) = sender.defer(value) else {
+        return;
+    };
     loop {
-        match sender.try_send(value) {
+        match sender.raw().try_send(value) {
             Ok(()) | Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
             Err(std::sync::mpsc::TrySendError::Full(next)) => {
                 value = next;
@@ -154,7 +159,7 @@ async fn management_request(
     Ok(result)
 }
 async fn management_update(
-    sender: &SyncSender<UiUpdate>,
+    sender: &impl UpdateTarget,
     context: Option<ManagementContext>,
     value: UiUpdate,
 ) {
@@ -171,7 +176,7 @@ async fn management_update(
     .await;
 }
 async fn management_status(
-    sender: &SyncSender<UiUpdate>,
+    sender: &impl UpdateTarget,
     context: Option<ManagementContext>,
     text: impl ToString,
 ) {
@@ -186,7 +191,7 @@ async fn management_status(
     .await;
 }
 async fn status(
-    sender: &SyncSender<UiUpdate>,
+    sender: &impl UpdateTarget,
     thread_id: Option<String>,
     text: impl std::fmt::Display,
 ) {
@@ -364,7 +369,7 @@ fn command_title(command: &Command) -> String {
 // Report operation acceptance separately from presentation: a report-rendering
 // failure must not invite retrying an already-applied mutation.
 async fn command_outcome<T>(
-    updates: &SyncSender<UiUpdate>,
+    updates: &impl UpdateTarget,
     submission: Option<CommandSubmission>,
     result: &Result<T, ApiError>,
 ) {
@@ -478,7 +483,7 @@ async fn checked_storage<T>(control: &Control, result: Result<T, ApiError>) -> R
     result
 }
 async fn load_failed(
-    sender: &SyncSender<UiUpdate>,
+    sender: &impl UpdateTarget,
     thread_id: String,
     generation: u64,
     error: ApiError,
@@ -486,7 +491,7 @@ async fn load_failed(
     load_failed_at(sender, thread_id, generation, None, error).await;
 }
 async fn load_failed_at(
-    sender: &SyncSender<UiUpdate>,
+    sender: &impl UpdateTarget,
     thread_id: String,
     generation: u64,
     view_revision: Option<u64>,
@@ -517,7 +522,7 @@ async fn load_failed_at(
 }
 
 async fn stream_commits(
-    updates: &SyncSender<UiUpdate>,
+    updates: &impl UpdateTarget,
     thread: &str,
     generation: u64,
     mappings: Vec<(String, String)>,
@@ -622,6 +627,7 @@ async fn run_with_clipboard_slots(
     clipboard: Arc<dyn ClipboardBackend>,
     command_slots: Arc<Semaphore>,
 ) -> Result<(), ApiError> {
+    let updates = BufferedUpdates::new(updates);
     actions.close_tool_starts_on_quit(&control);
     let mut selection = selection::Selection::default();
     let mut ipc_failure = server.failures();
@@ -631,6 +637,7 @@ async fn run_with_clipboard_slots(
     let mut stream_inflight = false;
     let mut stream_retry: Option<Box<streaming::Prepared>> = None;
     let mut stream_next = tokio::time::Instant::now();
+    let mut delivery_next = tokio::time::Instant::now();
     let stream_period =
         Duration::from_secs_f64(1.0 / f64::from(control.store.config.ui.max_fps.clamp(1, 30)));
     let mut pending: HashMap<String, (String, String, u64)> = HashMap::new();
@@ -650,7 +657,7 @@ async fn run_with_clipboard_slots(
     let mut render_width = 80_u16;
     let mut management = management_state::Management::default();
     let cancel = CancellationToken::new();
-    let mut events = control.subscribe();
+    let mut ui_subscription = control.subscribe_ui();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     update(&updates, UiUpdate::Initialize { cwd }).await;
@@ -665,11 +672,14 @@ async fn run_with_clipboard_slots(
             )
             .await;
         }
-        while let Some(thread) = dirty_threads
-            .iter()
-            .find(|thread| !refreshing.contains(*thread))
-            .cloned()
-        {
+        while !updates.backpressured() {
+            let Some(thread) = dirty_threads
+                .iter()
+                .find(|thread| !refreshing.contains(*thread))
+                .cloned()
+            else {
+                break;
+            };
             let Ok(permit) = read_slots.clone().try_acquire_owned() else {
                 break;
             };
@@ -685,6 +695,8 @@ async fn run_with_clipboard_slots(
                 continue;
             }
             refreshing.insert(thread.clone());
+            #[cfg(test)]
+            stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             read_workers.spawn(refresh::run(
                 refresh::Query {
                     thread,
@@ -695,13 +707,17 @@ async fn run_with_clipboard_slots(
                     render_width,
                 },
                 control.clone(),
-                updates.clone(),
+                updates.worker(),
                 background_tx.clone(),
                 read_cancel.clone(),
                 progress_slots.clone(),
                 permit,
             ));
         }
+        if updates.closed() {
+            break;
+        }
+        ui_subscription.select(selection.active_thread.as_deref());
         actions.enable_cancel(control_tasks.is_empty());
         tokio::select! {
             changed=ipc_failure.changed(),if watch_ipc_failure=> {
@@ -738,7 +754,10 @@ async fn run_with_clipboard_slots(
                     _ => {}
                 }
             },
-            action=actions.recv()=> {
+            _=tokio::time::sleep_until(delivery_next),if updates.pending()=> {
+                updates.flush();delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
+            },
+            action=actions.recv_with_admission(!updates.backpressured())=> {
                 let Some(action) = action else {
                     break;
                 };
@@ -765,6 +784,7 @@ async fn run_with_clipboard_slots(
                     }
                 };
                 let has_submission = submission.is_some();
+                #[cfg(test)] stream_metrics::FRONTEND_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 match action {
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
@@ -782,7 +802,7 @@ async fn run_with_clipboard_slots(
                         }
                     }
                     UiAction::LoadReceived{thread_id,page}=>{
-                        let control=control.clone();let sender=updates.clone();
+                        let control=control.clone();let sender=updates.worker();
                         let reply_context=context.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move{
                             match received::list(&control,thread_id,page).await{
@@ -796,7 +816,7 @@ async fn run_with_clipboard_slots(
                         request_id,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let token = read_cancel.child_token();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let response = control
@@ -991,7 +1011,7 @@ async fn run_with_clipboard_slots(
                         };
                         status(&updates, target.clone(), "設定を反映中…").await;
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result =
                                 request(&control, Command::ThreadSet(args))
@@ -1055,7 +1075,7 @@ async fn run_with_clipboard_slots(
                             continue;
                         };
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = selection.active_thread.clone();
                         spawn_work(&mut workers, permit, async move {
                             let result = request(&control, Command::RunRetry(args)).await;
@@ -1132,7 +1152,7 @@ async fn run_with_clipboard_slots(
                         let work_status = management::work_status(&command);
                         let control = control.clone();
                         let sender = background_tx.clone();
-                        let outcomes = updates.clone();
+                        let outcomes = updates.worker();
                         let observe = management.observe(&command);
                         spawn_work(&mut workers, permit, async move {
                             let response = management_request(&control, command, observe).await;
@@ -1184,7 +1204,7 @@ async fn run_with_clipboard_slots(
                         let generation = management.next_generation();
                         let control = control.clone();
                         let sender = background_tx.clone();
-                        let outcomes = updates.clone();
+                        let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let title = format!("添付を明示再読込み: {thread_id}（API送信なし）");
                             let response = control.reload_attachments(thread_id).await;
@@ -1279,7 +1299,7 @@ async fn run_with_clipboard_slots(
                         };
                         let control = control.clone();
                         let sender = background_tx.clone();
-                        let outcomes = updates.clone();
+                        let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result = load_edit_request(&control, &thread_id, &node_id).await;
                             command_outcome(&outcomes, submission, &result).await;
@@ -1435,7 +1455,7 @@ async fn run_with_clipboard_slots(
                         expected_revision,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let rejected = submission.clone();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let result = restore_snapshot(&control, node_id).await;
@@ -1486,7 +1506,7 @@ async fn run_with_clipboard_slots(
                         generation,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let requested_cursor = cursor.clone();
                             match request(
@@ -1573,11 +1593,12 @@ async fn run_with_clipboard_slots(
                         preview_sources,
                     } => {
                         selection.select_thread(thread_id.clone(), generation);
+                        ui_subscription.select(Some(&thread_id));
                         streams.clear();
                         streams.resume(thread_id.clone(), preview_sources);
                         stream_retry = None;
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = thread_id.clone();
                         let results = background_tx.clone();
                         let progress_slots = progress_slots.clone();
@@ -1633,7 +1654,7 @@ async fn run_with_clipboard_slots(
                         before_cursor,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
                             &mut read_workers,
@@ -1665,7 +1686,7 @@ async fn run_with_clipboard_slots(
                         mut nodes,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
                             &mut read_workers,
@@ -1705,7 +1726,7 @@ async fn run_with_clipboard_slots(
                     }
                     UiAction::RebaseStream(request) => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = request.thread_id.clone();
                         let rejected = target.clone();
                         let generation = request.generation;
@@ -1743,7 +1764,7 @@ async fn run_with_clipboard_slots(
                         anchor,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
                             &mut read_workers,
@@ -1782,7 +1803,7 @@ async fn run_with_clipboard_slots(
                         selection_revision,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
                             &mut read_workers,
@@ -1822,7 +1843,7 @@ async fn run_with_clipboard_slots(
                         view_revision,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
                             &mut read_workers,
@@ -1858,7 +1879,7 @@ async fn run_with_clipboard_slots(
                         older,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
                             &mut read_workers,
@@ -1992,7 +2013,7 @@ async fn run_with_clipboard_slots(
                         let timeout = control.store.config.io.file_prepare_timeout_ms;
                         let cancel = cancel.child_token();
                         let sender = background_tx.clone();
-                        let outcomes = updates.clone();
+                        let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
                                 let pixels = clipboard.capture(timeout, cancel.clone()).await?;
@@ -2029,7 +2050,7 @@ async fn run_with_clipboard_slots(
                         request_id,
                     } => {
                         let control = control.clone();
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             match request(
                                 &control,
@@ -2090,7 +2111,7 @@ async fn run_with_clipboard_slots(
                         let generation = management.next_generation();
                         let control = control.clone();
                         let sender = background_tx.clone();
-                        let follow_updates = updates.clone();
+                        let follow_updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result =
                                 presentation_work(move || management::follow(&value, &pointer, mode))
@@ -2159,7 +2180,7 @@ async fn run_with_clipboard_slots(
                             management_status(&updates,context.clone(),"詳細は本文cache予算を超えたため未保持。対象IDから原文pageを取得するか範囲を絞って再照会してください").await;
                             continue;
                         };
-                        let sender = updates.clone();
+                        let sender = updates.worker();
                         let worker_context = context.clone();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let selected = pointer.clone();
@@ -2247,7 +2268,7 @@ async fn run_with_clipboard_slots(
                         let control = control.clone();
                         let clipboard = clipboard.clone();
                         let sender = background_tx.clone();
-                        let outcomes = updates.clone();
+                        let outcomes = updates.worker();
                         let cancel = cancel.child_token();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
@@ -2309,7 +2330,7 @@ async fn run_with_clipboard_slots(
                             continue;
                         };
                         let control = control.clone();
-                        let updates = updates.clone();
+                        let updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result = control.background(&thread_id).await;
                             command_outcome(&updates, submission, &result).await;
@@ -2700,7 +2721,7 @@ async fn run_with_clipboard_slots(
                 },
                 None => {}
             },
-            event=events.recv()=> match event {
+            event=ui_subscription.receiver.recv()=> match event {
                 Ok(EngineEvent::Changed { thread_id, recovery }) => {
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
@@ -2739,6 +2760,7 @@ async fn run_with_clipboard_slots(
                     status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
                     }
@@ -2764,7 +2786,7 @@ async fn run_with_clipboard_slots(
                     stream_inflight = true;
                     stream_next = tokio::time::Instant::now() + stream_period;
                     let control = control.clone();
-                    let sender = updates.clone();
+                    let sender = updates.worker();
                     let results = background_tx.clone();
                     let stop = selection.cancel.child_token();
                     let ticket = frame.ticket.clone();
@@ -2804,6 +2826,7 @@ async fn run_with_clipboard_slots(
             _=send_workers.join_next(),if !send_workers.is_empty()=> {},
         }
     }
+    drop(ui_subscription);
     read_cancel.cancel();
     selection.cancel.cancel();
     cancel.cancel();
@@ -2834,7 +2857,24 @@ async fn run_with_clipboard_slots(
             .and(control_result)
             .and(owner_result)
     };
-    wait_for_shutdown(&mut actions, &updates, grace, shutdown).await
+    let result = {
+        let waiting = wait_for_shutdown_updates(&mut actions, &updates, grace, shutdown);
+        tokio::pin!(waiting);
+        loop {
+            tokio::select! {
+                result=&mut waiting=>break result,
+                _=tokio::time::sleep(Duration::from_millis(5)),if updates.pending()=> {updates.flush();},
+            }
+        }
+    };
+    if updates.finish(&mut actions, grace).await {
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "Forced shutdown while UI delivery was pending",
+        )
+        .details(serde_json::json!({"forced_shutdown":true})));
+    }
+    result
 }
 
 /// Keep the terminal responsive while owned shutdown proceeds. A force request
@@ -2842,6 +2882,14 @@ async fn run_with_clipboard_slots(
 pub async fn wait_for_shutdown<F: Future<Output = Result<(), ApiError>>>(
     actions: &mut impl crate::ui::actions::ActionStream,
     updates: &SyncSender<UiUpdate>,
+    grace: Duration,
+    shutdown: F,
+) -> Result<(), ApiError> {
+    wait_for_shutdown_updates(actions, updates, grace, shutdown).await
+}
+async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
+    actions: &mut impl crate::ui::actions::ActionStream,
+    updates: &impl UpdateTarget,
     grace: Duration,
     shutdown: F,
 ) -> Result<(), ApiError> {
@@ -3308,7 +3356,7 @@ mod stream_tests {
 }
 
 #[cfg(test)]
-mod control_tests;
+pub(crate) mod control_tests;
 
 #[cfg(test)]
 mod notice_tests {
@@ -3330,3 +3378,6 @@ mod notice_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod delivery_performance;

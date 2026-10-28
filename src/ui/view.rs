@@ -44,6 +44,7 @@ pub struct ThreadView {
     pub view_revision: u64,
     pub reasoning_expanded: BTreeSet<String>,
     history_revision: u64,
+    body_storage_bytes: std::cell::Cell<Option<usize>>,
     pub(super) scroll: VisualScroll,
     pub(super) composer: composer::Composer,
 }
@@ -217,6 +218,7 @@ impl ThreadView {
             view_revision: 0,
             reasoning_expanded: BTreeSet::new(),
             history_revision: 0,
+            body_storage_bytes: std::cell::Cell::new(None),
             scroll: VisualScroll::default(),
             composer: composer::Composer::default(),
         }
@@ -253,11 +255,11 @@ impl ThreadView {
         if let Some(value) = cache.get(&key) {
             return value;
         }
-        let (styled, targets, sources) = presentation::history(self, width);
+        let (styled, targets, sources) =
+            presentation::history_with_cache(self, width, Some(cache), budget);
         let text = presentation::plain(&styled);
-        let lines = Paragraph::new(presentation::borrowed(&styled))
-            .wrap(Wrap { trim: false })
-            .line_count(width);
+        // history_with_cache already returns physical hanging-wrapped rows.
+        let lines = if width == 0 { 0 } else { styled.len() };
         let value = Arc::new(HistoryLayout {
             targets,
             sources,
@@ -900,6 +902,12 @@ impl ThreadView {
         if !text.is_empty() {
             self.activity.stream(&node_id);
         }
+        let previous_total = self.body_storage_bytes.get();
+        let previous_cost = self
+            .nodes
+            .iter()
+            .find(|node| node.node_id == node_id)
+            .map_or(0, node_storage_bytes);
         let mut source_changed = false;
         if let Some(node) = self.nodes.iter_mut().find(|n| n.node_id == node_id) {
             let width = |p: &NodePresentation| {
@@ -914,6 +922,12 @@ impl ThreadView {
                 && node.presentation.kind == presentation.kind
                 && node.presentation.body_extent_unknown == presentation.body_extent_unknown
                 && width(&node.presentation) == width(&presentation)
+                && (node.presentation.projection_stamp.is_some()
+                    && node.presentation.projection_stamp == presentation.projection_stamp
+                    || node.presentation.projection_stamp.is_none()
+                        && presentation.projection_stamp.is_none()
+                        && node.text == text
+                        && node.presentation == presentation)
             {
                 return;
             }
@@ -934,7 +948,7 @@ impl ThreadView {
             self.provisional_nodes.insert(node_id.clone());
             self.nodes.push(UiNode {
                 presentation,
-                node_id,
+                node_id: node_id.clone(),
                 role,
                 text,
                 base_char_offset,
@@ -943,7 +957,17 @@ impl ThreadView {
             });
         }
         if source_changed {
+            let updated_cost = self
+                .nodes
+                .iter()
+                .find(|node| node.node_id == node_id)
+                .map_or(0, node_storage_bytes);
             self.mark_source_changed();
+            self.body_storage_bytes.set(previous_total.map(|total| {
+                total
+                    .saturating_sub(previous_cost)
+                    .saturating_add(updated_cost)
+            }));
         }
         if !self.follow {
             self.unseen = true;
@@ -1227,6 +1251,7 @@ impl ThreadView {
             }
         } else {
             for node in &mut self.nodes {
+                node.presentation.projection_stamp = None;
                 for block in &mut node.presentation.blocks {
                     if let Some(tool) = &mut block.tool {
                         tool.observation_unavailable();
@@ -1365,8 +1390,13 @@ impl ThreadView {
 
 impl ThreadView {
     pub(super) fn retain_source_ids(&mut self) {
+        let ids = self
+            .nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect::<BTreeSet<_>>();
         self.provisional_nodes
-            .retain(|id| self.nodes.iter().any(|node| &node.node_id == id));
+            .retain(|id| ids.contains(id.as_str()));
         self.committed_nodes
             .retain(|attempt, _| self.provisional_nodes.contains(attempt));
         if self
@@ -1377,7 +1407,7 @@ impl ThreadView {
             self.committed_preview = None;
         }
         self.reasoning_expanded
-            .retain(|id| self.nodes.iter().any(|node| &node.node_id == id));
+            .retain(|id| ids.contains(id.as_str()));
     }
     pub(super) fn compact_node_slots(&mut self) -> usize {
         let old = self.nodes.capacity();
@@ -1439,12 +1469,18 @@ impl ThreadView {
     pub(super) fn retained_body_bytes(&self, working: &[String]) -> usize {
         let mut bytes =
             self.nodes.capacity().saturating_sub(working.len()) * std::mem::size_of::<UiNode>();
-        for node in &self.nodes {
-            if !working.contains(&node.node_id) {
-                bytes = bytes.saturating_add(
-                    node.metadata_bytes() - std::mem::size_of::<UiNode>() + node.cached_bytes(),
-                );
-            }
+        let stored = self.body_storage_bytes.get().unwrap_or_else(|| {
+            let stored = self.nodes.iter().map(node_storage_bytes).sum();
+            self.body_storage_bytes.set(Some(stored));
+            stored
+        });
+        bytes = bytes.saturating_add(stored);
+        for node in self
+            .nodes
+            .iter()
+            .filter(|node| working.contains(&node.node_id))
+        {
+            bytes = bytes.saturating_sub(node_storage_bytes(node));
         }
         for (attempt, saved) in &self.committed_nodes {
             if !working.contains(attempt) {
@@ -1514,6 +1550,7 @@ impl ThreadView {
         self.history_revision
     }
     fn mark_source_changed(&mut self) {
+        self.body_storage_bytes.set(None);
         self.history_revision = self.history_revision.wrapping_add(1);
     }
 }
@@ -2539,5 +2576,93 @@ mod evicted_committed_source_tests {
         assert_eq!(view.nodes()[0].text, "final body");
         assert!(view.committed_nodes.is_empty());
         assert!(view.provisional_nodes.is_empty());
+    }
+}
+
+fn node_storage_bytes(node: &UiNode) -> usize {
+    node.metadata_bytes() - std::mem::size_of::<UiNode>() + node.cached_bytes()
+}
+
+#[cfg(test)]
+mod body_accounting_tests {
+    use super::*;
+    #[test]
+    fn streaming_replacement_eviction_and_capacity_compaction_keep_exact_body_totals() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        for n in 0..24 {
+            let incoming = UiNode {
+                node_id: "live".into(),
+                role: "assistant".into(),
+                text: "日本語".repeat(n + 1),
+                total_chars: (n + 1) * 3,
+                ..Default::default()
+            };
+            view.on_stream(incoming);
+            let expected = view.nodes.capacity() * std::mem::size_of::<UiNode>()
+                + view.nodes.iter().map(node_storage_bytes).sum::<usize>();
+            assert_eq!(view.retained_body_bytes(&[]), expected);
+            let exempt = vec!["live".into()];
+            assert_eq!(
+                view.retained_body_bytes(&exempt),
+                view.nodes.capacity().saturating_sub(1) * std::mem::size_of::<UiNode>()
+            );
+        }
+        view.evict_node_body(0);
+        view.compact_node_slots();
+        assert_eq!(
+            view.retained_body_bytes(&[]),
+            view.nodes.capacity() * std::mem::size_of::<UiNode>()
+                + view.nodes.iter().map(node_storage_bytes).sum::<usize>()
+        );
+        view.discard_cached_history();
+        assert_eq!(view.retained_body_bytes(&[]), 0);
+    }
+    #[test]
+    fn local_tool_observation_failure_invalidates_projection_stamp() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut node = UiNode {
+            node_id: "tool".into(),
+            ..Default::default()
+        };
+        node.presentation.projection_stamp = Some([7; 32]);
+        node.presentation
+            .blocks
+            .push(crate::presentation::PresentationBlock {
+                tool: Some(crate::presentation::ToolPresentation::default()),
+                ..Default::default()
+            });
+        view.nodes.push(node);
+        view.on_tool_facts(Err("not currently observable".into()));
+        assert!(view.nodes[0].presentation.projection_stamp.is_none());
+    }
+    #[test]
+    fn paused_stream_window_extent_changes_render_unit_identity_without_losing_old_text() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.follow = false;
+        view.anchor.node_id = Some("live".into());
+        view.anchor.char_offset = 0;
+        let mut original = UiNode {
+            node_id: "live".into(),
+            role: "assistant".into(),
+            text: "old text".into(),
+            total_chars: 8,
+            ..Default::default()
+        };
+        original.presentation.projection_stamp = Some([7; 32]);
+        view.nodes.push(original);
+        let old = RenderUnitKey::new(&view, 0, 1, 80, &[]).unwrap();
+        let mut incoming = UiNode {
+            node_id: "live".into(),
+            role: "assistant".into(),
+            text: "new tail".into(),
+            base_char_offset: 100,
+            total_chars: 108,
+            ..Default::default()
+        };
+        incoming.presentation.projection_stamp = Some([8; 32]);
+        view.on_stream(incoming);
+        assert_eq!(view.nodes[0].text, "old text");
+        assert_eq!(view.nodes[0].presentation.projection_stamp, Some([7; 32]));
+        assert_ne!(old, RenderUnitKey::new(&view, 0, 1, 80, &[]).unwrap());
     }
 }

@@ -1,6 +1,6 @@
 //! Frontend observation context, separate from UI views and durable Thread state.
-use super::{ApiError, UiUpdate, activity, status, update};
-use std::{collections::HashMap, sync::mpsc::SyncSender};
+use super::{ApiError, UiUpdate, UpdateTarget, activity, status, update};
+use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
 #[derive(Default)]
 pub(super) struct Selection {
@@ -53,7 +53,7 @@ impl Selection {
     }
     pub(super) async fn publish_activity(
         &mut self,
-        updates: &SyncSender<UiUpdate>,
+        updates: &impl UpdateTarget,
         thread: String,
         generation: u64,
         epoch: u64,

@@ -249,6 +249,10 @@ impl ActionReceiver {
         None
     }
     pub async fn recv(&mut self) -> Option<UiAction> {
+        self.recv_with_admission(true).await
+    }
+    /// Pause ordinary intake without pausing the reserved Cancel/Quit slots.
+    pub(crate) async fn recv_with_admission(&mut self, admit: bool) -> Option<UiAction> {
         loop {
             // Register before checking slots so a concurrent delivery is retained.
             let shared = self.shared.clone();
@@ -284,7 +288,7 @@ impl ActionReceiver {
                 notified.await;
                 continue;
             }
-            tokio::select! {biased;_= &mut notified=>{},action=self.normal.recv()=>return action}
+            tokio::select! {biased;_= &mut notified=>{},action=self.normal.recv(),if admit || self.shared.is_none()=>return action}
         }
     }
 }
@@ -339,5 +343,31 @@ mod quit_start_tests {
             bind_tool_gate(&send.shared, late.clone());
             assert!(late.load(Ordering::SeqCst));
         }
+    }
+}
+
+#[cfg(test)]
+mod output_admission_tests {
+    use super::*;
+    #[tokio::test]
+    async fn paused_normal_admission_preserves_priority_cancel_and_quit() {
+        let (sender, mut receiver) = channel(1);
+        sender
+            .try_send(UiAction::RenderWidth { width: 120 })
+            .unwrap();
+        sender
+            .try_send(UiAction::Cancel {
+                thread_id: "thread".into(),
+            })
+            .unwrap();
+        assert!(
+            matches!(receiver.recv_with_admission(false).await,Some(UiAction::Cancel{thread_id})if thread_id=="thread")
+        );
+        receiver.complete_cancel();
+        sender.try_send(UiAction::Quit).unwrap();
+        assert!(matches!(
+            receiver.recv_with_admission(false).await,
+            Some(UiAction::Quit)
+        ));
     }
 }

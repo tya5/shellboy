@@ -3,6 +3,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::Instant,
 };
+pub(crate) static FRONTEND_LAGGED: AtomicU64 = AtomicU64::new(0);
+pub(crate) static FRONTEND_RELOADS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static FRONTEND_ACTIONS: AtomicU64 = AtomicU64::new(0);
 pub(crate) static SNAPSHOTS: AtomicU64 = AtomicU64::new(0);
 pub(crate) static CLONED_BYTES: AtomicU64 = AtomicU64::new(0);
 pub(crate) static GATE_READS: AtomicU64 = AtomicU64::new(0);
@@ -12,7 +15,15 @@ pub(crate) fn snapshot(bytes: usize) {
     CLONED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
 }
 pub(crate) fn reset() {
-    for counter in [&SNAPSHOTS, &CLONED_BYTES, &GATE_READS, &GATE_NANOS] {
+    for counter in [
+        &SNAPSHOTS,
+        &CLONED_BYTES,
+        &GATE_READS,
+        &GATE_NANOS,
+        &FRONTEND_LAGGED,
+        &FRONTEND_RELOADS,
+        &FRONTEND_ACTIONS,
+    ] {
         counter.store(0, Ordering::Relaxed);
     }
 }

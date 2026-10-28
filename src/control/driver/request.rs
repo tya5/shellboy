@@ -187,7 +187,7 @@ pub(super) async fn stream_response(
                 // A receipt after a long silence is always forwarded immediately.
                 if last_receive_notice.is_none_or(|last| observed_at.saturating_duration_since(last) >= std::time::Duration::from_secs(1)) {
                     last_receive_notice = Some(observed_at);
-                    let _ = control.events.send(EngineEvent::ModelReceive {
+                    control.publish_event(EngineEvent::ModelReceive {
                         thread_id: thread.into(),
                         attempt_id: attempt.into(),
                         observed_at,
@@ -196,7 +196,7 @@ pub(super) async fn stream_response(
                 let Some(event) = event else { continue; };
                 let kind=model::classify_stream_event(&event);
                 let reasoning=kind==model::StreamEventKind::ReasoningDelta;
-                if matches!(kind,model::StreamEventKind::TextDelta|model::StreamEventKind::ReasoningDelta) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();let _=control.events.send(EngineEvent::Stream{thread_id:thread.into(),node_id:attempt.into(),text:delta.into(),reasoning,stream_char_offset});}
+                if matches!(kind,model::StreamEventKind::TextDelta|model::StreamEventKind::ReasoningDelta) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();control.publish_event(EngineEvent::Stream{thread_id:thread.into(),node_id:attempt.into(),text:delta.into(),reasoning,stream_char_offset});}
             }
         }
     }

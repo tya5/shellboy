@@ -308,10 +308,10 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         tx.execute("INSERT OR IGNORE INTO delivery(event_id,recipient_id,state) SELECT e.id,?2,'pending' FROM event e WHERE e.target_thread_id=?1 AND e.kind='context_changed' AND e.target_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM delivery d WHERE d.event_id=e.id AND d.state='processed')",params![thread,run])?;
         let events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND (e.kind<>'context_changed' OR NOT EXISTS(SELECT 1 FROM delivery done WHERE done.event_id=e.id AND done.state='processed')) ORDER BY e.created_at,e.id")?.query_map([&run],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         let mut snapshot=tx.query_row("SELECT u.generation,t.selection_revision,t.profile_revision,t.profile_id,t.model_id,t.effort,t.reasoning_epoch,t.cwd,t.agents_path FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[&turn],|r|Ok(Snapshot{thread:thread.clone(),run:run.clone(),turn:turn.clone(),generation:r.get(0)?,selection:r.get(1)?,profile_revision:r.get(2)?,profile:r.get(3)?,model:r.get(4)?,effort:r.get(5)?,epoch:r.get(6)?,cwd:PathBuf::from(r.get::<_,String>(7)?),agents:PathBuf::from(r.get::<_,String>(8)?),input:None,receipts:vec![],events:events.iter().map(|v|v.0.clone()).collect()}))?;
-        let mut path:Vec<String>=tx.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&thread],|r|r.get(0))?.collect::<Result<_,_>>()?;
         let pending:Vec<(String,String)>=tx.prepare("SELECT id,message_node_id FROM receipt WHERE turn_id=?1 AND state='accepted' ORDER BY created_at,rowid")?.query_map([&turn],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
-        for (receipt,node)in pending{snapshot.receipts.push(receipt);if !path.contains(&node){path.push(node);}}
-        if path.len()as i64!=tx.query_row("SELECT count(*) FROM thread_path WHERE thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?{history::select_path(&tx,&thread,snapshot.selection as u64,&path,&now())?;}
+        let nodes:Vec<String>=pending.iter().map(|(_,node)|node.clone()).collect();
+        snapshot.receipts=pending.into_iter().map(|(receipt,_)|receipt).collect();
+        history::append_existing_nodes(&tx,&thread,snapshot.selection as u64,&nodes,&now())?;
         for (event,payload)in &events{
             let node=format!("event-{event}");
             let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node WHERE id=?1)",[&node],|r|r.get(0))?;
@@ -684,7 +684,7 @@ async fn run_shell(
             if error.is_storage_failure() {
                 collector.fail_storage().await;
             }
-            let _ = collector.events.send(EngineEvent::Error {
+            collector.publish_event(EngineEvent::Error {
                 thread_id: current.thread.clone(),
                 error: error.clone(),
             });

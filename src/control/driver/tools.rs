@@ -133,7 +133,7 @@ pub(super) async fn run_tool_group(
         control.kick_quiet(target).await;
     }
     if foreground_release.is_some() || cancelled_count > 0 {
-        let _ = control.events.send(EngineEvent::Notice {
+        control.publish_event(EngineEvent::Notice {
             thread_id: snapshot.thread.clone(),
             foreground_release,
             cancelled_calls: cancelled_count,

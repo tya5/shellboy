@@ -256,7 +256,7 @@ impl Prepared {
                         self.ticket.width,
                     );
                     node.presentation.body_extent_unknown |= self.gap;
-                    super::streams::seal_node(node);
+                    seal_stream_node(node, &self.ticket, self.gap);
                 }
                 self.prepared = true;
                 self
@@ -321,6 +321,24 @@ impl Prepared {
         }
     }
 }
+/// A revision token for this disposable projection, not a content/provenance hash.
+/// Serial changes on source handoff, revision on every delta/gap and width on
+/// reformatting, avoiding serializing/hash-scanning the retained tail each frame.
+fn seal_stream_node(node: &mut UiNode, ticket: &Ticket, gap: bool) {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    digest.update(b"shellboy-live-projection-v1\0");
+    digest.update(ticket.thread.as_bytes());
+    digest.update([0]);
+    digest.update(ticket.attempt.as_bytes());
+    digest.update([0]);
+    digest.update(ticket.serial.to_le_bytes());
+    digest.update(ticket.revision.to_le_bytes());
+    digest.update(ticket.width.to_le_bytes());
+    digest.update([u8::from(gap)]);
+    node.presentation.projection_stamp = Some(digest.finalize().into());
+}
+
 enum Admission {
     Queued {
         ended: bool,

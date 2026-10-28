@@ -4,6 +4,7 @@ mod foreground;
 pub(crate) mod interruption;
 mod live;
 mod runtime;
+mod ui_events;
 pub use foreground::ForegroundRelease;
 use foreground::ForegroundSlot;
 use live::LiveRegistry;
@@ -103,7 +104,9 @@ pub struct Control {
     live: Arc<LiveRegistry>,
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
+    ui_events: ui_events::UiEvents,
     changed: Notify,
+    shell_output_changed: Notify,
     stop: CancellationToken,
     diagnostics: crate::diagnostics::Diagnostics,
     storage_failed: AtomicBool,
@@ -174,7 +177,9 @@ impl Control {
             live: Arc::new(LiveRegistry::default()),
             origins: Mutex::new(HashMap::new()),
             events,
+            ui_events: ui_events::UiEvents::new(),
             changed: Notify::new(),
+            shell_output_changed: Notify::new(),
             stop: CancellationToken::new(),
             diagnostics: owner.diagnostics.clone(),
             storage_failed: AtomicBool::new(false),
@@ -243,6 +248,10 @@ impl Control {
     pub fn replay_cache_stats(&self) -> replay::ReplayStats {
         self.replay.stats()
     }
+    #[cfg(test)]
+    pub(crate) fn emit_test_event(&self, event: EngineEvent) {
+        self.publish_event(event);
+    }
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
         self.events.subscribe()
     }
@@ -250,7 +259,7 @@ impl Control {
         self.changed_with_recovery(thread_id, false);
     }
     fn changed_with_recovery(&self, thread_id: &str, recovery: bool) {
-        let _ = self.events.send(EngineEvent::Changed {
+        self.publish_event(EngineEvent::Changed {
             thread_id: thread_id.into(),
             recovery,
         });
@@ -824,7 +833,7 @@ impl Control {
             let active = self.live.cancel_run(&thread, run_id).await;
             if !active && let Err(error) = driver::stop_without_driver(self, run_id).await {
                 self.fail_storage().await;
-                let _ = self.events.send(EngineEvent::Error {
+                self.publish_event(EngineEvent::Error {
                     thread_id: thread.clone(),
                     error,
                 });
@@ -897,7 +906,7 @@ impl Control {
                     use rusqlite::OptionalExtension;
                     Ok(db
                         .query_row(
-                            "SELECT id FROM run WHERE thread_id=?1 AND state='live'",
+                            "SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",
                             [target_thread],
                             |row| row.get::<_, String>(0),
                         )
@@ -926,7 +935,7 @@ impl Control {
                     if error.is_storage_failure() {
                         control.fail_storage().await;
                     }
-                    let _ = control.events.send(EngineEvent::Error {
+                    control.publish_event(EngineEvent::Error {
                         thread_id: thread_id.clone(),
                         error,
                     });

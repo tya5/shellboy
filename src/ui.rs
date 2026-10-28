@@ -835,7 +835,6 @@ struct HistoryLayoutKey {
     anchor: Option<String>,
     expanded: Vec<String>,
     width: u16,
-    height: u16,
 }
 struct HistoryLayout {
     text: String,
@@ -843,6 +842,54 @@ struct HistoryLayout {
     lines: usize,
     targets: Vec<Arc<str>>,
     sources: Vec<presentation::RowSource>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct RenderUnitKey {
+    start: usize,
+    end: usize,
+    width: u16,
+    stamps: Vec<([u8; 32], usize, usize)>,
+    expanded: Vec<bool>,
+    preceding_links: Vec<Arc<str>>,
+}
+impl RenderUnitKey {
+    fn new(
+        view: &ThreadView,
+        start: usize,
+        end: usize,
+        width: u16,
+        links: &[Arc<str>],
+    ) -> Option<Self> {
+        Some(Self {
+            start,
+            end,
+            width,
+            stamps: view.nodes()[start..end]
+                .iter()
+                .map(|node| {
+                    node.presentation
+                        .projection_stamp
+                        .map(|stamp| (stamp, node.base_char_offset, node.total_chars))
+                })
+                .collect::<Option<Vec<_>>>()?,
+            expanded: view.nodes()[start..end]
+                .iter()
+                .map(|node| view.reasoning_expanded.contains(&node.node_id))
+                .collect(),
+            preceding_links: links.to_vec(),
+        })
+    }
+    fn bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.stamps.capacity() * std::mem::size_of::<([u8; 32], usize, usize)>()
+            + self.expanded.capacity()
+            + self.preceding_links.capacity() * std::mem::size_of::<Arc<str>>()
+            + self
+                .preceding_links
+                .iter()
+                .map(|link| link.len())
+                .sum::<usize>()
+    }
 }
 struct HistoryLayoutEntry {
     value: Arc<HistoryLayout>,
@@ -852,13 +899,18 @@ struct HistoryLayoutEntry {
 #[derive(Default)]
 struct HistoryLayoutCache {
     entries: BTreeMap<HistoryLayoutKey, HistoryLayoutEntry>,
+    units: BTreeMap<RenderUnitKey, HistoryLayoutEntry>,
     bytes: usize,
     clock: u64,
     #[cfg(test)]
     builds: usize,
+    #[cfg(test)]
+    unit_hits: usize,
+    #[cfg(test)]
+    unit_builds: usize,
 }
 impl HistoryLayoutKey {
-    fn new(view_key: &str, view: &ThreadView, width: u16, height: u16) -> Self {
+    fn new(view_key: &str, view: &ThreadView, width: u16, _height: u16) -> Self {
         Self {
             view: view_key.into(),
             thread: view.thread_id.clone(),
@@ -870,7 +922,6 @@ impl HistoryLayoutKey {
                 .map(|n| n.node_id.clone()),
             expanded: view.reasoning_expanded.iter().cloned().collect(),
             width,
-            height,
         }
     }
     fn bytes(&self) -> usize {
@@ -884,19 +935,73 @@ impl HistoryLayoutKey {
 impl HistoryLayoutCache {
     fn evict(&mut self, budget: usize) {
         while self.bytes > budget {
-            let Some(key) = self
+            let whole = self
                 .entries
                 .iter()
-                .min_by_key(|(_, e)| e.touched)
-                .map(|(key, _)| key.clone())
-            else {
-                break;
+                .min_by_key(|(_, entry)| entry.touched)
+                .map(|(key, entry)| (key.clone(), entry.touched));
+            let unit = self
+                .units
+                .iter()
+                .min_by_key(|(_, entry)| entry.touched)
+                .map(|(key, entry)| (key.clone(), entry.touched));
+            let removed = match (whole, unit) {
+                (Some((_whole, wt)), Some((unit, ut))) if ut < wt => self.units.remove(&unit),
+                (Some((whole, _)), _) => self.entries.remove(&whole),
+                (None, Some((unit, _))) => self.units.remove(&unit),
+                (None, None) => break,
             };
-            if let Some(old) = self.entries.remove(&key) {
+            if let Some(old) = removed {
                 self.bytes -= old.bytes;
             }
         }
     }
+    fn unit(&mut self, key: &RenderUnitKey) -> Option<Arc<HistoryLayout>> {
+        #[cfg(test)]
+        {
+            if self.units.contains_key(key) {
+                self.unit_hits += 1;
+            }
+        }
+        self.clock = self.clock.saturating_add(1);
+        self.units.get_mut(key).map(|entry| {
+            entry.touched = self.clock;
+            Arc::clone(&entry.value)
+        })
+    }
+    fn insert_unit(&mut self, key: RenderUnitKey, value: Arc<HistoryLayout>, budget: usize) {
+        #[cfg(test)]
+        {
+            self.unit_builds += 1;
+        }
+        let bytes = key.bytes()
+            + value.text.capacity()
+            + presentation::bytes(&value.styled)
+            + value.targets.capacity() * std::mem::size_of::<Arc<str>>()
+            + value.targets.iter().map(|link| link.len()).sum::<usize>()
+            + value.sources.capacity() * std::mem::size_of::<presentation::RowSource>()
+            + std::mem::size_of::<HistoryLayout>()
+            + std::mem::size_of::<HistoryLayoutEntry>()
+            + 128;
+        if bytes > budget || budget == 0 {
+            return;
+        }
+        if let Some(old) = self.units.remove(&key) {
+            self.bytes -= old.bytes;
+        }
+        self.evict(budget - bytes);
+        self.clock = self.clock.saturating_add(1);
+        self.bytes += bytes;
+        self.units.insert(
+            key,
+            HistoryLayoutEntry {
+                value,
+                bytes,
+                touched: self.clock,
+            },
+        );
+    }
+
     fn discard_old_revision(&mut self, key: &HistoryLayoutKey) {
         let bytes = &mut self.bytes;
         self.entries.retain(|old, entry| {
@@ -1044,6 +1149,24 @@ pub struct UiState {
     thread_deletions_inflight: BTreeMap<String, u64>,
     command_rejected: bool,
 }
+// Preserve source-window I/O intent before viewport reconciliation initializes
+// or clamps the display row. These facts live for this draw only.
+#[derive(Clone, Copy)]
+struct RenderPreflight {
+    anchor_changed: bool,
+    initializing: bool,
+}
+impl RenderPreflight {
+    fn new(view: &ThreadView) -> Self {
+        Self {
+            anchor_changed: !view.scroll.initialized
+                || view.scroll.anchor != view.anchor
+                || view.scroll.revision != view.history_revision(),
+            initializing: !view.scroll.initialized,
+        }
+    }
+}
+
 impl UiState {
     pub fn threads(&self) -> &[ThreadSummary] {
         self.thread_browser.items()
@@ -1134,7 +1257,35 @@ impl UiState {
             .get_mut(&self.active)
             .expect("active view exists")
     }
+    #[cfg(test)]
     fn prepare_render_width(&mut self, width: u16) {
+        let view = self.view();
+        let preflight = RenderPreflight::new(view);
+        let visible = self
+            .layout_cache
+            .entries
+            .iter()
+            .filter(|(key, _)| {
+                key.view == self.active && key.history_revision == view.history_revision()
+            })
+            .max_by_key(|(_, entry)| entry.touched)
+            .map(|(_, entry)| {
+                visible_render_nodes(
+                    &entry.value,
+                    view.scroll.row,
+                    view.scroll.height,
+                    view.nodes().len(),
+                )
+            })
+            .unwrap_or_default();
+        self.prepare_visible_render_width(width, &visible, preflight);
+    }
+    fn prepare_visible_render_width(
+        &mut self,
+        width: u16,
+        visible: &BTreeSet<usize>,
+        preflight: RenderPreflight,
+    ) {
         if self.render_width != width {
             self.render_width = width;
             self.render_pending.clear();
@@ -1147,12 +1298,20 @@ impl UiState {
         if view.scroll.request.is_some() {
             return;
         }
-        let working = working_node_ids(view);
+        let mut working = working_node_ids(view);
+        working.extend(
+            visible
+                .iter()
+                .filter_map(|index| view.nodes().get(*index).map(|node| node.node_id.clone())),
+        );
+        working.sort();
+        working.dedup();
         let generation = view.generation;
         let revision = view.view_revision;
         let mut requests = view
             .nodes()
             .iter()
+            .filter(|node| working.contains(&node.node_id))
             .filter_map(|node| {
                 let offset = if view.anchor.node_id.as_ref() == Some(&node.node_id) && !view.follow
                 {
@@ -1160,9 +1319,7 @@ impl UiState {
                 } else {
                     node.base_char_offset
                 };
-                let outside = (!view.scroll.initialized
-                    || view.scroll.anchor != view.anchor
-                    || view.scroll.revision != view.history_revision())
+                let outside = preflight.anchor_changed
                     && !view.follow
                     && view.anchor.node_id.as_ref() == Some(&node.node_id)
                     && (offset < node.base_char_offset
@@ -1178,7 +1335,7 @@ impl UiState {
                             .rendered
                             .as_ref()
                             .is_none_or(|rendered| rendered.width != width)
-                            || (!view.scroll.initialized
+                            || (preflight.initializing
                                 && block.source_exact
                                 && offset > block.source_start
                                 && offset < block.source_end))
@@ -3901,6 +4058,21 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     frame.render_widget(Paragraph::new(status), area);
 }
 
+fn visible_render_nodes(
+    layout: &HistoryLayout,
+    row: usize,
+    height: u16,
+    nodes: usize,
+) -> BTreeSet<usize> {
+    layout
+        .sources
+        .iter()
+        .skip(row)
+        .take(usize::from(height))
+        .flat_map(|source| source.node..source.covered_end.min(nodes))
+        .collect()
+}
+
 pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     let area = frame.area();
     state.viewport = area;
@@ -3947,7 +4119,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         height: recovery_height,
         ..layout[1]
     };
-    state.prepare_render_width(body_area.width.saturating_sub(4).max(1));
+    let render_preflight = RenderPreflight::new(state.view());
     let history = state.history_layout(
         body_area.width.saturating_sub(2),
         body_area.height.saturating_sub(2),
@@ -3956,6 +4128,17 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         &history,
         body_area.width.saturating_sub(2),
         body_area.height.saturating_sub(2),
+    );
+    let visible = visible_render_nodes(
+        &history,
+        scroll,
+        body_area.height.saturating_sub(2),
+        state.view().nodes().len(),
+    );
+    state.prepare_visible_render_width(
+        body_area.width.saturating_sub(4).max(1),
+        &visible,
+        render_preflight,
     );
     state.active_view_mut().scroll.area = Some(body_area);
     let view = state.view();
@@ -4758,7 +4941,7 @@ mod layout_cache_tests {
         assert!(!Arc::ptr_eq(&a, &expanded));
         assert!(expanded.text.contains("hidden 日本語"));
         assert!(!Arc::ptr_eq(&expanded, &ui.history_layout(21, 8)));
-        assert!(!Arc::ptr_eq(&expanded, &ui.history_layout(20, 9)));
+        assert!(Arc::ptr_eq(&expanded, &ui.history_layout(20, 9)));
         ui.active_view_mut().follow = false;
         ui.active_view_mut().anchor = ViewAnchor {
             node_id: Some("n".into()),
@@ -5304,3 +5487,6 @@ mod thread_view_boundary_tests {
 
 #[cfg(test)]
 mod performance_stream;
+
+#[cfg(test)]
+mod stream_performance;

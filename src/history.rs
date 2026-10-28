@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 
+mod append;
+pub use append::append_existing_nodes;
 mod list;
 mod node_row;
 pub use list::list_nodes;
@@ -195,10 +197,7 @@ pub fn select_path(
         })?;
     }
     for pair in path.windows(2) {
-        tx.execute(
-            "INSERT OR IGNORE INTO edge(src,dst) VALUES(?1,?2)",
-            params![pair[0], pair[1]],
-        )?;
+        append::insert_edge_if_missing(tx, &pair[0], &pair[1])?;
     }
     tx.execute("DELETE FROM thread_path WHERE thread_id=?1", [thread_id])?;
     for (ordinal, id) in path.iter().enumerate() {

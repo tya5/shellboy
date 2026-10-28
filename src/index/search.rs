@@ -1,5 +1,6 @@
 //! Explicit query embedding and eligible-source vector search.
 use super::*;
+mod reader;
 
 impl IndexService {
     pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchMatch>, ApiError> {
@@ -53,6 +54,15 @@ impl IndexService {
         cancel: CancellationToken,
     ) -> Result<Vec<IndexHit>, ApiError> {
         crate::protocol::Command::HistorySearch(args.clone()).validate()?;
+        // No waiting search queue and no query embedding charge before admission.
+        let permit = self.search_slots.clone().try_acquire_owned().map_err(|_| {
+            err(
+                ErrorCode::InvalidState,
+                "A semantic search is already running; retry after it finishes",
+            )
+        })?;
+        let guard = reader::SearchGuard::new(cancel.child_token());
+        let cancel = guard.token.clone();
         let args = args.clone();
         if let Some(thread) = &args.thread_id {
             let thread = thread.clone();
@@ -118,7 +128,7 @@ impl IndexService {
                 &space.model,
                 std::slice::from_ref(&args.query),
                 Some(space.dimension),
-                cancel,
+                cancel.clone(),
             )
             .await
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
@@ -129,10 +139,15 @@ impl IndexService {
             .expect("one validated query vector");
         let query = serde_json::to_string(&vector)
             .map_err(|_| err(ErrorCode::InvalidState, "Cannot encode query vector"))?;
-        self.database
-            .call(move |db| Ok(filtered_hits(db, &space, &query, &args)))
-            .await
-            .map_err(db_error)?
+        reader::rank(
+            self.database.path().to_path_buf(),
+            space,
+            query,
+            args,
+            &guard,
+            permit,
+        )
+        .await
     }
 }
 // vec0 accepts rowid-IN candidate sets (sqlite-vec 0.1.9). Validate source
@@ -144,6 +159,31 @@ fn filtered_hits(
     query: &str,
     args: &HistorySearchArgs,
 ) -> Result<Vec<IndexHit>, ApiError> {
+    Ok(ranked_hits(db, space, query, args, None)?.hits)
+}
+struct RankedHits {
+    hits: Vec<IndexHit>,
+    witnesses: Vec<Witness>,
+}
+fn ensure_running(cancel: Option<&CancellationToken>) -> Result<(), ApiError> {
+    if cancel.is_some_and(CancellationToken::is_cancelled) {
+        return Err(err(
+            ErrorCode::InvalidState,
+            "Semantic search was cancelled",
+        ));
+    }
+    Ok(())
+}
+fn ranked_hits(
+    db: &Connection,
+    space: &Space,
+    query: &str,
+    args: &HistorySearchArgs,
+    cancel: Option<&CancellationToken>,
+) -> Result<RankedHits, ApiError> {
+    ensure_running(cancel)?;
+    #[cfg(test)]
+    performance_tests::ranking_started();
     valid_table(&space.table).map_err(db_error)?;
     if let Some(thread) = &args.thread_id {
         let exists: bool = db
@@ -194,6 +234,7 @@ fn filtered_hits(
     let mut witness_checks = HashMap::<Witness, bool>::new();
     let mut visibility = HashMap::<String, bool>::new();
     while let Some(row) = rows.next().map_err(sql_error)? {
+        ensure_running(cancel)?;
         if from.is_some() || to.is_some() {
             let created: String = row.get(4).map_err(sql_error)?;
             let Ok(created) = chrono::DateTime::parse_from_rfc3339(&created) else {
@@ -242,7 +283,10 @@ fn filtered_hits(
         }
     }
     if eligible.is_empty() {
-        return Ok(Vec::new());
+        return Ok(RankedHits {
+            hits: Vec::new(),
+            witnesses: Vec::new(),
+        });
     }
     let count = eligible.len();
     let candidates = serde_json::to_string(&eligible)
@@ -252,7 +296,8 @@ fn filtered_hits(
         LEFT JOIN app_meta m ON m.key=?5||c.id
         WHERE v.embedding MATCH ?2 AND k=?3 AND v.rowid IN (SELECT value FROM json_each(?4)) ORDER BY v.distance",space.table);
     let mut k = (args.limit as usize * 8).min(count).min(4096);
-    loop {
+    let hits = loop {
+        ensure_running(cancel)?;
         let mut statement = db.prepare(&sql).map_err(sql_error)?;
         let mut rows = statement
             .query(params![
@@ -265,6 +310,7 @@ fn filtered_hits(
             .map_err(sql_error)?;
         let mut hits: Vec<IndexHit> = Vec::new();
         while let Some(row) = rows.next().map_err(sql_error)? {
+            ensure_running(cancel)?;
             let node: String = row.get(0).map_err(sql_error)?;
             let span = SourceSpan {
                 source_revision: row.get(6).map_err(sql_error)?,
@@ -296,13 +342,20 @@ fn filtered_hits(
         });
         if hits.len() >= args.limit as usize || k >= count {
             hits.truncate(args.limit as usize);
-            return Ok(hits);
+            break hits;
         }
         if k == 4096 {
-            return exact_filtered_hits(db, space, query, args, &candidates);
+            break exact_filtered_hits(db, space, query, args, &candidates, cancel)?;
         }
         k = (k * 2).min(count).min(4096);
-    }
+    };
+    let selected: HashSet<_> = hits.iter().map(|hit| hit.node_id.as_str()).collect();
+    let witnesses = witness_checks
+        .into_iter()
+        .filter(|(witness, valid)| *valid && selected.contains(witness.node_id.as_str()))
+        .map(|(witness, _)| witness)
+        .collect();
+    Ok(RankedHits { hits, witnesses })
 }
 
 /// Read-only snapshot adapter for standalone RAG. Does not open/migrate the
@@ -413,6 +466,7 @@ fn exact_filtered_hits(
     query: &str,
     args: &HistorySearchArgs,
     candidates: &str,
+    cancel: Option<&CancellationToken>,
 ) -> Result<Vec<IndexHit>, ApiError> {
     let sql = format!("SELECT c.source_node_id,c.span_start,c.span_end,j.body_kind,vec_distance_L2(v.embedding,?2) AS distance,m.value,c.source_revision,c.content_hash
         FROM embedding_chunk c JOIN {} v ON v.rowid=c.vec_row_id JOIN embedding_job j ON j.id=c.job_id
@@ -430,6 +484,7 @@ fn exact_filtered_hits(
         .map_err(sql_error)?;
     let mut hits: Vec<IndexHit> = Vec::new();
     while let Some(row) = rows.next().map_err(sql_error)? {
+        ensure_running(cancel)?;
         let node: String = row.get(0).map_err(sql_error)?;
         let span = SourceSpan {
             source_revision: row.get(6).map_err(sql_error)?,
@@ -505,3 +560,6 @@ mod visibility_cost_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod performance_tests;

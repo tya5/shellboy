@@ -69,6 +69,8 @@ pub(super) async fn collect_shell(
         let (mut next_stdout, mut next_stderr) = (stdout, stderr);
         // The owned chunks, including their byte-budget permits, stay in this
         // DB closure until the entire ordered batch commits or rolls back.
+        #[cfg(test)]
+        let save_started = std::time::Instant::now();
         let saved = control.store.database.call(move |db| {
             let tx = db.transaction()?;
             for chunk in &batch {
@@ -88,7 +90,18 @@ pub(super) async fn collect_shell(
         match saved {
             Ok((out, err)) => {
                 (stdout, stderr) = (out, err);
-                control.changed.notify_waiters();
+                #[cfg(test)]
+                {
+                    control
+                        .waits
+                        .output_commits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let mut samples = control.waits.output_save_micros.lock().unwrap();
+                    if samples.len() < 8192 {
+                        samples.push(save_started.elapsed().as_micros());
+                    }
+                }
+                control.shell_output_changed.notify_waiters();
             }
             Err(error) => {
                 shell.handle.stop();
@@ -282,3 +295,6 @@ mod drain_tests;
 
 #[cfg(all(test, unix))]
 mod duration_tests;
+
+#[cfg(all(test, unix))]
+mod performance_tests;

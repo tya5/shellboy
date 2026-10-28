@@ -120,3 +120,7 @@ rollbackする。既存migrationを改変せず、node本文/source/receipt割�
 別の版台帳や自動downgradeは追加しない。
 
 operation receiptの終端結果には通常のSavedOutcome objectのほか、回収済み本文を示すJSON scalar `0`を許す。NULLのpendingとは区別し、ID/hash/origin/元terminal stateを同じrowに保持する。両replay入口でoperation_expiredへ投影し、同IDの変更を再実行しない。既存quota triggerで1byte markerとmetadataを計上する。新DDLは不要で、v0.1.2のschema9前進後だけ新形式を書き込む。旧binaryへ戻す手順と回収規則は [operation設計](operation-observability.md) を参照する。
+
+## Hot query index（Issue #26、schema v10）
+
+`0010_hot_query_indexes`でactive shellのowner/state、Threadごとの最新Run、terminal shellの時刻順の3本を追加する。計画・書込み費用と採用/見送りの根拠は[経路とhot query設計](history-adoption-performance.md)。既存rowは保持し、索引・ledger・user_versionを同一transactionで前進する。旧binaryの対応上限を超えるため自動downgradeはせず、戻す場合は更新前backupを別data-dirへ復元する。独立RAGのschema 3とは異なる版番号である。
