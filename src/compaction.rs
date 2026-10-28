@@ -1208,6 +1208,7 @@ mod tests {
             let mut calls = 0;
             for response in responses {
                 let (mut stream, _) = listener.accept().await.unwrap();
+                stream.set_nodelay(true).unwrap();
                 let mut bytes = Vec::new();
                 let mut chunk = [0; 8192];
                 loop {
