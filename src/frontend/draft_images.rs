@@ -167,4 +167,14 @@ mod tests {
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
+    #[test]
+    fn failed_capture_reclaims_ticket_and_owner_even_when_command_error_was_already_reported() {
+        let mut images = DraftImages::default();
+        let ticket = images.begin_image("draft", Some("thread"));
+        assert!(images.accept_image(ticket));
+        images.prune_owners();
+        assert!(images.pending.is_empty());
+        assert_eq!(images.threads().count(), 0);
+        assert!(!images.accept_image(ticket));
+    }
 }

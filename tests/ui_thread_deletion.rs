@@ -312,3 +312,94 @@ fn images_in_an_edit_fork_draft_are_owned_by_the_source_thread_for_deletion() {
     assert_ne!(ui.view().draft.draft_id, draft_id);
     assert!(ui.view().draft.edit.is_none());
 }
+
+#[test]
+fn cleanup_warning_preserves_applied_deletion_and_moves_current_to_editable_draft() {
+    let mut ui = ui();
+    ui.select_thread("chosen".into());
+    list(&mut ui, &["chosen"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: true,
+        result: Ok(ThreadDeletionReply::DeletedWithWarning {
+            ids: vec!["chosen".into()],
+            warning: "fixture saved-view cleanup failure".into(),
+        }),
+    });
+    assert!(ui.view().thread_id.is_none());
+    assert!(!ui.threads_visible());
+    assert!(
+        ui.view()
+            .status
+            .contains("削除しました。後片付けに失敗しました")
+    );
+    assert!(!ui.view().status.contains("削除できません"));
+    ui.insert("fresh", false);
+    assert_eq!(ui.view().draft.text, "fresh");
+}
+
+#[test]
+fn closing_and_reopening_cannot_submit_a_second_delete_of_the_same_thread() {
+    let mut ui = ui();
+    list(&mut ui, &["chosen"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    key(&mut ui, KeyCode::Esc);
+    assert!(key(&mut ui, KeyCode::Delete).is_empty());
+    assert!(ui.view().status.contains("削除を実行中"));
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: true,
+        result: Err(ApiError::new(ErrorCode::InvalidState, "fixture live Run")),
+    });
+    request(key(&mut ui, KeyCode::Delete), false);
+}
+
+#[test]
+fn late_delete_failure_survives_a_closed_browser_in_the_status_line() {
+    let mut ui = ui();
+    list(&mut ui, &["chosen"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::Esc);
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: true,
+        result: Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "fixture live Run started",
+        )),
+    });
+    assert!(!ui.threads_visible());
+    assert!(ui.view().status.contains("fixture live Run started"));
+    list(&mut ui, &["chosen"]);
+    assert!(screen(&mut ui).contains("fixture live Run started"));
+}
+
+#[test]
+fn modified_cancel_keys_do_not_close_confirmation_but_plain_escape_does() {
+    let mut ui = ui();
+    list(&mut ui, &["chosen"]);
+    request(key(&mut ui, KeyCode::Delete), false);
+    for code in [KeyCode::Char('n'), KeyCode::Char('N'), KeyCode::Esc] {
+        for modifiers in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
+            assert!(
+                ui.event(Event::Key(KeyEvent::new(code, modifiers)))
+                    .is_empty()
+            );
+            assert!(screen(&mut ui).contains("会話の削除確認"));
+        }
+    }
+    assert!(key(&mut ui, KeyCode::Esc).is_empty());
+    assert!(!screen(&mut ui).contains("会話の削除確認"));
+    assert_eq!(ui.threads().len(), 1);
+}

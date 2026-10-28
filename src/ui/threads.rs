@@ -128,7 +128,12 @@ impl ThreadBrowser {
         self.preferred = preferred;
         self.items = drafts;
         self.selected = 0;
-        self.begin(None)
+        // Reopening must retain a deletion outcome that arrived while closed.
+        // Filtering/paging still clears it through normal invalidation.
+        let notice = self.notice.take();
+        let action = self.begin(None);
+        self.notice = notice;
+        action
     }
     pub fn failed(&mut self, generation: u64, error: String) {
         if generation == self.generation {
@@ -940,6 +945,12 @@ mod tests {
         assert!(matches!(browser.key(release), ThreadOutcome::None));
         browser.key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
         assert_eq!(browser.filter(), "queryd");
+        browser.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(browser.filter(), "query");
+        browser.key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT));
+        browser.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(browser.filter(), "queryD ");
+        browser.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         browser.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         assert_eq!(browser.filter(), "query");
         browser.items[1].thread_id = "draft:local".into();

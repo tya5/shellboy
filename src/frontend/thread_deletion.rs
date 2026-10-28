@@ -2,6 +2,19 @@
 use super::*;
 
 pub(super) const MAX_KNOWN_THREADS: usize = 4_096;
+/// Selection generations are stale-response fences, not owned view IDs. They
+/// deliberately do not contribute to the finite deletion observation set.
+pub(super) fn candidates(
+    mut known: Vec<String>,
+    selection: &selection::Selection,
+    owned: impl Iterator<Item = String>,
+) -> Vec<String> {
+    known.extend(selection.active_thread.iter().cloned());
+    known.extend(owned);
+    known.sort();
+    known.dedup();
+    known
+}
 pub(super) enum Outcome {
     Preview(Value),
     Applied,
@@ -79,6 +92,47 @@ pub(super) async fn cleanup(
         })
         .await
         .map_err(storage_error)
+}
+
+/// Core success is irreversible even when local saved-view cleanup fails.
+/// Always return the confirmed root; descendants require a successful DB observation.
+pub(super) async fn finish_cleanup(
+    control: &Control,
+    root: &str,
+    candidates: Vec<String>,
+) -> (Vec<String>, Vec<String>, Option<String>) {
+    let observed_candidates = candidates.clone();
+    match cleanup(control, candidates).await {
+        Ok((mut deleted, drafts)) => {
+            if !deleted.iter().any(|id| id == root) {
+                deleted.push(root.to_owned());
+            }
+            (deleted, drafts, None)
+        }
+        Err(error) => {
+            // A failed write transaction can still permit read-only tombstone
+            // observation, so an active deleted child also leaves its view.
+            let observed = if observed_candidates.len() <= MAX_KNOWN_THREADS {
+                control.store.database.call(move |db| {
+                    let mut deleted = Vec::new();
+                    for id in observed_candidates {
+                        let dead: bool = db.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NOT NULL)",
+                            [&id], |row| row.get(0))?;
+                        if dead { deleted.push(id); }
+                    }
+                    Ok(deleted)
+                }).await.ok()
+            } else {
+                None
+            };
+            let mut deleted = observed.unwrap_or_default();
+            deleted.push(root.to_owned());
+            deleted.sort();
+            deleted.dedup();
+            (deleted, vec![], Some(error.to_string()))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -311,5 +365,225 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+    #[tokio::test]
+    async fn successful_core_delete_remains_success_when_saved_view_cleanup_fails() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        control
+            .store
+            .database
+            .call(|db| {
+                db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let args = ThreadDeleteArgs {
+            thread_id: "thread".into(),
+            descendants: false,
+        };
+        assert!(matches!(
+            run(&control, args, true).await.unwrap(),
+            Outcome::Applied
+        ));
+        // A failure after Core commit must never become a deletion failure.
+        control.store.database.call(|db| {
+            db.execute_batch("CREATE TRIGGER fixture_cleanup_failure BEFORE DELETE ON view_state BEGIN SELECT RAISE(ABORT,'fixture cleanup failure'); END;")?;
+            db.execute("INSERT OR IGNORE INTO view_state(thread_id,follow_tail) VALUES('thread',1)", [])?;
+            Ok(())
+        }).await.unwrap();
+        let (deleted, _, warning) = finish_cleanup(&control, "thread", vec!["thread".into()]).await;
+        assert_eq!(deleted, ["thread"]);
+        assert!(warning.unwrap().contains("fixture cleanup failure"));
+        let (deleted, _, warning) = finish_cleanup(
+            &control,
+            "thread",
+            (0..MAX_KNOWN_THREADS + 1)
+                .map(|n| format!("t{n}"))
+                .collect(),
+        )
+        .await;
+        assert_eq!(deleted, ["thread"]);
+        assert!(warning.is_some());
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn parent_only_delete_preserves_child() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let child = request(
+            &control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                parent_id: Some("thread".into()),
+                cwd: None,
+                connection: None,
+                model: None,
+                effort: None,
+            }),
+        )
+        .await
+        .unwrap()["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        control
+            .store
+            .database
+            .call(|db| {
+                db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        run(
+            &control,
+            ThreadDeleteArgs {
+                thread_id: "thread".into(),
+                descendants: false,
+            },
+            true,
+        )
+        .await
+        .unwrap();
+        let (deleted, _, warning) =
+            finish_cleanup(&control, "thread", vec!["thread".into(), child.clone()]).await;
+        assert_eq!(deleted, ["thread"]);
+        assert!(warning.is_none());
+        assert!(
+            request(
+                &control,
+                Command::ThreadGet(ThreadTarget {
+                    thread_id: Some(child)
+                })
+            )
+            .await
+            .is_ok()
+        );
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn historical_selection_generations_do_not_exhaust_deletion_observation_budget() {
+        let mut selection = selection::Selection::default();
+        for n in 0..MAX_KNOWN_THREADS + 100 {
+            selection.select_thread(format!("old{n}"), n as u64);
+        }
+        selection.select_thread("active".into(), 1);
+        let result = candidates(
+            vec!["visible".into()],
+            &selection,
+            ["saved".into(), "image".into()].into_iter(),
+        );
+        assert_eq!(result, ["active", "image", "saved", "visible"]);
+    }
+
+    struct FailedClipboard;
+    impl ClipboardBackend for FailedClipboard {
+        fn capture(&self, _: u64, _: CancellationToken) -> ClipboardFuture<'_, ClipboardPixels> {
+            Box::pin(async {
+                Err(ApiError::new(
+                    ErrorCode::IoFailed,
+                    "fixture capture failure",
+                ))
+            })
+        }
+        fn copy(
+            &self,
+            _: String,
+            _: CopyBackend,
+            _: usize,
+            _: u64,
+            _: CancellationToken,
+        ) -> ClipboardFuture<'_, CopyOutcome> {
+            Box::pin(async { unreachable!("copy not requested") })
+        }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn submitted_image_failure_is_reported_once_while_unsubmitted_failure_keeps_draft_notice()
+    {
+        let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (sender, receiver) = crate::ui::actions::channel(16);
+        let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+        let bridge = tokio::spawn(run_with_clipboard_slots(
+            control,
+            receiver,
+            updates,
+            root.path().into(),
+            owner,
+            server,
+            Arc::new(FailedClipboard),
+            Arc::new(Semaphore::new(2)),
+        ));
+        sender
+            .try_send(UiAction::SubmittedCommand {
+                submission: CommandSubmission {
+                    draft_id: "slash".into(),
+                    revision: 1,
+                },
+                action: Box::new(UiAction::PasteImage {
+                    draft_id: "slash".into(),
+                    revision: 1,
+                    position: 0,
+                    thread_id: None,
+                }),
+            })
+            .unwrap();
+        sender
+            .try_send(UiAction::PasteImage {
+                draft_id: "bare".into(),
+                revision: 1,
+                position: 0,
+                thread_id: None,
+            })
+            .unwrap();
+        let mut command_errors = 0;
+        let mut bare_errors = 0;
+        let mut duplicate_errors = 0;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while command_errors == 0 || bare_errors == 0 {
+                while let Ok(update) = incoming.try_recv() {
+                    match update {
+                        UiUpdate::CommandOutcome {
+                            submission,
+                            result: Err(error),
+                        } if submission.draft_id == "slash" => {
+                            assert!(error.contains("fixture capture failure"));
+                            command_errors += 1;
+                        }
+                        UiUpdate::DraftStatus { draft_id, text }
+                            if text.contains("fixture capture failure") =>
+                        {
+                            if draft_id == "bare" {
+                                bare_errors += 1;
+                            } else {
+                                duplicate_errors += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // Both captures completed; give the result channel a bounded observation
+        // window for an erroneously duplicated slash DraftStatus.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        while let Ok(update) = incoming.try_recv() {
+            if matches!(update,UiUpdate::DraftStatus{draft_id,text} if draft_id=="slash"&&text.contains("fixture capture failure"))
+            {
+                duplicate_errors += 1;
+            }
+        }
+        assert_eq!(command_errors, 1);
+        assert_eq!(bare_errors, 1);
+        assert_eq!(duplicate_errors, 0);
+        sender.try_send(UiAction::Quit).unwrap();
+        crate::frontend::control_tests::finish_bridge(bridge, &incoming).await;
     }
 }

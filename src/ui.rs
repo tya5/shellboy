@@ -786,6 +786,7 @@ pub struct ManagementView {
 pub enum ThreadDeletionReply {
     Preview(serde_json::Value),
     Deleted(Vec<String>),
+    DeletedWithWarning { ids: Vec<String>, warning: String },
 }
 #[derive(Clone, Debug)]
 enum Confirmation {
@@ -1040,6 +1041,7 @@ pub struct UiState {
     next_detail_request: u64,
     next_input_request: u64,
     next_thread_deletion_request: u64,
+    thread_deletions_inflight: BTreeMap<String, u64>,
     command_rejected: bool,
 }
 impl UiState {
@@ -1107,6 +1109,7 @@ impl UiState {
             next_detail_request: 0,
             next_input_request: 0,
             next_thread_deletion_request: 0,
+            thread_deletions_inflight: BTreeMap::new(),
         }
     }
     pub fn view(&self) -> &ThreadView {

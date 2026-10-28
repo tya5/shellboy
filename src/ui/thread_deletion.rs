@@ -107,6 +107,14 @@ impl UiState {
                 .notice("未保存の下書きは会話の削除対象ではありません".into());
             return vec![];
         }
+        if self.thread_deletions_inflight.contains_key(&thread)
+            || self.thread_deletions_inflight.len() >= 32
+        {
+            let message = "削除を実行中です。結果を待ってから再操作してください".to_owned();
+            self.thread_browser.notice(message.clone());
+            self.active_view_mut().status = message;
+            return vec![];
+        }
         self.next_thread_deletion_request = self.next_thread_deletion_request.wrapping_add(1);
         let title = self
             .thread_browser
@@ -135,7 +143,11 @@ impl UiState {
         if key.kind == KeyEventKind::Release {
             return vec![];
         }
-        if matches!(key.code, KeyCode::Esc | KeyCode::Char('n' | 'N')) {
+        if !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            && matches!(key.code, KeyCode::Esc | KeyCode::Char('n' | 'N'))
+        {
             self.confirmation = None;
             self.confirmation_scroll = 0;
             self.dirty = true;
@@ -175,6 +187,10 @@ impl UiState {
         let action = execute.map(|execute| {
             self.next_thread_deletion_request = self.next_thread_deletion_request.wrapping_add(1);
             dialog.request_id = self.next_thread_deletion_request;
+            if execute {
+                self.thread_deletions_inflight
+                    .insert(dialog.args.thread_id.clone(), dialog.request_id);
+            }
             self.confirmation_scroll = 0;
             self.deletion_action(&dialog, execute)
         });
@@ -189,6 +205,20 @@ impl UiState {
         execute: bool,
         result: Result<ThreadDeletionReply, crate::protocol::ApiError>,
     ) {
+        if execute && self.thread_deletions_inflight.get(&args.thread_id) == Some(&request_id) {
+            self.thread_deletions_inflight.remove(&args.thread_id);
+        }
+        let result = match result {
+            Ok(ThreadDeletionReply::DeletedWithWarning { ids, warning }) if execute => {
+                self.remove_deleted_threads(&ids);
+                let message = format!("削除しました。後片付けに失敗しました: {warning}");
+                self.thread_browser.notice(message.clone());
+                self.active_view_mut().status = message;
+                self.dirty = true;
+                return;
+            }
+            other => other,
+        };
         let matches = matches!(&self.confirmation,Some(Confirmation::ThreadDeletion(dialog)) if dialog.matches(request_id,&args));
         match result {
             Ok(ThreadDeletionReply::Deleted(ids)) if execute => {
@@ -220,8 +250,9 @@ impl UiState {
             }
             Err(error) => {
                 if execute {
-                    self.thread_browser
-                        .notice(format!("削除できません: {}", error.message));
+                    let message = format!("削除できません: {}", error.message);
+                    self.thread_browser.notice(message.clone());
+                    self.active_view_mut().status = message;
                 }
                 if matches
                     && let Some(Confirmation::ThreadDeletion(dialog)) = &mut self.confirmation

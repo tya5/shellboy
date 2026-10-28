@@ -286,6 +286,7 @@ enum BackgroundResult {
         draft_id: String,
         revision: u64,
         position: usize,
+        error_reported: bool,
         result: Result<ManagedImage, ApiError>,
     },
     Copied {
@@ -1072,14 +1073,10 @@ async fn run_with_clipboard_slots(
                         });
                     }
                     UiAction::ThreadDeletion { request_id, args, execute, mut known_thread_ids } => {
-                        known_thread_ids.extend(selection.generations.keys().cloned());
-                        known_thread_ids.extend(selection.active_thread.iter().cloned());
-                        known_thread_ids.extend(draft_saver.threads().cloned());
-                        known_thread_ids.extend(images.threads().cloned());
-                        known_thread_ids.sort();
-                        known_thread_ids.dedup();
+                        known_thread_ids = thread_deletion::candidates(known_thread_ids, &selection,
+                            draft_saver.threads().chain(images.threads()).cloned());
                         if known_thread_ids.len() > thread_deletion::MAX_KNOWN_THREADS {
-                            update(&updates, UiUpdate::ThreadDeletion { request_id, args, execute, result: Err(ApiError::new(ErrorCode::InvalidArgument, "削除確認の会話件数が上限を超えました。一覧を更新してください")) }).await;
+                            update(&updates, UiUpdate::ThreadDeletion { request_id, args, execute, result: Err(ApiError::new(ErrorCode::InvalidArgument, "削除確認の会話件数が上限を超えました。Shellboy を再起動して再操作してください")) }).await;
                             continue;
                         }
                         let control = control.clone();
@@ -2010,6 +2007,7 @@ async fn run_with_clipboard_slots(
                                         draft_id,
                                         revision,
                                         position,
+                                        error_reported: has_submission,
                                         result,
                                     })
                                     .await;
@@ -2330,32 +2328,25 @@ async fn run_with_clipboard_slots(
                         Ok(thread_deletion::Outcome::Preview(value)) => Ok(ThreadDeletionReply::Preview(value)),
                         Ok(thread_deletion::Outcome::Applied) => {
                             known_thread_ids.push(args.thread_id.clone());
-                            known_thread_ids.extend(selection.generations.keys().cloned());
-                            known_thread_ids.extend(selection.active_thread.iter().cloned());
-                            known_thread_ids.extend(draft_saver.threads().cloned());
-                            known_thread_ids.extend(images.threads().cloned());
-                            match thread_deletion::cleanup(&control, known_thread_ids).await {
-                                Ok((deleted, drafts)) => {
-                                    let ids: HashSet<_> = deleted.iter().cloned().collect();
-                                    draft_saver.forget_threads(&ids);
-                                    images.forget_threads(&ids, &drafts);
-                                    selection.generations.retain(|thread, _| !ids.contains(thread));
-                                    dirty_threads.retain(|thread| !ids.contains(thread));
-                                    refreshing.retain(|thread| !ids.contains(thread));
-                                    pending.retain(|_, value| !ids.contains(&value.0));
-                                    if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
-                                        selection.activate_draft(uuid::Uuid::new_v4().to_string());
-                                        streams.clear();
-                                        stream_retry = None;
-                                    }
-                                    Ok(ThreadDeletionReply::Deleted(deleted))
-                                }
-                                Err(error) => {
-                                    let error = error.details(serde_json::json!({"deletion_accepted":true,"thread_id":args.thread_id}));
-                                    let _ = checked_storage::<()>(&control, Err(error.clone())).await;
-                                    Err(error)
-                                },
+                            known_thread_ids = thread_deletion::candidates(known_thread_ids, &selection,
+                                draft_saver.threads().chain(images.threads()).cloned());
+                            let (deleted, drafts, warning) = thread_deletion::finish_cleanup(&control, &args.thread_id, known_thread_ids).await;
+                            let ids: HashSet<_> = deleted.iter().cloned().collect();
+                            draft_saver.forget_threads(&ids);
+                            images.forget_threads(&ids, &drafts);
+                            selection.generations.retain(|thread, _| !ids.contains(thread));
+                            dirty_threads.retain(|thread| !ids.contains(thread));
+                            refreshing.retain(|thread| !ids.contains(thread));
+                            pending.retain(|_, value| !ids.contains(&value.0));
+                            if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
+                                selection.activate_draft(uuid::Uuid::new_v4().to_string());
+                                streams.clear();
+                                stream_retry = None;
                             }
+                            Ok(match warning {
+                                Some(warning) => ThreadDeletionReply::DeletedWithWarning { ids: deleted, warning },
+                                None => ThreadDeletionReply::Deleted(deleted),
+                            })
                         }
                         Err(error) => Err(error),
                     };
@@ -2553,6 +2544,7 @@ async fn run_with_clipboard_slots(
                     draft_id,
                     revision,
                     position,
+                    error_reported,
                     result,
                 }) => {
                     if !images.accept_image(ticket) { continue; }
@@ -2576,7 +2568,7 @@ async fn run_with_clipboard_slots(
                         )
                         .await;
                     }
-                    Err(error) => {
+                    Err(error) if !error_reported => {
                         update(
                             &updates,
                             UiUpdate::DraftStatus {
@@ -2586,6 +2578,7 @@ async fn run_with_clipboard_slots(
                         )
                         .await
                     }
+                    Err(_) => {}
                     }
                     images.prune_owners();
                 },
