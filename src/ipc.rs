@@ -48,11 +48,24 @@ fn io_error(_: std::io::Error) -> ApiError {
     )
     .hint("Check --data-dir and start its owner if needed; inspect any known operation receipt before repeating a mutation")
 }
-fn mismatch() -> ApiError {
+fn endpoint_mismatch() -> ApiError {
     ApiError::new(
         ErrorCode::ProtocolMismatch,
-        "Local endpoint or protocol version changed; retry the connection",
+        "Local endpoint metadata or owner instance changed",
     )
+    .hint("Check the selected data directory and owner, refresh endpoint metadata, and reconnect")
+}
+fn protocol_mismatch(client: u32, owner: u32) -> ApiError {
+    ApiError::new(
+        ErrorCode::ProtocolMismatch,
+        format!("CLI uses protocol {client} but the owner uses {owner}; run the CLI and owner from the same release"),
+    )
+    .hint("Run the CLI and owner from the same release; retrying unchanged binaries cannot resolve this version mismatch")
+    .details(serde_json::json!({
+        "client_protocol_version": client,
+        "owner_protocol_version": owner,
+        "request_may_have_been_applied": false
+    }))
 }
 
 async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
@@ -66,10 +79,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     let operation = async {
         let hello: Hello = tokio::time::timeout(FRAME_READ_TIMEOUT, read_frame(&mut stream))
             .await
-            .map_err(|_| mismatch())??
-            .ok_or_else(mismatch)?;
+            .map_err(|_| endpoint_mismatch())??
+            .ok_or_else(endpoint_mismatch)?;
         if hello.protocol_version != PROTOCOL_VERSION {
-            return Err(mismatch());
+            return Err(protocol_mismatch(hello.protocol_version, PROTOCOL_VERSION));
         }
         write_frame(
             &mut stream,
@@ -82,7 +95,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         let request: Request = tokio::time::timeout(FRAME_READ_TIMEOUT, read_frame(&mut stream))
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Request frame read timed out"))??
-            .ok_or_else(mismatch)?;
+            .ok_or_else(endpoint_mismatch)?;
         if let Err(error) = request.validate() {
             write_frame(
                 &mut stream,
@@ -154,13 +167,13 @@ fn environment_endpoint(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
         else {
             return Ok(None);
         };
-        let address = address.into_string().map_err(|_| mismatch())?;
+        let address = address.into_string().map_err(|_| endpoint_mismatch())?;
         let instance_id = std::env::var("SHELLBOY_INSTANCE_ID")
             .ok()
             .filter(|id| !id.is_empty())
-            .ok_or_else(mismatch)?;
+            .ok_or_else(endpoint_mismatch)?;
         if !Path::new(&address).is_absolute() {
-            return Err(mismatch());
+            return Err(endpoint_mismatch());
         }
         Ok(Some(Endpoint {
             protocol_version: PROTOCOL_VERSION,
@@ -192,7 +205,7 @@ async fn read_endpoint(data_dir: &Path) -> Result<Endpoint, ApiError> {
         let file = std::fs::File::open(path).map_err(io_error)?;
         let metadata = file.metadata().map_err(io_error)?;
         if !metadata.is_file() || metadata.len() > 64 * 1024 {
-            return Err(mismatch());
+            return Err(endpoint_mismatch());
         }
         use std::io::Read;
         let mut bytes = Vec::new();
@@ -200,9 +213,9 @@ async fn read_endpoint(data_dir: &Path) -> Result<Endpoint, ApiError> {
             .read_to_end(&mut bytes)
             .map_err(io_error)?;
         if bytes.len() > 64 * 1024 {
-            return Err(mismatch());
+            return Err(endpoint_mismatch());
         }
-        serde_json::from_slice::<Endpoint>(&bytes).map_err(|_| mismatch())
+        serde_json::from_slice::<Endpoint>(&bytes).map_err(|_| endpoint_mismatch())
     })
     .await
     .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Endpoint worker failed"))?
@@ -215,12 +228,15 @@ async fn connect(
     origin: Option<Origin>,
 ) -> Result<Response<Value>, ApiError> {
     if endpoint.protocol_version != PROTOCOL_VERSION {
-        return Err(mismatch());
+        return Err(protocol_mismatch(
+            PROTOCOL_VERSION,
+            endpoint.protocol_version,
+        ));
     }
     #[cfg(unix)]
     {
         if endpoint.transport != "unix" {
-            return Err(mismatch());
+            return Err(endpoint_mismatch());
         }
         let stream = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -241,7 +257,7 @@ async fn connect(
     #[cfg(windows)]
     {
         if endpoint.transport != "pipe" {
-            return Err(mismatch());
+            return Err(endpoint_mismatch());
         }
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         let stream = loop {
@@ -307,9 +323,15 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
         tokio::time::timeout(std::time::Duration::from_secs(5), read_frame(&mut stream))
             .await
             .map_err(|_| handshake_timeout())??
-            .ok_or_else(mismatch)?;
-    if welcome.protocol_version != PROTOCOL_VERSION || welcome.instance_id != endpoint.instance_id {
-        return Err(mismatch());
+            .ok_or_else(endpoint_mismatch)?;
+    if welcome.protocol_version != PROTOCOL_VERSION {
+        return Err(protocol_mismatch(
+            PROTOCOL_VERSION,
+            welcome.protocol_version,
+        ));
+    }
+    if welcome.instance_id != endpoint.instance_id {
+        return Err(endpoint_mismatch());
     }
     let mut request = Request::new(
         operation_id.unwrap_or_else(|| format!("{}:{}", welcome.instance_id, uuid::Uuid::new_v4())),
@@ -343,7 +365,11 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
         .validate()
         .map_err(|error| uncertain_reply(error, &expected, &request.command))?;
     if response.operation_id != expected {
-        return Err(uncertain_reply(mismatch(), &expected, &request.command));
+        return Err(uncertain_reply(
+            endpoint_mismatch(),
+            &expected,
+            &request.command,
+        ));
     }
     Ok(response)
 }
@@ -549,6 +575,114 @@ mod frame_delivery_tests {
         }
     }
 
+    fn assert_version_mismatch(error: &ApiError, owner: u32) {
+        assert_eq!(error.code, ErrorCode::ProtocolMismatch);
+        let details = error.details.as_ref().unwrap();
+        assert_eq!(details["client_protocol_version"], PROTOCOL_VERSION);
+        assert_eq!(details["owner_protocol_version"], owner);
+        assert_eq!(details["request_may_have_been_applied"], false);
+        assert!(
+            error
+                .message
+                .contains(&format!("CLI uses protocol {PROTOCOL_VERSION}"))
+        );
+        assert!(error.message.contains(&format!("owner uses {owner}")));
+        assert!(error.hint.as_ref().unwrap().contains("same release"));
+        assert!(!error.message.contains("retry"));
+    }
+
+    #[tokio::test]
+    async fn mismatched_endpoint_protocol_is_rejected_before_transport_connection() {
+        let mut saved = endpoint();
+        saved.protocol_version = PROTOCOL_VERSION - 1;
+        // The fixture has neither a valid transport nor an address. Version
+        // rejection must precede either transport validation or connection I/O.
+        let error = connect(saved, Command::Status(Default::default()), None, None)
+            .await
+            .unwrap_err();
+        assert_version_mismatch(&error, PROTOCOL_VERSION - 1);
+    }
+
+    #[tokio::test]
+    async fn changed_owner_instance_is_distinct_from_protocol_mismatch_before_dispatch() {
+        let (client, mut peer) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            read_frame::<_, Hello>(&mut peer).await.unwrap().unwrap();
+            write_frame(
+                &mut peer,
+                &Welcome {
+                    protocol_version: PROTOCOL_VERSION,
+                    instance_id: "replacement-instance".into(),
+                },
+            )
+            .await
+            .unwrap();
+            assert!(read_frame::<_, Value>(&mut peer).await.unwrap().is_none());
+        });
+        let error = call_stream(
+            client,
+            endpoint(),
+            Command::Status(Default::default()),
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::ProtocolMismatch);
+        assert!(error.message.contains("owner instance changed"));
+        assert!(!error.message.contains("protocol"));
+        assert!(error.details.is_none());
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mismatched_reply_id_after_mutation_preserves_uncertain_receipt_guidance() {
+        let (client, mut peer) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            read_frame::<_, Hello>(&mut peer).await.unwrap().unwrap();
+            write_frame(
+                &mut peer,
+                &Welcome {
+                    protocol_version: PROTOCOL_VERSION,
+                    instance_id: "instance".into(),
+                },
+            )
+            .await
+            .unwrap();
+            read_frame::<_, Request>(&mut peer).await.unwrap().unwrap();
+            write_frame(
+                &mut peer,
+                &Response::success("instance:wrong", serde_json::json!({})),
+            )
+            .await
+            .unwrap();
+        });
+        let error = call_stream(
+            client,
+            endpoint(),
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some("t".into()),
+                text: "hello".into(),
+            }),
+            Some("instance:sent".into()),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .hint
+                .as_ref()
+                .unwrap()
+                .contains("do not resubmit the mutation under a new ID")
+        );
+        let details = error.details.as_ref().unwrap();
+        assert_eq!(details["request_may_have_been_applied"], true);
+        assert_eq!(details["operation_id"], "instance:sent");
+        assert_eq!(details["next_operation"]["command"], "operation.get");
+        task.await.unwrap();
+    }
+
     #[tokio::test]
     async fn mismatched_owner_protocol_is_rejected_before_sending_command() {
         let (client, mut peer) = tokio::io::duplex(4096);
@@ -580,7 +714,7 @@ mod frame_delivery_tests {
         .await
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::ProtocolMismatch);
-        assert!(error.details.is_none(), "no request was sent");
+        assert_version_mismatch(&error, PROTOCOL_VERSION - 1);
         task.await.unwrap();
     }
 

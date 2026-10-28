@@ -240,7 +240,7 @@ impl IndexService {
             match self.process_one(token.clone()).await {
                 Ok(true) => continue,
                 Ok(false) => {}
-                Err(_) => {}
+                Err(_) => {} // The recorded pause blocks further claims until explicit retry.
             }
             let delay = self.next_delay().await.unwrap_or(Duration::from_secs(30));
             tokio::select! {
@@ -674,6 +674,43 @@ impl IndexService {
             .map_err(db_error)
     }
     pub async fn process_one(&self, cancel: CancellationToken) -> Result<bool, ApiError> {
+        let outcome = self.process_one_inner(cancel).await;
+        if let Err(error) = &outcome {
+            // A failed adoption must not silently strand a running claim while
+            // other inputs continue spending. Preserve the original transaction
+            // outcome as unknown; a separate existing pause carries the reason.
+            let mut keys = self.identity_keys();
+            if let Some(family) = self.failure_key() {
+                keys.push(family.to_owned());
+            }
+            let reason = json!({
+                "kind":"index_worker_error",
+                "message":"Index processing failed; result adoption may be incomplete. Inspect storage and retry explicitly",
+                "error":error,
+            }).to_string();
+            let paused = self
+                .database
+                .call(move |db| {
+                    let tx = db.transaction()?;
+                    for key in keys {
+                        let pause = IndexKeys::new(&key).pause();
+                        if meta(&tx, &pause)?.is_none() {
+                            set_meta(&tx, &pause, &reason)?;
+                        }
+                    }
+                    tx.commit()?;
+                    Ok(())
+                })
+                .await;
+            if paused.is_err() {
+                // Storage cannot preserve even the diagnostic. Stop spending;
+                // restart/repair is required rather than a hidden retry loop.
+                self.stop.cancel();
+            }
+        }
+        outcome
+    }
+    async fn process_one_inner(&self, cancel: CancellationToken) -> Result<bool, ApiError> {
         if cancel.is_cancelled() {
             return Ok(false);
         }

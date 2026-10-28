@@ -96,7 +96,7 @@ fn validate_schema(db: &Connection) -> Result<()> {
     if version != 3 {
         return Err(err(
             "schema_unsupported",
-            "Knowledge database schema requires migration; open it with a writer command such as shellboy rag source add before reading",
+            "Knowledge database schema requires migration; run shellboy rag init to migrate without registering materials or indexing before reading",
         ));
     }
     Ok(())
@@ -151,7 +151,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     let _lock = writer_lock(path)?;
     if path.exists() {
         drop(_lock);
-        let s = open(path, false)?;
+        let s = open(path, true)?;
         return Ok(
             json!({"database_uuid":s.uuid,"already_initialized":true,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
         );

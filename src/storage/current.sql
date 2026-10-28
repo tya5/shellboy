@@ -1,4 +1,4 @@
--- Current conversation schema v10. Historical upgrades live in storage::migrate.
+-- Current conversation schema v11. Historical upgrades live in storage::migrate.
 -- Keep this definition equivalent to the completed historical migrations.
 
 CREATE TABLE app_meta(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -355,7 +355,6 @@ CREATE INDEX index_auto_source ON app_meta(json_extract(value,'$.node_id')) WHER
 
 CREATE INDEX node_turn ON node(turn_id,id);
 
-CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id);
 
 CREATE INDEX shell_active_owner ON shell_execution(owner_run_id,state)
  WHERE state IN ('starting','running','stopping');
@@ -379,4 +378,5 @@ INSERT INTO schema_migration(version,name) VALUES(7,'0007_usage_and_source_index
 INSERT INTO schema_migration(version,name) VALUES(8,'0008_receipt_accounting_compat');
 INSERT INTO schema_migration(version,name) VALUES(9,'0009_compaction_turn_indexes');
 INSERT INTO schema_migration(version,name) VALUES(10,'0010_hot_query_indexes');
-PRAGMA user_version=10;
+INSERT INTO schema_migration(version,name) VALUES(11,'0011_current_index_metadata');
+PRAGMA user_version=11;

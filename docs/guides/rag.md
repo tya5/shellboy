@@ -17,6 +17,8 @@ shellboy rag index --source notes
 shellboy rag search --scope source:notes --query 'recovery'
 ```
 
+`rag init` creates a missing store or upgrades an existing store through the isolated startup migration. It does not register materials, index documents, or call an embedding API. If a read-only command reports an older RAG schema, run `rag init` once, then repeat the read.
+
 ### Exclude source entries
 
 ```bash

@@ -45,6 +45,9 @@ impl Proxy {
         let task = tokio::spawn(async move {
             loop {
                 let (mut stream, _) = tokio::select! {_=token.cancelled()=>break,result=listener.accept()=>result.unwrap()};
+                // Local fixture responses must not depend on delayed ACK/Nagle
+                // timing between tiny header and body writes.
+                stream.set_nodelay(true).unwrap();
                 let mut bytes = Vec::new();
                 let split = loop {
                     let mut buffer = [0; 4096];
@@ -113,8 +116,9 @@ impl Proxy {
                     "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
                 );
-                let _ = stream.write_all(head.as_bytes()).await;
-                let _ = stream.write_all(&body).await;
+                let mut response = head.into_bytes();
+                response.extend_from_slice(&body);
+                let _ = stream.write_all(&response).await;
             }
         });
         Self {
@@ -140,6 +144,7 @@ struct Fixture {
     _temp: tempfile::TempDir,
     db: DbWorker,
     service: Arc<IndexService>,
+    config: Arc<Config>,
     proxy: Proxy,
 }
 impl Fixture {
@@ -160,11 +165,13 @@ impl Fixture {
         config.embedding.model = Some("embedding-fixture".into());
         let temp = tempfile::tempdir().unwrap();
         let db = DbWorker::open(temp.path().join("db.sqlite")).await.unwrap();
-        let service = IndexService::new(db.clone(), Arc::new(config));
+        let config = Arc::new(config);
+        let service = IndexService::new(db.clone(), config.clone());
         Self {
             _temp: temp,
             db,
             service,
+            config,
             proxy,
         }
     }
@@ -2933,5 +2940,146 @@ async fn query_embedding_caller_disconnect_releases_stalled_http_and_allows_next
     }
     assert!(!f.service.search("cat", 10).await.unwrap().is_empty());
     assert_eq!(f.proxy.count(), 3);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn old_integer_reset_migrates_before_real_workers_and_exhausted_failures_trip_breaker() {
+    let mut config = Config::default();
+    config.indexing.retries = 0;
+    config.indexing.retry_delays_ms.clear();
+    let mut f = Fixture::new(config).await;
+    f.node("seed", "cat seed").await;
+    f.service.enqueue_new(&["seed".into()]).await.unwrap();
+    f.drain().await;
+    for i in 0..4 {
+        let id = format!("failed-{i}");
+        f.node(&id, "dog").await;
+        f.service.enqueue_new(&[id]).await.unwrap();
+    }
+    let path = f._temp.path().join("db.sqlite");
+    f.db.shutdown().await.unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DELETE FROM schema_migration WHERE version=11; PRAGMA user_version=10; INSERT OR REPLACE INTO app_meta(key,value) SELECT 'index.common_failures.'||value,'0' FROM app_meta WHERE key GLOB 'index.query_profile.*';").unwrap();
+    db.close().unwrap();
+    f.db = DbWorker::open(&path).await.unwrap();
+    f.service = IndexService::new(f.db.clone(), f.config.clone());
+    for _ in 0..3 {
+        f.proxy.push(Reply::Error(503, "server_error"));
+    }
+    let workers = f.service.start().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let status = f.service.status(args()).await.unwrap();
+            if status.paused {
+                assert_eq!((status.done, status.failed, status.pending), (1, 3, 1));
+                assert!(status.reason.unwrap().contains("server_error"));
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    workers.shutdown().await;
+    assert_eq!(
+        f.proxy.count(),
+        4,
+        "one seed plus exactly three exhausted terminal failures"
+    );
+    f.db.call(|db| {
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM embedding_job WHERE state='running'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?,
+            0
+        );
+        let value: String = db.query_row(
+            "SELECT value FROM app_meta WHERE key GLOB 'index.common_failures.*'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(serde_json::from_str::<Value>(&value).unwrap()["count"], 3);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
+async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_worker() {
+    let f = Fixture::new(Config::default()).await;
+    f.node("seed", "cat seed").await;
+    f.service.enqueue_new(&["seed".into()]).await.unwrap();
+    f.drain().await;
+    f.db.call(|db| {
+        db.execute("INSERT OR REPLACE INTO app_meta(key,value) SELECT 'index.common_failures.'||value,'{\"cause\":\"bad\",\"count\":\"broken\"}' FROM app_meta WHERE key GLOB 'index.query_profile.*'",[])?;
+        Ok(())
+    }).await.unwrap();
+    for i in 0..2 {
+        let id = format!("pending-{i}");
+        f.node(&id, "dog").await;
+        f.service.enqueue_new(&[id]).await.unwrap();
+    }
+    f.proxy.push(Reply::Error(400, "unknown_failure"));
+    let workers = f.service.start().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let status = f.service.status(args()).await.unwrap();
+            if status.paused {
+                assert_eq!((status.done, status.failed, status.pending), (1, 1, 1));
+                let reason = status.reason.unwrap();
+                assert!(reason.contains("index_failure_adoption"), "{reason}");
+                assert!(reason.contains("unknown_failure"), "{reason}");
+                assert!(reason.contains("Stored index job is malformed"), "{reason}");
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    workers.shutdown().await;
+    assert_eq!(
+        f.proxy.count(),
+        2,
+        "the paused worker must not request the second input"
+    );
+    f.db.call(|db| {
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM embedding_job WHERE state='running'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?,
+            0
+        );
+        let error: String = db.query_row(
+            "SELECT error_json FROM embedding_job WHERE state='failed'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert!(error.contains("unknown_failure"));
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key GLOB 'index.input.*'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?,
+            2,
+            "retain both fixed inputs for explicit retry"
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.service.retry(args()).await.unwrap();
+    f.drain().await;
+    let status = f.service.status(args()).await.unwrap();
+    assert!(!status.paused);
+    assert_eq!((status.done, status.failed, status.pending), (3, 0, 0));
     f.close().await;
 }

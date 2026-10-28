@@ -12,7 +12,7 @@ v0.1.1で残った問題と、v0.1.2での修正・残る制限を区別しま�
 
 v0.1.1では読取り結果も現在instanceのreceiptへ蓄積します。v0.1.2は観測のreceiptを作らず、同IDでも再観測します。変更/waitの終端結果は24時間経過後の保守又は圧迫時に結果だけを回収し、期限切れIDを残して同IDの変更再実行を拒否します。pendingと未反映参照は保護します。期限切れは未実行を意味しません。
 
-通常256MiB/outcome8MiB、停止専用固定余白と、期限切れIDのmetadataは同じ予算へ算入します。極端に多い変更や保護対象で満杯なら、明示owner再起動で旧terminalを回収する必要が残ります。`operation get` / `status` / `storage status` はreceiptを作らず、TUIのCtrl+C・`/stop` もreceipt不要です。`status --operation` はv0.1.2だけ非推奨aliasとして残し、次リリースで削除します。
+通常256MiB/outcome8MiB、停止専用固定余白と、期限切れIDのmetadataは同じ予算へ算入します。極端に多い変更や保護対象で満杯なら、明示owner再起動で旧terminalを回収する必要が残ります。`operation get` / `status` / `storage status` はreceiptを作らず、TUIのCtrl+C・`/stop` もreceipt不要です。未リリース0.2.0 sourceでは `status --operation` を削除しました。受付の照会には `operation get --operation ID` を使用してください。
 
 目安として、1件0.7〜0.9KiBのID metadataを新IDで1秒に1回保存すると仮定すれば、1日約60〜80MiB、数日で通常予算を圧迫します。これはmetadata長・予約・保護量を省いた計算例で、現環境の実測値や稼働日数の保証ではありません。waitの既定30秒待機では増加速度が下がります。既に満たされた条件へのwaitを高速反復せず、現在値の確認にはreceipt不要のgetを使い、実際の使用量はstatusのreceipt_budgetを確認してください。
 
@@ -60,3 +60,7 @@ can suppress that marker while the frontend returns a forced shutdown error and
 nonzero exit. Normal result ordering and lossless delivery are not relaxed by
 this exception. Forced termination can abandon undelivered presentation and
 unfinished cleanup; it is never reported as a successful graceful shutdown.
+
+## Earlier interruption payloads (#33)
+
+Pre-0.2 interruption nodes using `legacy_pending_operations_with_unknown_targets` are not converted or read through a compatibility shim. Their unknown-target count and related interruption details may no longer be grouped in the summary. Saved nodes remain available as original text through F6.

@@ -123,26 +123,17 @@ mod tests {
         "SELECT COALESCE(SUM(length(CAST(value AS BLOB))),0) FROM app_meta WHERE key LIKE 'index.%'",
     ];
 
-    fn legacy_schema() -> Connection {
+    fn current_schema() -> Connection {
         let db = Connection::open_in_memory().unwrap();
-        initialize_legacy(&db);
+        initialize_current(&db);
         db
     }
 
-    fn initialize_legacy(db: &Connection) {
+    fn initialize_current(db: &Connection) {
         // Deliberately isolate accounting from FK graph setup; real GC/Store
         // integration tests exercise the enabled-FK mutation paths separately.
         db.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
-        for migration in [
-            include_str!("../../migrations/0001_initial.sql"),
-            include_str!("../../migrations/0002_gc_indexes.sql"),
-            include_str!("../../migrations/0003_context_indexes.sql"),
-            include_str!("../../migrations/0004_attachment_provenance.sql"),
-            include_str!("../../migrations/0005_origin_credentials.sql"),
-            include_str!("../../migrations/0006_receipt_budget.sql"),
-        ] {
-            db.execute_batch(migration).unwrap();
-        }
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
     }
 
     fn seed(db: &Connection) {
@@ -174,8 +165,8 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
     }
 
     #[test]
-    fn byte_indexes_match_legacy_payload_measurements_after_migration_mutation_and_rollback() {
-        let mut db = legacy_schema();
+    fn byte_indexes_match_reference_payload_measurements_after_mutation_and_rollback() {
+        let mut db = current_schema();
         seed(&db);
         let payload: i64 = db
             .query_row(
@@ -188,10 +179,6 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
             payload, 999,
             "fixture must not assume payload_bytes is authoritative"
         );
-        db.execute_batch(include_str!(
-            "../../migrations/0007_usage_and_source_indexes.sql"
-        ))
-        .unwrap();
         assert_reference(&db);
         let before = logical_usage(&db).unwrap().total();
         {
@@ -210,12 +197,8 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
 
     #[test]
     fn logical_aggregation_uses_scalar_indexes_without_payload_functions() {
-        let db = legacy_schema();
+        let db = current_schema();
         seed(&db);
-        db.execute_batch(include_str!(
-            "../../migrations/0007_usage_and_source_indexes.sql"
-        ))
-        .unwrap();
         for query in
             HISTORY_QUERIES
                 .iter()
@@ -255,7 +238,7 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
         }
         let temp = tempfile::tempdir().unwrap();
         let mut db = Connection::open(temp.path().join("measurement.sqlite")).unwrap();
-        initialize_legacy(&db);
+        initialize_current(&db);
         // Seed-only speed setting on this disposable fixture; no production
         // commit/durability result is inferred from this read/lookup measurement.
         db.execute_batch("PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;")
@@ -283,17 +266,6 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
                 }
             }
             tx.commit().unwrap();
-            if previous == 0 {
-                let start = Instant::now();
-                db.execute_batch(include_str!(
-                    "../../migrations/0007_usage_and_source_indexes.sql"
-                ))
-                .unwrap();
-                println!(
-                    "index_build_10k_ms={:.3}",
-                    start.elapsed().as_secs_f64() * 1000.
-                );
-            }
             let mut legacy = Vec::new();
             let mut indexed = Vec::new();
             let mut old_lookup = Vec::new();

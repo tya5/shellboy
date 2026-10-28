@@ -172,4 +172,4 @@ Do not expect `$env:...` to expand normally after `--%`. This PowerShell example
 
 ## Shell elapsed time
 
-`elapsed_ms` measures supervision from immediately before OS process launch until completion is finalized after the direct child exits, descendant reclamation is confirmed, and output drains. It includes waiting while descendants hold pipes and output backpressure, but excludes later DB persistence waits and result reading. `started_at` / `ended_at` are separate stored timestamps. Older unmeasured executions omit this field rather than adding an estimate.
+`elapsed_ms` measures supervision from immediately before OS process launch until completion is finalized after the direct child exits, descendant reclamation is confirmed, and output drains. It includes waiting while descendants hold pipes and output backpressure, but excludes later DB persistence waits and result reading. `started_at` / `ended_at` are separate stored timestamps. This field is absent before termination and when an execution is recovered after owner restart; no duration is invented.

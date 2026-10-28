@@ -252,7 +252,7 @@ F2 or `/select` freezes history rendering and releases mouse capture. Use termin
 
 A Thread's `AGENTS.md` supplies work instructions read at each new Turn. The Agent Guide teaches Shellboy's model how to use the CLI; it is not automatically injected. When requesting delegation, name a real path for the model to read, as in [User Guide](user-guide.md#5-delegate-to-a-child). Do not treat this repository's root AGENTS.md as a universal Agent Guide for all users.
 
-Attachments appear at the draft cursor as `[画像: ファイル名]` / `[添付: ファイル名]` (image/attachment chips). Left/Right move around them, allowing “description → image → description” order. Delete before or Backspace after a chip removes that draft attachment without deleting sent provenance or external files. Older saved drafts lacking positions continue placing attachments at the body end.
+Attachments appear at the draft cursor as `[画像: ファイル名]` / `[添付: ファイル名]` (image/attachment chips). Left/Right move around them, allowing “description → image → description” order. Delete before or Backspace after a chip removes that draft attachment without deleting sent provenance or external files.
 
 During sent-text recall with Up/Down, current unsent attachments move to the recalled text's end. Moving past the newest restores the unfinished draft text and original attachment positions. Use `/edit` to edit in the original request's attachment order, or `/restore` to restore a send snapshot to original positions.
 

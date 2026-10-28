@@ -178,7 +178,7 @@ Shell startup uses the model shell tool; there is no CLI `shell start`.
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `shell get --execution EXECUTION` | execution_id/run_id/state/output_complete/exit_code/reason, saved command/cwd/thread_id/turn_id. Use the current owner and CLI; absence is not handled by an older-owner compatibility path |
+| `shell get --execution EXECUTION` | execution_id/run_id/state/output_complete/exit_code/reason, saved command/cwd/thread_id/turn_id |
 | `shell read --execution EXECUTION [--cursor C] [--encoding NAME] [--limit-bytes N]` | execution_id/text/encoding/cursor/raw_bytes/output_complete/decode_errors; default/max 65536 bytes, minimum 1; omitted encoding uses the saved execution encoding |
 | `shell write --execution EXECUTION (--text TEXT | --text-stdin) [--encoding NAME]` | bytes_written/status/stdin_open/reason; status `complete|timeout|closed|stopped|failed`; bytes_written is actual bytes, including partial writes. Encoding defaults UTF-8. Only live shells started with stdin_open; stdin/write-deadline limits apply |
 | `shell eof --execution EXECUTION` | accepted and related fields; closes stdin, separate from stop; shell can continue afterward |

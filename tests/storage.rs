@@ -841,7 +841,7 @@ async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
     let worker = DbWorker::open(&path).await.unwrap();
     worker.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX node_turn; DROP INDEX receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
+    db.execute_batch("DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
     db.close().unwrap();
     assert!(matches!(
         DbWorker::open(&path).await,
@@ -892,7 +892,7 @@ async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without
     // name so the first CREATE INDEX must also roll back with version/ledger.
     let db = Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX node_turn; DROP INDEX receipt_turn_source;
+        "DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source;
         DELETE FROM schema_migration WHERE version>=9; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=8;
         CREATE TABLE receipt_turn_source(blocker INTEGER);",
     )
@@ -942,7 +942,7 @@ async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without
         worker.call(move |db| {
             assert_eq!(db.query_row("PRAGMA user_version",[],|row|row.get::<_,i64>(0))?,SCHEMA_VERSION);
             assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=9",[],|row|row.get::<_,String>(0))?,"0009_compaction_turn_indexes");
-            for (index, expected) in [("node_turn",vec!["turn_id","id"]),("receipt_turn_source",vec!["turn_id","target_thread_id","message_node_id"])] {
+            for (index, expected) in [("node_turn",vec!["turn_id","id"]),("receipt_turn_source",vec![])] {
                 let columns=db.prepare(&format!("PRAGMA index_info({index})"))?.query_map([],|row|row.get::<_,String>(2))?.collect::<rusqlite::Result<Vec<_>>>()?;
                 assert_eq!(columns,expected);
             }
@@ -984,8 +984,9 @@ async fn public_schema_versions_converge_to_fresh_schema_without_data_loss() {
         include_str!("../migrations/0008_receipt_accounting_compat.sql"),
         include_str!("../migrations/0009_compaction_turn_indexes.sql"),
         include_str!("../migrations/0010_hot_query_indexes.sql"),
+        include_str!("../migrations/0011_current_index_metadata.sql"),
     ];
-    for version in [8, 9, 10] {
+    for version in [8, 9, 10, 11] {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("upgrade.sqlite");
         let db = Connection::open(&path).unwrap();
@@ -1022,4 +1023,63 @@ async fn public_schema_versions_converge_to_fresh_schema_without_data_loss() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("metadata.sqlite");
+    let writer = DbWorker::open(&path).await.unwrap();
+    writer.shutdown().await.unwrap();
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DELETE FROM schema_migration WHERE version=11; PRAGMA user_version=10;").unwrap();
+    for (name, value) in [
+        ("integer", "0"),
+        ("invalid", "not json"),
+        ("array", "[]"),
+        ("null", "null"),
+        ("badcause", r#"{"cause":3,"count":1}"#),
+        ("badcount", r#"{"cause":"transient","count":"1"}"#),
+        ("negative", r#"{"cause":"transient","count":-1}"#),
+        ("current", r#"{"cause":"transient","count":2}"#),
+    ] {
+        db.execute(
+            "INSERT INTO app_meta(key,value)VALUES(?1,?2)",
+            params![format!("index.common_failures.{name}"), value],
+        )
+        .unwrap();
+    }
+    db.execute(
+        "INSERT INTO app_meta(key,value)VALUES('index.pause.saved','preserve pause')",
+        [],
+    )
+    .unwrap();
+    db.close().unwrap();
+    let writer = DbWorker::open(&path).await.unwrap();
+    writer.call(|db| {
+        let rows = db.prepare("SELECT key,value FROM app_meta WHERE key GLOB 'index.common_failures.*' ORDER BY key")?.query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(rows, vec![("index.common_failures.current".into(),r#"{"cause":"transient","count":2}"#.into())]);
+        assert_eq!(db.query_row("SELECT value FROM app_meta WHERE key='index.pause.saved'",[],|r|r.get::<_,String>(0))?,"preserve pause");
+        assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE name='receipt_turn_source'",[],|r|r.get::<_,i64>(0))?,0);
+        // A damaged current-format DB must not be silently reset on every open.
+        db.execute("INSERT INTO app_meta(key,value)VALUES('index.common_failures.damaged','0')",[])?;
+        Ok(())
+    }).await.unwrap();
+    writer.shutdown().await.unwrap();
+    let writer = DbWorker::open(&path).await.unwrap();
+    writer
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT value FROM app_meta WHERE key='index.common_failures.damaged'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )?,
+                "0"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    writer.shutdown().await.unwrap();
 }

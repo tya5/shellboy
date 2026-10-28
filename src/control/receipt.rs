@@ -228,9 +228,7 @@ mod tests {
     use super::*;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE operation_receipt(operation_id TEXT PRIMARY KEY,instance_id TEXT,origin_json TEXT,request_hash TEXT,state TEXT,created_at TEXT,result_ref_json TEXT);CREATE TABLE app_meta(key TEXT,value TEXT);CREATE TABLE receipt(client_operation_id TEXT,state TEXT);CREATE TABLE attachment_delivery(operation_id TEXT,status TEXT);CREATE TABLE quota_counter(category TEXT PRIMARY KEY,logical_bytes INTEGER,revision INTEGER);CREATE TABLE schema_migration(version INTEGER,name TEXT);").unwrap();
-        db.execute_batch(include_str!("../../migrations/0006_receipt_budget.sql"))
-            .unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db
     }
     fn scanned_usage(db: &Connection, instance: &str) -> u64 {
@@ -357,6 +355,7 @@ mod tests {
     #[test]
     fn current_ttl_and_pressure_protect_pending_deliveries_and_compaction() {
         let db = fixture();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('fixture-thread','/fixture','/fixture/AGENTS.md','fixture-profile','fixture-model','now'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('fixture-node','user','now','{}');").unwrap();
         for (id, state) in [
             ("expired", "completed"),
             ("failed", "failed"),
@@ -366,23 +365,23 @@ mod tests {
             ("compact-pending", "completed"),
             ("compact-inflight", "completed"),
         ] {
-            db.execute(r#"INSERT INTO operation_receipt VALUES(?1,'current','null','hash',?2,'2000-01-01','{"result":{}}',0)"#,params![format!("current:{id}"),state]).unwrap();
+            db.execute(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'current','null','hash',?2,'2000-01-01','{"result":{}}',0)"#,params![format!("current:{id}"),state]).unwrap();
             db.execute(
                 r#"INSERT INTO app_meta VALUES(?1,'{"status":"completed"}')"#,
                 [format!("compact.result.current:{id}")],
             )
             .unwrap();
         }
-        db.execute("INSERT INTO receipt VALUES('current:message','held')", [])
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at) VALUES('message-receipt','current:message','{}','fixture-thread','fixture-node','held','now')", [])
             .unwrap();
         db.execute(
-            "INSERT INTO attachment_delivery VALUES('current:attachment','accepted')",
+            "INSERT INTO attachment_delivery(node_id,thread_id,status,operation_id,origin_json,created_at) VALUES('fixture-node','fixture-thread','accepted','current:attachment','{}','now')",
             [],
         )
         .unwrap();
         db.execute(r#"INSERT INTO app_meta VALUES('compact.pending.fixture','["current:compact-pending"]')"#,[]).unwrap();
         db.execute(r#"INSERT INTO app_meta VALUES('compact.inflight.fixture','["current:compact-inflight"]')"#,[]).unwrap();
-        db.execute(r#"INSERT INTO operation_receipt VALUES('current:fresh','current','null','hash','completed',datetime('now','-23 hours'),'{"result":{}}',0)"#,[]).unwrap();
+        db.execute(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:fresh','current','null','hash','completed',datetime('now','-23 hours'),'{"result":{}}',0)"#,[]).unwrap();
         assert_eq!(collect(&db, "current", false).unwrap(), 2);
         assert_eq!(
             db.query_row(
@@ -430,7 +429,7 @@ mod tests {
     fn expiry_is_batched_and_never_hides_corrupt_outcomes_or_deletes_current_ids() {
         let db = fixture();
         for n in 0..130 {
-            db.execute(r#"INSERT INTO operation_receipt VALUES(?1,'current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[format!("current:{n:03}")]).unwrap();
+            db.execute(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[format!("current:{n:03}")]).unwrap();
         }
         assert_eq!(collect(&db, "current", true).unwrap(), 128);
         assert_eq!(collect(&db, "current", true).unwrap(), 2);
@@ -441,6 +440,9 @@ mod tests {
                 .unwrap(),
             130
         );
+        // Simulate existing corruption that current writer constraints reject.
+        db.execute_batch("PRAGMA ignore_check_constraints=ON;")
+            .unwrap();
         for (id, body) in [
             ("bad-json", "broken"),
             ("bad-envelope", "{}"),
@@ -449,8 +451,10 @@ mod tests {
                 r#"{"error":{"code":"unknown","message":"bad"}}"#,
             ),
         ] {
-            db.execute("INSERT INTO operation_receipt VALUES(?1,'current','null','hash','failed','2000-01-01',?2,0)",params![format!("current:{id}"),body]).unwrap();
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'current','null','hash','failed','2000-01-01',?2,0)",params![format!("current:{id}"),body]).unwrap();
         }
+        db.execute_batch("PRAGMA ignore_check_constraints=OFF;")
+            .unwrap();
         assert_eq!(collect(&db, "current", true).unwrap(), 0);
         assert_eq!(
             usage(&db, "current").unwrap(),
@@ -466,9 +470,9 @@ mod tests {
         )
         .unwrap();
         for id in ["current:a", "current:b"] {
-            db.execute("INSERT INTO operation_receipt VALUES(?1,'current','null','hash','completed','2000-01-01',?2,0)",params![id,large]).unwrap();
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'current','null','hash','completed','2000-01-01',?2,0)",params![id,large]).unwrap();
         }
-        db.execute(r#"INSERT INTO operation_receipt VALUES('current:c','current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[]).unwrap();
+        db.execute(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:c','current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[]).unwrap();
         assert_eq!(
             collect(&db, "current", true).unwrap(),
             2,
@@ -485,8 +489,8 @@ mod tests {
         assert_eq!(collect(&db, "current", true).unwrap(), 1);
         // An out-of-contract oversized legacy envelope is never materialized or
         // overwritten, and does not prevent a subsequent small row's progress.
-        db.execute("INSERT INTO operation_receipt VALUES('current:oversized','current','null','hash','completed','2000-01-01',?1,0)",["x".repeat(MAX_OUTCOME_BYTES as usize+1)]).unwrap();
-        db.execute(r#"INSERT INTO operation_receipt VALUES('current:z','current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[]).unwrap();
+        db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:oversized','current','null','hash','completed','2000-01-01',?1,0)",[serde_json::to_string(&"x".repeat(MAX_OUTCOME_BYTES as usize-1)).unwrap()]).unwrap();
+        db.execute(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:z','current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[]).unwrap();
         assert_eq!(collect(&db, "current", true).unwrap(), 1);
         assert_eq!(db.query_row("SELECT octet_length(result_ref_json) FROM operation_receipt WHERE operation_id='current:oversized'",[],|r|r.get::<_,i64>(0)).unwrap(),MAX_OUTCOME_BYTES as i64+1);
         assert_eq!(collect(&db, "current", true).unwrap(), 0);
@@ -498,7 +502,7 @@ mod tests {
     #[test]
     fn failed_current_expiry_rolls_back_companion_and_quota_updates() {
         let mut db = fixture();
-        db.execute_batch(r#"INSERT INTO operation_receipt VALUES('current:done','current','null','hash','completed','2000-01-01','{"result":{}}',0);
+        db.execute_batch(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:done','current','null','hash','completed','2000-01-01','{"result":{}}',0);
             INSERT INTO app_meta VALUES('compact.result.current:done','{}');
             CREATE TRIGGER fail_expiry BEFORE UPDATE ON operation_receipt BEGIN SELECT RAISE(ABORT,'fixture');END;"#).unwrap();
         let before = usage(&db, "current").unwrap();
@@ -565,9 +569,9 @@ mod tests {
             budget + 1024,
         )
         .unwrap();
-        tx.execute("INSERT INTO operation_receipt VALUES('old:pending','old','null','hash','pending','2000-01-01',NULL,8388608)",[]).unwrap();
+        tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('old:pending','old','null','hash','pending','2000-01-01',NULL,8388608)",[]).unwrap();
         assert_eq!(collect(&tx, "current", true).unwrap(), 0);
-        tx.execute("INSERT INTO operation_receipt VALUES('old:done','old','null','hash','completed','2000-01-01','{}',0)",[]).unwrap();
+        tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('old:done','old','null','hash','completed','2000-01-01','{}',0)",[]).unwrap();
         assert_eq!(collect(&tx, "current", false).unwrap(), 1);
         assert_eq!(
             tx.query_row("SELECT count(*) FROM operation_receipt", [], |r| r
@@ -589,7 +593,7 @@ mod tests {
     #[test]
     fn derived_counters_follow_direct_sql_unicode_updates_deletes_and_rollback() {
         let mut db = fixture();
-        db.execute("INSERT INTO operation_receipt VALUES('current:日本語','current','{\"execution_id\":\"猫\"}','hash','pending','now',NULL,4096)",[]).unwrap();
+        db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:日本語','current','{\"execution_id\":\"猫\"}','hash','pending','now',NULL,4096)",[]).unwrap();
         assert_eq!(
             usage(&db, "current").unwrap(),
             scanned_usage(&db, "current")
@@ -631,7 +635,7 @@ mod tests {
     #[test]
     fn failed_collection_rolls_back_counter_and_companion_changes() {
         let mut db = fixture();
-        db.execute_batch("INSERT INTO operation_receipt VALUES('old:done','old','null','hash','completed','2000-01-01','{}',0);INSERT INTO app_meta VALUES('compact.result.old:done','{}');CREATE TRIGGER fail_collection BEFORE DELETE ON operation_receipt BEGIN SELECT RAISE(ABORT,'fixture');END;").unwrap();
+        db.execute_batch("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('old:done','old','null','hash','completed','2000-01-01','{}',0);INSERT INTO app_meta VALUES('compact.result.old:done','{}');CREATE TRIGGER fail_collection BEFORE DELETE ON operation_receipt BEGIN SELECT RAISE(ABORT,'fixture');END;").unwrap();
         let before = usage(&db, "current").unwrap();
         {
             let tx = db.transaction().unwrap();

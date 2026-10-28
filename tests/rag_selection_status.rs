@@ -538,13 +538,23 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
             result["error"]["message"]
                 .as_str()
                 .unwrap()
-                .contains("writer command"),
+                .contains("shellboy rag init"),
             "{result}"
         );
     }
     assert_eq!(std::fs::read(root.join("rag.db")).unwrap(), before);
-    let readded = add(root, "materials", &["*.log"], false).await;
-    assert_eq!(readded["result"]["source_id"], original);
+    let migrated = call(root, RagCommand::Init).await;
+    assert_eq!(migrated["ok"], true, "{migrated}");
+    assert_eq!(migrated["result"]["already_initialized"], true);
+    let listed = call(
+        root,
+        RagCommand::Source {
+            command: SourceCommand::List,
+        },
+    )
+    .await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert!(listed.to_string().contains(original.as_str().unwrap()));
     let db = rusqlite::Connection::open(root.join("rag.db")).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -669,6 +679,9 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     };
     let db = rusqlite::Connection::open(&path).unwrap();
     let expected = indexes(&db);
+    let original_sources: i64 = db
+        .query_row("SELECT count(*) FROM sources", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(expected.len(), 2);
     db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; PRAGMA user_version=2; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     drop(db);
@@ -677,9 +690,14 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     assert_eq!(rejected["ok"], false, "{rejected}");
     assert_eq!(rejected["error"]["code"], "schema_unsupported");
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    std::fs::create_dir(root.join("notes")).unwrap();
-    assert_eq!(add(root, "notes", &[], false).await["ok"], true);
+    let migrated = call(root, RagCommand::Init).await;
+    assert_eq!(migrated["ok"], true, "{migrated}");
     let db = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM sources", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        original_sources
+    );
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
@@ -699,7 +717,7 @@ async fn readonly_history_rejects_older_conversation_schema_without_migrating() 
     let writer = DbWorker::open(&path).await.unwrap();
     writer.shutdown().await.unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DELETE FROM schema_migration WHERE version=10; PRAGMA user_version=9; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    db.execute_batch("DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     db.close().unwrap();
     let before = std::fs::read(&path).unwrap();
     let result = call(

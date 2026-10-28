@@ -18,7 +18,7 @@ This file contains instructions for developing Shellboy itself. Product users sh
 - Preserve the ordering of state adoption, persistence, cancellation, and late results in the [Control design](docs/design/control.md) and relevant subsystem designs. For every new table, event, worker, queue, or dependency, document why it is necessary, its bounds, owner, and shutdown responsibility.
 - Use ordinary Rust modules. Do not add a generic Repository or independent job engine. Do not hide incomplete behavior behind successful stubs.
 - Keep credentials, local databases, real conversations, and private logs out of Git. Do not add compatibility paths for the former product's command names, environment variables, or default storage locations.
-- Before 1.0.0, do not add one-off migrations or compatibility shims for earlier releases (old data formats, deprecated aliases, legacy keys). Breaking changes are acceptable. General mechanisms needed for long-term compatibility (the schema migration runner, `user_version`, protocol version checks) are allowed. Compatibility is guaranteed from 1.0.0.
+- Before 1.0.0, do not add compatibility shims for earlier releases in Core (old data formats, deprecated aliases, legacy keys); Core reads only the current format. Schema upgrades belong only in the isolated startup migration modules (`storage::migrate`, `rag::store::migrate`) so historical conversions can be removed later. Breaking changes are acceptable. Keep the general schema migration runner, `user_version`/ledger validation, and protocol version checks. Compatibility is guaranteed from 1.0.0.
 
 ## Validation and handoff
 

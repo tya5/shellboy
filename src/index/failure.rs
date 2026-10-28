@@ -50,7 +50,10 @@ impl IndexService {
         let pause_keys = self.identity_keys();
         let key = key.to_owned();
         let config = self.config.clone();
-        self.database
+        let recovery_claim = claimed.clone();
+        let provider_error = error.clone();
+        let outcome = self
+            .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 adopt_failure_tx(
@@ -66,7 +69,43 @@ impl IndexService {
                 Ok(())
             })
             .await
-            .map_err(db_error)
+            .map_err(db_error);
+        if let Err(adoption_error) = &outcome {
+            let claimed = recovery_claim;
+            let diagnostic = json!({
+                "kind":"index_failure_adoption",
+                "message":"Embedding failed but its normal failure adoption failed; retry explicitly after checking storage",
+                "provider_error":provider_error,
+                "adoption_error":adoption_error,
+            });
+            let mut pause_keys = self.identity_keys();
+            if let Some(family) = self.failure_key() {
+                pause_keys.push(family.to_owned());
+            }
+            // Keep the fixed input and actual provider failure. A separate
+            // transaction must not rerun the malformed streak update.
+            let _ = self.database.call(move |db| {
+                let tx = db.transaction()?;
+                if claim_valid(&tx, &claimed)? {
+                    if let Some(job) = &claimed.job_id {
+                        tx.execute("UPDATE embedding_job SET state='failed',error_json=?2,next_attempt_at=NULL WHERE id=?1",params![job,diagnostic.to_string()])?;
+                    }
+                    if let Some(bootstrap) = &claimed.bootstrap_key {
+                        let mut work = claimed.work.clone();
+                        work.state = "failed".into();
+                        work.error = Some(diagnostic.clone());
+                        work.next_at = None;
+                        update_json_meta(&tx, bootstrap, &work)?;
+                    }
+                    for key in pause_keys {
+                        set_meta(&tx, &IndexKeys::new(&key).pause(), &diagnostic.to_string())?;
+                    }
+                }
+                tx.commit()?;
+                Ok(())
+            }).await;
+        }
+        outcome
     }
 }
 

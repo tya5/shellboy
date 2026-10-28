@@ -73,6 +73,14 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         transaction.execute_batch(HOT_QUERY_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
+    if version < 11 {
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        transaction.execute_batch(include_str!(
+            "../../migrations/0011_current_index_metadata.sql"
+        ))?;
+        transaction.commit()?;
+    }
     validate_schema(connection)?;
     Ok(())
 }

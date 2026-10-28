@@ -92,12 +92,9 @@ HTTP 401/402/403と既知の設定・次元不一致は共有queueを即pauseす
 terminal job失敗が設定回数連続すればpauseする。別原因・正常採用・明示長さsplit・取消しで
 該当streakは切れる。retry中のattemptを別jobのterminal失敗として加算しない。
 
-既存`index.common_failures.<profile>`の整数を、cause/countの小さな内部JSONへ置き換える。
-新table/worker/queueはない。causeは一時障害の固定tag、又はkind/status/provider codeのhash
-（code不明ならkind/statusまで）であり、推測的な文面分類をしない。provider本文を
-counterへ複製しない。リクエストID等が変動する文面だけでstreakを分断しない。codeなし障害は同じkind/statusという粗い障害クラスとして数え、同一根本原因だとは断定しない。countは設定閾値で飽和するため1profile約128bytes以内。原因を復元できない
-旧整数は次の失敗で新streakを開始するが、保存済pauseは維持する。成功と明示retryの既存`0`
-resetを引き続き扱い、許可済み失敗入力以外をretryで追加しない。
+Current `index.common_failures.<family>` values are bounded cause/count JSON objects. Schema v11 startup migration removes prior integer resets and other non-current counters once; runtime never parses a legacy fallback. Current valid counters and saved pauses remain. Success, cancellation, split, and explicit retry delete the counter. Cause uses a fixed transient tag or a hash of kind/status/provider code, never request-specific prose. Count saturates at the configured threshold.
+
+If a worker cannot adopt a result because current metadata is malformed, it preserves the provider failure on the claimed input, marks the claim failed, and records an existing family/profile pause reason. Workers stop claiming until explicit retry. This is an uncertain adoption, not a successful embedding or a provider error; the original transaction rolls back. Status exposes the diagnostic and manual retry remains explicit. If storage also rejects recording the pause, no durable diagnostic can be promised; the service cancels its workers rather than spending on more inputs. No new queue, worker, table, or automatic paid repair is introduced.
 
 ## G2: raw期限と保存済み会話本文の寿命
 

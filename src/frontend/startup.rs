@@ -150,7 +150,7 @@ mod tests {
             let db = rusqlite::Connection::open(path).unwrap();
             // Prepare an older supported fixture before startup. No second
             // writer remains to race the production 2-second busy timeout.
-            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX node_turn; DROP INDEX receipt_turn_source; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; COMMIT;").unwrap();
+            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; COMMIT;").unwrap();
         }).await.unwrap();
         let token = CancellationToken::new();
         let cancel = token.clone();

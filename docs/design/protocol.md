@@ -196,7 +196,7 @@ OSごとの所有対象を型の構成で明確にする。Windowsの実機受�
 
 ### 同じwire版の旧ownerと未知操作（PR1-10）
 
-Historical older-owner guidance is superseded by Issue #33. Current request/response envelopes use `protocol_version=2`. Other versions are rejected, and current required fields are not made optional for older owners. Use the same release for CLI and owner. Unknown operations remain errors; a connection loss is still not proof that a mutation did not execute. No capability negotiation or old status wrapper is added.
+Historical older-owner guidance is superseded by Issue #33. Current request/response envelopes use `protocol_version=2`. Other versions are rejected, and current required fields are not made optional for older owners. Use the same release for CLI and owner. A version mismatch reports `details.client_protocol_version` and `details.owner_protocol_version` and requires aligning releases; retrying the same binaries cannot fix it. Endpoint metadata and Welcome version checks reject before command dispatch. Endpoint/instance changes remain a distinct reconnect diagnostic. A lost response after sending a mutation remains an uncertain result and retains receipt lookup guidance. Unknown operations remain errors; a connection loss is still not proof that a mutation did not execute. No capability negotiation or old status wrapper is added.
 
 ## R3-3 / R3-4: Command分類・語彙・既定値の正本
 

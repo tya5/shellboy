@@ -25,11 +25,12 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (8, "0008_receipt_accounting_compat"),
     (9, "0009_compaction_turn_indexes"),
     (10, "0010_hot_query_indexes"),
+    (11, "0011_current_index_metadata"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
 mod migrate;
-const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
+pub(crate) const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -569,7 +570,7 @@ mod schema_validation_tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(CURRENT_SCHEMA).unwrap();
         assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
-        db.execute_batch("DELETE FROM schema_migration WHERE version=10; PRAGMA user_version=9;")
+        db.execute_batch("DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;")
             .unwrap();
         assert!(
             matches!(validate_schema(&db), Err(StorageError::Schema(message)) if message.contains("current writer"))
