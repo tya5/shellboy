@@ -264,7 +264,12 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
                     "Cannot inspect history embedding space",
                 )
             })?
-            .ok_or_else(|| err("index_incompatible", "History has no active semantic index"))?
+            .ok_or_else(|| {
+                err(
+                    "rag_semantic_history_missing",
+                    "History has no active semantic index",
+                )
+            })?
     };
     let loaded = crate::config::Config::load_with_overrides(
         context.config.as_deref(),

@@ -5,6 +5,8 @@
 `shellboy rag` は会話本体を起動せず使う検索CLIです。質問への回答を生成する機能ではありません。
 まず `shellboy docs search --query '検索'` で操作ガイドを探せます。
 
+既存の独立RAG DBは最初の書込み時にschema 1から2へ移行し、sourceの除外指定を保存できるようになります。読取りとdry-runだけでは移行しません。移行後のDBはv0.1.5の旧バイナリでは開けないため、戻す必要がある場合は更新前にRAG DBをバックアップしてください。会話DBのschemaには変更ありません。
+
 ## 文書を登録する
 
 ```bash
@@ -15,6 +17,21 @@ shellboy rag index --source notes --dry-run
 shellboy rag index --source notes
 shellboy rag search --scope source:notes --query '復旧'
 ```
+
+### ソースの対象外を指定する
+
+```bash
+shellboy rag source add /absolute/path/to/notes --name notes --exclude '*.db' --exclude build
+shellboy rag index --source notes --dry-run
+# 既存sourceの除外指定を明示的に解除する場合
+shellboy rag source add /absolute/path/to/notes --name notes --clear-excludes
+```
+
+`--exclude`は複数指定でき、最大64個・各1024bytes以内。sourceに保存するのでindexごとの再指定は不要です。同じ名前/rootへの除外指定なしの再登録は維持、非空の指定で全置換、解除は`--clear-excludes`です。rootからの相対pathをslash区切りで照合し、slashのないpatternは各階層のbasenameにも適用します。directoryに一致すれば配下を読みません。gitignoreの読込みや否定規則には対応しません。
+
+dotで始まる配下entry（`.git`や`.DS_Store`）、現在使うRAG DBと`-wal`/`-shm`/`-journal`/writer lockは既定で対象外です。明示登録したhidden root自体は選択意図を優先します。シンボリックリンクは辿りません。未対応形式も失敗ではなく対象外です。結果の`skipped`、source別`selection`のtargets/excluded/unsupported/symlinks、拡張子別の内訳と上限20件の例を確認してください。1 sourceあたり対応資料10000件・訪問entry100000件・深さ64が上限です。
+
+完全な走査が成功すると、対象外になった旧資料や削除済み資料は検索のactive版から外れ、`removed`に数えます。原本は削除しません。実際の読取り/抽出失敗や走査不全では削除検出を抑止し、一時的なアクセス不能を削除と取り違えません。
 
 既定はkeyword検索・索引で、API接続は不要です。登録やdry-runはAPIを呼びません。
 管理DBは既定データディレクトリの `rag.db`、`shellboy rag --db /absolute/path/knowledge.db`
@@ -56,7 +73,7 @@ scopeは `docs`、`history`、`source:登録IDまたは名前` を繰り返し�
 検索はガイドを自動でembeddingせず、未準備やbinary更新で版が変わった場合は次のindex操作を示します。
 `--source`を省略したindexは登録資料を処理し、同梱ガイドを勝手に追加しません。
 semantic/hybrid検索自体のquery embeddingにもAPI費用が発生し得ます。
-準備できていないscopeがあるhybrid検索はkeyword結果とscope別エラーを併せて返します。
+hybridでkeywordに成功し、semanticの未作成・現profile未索引・embedding不足だけが確認できた場合は`ok:true`、終了コード0、`result.degraded:true`でkeyword結果を返します。`scope_status`はscopeごとのkeyword/semantic使用状態・理由・不足文書/chunk数と、`next.steps[].command`の対象sourceを明示した回復手順を示します。同じ理由は`warnings`へ集約し、互換の`scope_errors`にも`warning:true`を付けて失敗と区別します。未知の不足件数はnullです。設定不正/未設定・認証・通信・DB/identity不一致等は本当のエラーとして扱い、明示semantic検索をkeywordへ切り替えません。
 `shellboy docs`やdocsのkeyword検索はDB・APIなしで引き続き使えます。
 
 結果のexcerptは抜粋です。返却されたreferenceを使って原文を読みます。
@@ -72,7 +89,7 @@ shellboy rag get --ref REFERENCE --limit-bytes 16384 --cursor CURSOR
 ガイドは文書全体、履歴は参照された本文種別です。getのoffsetはこの取得単位のUTF-8 byteです。
 位置の `source` はbackendが示した原本位置、`chunk_start_bytes/end_bytes` は保存した
 抽出本文内の範囲で、原本ファイルのbyte offsetではありません。
-一部scopeが失敗した場合は部分結果とscope別エラーを返し、終了コードは非0です。
+一部scopeが実際に失敗した場合は部分結果とscope別エラーを返し、終了コードは非0です。上記の確認済み未準備warningだけはdegraded成功として区別します。
 異なるembedding空間のdistanceは比較できないため、統合検索は順位で融合します。
 複数scopeを同時刻のsnapshotとは扱いません。履歴keywordは走査開始時のwatermarkまでを
 短い読取りで調べ、各参照を版/hashで検証します。検索中の新規追記は再検索で取得します。
@@ -128,3 +145,23 @@ shellboy rag ingest --id explanation-1 --source-file /absolute/path/to/original.
 `--metadata-file PATH` では生成者・モデル等の任意JSON情報を記録できますが、
 記録があること自体がLLMによる原本読取りの証明ではありません。
 派生本文は通常の原本フォルダ同期で上書きしません。
+
+
+## 索引の結果と最終更新を確認する
+
+`rag index`のJSONは`changed`/`unchanged`/`removed`/`processed`、`failure_count`/`failures`/`failures_truncated`、`partial_failure`、`embedding_paused`/`deferred`と再試行案内を返します。sourceごとの結果も`result.sources`で確認できます。新規資料で一度も成功していなければ`failed`、旧active版を残していれば`stale`です。失敗一覧は最大50件で、総数と省略有無を併記します。
+
+`rag status`は既存の保存行からsourceごとの状態、`last_scan`（最終走査）、`last_changed_at`（有効版の内容作成時刻の最大値）、失敗資料のkey/code/messageを返します。現在のembedding設定で欠けるchunk数が`semantic_missing`です。0は現在のactive chunksのembedding不足がないことを表し、索引を実行した時刻やAPI呼出回数とは異なります。設定を確認できない場合はnullを返し、`semantic_configuration`を確認します。
+
+semantic dry-runは外部APIを呼ばず、`text_bytes`/`segments`と`embedding_may_charge`を示します。外部extractorが必要で実測していない資料があれば`segments_complete:false`と`unmeasured_documents`を返し、未知の分割量を0件と決めつけません。単価を内蔵しないため料金の総額は算出しません。
+
+### background shellで実行した索引の最終結果
+
+モデルはshell toolへ、`command: "shellboy rag index --source notes --mode semantic"` と`background:true`を指定し、そのtoolが返した**作業execution ID**を保存します。実際に使っている`--db`/`--config`/`--data-dir`があればcommandにも同じ指定を付けます。
+
+```bash
+shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000
+shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes 65536
+```
+
+waitがtimeoutなら作業は継続しています。終端後はreadの`result.text`に含まれるindexのJSONを読み、`ok`と集計・失敗一覧を確認します。出力が長ければ返却`cursor`で続きへ進みます。終了コードだけで全成功と判定しません。ここで読むIDはindex commandを実行したshellのIDで、`message send`の受付CLIやwait/read自体を動かしたexecutionではありません。生の出力は保持期限があるため、後日の状態確認には`rag status`や`rag inspect`を使います。新しい操作結果保存DBやCore receiptは作りません。[shellガイド](shell.md)も参照してください。

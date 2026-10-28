@@ -79,9 +79,54 @@ pub(super) async fn index(context: &Context, dry_run: bool, mode: IndexMode) -> 
     Ok(result)
 }
 
+/// Diagnose only missing current catalogue/coverage, without publishing or embedding.
+pub(super) fn preparation(context: &Context) -> Result<Option<search::Preparation>> {
+    let profile = embedding_profile(context)?;
+    let docs = crate::docs::documents();
+    let s = match store::open(&context.database, false) {
+        Ok(s) => s,
+        Err(error) if error.code == "db_not_found" => {
+            return Ok(Some(search::Preparation {
+                reason: "store_not_initialized",
+                missing_documents: Some(docs.len() as i64),
+                missing_chunks: None,
+            }));
+        }
+        Err(error) => return Err(error),
+    };
+    let before = s.db.unchecked_transaction()?;
+    let mut missing = 0i64;
+    for doc in &docs {
+        let present: bool = before.query_row(
+            "SELECT EXISTS(SELECT 1 FROM documents d JOIN revisions r ON r.id=d.active_revision WHERE d.source_id='@docs' AND d.key=?1 AND r.body_hash=?2 AND r.extractor='bundled-guide-v1')",
+            rusqlite::params![doc.id, hash(doc.text.as_bytes())], |r| r.get(0))?;
+        missing += i64::from(!present);
+    }
+    let active: i64 = before.query_row(
+        "SELECT COUNT(*) FROM documents WHERE source_id='@docs' AND active_revision IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    before.commit()?;
+    if missing > 0 || active != docs.len() as i64 {
+        return Ok(Some(search::Preparation {
+            reason: "guide_catalogue_not_indexed",
+            missing_documents: Some(missing),
+            missing_chunks: None,
+        }));
+    }
+    search::material_preparation(&s, "@docs", &profile)
+}
+
 pub(super) async fn semantic(context: &Context, query: &str) -> Result<Vec<Hit>> {
     let profile = embedding_profile(context)?;
-    let s = store::open(&context.database, false)?;
+    let s = store::open(&context.database, false).map_err(|error| {
+        if error.code == "db_not_found" {
+            err("rag_semantic_store_missing", error.message)
+        } else {
+            error
+        }
+    })?;
     let before = s.db.unchecked_transaction()?;
     let generation: String =
         before.query_row("SELECT value FROM meta WHERE key='generation'", [], |r| {
@@ -93,7 +138,7 @@ pub(super) async fn semantic(context: &Context, query: &str) -> Result<Vec<Hit>>
         let revision:Option<String>=before.query_row("SELECT r.id FROM documents d JOIN revisions r ON r.id=d.active_revision WHERE d.source_id='@docs' AND d.key=?1 AND r.body_hash=?2 AND r.extractor='bundled-guide-v1'",rusqlite::params![doc.id,body_hash],|r|r.get(0)).optional()?;
         let Some(revision) = revision else {
             return Err(err(
-                "index_incompatible",
+                "rag_semantic_guides_missing",
                 "Bundled guides are not indexed for this binary; run shellboy rag init, then shellboy rag index --source docs --dry-run --mode semantic and shellboy rag index --source docs --mode semantic",
             ));
         };
@@ -106,14 +151,14 @@ pub(super) async fn semantic(context: &Context, query: &str) -> Result<Vec<Hit>>
     )?;
     if active as usize != map.len() {
         return Err(err(
-            "index_incompatible",
+            "rag_semantic_guides_missing",
             "Bundled guide catalogue changed; explicitly run shellboy rag index --source docs --mode semantic",
         ));
     }
     before.commit()?;
     let mut hits = material_semantic(&s, "@docs", query, &profile).await.map_err(|error| {
-        if error.code == "index_incompatible" {
-            err("index_incompatible", "Bundled guides lack embeddings for this profile; run shellboy rag index --source docs --dry-run --mode semantic, then shellboy rag index --source docs --mode semantic")
+        if matches!(error.code.as_str(), "rag_semantic_profile_missing" | "rag_semantic_coverage_missing") {
+            err(&error.code, "Bundled guides lack embeddings for this profile; run shellboy rag index --source docs --dry-run --mode semantic, then shellboy rag index --source docs --mode semantic")
         } else { error }
     })?;
     let current: String =

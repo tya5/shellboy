@@ -40,6 +40,57 @@ struct Manifest {
     extensions: Vec<String>,
 }
 
+/// Classify the extension without opening its contents or running an extractor.
+/// Explicit adapters remain responsible for their own extension declarations.
+pub(crate) fn supported(path: &Path, adapter: Option<&Path>) -> bool {
+    adapter.is_some()
+        || matches!(
+            path.extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str(),
+            "" | "txt"
+                | "md"
+                | "markdown"
+                | "text"
+                | "rst"
+                | "csv"
+                | "json"
+                | "yaml"
+                | "yml"
+                | "toml"
+                | "log"
+                | "pdf"
+                | "docx"
+                | "pptx"
+                | "xlsx"
+        )
+}
+pub(crate) fn native_text(path: &Path) -> bool {
+    supported(path, None)
+        && !matches!(
+            path.extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str(),
+            "pdf" | "docx" | "pptx" | "xlsx"
+        )
+}
+
+pub(crate) fn adapter_extensions(path: &Path) -> Result<Vec<String>, String> {
+    let manifest: Manifest = serde_json::from_slice(&bounded_file(path, 64 * 1024)?)
+        .map_err(|_| "extractor_failed: invalid adapter manifest".to_owned())?;
+    if manifest.schema_version != 1
+        || manifest.extensions.len() > 256
+        || manifest.extensions.iter().any(|value| value.len() > 64)
+    {
+        return Err("extractor_failed: invalid adapter extension declarations".into());
+    }
+    Ok(manifest.extensions)
+}
+
 pub fn extract(
     path: &Path,
     backend: Option<&Path>,

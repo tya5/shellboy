@@ -1,3 +1,5 @@
+mod observation;
+mod scan;
 mod sync;
 use super::*;
 use fs2::FileExt;
@@ -12,18 +14,19 @@ use sync::{FileIndexPolicy, SyncCounts, collect_missing, index_derived};
 
 const SCHEMA: &str = "
 CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-CREATE TABLE sources(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,root TEXT NOT NULL,kind TEXT NOT NULL,last_scan TEXT,error TEXT);
+CREATE TABLE sources(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,root TEXT NOT NULL,kind TEXT NOT NULL,last_scan TEXT,error TEXT,exclude_json TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE documents(id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES sources(id),key TEXT NOT NULL,active_revision TEXT,status TEXT NOT NULL DEFAULT 'ready',error TEXT,UNIQUE(source_id,key));
 CREATE TABLE revisions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id),source_hash TEXT NOT NULL,body_hash TEXT NOT NULL,extractor TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,provenance TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE TABLE blocks(revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,text TEXT NOT NULL,location TEXT NOT NULL,PRIMARY KEY(revision_id,ordinal));
 CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,text TEXT NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
 CREATE TABLE spaces(id TEXT PRIMARY KEY,dimension INTEGER NOT NULL,profile TEXT NOT NULL,model TEXT NOT NULL,endpoint_hash TEXT NOT NULL,table_name TEXT NOT NULL);
 CREATE TABLE embeddings(space_id TEXT NOT NULL REFERENCES spaces(id),hash TEXT NOT NULL,vec_rowid INTEGER NOT NULL,PRIMARY KEY(space_id,hash));
-PRAGMA user_version=1;";
+PRAGMA user_version=2;";
 
 pub(super) struct Store {
     pub db: Connection,
     pub uuid: String,
+    version: i64,
     _lock: Option<File>,
 }
 pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
@@ -50,8 +53,8 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     if !write {
         db.execute_batch("PRAGMA query_only=ON;")?;
     }
-    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 1 {
+    let mut version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if !matches!(version, 1 | 2) {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema is not supported; no migration was attempted",
@@ -70,12 +73,17 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
             "Not a Shellboy document database",
         ));
     }
+    if write && version == 1 {
+        db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE sources ADD COLUMN exclude_json TEXT NOT NULL DEFAULT '[]'; PRAGMA user_version=2; COMMIT;")?;
+        version = 2;
+    }
     if write {
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
     }
     Ok(Store {
         db,
         uuid,
+        version,
         _lock: lock,
     })
 }
@@ -197,7 +205,9 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     if path.exists() {
         drop(_lock);
         let s = open(path, false)?;
-        return Ok(json!({"database_uuid":s.uuid,"already_initialized":true}));
+        return Ok(
+            json!({"database_uuid":s.uuid,"already_initialized":true,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+        );
     }
     crate::storage::register_vec()
         .map_err(|_| err("database_failed", "Cannot initialize sqlite-vec"))?;
@@ -210,7 +220,9 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     tx.execute("INSERT INTO meta VALUES('generation','0')", [])?;
     tx.execute("INSERT INTO sources(id,name,root,kind) VALUES('@docs','@docs','','builtin'),('@derived','derived','','derived')",[])?;
     tx.commit()?;
-    Ok(json!({"database_uuid":uuid,"already_initialized":false}))
+    Ok(
+        json!({"database_uuid":uuid,"already_initialized":false,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+    )
 }
 pub(super) fn resolve_source(db: &Connection, id: &str) -> Result<String> {
     db.query_row("SELECT id FROM sources WHERE (id=?1 OR name=?1) AND kind!='builtin' ORDER BY CASE WHEN id=?1 THEN 0 ELSE 1 END",[id],|r|r.get(0)).optional()?.ok_or_else(||err("source_not_found","Registered source does not exist"))
@@ -219,7 +231,19 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
     let write = !matches!(command, SourceCommand::List);
     let mut s = open(path, write)?;
     match command {
-        SourceCommand::Add { path, name } => {
+        SourceCommand::Add {
+            path,
+            name,
+            exclude,
+            clear_excludes,
+        } => {
+            if clear_excludes && !exclude.is_empty() {
+                return Err(err(
+                    "invalid_argument",
+                    "Cannot combine exclude patterns with clear-excludes",
+                ));
+            }
+            scan::validate_patterns(&exclude)?;
             if name.is_empty()
                 || name.len() > 128
                 || name.starts_with('@')
@@ -248,7 +272,20 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
                         "Source name already refers to another path",
                     ));
                 }
-                return Ok(json!({"source_id":id,"name":name,"root":root,"existing":true}));
+                if clear_excludes || !exclude.is_empty() {
+                    s.db.execute(
+                        "UPDATE sources SET exclude_json=?2 WHERE id=?1",
+                        params![id, serde_json::to_string(&exclude).expect("patterns")],
+                    )?;
+                }
+                let patterns: String = s.db.query_row(
+                    "SELECT exclude_json FROM sources WHERE id=?1",
+                    [&id],
+                    |row| row.get(0),
+                )?;
+                return Ok(
+                    json!({"source_id":id,"name":name,"root":root,"existing":true,"exclude":serde_json::from_str::<Value>(&patterns).unwrap_or(Value::Null)}),
+                );
             }
             let count: i64 = s.db.query_row(
                 "SELECT COUNT(*) FROM sources WHERE kind!='builtin'",
@@ -263,14 +300,19 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
             }
             let id = uuid::Uuid::new_v4().to_string();
             s.db.execute(
-                "INSERT INTO sources(id,name,root,kind) VALUES(?1,?2,?3,'file')",
-                params![id, name, root],
+                "INSERT INTO sources(id,name,root,kind,exclude_json) VALUES(?1,?2,?3,'file',?4)",
+                params![
+                    id,
+                    name,
+                    root,
+                    serde_json::to_string(&exclude).expect("patterns")
+                ],
             )?;
-            Ok(json!({"source_id":id,"name":name,"root":root,"existing":false}))
+            Ok(json!({"source_id":id,"name":name,"root":root,"existing":false,"exclude":exclude}))
         }
         SourceCommand::List => {
-            let mut q=s.db.prepare("SELECT id,name,root,kind,last_scan,error FROM sources WHERE kind!='builtin' ORDER BY name LIMIT 201")?;
-            let items=q.query_map([],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            let mut q=s.db.prepare(&format!("SELECT id,name,root,kind,last_scan,error,{} FROM sources WHERE kind!='builtin' ORDER BY name LIMIT 201", if s.version>=2 {"exclude_json"}else{"'[]'"}))?;
+            let items=q.query_map([],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?,"exclude":serde_json::from_str::<Value>(&r.get::<_,String>(6)?).unwrap_or(Value::Null)})))?.collect::<std::result::Result<Vec<_>,_>>()?;
             if items.len() > 200 {
                 return Err(err(
                     "output_limit",
@@ -421,54 +463,6 @@ pub(super) fn publish(s: &mut Store, document: &str, revision: &str) -> Result<(
     Ok(())
 }
 
-fn collect(path: &Path, root: &Path, files: &mut Vec<(String, PathBuf)>) -> Result<()> {
-    if path
-        .components()
-        .count()
-        .saturating_sub(root.components().count())
-        > 64
-    {
-        return Err(err(
-            "input_limit",
-            "Source directory nesting exceeds 64 levels",
-        ));
-    }
-    let meta = std::fs::symlink_metadata(path).map_err(|_| {
-        err(
-            "source_unavailable",
-            "Source traversal failed; deletion detection was skipped",
-        )
-    })?;
-    if meta.file_type().is_symlink() {
-        return Ok(());
-    }
-    if meta.is_dir() {
-        let mut entries = std::fs::read_dir(path)?.collect::<std::result::Result<Vec<_>, _>>()?;
-        entries.sort_by_key(|e| e.file_name());
-        for e in entries {
-            collect(&e.path(), root, files)?;
-        }
-    } else if meta.is_file() {
-        if files.len() >= 10000 {
-            return Err(err(
-                "input_limit",
-                "Source exceeds 10000 files per synchronization",
-            ));
-        }
-        let key = path
-            .strip_prefix(root)
-            .ok()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| path.file_name().map(Path::new).unwrap_or(path));
-        files.push((
-            key.to_str()
-                .ok_or_else(|| err("invalid_argument", "Source filenames must be Unicode"))?
-                .to_owned(),
-            path.into(),
-        ));
-    }
-    Ok(())
-}
 pub(super) async fn index(
     context: &search::Context,
     source: Option<&str>,
@@ -490,10 +484,14 @@ pub(super) async fn index(
     let selected = source.map(|id| resolve_source(&s.db, id)).transpose()?;
     let sources = {
         let mut q = s.db.prepare(
-            "SELECT id,root FROM sources WHERE kind='file' AND (?1 IS NULL OR id=?1) ORDER BY id",
+            &format!("SELECT id,root,{} FROM sources WHERE kind='file' AND (?1 IS NULL OR id=?1) ORDER BY id", if s.version>=2 {"exclude_json"}else{"'[]'"}),
         )?;
         q.query_map([selected.as_deref()], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?
     };
@@ -503,6 +501,8 @@ pub(super) async fn index(
     let mut failure_count = 0usize;
     let mut breaker = ProviderBreaker::default();
     let mut deferred = 0usize;
+    let mut skipped = 0usize;
+    let mut source_results = Vec::new();
     let profile = if !dry_run && mode == IndexMode::Semantic {
         Some(search::embedding_profile(context)?)
     } else {
@@ -516,29 +516,46 @@ pub(super) async fn index(
         profile,
         selection,
     };
-    for (source, root) in sources {
-        let mut files = Vec::new();
-        if let Err(error) = collect(Path::new(&root), Path::new(&root), &mut files) {
-            failure_count += 1;
-            if failures.len() < 50 {
-                failures
-                    .push(json!({"source_id":source,"code":error.code,"message":error.message}));
-            }
-            if !dry_run {
-                s.db.execute(
-                    "UPDATE sources SET error=?2 WHERE id=?1",
+    for (source, root, patterns) in sources {
+        let patterns: Vec<String> = serde_json::from_str(&patterns)
+            .map_err(|_| err("schema_unsupported", "Invalid persisted source exclusions"))?;
+        let scanned = scan::collect(Path::new(&root), &context.database, &patterns, adapter);
+        let scan = match scanned {
+            Ok(scan) => scan,
+            Err(error) => {
+                failure_count += 1;
+                if failures.len() < 50 {
+                    failures.push(
+                        json!({"source_id":source,"code":error.code,"message":error.message}),
+                    );
+                }
+                if !dry_run {
+                    s.db.execute(
+                    "UPDATE sources SET error=?2,last_scan=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",
                     params![source, error.code],
                 )?;
-                s.db.execute(
-                    "UPDATE documents SET status='stale',error=?2 WHERE source_id=?1",
+                    s.db.execute(
+                    "UPDATE documents SET status=CASE WHEN active_revision IS NULL THEN 'failed' ELSE 'stale' END,error=?2 WHERE source_id=?1 AND (active_revision IS NOT NULL OR status!='missing')",
                     params![source, error.code],
                 )?;
+                }
+                source_results
+                    .push(json!({"source_id":source,"scan_complete":false,"error":error.code}));
+                continue;
             }
-            continue;
-        }
-        let seen: HashSet<String> = files.iter().map(|(k, _)| k.clone()).collect();
+        };
+        let mut summary = serde_json::to_value(&scan).expect("scan summary");
+        summary["target_examples_truncated"] = json!(scan.targets > scan.target_examples.len());
+        summary["excluded_examples_truncated"] =
+            json!(scan.excluded > scan.excluded_examples.len());
+        summary["unsupported_examples_truncated"] =
+            json!(scan.unsupported > scan.unsupported_examples.len());
+        skipped += scan.excluded + scan.unsupported + scan.symlinks;
+        let before_counts = (counts.changed, counts.unchanged, counts.processed);
+        let before_failures = failure_count;
+        let seen: HashSet<String> = scan.files.iter().map(|(k, _)| k.clone()).collect();
         let mut source_failed = false;
-        for (key, path) in files {
+        for (key, path) in scan.files {
             if breaker.paused() {
                 deferred += 1;
                 source_failed = true;
@@ -552,11 +569,12 @@ pub(super) async fn index(
                 breaker.failure(&error.code);
                 failure_count += 1;
                 if failures.len() < 50 {
-                    failures.push(json!({"source_id":source,"key":key,"code":error.code,"message":error.message,"previous_revision_retained":true}));
+                    failures.push(json!({"source_id":source,"key":key,"code":error.code,"message":error.message,"previous_revision_retained":s.db.query_row("SELECT EXISTS(SELECT 1 FROM documents WHERE source_id=?1 AND key=?2 AND active_revision IS NOT NULL)",params![source,key],|row|row.get::<_,bool>(0))?}));
                 }
                 if !dry_run {
-                    s.db.execute("INSERT OR IGNORE INTO documents(id,source_id,key,status,error)VALUES(?1,?2,?3,'failed',?4)",params![hash(format!("{source}\0{key}").as_bytes()),source,key,error.code])?;
-                    s.db.execute("UPDATE documents SET status='stale',error=?3 WHERE source_id=?1 AND key=?2",params![source,key,error.code])?;
+                    let saved_error = json!({"code":error.code,"message":error.message.chars().take(2048).collect::<String>()}).to_string();
+                    s.db.execute("INSERT OR IGNORE INTO documents(id,source_id,key,status,error)VALUES(?1,?2,?3,'failed',?4)",params![hash(format!("{source}\0{key}").as_bytes()),source,key,saved_error])?;
+                    s.db.execute("UPDATE documents SET status=CASE WHEN active_revision IS NULL THEN 'failed' ELSE 'stale' END,error=?3 WHERE source_id=?1 AND key=?2",params![source,key,saved_error])?;
                 }
             } else {
                 breaker.success();
@@ -564,7 +582,9 @@ pub(super) async fn index(
         }
         // Even complete traversal must not turn a source processing failure into
         // an accidental deletion sweep. Successful document revisions remain.
-        removed += collect_missing(&mut s, &source, &seen, dry_run, source_failed)?;
+        let source_removed = collect_missing(&mut s, &source, &seen, dry_run, source_failed)?;
+        removed += source_removed;
+        source_results.push(json!({"source_id":source,"scan_complete":true,"deletion_detection":!source_failed,"changed":counts.changed-before_counts.0,"unchanged":counts.unchanged-before_counts.1,"processed":counts.processed-before_counts.2,"removed":source_removed,"failure_count":failure_count-before_failures,"selection":summary}));
         if !dry_run {
             s.db.execute(
                 "UPDATE sources SET last_scan=?2,error=?3 WHERE id=?1",
@@ -575,6 +595,12 @@ pub(super) async fn index(
                 ],
             )?;
         }
+    }
+    if dry_run && selected.as_deref().is_none_or(|id| id == "@derived") {
+        let (documents, segments, bytes): (i64,i64,i64) = s.db.query_row("SELECT (SELECT COUNT(*) FROM documents WHERE source_id='@derived' AND active_revision IS NOT NULL),COUNT(*),COALESCE(SUM(length(CAST(c.text AS BLOB))),0) FROM chunks c JOIN documents d ON d.active_revision=c.revision_id WHERE d.source_id='@derived'", [], |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+        counts.unchanged += documents as usize;
+        counts.segments += segments as usize;
+        counts.text_bytes += bytes as usize;
     }
     // Ingest documents participate in explicit semantic indexing but never in a
     // file walk; ordinary synchronization cannot overwrite their supplied body.
@@ -593,7 +619,7 @@ pub(super) async fn index(
         .await?;
     }
     Ok(
-        json!({"dry_run":dry_run,"changed":counts.changed,"unchanged":counts.unchanged,"removed":removed,"processed":counts.processed,"failures":failures,"failure_count":failure_count,"failures_truncated":failure_count>failures.len(),"partial_failure":failure_count>0,"embedding_paused":breaker.paused(),"deferred":deferred,"retry_hint":breaker.paused().then_some("Resolve provider rate/auth/credit issue, then rerun the same index command; successful embeddings are retained")}),
+        json!({"dry_run":dry_run,"sources":source_results,"skipped":skipped,"text_bytes":counts.text_bytes,"segments":counts.segments,"segments_complete":counts.unmeasured==0,"unmeasured_documents":counts.unmeasured,"embedding_may_charge":mode==IndexMode::Semantic && (counts.changed+counts.unchanged+counts.unmeasured>0),"billing":if dry_run {"This preview makes no external requests. Explicit semantic indexing may charge; unit price is unknown."}else{"Explicit semantic indexing may call the configured embedding API; successful cached content is reused and unit price is unknown."},"changed":counts.changed,"unchanged":counts.unchanged,"removed":removed,"processed":counts.processed,"failures":failures,"failure_count":failure_count,"failures_truncated":failure_count>failures.len(),"partial_failure":failure_count>0,"embedding_paused":breaker.paused(),"deferred":deferred,"retry_hint":breaker.paused().then_some("Resolve provider rate/auth/credit issue, then rerun the same index command; successful embeddings are retained")}),
     )
 }
 
@@ -678,32 +704,12 @@ pub(super) fn ingest(
     )
 }
 
-pub(super) fn status(path: &Path) -> Result<Value> {
-    let s = open(path, false)?;
-    let documents: i64 = s.db.query_row(
-        "SELECT COUNT(*) FROM documents WHERE active_revision IS NOT NULL",
-        [],
-        |r| r.get(0),
-    )?;
-    let chunks: i64 = s.db.query_row(
-        "SELECT COUNT(*) FROM chunks c JOIN documents d ON d.active_revision=c.revision_id",
-        [],
-        |r| r.get(0),
-    )?;
-    let stale: i64 = s.db.query_row(
-        "SELECT COUNT(*) FROM documents WHERE status='stale'",
-        [],
-        |r| r.get(0),
-    )?;
-    let embeddings: i64 =
-        s.db.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))?;
-    Ok(
-        json!({"database_uuid":s.uuid,"documents":documents,"chunks":chunks,"stale":stale,"cached_embeddings":embeddings}),
-    )
+pub(super) fn status(context: &search::Context) -> Result<Value> {
+    observation::status(context)
 }
 pub(super) fn inspect(path: &Path, id: &str) -> Result<Value> {
     let s = open(path, false)?;
-    let source=s.db.query_row("SELECT id,name,root,kind,last_scan,error FROM sources WHERE id=?1 OR name=?1",[id],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?}))).optional()?;
+    let source=s.db.query_row(&format!("SELECT id,name,root,kind,last_scan,error,{} FROM sources WHERE id=?1 OR name=?1",if s.version>=2 {"exclude_json"}else{"'[]'"}),[id],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?,"exclude":serde_json::from_str::<Value>(&r.get::<_,String>(6)?).unwrap_or(Value::Null)}))).optional()?;
     if let Some(value) = source {
         return Ok(value);
     }

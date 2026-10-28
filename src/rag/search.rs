@@ -273,7 +273,7 @@ pub(super) async fn material_semantic(
         .optional()?;
     let Some((dimension, table)) = space else {
         return Err(err(
-            "index_incompatible",
+            "rag_semantic_profile_missing",
             "No semantic index for the configured embedding profile; run rag index --mode semantic",
         ));
     };
@@ -288,7 +288,7 @@ pub(super) async fn material_semantic(
     let missing:i64=before.query_row("SELECT COUNT(*) FROM chunks c JOIN documents d ON d.active_revision=c.revision_id WHERE d.source_id=?1 AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.hash=c.hash AND e.space_id=?2)",params![source,profile.id],|r|r.get(0))?;
     if missing > 0 {
         return Err(err(
-            "index_incompatible",
+            "rag_semantic_coverage_missing",
             "Some current documents lack embeddings for the configured profile; run rag index --mode semantic",
         ));
     }
@@ -336,6 +336,149 @@ pub(super) async fn material_semantic(
     Ok(hits)
 }
 
+/// Positive evidence of an absent/incomplete index, never an arbitrary provider failure.
+#[derive(Clone)]
+pub(super) struct Preparation {
+    pub reason: &'static str,
+    pub missing_documents: Option<i64>,
+    pub missing_chunks: Option<i64>,
+}
+
+pub(super) fn material_preparation(
+    s: &store::Store,
+    source: &str,
+    profile: &Profile,
+) -> Result<Option<Preparation>> {
+    let snapshot = s.db.unchecked_transaction()?;
+    let space_exists: bool = snapshot.query_row(
+        "SELECT EXISTS(SELECT 1 FROM spaces WHERE id=?1)",
+        [&profile.id],
+        |r| r.get(0),
+    )?;
+    let (missing_documents, missing_chunks): (i64, i64) = snapshot.query_row(
+        "SELECT COUNT(DISTINCT c.revision_id),COUNT(*) FROM chunks c JOIN documents d ON d.active_revision=c.revision_id WHERE d.source_id=?1 AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.hash=c.hash AND e.space_id=?2)",
+        params![source, profile.id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    snapshot.commit()?;
+    Ok(
+        (!space_exists || missing_chunks > 0).then_some(Preparation {
+            reason: if space_exists {
+                "embeddings_incomplete"
+            } else {
+                "profile_not_indexed"
+            },
+            missing_documents: Some(missing_documents),
+            missing_chunks: Some(missing_chunks),
+        }),
+    )
+}
+
+fn command_prefix(context: &Context) -> Vec<String> {
+    let mut command = vec!["shellboy".into()];
+    if let Some(directory) = &context.data_dir {
+        command.extend([
+            "--data-dir".into(),
+            directory.to_string_lossy().into_owned(),
+        ]);
+    }
+    if let Some(config) = &context.config {
+        command.extend(["--config".into(), config.to_string_lossy().into_owned()]);
+    }
+    command
+}
+fn preparation_next(
+    context: &Context,
+    scope: &str,
+    source: Option<&str>,
+    preparation: &Preparation,
+) -> Value {
+    let mut prefix = command_prefix(context);
+    if scope == "history" {
+        prefix.extend(["index".into(), "status".into()]);
+        return json!({"source":"history", "steps":[{"command":prefix,"purpose":"Inspect the matching running history owner before explicitly selecting/backfilling an index"}],
+            "note":"History indexing belongs to the conversation owner, not rag index; no indexing was started"});
+    }
+    prefix.extend([
+        "rag".into(),
+        "--db".into(),
+        context.database.to_string_lossy().into_owned(),
+    ]);
+    let selected = if scope == "docs" {
+        "docs"
+    } else {
+        source.expect("resolved source")
+    };
+    let mut steps = Vec::new();
+    if preparation.reason == "store_not_initialized" {
+        let mut init = prefix.clone();
+        init.push("init".into());
+        steps.push(
+            json!({"command":init,"purpose":"Initialize the independent knowledge database"}),
+        );
+    }
+    let mut index = prefix;
+    index.extend([
+        "index".into(),
+        "--source".into(),
+        selected.into(),
+        "--mode".into(),
+        "semantic".into(),
+    ]);
+    let mut preview = index.clone();
+    preview.push("--dry-run".into());
+    steps.push(
+        json!({"command":preview,"purpose":"Preview semantic indexing without embedding requests"}),
+    );
+    steps.push(json!({"command":index,"purpose":"Explicitly prepare semantic indexing; embedding API charges may apply"}));
+    json!({"source":selected,"steps":steps,"embedding_may_charge":true})
+}
+/// These codes are private to this module tree. Public scope errors retain
+/// their established index_incompatible/db_not_found codes.
+fn preparation_reason(code: &str) -> Option<(&'static str, &'static str)> {
+    match code {
+        "rag_semantic_store_missing" => Some(("store_not_initialized", "db_not_found")),
+        "rag_semantic_guides_missing" => {
+            Some(("guide_catalogue_not_indexed", "index_incompatible"))
+        }
+        "rag_semantic_profile_missing" => Some(("profile_not_indexed", "index_incompatible")),
+        "rag_semantic_coverage_missing" => Some(("embeddings_incomplete", "index_incompatible")),
+        "rag_semantic_history_missing" => {
+            Some(("history_index_not_selected", "index_incompatible"))
+        }
+        _ => None,
+    }
+}
+fn diagnose_preparation(
+    context: &Context,
+    scope: &str,
+    source: Option<&str>,
+    error: &Error,
+) -> Option<Preparation> {
+    let (reason, _) = preparation_reason(&error.code)?;
+    // The failure site proves preparation was missing. Optional follow-up
+    // counts are a separate short snapshot and may already have changed.
+    let baseline = Preparation {
+        reason,
+        missing_documents: None,
+        missing_chunks: None,
+    };
+    let observation = if scope == "docs" {
+        super::builtin::preparation(context).ok().flatten()
+    } else if scope == "history" {
+        None
+    } else {
+        store::open(&context.database, false).ok().and_then(|s| {
+            embedding_profile(context)
+                .ok()
+                .and_then(|profile| material_preparation(&s, source?, &profile).ok().flatten())
+        })
+    };
+    Some(
+        observation
+            .filter(|observed| observed.reason == reason)
+            .unwrap_or(baseline),
+    )
+}
+
 pub(super) async fn search(
     context: &Context,
     query: &str,
@@ -381,29 +524,59 @@ pub(super) async fn search(
             .push(json!({"scope":"registered_sources","code":error.code,"message":error.message}));
     }
     let mut lists = Vec::new();
+    let mut statuses = Vec::new();
+    let mut warnings: BTreeMap<String, Value> = BTreeMap::new();
+    let mut fatal = !failures.is_empty();
     let mut resolved_sources = HashSet::new();
     let mut breaker = ProviderBreaker::default();
     for scope in &scopes {
-        if breaker.paused() {
-            failures.push(json!({"scope":scope,"code":"embedding_paused","message":"Provider failure paused later scopes; no request was sent"}));
-            continue;
-        }
+        let mut keyword = if mode == SearchMode::Semantic {
+            "not_requested"
+        } else {
+            "not_used"
+        };
+        let mut semantic = if mode == SearchMode::Keyword {
+            "not_requested"
+        } else {
+            "not_used"
+        };
+        let mut source_id = None;
+        let mut duplicate = false;
         let result: Result<()> = async {
             if scope == "docs" {
                 if mode != SearchMode::Semantic {
                     lists.push(docs_keyword(query));
+                    keyword = "ok";
                 }
                 if mode != SearchMode::Keyword {
+                    semantic = "error";
+                    if breaker.paused() {
+                        return Err(err(
+                            "embedding_paused",
+                            "Provider failure paused semantic search; no request was sent",
+                        ));
+                    }
                     lists.push(super::builtin::semantic(context, query).await?);
+                    semantic = "ok";
                 }
                 return Ok(());
             }
             if scope == "history" {
                 if mode != SearchMode::Semantic {
+                    keyword = "error";
                     lists.push(history::keyword(&context.history, query)?);
+                    keyword = "ok";
                 }
                 if mode != SearchMode::Keyword {
+                    semantic = "error";
+                    if breaker.paused() {
+                        return Err(err(
+                            "embedding_paused",
+                            "Provider failure paused semantic search; no request was sent",
+                        ));
+                    }
                     lists.push(history::semantic(context, query).await?);
+                    semantic = "ok";
                 }
                 return Ok(());
             }
@@ -412,25 +585,76 @@ pub(super) async fn search(
                 .ok_or_else(|| err("scope_invalid", "Scope must be docs, history, or source:ID"))?;
             let s = store::open(&context.database, false)?;
             let id = store::resolve_source(&s.db, source)?;
+            source_id = Some(id.clone());
             if !resolved_sources.insert(id.clone()) {
+                duplicate = true;
                 return Ok(());
             }
             if mode != SearchMode::Semantic {
+                keyword = "error";
                 lists.push(material_hits(&s, &id, query)?);
+                keyword = "ok";
             }
             if mode != SearchMode::Keyword {
+                semantic = "error";
+                if breaker.paused() {
+                    return Err(err(
+                        "embedding_paused",
+                        "Provider failure paused semantic search; no request was sent",
+                    ));
+                }
                 let profile = embedding_profile(context)?;
                 lists.push(material_semantic(&s, &id, query, &profile).await?);
+                semantic = "ok";
             }
             Ok(())
         }
         .await;
+        let mut status =
+            json!({"scope":scope,"source":source_id,"keyword":keyword,"semantic":semantic});
+        if duplicate {
+            status["duplicate_of"] = json!(format!(
+                "source:{}",
+                source_id.as_deref().expect("resolved duplicate")
+            ));
+        }
         if let Err(error) = result {
             breaker.failure(&error.code);
-            failures.push(json!({"scope":scope,"code":error.code,"message":error.message}));
-        } else {
+            let wire_code =
+                preparation_reason(&error.code).map_or(error.code.as_str(), |(_, code)| code);
+            status["error_code"] = json!(wire_code);
+            let preparation = diagnose_preparation(context, scope, source_id.as_deref(), &error);
+            let degraded = mode == SearchMode::Hybrid && keyword == "ok" && preparation.is_some();
+            let mut failure = json!({"scope":scope,"code":wire_code,"message":error.message});
+            if let Some(preparation) = preparation {
+                let next = preparation_next(context, scope, source_id.as_deref(), &preparation);
+                status["semantic"] = json!("not_ready");
+                status["reason"] = json!(preparation.reason);
+                status["missing_documents"] = json!(preparation.missing_documents);
+                status["missing_chunks"] = json!(preparation.missing_chunks);
+                status["next"] = next.clone();
+                failure["reason"] = json!(preparation.reason);
+                failure["next"] = next;
+                if degraded {
+                    failure["warning"] = json!(true);
+                    let warning = warnings.entry(preparation.reason.into()).or_insert_with(|| json!({
+                        "code":"semantic_not_ready", "reason":preparation.reason,
+                        "message":"Semantic index is not ready; keyword results are available. No document embedding or indexing was started.",
+                        "scopes":[], "recovery":"See each scope_status entry for exact counts and source-specific next commands"}));
+                    warning["scopes"]
+                        .as_array_mut()
+                        .expect("warning scopes")
+                        .push(json!(scope));
+                }
+            }
+            if !degraded {
+                fatal = true;
+            }
+            failures.push(failure);
+        } else if !duplicate && (mode == SearchMode::Keyword || semantic == "ok") {
             breaker.success();
         }
+        statuses.push(status);
     }
     let mut fused: BTreeMap<String, Hit> = BTreeMap::new();
     for list in lists {
@@ -464,7 +688,7 @@ pub(super) async fn search(
     let mut hits = fused.into_values().collect::<Vec<_>>();
     hits.sort_by(Hit::compare);
     hits.truncate(limit as usize);
-    let mut result = json!({"items":hits.iter().map(Hit::value).collect::<Vec<_>>(),"scopes":scopes,"mode":match mode{SearchMode::Keyword=>"keyword",SearchMode::Semantic=>"semantic",SearchMode::Hybrid=>"hybrid"},"rank_fusion":"rrf_k60","snapshot":"independent_sources_history_watermark_per_node_witness","scope_errors":failures});
+    let mut result = json!({"items":hits.iter().map(Hit::value).collect::<Vec<_>>(),"scopes":scopes,"mode":match mode{SearchMode::Keyword=>"keyword",SearchMode::Semantic=>"semantic",SearchMode::Hybrid=>"hybrid"},"rank_fusion":"rrf_k60","snapshot":"independent_sources_history_watermark_per_node_witness","scope_errors":failures,"scope_status":statuses,"degraded":!warnings.is_empty(),"warnings":warnings.into_values().collect::<Vec<_>>()});
     while serde_json::to_vec(&result).expect("result JSON").len() > 512 * 1024 {
         if result["items"]
             .as_array_mut()
@@ -476,7 +700,7 @@ pub(super) async fn search(
         }
         result["truncated"] = json!(true);
     }
-    if failures.is_empty() {
+    if !fatal {
         Ok(json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":true,"result":result}))
     } else {
         Ok(
@@ -558,4 +782,40 @@ pub(super) fn get(
     value["reference"] = json!(token);
     value["provenance"] = provenance;
     Ok(value)
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+
+    #[test]
+    fn generic_incompatibility_is_never_reclassified_by_a_later_missing_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = Context {
+            database: directory.path().join("missing-rag.db"),
+            history: directory.path().join("missing-history.db"),
+            config: None,
+            data_dir: Some(directory.path().join("data")),
+            cwd: directory.path().into(),
+        };
+        for message in [
+            "Embedding dimension exceeds sqlite-vec limit 8192",
+            "History index endpoint/model identity is unverified",
+        ] {
+            let failure = err("index_incompatible", message);
+            assert!(diagnose_preparation(&context, "docs", None, &failure).is_none());
+            assert!(diagnose_preparation(&context, "history", None, &failure).is_none());
+            assert!(diagnose_preparation(&context, "source:any", Some("any"), &failure).is_none());
+        }
+        let original = err("rag_semantic_coverage_missing", "Coverage was incomplete");
+        let preparation = diagnose_preparation(&context, "source:any", Some("any"), &original)
+            .expect("Original failure-site evidence survives later unavailable observations");
+        assert_eq!(preparation.reason, "embeddings_incomplete");
+        assert!(preparation.missing_documents.is_none());
+        assert!(preparation.missing_chunks.is_none());
+        assert_eq!(
+            preparation_reason(&original.code).unwrap().1,
+            "index_incompatible"
+        );
+    }
 }

@@ -34,6 +34,8 @@ async fn add(root: &Path, name: &str, path: &str) {
             root,
             RagCommand::Source {
                 command: SourceCommand::Add {
+                    exclude: vec![],
+                    clear_excludes: false,
                     path: path.into(),
                     name: name.into()
                 }
@@ -519,7 +521,7 @@ async fn concurrent_writer_is_bounded_busy_and_short_keywords_survive_partial_fi
     let busy = index(root, None, IndexMode::Keyword).await;
     assert_eq!(busy["error"]["code"], "busy");
     drop(lock);
-    std::fs::write(root.join("notes/bad.bin"), [0xff, 0xfe, 0xfd]).unwrap();
+    std::fs::write(root.join("notes/bad.md"), [0xff, 0xfe, 0xfd]).unwrap();
     let partial = index(root, None, IndexMode::Keyword).await;
     assert_eq!(partial["ok"], false);
     assert_eq!(partial["result"]["failure_count"], 1);
@@ -1088,7 +1090,8 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
         },
     )
     .await;
-    assert_eq!(default["ok"], false);
+    assert_eq!(default["ok"], true);
+    assert_eq!(default["result"]["degraded"], true);
     assert_eq!(default["result"]["scopes"], json!(["docs"]));
     assert!(!default["result"]["items"].as_array().unwrap().is_empty());
     assert!(!root.join("knowledge.db").exists());
@@ -1225,7 +1228,9 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     // Simulate a binary whose catalogue added a guide: no current published revision.
     db.execute("UPDATE documents SET active_revision=NULL WHERE source_id='@docs' AND key=(SELECT key FROM documents WHERE source_id='@docs' LIMIT 1)",[]).unwrap();
     let unavailable = search(root, "docs", "復旧", SearchMode::Hybrid).await;
-    assert_eq!(unavailable["ok"], false);
+    assert_eq!(unavailable["ok"], true);
+    assert_eq!(unavailable["result"]["degraded"], true);
+    assert_eq!(unavailable["result"]["scope_errors"][0]["warning"], true);
     assert!(
         !unavailable["result"]["items"]
             .as_array()

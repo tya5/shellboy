@@ -92,6 +92,12 @@ pub enum SourceCommand {
         path: PathBuf,
         #[arg(long)]
         name: String,
+        /// Persistent source-relative globs; repeat to exclude multiple patterns.
+        #[arg(long, conflicts_with = "clear_excludes")]
+        exclude: Vec<String>,
+        /// Explicitly remove existing exclusion patterns when re-registering a source.
+        #[arg(long)]
+        clear_excludes: bool,
     },
     List,
     Remove {
@@ -324,7 +330,7 @@ async fn run(
                 .map(|p| absolute(p, cwd))
                 .as_deref(),
         )?,
-        RagCommand::Status => store::status(&context.database)?,
+        RagCommand::Status => store::status(&context)?,
         RagCommand::Inspect { id } => store::inspect(&context.database, &id)?,
         RagCommand::Search {
             query,

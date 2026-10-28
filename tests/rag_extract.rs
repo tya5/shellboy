@@ -122,3 +122,28 @@ fn incompatible_backend_is_rejected_before_extraction() {
             .contains("supported Xberg version")
     );
 }
+
+#[test]
+fn traversal_type_classification_and_adapter_declarations_are_bounded_and_api_free() {
+    for path in [
+        "README",
+        "notes.md",
+        "INPUT.JSON",
+        "report.PDF",
+        "slides.pptx",
+    ] {
+        assert!(extractor::supported(Path::new(path), None), "{path}");
+    }
+    assert!(!extractor::supported(Path::new("rag.db"), None));
+    assert!(extractor::native_text(Path::new("notes.MD")));
+    assert!(!extractor::native_text(Path::new("report.PDF")));
+    let root = tempfile::tempdir().unwrap();
+    let manifest = root.path().join("adapter.json");
+    fs::write(&manifest, serde_json::json!({"schema_version":1,"id":"synthetic","version":"1","executable":"unused","argv":[],"extensions":["custom"]}).to_string()).unwrap();
+    assert_eq!(
+        extractor::adapter_extensions(&manifest).unwrap(),
+        ["custom"]
+    );
+    fs::write(&manifest, serde_json::json!({"schema_version":1,"id":"synthetic","version":"1","executable":"unused","argv":[],"extensions":vec!["custom";257]}).to_string()).unwrap();
+    assert!(extractor::adapter_extensions(&manifest).is_err());
+}

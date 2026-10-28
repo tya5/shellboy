@@ -5,6 +5,9 @@ pub(super) struct SyncCounts {
     pub(super) changed: usize,
     pub(super) unchanged: usize,
     pub(super) processed: usize,
+    pub(super) text_bytes: usize,
+    pub(super) segments: usize,
+    pub(super) unmeasured: usize,
 }
 pub(super) struct FileIndexPolicy<'a> {
     pub(super) dry_run: bool,
@@ -38,14 +41,34 @@ impl FileIndexPolicy<'_> {
                 == Some(self.selection.as_str())
         {
             counts.unchanged += 1;
+            let (segments, bytes): (i64, i64) = store.db.query_row("SELECT COUNT(*),COALESCE(SUM(length(CAST(text AS BLOB))),0) FROM chunks WHERE revision_id=?1", [revision], |row| Ok((row.get(0)?,row.get(1)?)))?;
+            counts.segments += segments as usize;
+            counts.text_bytes += bytes as usize;
             if let Some(profile) = &self.profile {
                 search::embed_revision(store, revision, profile).await?;
-                publish(store, document, revision)?;
+            }
+            if !self.dry_run {
+                let ready: bool = store.db.query_row(
+                    "SELECT status='ready' AND error IS NULL FROM documents WHERE id=?1",
+                    [document],
+                    |row| row.get(0),
+                )?;
+                if self.profile.is_some() || !ready {
+                    publish(store, document, revision)?;
+                }
             }
             return Ok(());
         }
         counts.changed += 1;
         if self.dry_run {
+            if self.adapter.is_none() && extract::native_text(path) {
+                let text = std::str::from_utf8(&bytes)
+                    .map_err(|_| err("extractor_failed", "Text input must be UTF-8"))?;
+                counts.text_bytes += text.len();
+                counts.segments += crate::index::split_text(text, SPLIT, 0).len();
+            } else {
+                counts.unmeasured += 1;
+            }
             return Ok(());
         }
         let extracted = extract::extract(path, self.backend, self.adapter)
@@ -56,6 +79,12 @@ impl FileIndexPolicy<'_> {
                 "Source changed during extraction; retry synchronization",
             ));
         }
+        counts.text_bytes += extracted.text.len();
+        counts.segments += extracted
+            .blocks
+            .iter()
+            .map(|block| crate::index::split_text(&block.text, SPLIT, 0).len())
+            .sum::<usize>();
         let provenance = json!({"path":path.to_string_lossy(),"source_hash":source_hash,"content_kind":"extracted","extractor_selection":self.selection});
         let (document, revision, _) = prepare(
             store,
@@ -87,7 +116,7 @@ pub(super) fn collect_missing(
     let mut removed = 0;
     let existing = {
         let mut q = store.db.prepare(
-            "SELECT id,key FROM documents WHERE source_id=?1 AND active_revision IS NOT NULL",
+            "SELECT id,key FROM documents WHERE source_id=?1 AND (active_revision IS NOT NULL OR status!='missing')",
         )?;
         q.query_map([&source], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
@@ -101,7 +130,7 @@ pub(super) fn collect_missing(
                 if !dry_run {
                     let tx = store.db.transaction()?;
                     tx.execute(
-                        "UPDATE documents SET active_revision=NULL,status='missing' WHERE id=?1",
+                        "UPDATE documents SET active_revision=NULL,status='missing',error=NULL WHERE id=?1",
                         [id],
                     )?;
                     tx.execute(
