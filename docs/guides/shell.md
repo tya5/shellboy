@@ -1,12 +1,12 @@
-# shell実行と出力の取得
+# Shell execution and output
 
-[ガイド入口](README.md) · [Agent Guide](agent-guide.md) · [CLI辞書](cli-reference.md)
+[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
-モデルの外部作業用toolは `shell` です。CLIの `shellboy shell ...` は、既に起動したexecutionの観測・stdin・停止を扱います。`shellboy shell start` というコマンドはありません。人間は通常の自分の端末で任意のコマンドを実行できますが、それだけではshellboy所有のexecutionとして記録されません。
+The model uses the `shell` tool for external work. The `shellboy shell ...` CLI observes, supplies stdin to, and stops executions that have already started. There is no `shellboy shell start` command. Humans can run arbitrary commands in their own terminals, but those commands alone are not recorded as Shellboy-owned executions.
 
-## モデルtoolの引数
+## Model tool arguments
 
-次はtool callのJSON引数です。CLIへそのまま渡すJSONではありません。未知のfieldは拒否され、必須は `command` だけです。
+These are JSON arguments to a tool call, not JSON to pass directly to the CLI. Unknown fields are rejected. Only `command` is required.
 
 ```json
 {
@@ -19,26 +19,26 @@
 }
 ```
 
-| field | 省略時 | 意味 |
+| Field | Default | Meaning |
 |---|---|---|
-| `command` | 必須 | 設定されたBash/PowerShellで実行する文字列 |
-| `background` | `false` | `true`なら起動後にexecution IDを返してモデルが先へ進む |
-| `stdin_open` | `false` | 初期入力後もstdinを開くか。falseなら初期入力後にEOF |
-| `initial_stdin` | なし | 起動時に渡す文字列。後続CLI writeより先に書き込む |
-| `input_encoding` | `UTF-8` | 初期stdinをbyteへ変換するencoding |
-| `output_encoding` | `UTF-8` | 出力の初期表示encoding。rawはbyteのまま保存 |
+| `command` | Required | String executed by the configured Bash/PowerShell |
+| `background` | `false` | When `true`, return an execution ID after startup so the model can continue |
+| `stdin_open` | `false` | Keep stdin open after initial input; otherwise send EOF after that input |
+| `initial_stdin` | None | Startup input string, written before later CLI writes |
+| `input_encoding` | `UTF-8` | Encoding used to convert initial stdin into bytes |
+| `output_encoding` | `UTF-8` | Initial output display encoding; raw output is stored as bytes |
 
-`command`の例はBashです。shell種別/実行ファイルは起動設定に従い、tool引数に独自の `shell` / `cwd` fieldはありません。cwdはThread設定を使います。作業先を変更したいときは、設定とその変更範囲を確認してください。Bash構文をPowerShellのcommandへそのまま流用しません。
+The `command` examples use Bash. The shell type and executable follow startup configuration; there are no custom `shell` or `cwd` tool arguments. The Thread configuration supplies cwd. To change the working directory, check the configuration and the scope affected by changing it. Do not reuse Bash syntax unchanged in a PowerShell command.
 
-## foregroundとbackground
+## Foreground and background
 
-foregroundはこのtoolの完了をモデルが待ちます。UI/Control全体を停止する意味ではなく、人間は他Threadや別操作へ進めます。backgroundは同じ所有方式で実行し、返却された `execution_id` を後から確認します。モデルのTurnが最終回答を返しても、所有するshellや子Runが残ればRunはliveのままです。正常なRun完了には所有処理等が残っていないことが必要です。Runの明示停止やアプリ終了では所有処理を停止・回収します。
+For foreground work, the model waits for the tool to complete. This does not stop the entire UI/Control: humans can switch Threads or perform other operations. Background work has the same ownership rules; inspect the returned `execution_id` later. Even after the model's Turn returns its final answer, the Run remains live while it owns shells or child Runs. Normal Run completion requires that no owned work remains. Explicitly stopping the Run or exiting the application stops and reclaims owned work.
 
 ```json
 {"command":"sleep 2; printf '%s\\n' 'ready'","background":true}
 ```
 
-実executionの観測は次のBash例で行います。大文字IDは返却値に差し替えてください。
+Observe the actual execution with these Bash commands. Replace uppercase IDs with returned values.
 
 ```bash
 shellboy shell get --execution EXECUTION_ID
@@ -46,37 +46,36 @@ shellboy shell read --execution EXECUTION_ID --limit-bytes 65536
 shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"EXECUTION_ID"}]' --timeout-ms 30000
 ```
 
-観測結果から選ぶ次操作は次の通りです。
+Choose the next observation from the stored state and result:
 
-| 保存状態・結果 | 次の観測 |
+| Stored state/result | Next observation |
 |---|---|
-| starting / running / stopping | 同じexecutionをget/readし、必要ならshell_endedまたはshell_outputをwait |
-| wait timeout | 対象は継続。同じexecutionを確認して観測を続ける。commandを再起動しない |
-| exited / failed / stopped | exit_code・end_reason・output_completeと末尾出力を読む。終端を成功と同一視しない |
-| cursor_expired / cursor_encoding_mismatch | 対象とencodingを確認しcursorなしで読取りを再開。既読byteが再び返ることがある |
-| output_expired | 保持状態を確認する。消えたrawはreadの反復では復元できない |
+| starting / running / stopping | Get/read the same execution; wait for shell_ended or shell_output if needed |
+| wait timeout | The target continues. Inspect the same execution and keep observing; do not restart the command |
+| exited / failed / stopped | Read exit_code, end_reason, output_complete, and trailing output. Terminal does not necessarily mean successful |
+| cursor_expired / cursor_encoding_mismatch | Check the target and encoding, then resume reading without a cursor. Previously read bytes may return again |
+| output_expired | Check retention state. Repeated reads cannot restore reclaimed raw output |
 
-人間がforegroundを途中で背景化した場合、対象shellは生存し、未実行の後続tool callはcancelledになります。追加指示でforeground待機が解除された場合も、既存executionの状態を確認します。toolの待機解除だけをプロセス終了と見なして同じcommandを再実行しないでください。
+When a human moves foreground work to the background, the shell stays alive and subsequent tool calls that have not executed are cancelled. If additional instructions release a foreground wait, also inspect the existing execution. Do not treat release of the tool wait as process termination and execute the same command again.
 
-この場合のtool resultは `status: "running"`、継続対象の `execution_id`、介入理由 `reason: "human_backgrounded"` 又は `"additional_input"` を返します。後続callがあれば各callに `cancelled` 結果が付きます。UIも同じ保存済み結果から対象と後続の取消しを通知し、後続がなければ取消しを捏造しません。通知後にshellが終了することもあるため、最新状態は同じIDでget/read/waitします。
+In that case, the tool result includes `status: "running"`, the continuing `execution_id`, and an intervention `reason` of `"human_backgrounded"` or `"additional_input"`. Each subsequent call, if any, receives a `cancelled` result. The UI reports the target and subsequent cancellations from the same stored results; it does not invent cancellations when no subsequent calls exist. The shell may finish after that notification, so get/read/wait on the same ID for its latest state.
 
-Ctrl+CによるRun中断は背景化と異なり、対象と所有配下へ停止を要求します。停止受付を全PID回収済みと扱わず、Run/shellの終端を照会してください。中断されたモデルを通知だけのために自動再開することはありません。
+Unlike backgrounding, interrupting a Run with Ctrl+C requests stopping it and its owned descendants. Acceptance of a stop request does not mean every PID has been reclaimed; query the terminal Run/shell state. An interrupted model is not automatically resumed merely to deliver a notification.
 
+### Minimal check of background output only (Bash)
 
-### background出力だけを確認する最小手順（Bash）
-
-この検証では、対象shellのcommandを次の文字列に固定します。トークン以外の表示、CLI呼出し、パイプ、リダイレクトをcommandへ足しません。通常のBash設定なら、2秒後にstdoutへASCIIの `SHELLBOY_BG_READ_V1` だけを改行なしで出し、stderrは空、終了コードは0になります。
+For this check, fix the target shell's command to the following string. Add no other output, CLI calls, pipes, or redirects. With ordinary Bash configuration, it writes only the ASCII token `SHELLBOY_BG_READ_V1` to stdout without a newline after two seconds, leaves stderr empty, and exits with code 0.
 
 ```json
 {"command":"sleep 2; printf SHELLBOY_BG_READ_V1","background":true,"stdin_open":false,"output_encoding":"UTF-8"}
 ```
 
-これはモデルのshell tool引数です。モデル自身がこのtoolを直接呼び、返却された**この起動の `execution_id`** を控えます。`shellboy message send` で起動を依頼する手順へ置き換えません。
+These are model shell tool arguments. The model must call this tool directly and retain **the `execution_id` returned by this launch**. Do not replace this procedure with a `shellboy message send` request asking another model to launch it.
 
-**起動と観測は二段階で構いません。** まず上記のtool結果からIDを取得し、次のshell toolで以下の観測CLIを実行します。shell間で変数は共有されないため、`BG_EXECUTION_ID` には実際の返却IDを文字列として設定します。人間が同じownerへ接続する別端末で観測しても構いません。既定以外の保存先なら各CLIへ `--data-dir PATH` を指定してください。
+**Launching and observing may be two separate steps.** First obtain the ID from the tool result above; then run the observation CLI below in another shell tool call. Variables are not shared between shells, so set `BG_EXECUTION_ID` to the actual returned ID string. A human can also observe from another terminal connected to the same owner. For a nondefault data directory, pass `--data-dir PATH` to each CLI command.
 
 ```bash
-BG_EXECUTION_ID='起動時に返ったexecution_id'
+BG_EXECUTION_ID='EXECUTION_ID_RETURNED_AT_LAUNCH'
 BG_READ_CHECK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/shellboy-bg-read.XXXXXX")
 
 shellboy wait --conditions-json "[{\"type\":\"shell_ended\",\"execution_id\":\"$BG_EXECUTION_ID\"}]" --timeout-ms 30000 > "$BG_READ_CHECK_DIR/wait.json"
@@ -86,29 +85,29 @@ shellboy shell read --execution "$BG_EXECUTION_ID" --encoding UTF-8 --limit-byte
 cat "$BG_READ_CHECK_DIR/read.json"
 ```
 
-各ファイルのトップレベル `ok:true` を確認してから、以下で判定します。waitがtimeout/失敗なら検証完了にせず状態を調べます。最初のreadにはcursorを付けません。
+Check top-level `ok:true` in each file, then evaluate the following conditions. If wait times out or fails, investigate the state instead of declaring the check complete. Do not supply a cursor on the first read.
 
-| 観測元 | 期待値 |
+| Observation | Expected value |
 |---|---|
-| `wait.json` の `result.status` | `satisfied`。これだけでは正常終了の証明にはしない |
-| `get.json` の `result.command` | `sleep 2; printf SHELLBOY_BG_READ_V1` と完全一致。起動tool結果のcommand/Thread/Run/Turnも照合 |
-| `get.json` の `result.state` / `exit_code` / `output_complete` | `exited` / `0` / `true` |
-| `read.json` の `result.execution_id` | 起動時に控えたIDと一致 |
-| `read.json` の `result.text` | `SHELLBOY_BG_READ_V1` と完全一致。改行やJSONは含まない |
-| `read.json` の `result.raw_bytes` | `15`。このページで取得したrawの**バイト数**であり、rawの内容や累積総量ではない |
-| `read.json` の `result.encoding` / `decode_errors` / `output_complete` | `UTF-8` / `false` / `true` |
+| `wait.json`: `result.status` | `satisfied`; this alone does not prove successful exit |
+| `get.json`: `result.command` | Exactly `sleep 2; printf SHELLBOY_BG_READ_V1`; also compare command/Thread/Run/Turn with the launching tool result |
+| `get.json`: `result.state` / `exit_code` / `output_complete` | `exited` / `0` / `true` |
+| `read.json`: `result.execution_id` | Matches the ID retained at launch |
+| `read.json`: `result.text` | Exactly `SHELLBOY_BG_READ_V1`, without a newline or JSON |
+| `read.json`: `result.raw_bytes` | `19`: the **number of raw bytes** retrieved in this page, not their contents or a cumulative total |
+| `read.json`: `result.encoding` / `decode_errors` / `output_complete` | `UTF-8` / `false` / `true` |
 
-判定対象は画面全体やモデルの説明ではなく、保存した `read.json` の `result.text` と `raw_bytes` です。観測CLIを実行したshellにも別の `execution_id` が付きますが、`BG_EXECUTION_ID` をそのIDへ置き換えません。追加指示や他Threadへのメッセージ送信があっても、起動・観測を一度のtool呼出しにまとめる必要はありません。
+Evaluate `result.text` and `raw_bytes` in the saved `read.json`, not the whole screen or the model's explanation. The shell running the observation CLI has its own `execution_id`; do not replace `BG_EXECUTION_ID` with that ID. Additional instructions or messages sent to other Threads do not require launching and observing in a single tool call.
 
-`shellboy message send` をshellから呼んだ場合、そのshellの `execution_id` が指すのは**送信CLIを実行したプロセス**です。そのstdoutに `accepted` / `message_id` 等の受付JSONが保存されるのは正常です。受付は依頼先でのshell起動完了を意味せず、受付結果のmessage/run/turn IDもshellのexecution IDではありません。委譲して検証する場合は、依頼先が実際に呼んだshell toolの返却から対象IDを取得する必要があります。この最小検証では直接toolを呼ぶことで、この区別を不要にします。
+When a shell calls `shellboy message send`, that shell's `execution_id` identifies **the process running the sending CLI**. Its stdout legitimately contains acceptance JSON such as `accepted` / `message_id`. Acceptance does not mean the receiving model has completed launching a shell. Message/run/turn IDs in the acceptance result are not shell execution IDs either. For delegated verification, obtain the target ID from the shell tool result actually returned to the receiving model. Calling the tool directly in this minimal check avoids that distinction.
 
-更新後の起動tool結果と `shell get` は実commandと所有文脈を返します。command等のfieldがない旧ownerは正常終了・再起動すると新しい照会情報を利用できます。
+Updated launching tool results and `shell get` return the actual command and ownership context. An older owner that lacks fields such as command can expose the newer query information after a normal exit and restart.
 
-`shell read` は指定executionのstdout/stderrの保存rawをdecodeして返します。別executionのCLI返却JSONが自動で混入するものではありません。一方、対象command自体から `shellboy message send` 等を呼べば、そのCLIのstdoutは実際に対象shellのrawへ入ります。余分な文字があれば、まず `result.execution_id` と `shell get` の `command` / `cwd` / `thread_id` / `run_id` / `turn_id`、shell設定を確認し、表示上の混同と実rawへの出力を区別してください。
+`shell read` decodes the specified execution's stored stdout/stderr raw bytes. It does not automatically mix in CLI response JSON from another execution. However, if the target command itself calls `shellboy message send` or another CLI, that CLI's stdout really does become part of the target shell's raw output. For unexpected characters, first compare `result.execution_id`, the `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shell get`, and shell configuration. Distinguish display confusion from output actually present in raw bytes.
 
-## stdin、初期入力、EOF
+## Stdin, initial input, and EOF
 
-stdinは既定で閉じます。後からwriteする必要がある処理には、起動時に `stdin_open:true` を指定します。
+Stdin closes by default. For work that needs later writes, launch with `stdin_open:true`.
 
 ```json
 {"command":"cat","background":true,"stdin_open":true,"initial_stdin":"first line\n","input_encoding":"UTF-8"}
@@ -116,61 +115,61 @@ stdinは既定で閉じます。後からwriteする必要がある処理には�
 
 ```bash
 shellboy shell write --execution EXECUTION_ID --text 'second line'
-# 改行を含む入力ならUTF-8 stdinから渡す
+# Supply input containing a newline through UTF-8 stdin
 printf '%s\n' 'third line' | shellboy shell write --execution EXECUTION_ID --text-stdin
 shellboy shell eof --execution EXECUTION_ID
 ```
 
-`--text` は自動で改行を足しません。`shell eof` は空文字writeと異なり、pipeを閉じます。EOF後は再openできません。stdinはプロセスのpipeで、PTY/対話端末ではないため、tty前提のアプリを同じように操作できるとは限りません。
+`--text` does not append a newline. Unlike writing an empty string, `shell eof` closes the pipe. It cannot be reopened after EOF. Stdin is a process pipe, not a PTY/interactive terminal; applications requiring a tty may not work the same way.
 
-writeのresultは `bytes_written`、`status`、`stdin_open`、任意の `reason` です。`complete` 以外に `timeout` / `closed` / `stopped` / `failed` があり、部分writeの可能性があります。timeoutを全量未送信と見なして全文再送すると重複するため、自動再送しません。入力は指定encodingで全体を表現できるかを事前確認し、表現不能文字を置換して送信しません。
+Write results include `bytes_written`, `status`, `stdin_open`, and an optional `reason`. In addition to `complete`, statuses include `timeout` / `closed` / `stopped` / `failed`; writes may be partial. Do not automatically resend the entire input after a timeout: assuming nothing was sent could duplicate input. Input is checked in advance for representability in the specified encoding; unrepresentable characters are not silently replaced and sent.
 
-## raw、encodingとcursor
+## Raw output, encoding, and cursors
 
-stdout/stderrは別streamとしてraw byteを保存し、表示時に独立decodeします。取得ページは途中byte/改行なしにも対応し、encoding変更でrawを上書きしません。保存量と表示抜粋は別で、tool resultの抜粋だけを全出力として扱わないでください。
+Stdout and stderr are stored as separate raw byte streams and decoded independently for display. Pages support partial byte sequences and output without newlines. Changing the encoding does not overwrite raw bytes. Stored output and display excerpts differ; do not mistake a tool result excerpt for the entire output.
 
 ```bash
 shellboy shell read --execution EXECUTION_ID --encoding CP932 --limit-bytes 65536
-# result.cursorを使って同じencodingの続きへ
+# Continue using result.cursor with the same encoding
 shellboy shell read --execution EXECUTION_ID --cursor CURSOR --limit-bytes 65536
 ```
 
-取得resultの `text`、`raw_bytes`、`encoding`、`cursor`、`decode_errors`、`output_complete` を確認します。cursorは不透明な値で、実行ID・位置・retention世代・encoding等に結び付きます。手で編集しません。encodingを変えて最初から読み直すならcursorを付けずに指定します。旧cursorに別encodingを混ぜると `cursor_encoding_mismatch` です。明示encoding変更は関連する索引を無効化するため、必要なら改めて明示再索引します。
+Inspect `text`, `raw_bytes`, `encoding`, `cursor`, `decode_errors`, and `output_complete`. A cursor is opaque and binds information including execution ID, position, retention generation, and encoding. Do not edit it. To reread from the beginning with another encoding, specify that encoding without a cursor. Mixing a different encoding with an old cursor produces `cursor_encoding_mismatch`. Explicit encoding changes invalidate the associated index; explicitly reindex if needed.
 
-CP932/windows-31j/ms932はShift_JIS系として扱います。UTF-16はbyte orderが分かる `UTF-16LE` / `UTF-16BE` を指定します。曖昧なUTF-16入力変換に依存しません。出力に不正byteがあれば `decode_errors` を確認し、適切なencodingでrawを再取得できます。
+CP932/windows-31j/ms932 are treated as Shift_JIS variants. For UTF-16, specify `UTF-16LE` / `UTF-16BE` with known byte order. Do not rely on ambiguous UTF-16 input conversion. For invalid output bytes, inspect `decode_errors` and reread the raw output with an appropriate encoding.
 
-出力がまだ増える可能性があるときは、返却cursorで更新を待てます。
+If output may still grow, wait for updates using the returned cursor.
 
 ```bash
 shellboy wait --conditions-json '[{"type":"shell_output","execution_id":"EXECUTION_ID","cursor":"CURSOR"}]' --timeout-ms 30000
 shellboy shell read --execution EXECUTION_ID --cursor CURSOR --limit-bytes 65536
 ```
 
-waitは対象終端でも解除されるため、空の末尾ページでは `output_complete` とshell状態も確認します。保持期限/容量によるraw回収は `output_expired`、旧世代cursor等は明示エラーになります。空出力成功へ読み替えません。詳細は [復旧と保存](recovery-and-storage.md) を参照してください。
+Wait also returns when the target becomes terminal. For an empty trailing page, check `output_complete` and shell state too. Raw reclamation due to retention age/capacity produces `output_expired`; old-generation cursors and similar conditions produce explicit errors. Do not reinterpret them as successful empty output. See [Recovery and storage](recovery-and-storage.md).
 
-## 停止と保存完了
+## Stopping and storage completion
 
 ```bash
 shellboy shell stop --execution EXECUTION_ID
 shellboy shell get --execution EXECUTION_ID
 ```
 
-stopの `accepted:true` は停止受付です。終了状態を確認してから停止完了と報告します。shellの `state` は `starting` / `running` / `stopping` / `exited` / `failed` / `stopped`、`exit_code` は存在するときだけ値を持ちます。`output_complete` と終了理由は別です。shell終端でもdrain等が不完全なら、全出力が保存されたと保証できません。
+Stop's `accepted:true` means the request was accepted. Confirm terminal state before reporting that stopping has completed. Shell `state` is `starting` / `running` / `stopping` / `exited` / `failed` / `stopped`. `exit_code` has a value only when available. `output_complete` and end reason are separate facts. Even a terminal shell cannot guarantee complete output storage if draining or similar work is incomplete.
 
-raw上限に達した場合は対象を停止し、理由と不完全性を記録します。保存済みbyteを隠して無限に実行し続ける仕組みではありません。モデルOriginからは自Run/所有配下のshellを操作し、独立Runへwrite/EOF/stopはできません。実行再起動後に以前のPIDを使って停止することもありません。
+Reaching the raw output limit stops the target and records the reason and incompleteness. Shellboy does not hide stored bytes and let a process run indefinitely. A model Origin can operate on shells in its own Run or owned descendants; it cannot write/EOF/stop shells in independent Runs. After an application restart, old PIDs are not used to stop processes.
 
-## PowerShellの引数
+## PowerShell arguments
 
-Windowsでは設定されたPowerShellを使用します。たとえばtoolのcommandは `Write-Output 'ready'` のようにPowerShell構文で書きます。CLIの環境変数参照は `$env:SHELLBOY_RUN_ID` 等です。Bashの `$SHELLBOY_RUN_ID`、`printf`、here-documentは同じ意味になりません。
+Windows uses the configured PowerShell. Write tool commands in PowerShell syntax, for example `Write-Output 'ready'`. CLI environment variable references use forms such as `$env:SHELLBOY_RUN_ID`. Bash's `$SHELLBOY_RUN_ID`, `printf`, and here-documents do not have the same meaning.
 
-Windows PowerShell 5.1と新しいpwshではnative commandへJSONを渡す引用動作が異なります。小さなJSON例を渡す場合も、実shellで `shellboy --help` と利用中の引数渡しを確認してください。たとえばWindows PowerShell 5.1のstop-parsing構文なら、変数展開を使わず実IDを直接置きます。
+Windows PowerShell 5.1 and newer pwsh differ in quoting JSON passed to native commands. Even for small JSON examples, check `shellboy --help` and argument passing in the shell in use. With Windows PowerShell 5.1's stop-parsing syntax, for example, insert actual IDs directly without variable expansion:
 
 ```powershell
 shellboy --% wait --conditions-json [{\"type\":\"run_ended\",\"run_id\":\"ACTUAL_RUN_ID\"}] --timeout-ms 30000
 ```
 
-`--%` 以降で `$env:...` が通常どおり展開されることを期待しません。Windows実機検証は今回対象外なので、この例を全PowerShell版での実行保証とはしません。通常の文字列sendには `shellboy message send --thread 'ACTUAL_THREAD_ID' --text '確認してください'` のように単純な引数を使えます。
+Do not expect `$env:...` to expand normally after `--%`. This change was not verified on a physical Windows machine, so this example does not guarantee execution on every PowerShell version. Ordinary text sends can use simple arguments such as `shellboy message send --thread 'ACTUAL_THREAD_ID' --text 'Please check this'`.
 
-## shellの経過時間
+## Shell elapsed time
 
-`elapsed_ms` はOS起動直前から、直接の子processの終了・配下processの回収確認・出力drainを経てcompletionを確定するまでの監視期間です。配下がpipeを保持している間の待ちや出力の背圧も含み、確定後のDB保存待ち・結果読取り時間は含みません。`started_at` / `ended_at` は別の保存時刻です。過去の未計測実行には推定値を足さず、このfieldを省略します。
+`elapsed_ms` measures supervision from immediately before OS process launch until completion is finalized after the direct child exits, descendant reclamation is confirmed, and output drains. It includes waiting while descendants hold pipes and output backpressure, but excludes later DB persistence waits and result reading. `started_at` / `ended_at` are separate stored timestamps. Older unmeasured executions omit this field rather than adding an estimate.

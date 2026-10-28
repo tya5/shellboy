@@ -1,5 +1,13 @@
 # 開発状況
 
+## English documentation defaults (2026-10-29; complete locally)
+
+All 13 unsuffixed product guides are English. Twelve Japanese user-facing counterparts use `.ja.md`; the Agent Guide is English only. Root README/AGENTS and documentation entry points are English. Existing guide IDs remain stable; bundled docs metadata/categories and the RAG docs scope use English. Japanese guide files remain in source/release archives rather than adding a second runtime catalogue.
+
+The [language policy and UI evaluation](../design/documentation-language.md) recommends an English-default UI with an explicit Japanese startup choice in a later task. No UI implementation, locale configuration, Core state, database, or system prompt changes are included. The current installed/published 0.1.6 is unchanged; these are local source changes, with no push/release/install requested in this task.
+
+Translation review, 713 relative links/50 heading fragments, and command-flag/TOML checks passed. Format and all-target strict Clippy passed; focused docs/RAG tests passed in 7 groups (52 passed, 0 failed). Actual offline docs passed 33 checks / 13 guides / 3 categories / 127 bundled links, plus explicit English catalogue/Agent Guide and Unicode-literal checks. See [acceptance](../validation/acceptance.md) for scope and limits. Work is committed locally without push, release, or installed-binary changes. Earlier sections below describe previous work.
+
 ## v0.1.6公開・常用更新完了
 
 #19〜#30の設計・実装・検証を完了し、検証済みsource `025388c`を[v0.1.6](https://github.com/tya5/shellboy/releases/tag/v0.1.6)として公開しました。最終ローカル標準checkは76群1,296 passed / 0 failed / 24 ignored、[3 OS CI](https://github.com/tya5/shellboy/actions/runs/40712696984)はWindows 1,195 / macOS 1,296 / Linux 1,297 passed・全OS failed 0。性能用6種類を別途実行し、実HTTP+PTY 10会話・削除PTY 5項目・RAG CLI 10項目・docs 33項目も成功しました。
@@ -170,7 +178,7 @@ v0.1.0以降の修正を、検証済みcommit `e55da58` のtag `v0.1.1` とし�
 
 Enterを押した時点で既存ステータス行に「送信受付中」を表示し、同じアニメーション時計で動かします。保存成功後は対応message IDを履歴で確認するまで「保存済み・表示待ち」を表示します。すでにRun/Turnが進んでいる場合はその段階を主表示に維持し、表示待ちを併記します。複数送信・経過時間・失敗時の入力保持と、通知順序の前後・高速完了・会話切替を扱います。
 
-既存の有限診断writerへmessage_sendを追加し、draft ID/revision・実際のoperation ID・保存message IDを関連付けます。保存成功をUI通知前に記録するため、保存前の待ちと通知・履歴・描画側の問題の切り分けに使えます。本文・添付pathのログや新しいCore状態・表・workerは追加しません。設計は [実行状態表示](../design/tui-activity-indicator.md)、調査手順は [診断ログ](../guides/recovery-and-storage.md#診断ログを確認する) を参照してください。
+既存の有限診断writerへmessage_sendを追加し、draft ID/revision・実際のoperation ID・保存message IDを関連付けます。保存成功をUI通知前に記録するため、保存前の待ちと通知・履歴・描画側の問題の切り分けに使えます。本文・添付pathのログや新しいCore状態・表・workerは追加しません。設計は [実行状態表示](../design/tui-activity-indicator.md)、調査手順は [診断ログ](../guides/recovery-and-storage.md#diagnostic-logs) を参照してください。
 
 macOSで対象8 suiteの441 passed / 0 failed / 3 ignored、strict Clippy、fmt/diff、同梱docs検証、staged秘密情報スキャンが成功しました。詳細と未実施範囲は [検証状況](../validation/acceptance.md) に記録します。修正はv0.1.1へ含めて公開しました。利用中ownerは変更していません。
 

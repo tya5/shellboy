@@ -1,99 +1,94 @@
-# 子への委譲と連携
+# Delegation and coordination
 
-[ガイド入口](README.md) · [Agent Guide](agent-guide.md) · [CLI辞書](cli-reference.md)
+[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
-shellboyの子エージェントは、子Thread上で動くRunです。Threadは保存する会話と設定、Runはshellと子Runの所有者、Turnは一回答区間です。子を作っただけでは実行が始まらず、依頼の送信でRun/Turnが割り当てられます。親子は同じruntimeとファイルシステムを使い、別の隔離環境ではありません。
+A Shellboy child agent (also called a subagent) is a Run executing on a child Thread. A Thread holds stored conversation and configuration; a Run owns shells and child Runs; a Turn is one response interval. Creating a child alone does not start execution. Sending a request assigns a Run/Turn. Parent and child share the runtime and filesystem, not separate isolated environments.
 
-## 所有と人間の操作
+## Ownership and human operations
 
-Threadの `parent_id` は会話の親子関係です。実行上の所有はRunの `owner_run_id` で確認します。モデルshellから、自Threadを親にした子Threadへ送信して新Runを始めると、その実行は現在の親Runの所有下になります。階層を付けない独立Threadへの依頼だけでは、その独立Runを所有しません。
+A Thread's `parent_id` describes conversation hierarchy. Check a Run's `owner_run_id` for execution ownership. When a model shell sends to a child Thread whose parent is its own Thread and starts a new Run, that execution belongs to the current parent Run. Merely sending a request to an independent Thread without that hierarchy does not give ownership of its independent Run.
 
-人間の通常の外部CLIにはモデルのOriginがありません。`--parent` でThreadの関係を作っても、人間のsendだけで任意の稼働親Runの所有に偽装できません。外部CLIでは省略先の自Threadもないため、必要な `--thread` と、別保存先なら `--data-dir` を指定します。稼働ownerが必要で、CLIは未起動ownerを自動起動しません。
+A human's ordinary external CLI has no model Origin. Creating a Thread relationship with `--parent` does not let a human send impersonate ownership by an arbitrary running parent Run. External CLI calls also have no implicit current Thread: specify `--thread` where required, and `--data-dir` for another data directory. A running owner is required; the CLI does not automatically start an owner.
 
-モデルshellは発行済みOriginを継承します。tokenを表示・コピー・手作業で設定する必要はありません。外部CLIをモデル権限に見せかける操作は行いません。モデルからの停止は自分の所有下に限定され、復旧retryはliveな直属親が判断します。祖父や兄弟は直属親の代わりに子をretryできません。人間は明示操作で介入できます。
+Model shells inherit an issued Origin. There is no need to display, copy, or manually set its token. Do not make an external CLI impersonate model authority. A model can stop only work it owns, and recovery retry decisions belong to the live immediate parent. Grandparents or siblings cannot retry a child in place of its immediate parent. Humans can intervene explicitly.
 
-## 子を作成して依頼する
+## Creating a child and sending a request
 
-次は親モデルのBash shellで行う例です。`CHILD_THREAD_ID` 等は、それぞれの返却JSONから取得した実IDへ置き換えます。コマンドごとに `ok` とresult/errorを確認し、失敗後に残りを機械的に実行しません。
+This example runs in the parent model's Bash shell. Replace `CHILD_THREAD_ID` and similar placeholders with actual IDs from each returned JSON. Check `ok` and result/error after each command; do not mechanically continue after a failure.
 
 ```bash
 shellboy thread create --parent "$SHELLBOY_THREAD_ID"
-# result.thread_idを控える
-shellboy message send --thread CHILD_THREAD_ID --text '担当: parserの読み取り監査。変更せず、確実な不具合と根拠、確認済み範囲を返してください。'
-# result.message_id / assignment / run_id / turn_idを控える
+# Retain result.thread_id
+shellboy message send --thread CHILD_THREAD_ID --text 'Task: read-only audit of the parser. Make no changes. Return definite defects, supporting evidence, and the scope verified.'
+# Retain result.message_id / assignment / run_id / turn_id
 shellboy message get --message MESSAGE_ID
 ```
 
-作成、送信、回答取得は別段階です。createの `result.thread_id` を
-`CHILD_THREAD_ID`、sendの `result.message_id` を `CHILD_MESSAGE_ID`、割り当てられた
-`result.turn_id` を `CHILD_TURN_ID` として区別します。sendを実行した観測shellの
-execution IDで、依頼先の回答やshell出力を取得しようとしないでください。
+Creation, sending, and retrieving the answer are separate steps. Distinguish create's `result.thread_id` as `CHILD_THREAD_ID`, send's `result.message_id` as `CHILD_MESSAGE_ID`, and the assigned `result.turn_id` as `CHILD_TURN_ID`. Do not try to retrieve the receiving model's answer or shell output using the execution ID of the observing shell that ran send.
 
-現在の保存状態を一覧する場合は `shellboy status --thread CHILD_THREAD_ID` を使い、
-返却されたRun/Turn/shell/messageのIDから各getへ進めます。子Threadの親子関係と
-Runの所有関係は別なので、停止や復旧の権限をThreadの見た目から推定しません。
+Use `shellboy status --thread CHILD_THREAD_ID` to list current stored state, then get individual objects using the returned Run/Turn/shell/message IDs. Thread hierarchy and Run ownership differ: do not infer stop or recovery authority from the Thread's appearance.
 
-親を指定した作成では、cwd・AGENTS参照先・connection・model・effortを継承します。cwd・connection・model・effortは対応するcreate引数で明示指定できます。AGENTS参照先を上書きするcreate引数はなく、子作成時にcwdを変えても親のAGENTS参照先を保持します。親の履歴全文は複製しません。必要な本文や `history get` 対象のnode IDを依頼に含めてください。単独Threadの作成や履歴forkは [履歴ガイド](history-and-search.md) を参照してください。
+Creating with a parent inherits cwd, AGENTS reference, connection, model, and effort. Corresponding create arguments can explicitly override cwd, connection, model, and effort. There is no create argument to override the AGENTS reference; changing cwd when creating a child still preserves its parent's AGENTS reference. The parent's entire history is not copied. Include needed text or node IDs to read through `history get` in the request. See [History and search](history-and-search.md) for independent Threads and history forks.
 
-`assignment` は `new_run`、`new_turn`、`existing_turn`、`pending` のいずれかです。`pending` ではまだRun/Turnが決まっていないため、存在しないTurnを待機しません。`message get` で同じmessageを追跡し、`held` の理由や対象の `thread get` / `run get` を確認します。確定済みRun/Turnへの割当は後から別IDへ付け替えません。新規sendで同じ依頼を重複作成してpendingを回避しないでください。
+`assignment` is `new_run`, `new_turn`, `existing_turn`, or `pending`. With `pending`, no Run/Turn has been determined yet; do not wait on a nonexistent Turn. Track the same message with `message get`, inspect the `held` reason and the target's `thread get` / `run get`. Once assigned to a definite Run/Turn, a message is not later reassigned to different IDs. Do not bypass pending by sending a duplicate request.
 
-## any待機と回答の取得
+## Waiting with any semantics and retrieving answers
 
-Turn IDが得られたら、その回答区間を待ちます。次はBashで、JSON内のIDも実際の返却値へ差し替えます。
+Once you have a Turn ID, wait for that response interval. This is a Bash example; replace IDs inside the JSON with actual returned values too.
 
 ```bash
 shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"CHILD_TURN_ID"}]' --timeout-ms 30000
 shellboy turn get --turn CHILD_TURN_ID
-# result.answer_node_idがあれば取得する
+# Retrieve result.answer_node_id if present
 shellboy history get --node ANSWER_NODE_ID --limit-bytes 65536
 ```
 
-複数conditionは **any** です。一つが満たされれば返り、全ての子の完了を意味しません。
+Multiple conditions use **any** semantics. The call returns when one is satisfied, not necessarily when every child completes.
 
 ```bash
 shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"TURN_A"},{"type":"turn_completed","turn_id":"TURN_B"}]' --timeout-ms 30000
 ```
 
-`matched` と `snapshot.conditions` を確認し、未完了の対象だけを改めて待ちます。`turn_completed` は停止/失敗も含む終端観測なので、`satisfied` でも対象の `state` と `answer_node_id` を必ず確認します。回答nodeがない停止を架空の回答で補いません。本文に `next_cursor` があれば同じnodeをページ取得します。
+Inspect `matched` and `snapshot.conditions`, then wait again only for unfinished targets. `turn_completed` observes terminal states including stopped/failed, so even `satisfied` requires checking the target's `state` and `answer_node_id`. Do not invent an answer for a stopped Turn without an answer node. If its body returns `next_cursor`, page through the same node.
 
-| wait status | 次の行動 |
+| Wait status | Next action |
 |---|---|
-| `satisfied` | matchedの対象状態を確認し、必要な回答node/出力を取得する |
-| `timeout` | 対象は継続。進捗を見て作業するか、別operationとして再待機する |
-| `interrupted` | 観測の解除。対象の停止成功とは扱わず、現在状態と新しい指示を確認する |
-| `recovery_wait` | 明示復旧判断が必要。原因を取得し、直属親ならretry/stop、必要なら上へ相談する |
-| `unavailable` | 削除等で対象を利用できない。snapshot/reasonを確認し、同じwaitを無条件反復しない |
+| `satisfied` | Inspect matched targets' states and retrieve needed answer nodes/output |
+| `timeout` | Targets continue. Check progress and do other work, or wait again as a separate operation |
+| `interrupted` | Observation was released. Do not treat it as a successful target stop; check current state and new instructions |
+| `recovery_wait` | An explicit recovery decision is needed. Retrieve the cause; as immediate parent, retry/stop, or consult a higher authority if needed |
+| `unavailable` | The target is unavailable, for example after deletion. Check snapshot/reason; do not repeat the same wait unconditionally |
 
-自分のRun/Turn/現在shell、祖先や他のwaitとの循環は拒否されます。子が親Runの終了を待つと、親による子の回収待ちと循環し得ます。`wait_cycle` をsleepループで迂回せず、依頼と通知の向きを修正します。Ctrl+Cや接続切断はCLIの観測を解除し、対象Run/shellの停止にはなりません。
+Waiting on your own Run/Turn/current shell, or forming a cycle with ancestors or other waits, is rejected. A child waiting for its parent Run to end could cycle with the parent waiting to reclaim that child. Do not work around `wait_cycle` with sleep loops; fix the direction of requests and notifications. Ctrl+C or connection loss releases the CLI observation and does not stop the target Run/shell.
 
-## 途中報告と生存期間
+## Progress reports and lifetime
 
-子は `thread get` の `parent_id` を確認し、必要な単発報告を親へ送れます。
+A child can inspect `parent_id` in `thread get` and send a needed one-off progress report to its parent.
 
 ```bash
 shellboy thread get
-shellboy message send --thread PARENT_THREAD_ID --text '途中報告: 読み取り監査は3ファイル完了。残り1ファイル、変更はありません。返信は不要です。'
+shellboy message send --thread PARENT_THREAD_ID --text 'Progress: read-only audit completed for 3 files; 1 remains. No changes. No reply needed.'
 ```
 
-これは通常のmessage通知です。報告ごとに親からの返答を待つ義務はなく、親は安全な境界で採用します。親への報告で最終回答の取得を代用しません。子の回答完了とRun終了も別です。背景shell等が残れば、Turn回答後もRunはliveのことがあります。全所有処理の終わりが必要なら `run_ended` を待ちます。
+This is an ordinary message notification. A child need not wait for a reply to every report; the parent adopts it at a safe boundary. A progress report does not replace retrieving the final answer. Completion of the child's answer and termination of its Run also differ. Background shells can keep a Run live after its Turn answers. If all owned work must finish, wait for `run_ended`.
 
 ```bash
 shellboy wait --conditions-json '[{"type":"run_ended","run_id":"CHILD_RUN_ID"}]' --timeout-ms 30000
 ```
 
-親のTurnが回答完了しても、所有する子/孫Runやshellが残っていれば親Runはliveのままです。正常なRun完了は所有処理や未処理指示等が残っていないことを確認して確定します。親Runを明示停止した場合やアプリ終了では、所有する配下を停止・回収します。子をアプリ終了後も残す永続daemonとしては使いません。独立Threadの独立Runは親Runの所有回収に含まれません。
+Even after the parent's Turn answers, its Run remains live while it owns child/grandchild Runs or shells. Normal Run completion is finalized only after confirming that no owned work, unprocessed instructions, or similar obligations remain. Explicitly stopping the parent Run or exiting the application stops and reclaims its owned descendants. Do not use a child as a persistent daemon that survives application exit. Independent Runs on independent Threads are outside the parent Run's ownership cleanup.
 
-## 復旧を判断する
+## Deciding recovery
 
 ```bash
 shellboy run get --run CHILD_RUN_ID
 shellboy turn get --turn CHILD_TURN_ID
-# 原因を確認・修復してから、直属親または人間が明示する
+# After inspecting and fixing the cause, the immediate parent or a human explicitly retries
 shellboy run retry --run CHILD_RUN_ID
-# 続行しない場合
+# Alternatively, to discontinue
 shellboy run stop --run CHILD_RUN_ID
 ```
 
-retryとstopは選択肢です。上の両方を続けて実行する例ではありません。子の `recovery_wait` へモデルが普通のmessageを送っても、その本文は保留され、自動復旧の代わりになりません。再起動後は以前のRunを自動再実行せず、中断情報・保存済み回答/未処理messageを見て新しい実行を判断します。停止時は未実行指示のmessage IDを保持してください。
+Retry and stop are alternatives; the example does not instruct running both consecutively. An ordinary model message to a child in `recovery_wait` is held, not substituted for automatic recovery. After restart, earlier Runs are not automatically executed again. Decide on new execution using interruption information, stored answers, and unprocessed messages. Retain IDs of unexecuted instruction messages when stopping.
 
-PowerShellでは `$env:SHELLBOY_THREAD_ID` を使います。単一引用符のJSON例は利用shellの引数渡しに合わせ、詳しくは [shell](shell.md) を参照してください。Windows実機での動作確認は今回対象外です。
+In PowerShell, use `$env:SHELLBOY_THREAD_ID`. Adapt single-quoted JSON examples to the shell's argument passing; see [Shell](shell.md). Physical Windows verification was outside the scope of this change.

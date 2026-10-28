@@ -29,10 +29,13 @@ fn binary_guides_are_offline_and_independent_of_configuration_and_cwd() {
     for args in [
         vec!["docs", "list"],
         vec!["docs", "get", "--id", "shellboy/shell"],
-        vec!["docs", "search", "--query", "背景"],
+        vec!["docs", "search", "--query", "background"],
     ] {
         let (success, value) = call(root.path(), &args);
         assert!(success && value["ok"] == true, "{value}");
+        if args.get(1) == Some(&"search") {
+            assert!(!value["result"]["items"].as_array().unwrap().is_empty());
+        }
     }
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
 }

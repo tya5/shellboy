@@ -1,10 +1,10 @@
-# ガイドを見つける
+# Find a guide
 
-[ガイド入口](README.md) · [Agent Guide](agent-guide.md) · [CLI辞書](cli-reference.md)
+[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md) · [日本語](docs.ja.md)
 
-`shellboy docs` は実行ファイルに同梱された操作ガイドを読みます。リポジトリ、起動中のShellboy、設定、API接続は不要です。`skill` は将来の別機能のために予約されており、このガイド閲覧機能の名前ではありません。
+`shellboy docs` reads operation guides bundled into the executable. It needs no repository, running Shellboy owner, configuration, or API connection. `skill` is reserved for a possible separate feature; it is not the name of this guide reader.
 
-## 階層から読む
+## Browse the hierarchy
 
 ```sh
 shellboy docs list
@@ -14,23 +14,23 @@ shellboy docs get --id shellboy/agent-guide
 shellboy docs get --id shellboy/delegation
 ```
 
-一覧の `id` と `parent_id` は文書ファイルの配置とは独立した論理IDです。`shellboy/start` は導入、`shellboy/work` は作業別、`shellboy/reference` は辞書の分類です。一覧は直属の子を返し、検索の `--parent` は子孫まで含めます。
+The list's `id` and `parent_id` are logical IDs independent of file placement. `shellboy/start` contains introductory guides, `shellboy/work` contains task guides, and `shellboy/reference` contains references. Listing returns direct children; search's `--parent` includes descendants.
 
-## キーワードから探す
+## Search by keyword
 
 ```sh
-shellboy docs search --query '子エージェント'
+shellboy docs search --query 'child agent'
 shellboy docs search --query 'background' --parent shellboy/work
 ```
 
-既定検索は大文字小文字を区別しないliteral部分一致です。日本語も空白で区切らず検索できます。検索結果の抜粋は全文ではありません。`id` を使って `docs get` で確認します。意味検索や資料との横断検索は `rag search` で明示選択します。
+The bundled catalogue is English; use English search terms. Search uses case-insensitive literal substring matching, not query translation. Japanese literals present in quoted UI captions can also match without word spacing. A search excerpt is not the full document. Use its `id` with `docs get` to read the source. Explicitly select `rag search` for semantic search or searches spanning guides and other documents.
 
-## 版と続きの取得
+## Versions and pagination
 
-list/searchは `items` と `next_cursor`、getはMarkdownの `text`、`sections`、`links`、`next_cursor` を返します。続きがあれば、同じID・sectionまたは検索条件へ `--cursor` を渡します。ページサイズは次の取得で変更できます。
+list/search return `items` and `next_cursor`; get returns Markdown `text`, `sections`, `links`, and `next_cursor`. To continue, pass `--cursor` with the same ID and section, or the same search conditions. You may change the page size for the next request.
 
-`version` は実行ファイルの版と同梱catalogueのhash、`content_hash` は文書全体のSHA-256です。getの `start` / `end` は文書全体を基準としたUTF-8 byte位置で、文字の途中では分割しません。`sections` のIDは `--section` に指定できます。更新後や別条件でcursorを使い回すとエラーになるため、改めて取得してください。
+`version` combines the executable version and bundled catalogue hash. `content_hash` is the SHA-256 of the entire document. get's `start` / `end` are UTF-8 byte positions relative to the whole document; pages never split a character. Use a `sections` ID with `--section`. Reusing a cursor after an update or with different conditions is an error; start a new request.
 
-`links` は同梱ガイドへの `bundled`、Webへの `external`、開発repo内だけの資料への `repository` を区別します。後二者は同梱本文ではありません。開発資料へのリンクがあっても、そのファイルが作業環境に存在すると仮定しません。
+`links` distinguish `bundled` guide links, `external` web links, and `repository` links available only in the development repository. The latter two are not bundled text. A link to development material does not imply that its file exists in your working environment.
 
-これらはownerへの操作を発生させず、operation receiptへ保存されません。`--operation-id` とは併用できません。会話の操作コマンドには従来どおり同じdata-dirのownerが必要です。
+These commands do not operate on an owner or persist operation receipts. They cannot be combined with `--operation-id`. Conversation commands still require an owner running against the same data-dir.

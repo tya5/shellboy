@@ -66,92 +66,92 @@ pub fn documents() -> Vec<Document> {
         document(
             "shellboy",
             "",
-            "Shellboyガイド",
-            "目的からガイドを探す入口と用語",
+            "Shellboy guides",
+            "Find guides by task and understand common terms",
             include_str!("../docs/guides/README.md"),
         ),
         document(
             "shellboy/user-guide",
             "shellboy/start",
             "User Guide",
-            "起動、会話、モデル変更、停止",
+            "Start, chat, change models, and stop",
             include_str!("../docs/guides/user-guide.md"),
         ),
         document(
             "shellboy/agent-guide",
             "shellboy/start",
             "Agent Guide",
-            "モデルの操作手順、文脈とID、受付と完了",
+            "Model workflows, context and IDs, acceptance versus completion",
             include_str!("../docs/guides/agent-guide.md"),
         ),
         document(
             "shellboy/docs",
             "shellboy/start",
-            "ガイドを見つける",
-            "docsの階層、検索、版付き本文取得",
+            "Finding guides",
+            "Browse docs, search, and retrieve versioned text",
             include_str!("../docs/guides/docs.md"),
         ),
         document(
             "shellboy/delegation",
             "shellboy/work",
-            "委譲と子エージェント",
-            "子作成、依頼、途中報告、待機、所有",
+            "Delegation and child agents",
+            "Create children, assign work, report, wait, and track ownership",
             include_str!("../docs/guides/delegation.md"),
         ),
         document(
             "shellboy/shell",
             "shellboy/work",
             "shell",
-            "foreground/background、execution、stdin、出力",
+            "Foreground/background work, execution IDs, stdin, and output",
             include_str!("../docs/guides/shell.md"),
         ),
         document(
             "shellboy/history-and-search",
             "shellboy/work",
-            "履歴と検索",
-            "原文、fork、検索、索引、要約とspill",
+            "History and search",
+            "Originals, forks, search, indexing, summaries, and spill",
             include_str!("../docs/guides/history-and-search.md"),
         ),
         document(
             "shellboy/attachments",
             "shellboy/work",
-            "添付",
-            "画像とfile、更新、出典、除外",
+            "Attachments",
+            "Images and files, refresh, provenance, and exclusions",
             include_str!("../docs/guides/attachments.md"),
         ),
         document(
             "shellboy/recovery-and-storage",
             "shellboy/work",
-            "復旧とストレージ",
-            "停止、再試行、操作照会、削除、GC",
+            "Recovery and storage",
+            "Stop, retry, inspect operations, delete, and run GC",
             include_str!("../docs/guides/recovery-and-storage.md"),
         ),
         document(
             "shellboy/configuration",
             "shellboy/reference",
-            "設定",
-            "API接続、モデル、保存場所、TOML",
+            "Configuration",
+            "API connections, models, storage paths, and TOML",
             include_str!("../docs/guides/configuration.md"),
         ),
         document(
             "shellboy/tui",
             "shellboy/reference",
-            "画面操作",
-            "キー、slash、補完、履歴、表示",
+            "TUI operations",
+            "Keys, slash commands, completion, history, and display",
             include_str!("../docs/guides/tui.md"),
         ),
         document(
             "shellboy/rag",
             "shellboy/reference",
-            "独立RAG",
-            "資料登録、抽出、索引、横断検索、版付き取得",
+            "Standalone RAG",
+            "Register material, ingest text, index, search scopes, and retrieve revisions",
             include_str!("../docs/guides/rag.md"),
         ),
         document(
             "shellboy/cli-reference",
             "shellboy/reference",
             "CLI reference",
-            "コマンド構文、JSON、cursor、エラー",
+            "Command syntax, JSON, cursors, and errors",
             include_str!("../docs/guides/cli-reference.md"),
         ),
     ]
@@ -159,11 +159,23 @@ pub fn documents() -> Vec<Document> {
 fn catalogue() -> Vec<Document> {
     let mut docs = documents();
     for (id, title, summary) in [
-        ("start", "使い始める", "人間とモデルの入口"),
-        ("work", "作業する", "委譲、shell、履歴、添付、復旧"),
-        ("reference", "辞書", "設定、画面、CLIの参照"),
+        (
+            "start",
+            "Getting started",
+            "Entry points for people and models",
+        ),
+        (
+            "work",
+            "Working",
+            "Delegation, shell, history, attachments, and recovery",
+        ),
+        (
+            "reference",
+            "Reference",
+            "Configuration, TUI, and CLI reference",
+        ),
     ] {
-        docs.push(document(&format!("shellboy/{id}"), "shellboy", title, summary, &format!("# {title}\n\n{summary}\n\n`shellboy docs list --parent shellboy/{id}` でガイドを選びます。\n")));
+        docs.push(document(&format!("shellboy/{id}"), "shellboy", title, summary, &format!("# {title}\n\n{summary}\n\nChoose a guide with `shellboy docs list --parent shellboy/{id}`.\n")));
     }
     docs.sort_by(|a, b| a.id.cmp(&b.id));
     docs
@@ -537,7 +549,7 @@ mod tests {
         let mut text = String::new();
         loop {
             let page = execute(DocsCommand::Get {
-                id: "shellboy/shell".into(),
+                id: "shellboy/tui".into(),
                 section: None,
                 limit_bytes: 17,
                 cursor: cursor.clone(),
@@ -559,19 +571,23 @@ mod tests {
                 .starts_with("cursor_expired")
             );
         }
+        assert!(
+            text.contains("会話"),
+            "the pagination fixture must exercise multibyte text"
+        );
         assert_eq!(
             text,
             documents()
                 .into_iter()
-                .find(|d| d.id == "shellboy/shell")
+                .find(|d| d.id == "shellboy/tui")
                 .unwrap()
                 .text
         );
     }
     #[test]
-    fn japanese_keyword_and_nested_scope() {
+    fn english_keyword_and_nested_scope() {
         let page = execute(DocsCommand::Search {
-            query: "子エージェント".into(),
+            query: "subagent".into(),
             parent: Some("shellboy/work".into()),
             limit: 100,
             cursor: None,

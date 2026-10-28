@@ -1,97 +1,95 @@
-# 画面操作
+# TUI controls
 
-[User Guide](user-guide.md) · [ガイド一覧](README.md)
+[User Guide](user-guide.md) · [Guide index](README.md)
 
-画面ではThreadを「会話」、Runを「作業」、Turnを「応答処理」と表します。CLI名・識別子のkey・原文は元の表記を保ちます。
+The current UI calls a Thread `会話` (conversation), a Run `作業` (work), and a Turn `応答処理` (response processing). CLI names, identifier keys, and source text retain their original spelling. Japanese captions quoted below identify the unchanged current UI.
 
-上部は会話と接続・モデル、中央は履歴、下部は下書きと実行状態です。履歴は発話、コマンド、実行結果、状態変更、要約などを種類別に表示します。回答・要約・展開した可視推論はMarkdown、依頼とコマンド出力は原文のテキストとして読みます。連続する通常通知は件数と種類をまとめ、個別の内容は詳細から確認できます。
+The top shows the conversation, connection, and model; the center shows history; the bottom holds the draft and activity status. History distinguishes messages, commands, execution results, state changes, and summaries. Answers, summaries, and expanded visible reasoning use Markdown; requests and command output use source text. Consecutive routine notifications are grouped by count and kind, with individual contents available in details.
 
-履歴のない新しい会話では送信・改行キーと作業場所を案内します。`AGENTS.md: 未確認`はファイルの不存在を意味せず、画面へ有無の観測が渡っていない状態です。
+A new conversation without history shows send/newline keys and working directory. `AGENTS.md: 未確認` means the screen has not received an observation of the file's presence, not that it is absent.
 
-通常表示の整理は保存原文の削除ではありません。完全なID、変更前後、原文の続き、出典、完全URLは詳細画面や型付き操作フォームから取得します。cwdなど現在の設定は`/cwd`や`/model`でも確認できます。
+Simplified display does not delete saved source. Details and typed action forms provide full IDs, before/after values, remaining source, provenance, and complete URLs. Use `/cwd` or `/model` to inspect current settings as well.
 
-## 実行状態の表示
+## Activity display
 
-下部の既存ステータス行に、現在の会話の処理段階を表示します。Enter直後から「送信受付中」が動き、保存成功後に対応メッセージを履歴で確認するまでは「保存済み・表示待ち」を示します。すでに応答処理が進んでいる場合は、その段階を主表示にして表示待ちを同じ行へ併記します。複数の送信待ちには件数、1秒以上の待ちには「送信からN秒」を示します。この時間は画面で送信した時点からの経過であり、APIの処理時間ではありません。失敗・取消・保留では送信の動きを止め、自動再送はしません。
+The existing bottom status line shows processing stages for the current conversation. Immediately after Enter, `送信受付中` (accepting submission) animates. After successful storage, `保存済み・表示待ち` (saved, awaiting display) remains until the corresponding message is observed in history. If response processing has already advanced, its stage becomes primary and pending display is noted on the same line. Multiple pending sends show a count; waits of at least one second show time since submission. This measures elapsed UI time since sending, not API processing time. Failure, cancellation, or holding stops the send animation; no automatic resend occurs.
 
-「準備中」「モデル応答待ち」「応答受信中」「ツール処理中」は文字の明るさが流れ、「待機中」「回答済み背景処理中」「実行継続中」「停止処理中」はマーカーがゆっくり明滅します。完了・中断・異常終了・復旧待ちは静止表示です。異常終了と復旧待ちは注意色になります。
+`準備中` (preparing), `モデル応答待ち` (awaiting model), `応答受信中` (receiving response), and `ツール処理中` (processing tools) use moving text brightness. `待機中` (waiting), `回答済み背景処理中` (answered, background work active), `実行継続中` (execution continuing), and `停止処理中` (stopping) use a slowly pulsing marker. Completed, interrupted, failed, and recovery-wait states are static; failure and recovery wait use an attention color.
 
-見出しは現在の状態、会話名、モデル、作業場所の順に表示します。長い会話名は幅の半分までとし、幅不足では後方から省略します。作業場所は末尾を優先し、完全な値はF8の「Thread · 詳細」で確認・コピーできます。
+The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `Thread · 詳細`.
 
-表示は保存状態と受信イベントに追従します。応答受信中は現在のモデルattemptから実際にテキストを受信した場合です。「待機中」の対象やモデル内部の思考など、観測できない処理を推測して表示しません。Turnが回答を終えても、所有するshellや子Runが動いていれば「回答済み背景処理中」となります。詳細は `/status thread` またはF8から確認できます。
+Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable work, such as the model's internal thought or the target of an unspecified wait, is not guessed. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
 
-アニメーションはステータス行だけで、履歴本文やスクロール位置を動かしません。選択・コピーモードやoverlay表示中はアニメーション用の再描画を止めます。選択中は上端に「表示固定」と解除キーを示し、F2/Escで解除すると更新表示へ戻ります。会話一覧は取得時点の状態であり、動作中を示すアニメーションは付けません。
+Animations affect only the status line, never history text or scroll position. Animation redraws stop during selection/copy mode or overlays. Selection mode shows `表示固定` (display frozen) and exit keys at the top; F2/Esc resumes updates. The conversation list is a snapshot and has no running-state animation.
 
-ステータスの「観測経過」は、この画面がTurnの活動を確認した期間の単調時計による計測です。
-選択前・再起動前や状態を取得できない間は含めません。復旧待ちとTurn終了で停止し、
-ツール見出しの保存済み実行時間とは別に扱います。
+`観測経過` (observed elapsed time) uses a monotonic clock for the period during which this screen observed Turn activity. It excludes time before selection, before restart, and while state was unavailable; it stops at recovery wait or Turn termination. It differs from a tool header's saved execution duration.
 
-入力枠は表示後の行数に合わせ、通常は画面高の1/4・最大8行を上限にし、小さい画面では3行の操作域を優先します。折りたたんだ貼付けは短い番号付きchipになり、展開・編集・削除は `/paste 番号 show|edit|remove` で行えます。
+The composer follows displayed line count, normally limited to one quarter of screen height and at most eight lines; small screens prioritize a three-line control area. Folded pastes become short numbered chips; expand/edit/remove with `/paste NUMBER show|edit|remove`.
 
-## 復旧待ちの通知ベル
+## Recovery-wait notification bell
 
-起動後に新たな復旧待ちを検知すると、現在の会話だけでなく背景の会話でも端末ベルで通知します。起動時に既に存在していた復旧待ちや、同じ状態の再取得・会話切替・再描画では鳴りません。複数会話から短時間に通知が来た場合は2秒間隔にまとめます。完了や再試行中の表示では鳴りません。
+New recovery waits detected after startup trigger the terminal bell for background conversations as well as the current one. Existing startup recovery waits, rereads of the same state, conversation switches, and redraws do not ring. Bursts across conversations are limited to one notification per two seconds. Completion and retrying displays do not ring.
 
-ベルを無効にするには設定ファイルへ次を追加し、ownerを再起動します。
+To disable the bell, add this configuration and restart the owner:
 
 ```toml
 [ui]
 bell = false
 ```
 
-通知は端末のBELです。音・画面flash・visual bellなどの見え方は端末設定に従います。聞こえない場合は端末のbell設定を確認してください。tmux等のmultiplexerを使う場合は、端末に加えてmultiplexer側のbell転送・通知設定も必要です。ShellboyはOS通知や音量設定を変更しません。
+This uses terminal BEL. Sound, screen flash, or visual-bell behavior follows terminal settings. If inaudible, check those settings; multiplexers such as tmux also need bell forwarding/notification configuration. Shellboy does not change OS notifications or volume.
 
-## 入力と基本キー
+## Input and basic keys
 
-既定値です。送信・改行の組合せは`ui.send_key`と`ui.newline_keys`で変更できます。端末が同じキーコードとして送る組合せは区別できません。処理中の枠には追加指示として次の区切りで反映すること、復旧待ちには新しい指示で再開することを表示します。
+These are defaults. Change send/newline combinations with `ui.send_key` and `ui.newline_keys`. Combinations producing the same terminal key code cannot be distinguished. While processing, the composer explains that additional instructions apply at the next boundary; during recovery wait, a new instruction resumes work.
 
-| キー | 操作 |
+| Key | Action |
 | --- | --- |
-| Enter | 下書きを送信、又は手入力したslash操作を実行 |
-| Ctrl+J / Shift+Enter | 改行 |
-| Ctrl+U | 現在の下書き本文・貼付け・添付参照を消去。送信済み依頼と外部ファイルは保持（送信/改行へ割り当てた場合は設定優先） |
-| Ctrl+L | 画面全体を消去して描き直す。下書き・スクロール・選択・popupは保持（送信/改行へ割り当てた場合は設定優先） |
-| 左右 / Backspace / Delete | 文字単位で移動・削除（結合文字・emojiも考慮） |
-| 上下 | 候補選択／送信履歴の呼出し／下書き内の上下行へ移動（後述） |
-| Tab | 選択したslash候補を補完 |
-| Home / End | 下書きの現在行の先頭・末尾へ移動 |
-| ホイール上下 | 履歴領域を3表示行ずつ移動。折り返し後の行数が基準 |
-| PgUp / PgDn | 履歴表示領域の高さ−1行ずつ前後へ移動 |
-| Ctrl+End | 履歴末尾を再取得し追従へ戻る |
-| Ctrl+T / Ctrl+N | 会話一覧 / 新しい下書き |
-| F1 | 用途別の操作ヘルプ。送信・改行は現在の設定を表示 |
-| F2 | 端末の選択・コピーモードへ入る／戻る |
-| F3 / F4 / F5 | 最新の貼付けblockを確認 / 編集 / 削除 |
-| F6 | 会話の内容を選び、詳細・原文を確認 |
-| F7 | 現在の履歴項目のリンク一覧と完全URLを確認 |
-| F8 | 操作一覧から対象・引数を入力するフォームを開く |
-| Ctrl+C | 現在Threadを中断。終了キーではない |
-| Ctrl+B | 現在のforeground shellを背景化 |
-| Ctrl+Q | 通常終了を開始 |
+| Enter | Send draft or execute a manually typed slash action |
+| Ctrl+J / Shift+Enter | Newline |
+| Ctrl+U | Clear current draft text, pastes, and attachment references; preserve sent requests and external files (configured send/newline bindings take precedence) |
+| Ctrl+L | Clear and redraw the whole screen; preserve draft, scroll, selection, and popup (configured send/newline bindings take precedence) |
+| Left/Right / Backspace / Delete | Move/delete by character, accounting for combining characters and emoji |
+| Up/Down | Select completion, recall sent text, or move between draft lines; see below |
+| Tab | Complete the selected slash candidate |
+| Home / End | Start/end of the current draft line |
+| Mouse wheel | Move history three display rows, measured after wrapping |
+| PgUp / PgDn | Move history by viewport height minus one row |
+| Ctrl+End | Refetch the latest history and resume following |
+| Ctrl+T / Ctrl+N | Conversation list / new draft |
+| F1 | Task-oriented help, showing currently configured send/newline keys |
+| F2 | Enter/leave terminal selection and copy mode |
+| F3 / F4 / F5 | Inspect / edit / remove the latest paste block |
+| F6 | Choose conversation content and inspect details/source |
+| F7 | Links and complete URLs for the current history item |
+| F8 | Action list and typed target/argument forms |
+| Ctrl+C | Interrupt the current Thread; does not quit |
+| Ctrl+B | Background the current foreground shell |
+| Ctrl+Q | Begin normal shutdown |
 
-画面に文字の残りや古いリンク領域が見える場合はCtrl+Lで描き直せます。一覧・詳細・popup・選択固定中でも使え、連打は描画の上限頻度内でまとめます。送信/改行キーと重なる場合、画面再描画は無効になりF1のヘルプへ理由を表示します。端末との文字幅など、ずれの原因そのものを修正する機能ではありません。
+Use Ctrl+L if stale characters or old link regions remain. It works in lists, details, popups, and frozen selection; repeated presses are coalesced within the render-rate cap. If it conflicts with send/newline bindings, redraw is disabled and F1 explains why. It does not repair underlying terminal character-width disagreement.
 
-選択・コピーモード中のCtrl+Lは、その時点の最新状態を一度描き直します。固定後に届いた応答も表示され、追従中は表示位置が進むことがあります。選択モードは解除せず、その後の自動描画は再び止まります。固定時点の画面を保存して復元する操作ではありません。
+In selection/copy mode, Ctrl+L redraws the latest state once, including responses received after freezing; a following viewport may advance. Selection mode remains active and automatic redraw stops again afterward. This does not restore a snapshot of the screen at freeze time.
 
-各Threadの下書き、原文の文字位置anchor、追従状態を保持します。操作時の移動量は表示行数です。履歴末尾では最後の画面へ揃えて追従し、上へ読むと追従を止めます。ヘルプや詳細などのoverlayが開いている間は、ホイールで背面の会話を動かしません。画面外の本文やlayoutがcacheから回収されることはありますが、履歴原文の削除とは別です。「本文未キャッシュ」はスクロール位置に応じた再取得で読みます。
+Each Thread retains its draft, source-character anchor, and follow state. Movement is measured in display rows. At the end, history aligns to the last screen and follows; reading upward stops following. Wheels do not move the conversation behind help/details overlays. Offscreen bodies/layouts may be evicted from cache without deleting source history. `本文未キャッシュ` (body not cached) is fetched again according to scroll position.
 
-F1（`/help`）は、よく使う操作、会話の閲覧・切替、詳細・処理状況、モデル・添付など用途別に説明します。上下で1行、PgUp/PgDnで画面単位に読み進め、Esc/Enter/F1で閉じます。コマンドを入力するときはEscで会話へ戻ってください。`/model`・`/cwd`と一覧のF1は、それぞれモデル設定・作業フォルダー・選んだ会話の情報として表示します。
+F1 (`/help`) groups common controls, conversation navigation, details/activity, models, and attachments by purpose. Up/Down scroll one row, PgUp/PgDn one page, and Esc/Enter/F1 close. Return to the conversation with Esc before entering commands. `/model`, `/cwd`, and F1 in the conversation list show model settings, working directory, and selected-conversation information respectively.
 
-## 補完と入力履歴
+## Completion and input history
 
-`/`からコマンド名を入力すると、入力欄の上に候補と説明が出ます。上下で選び、Tab又はEnterで補完します。未完成の名前はEnterで補完するだけです。名前が既に完全一致なら、従来どおり送信キーで実行します。Escは候補だけを閉じます。引数の入力中や、貼付けたslash本文には候補を出しません。
+Typing a command name beginning with `/` shows candidates and descriptions above the composer. Choose with Up/Down and complete with Tab or Enter. Enter only completes an unfinished name; when the name already matches exactly, the send key executes it. Esc closes only the candidates. No candidates appear while entering arguments or for pasted slash text.
 
-候補が出ていないとき、入力の先頭行で上キーを押すと、現在の会話で送信済みの本文を新しい順に呼び出します。呼出し中は上下で古い／新しい本文へ移動し、最新の次で下キーを押すと書きかけの下書きへ戻ります。再起動後や表示cacheにない本文も対象です。新規の未保存会話にはまだ履歴がありません。通常の複数行下書きでは、行の内側にいる間は上下キーでカーソルを移動します。
+Without candidates, Up on the first draft line recalls sent text from the current conversation, newest first. Up/Down then move to older/newer text; Down beyond the newest restores the unfinished draft. Recall includes text after restart and outside the display cache. A new unsaved conversation has no history. Within ordinary multiline drafts, Up/Down move the cursor between lines.
 
-呼び出した本文を編集・送信できます。上キー直後に送信キーを押した場合も、取得後の本文を送ります。読み込み中に編集・会話切替をすると、その送信待ちは取り消します。添付は現在の下書きのものを保ち、過去の添付は自動復元しません。過去の本文が`/`で始まっても会話本文として扱います。未送信のslash操作や別の会話の本文は履歴に含みません。本文上限を超える履歴は切り詰めずエラーにし、現在の下書きを保ちます。
+Recalled text can be edited and sent. If the send key is pressed immediately after Up, sending waits for the recalled text. Editing or switching conversations during loading cancels that pending send. Current draft attachments remain; historical attachments are not automatically restored. Recalled text starting with `/` remains conversation text. Unsent slash actions and other conversations are excluded. Oversized historical text produces an error without truncation and preserves the current draft.
 
-## 長文の貼付け
+## Pasting long text
 
-会話の入力中にbracketed pasteとして届いた本文は、改行や先頭の`/`を含めて下書きへ入ります。貼付けイベントだけで送信・slash操作を実行しません。既定では1000文字超又は3行超をblockに折りたたみ、全文は保持します。Enterで送ると折りたたみ部分も全文を送ります。
+Bracketed paste received in the conversation composer enters the draft including newlines and an initial `/`; a paste event alone never sends or executes slash actions. By default, over 1000 characters or over three lines fold into a block while retaining the full text. Enter sends the full folded content.
 
-help・管理・詳細・確認・会話一覧など入力を受け付けない画面では、貼付けを反映せず下部に通知します。Escで戻ってから再貼付してください。選択・コピーモード中の貼付けも未反映とし、モードを解除したことと再貼付が必要なことを通知します。下書きや背面の入力fieldへは入りません。
+Non-input screens such as help, management, details, confirmation, and the conversation list reject pastes and show a bottom notification. Return with Esc and paste again. Pasting during selection/copy mode is also not applied: a notification explains the mode was left and repasting is needed. Nothing enters the draft or a field behind the screen.
 
-block番号を指定して操作する場合は次を使います。
+Address a block by number:
 
 ```text
 /paste 1 show
@@ -99,170 +97,169 @@ block番号を指定して操作する場合は次を使います。
 /paste 1 remove
 ```
 
-`show`と`edit`はいずれもblockを展開し、先頭へcursorを移します。 折りたたみ中は左右キーでblockの両端を移動し、境界でのBackspace/Deleteはblock全体を削除します。一文字ずつ編集する場合は先に展開してください。F3/F4/F5は最新blockを対象にします。折りたたみ表示をコピーしただけでは原文を得られないことに注意してください。`limits.draft_bytes`を超える貼付けは全体を拒否し、途中だけ採用しません。
+Both `show` and `edit` expand the block and move the cursor to its start. While folded, Left/Right jump between block boundaries; Backspace/Delete at a boundary removes the whole block. Expand first to edit characters. F3/F4/F5 target the latest block. Copying only the folded display does not recover source text. Pasting beyond `limits.draft_bytes` rejects the entire paste rather than adopting a prefix.
 
-送信後の失敗・取消しsnapshotは`/restore REVISION`で復元できます。スラッシュ操作が未受付・失敗になった場合も元入力を復元し、すでに別の編集を始めていればその入力を保ったまま元操作の復元番号を表示します。必要なrevisionは状態表示のヒントに出ます。受付後は不変のmessage原文から復元し、復元待ちの間に別の編集を始めると遅い結果を採用しません。
+Restore failed/cancelled send snapshots with `/restore REVISION`. Unaccepted or failed slash actions also restore their input; if other editing has begun, that new input is preserved and the old action's restore revision is displayed. Status hints supply the revision. After acceptance, restoration uses immutable message source; a late restore result is not adopted if you edit while waiting.
 
-## Slash操作一覧
+## Slash commands
 
-`/status`は全Threadの保存済み作業を一覧にします。`/status thread`は現在のThreadだけ、`/status all`は終了済みも対象です。Run・Turn・background shell・未適用依頼・モデルattemptを1項目1行で表示します。上下で選択、Enterで所属・モデル・記録時刻の詳細、Oで対象の照会、Sでshell出力原文、Rで再取得、Nで一覧の次pageへ進みます。詳細pageを開いている間のNは、その詳細の続きです。Escで会話へ戻り、下書き・閲覧位置は保持します。
+`/status` lists stored work across all Threads. `/status thread` limits it to the current Thread; `/status all` includes terminal work. Runs, Turns, background shells, unapplied requests, and model attempts each occupy one row. Up/Down select, Enter opens ownership/model/timestamp details, O queries the target, S reads shell source output, R refreshes, and N fetches the next list page. Within a detail page, N continues that detail. Esc returns to the conversation, retaining the draft and reading position.
 
-これは保存状態の観測です。プロセス生存、実行中の検索、独立RAG storeは観測していません。Turn完了後もbackground shellや子Runが動いている場合があるため、TurnとRunの状態を分けて確認してください。失敗等の絞り込みはF8の「作業 · 状態一覧」、索引は`/index status`、RAGはCLIの`shellboy rag status`を使います。
+This observes saved state, not OS process liveness, in-flight searches, or standalone RAG stores. A completed Turn can still own background shells or child Runs; inspect Turn and Run states separately. Use F8 `作業 · 状態一覧` for filters such as failures, `/index status` for indexing, and CLI `shellboy rag status` for RAG.
 
-以下の`ID`や接続名は実際の値へ置き換えます。引数全体をパスに使う`/attach`、`/cwd`では空白を含むパスを引用できます。
+Replace `ID` and connection names below with real values. `/attach` and `/cwd`, which use their argument as a path, allow quoted paths with spaces.
 
-| 操作 | 用途 |
+| Action | Purpose |
 | --- | --- |
-| `/help` | 用途別の操作ヘルプ。参考情報にメモリ保持量の設定 |
-| `/status [all\|thread]` | 全体又は現在Threadの保存済み作業。終端も含めるにはall |
-| `/details` | 会話の内容の選択・詳細 |
-| `/links` | 現在の履歴項目のリンク一覧 |
-| `/actions`、`/operations` | 型付き操作フォーム |
-| `/cancel-wait` | TUIで開始した待機の観測を取消し。待機対象は停止しない |
-| `/new` | 新しい下書き |
-| `/threads [FILTER]` | Thread・未送信下書き一覧 |
-| `/switch THREAD_ID` | IDで切替 |
-| `/model` | 現在の接続・モデル・effort表示 |
-| `/models [CONNECTION]` | 接続先のliveモデル一覧。文字で絞込み、上下選択、Enter変更、Ctrl+R再取得、Ctrl+Yで選択IDコピー、Escで戻る |
-| `/model CONNECTION MODEL_ID` | 接続・モデル変更 |
-| `/effort VALUE`、`/effort none` | effort指定・解除 |
-| `/cwd`、`/cwd PATH` | 作業フォルダー表示・変更 |
-| `/fork [NODE_ID]` | 指定nodeまでを共有して新Threadを作成 |
-| `/edit [USER_NODE_ID]` | 元依頼を別の編集用下書きへ読み、送信時に分岐 |
-| `/compact` | 安全境界でスピル・要約を要求 |
-| `/search QUERY` | active embedding空間の会話検索 |
-| `/index [status\|all\|thread\|threads ID...]` | 索引管理。`thread`は現在Thread |
-| `/index space SPACE_ID [status\|all\|thread\|threads ID...]` | 指定空間の管理対象選択 |
-| `/attach PATH` | file入力として下書きへパス参照を追加 |
-| `/attachments` | 下書き添付と保存済み送信選択を表示 |
-| `/detach ATTACHMENT_ID` | 下書き又は保存済み送信選択から除外 |
-| `/reload-attachments` | 保存済みThreadの添付を明示再読込（API送信なし） |
-| `/image`、`/paste-image` | clipboard画像を下書きへ追加 |
-| `/copy [NODE_ID] [BLOCK_INDEX]` | 元本文又は0始まりの完結コードblockをコピー |
-| `/reasoning [NODE_ID]` | 返却された推論テキストの開閉 |
-| `/select` | 選択・コピーモード切替 |
-| `/paste ID show\|edit\|remove` | 貼付けblockの操作 |
-| `/restore` | 選択中で最後に作成した省略markerの入力範囲を復元。後続会話は保持、添付は自動復活しない |
-| `/restore REVISION` | 失敗・取消しの下書きsnapshot復元 |
-| `/cancel` | 現在Threadを中断 |
-| `/background` | foreground shellを背景化 |
-| `/quit` | 通常終了 |
+| `/help` | Task-oriented help, including memory-retention settings in reference information |
+| `/status [all\|thread]` | Stored work globally/current Thread; `all` includes terminal states |
+| `/details` | Select conversation content and inspect details |
+| `/links` | Links for the current history item |
+| `/actions`, `/operations` | Typed action forms |
+| `/cancel-wait` | Cancel observation of a TUI-started wait, without stopping its target |
+| `/new` | New draft |
+| `/threads [FILTER]` | Threads and unsent drafts |
+| `/switch THREAD_ID` | Switch by ID |
+| `/model` | Current connection, model, and effort |
+| `/models [CONNECTION]` | Live model list: type to filter, Up/Down select, Enter changes, Ctrl+R refreshes, Ctrl+Y copies selected ID, Esc returns |
+| `/model CONNECTION MODEL_ID` | Change connection/model |
+| `/effort VALUE`, `/effort none` | Set/clear effort |
+| `/cwd`, `/cwd PATH` | Show/change working directory |
+| `/fork [NODE_ID]` | New Thread sharing history through the specified node |
+| `/edit [USER_NODE_ID]` | Load the original request into a separate editing draft; branch on send |
+| `/compact` | Request spill/summary at a safe boundary |
+| `/search QUERY` | Conversation search in the active embedding space |
+| `/index [status\|all\|thread\|threads ID...]` | Index management; `thread` means current Thread |
+| `/index space SPACE_ID [status\|all\|thread\|threads ID...]` | Select management targets in a specified space |
+| `/attach PATH` | Add a path reference to the draft as file input |
+| `/attachments` | Draft attachments and saved send selections |
+| `/detach ATTACHMENT_ID` | Exclude from draft or saved send selection |
+| `/reload-attachments` | Explicitly reread saved Thread attachments, without API submission |
+| `/image`, `/paste-image` | Add clipboard image to draft |
+| `/copy [NODE_ID] [BLOCK_INDEX]` | Copy source body or zero-based complete code block |
+| `/reasoning [NODE_ID]` | Expand/collapse returned reasoning text |
+| `/select` | Toggle selection/copy mode |
+| `/paste ID show\|edit\|remove` | Paste-block actions |
+| `/restore` | Restore the input range of the newest currently selected omission marker; preserve subsequent conversation, without automatically reviving attachments |
+| `/restore REVISION` | Restore failed/cancelled draft snapshot |
+| `/cancel` | Interrupt the current Thread |
+| `/background` | Background the foreground shell |
+| `/quit` | Normal shutdown |
 
-`/fork`のnode省略時はanchor又は末尾、`/edit`はanchor又は最後のuser nodeを候補にします。指定nodeの種類・境界が不適切ならエラーになります。再現可能な操作にはIDを明示してください。`/edit`は元nodeの上書きではなく、送信時に元依頼の直前から分岐します。動作中Runがあれば、そのRunを停止する確認をYで確定してから進みます。
+Omitting the node in `/fork` suggests the anchor or tail; `/edit` suggests the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active, confirm stopping it with Y before proceeding.
 
-## Overlayと選択モード
+## Overlays and selection mode
 
-ポップアップは共通の枠・見出し・補足・本文・下部操作欄で表示します。選択行は`›`と背景色で区別し、操作案内は本文を移動しても下部に残ります。長い項目が画面に収まらない場合は`…`で中間の省略を示しますが、原文・コピー・実行へ渡す値は保持します。完全な内容は詳細・原文から取得してください。フォームでは入力末尾を確認でき、入力値全体を実行へ渡します。
+Popups share a frame, heading, explanation, body, and bottom controls. `›` plus background color marks selection; controls remain visible while scrolling. `…` indicates omitted middle content when an item cannot fit, but source, copy values, and execution arguments remain intact. Read full content through details/source. Forms expose the end of input and submit its whole value.
 
-通常の一覧・詳細field・フォームは上下で選択し、PgUp/PgDnで現在の表示範囲に応じて選択を移します。原文・help・結果本文は上下で1表示行、PgUp/PgDnで画面単位に読みます。会話一覧のPgDnは引き続き次pageの追加取得です。確認画面も上下/PgUp/PgDnで長い説明を読み、実行はYだけ、N/Escで戻ります。
+Ordinary lists, detail fields, and forms use Up/Down for selection and PgUp/PgDn for viewport-sized selection movement. Source, help, and result bodies scroll one display row with Up/Down and one page with PgUp/PgDn. PgDn in the conversation list continues fetching the next page. Confirmation screens scroll long explanations with Up/Down/PgUp/PgDn; only Y executes, while N/Esc return.
 
-
-| 画面 | キー |
+| Screen | Keys |
 | --- | --- |
-| help | 上下/PgUp/PgDnでスクロール、Esc/Enter/F1で閉じる |
-| 会話一覧 | 文字・Backspaceで絞込み、上下で選択、左右で親子の開閉・移動、Home/Endで先頭/末尾、Enterで切替、PgDnで次page追加、Ctrl+R再取得、F1で会話情報、Delete/Ctrl+Dで削除確認、Escで戻る |
-| 管理・検索結果 | Tab / Shift+Tabでfield選択、上下/PgUp/PgDnでスクロール、Enterで選択fieldの詳細、Cで値copy、Aで操作フォーム、Wで明示waitの観測取消、Escで戻る |
-| 会話の詳細（F6） | 上下で項目を選びEnterでfieldへ。fieldも上下で選択。Vで要点/内部項目、Oで本文原文、F7/Lでリンク、Cで値copy、Aで原文取得フォーム、Escで閉じる |
-| 原文 | PgUp/PgDnで現在page内をスクロール、Nで次page、Pで先頭page、Cで現在pageの原文をコピー |
-| リンク一覧 | 上下で選択、Cで完全URLをコピー。URLの認識や表示だけでは接続しない |
-| 操作一覧（F8） | 文字・貼付けで絞込み、Backspaceで削除、Ctrl+Uで解除、上下/PgUp/PgDn/Home/Endで選択、Enterでフォーム、Escで絞込み解除→閉じる、F8で閉じる |
-| 操作フォーム | Tab/上下でfield、Shift+Tabで前field、左右/Spaceで選択値、文字入力・貼付け、Backspaceで末尾削除、Ctrl+Uでfield全消去、複数行本文はCtrl+Jで改行、Enterで実行、Escで一覧へ |
-| 待機フォーム | F9で入力条件を追加、F10で追加済みの最後を削除。複数条件のいずれかの成立を待つ。実行後の管理画面で小文字wを押すと観測取消 |
-| 添付管理 | 上記に加え、小文字`s`で保存済みselection一覧、`r`で明示再読込 |
-| 索引管理 | 小文字`s`状態、`p`費用preview、`b`backfill、`t`retry、`r`rebuild。実行前に対象とpreviewが必要 |
-| 会話の削除確認 | D/Spaceで子の会話も削除を切替（再照会）、削除可能なときYで実行、N/Escで取消し |
-| 操作確認 | Yで確定、N/Escで取消し |
-| 終了猶予超過 | W/Enterで待機、Fでforce確認、さらにYで強制終了 |
+| Help | Up/Down/PgUp/PgDn scroll; Esc/Enter/F1 close |
+| Conversation list | Text/Backspace filter; Up/Down select; Left/Right collapse/expand/navigate parents and children; Home/End first/last; Enter switches; PgDn adds next page; Ctrl+R refreshes; F1 information; Delete/Ctrl+D deletion confirmation; Esc returns |
+| Management/search results | Tab / Shift+Tab select fields; Up/Down/PgUp/PgDn scroll; Enter field details; C copies value; A action form; W cancels explicit-wait observation; Esc returns |
+| Conversation details (F6) | Up/Down select item, Enter opens fields; Up/Down select fields; V concise/internal view; O source; F7/L links; C copies value; A source-fetch form; Esc closes |
+| Source | PgUp/PgDn scroll current page; N next page; P first page; C copies current page source |
+| Link list | Up/Down select; C copies full URL; recognition/display alone never connects |
+| Action list (F8) | Type/paste to filter; Backspace removes; Ctrl+U clears; Up/Down/PgUp/PgDn/Home/End select; Enter opens form; Esc clears filter then closes; F8 closes |
+| Action form | Tab/Up/Down fields; Shift+Tab previous; Left/Right/Space choose; type/paste; Backspace deletes at end; Ctrl+U clears field; Ctrl+J newline in multiline bodies; Enter submits; Esc returns to list |
+| Wait form | F9 adds condition; F10 removes last added condition; waits for any condition; lowercase w in subsequent management view cancels observation |
+| Attachment management | Additionally lowercase `s` saved selections, `r` explicit reread |
+| Index management | Lowercase `s` status, `p` cost preview, `b` backfill, `t` retry, `r` rebuild; target and preview required before execution |
+| Conversation deletion confirmation | D/Space toggles descendants and requeries; Y executes when allowed; N/Esc cancel |
+| Action confirmation | Y confirms; N/Esc cancel |
+| Shutdown grace exceeded | W/Enter wait; F force confirmation, then Y force quit |
 
-会話一覧は1会話1行で、会話名・作業場所・状態・更新時刻を列で表示します。絞込みの文字はすぐに表示し、連続入力が150ms止まったところで取得します。Ctrl+Rの再取得は即時です。保存タイトルが空の場合は、最初のユーザーの依頼から短い会話名を表示し、その名前で絞り込めます。既存の明示タイトルや履歴は書き換えません。枝線は親子関係、`▾` / `▸` は展開／折りたたみ、`●` は閲覧中、`›` と背景色は選択項目を示します。左で子を閉じ、既に閉じているか葉なら親へ移動します。右で開き、既に開いていれば最初の子へ移動します。上下は表示中の行を辿り、選択は表示範囲へ追従します。
+The conversation list uses one row per conversation with name, working directory, state, and update time columns. Filter text appears immediately; fetching follows 150ms without typing. Ctrl+R refreshes immediately. An empty saved title displays a short name from the first user request, searchable by that name, without rewriting explicit titles or history. Branch lines show ancestry; `▾` / `▸` mean expanded/collapsed, `●` marks the open conversation, and `›` with background marks the selected item. Left collapses children or moves to the parent when already collapsed/a leaf. Right expands or enters the first child when already expanded. Up/Down traverse visible rows and keep selection in view.
 
-F8のThread設定では「タイトル操作」を `set` にしてタイトルを入力すると変更できます。`auto` は手動名を解除し会話由来の表示へ戻し、`keep` は維持します。CLIでは `shellboy thread set --thread THREAD --title '名前'`、解除は `--title ''` です。
+In F8 Thread settings, set `タイトル操作` (title action) to `set` and enter a title to rename. `auto` clears the manual name and returns to conversation-derived display; `keep` preserves it. CLI: `shellboy thread set --thread THREAD --title 'Name'`; clear with `--title ''`.
 
-下部の固定詳細に選択項目のcwd・ID・親・状態と、Markdown記法と改行を整えた1行・最大80文字程度の抜粋を表示します。狭い幅では列を省略し、詳細またはF1で完全値を確認します。会話全体はEnterで開き、原文はF6から取得できます。
+Fixed bottom details show the selection's cwd, ID, parent, state, and a one-line excerpt of roughly at most 80 characters with Markdown/newlines normalized. Narrow screens omit columns; details or F1 show complete values. Enter opens the conversation; F6 reads source.
 
-`[親未取得]` はページや絞込みの範囲に親がない場合です。PgDnで続きを追加すると、取得した親の下へ子をまとめます。取得済みの並びは更新順を基に親子でまとめており、完全な全件ツリーを保証する表示ではありません。上限2000件では絞込みを案内します。取得失敗時はCtrl+Rで再取得できます。検索・一覧閲覧だけでThreadの処理は停止しません。
+`[親未取得]` means the parent is outside the fetched page/filter scope. Adding pages with PgDn groups children under newly fetched parents. Fetched rows group ancestry based on update order; this is not a guaranteed complete tree. At 2000 entries, narrow the filter. Ctrl+R retries failed fetches. Searching/browsing does not stop Thread work.
 
-### 会話一覧から削除する
+### Deleting from the conversation list
 
-Ctrl+Tの会話一覧で保存済み会話を選び、DeleteまたはCtrl+Dを押すと削除の影響と確認が表示されます。macOSではfn+deleteがDeleteに相当し、通常のdelete/Backspaceは引き続き絞り込み文字を消します。
+In Ctrl+T's list, select a saved conversation and press Delete or Ctrl+D for impact and confirmation. On macOS, fn+delete means Delete; ordinary delete/Backspace still removes filter characters.
 
-子の会話も削除する指定は既定で無効です。確認画面のD／Spaceで切り替えた場合は影響を再取得します。最新の影響が削除可能と示すときだけYで実行でき、N/Escでは取り消します。live/stoppingのRun等で削除できない場合は理由を表示します。確認後に状態が変わっても実行時に再判定し、失敗は一覧に残します。
+Deleting child conversations is off by default. Toggling D/Space requeries impact. Only Y with the latest impact permitting deletion executes; N/Esc cancel. Reasons explain live/stopping Run blockers and similar restrictions. State is checked again during execution even after confirmation, and failures remain in the list.
 
-背景の会話を削除すると一覧の隣の行へ選択が移り、開いていた会話はそのままです。現在開いている会話を削除すると、その会話のTUI下書き等を破棄し、新しい下書きへ移ります。共有元の履歴や外部添付ファイルをまとめて削除する操作ではなく、履歴の回収は既存のGCに従います。未保存の下書き行はこのThread削除では扱いません。
+Deleting a background conversation selects an adjacent list row while leaving the open conversation intact. Deleting the open one discards its TUI draft state and moves to a new draft. This does not collectively delete shared source history or external attachment files; history reclamation follows existing GC. Unsaved draft rows are not handled by Thread deletion.
 
-会話一覧で削除が確定した後の後片付けだけが失敗した場合は、「削除しました。後片付けに失敗」と区別します。削除済み会話へ戻したり「削除できません」と再解釈しません。一覧を閉じた後の失敗/警告もstatusへ残します。削除中の同じ会話へ重ねて削除依頼は送れません。長いセッションで保持件数の上限に達した場合は、案内に従ってShellboyを再起動してください。
+When deletion is confirmed but only subsequent cleanup fails, the UI distinguishes `削除しました。後片付けに失敗` (deleted; cleanup failed). It does not restore the deleted conversation or reinterpret the result as inability to delete. Failures/warnings arriving after the list closes remain in status. Duplicate deletion of the same in-flight target is blocked. If a long session reaches the retention limit, restart Shellboy as instructed.
 
-画面中のS/P/B等の案内は小文字キーで操作します。索引の対象指定とpreviewの内容は[履歴と検索](history-and-search.md)を参照してください。
+Screen hints such as S/P/B use lowercase keys. See [history and search](history-and-search.md) for index target selection and preview.
 
-### 詳細から原文とリンクを読む
+### Read source text and links from details
 
-F6の「会話の詳細」では、各項目の番号・種別・本文抜粋から対象を選びます。モデル回答、shell呼出し/結果、状態変更を区別し、Enter後も選んだ内容を上部に表示します。上下で選んだ対象へO原文・Cコピーが作用し、F6で一覧へ戻ると同じ項目を選択します。操作フォームのEnter「送信」は照会・変更の依頼を送る操作です。変更に必要な確認は別途表示します。
+F6 `会話の詳細` (conversation details) selects by item number, kind, and excerpt. Model answers, shell calls/results, and state changes are distinct; the selected content remains above the fields after Enter. O and C act on the Up/Down-selected target; returning to the list with F6 preserves selection. Enter `送信` (submit) in an action form sends a query/change request; required mutation confirmation appears separately.
 
-1. F6（`/details`）で履歴項目を選び、Enterでその項目のfieldを開きます。node ID、tool引数、状態、変更前後などを読みます。長いIDは通常の会話行へ繰り返さず、この詳細に保持します。
-2. fieldを上下で選び、Cで値をコピーします。`[詳細は原文参照]` が付いた短縮値はコピーせず、原文画面へ進みます。Run/Turn/execution等の参照fieldはEnterで対応する照会フォーム、node参照は原文へ進めます。原文の前後・出典IDはF8の「履歴 · 原文」に指定して取得できます。
-3. Oで原文の先頭pageを取得します。Nで次page、Pで先頭へ戻り、Cは**現在pageの原文だけ**をコピーします。一度に全履歴や全rawを読み込む操作ではありません。pageは最大64KiBで、続きの有無と前後・出典参照を確認できます。shellの全rawはF8の「shell · 原文」からexecution・cursor・encodingを指定してください。
-4. F7（`/links`）又は詳細の小文字lで、現在項目のHTTP(S)リンクを選べます。Cは折返しや短いlabelに関係なく完全URLをコピーします。URL表示はネットワーク接続やブラウザー起動を行いません。この本文windowにリンクがない場合は、その旨を表示します。
+1. In F6 (`/details`), select a history item and Enter its fields: node ID, tool arguments, state, before/after values, and more. Full IDs remain here rather than repeating in ordinary conversation rows.
+2. Select fields with Up/Down and C to copy. A shortened value marked `[詳細は原文参照]` is not copied; proceed to source. Enter on Run/Turn/execution references opens the corresponding query form; node references open source. Use F8 `履歴 · 原文` for neighboring/source node IDs.
+3. O fetches the first source page; N next, P first. C copies **only the current source page**. This never loads all history or raw output at once. Pages are at most 64KiB, with continuation, neighboring, and source references. For full shell raw output, use F8 `shell · 原文` with execution, cursor, and encoding.
+4. F7 (`/links`) or lowercase l in details selects HTTP(S) links for the current item. C copies the complete URL regardless of wrapping/short labels. Display does not connect or launch a browser. An empty link set for the current body window is stated explicitly.
 
-shell結果の通常表示は、保持中のrawから確認できたstdout/stderrを別ブロックに分けます。本文中の「error」等の語でstreamを推測しません。これは表示用の有限な先頭抜粋で、続き・未回収部分の有無は詳細の「出力の表示範囲」に示します。raw回収済み、実行参照不明、表示準備の時間上限などで識別できない場合は、保存済みの統合抜粋と理由を残します。Oで得る保存原文や本文コピーを、この表示上の区別で書き換えることはありません。
+Ordinary shell results separate stdout/stderr blocks only when verified from retained raw output; words such as “error” do not determine the stream. This is a bounded leading display excerpt; `出力の表示範囲` (output display range) in details reports remaining/uncollected portions. When streams cannot be identified because raw was reclaimed, execution reference is unknown, or display preparation exceeded its deadline, saved combined excerpts and the reason remain. This visual distinction never rewrites saved source from O or body copies.
 
-F6で項目一覧へ戻り、Escで詳細を閉じます。下書きや元の閲覧anchorを変更する操作ではありません。原文回収済みなら理由を表示し、空の正常本文として扱いません。
+F6 returns to the item list; Esc closes details without changing draft or original reading anchor. Reclaimed source shows a reason rather than an empty successful body.
 
-リンクは対応端末の標準操作で開きます。修飾キーやtmux・マウス取り込みの影響は端末設定に従います。取り込みが妨げる場合はF2で端末選択モードへ切り替えるか、F7から完全URLをコピーしてください。端末側のブラウザー起動結果をShellboyが確認したとは表示しません。
+Open links using standard terminal controls; modifiers, tmux, and mouse capture follow terminal settings. If capture interferes, use F2 terminal selection or copy the full URL from F7. Shellboy does not claim to verify browser launch success.
 
-### 復旧待ち
+### Recovery wait
 
-原因・未反映指示・保存済みツール結果は、一時通知と別に会話下部へ残ります。`/retry`で現在の復旧待ちを同じ内容で再試行、入力して送信すると新しい指示で再開、`/stop`またはCtrl+Cで停止します。F8のRun再試行・停止の既定対象は現在の作業です。詳しくは[復旧・保存](recovery-and-storage.md#復旧待ちを再開する)を参照してください。
+Reasons, unapplied instructions, and saved tool results remain below the conversation separately from transient notifications. `/retry` retries the current recovery wait with the same content; typing and sending resumes with a new instruction; `/stop` or Ctrl+C stops. F8 Run retry/stop defaults to current work. See [resuming recovery wait](recovery-and-storage.md#resuming-recovery-wait).
 
-### 管理結果のfieldと詳細page
+### Management result fields and detail pages
 
-回答の通常詳細では、既知の形式の本文・状態・参照を中心に表示し、単一配列の段数や既定の内部値を整理します。Vで保持中の内部項目へ切り替え、Oで本文の原文を確認できます。選択した本文やIDのCコピーは元の値を保持します。
+Ordinary answer details emphasize known-format body, state, and references, simplifying single-array nesting and default internal values. V shows retained internal fields; O reads source. C preserves original text/ID values.
 
-F8の操作、検索、添付・索引・保存管理の結果は、field名と値、配列の件数を持つ構造化表示です。通常の結果画面へJSON全文を貼り付ける方式ではありません。Tab / Shift+Tabでfieldを選び、Enterでその値の詳細を取得します。「全結果の詳細」を選べば、通常表示の上限を超えた未知fieldも順に読めます。
+F8 actions, searches, attachment/index/storage management results use structured field names, values, and array counts rather than dumping full JSON. Tab / Shift+Tab select a field; Enter fetches its details. `全結果の詳細` (full result details) also exposes unknown fields beyond ordinary display limits.
 
-一覧でCを押したときも、`[詳細は原文参照]` が付いた短縮値はコピーせず詳細を取得します。省略記号を完全値としてclipboardへ渡しません。
+C on a shortened `[詳細は原文参照]` value fetches details instead of copying; omission marks never become a purported complete clipboard value.
 
-詳細内ではNで次page、Pで先頭、上下/PgUp/PgDnで現在page内をスクロールします。Cは現在pageの本文をコピーし、Escでfield一覧、もう一度Escで会話へ戻ります。短いpreviewや省略表示を全文と取り違えず、完全値が必要なら詳細pageを取得してください。「この操作の受付ID」（`request_operation_id`）はその照会・操作自体のIDで、F8の「操作 · 受付結果」で確認できます。messageやRunのIDとは別です。
+Inside details, N gets the next page, P the first, and Up/Down/PgUp/PgDn scroll the current page. C copies that page; Esc returns to fields, then Esc to the conversation. Fetch detail pages when a complete value is required rather than treating a preview as the full text. `この操作の受付ID` (`request_operation_id`) identifies that query/action itself and can be inspected with F8 `操作 · 受付結果`; it differs from message and Run IDs.
 
-保持する詳細は直近の結果一つです。新しい結果で古い詳細を置き換え、古い結果への遅い要求は採用しません。本文cache予算を超えて詳細を保持できない場合は、未保持と再取得方法を表示します。対象node/executionを使った原文page取得、または対象範囲を絞った照会へ進んでください。資格情報や返却されないopaque推論を閲覧する入口ではありません。
+Only the most recent result's details are retained. A new result replaces old details; late requests for old results are discarded. If body-cache limits prevent retention, the UI reports it and explains refetching. Read source pages using the node/execution or narrow the query. This is not a route to credentials or opaque reasoning that was never returned.
 
-管理結果のEscは表示を閉じます。受付済み操作の取消しにはなりません。Runの停止は `/stop`、待機観測だけをやめる操作は `/cancel-wait` で区別します。
+Esc closes management display without cancelling an accepted operation. `/stop` stops the Run; `/cancel-wait` only stops observing a wait.
 
-### 操作フォームで入力する
+### Entering action forms
 
-F8（`/actions`、`/operations`）は「この会話で」「よく使う」「すべての操作」の順に全36操作を表示します。人向け名・CLI名・関連するslashを文字入力や貼付けで絞り込めます（128文字まで）。上下とEnterでフォームを選び、fieldごとに対象IDや引数を入力します。会話状態の更新は次に開くフォームの候補へ反映し、編集中の対象を置き換えません。参照元から開いた対象IDも保持します。候補は受付可能性の保証ではないため、実行前に対象を確認してください。表示したslashは関連する近道です。`/attach`は下書きへの追加、F8の添付追加は保存操作です。
+F8 (`/actions`, `/operations`) lists all 36 actions grouped as current-conversation, common, and all actions. Type/paste up to 128 characters to filter human names, CLI names, and related slash actions. Choose with Up/Down and Enter, then enter target IDs/arguments per field. Conversation-state updates affect suggestions in the next form, not the target currently being edited; IDs opened from references also remain fixed. Suggestions do not guarantee acceptance: verify the target before submission. Shown slash actions are related shortcuts; `/attach` adds to the draft whereas F8 attachment-add is a saved operation.
 
-「履歴 · 検索」はThread・kind/除外kind（空白区切り）・作成日時from/to（offset付きRFC3339）のfilterを指定できます。Thread空欄は全体で、現在Threadを自動設定しません。`/search QUERY` は従来どおり全体検索です。「履歴 · 関係」はnodeとprevious/next/sources/replacements、件数、cursorを指定します。結果の出典情報・原文revision・索引区間は構造化fieldから確認します。検索範囲と関係の意味は[履歴と検索](history-and-search.md)を参照してください。
+`履歴 · 検索` accepts Thread, kind/excluded kind (space-separated), and creation from/to (offset-bearing RFC3339) filters. An empty Thread means global, never automatically current Thread. `/search QUERY` remains global. `履歴 · 関係` takes node, previous/next/sources/replacements, count, and cursor. Structured fields expose provenance, source revision, and indexed spans. See [history and search](history-and-search.md) for scope and relation semantics.
 
-F8の「Thread · 削除影響」はThreadと子孫の指定で、削除阻害Run・参照数・共有・更新日時を照会します。実削除の確認画面は開かず、照会後も削除操作の再判定が必要です。回収可能容量は未見積もりとして表示します。get結果のcontextと、操作受付照会のtargets/downstreamは構造化fieldから確認できます。受付完了と後続完了は区別してください。
+F8 `Thread · 削除影響` queries blocking Runs, reference counts, sharing, and update time for a Thread/descendant choice. It does not open actual deletion confirmation, and execution still requires a new deletion check. Reclaimable size is unestimated. Structured fields expose get-result context and operation targets/downstream. Distinguish acceptance from downstream completion.
 
-文字はfield末尾へ入力・貼付けします。候補IDなどを置き換えるときはCtrl+Uでfieldを空にしてから入力します。Backspaceは末尾の文字を削除します。依頼本文・stdin本文の複数行fieldではCtrl+Jが改行です。**Enterは改行ではなく操作依頼の送信**なので、貼付け後も内容を確認してから押してください。フォーム入力の合計は1MiBまでで、超過時は既存値を保持します。
+Typing/paste appends to a field. Ctrl+U clears a suggested ID before replacement; Backspace removes its last character. Multiline request/stdin fields use Ctrl+J for newline. **Enter submits the action request, not a newline**: inspect pasted content before pressing it. Total form input is limited to 1MiB; overflow preserves existing values.
 
-真偽値や選択肢は左右/Spaceで選びます。空欄の意味や必要な引数は操作ごとに異なり、検証エラーはフォームに表示します。Thread削除・保存回収は確認、索引変更は対象と費用previewの確認を経て実行します。その他も「受付」と対象処理の「完了」を分けて結果を読んでください。[CLI辞書](cli-reference.md) は同じ操作の条件・状態を説明しています。
+Use Left/Right/Space for booleans/choices. Empty-field semantics and required arguments vary per action; validation errors remain in the form. Thread deletion/storage reclamation require confirmation; index mutation requires target and cost preview. For other results too, distinguish acceptance from target completion. [CLI reference](cli-reference.md) explains the same conditions/states.
 
-### 待機の取消しと対象の中断を区別する
+### Cancelling observation versus interrupting its target
 
-F8の「待機 · 条件を観測」で条件の種類と対象IDを指定します。F9で条件を追加すると対象欄を空にし、F10で追加済みの最後を削除します。実行時に対象欄に残っている条件も加え、いずれかの成立を待ちます。timeoutや `recovery_wait` を含め、結果のstatusとsnapshotを確認します。
+In F8 `待機 · 条件を観測`, choose a condition kind and target ID. F9 adds it and clears the target field; F10 removes the last added condition. Submission includes any condition still in the target field and waits for any condition. Inspect result status and snapshot, including timeout and `recovery_wait`.
 
-管理画面の**小文字w**、又は会話入力から `/cancel-wait` で、TUIから開始した明示waitの観測だけを取消します。対象のRunやshellは続きます。Escで画面を閉じることは観測取消ではありません。**Ctrl+Cは現在Threadの実行中断**なので、単に待つのをやめたいときには使わないでください。
+**Lowercase w** in management or `/cancel-wait` in conversation input cancels only observation of an explicit wait started by the TUI. Its Run/shell continues. Esc merely closes display. **Ctrl+C interrupts the current Thread**; do not use it merely to stop waiting.
 
-### 端末選択と本文コピー
+### Terminal selection and body copy
 
-F2又は`/select`では履歴描画を固定し、マウス取り込みを解除します。端末標準の範囲選択・コピーを使い、F2又はEscで戻ります。OS/端末のコピーキーがCtrl+Cを先に処理することもありますが、ShellboyへCtrl+Cが届けば中断として扱います。Ctrl+Qは選択モードからも終了を開始します。
+F2 or `/select` freezes history rendering and releases mouse capture. Use terminal-native range selection/copy; F2 or Esc returns. OS/terminal copy shortcuts may intercept Ctrl+C, but if Shellboy receives it, it interrupts. Ctrl+Q begins shutdown even in selection mode.
 
-`/copy`は表示placeholderではなくDBの原文を取得します。本文全体のコピーは64KiBを超えるとエラーになり、`history get`でpage取得するよう案内します。コードblock番号と字下げはMarkdown表示と同じ解析に従います。原文を最後まで取得済みならEOFで終わるblockも対象です。取得pageが途中の場合、末尾の未完blockはコピーせず原文の続きを取得するよう案内します。OS clipboard又はOSC52の選択、remote端末の制約は[設定](configuration.md)を参照してください。
+`/copy` fetches DB source rather than a display placeholder. Whole-body copies over 64KiB fail with instructions to page via `history get`. Code-block indices/indentation use the same parser as Markdown display. An EOF-ended block is eligible if the entire source has been fetched. With an intermediate page, an unfinished trailing block is not copied; fetch more source first. See [configuration](configuration.md) for OS clipboard/OSC52 selection and remote-terminal limitations.
 
-## AGENTS.mdとAgent Guide
+## AGENTS.md and Agent Guide
 
-Threadの`AGENTS.md`は作業指示で、新Turnで読みます。Agent GuideはShellboy内のモデルにCLIの使い方を教える文書です。Agent Guideは自動注入されないため、委譲などを頼む時は[User Guide](user-guide.md#5-子へ委譲する)のように実在するパスを指定して読ませます。このrepo直下のAGENTS.mdを「全利用者共通のAgent Guide」として扱わないでください。
+A Thread's `AGENTS.md` supplies work instructions read at each new Turn. The Agent Guide teaches Shellboy's model how to use the CLI; it is not automatically injected. When requesting delegation, name a real path for the model to read, as in [User Guide](user-guide.md#5-delegate-to-a-child). Do not treat this repository's root AGENTS.md as a universal Agent Guide for all users.
 
-添付は下書きのカーソル位置に `[画像: ファイル名]` / `[添付: ファイル名]` として入ります。左右キーでその前後へ移動して本文を書けるので、「説明前→画像→説明後」の順で送れます。chipの前でDelete、後ろでBackspaceを押すと、その下書き添付も外れます。送信後の出典や外部ファイルは削除しません。古い保存下書きの位置なし添付は、従来どおり本文の末尾になります。
+Attachments appear at the draft cursor as `[画像: ファイル名]` / `[添付: ファイル名]` (image/attachment chips). Left/Right move around them, allowing “description → image → description” order. Delete before or Backspace after a chip removes that draft attachment without deleting sent provenance or external files. Older saved drafts lacking positions continue placing attachments at the body end.
 
-上下キーで別の送信本文を呼び出している間、手元の未送信添付は呼び出した本文の末尾へ置きます。最新の次へ戻すと、書きかけだった下書きの本文・添付位置も元どおり復元します。原依頼の添付を含む順序で編集する場合は `/edit`、送信snapshotを元位置へ復元する場合は `/restore` を使います。
+During sent-text recall with Up/Down, current unsent attachments move to the recalled text's end. Moving past the newest restores the unfinished draft text and original attachment positions. Use `/edit` to edit in the original request's attachment order, or `/restore` to restore a send snapshot to original positions.
 
-## 保存した受信記録を読む
+## Reading saved receive records
 
-`/received` は現在の会話に保存した受信記録を新しい順に32件ずつ表示します。`/received 2` のようにページ番号を指定でき、一覧内の前／次ページもEnterで開けます。総件数とページを表示し、任意の項目を選んでEnterを押すと、保存原文JSONを既存の原文画面で読みます。Nで次の原文ページ、Pで先頭、Cで現在ページをコピーします。IDを覚える必要はありません。
+`/received` lists receive records for the current conversation newest first, 32 per page. Specify a page with `/received 2`; previous/next list-page entries also open with Enter. The list shows count/page; select an item and Enter to read its saved JSON in the existing source viewer. N continues source pages, P returns to the first, C copies the current page. No memorized ID is required.
 
-失敗した要求は「途中で切れた応答（保存済み・会話には含めない）」として、受信済みの読める推論・回答を表示します。成功した要求の途中内容と最終応答の差は「ストリーム差分・最終確定済み」と区別します。通常の会話には最新2件の表示窓を保持し、古い記録と省略部分は一覧から読めます。元のTurnが復旧待ちの間だけ注意色にし、回復・停止後は通常通知にします。一覧はローカル時刻と同じTurnの依頼抜粋で見分けられます。会話の再選択や再起動後も、保存済み記録から表示を復元します。
+Failed requests display readable received reasoning/answers as `途中で切れた応答（保存済み・会話には含めない）` (interrupted response, saved but excluded from conversation). Differences between streaming and final content on successful requests are marked `ストリーム差分・最終確定済み` (stream difference, final adopted). Ordinary conversation retains display windows for the latest two records; older records and omitted portions remain accessible in the list. Attention color applies only while the original Turn is in recovery wait, becoming a normal notification after recovery/stop. Local time and the same Turn's request excerpt identify records. Reselecting a conversation or restarting reconstructs display from saved records.
 
-これらは監査用の受信記録で、モデルへ再送する採用履歴には入りません。表示窓は原文JSONそのものではなく、本文・推論を取り出した抜粋です。原文には受信途中の本文、完了item、最終応答、失敗や差分の情報を保ち、暗号化された推論は画面の本文へ展開しません。
+These are receive-audit records, excluded from adopted history resent to the model. Display windows extract text/reasoning excerpts rather than showing source JSON itself. Source retains partial text, completed items, final response, and failure/difference information. Encrypted reasoning is never expanded as screen text.

@@ -1,14 +1,16 @@
-# 文書案内
+# Documentation
 
-製品を使う人は [User Guide](guides/user-guide.md)、Shellboy内のモデルは [Agent Guide](guides/agent-guide.md)、開発者は [適用仕様](design/effective-spec.md) から読みます。
+Product users start with the [User Guide](guides/user-guide.md) ([Japanese](guides/user-guide.ja.md)). Models running inside Shellboy use the English-only [Agent Guide](guides/agent-guide.md). Developers start with the [effective specification](design/effective-spec.md).
 
-| 配置 | 内容 | 更新規約 |
-|---|---|---|
-| `guides/` | 同梱する操作ガイド | 実際のCLI・設定・表示に合わせる。`src/docs.rs` が本文を組み込むためビルド時も必要 |
-| `design/` | 採用仕様・実装設計 | 公開型・設定・migration・実装と照合し、契約変更を先に記録する |
-| `development/` | セットアップ・現在地・判断理由 | 個人環境の設定・資格情報・私的ログを含めない |
-| `validation/` | 確認手順と実施状況 | 対象source・環境・結果・未実施を分け、手順だけで合格としない |
+English is the default for documentation. Japanese user-facing guides use the same basename with `.ja.md`; unsuffixed guide files are English. Existing Japanese design and historical records remain available; this language change does not claim to translate the entire development archive. New documents are written in English. See the [language policy and UI evaluation](design/documentation-language.md).
 
-[設計一覧](design/README.md)、[開発環境](development/setup.md)、[開発状況](development/status.md)、[判断記録](development/decisions.md)、[公開構成](development/publication.md)、[検証状況](validation/acceptance.md) を用途に応じて参照してください。
+| Directory | Contents | Maintenance rule |
+| --- | --- | --- |
+| `guides/` | Product operation guides | Match the actual CLI, configuration, and display. `src/docs.rs` embeds the English guide bodies, so they are required at build time. Keep Japanese translations aligned when changing a user guide. |
+| `design/` | Adopted specifications and implementation designs | Check public types, configuration, migrations, and implementation; record contract changes first. |
+| `development/` | Setup, status, and decision records | Exclude personal configuration, credentials, and private logs. |
+| `validation/` | Verification procedures and observations | Separate source, environment, results, and untested cases. A procedure alone is not a passing result. |
 
-公開版はここにある採用設計を基準とします。非公開の引継ぎ資料や過去レビュー台帳をビルド・開発・利用の前提にしません。実装の移動だけで契約を変更せず、未実施の検証を過去の結果で埋めません。
+Use the [design index](design/README.md), [setup](development/setup.md), [status](development/status.md), [decision log](development/decisions.md), [publication layout](development/publication.md), and [verification record](validation/acceptance.md) as needed.
+
+The public repository's adopted designs are the development baseline. Private handoff material and old review ledgers are not prerequisites for building, developing, or using Shellboy. Moving code does not change a contract; previous results do not fill gaps in current validation.

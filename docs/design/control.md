@@ -278,4 +278,4 @@ production TUIは起動前に既存action mailboxへownerのtool-start gateをbi
 
 ## 会話HTTPの有限再試行
 
-未受信の一時失敗は [model HTTP](model-http.md#未受信の一時失敗の再試行issue-7) の条件に限り既存Driverで再試行する。failed attempt保存後にThread境界を解放して取消し可能な待機を行い、次の通常受付でgeneration/選択/容量/添付を再検証する。context超過が明示されている場合は圧縮を優先する。既存の復旧待ちを時間だけで再開しない。
+未受信の一時失敗は [model HTTP](model-http.md#会話の連続一時失敗の再試行issue-711) の条件に限り既存Driverで再試行する。failed attempt保存後にThread境界を解放して取消し可能な待機を行い、次の通常受付でgeneration/選択/容量/添付を再検証する。context超過が明示されている場合は圧縮を優先する。既存の復旧待ちを時間だけで再開しない。

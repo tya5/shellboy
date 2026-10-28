@@ -84,7 +84,7 @@ PTY、MCP、permission engine、web UI、archive、成果物専用機構、pipel
 
 ## 人向けの状態と復旧契約
 
-通常画面は [User Guideの概念対応](../guides/user-guide.md#会話と作業状態の読み方) に従い、
+通常画面は [User Guideの概念対応](../guides/user-guide.md#conversations-and-work-states) に従い、
 内部IDを常に読み解く必要がない表示にする。詳しいID・原文・理由を失わない。
 現在の処理と、過去に選択した管理結果の参照対象は別に保持する。古い結果を開いても現在の停止/復旧対象は変えない。
 
@@ -113,3 +113,5 @@ Issue #19の削除確定と後片付け警告は[Thread一覧](thread-browser.md
 Issue #24の内部形式変換の廃止と原本付きingestは[Docs/RAG](docs-and-rag.md)、#25/#26の末尾採用・CAS・DB v10の索引は[経路とhot query](history-adoption-performance.md)、#27/#28の有限readonly検索と出力通知は[readerとwait](history-search-readers-and-waits.md)に従う。新しい一次情報の表や汎用pool/ジョブengineは作らない。独立RAGはschema 3へ前進し、会話DBのmigrationとは分ける。
 
 Issue #29/#30のrender-unit再利用、可視範囲の幅再描画、有限outboxとUI専用購読は[描画・配送設計](tui-render-delivery-performance.md)に従う。layout予算は既存合計を維持し、重要結果は最新状態へ集約しない。新しい永続表/worker/event型は作らず、有限UI channelの所有とpriority終了経路を明示する。
+
+English is the default documentation language. Unsuffixed guides and the bundled docs catalogue are English; Japanese user guides use `.ja.md`, and the Agent Guide is English only. See [documentation language and the UI evaluation](documentation-language.md). The UI remains unchanged; the bilingual UI recommendation is a future implementation proposal, not a current configuration contract.

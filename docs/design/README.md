@@ -11,3 +11,5 @@
 - ガイド・文書検索: [ガイド構成](guides.md)、[docs/RAG採用仕様](docs-and-rag-spec.md)、[docs/RAG実装](docs-and-rag.md)
 
 各設計では責務・不変条件・上限・所有者・失敗時の扱いを保ちます。設計の存在と動作検証の成功は別です。[現在地](../development/status.md) と [検証状況](../validation/acceptance.md) を確認してください。
+
+- Documentation language and future UI options: [English defaults and Japanese translations](documentation-language.md).

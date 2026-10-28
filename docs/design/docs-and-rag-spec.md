@@ -14,7 +14,7 @@
 Markdown 本文、見出し、内部リンクを取得できる。IDと配置パスは分離する。
 モデルへの常時提示は一覧・検索の短い案内のみ。全文は必要時に読む。
 
-検索は既定で keyword。日本語の2文字語と英数字記号のliteral部分一致を扱う。
+Search defaults to keyword over the English bundled catalogue. Matching remains Unicode-aware, case-insensitive literal substring search, including Japanese literals where present; queries are not translated. See the [documentation language policy](documentation-language.md).
 Embedding 不在時にも使える。semantic/hybrid は `rag search` で明示選択する。
 一覧は既定50、最大200、検索は既定10、最大100件。
 本文は既定16KiB、最大64KiBのUTF-8境界付きページ。
@@ -77,7 +77,7 @@ ownerのoperation receiptへ登録せず、`--operation-id`併用は拒否する
 
 ## 完了条件
 
-1. repo外cwd、owner/API/設定無しで階層閲覧と日本語keyword検索。
+1. repo外cwd、owner/API/設定無しで英語catalogueの階層閲覧とkeyword検索。Unicode本文は引き続きliteral検索・UTF-8境界を検証。
 2. 新規モデルが短い入口からガイドを自ら読み、shell/子への依頼を正しいIDで実行。
 3. text/PDF/DOCX/PPTX/XLSXおよび第三者adapterから検索→同版get。
 4. 差分同期、消失、読取失敗、版保持、派生ingest、dry-runとAPI呼出し省略。

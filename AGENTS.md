@@ -1,26 +1,27 @@
-# Shellboy 開発ガイド
+# Shellboy development guide
 
-このファイルはShellboy自体の開発指示です。製品の利用者は [User Guide](docs/guides/user-guide.md)、Shellboy内のモデルは [Agent Guide](docs/guides/agent-guide.md) を参照してください。リンク先は自動展開されません。
+This file contains instructions for developing Shellboy itself. Product users should start with the [User Guide](docs/guides/user-guide.md); models running inside Shellboy should read the [Agent Guide](docs/guides/agent-guide.md). Linked files are not expanded automatically.
 
-## 作業の基準
+## Working baseline
 
-- 最初に [適用仕様](docs/design/effective-spec.md) を読み、対象領域の採用設計へ進む。公開型・設定・migration・fixtureと設計を照合し、矛盾は設計へ先に反映する。
-- 現在地は [開発状況](docs/development/status.md)、検証済みと未実施の区別は [検証状況](docs/validation/acceptance.md) に記録する。過去の試験や文書の存在を現変更の成功として扱わない。
-- 通常の判断は自律的に行う。確信が弱い判断は [判断記録](docs/development/decisions.md) に理由・影響・再確認条件を残す。
-- 文書は [配置と更新規約](docs/README.md) に従う。採用設計はこのリポジトリだけで参照できる状態を保つ。
+- Read the [effective specification](docs/design/effective-spec.md) first, then the adopted designs for the area you are changing. Check public types, configuration, migrations, fixtures, and implementation against the design; record contract changes before implementing them.
+- Keep the [development status](docs/development/status.md) current. Record verified and untested behavior separately in [acceptance](docs/validation/acceptance.md). An existing document or an earlier successful test does not prove the current change works.
+- Make routine decisions autonomously. Record uncertain decisions, their reasoning, impact, and conditions for revisiting them in the [decision log](docs/development/decisions.md).
+- Follow the [documentation layout and maintenance rules](docs/README.md). Adopted designs must be usable from this repository alone.
+- English is the default for new documentation and development instructions. User-facing guide translations use `name.ja.md`; the Agent Guide is English only. Follow the [documentation language policy and UI evaluation](docs/design/documentation-language.md). Existing Japanese UI labels are unchanged until a separate implementation task.
 
-## 実装の境界
+## Implementation boundaries
 
-- Rust / Ratatui / Crossterm / Tokio / bundled SQLite / sqlite-vecを使う。固定ツールチェーン・依存変更には理由と検証結果を残す。
-- UIのメインOSスレッドにI/O、DB操作、join、キュー空き待ちを置かない。共有async runtime、専用DB worker、有限blocking file workerへ分ける。
-- モデル向けツールはshellのみ。履歴・送信・子・待機・添付は `shellboy` CLI経由とする。
-- 状態確定・永続化・取消し・遅着は [Control設計](docs/design/control.md) と対象設計の順序を維持する。新しい表・event・worker・queue・依存には必要性・上限・所有者・終了責任を記録する。
-- 通常のRust moduleを使い、汎用Repositoryや独立ジョブエンジンを追加しない。未実装をstubの成功で隠さない。
-- 資格情報、ローカルDB、実会話、私的ログをGitへ入れない。改名前のコマンド・環境変数・保存先への互換経路は追加しない。
+- Use Rust, Ratatui, Crossterm, Tokio, bundled SQLite, and sqlite-vec. Record the reason and validation for changes to the pinned toolchain or dependencies.
+- Keep I/O, database work, joins, and waits for queue capacity off the UI's main OS thread. Use the shared async runtime, dedicated database worker, and bounded blocking file workers.
+- Expose only the shell tool to models. Use the `shellboy` CLI for history, messaging, children, waiting, and attachments.
+- Preserve the ordering of state adoption, persistence, cancellation, and late results in the [Control design](docs/design/control.md) and relevant subsystem designs. For every new table, event, worker, queue, or dependency, document why it is necessary, its bounds, owner, and shutdown responsibility.
+- Use ordinary Rust modules. Do not add a generic Repository or independent job engine. Do not hide incomplete behavior behind successful stubs.
+- Keep credentials, local databases, real conversations, and private logs out of Git. Do not add compatibility paths for the former product's command names, environment variables, or default storage locations.
 
-## 検証と引継ぎ
+## Validation and handoff
 
-- 変更に応じた検証を実施する。標準チェックは `sh scripts/check.sh` または `./scripts/check.ps1`。手順は [開発環境](docs/development/setup.md) に記載する。
-- 一時DB・合成fixture・ローカルmockを優先する。実APIの課金や利用者の保存データの変更を通常の確認に混ぜない。
-- 実行環境・コマンド・結果・未実施を区別し、実機がないOSや端末をmock成功で合格としない。
-- 意味のある単位でローカルcommitを作る。push・リリースは利用者の明示指示に従う。既存レビュー対応を引き継ぐ場合は [台帳の運用](docs/development/maintenance.md) を確認する。作業後は開発状況を更新し、再開点を明確にする。
+- Run checks appropriate to the change. The standard checks are `sh scripts/check.sh` or `./scripts/check.ps1`; see [development setup](docs/development/setup.md).
+- Prefer temporary databases, synthetic fixtures, and local mocks. Do not mix paid API calls or modifications to user data into routine verification.
+- Distinguish the environment, command, observed result, and untested cases. A mock does not establish success on an unavailable OS or terminal.
+- Make local commits at meaningful boundaries. Push or release only when the user explicitly requests it. For existing review work, follow the [review ledger process](docs/development/maintenance.md). Update the development status and leave a clear continuation point.

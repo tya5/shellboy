@@ -1,10 +1,10 @@
-# 復旧・停止・ストレージ
+# Recovery, stopping, and storage
 
-[ガイド一覧](README.md) / [User Guide](user-guide.md) / [Agent Guide](agent-guide.md)
+[Guide index](README.md) / [User Guide](user-guide.md) / [Agent Guide](agent-guide.md)
 
-返事が止まったときは、同じ依頼を繰り返し送る前に保存済みの受付・Turn・Runを確認します。CLIは本体を起動したまま別の端末から使います。以下はBashの例で、IDは実際の応答へ置き換えます。
+When responses stop, inspect saved acceptance, Turn, and Run state before repeatedly sending the same request. Use the CLI in another terminal while the owner remains running. Examples below use Bash; replace IDs with values from actual responses.
 
-## 受付と完了を分けて調べる
+## Distinguish acceptance from completion
 
 ```sh
 shellboy thread list
@@ -14,113 +14,106 @@ shellboy turn get --turn TURN_ID
 shellboy run get --run RUN_ID
 ```
 
-| 観測対象 | 分かること | 取り違えないこと |
+| Observation | What it means | Avoid this confusion |
 |---|---|---|
-| CLIの `ok: true` | 指定操作の受付や照会が成立した | モデル回答・shell・索引処理の成功とは別 |
-| messageの `accepted` / `held` | 本文は保存済み / 保存済みで実行保留 | 同じ本文を新規送信して重複させない |
-| messageの `applied` | モデル入力へ反映された | 回答が完了したとは限らない |
-| messageの `cancelled` | その指示は取消扱いになった | 原因を調べて次の指示を判断する |
-| `assignment: pending` | Run/Turnはまだ未割当 | IDを推測せず `message get` で確認する |
-| Turnの `completed` | 通常回答が確定した | 背景shellや子Runが終わったとは限らない |
-| Runの `live` | 実行寿命が続いている | 回答前だけでなく所有する背景作業待ちも含む |
-| Turnの `recovery_wait` | 失敗理由を保存して明示判断を待っている | 時間経過や設定変更だけでは再開しない |
+| CLI `ok: true` | The specified acceptance or query succeeded | Does not imply a successful model answer, shell, or indexing job |
+| Message `accepted` / `held` | Body saved / saved with execution held | Do not duplicate it with another new send |
+| Message `applied` | Included in model input | Answer may not be complete |
+| Message `cancelled` | Instruction treated as cancelled | Investigate the cause before deciding the next instruction |
+| `assignment: pending` | Run/Turn not assigned yet | Check `message get` rather than guessing IDs |
+| Turn `completed` | Normal answer finalized | Background shells or child Runs may still be active |
+| Run `live` | Execution lifetime continues | Includes waiting for owned background work after answering |
+| Turn `recovery_wait` | Failure reason saved, awaiting an explicit decision | Time or configuration changes alone do not resume it |
 
-回答は `answer_node_id` が返されたら `shellboy history get --node NODE_ID` で取得します。長い本文は `next_cursor` を使って続きも読みます。状態が終端でも `failed` / `stopped` を成功回答と扱わないでください。
+When `answer_node_id` is returned, retrieve it with `shellboy history get --node NODE_ID`. Follow `next_cursor` for long bodies. Terminal `failed` / `stopped` states are not successful answers.
 
-TUIではF8の「待機 · any条件」から開始し、管理画面の小文字w又は `/cancel-wait` で観測だけを取消せます。Escで画面を閉じても対象を停止しません。Ctrl+Cは現在Threadの実行中断なので区別してください。[待機の画面操作](tui.md#待機の取消しと対象の中断を区別する) を参照してください。
+In the TUI, start via F8 `待機 · any条件` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
 
-実行待ちには `shellboy wait` を使えます。`timeout` は対象の停止や失敗ではありません。`satisfied` も対象の成功とは限らないため、同じ返却値のsnapshotと状態を確認します。[委譲](delegation.md) と [CLI reference](cli-reference.md) にJSON形式と状態別の分岐があります。
+Use `shellboy wait` to wait for execution. `timeout` does not mean the target stopped or failed. `satisfied` need not mean target success: inspect the returned snapshot and state. [Delegation](delegation.md) and [CLI reference](cli-reference.md) show JSON and state-dependent branches.
 
-## 一時的なモデル通信失敗の自動再試行
+## Automatic retries for temporary model communication failures
 
-一時的な通信失敗が続く場合、既定で連続8回まで自動で追加試行します。TUIの「一時的なエラーのため再試行中」は待機中の通常表示です。Ctrl+CやRun停止で待機を取り消せます。上限に達すると最後のエラーと回数を示して復旧待ちになります。最終responseの採用成功で連続失敗回数をリセットするため、tool処理を含む長い会話全体で8回という制限ではありません。
+Temporary communication failures trigger up to eight consecutive additional attempts by default. TUI `一時的なエラーのため再試行中` (retrying a temporary error) is a normal waiting display. Ctrl+C or stopping the Run cancels the wait. Exhausting the budget enters recovery wait with the latest error and count. Successful final-response adoption resets consecutive failures; this is not an eight-retry cap over an entire long conversation/tool loop.
 
-対象はHTTP429・500・502・503・504と一時的な接続失敗・通信切断・EOF・受信停滞timeoutです。既定では部分出力があっても再試行し、受信済み本文は失敗attemptへ保全します。最終responseの採用前のtool callは実行しません。認証・設定・形式・明示provider失敗などの恒久エラーは自動再送しません。HTTPエラー本文はモデル出力とは区別します。
+Eligible failures are HTTP 429/500/502/503/504 and temporary connection failures, disconnects, EOFs, and receive-idle timeouts. By default, partial output also retries, with received text preserved in the failed attempt. Tool calls are not executed before final-response adoption. Permanent authentication, configuration, format, or explicit provider failures are not automatically resent. HTTP error bodies are distinct from model output.
 
-HTTP429・500・502・503・504のヘッダーを受信した後、エラー本文の読み取り中に停滞timeoutや通信切断になった場合も、保存済みのHTTP statusを使って再試行を判定します。HTTP400・401・403などは、本文取得のtimeoutだけを理由に再送しません。
+If headers for HTTP 429/500/502/503/504 have arrived and reading their error body stalls or disconnects, the saved HTTP status still determines retry eligibility. HTTP 400/401/403 and similar responses do not retry solely because their body retrieval timed out.
 
-接続別の `response_max_retries = 0` で自動再試行を無効化できます。`response_retry_partial = false` は部分出力がある失敗だけを復旧待ちにし、metadataやheartbeatのみで出力がない通信失敗は再試行します。指数待機上限は `response_retry_max_delay_ms`（既定60000）、サーバーの `Retry-After` は別の固定10分上限です。[設定](configuration.md)を参照してください。上流で処理が進んでいた場合、再試行によって料金が重複する可能性があります。失敗attemptには回数・待機・この可能性を保存します。自動再試行が終わった復旧待ちは、時間経過だけでは再開しません。 Retry-Afterが600秒（10分）を超える場合、600秒に短縮して再送せず、指定待機時間を保存・表示して復旧待ちにします。
+Per-connection `response_max_retries = 0` disables automatic retries. `response_retry_partial = false` sends only partial-output failures to recovery wait; communication failures containing metadata/heartbeats without output remain retryable. `response_retry_max_delay_ms` caps exponential delay (default 60000); server `Retry-After` has a separate fixed ten-minute cap. See [configuration](configuration.md). Retries may duplicate charges when upstream processing already occurred. Failed attempts save the count, delay, and this possibility. Recovery wait after automatic retries does not resume merely with time. Retry-After over 600 seconds is preserved/displayed and enters recovery wait rather than being shortened to 600 seconds and resent.
 
-部分出力には画面へ表示される本文だけでなく、`response.output_item.added` で受信したreasoning項目、暗号化されたreasoning（`encrypted_content`）も含みます。`response_retry_partial = false` の場合、推論の項目を受信した後の通信失敗は、可視本文が空でも復旧待ちになります。
+Partial output includes not only visible body text but reasoning items received via `response.output_item.added`, including encrypted reasoning (`encrypted_content`). With `response_retry_partial = false`, a communication failure after such an item enters recovery wait even when visible text is empty.
 
-自動再試行は長時間続く場合があります。例えば各試行が既定の受信停滞600秒で失敗し、`Retry-After` がない場合、初回を含む9要求と指数待機183秒で `600 × 9 + 183 = 5583秒`（約93分）です。これは通信・処理時間を含む全体上限ではありません。受信が続くと停滞時計は更新され、`Retry-After` によって待機も変わります。短くしたい場合は `stream_idle_timeout_ms`、`response_max_retries`、`response_retry_max_delay_ms` を調整するか、Ctrl+Cで停止してください。`stream_idle_timeout_ms = 0` は停滞期限を無効にする設定です。
+Automatic retries can take a long time. If each attempt reaches the default 600-second receive-idle timeout without Retry-After, nine requests including the initial one plus 183 seconds of exponential delays take `600 × 9 + 183 = 5583 seconds` (about 93 minutes). This is not a total communication/processing deadline: reception resets the idle clock and Retry-After changes waits. Adjust `stream_idle_timeout_ms`, `response_max_retries`, or `response_retry_max_delay_ms`, or stop with Ctrl+C. `stream_idle_timeout_ms = 0` disables the idle deadline.
 
-## 送信保存に失敗した場合
+## When saving a submission fails
 
-初回送信の保存に失敗した場合、本文は下書きへ残ります。入力上限やqueue満杯等なら原因を解消して再送できますが、正本DBの `save_failed` は新規受付を停止するため、その場で再送を繰り返しません。画面に残る未保存本文があれば終了前に退避し、停止・終了後に保存先の原因を直します。再起動後は実際に保存できていた下書きと受付を確認してください。RAMだけに残った本文の再起動後の復元は保証できません。保存済み受付の後でprepareやAPI開始に失敗した場合は、元のmessage/Run/Turnを調べて復旧します。新しいmessageを作ることと、元のTurnをretryすることは別です。
+If saving the initial submission fails, its text remains in the draft. Resolve input-limit or queue-full causes before resending. A canonical DB `save_failed`, however, stops new acceptance: do not repeatedly retry in place. Save any unsaved text visible on screen before exiting; fix storage after stopping/shutdown. After restart, inspect drafts and acceptance that were actually persisted. Restoration of text held only in RAM is not guaranteed. If preparation or API startup fails after acceptance was saved, recover by inspecting the original message/Run/Turn. Creating another message differs from retrying the original Turn.
 
-遅い応答が次の下書きを消さないよう下書きはrevisionで区別されます。失敗snapshotを復元する `/restore REV` は [画面操作](tui.md) を参照してください。
+Draft revisions prevent slow responses from clearing a newer draft. See [TUI controls](tui.md) for `/restore REV` of a failed snapshot.
 
-CLIの返答だけを見失ったときは、既知のoperation IDがあれば先に照会します。
+If only the CLI reply was lost and the operation ID is known, query it first:
 
 ```sh
 shellboy operation get --operation OPERATION_ID
 ```
 
-送信後に接続が切れた場合は、返却JSONの `operation_id` と
-`error.details.operation_id` に照会対象IDが残ります。IDを自分で指定していなかった場合も
-この自動生成IDを使います。`request_may_have_been_applied: true` は結果不明という意味で、
-実行済み・未実行・失敗のどれも断定しません。`next_operation` は受付照会への型付き案内です。
-IDの文字列を新しいコマンドとして評価せず、`--operation` の引数へ渡します。
+After disconnection following send, returned JSON retains the query target in `operation_id` and `error.details.operation_id`. Use this generated ID even if you did not supply one. `request_may_have_been_applied: true` means outcome unknown; it proves neither execution, nonexecution, nor failure. `next_operation` provides typed guidance to the receipt query. Pass the ID as an argument to `--operation`; never evaluate it as a new command.
 
-プロセス自体を終了した場合など、返却JSONを取得できずIDも不明な場合は、この案内からIDを復元できるとは限りません。既知のThread/Runと `status --all`、保存履歴を確認し、自動再送しないでください。
+If the process exited without returning JSON and the ID is unknown, this guidance cannot necessarily recover it. Inspect known Thread/Run state, `status --all`, and saved history; do not automatically resend.
 
-`operation_not_found` / `operation_expired` なら対象get・保存履歴と照合します。
-`operation_conflict` なら既存のreceipt内容と要求の違いを調べます。いずれも新IDで同じ
-副作用を繰り返す理由にはしません。`save_failed` なら未保存入力を保持して保存障害を調べ、
-新規mutationを繰り返さないでください。
+For `operation_not_found` / `operation_expired`, compare target get results and saved history. For `operation_conflict`, inspect differences between the existing receipt and the request. None justifies repeating an uncertain side effect under a new ID. For `save_failed`, preserve unsaved input and investigate persistence instead of repeatedly sending new mutations.
 
-同じinstance内で同operation ID・同じ要求を再送すると、受付を重複させず保存済み結果を返します。同IDで内容を変更すると `operation_conflict` です。再起動後の旧IDも、同じ要求の保存済み結果が残っていればその結果を返し、副作用は再実行しません。旧IDの記録がなければ `operation_expired` です。結果不明のshell入力等を新IDで無条件再送しないでください。
+Within the same instance, resending the same operation ID and same request returns the saved result without duplicate acceptance; changed content with the same ID yields `operation_conflict`. After restart, an old ID with a retained result for the same request also returns it without repeating side effects. Without its old record, it yields `operation_expired`. Never unconditionally resend uncertain shell input under a new ID.
 
-`operation get` の `targets` から対象のgetへ進みます。`downstream` はmessageの現在配送状態、またはcompactのqueued/running/completed/failedと終端outcomeを返します。受付の `state=completed` と後続処理の成功は別です。`result_uncertain` や `replay_policy=do_not_reexecute` があれば、結果不明の副作用を安全に再実行できるとは判断しません。照会自身にはreceiptを保存せず、同じ照会IDでも現在値を確認できます。
+Follow `operation get` `targets` to target queries. `downstream` reports a message's current delivery state or compact queued/running/completed/failed state and terminal outcome. Receipt `state=completed` is separate from downstream success. `result_uncertain` or `replay_policy=do_not_reexecute` does not indicate safe reexecution of uncertain effects. Queries themselves do not save receipts; even with the same query ID they observe current state.
 
-get系の `context.recovery_reason` は構造化された理由です。再起動中断の `result_uncertain=true` は失敗確定ではなく、復旧待ちもfailureと同義ではありません。保存された時刻と所有を読み、未保存のstarted_atや全状態遷移を推定しません。Run/Turnの `lifetime_ms` は待機込みの作成から終了までで、未終了時は省略されます。
+Get-result `context.recovery_reason` is structured. Restart interruption with `result_uncertain=true` is not a confirmed failure, and recovery wait is not synonymous with failure. Read saved times/ownership without inferring unrecorded started_at or every state transition. Run/Turn `lifetime_ms` spans creation to termination including waits and is omitted before termination.
 
-## 前回終了時の記録を見る
+## Inspecting the previous shutdown record
 
-背景処理が残っていた会話を再起動後に開くと、履歴に「前回の終了時の記録」と作業・応答処理・コマンド・子・中断した待機観測の件数を表示します。F6で同名の記録を選び、Enterで対象IDや理由、Oで保存原文を確認できます。「前回の保存記録 · コマンド」「子の作業」「前回の待機観測は中断済み」から個別の対象へ進めます。参照したRun/Turn/shellは各getやF8で現在の保存状態を照会してください。
+After restart, opening a conversation that had background work shows `前回の終了時の記録` (previous shutdown record), with counts of work, response processing, commands, children, and interrupted wait observations. In F6 select that record and Enter for IDs/reasons or O for saved source. Entries such as previous saved commands, child work, and interrupted prior wait observations lead to individual targets. Use get commands or F8 for their current saved Run/Turn/shell state.
 
-終了時の記録は停止処理を始める前のsnapshotです。「予定した状態」と実際の回収結果を区別し、外部副作用の結果が不確実ならそのまま表示します。通常Ctrl+Qで終了したことだけで、すべての外部処理の結果が確定したとは扱いません。再起動後に以前の処理を自動実行せず、保存した対象・回答・未反映の依頼を確認して次の操作を選びます。
+The shutdown record is a snapshot before stopping begins. Distinguish intended state from actual cleanup outcome; uncertain external side effects remain uncertain. Normal Ctrl+Q shutdown alone does not prove every external outcome. Restart does not automatically rerun previous work: inspect saved targets, answers, and unapplied requests before choosing an action.
 
-## 復旧待ちを再開する
+## Resuming recovery wait
 
-TUIでは原因と未反映指示を会話の下に表示します。別の照会結果や設定変更でも、この原因は消えません。`/retry` は現在の復旧待ちを同じ内容で再試行し、通常の入力送信は新しい指示で再開します。`/stop` またはCtrl+Cは現在の会話の作業を停止します。F8でRun/Turnの詳細を確認でき、再試行・停止フォームの既定値は現在の作業です。古い管理結果のRun IDを引き継ぎません。
+The TUI preserves the cause and unapplied instructions below the conversation; other queries or configuration changes do not erase them. `/retry` retries current recovery wait with the same content; ordinary input sends a new instruction to resume. `/stop` or Ctrl+C stops current-conversation work. F8 Run/Turn details and retry/stop forms default to current work, never a Run ID inherited from an old management result.
 
-復旧待ちの時間はモデルが処理を続けている時間ではなく、人の操作待ちです。保存記録から失敗段階が分からない場合は未記録と示します。確定済みツール結果は利用しますが、未確認の副作用を再実行しない保証とは区別して詳細を確認してください。
+Recovery wait is time awaiting human action, not continued model processing. An unknown failure stage is shown as unrecorded. Confirmed tool results are reused, but inspect details rather than interpreting that as a guarantee against reexecution of every uncertain side effect.
 
-1. `turn get` / `run get` / `thread get` の復旧理由やhintを読む。
-2. 原因を解消する。例：参照先ファイルを直す、接続設定やモデルを確認する、容量を回収する。
-3. 同じ生存Runの復旧Turnを明示retryする。
+1. Read recovery reasons/hints in `turn get` / `run get` / `thread get`.
+2. Resolve the cause: fix a referenced file, check connection/model, or reclaim capacity.
+3. Explicitly retry the recovery Turn in the same live Run.
 
 ```sh
 shellboy run retry --run RUN_ID
 ```
 
-外部人間CLIまたは直属の所有親が復旧を判断します。祖先であるだけのモデルや、別の独立チャットには同じ権限はありません。親から普通のmessageを送るだけでretryにはなりません。人間の新しい指示が同じ復旧Turnを明示再開する経路もありますが、原因を直した元Turnの再試行には上のコマンドが明確です。
+An external human CLI or the direct owning parent decides recovery. Merely being an ancestor model or an independent chat does not confer the same authority. An ordinary parent message is not a retry. A human's new instruction can explicitly resume the same recovery Turn, but the command above clearly retries the original Turn after its cause is fixed.
 
-`run retry` は終端Runを復活させません。停止・再起動後に新しい作業を始めるときは、新しい指示を送って新Run/Turnを作ります。再起動時に古いPIDを使って停止したり、shellの副作用を自動で再実行したりはしません。前回の未確認状態は履歴・再開時のcontextとして扱います。
+`run retry` does not revive a terminal Run. After stop/restart, send a new instruction to create a new Run/Turn. Restart never stops an old PID or automatically repeats shell side effects. Previously uncertain state becomes history/restart context.
 
-接続先が混ざった履歴の項目IDでHTTP400になっていた会話は、修正版への更新・owner再起動後、同じ会話で新しい依頼を送って続けてください。再起動で停止した旧Runへの`/retry`は使えません。同じ会話の保存履歴は送信時に新しい変換を通り、message／function_callの接続先固有IDだけが外れます。保存原文は保持し、reasoning等の別のprovider制約まで解消する保証ではありません。
+For conversations that received HTTP 400 because histories mixed endpoint-specific item IDs, update, restart the owner, and send a new request in the same conversation. `/retry` cannot target the old Run stopped by restart. Saved history passes through new conversion on send, removing only endpoint-specific message/function_call IDs. Source remains intact; this does not guarantee resolution of other provider constraints such as reasoning items.
 
-明示されたcontext容量超過は自動圧縮・最大2段階のretry対象です。通信障害をcontext超過と推測しません。一方、対象の一時失敗で再試行を使い切り、入力が大きい場合は、次の決定論的縮小を一度だけ検討します。手動の `/compact` は [履歴と検索](history-and-search.md) を参照してください。
+Explicit context-capacity overflow triggers automatic compaction and up to two retry stages. Communication failures are not guessed to be context overflow. After eligible temporary failures exhaust retries, a large input may instead be considered once for deterministic reduction described below. For manual `/compact`, see [history and search](history-and-search.md).
 
-## 中断と終了
+## Interrupting and quitting
 
-| 操作 | 意味 |
+| Action | Meaning |
 |---|---|
-| TUIでCtrl+C | 現在のRunへ停止を要求する |
-| `shellboy run stop --run RUN_ID` | 指定Runとその所有配下の停止を受け付ける |
-| `shellboy shell stop --execution EXECUTION_ID` | 指定shellへ停止を要求する |
-| 外部CLIのwait中にCtrl+C | その観測を切断する。対象Run/shellは継続する |
-| TUIでCtrl+Q | 全体の停止・保存・DB終了を進めて通常終了する |
+| TUI Ctrl+C | Request stopping the current Run |
+| `shellboy run stop --run RUN_ID` | Accept stopping the specified Run and its owned descendants |
+| `shellboy shell stop --execution EXECUTION_ID` | Request stopping that shell |
+| Ctrl+C during external CLI wait | Disconnect observation; target Run/shell continues |
+| TUI Ctrl+Q | Stop work, save, close DB, and shut down normally |
 
-停止受付の成功は全PID回収完了と同義ではありません。必要ならRun終端を待ち、状態を照会します。モデルが停止できるのは自Runと現在所有する子孫、およびそのshellです。独立Threadへの依頼を送れたことは、その実行を停止できることを意味しません。
+Successful stop acceptance does not prove all PIDs were reaped. Wait for Run termination and inspect state when needed. A model can stop its own Run, currently owned descendants, and their shells. Ability to send requests to independent Threads does not imply authority to stop their execution.
 
-通常終了の猶予を過ぎると、TUIは待機継続か強制終了を選べるようになります。WまたはEnterで同じ終了処理を待ちます。F→Yで明示強制終了、確認中のN/Escは強制終了を取り消します。強制終了では未保存・配下の未回収が残る可能性があり、正常終了とは区別されます。
+After normal-shutdown grace expires, the TUI offers continued waiting or force quit. W/Enter waits for the same shutdown. F then Y explicitly forces exit; N/Esc cancels force confirmation. Force quit can leave unsaved data/unreaped descendants and differs from normal shutdown.
 
-正本DBの保存障害は表示だけのエラーとして続行せず、新規受付を止めて所有処理の停止へ進みます。DBやlockファイルを削除して無理に起動させる手順にはしません。終了後にストレージ・権限・空き容量を調べます。
+Canonical DB persistence failure stops new acceptance and proceeds to stop owned work, rather than continuing as a display-only error. Do not delete DB/lock files to force startup. After shutdown, investigate storage, permissions, and free space.
 
-## 保持ルールと回収
+## Retention and collection
 
 ```sh
 shellboy storage status
@@ -128,138 +121,135 @@ shellboy storage collect --category raw
 shellboy storage collect --category managed-images
 ```
 
-`collect` は既定の保持・参照保護に従う回収です。指定カテゴリの全データを無条件に消すコマンドではありません。`all` / `raw` / `managed-images` / `history` / `index` が選べ、指定なしは `all` です。返却結果と `storage status` を読み、回収できた量・保護された量を確認します。
+`collect` follows configured retention and reference protection; it does not unconditionally erase an entire category. Categories are `all` / `raw` / `managed-images` / `history` / `index`, default `all`. Read its result and `storage status` for reclaimed/protected amounts.
 
-| 種類 | 既定の扱い |
+| Kind | Default handling |
 |---|---|
-| 会話・回答・推論・要約 | 期限による自動削除なし |
-| shellのpipe原文 | 終端shellを対象に7日 / 合計1GiB。生存処理・pin中は保護 |
-| managed clipboard画像 | 7日 / 合計256MiB。使用中・送信pin・保存下書き等の保護を優先 |
-| 外部ファイル・画像 | パス参照。ShellboyのGCでは外部の実体を削除しない |
-| 削除Threadの履歴本文 | 生存forkや要約出典等から不要になったものを到達性GCで回収 |
+| Conversation, answers, reasoning, summaries | No automatic expiry deletion |
+| Shell pipe source | Terminal shells: seven days / total 1GiB; live work and pins protected |
+| Managed clipboard images | Seven days / total 256MiB; active use, send pins, saved drafts, and similar protection take precedence |
+| External files/images | Path references; Shellboy GC never deletes external originals |
+| Deleted-Thread history bodies | Reachability GC reclaims bodies no longer needed by live forks, summary sources, and similar references |
 
-Threadを消す前に影響を照会できます。照会は削除もGCも開始しません。
+Preview impact before deleting a Thread. Preview starts neither deletion nor GC.
 
 ```sh
 shellboy thread delete-preview --thread THREAD_ID
-# 子孫も削除対象とする場合
+# Include descendants in the deletion target
 shellboy thread delete-preview --thread THREAD_ID --descendants
 ```
 
-`deletable_now` は選択対象にlive/stopping Runがないことを示します。阻害Run・子孫数・添付参照・他Threadとの直接共有・completed置換の直接sourceを確認します。件数はGC全体の到達性判定や物理ファイル数ではありません。`reclaimable_bytes=null` と理由を返し、回収容量は未見積もりです。共有や子Threadがあるだけでは削除禁止にはなりません。preview後に状態は変わるため、実deleteもtransaction内で再判定します。
+`deletable_now` means selected targets have no live/stopping Run. Inspect blocking Runs, descendant counts, attachment references, direct sharing with other Threads, and direct sources of completed replacements. These counts are neither whole-GC reachability nor physical file counts. `reclaimable_bytes=null` with a reason means capacity is unestimated. Sharing or child Threads alone do not prohibit deletion. State may change after preview, so actual delete checks again within its transaction.
 
-阻害Runがあれば停止して終端を確認してから削除します。
+If blocked, stop the blocking Run and confirm its termination before deleting:
 
 ```sh
 shellboy thread delete --thread THREAD_ID
 ```
 
-`--descendants` を付けると系譜上の子Threadも削除対象になるため、対象を確認して使います。forkの共有経路や必要な出典は保持され、回収後もtombstoneから理由を確認できます。削除したThreadの専用本文まで永久に取得できる保証はありません。
+`--descendants` also targets lineage children; verify the scope first. Shared fork paths and necessary provenance remain; tombstones retain reasons after collection. Dedicated bodies of deleted Threads are not guaranteed to remain readable forever.
 
-## 容量表示の見方
+## Reading capacity figures
 
-`storage status` の主な値は以下です。
+Key `storage status` fields:
 
-| 値 | 意味 |
+| Value | Meaning |
 |---|---|
-| `logical_live_bytes` | 保存本文・raw・索引・managed画像等の論理使用量。容量制御の基準 |
-| `db_bytes` / `wal_bytes` | 実ファイルのサイズ |
-| `managed_bytes` / `log_bytes` | managed実体・ログの物理サイズ |
-| `filesystem_free_bytes` | 取得できた場合のファイルシステム空き容量 |
-| `reclaimable_bytes` | 回収可能量の下限。全GCカテゴリを含む厳密な見積りではない |
+| `logical_live_bytes` | Logical body/raw/index/managed-image usage; basis for capacity control |
+| `db_bytes` / `wal_bytes` | Actual file sizes |
+| `managed_bytes` / `log_bytes` | Physical managed-file/log sizes |
+| `filesystem_free_bytes` | Filesystem free capacity, when available |
+| `reclaimable_bytes` | Lower bound on reclaimable capacity, not an exact estimate over all GC categories |
 
-論理使用量の既定警告は8GiB、上限は10GiBです。上限では会話を自動削除せず、新しい作業を `storage_limit` で拒否または復旧待ちにします。受付保存済みの本文と、上限により受付前に拒否された操作は区別してください。停止・終了記録・GCは許可されます。回収して上限未満になっても、復旧Turnは明示retryが必要です。
+Default logical warning is 8GiB and maximum 10GiB. At the maximum, conversations are not automatically deleted: new work is rejected with `storage_limit` or enters recovery wait. Distinguish a body already accepted/saved from an operation rejected before acceptance. Stop, shutdown records, and GC remain allowed. Going below the limit after collection still requires explicit retry of a recovery Turn.
 
-SQLite内で本文を回収してもDBファイルが直ちに縮むとは限りません。再利用可能ページとOS空き容量を混同しないでください。自動VACUUMは行いません。DB・WAL・SHMを起動中にばらばらにコピー/削除する運用は避け、バックアップするなら本体を正常終了して保存データ全体を扱います。
+Reclaiming SQLite bodies need not immediately shrink DB files. Reusable pages differ from OS free capacity. No automatic VACUUM runs. Avoid copying/deleting DB/WAL/SHM separately while running; for backups shut down normally and handle the saved data as a whole.
 
-RAMのbody/layout/history/画像Base64 cache予算はストレージ保持量とは別です。cacheを0にしても会話を消す意味ではなく、送信中の一時作業領域を含む全アプリRSSの上限にもなりません。[設定](configuration.md) に各予算を記載しています。
+RAM body/layout/history/Base64-image cache budgets differ from storage retention. Zero caches do not delete conversations or impose a whole-application RSS cap including in-flight working memory. See [configuration](configuration.md) for each budget.
 
-論理容量の上限で索引作成が止まっても、既存索引のsemantic検索は使えます。検索queryの埋め込み費用は発生し得ますが、検索だけで索引処理を再開したり過去分を再索引したりはしません。物理disk不足とoperation receiptの別予算による拒否は、それぞれの回復手順に従います。
+Even when logical capacity stops new indexing, semantic searches of existing indexes remain available. Query embedding may cost money; search alone neither resumes indexing nor backfills old data. Physical disk exhaustion and operation receipt-budget rejection have separate recovery procedures.
 
-## よくある問題
+## Common problems
 
-| 症状・code | 確認と対処 |
+| Symptom / code | Check and response |
 |---|---|
-| `shellboy` が見つからない | ビルド・インストール先とPATHを確認（[導入手順](configuration.md)） |
-| `app_not_running` | 同じdata-dirの本体を対話端末で起動。CLIは自動起動しない |
-| 二重起動でlockエラー | 同じdata-dirを管理する本体を使う。別環境なら明示的に別data-dirへ |
-| `config_invalid` / 資格情報不足 | 表示されたキー、接続profile、API root、環境変数名を確認。変更後のTOMLは本体再起動で読み込む |
-| APIの残高・認証・モデルエラー | 保存されたproviderの理由を読む。利用可能な接続を選ぶ。別providerへ自動fallbackはしない |
-| `thread_not_found` / `target_unavailable` | 対象ID・data-dir・削除/回収済み状態を確認 |
-| `invalid_state` / `wait_cycle` | 状態と所有関係を確認。自分/祖先待ち、別所有Runの奪取、終端Run retryをしない |
-| `operation_conflict` / `operation_expired` | 同IDで異なる操作をしない。旧操作は照会し、結果不明の副作用を無条件に再送しない |
-| `cursor_expired` / `cursor_encoding_mismatch` | 新しい一覧・本文取得をcursorなしで開始。違う対象/encodingへcursorを流用しない |
-| `output_expired` | rawが回収済み。履歴の引用や保存済み回答は別に調べる。原文を捏造しない |
-| `input_limit` | 本文/添付/フレーム等、表示された上限と対象を確認。無言の切捨ては行わない |
-| `storage_limit` | 使用量を調べ、保持ルールに沿って回収するか設定を見直し、明示retry |
-| `save_failed` / `io_failed` | 保存先や参照先の空き・権限・状態を確認。未保存と保存済み受付を区別する |
-| 検索できない/結果が少ない | embedding設定・選択space・index statusを確認。過去分のbackfillは明示選択する |
-| サブエージェントを作ってくれない | モデルにAgent Guideの実在パスを指定して読ませる。自然言語だけでの操作成功を前提にしない |
-| EnterがIME確定と送信で競合する | send_key/newline_keysを変更し再起動。端末のpreedit通知は保証しない |
+| `shellboy` not found | Build/install location and PATH ([installation](configuration.md)) |
+| `app_not_running` | Start the owner with the same data directory in an interactive terminal; CLI never autostarts it |
+| Duplicate-start lock error | Use the owner already managing that data directory; explicitly choose another directory for a separate environment |
+| `config_invalid` / missing credentials | Reported key, connection profile, API root, environment variable name; restart to read edited TOML |
+| API balance/authentication/model error | Read saved provider reason and choose an available connection; no automatic other-provider fallback |
+| `thread_not_found` / `target_unavailable` | Target ID, data directory, deletion/collection state |
+| `invalid_state` / `wait_cycle` | State/ownership; do not wait on self/ancestors, take over another owner's Run, or retry a terminal Run |
+| `operation_conflict` / `operation_expired` | Do not change content under one ID; query old work and never blindly resend uncertain effects |
+| `cursor_expired` / `cursor_encoding_mismatch` | Restart list/body retrieval without cursor; do not reuse for another target/encoding |
+| `output_expired` | Raw reclaimed; separately inspect saved quotes/answers, never invent source |
+| `input_limit` | Reported body/attachment/frame limit and target; no silent truncation |
+| `storage_limit` | Inspect usage, reclaim according to retention or revise configuration, explicitly retry |
+| `save_failed` / `io_failed` | Free space, permissions, destination/reference state; distinguish unsaved input from saved acceptance |
+| Search unavailable / few results | Embedding settings, selected space, index status; explicitly choose historical backfill |
+| Model will not create a subagent | Give a real Agent Guide path to read; natural-language phrasing alone does not guarantee tool use |
+| Enter conflicts with IME confirmation | Change send_key/newline_keys and restart; terminal preedit notification is not guaranteed |
 
-エラー報告には操作名・対象の状態・code・秘密を除いた条件を使います。APIキー、origin token、環境変数一覧、実会話全文をログ共有へ含めないでください。全固定codeとJSON形式は [CLI reference](cli-reference.md) を参照してください。
+Reports should include operation, target state, code, and conditions with secrets removed. Never share API keys, origin tokens, environment dumps, or full real conversations in logs. [CLI reference](cli-reference.md) lists fixed codes and JSON format.
 
+## Diagnostic logs
 
-## 診断ログを確認する
+Normal diagnostic logs are `logs/shellboy.log` in the data directory, with rotation. macOS default: `~/Library/Application Support/shellboy/data/logs/shellboy.log`. They record event names, timestamps, and target IDs for startup/shutdown and DB/model/shell failures, not continuous conversation bodies, API credentials, or complete error bodies.
 
-通常の診断ログはdata-dirの `logs/shellboy.log`（ローテーションあり）です。macOS既定は `~/Library/Application Support/shellboy/data/logs/shellboy.log`。起動・終了・DB／モデル／shellの失敗などのイベント名、時刻、対象IDを記録します。会話本文・API資格情報・完全なエラー本文を常時保存するログではありません。
+Windows default: `%LOCALAPPDATA%\shellboy\data\logs\shellboy.log`. With a custom location, inspect that data directory. Model `model_failure` records fixed classification and `attempt_id`. `model_stream_difference` diagnoses streamed/final differences; alone it means neither failure nor recovery wait. Correlate Thread/Run/Turn/attempt IDs, then use `/received` in the same Thread for saved source/final response. Source contains conversation/tool arguments; do not share it externally unchanged.
 
-Windowsの既定は `%LOCALAPPDATA%\shellboy\data\logs\shellboy.log` です。保存先を変更した場合は指定したdata-dirの下を確認します。モデル失敗の `model_failure` は固定分類と `attempt_id` を記録します。`model_stream_difference` は途中と最終応答の差分を示す診断で、それだけでは失敗や復旧待ちを意味しません。ログのThread/Run/Turn/attempt IDで対象を照合し、本文と最終応答は同じThreadの `/received` から保存原文を確認します。原文には会話やツール引数が含まれるため、そのまま外部へ共有しないでください。
+TUI `message_send` traces individual submissions using `send.draft_id` / `revision` / `operation_id`. `queued` means the frontend took the request, `processing` means send processing began, `saved` means persistence succeeded, and `failed` / `queue_full` indicate failure/admission shortage. Link saved `message_id` and Thread ID to history. `operation_id` also works in existing operation queries.
 
-TUI送信の `message_send` は `send.draft_id` / `revision` / `operation_id` で1件ずつ追えます。`queued` はfrontendが要求を取り出した時点、`processing` は送信処理開始、`saved` は保存成功、`failed` / `queue_full` は失敗・受付枠不足です。`saved` の `message_id` とThread IDを保存済み履歴に結びます。`operation_id` は既存のoperation照会にも使えます。
+If accepting-submission persists, inspect the last stage: only `queued` precedes processing, `processing` precedes confirmed save, and `saved` without screen progress points toward notification/history-fetch/rendering investigation. `queued` does not record Enter or a rendered frame; `saved` does not prove visible reflection. Logging is best effort through the existing bounded asynchronous writer: disabled settings, capacity, or crashes may omit records. Absence alone proves neither nonacceptance nor cause. Body/attachment paths are not additionally logged.
 
-「送信受付中」のままなら最後の段階を確認します。`queued` だけなら処理開始前、`processing` までなら保存成功前、`saved` まであるのに画面が進まなければ通知・履歴取得・描画側の切り分けに使えます。`queued` はEnterや画面描画の記録ではなく、`saved` も画面反映完了を意味しません。ログは既存の有限・非同期writerによる最善努力の記録で、無効設定・容量不足・異常終了等による欠落があり、行の不在だけで未受付や原因を断定しません。本文・添付pathは追加記録しません。
+Fatal aborts such as stack overflow bypass normal shutdown and may leave no cause text in the file. Terminal stderr, crash time, screen, and preceding actions also help investigation. Missing normal shutdown alone does not identify the cause.
 
-stack overflow等のfatal abortでは正常終了処理を通らず、原因本文がファイルへ記録されない場合があります。端末の標準エラーの文面と、落ちた時刻・画面・直前の操作も調査に使います。正常shutdownがないことだけで原因までは断定しません。
+### When operation receipt capacity rejects a request
 
-### operation receiptの容量で拒否された場合
+A mutation rejected with `storage_limit` and receipt-budget guidance was not accepted. `shellboy status`, `storage status`, and `operation get --operation ID` observe capacity/saved work without creating a new receipt. Get/list/search/preview reread even under one ID rather than accumulating results. Repeated semantic query embedding may cost money. Wait retains a receipt because it saves Turn wait state.
 
-`storage_limit`とreceipt予算の案内で拒否された変更は未受付です。`shellboy status` / `storage status` / `operation get --operation ID` は新receiptを作らず、容量と保存済み操作を観測できます。get/list/search/previewは同IDでも再観測し、結果を蓄積しません。semantic検索のquery embeddingは再実行で費用が生じ得ます。waitはTurn待機状態を保存するためreceiptを維持します。
+The original mutation ID, identical request, and valid same caller can retrieve a retained result. Terminal results become collectible by internal maintenance 24 hours after created_at or under budget pressure. Pending and references from unapplied messages/attachments/compaction remain protected. After outcome collection, ID/hash metadata remains: resending that ID yields `operation_expired` without reexecuting changes. Inspect `result_expired` / `replay_policy`, target state, and history; never blindly repeat effects under a new ID. This does not bypass authentication for an expired Origin.
 
-変更操作の元ID・同じ要求・有効な同callerで保全中の結果を再取得できます。終端結果はcreated_atから24時間経過後の内部保守、又は予算圧迫時に回収対象です。pendingと未反映message/添付/compactの参照は保護します。結果回収後もID/hash等を残し、同ID再送は `operation_expired` で拒否し、変更を再実行しません。`result_expired` / `replay_policy` と対象の状態・履歴を確認し、新IDで無条件に同じ副作用を繰り返さないでください。失効したOriginによる認証を迂回する仕組みではありません。
+`run stop` / `shell stop` can use fixed headroom beyond the normal 256MiB. Inspect `control_headroom_bytes` / `control_limit_bytes` / `control_available_bytes`. If stop itself exhausts headroom, new IDs are rejected; TUI Ctrl+C and `/stop` remain receipt-free. Available bytes never guarantee acceptance of an arbitrary next request.
 
-`run stop` / `shell stop` は通常256MiBに加え固定余白を使います。`control_headroom_bytes` / `control_limit_bytes` / `control_available_bytes` で確認できます。停止自身も余白を使い切れば新IDを拒否し、TUIのCtrl+C・`/stop` はreceipt不要のままです。残量は任意の次要求の受付保証ではありません。
+Expired-ID metadata counts against the same budget. If extreme mutation volume or protected entries fill it, end work normally and explicitly restart the owner to reclaim old terminal entries. Internal GC continues while preserving uncertainty for old pending work and protected references. No automatic restart or unauthorized pending deletion occurs. The 8MiB-per-outcome / normal-256MiB budgets are logical, not SQLite physical-size caps.
 
-期限切れIDのmetadataも同じ予算へ算入します。極端に多い変更や保護対象だけで満杯なら、作業を通常終了しownerを明示的に再起動して旧terminalを回収します。内部GCは継続し、旧pendingの不確実性と保護参照は維持します。自動再起動や無断のpending削除はしません。outcome1件8MiB・通常256MiBは論理予算で、SQLite物理サイズの上限ではありません。
+GC `managed_deleted` / `managed_failures` contain at most 128 details each. `managed_deleted_count` / `managed_failure_count` are real totals; `managed_details_truncated` indicates omitted details, not skipped collection work.
 
-GC結果のmanaged_deleted/managed_failuresは各128件までの詳細です。managed_deleted_count/managed_failure_countが実数、managed_details_truncatedが省略の有無を示します。詳細の省略は回収処理自体の省略を意味しません。
+### Text received before failure
 
-### 失敗時に受信した本文
+Text streamed on screen remains readable on recovery wait when saved source exists, labeled interrupted response, saved and excluded from conversation. `/received` reaches older failures and successful-response stream differences; Enter opens saved source. Attention color applies only during the original Turn's recovery wait, then becomes a normal notification after recovery/stop. Request excerpts and timestamps identify records. See [receive records](tui.md#reading-saved-receive-records) for paging. Preserving provisional text differs from adopting it into model retry input.
 
-画面に流れた本文は、復旧待ちへ入っても保存済み原文があれば「途中で切れた応答（保存済み・会話には含めない）」として読み続けられます。`/received` の一覧は古い失敗や成功時のストリーム差分にも到達でき、Enterで保存原文を開きます。元Turnの復旧待ちの間だけ注意色にし、回復・停止後は通常通知へ変わります。依頼抜粋・時刻付きの一覧から元の記録を選べます。詳しいページ操作は[受信記録](tui.md#保存した受信記録を読む)を参照してください。未確定の本文を残すことと、モデル再試行でその本文を採用することは別です。
+### Shutdown grace and Unix execution identity
 
-### 終了の短い待ちとUnixの実行識別
+After Quit, Runs may briefly continue until persistence and owned-work stop finish. Wait for normal shutdown; forcing exit while saving can leave uncertain external effects. Unix stop checks owned-process records, but PGID inspection and signal delivery cannot atomically exclude OS ID reuse between them.
 
-Quitの後も保存と所有処理の停止が終わるまでは、Runが短時間動き続ける場合があります。通常終了の完了を待ち、保存中の強制終了は未確認の外部副作用を残し得ることを考慮してください。Unixでは所有プロセスの記録を検査して停止しますが、PGIDの検査とsignal送信の間にOSがIDを再利用する競合を原子的に除く保証はありません。
+Processes detached outside the owned group with `setsid` or similar can survive stop. Complete cleanup is also not guaranteed for `nohup` use that detaches beyond ownership tracking. Tracking/maintaining self-daemonized work across restart is outside this scope.
 
-所有groupの外へ `setsid` 等で切り離した処理は、停止後も残り得ます。`nohup` 等を使う処理も、所有追跡の範囲外へ切り離す場合の完全回収は保証しません。自分でデーモン化した処理を再起動後まで追跡・維持する機能は今回の対象外です。
+## When HTTP reception stalls
 
-## HTTP応答が止まったとき
+After at least thirty seconds without observed reception for the same model request, conversation activity adds receiving-wait or elapsed-since-last-reception information. Receive notifications occur at most once per second, introducing less than a second of display difference. This does not assert that generation/reasoning stopped. Ctrl+C or `run stop` can stop it.
 
-会話画面は、同じモデル要求について30秒以上受信を観測しなければ、活動表示へ受信待ち又は最後の受信観測からの経過を補足します。受信通知は最大1回/秒のため表示には1秒未満の差があります。生成や推論が止まったと断定する表示ではありません。Ctrl+Cや`run stop`で停止できます。
+At the conversation receive-idle deadline, received text is preserved and consecutive-failure/partial-output settings choose automatic retry or recovery wait. Summary idle timeout is outside conversation retries and follows existing recovery. Inspect header/body stage, elapsed milliseconds, and configuration key. Per-connection `stream_idle_timeout_ms` defaults to 600000; raise it for models with long silence or use 0 to disable. The fixed thirty-second connection deadline and manual cancellation remain. Unknown failures are not automatically resent.
 
-会話が受信停滞期限に達した場合は、受信済みの本文を保全し、前述の連続失敗予算・部分応答設定に従って自動再試行又は復旧待ちへ進みます。要約の停滞timeoutは今回の会話再試行には含めず、従来の復旧経路を使います。エラーのheader/body段階・経過ms・設定keyを確認してください。設定ガイドの`connections.<名前>.stream_idle_timeout_ms`は既定600000で、長い無通信を許すモデルには増やすか、0で期限を無効にできます。接続確立の固定30秒と手動取消しは有効なままです。未知の失敗で自動再送はしません。
+Embeddings, semantic search, and RAG use per-connection `request_timeout_ms` (default 60000, minimum 1000) as the total request deadline. Model lists use its minimum with 20000ms. Index-worker timeout follows existing bounded retries; repeated failures pause the space. Read the status reason, repair connection/settings, then explicitly retry. Owner changes require restart. Search CLI disconnection or owner shutdown also cancels remaining search HTTP requests.
 
-embedding・意味検索・RAGは`connections.<名前>.request_timeout_ms`（既定60000、最小1000）の要求全体期限を使います。モデル一覧は同設定と20000msの短い方です。索引workerのtimeoutは既存の有限retryへ渡し、続く失敗はspaceをpauseします。statusの失敗理由を確認して接続や設定を直し、明示retryします。ownerの設定変更は再起動後に反映されます。検索CLIの切断・owner停止時は残った検索HTTPも取り消します。
+## Investigating incomplete EOF
 
-## EOFによる未完了を調べる
+`EOF before response.completed` means Shellboy had not recognized a completed event when the HTTP body ended. This wording alone does not prove the API never sent one.
 
-`EOF before response.completed` は、HTTP本文が終了した時点でShellboyがcompletedイベントを認識できなかったことを示します。API側が送信しなかったことまでは、この文言だけでは分かりません。
+Saved failure reasons include `received_bytes`, `parsed_events` (parsed JSON count), `completed_items`, `done_markers`, `pending_line_bytes` / `pending_data_bytes` (unfinished tail), and fixed-category `last_event`. Inspect the same Turn/attempt reason through `/received` source and share these diagnostic values rather than the full body. Normal `model_failure` logs still contain classification and attempt ID, not automatic complete error bodies.
 
-修正版では保存される失敗理由に `received_bytes`（受信量）、`parsed_events`（解析できたJSON数）、`completed_items`、`done_markers`、`pending_line_bytes` / `pending_data_bytes`（末尾の未完了量）、`last_event`（固定分類）を含みます。`/received`の保存原文などで同じTurn/attemptの理由を確認し、共有時は本文全体でなくこれらの診断値を使ってください。通常ログの`model_failure`は従来どおり分類とattempt IDであり、完全なエラー本文を自動記録するものではありません。
+`last_event=untyped` means JSON lacked a string type; `done_markers` counts `[DONE]` markers. Neither proves a completed response. Nonzero bytes with zero parsed events can mean comments only, so avoid inferring a cause. Events lacking their final blank line remain incomplete and are not automatically committed as answers or tool execution.
 
-`last_event=untyped` はJSONに文字列のtypeがなかった場合、`done_markers`は`[DONE]`の受信数です。いずれもcompleted responseの存在を保証しません。受信量があって解析数0でも、コメントだけの受信などがあり得るため原因を断定しないでください。最後の空行まで届かないイベントは未完了のまま保持し、自動で回答やtool実行として確定しません。
+## Reducing input after disconnect retries
 
+Connection `auto_trim_on_disconnect` defaults to true. Only after eligible disconnect/EOF/stall/temporary-HTTP retries are exhausted and estimated input exceeds guidance, once per Turn/generation, Shellboy tries spilling old complete tool results and omitting old groups. No summary API is called. `response_max_retries=0` or `auto_trim_on_disconnect=false` disables this.
 
-## 接続断の再試行後に入力を縮める
+Optional positive-integer `compact_hint_tokens` serves as both trigger guidance and reduction target. If absent, the trigger is above 75,000 estimated tokens and the target is half the estimate at failure. If preserving current request/latest groups prevents reaching the target, no spill or attachment exclusion is applied; normal recovery wait follows.
 
-接続の `auto_trim_on_disconnect` は既定trueです。対象となる切断・EOF・停滞・HTTP一時エラーで連続再試行を使い切り、推定入力が目安を超えたときだけ、Turn/generationごとに一度、古い完結tool結果のspillと古いgroupの省略を試みます。要約APIは呼びません。`response_max_retries=0` または `auto_trim_on_disconnect=false` では行いません。
+Adopted reduction leaves a fixed notification with original-node range/count, estimates, and restoration guidance. It replenishes retry budget once. A successful response does not restore the reduction allowance for the same Turn/generation. Further consecutive failures reach recovery wait. Reduction does not guarantee improvement; original nodes can be reread, range-summarized, or restored.
 
-`compact_hint_tokens` は省略可能な正の整数です。指定時は起動目安と縮小目標の両方、未指定時は75,000推定tokens超を起動目安にし、失敗時点の推定の半分を目標にします。現在の依頼と最新group等を残して目標へ到達できない場合、spillや添付除外も適用せず従来の復旧待ちになります。
+Argument-free TUI `/restore` or CLI `shellboy compact --restore --thread THREAD` restores the omitted range while retaining subsequent conversation and leaving attachments excluded. `/restore NUMBER` is the separate failed-draft restoration feature. See [input size and range editing](history-and-search.md#input-size-and-range-editing).
 
-縮小を採用すると決まった通知が会話に残り、元nodeの範囲と件数、概算、復元方法を示します。その後の再試行予算を一度補充します。正常応答があっても同じTurn/generationの縮小枠は戻りません。再び失敗が続けば復旧待ちです。縮小により失敗が改善する保証はなく、元nodeの読み直し・範囲要約・復元が可能です。
-
-TUIの引数なし `/restore` またはCLI `shellboy compact --restore --thread THREAD` で、省略範囲を戻せます。追加された後続会話は残し、添付はexcludedのままです。`/restore 番号` は別機能の失敗下書き復元です。詳細は[履歴と検索](history-and-search.md#入力の大きさと範囲編集)。
-
-
-縮小を検討して採用しなかった場合はattemptの`automatic_trim_attempt`で、閾値未満・安全な縮小では目標へ届かない・採用拒否を切り分けられます。旧会話で文字数計測がないときの4文字/token推定は、日本語等で過小評価する場合があります。最新成功要求の実測usageと合わせて確認してください。
+If reduction was considered but not adopted, attempt `automatic_trim_attempt` distinguishes below threshold, target unreachable by safe reduction, and adoption rejection. The four-characters/token fallback for old conversations lacking character measurements may underestimate languages such as Japanese. Compare the latest successful request's measured usage.

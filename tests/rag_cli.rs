@@ -59,7 +59,7 @@ fn docs_scope_does_not_create_a_database_and_unknown_scope_is_not_empty_success(
     let root = tempfile::tempdir().unwrap();
     let docs = call(
         root.path(),
-        &["search", "--scope", "docs", "--query", "復旧"],
+        &["search", "--scope", "docs", "--query", "recovery"],
         true,
     );
     assert!(!docs["result"]["items"].as_array().unwrap().is_empty());
@@ -74,7 +74,7 @@ fn docs_scope_does_not_create_a_database_and_unknown_scope_is_not_empty_success(
             "--scope",
             "source:missing",
             "--query",
-            "復旧",
+            "recovery",
         ],
         false,
     );
@@ -380,7 +380,7 @@ fn bundled_guide_index_has_an_explicit_cost_preview_without_configuration() {
     );
     call(
         root,
-        &["search", "--scope", "docs", "--query", "復旧"],
+        &["search", "--scope", "docs", "--query", "recovery"],
         true,
     );
     assert!(!root.join("data/shellboy.db").exists());

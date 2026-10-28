@@ -1073,7 +1073,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let (requests, fail_at, server) = proxy(root).await;
-    let missing = search(root, "docs", "復旧", SearchMode::Semantic).await;
+    let missing = search(root, "docs", "recovery", SearchMode::Semantic).await;
     assert_eq!(
         missing["result"]["scope_errors"][0]["code"], "db_not_found",
         "{missing}"
@@ -1081,7 +1081,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     let default = call(
         root,
         RagCommand::Search {
-            query: "復旧".into(),
+            query: "recovery".into(),
             scope: vec![],
             mode: SearchMode::Hybrid,
             limit: 10,
@@ -1120,7 +1120,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
         call(root, RagCommand::Status).await["result"]["documents"],
         0
     );
-    let not_ready = search(root, "docs", "復旧", SearchMode::Semantic).await;
+    let not_ready = search(root, "docs", "recovery", SearchMode::Semantic).await;
     assert_eq!(
         not_ready["result"]["scope_errors"][0]["code"],
         "index_incompatible"
@@ -1136,7 +1136,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
         .unwrap();
     assert!(cached > 0, "successful batches survive the later failure");
     assert_eq!(
-        search(root, "docs", "復旧", SearchMode::Semantic).await["ok"],
+        search(root, "docs", "recovery", SearchMode::Semantic).await["ok"],
         false
     );
     assert_eq!(
@@ -1170,7 +1170,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
         .open(root.join("knowledge.rag-lock"))
         .unwrap();
     lock.try_lock_exclusive().unwrap();
-    let found = search(root, "docs", "復旧", SearchMode::Semantic).await;
+    let found = search(root, "docs", "recovery", SearchMode::Semantic).await;
     assert_eq!(found["ok"], true, "{found}");
     assert!(!found["result"]["items"].as_array().unwrap().is_empty());
     assert_eq!(
@@ -1208,7 +1208,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
         original_config.replace("synthetic", "other-profile-model"),
     )
     .unwrap();
-    let profile_missing = search(root, "docs", "復旧", SearchMode::Semantic).await;
+    let profile_missing = search(root, "docs", "recovery", SearchMode::Semantic).await;
     assert_eq!(
         profile_missing["result"]["scope_errors"][0]["code"],
         "index_incompatible"
@@ -1223,7 +1223,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     std::fs::write(root.join("config.toml"), original_config).unwrap();
     // Simulate a binary whose catalogue added a guide: no current published revision.
     db.execute("UPDATE documents SET active_revision=NULL WHERE source_id='@docs' AND key=(SELECT key FROM documents WHERE source_id='@docs' LIMIT 1)",[]).unwrap();
-    let unavailable = search(root, "docs", "復旧", SearchMode::Hybrid).await;
+    let unavailable = search(root, "docs", "recovery", SearchMode::Hybrid).await;
     assert_eq!(unavailable["ok"], true);
     assert_eq!(unavailable["result"]["degraded"], true);
     assert_eq!(unavailable["result"]["scope_errors"][0]["warning"], true);
@@ -1256,7 +1256,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     )
     .unwrap();
     assert_eq!(
-        search(root, "docs", "復旧", SearchMode::Semantic).await["ok"],
+        search(root, "docs", "recovery", SearchMode::Semantic).await["ok"],
         false
     );
     assert_eq!(requests.load(Ordering::SeqCst), indexed + 1);
@@ -1282,13 +1282,13 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
         .unwrap()
     );
     assert_eq!(
-        search(root, "", "復旧", SearchMode::Keyword).await["ok"],
+        search(root, "", "recovery", SearchMode::Keyword).await["ok"],
         false
     );
     let defaults = call(
         root,
         RagCommand::Search {
-            query: "復旧".into(),
+            query: "recovery".into(),
             scope: vec![],
             mode: SearchMode::Semantic,
             limit: 10,
@@ -1312,7 +1312,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     let with_materials = call(
         root,
         RagCommand::Search {
-            query: "復旧".into(),
+            query: "recovery".into(),
             scope: vec![],
             mode: SearchMode::Semantic,
             limit: 10,
@@ -1346,7 +1346,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     let all = call(
         root,
         RagCommand::Search {
-            query: "復旧".into(),
+            query: "recovery".into(),
             scope: vec![],
             mode: SearchMode::Keyword,
             limit: 10,

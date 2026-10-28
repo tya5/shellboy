@@ -4,9 +4,9 @@ v0.1.1で残った問題と、v0.1.2での修正・残る制限を区別しま�
 
 ## HTTP停滞と期限（Issue #8）
 
-公開済みv0.1.2ではembeddingの接続後の期限がなく、上流が接続を保って止まると索引・検索が長く残る場合があります。未リリースsourceは接続別のHTTP期限を実装し、設定・挙動は [設定ガイド](../guides/configuration.md#httpの待機時間) を参照します。会話の無受信600秒は、high effortの実proxy要求がHTTP400で拒否されたため実測による確定値ではなく、利用者が変えられる暫定既定値です。
+公開済みv0.1.2ではembeddingの接続後の期限がなく、上流が接続を保って止まると索引・検索が長く残る場合があります。未リリースsourceは接続別のHTTP期限を実装し、設定・挙動は [設定ガイド](../guides/configuration.md#http-timeouts) を参照します。会話の無受信600秒は、high effortの実proxy要求がHTTP400で拒否されたため実測による確定値ではなく、利用者が変えられる暫定既定値です。
 
-受信経過は画面で現在のattemptを観測した範囲だけです。UI通知を最大1回/秒へ制限するため、最終byteからの時間には1秒未満の観測差があり、上流の生成停止を断定しません。HTTPの期限自体は全chunkで更新します。未リリースsourceではIssue #7の未受信一時失敗だけに有限retryを追加しています。受信済みの失敗やtimeoutは自動再送せず、上流の重複課金は防げません。[復旧ガイド](../guides/recovery-and-storage.md#一時的なモデル通信失敗の自動再試行)を参照してください。
+受信経過は画面で現在のattemptを観測した範囲だけです。UI通知を最大1回/秒へ制限するため、最終byteからの時間には1秒未満の観測差があり、上流の生成停止を断定しません。HTTPの期限自体は全chunkで更新します。未リリースsourceではIssue #7の未受信一時失敗だけに有限retryを追加しています。受信済みの失敗やtimeoutは自動再送せず、上流の重複課金は防げません。[復旧ガイド](../guides/recovery-and-storage.md#automatic-retries-for-temporary-model-communication-failures)を参照してください。
 
 ## operation receipt予算と期限切れ
 

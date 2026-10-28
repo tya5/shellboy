@@ -24,7 +24,7 @@
 
 `connections.<名前>.prompt_cache_key` はboolで既定false。明示trueの場合だけ、会話と要約のResponses要求本文へ同じThread UUIDの `prompt_cache_key` を付ける。falseならこの自動設定項目を本文へ追加しない。providerがこのフィールドを受理する場合に有効化する。キャッシュhitや同一上流への接続、障害解消を保証しない。
 
-両値ともRust DefaultとTOML省略時を揃え、文字列・整数などbool以外を拒否する。owner再起動後の要求へ反映する。LiteLLM側のroutingでは `x-litellm-session-id` やtrace ID等が優先される構成があるため、意図せず全Thread共通の固定識別headerを併用しない。接続先側の設定・優先順位は [設定ガイド](../guides/configuration.md#thread単位のセッション識別) と [model HTTP](model-http.md) を参照する。
+両値ともRust DefaultとTOML省略時を揃え、文字列・整数などbool以外を拒否する。owner再起動後の要求へ反映する。LiteLLM側のroutingでは `x-litellm-session-id` やtrace ID等が優先される構成があるため、意図せず全Thread共通の固定識別headerを併用しない。接続先側の設定・優先順位は [設定ガイド](../guides/configuration.md#per-thread-session-identity) と [model HTTP](model-http.md) を参照する。
 
 ## 接続ごとのTLS検証
 
@@ -46,7 +46,7 @@
 
 ## TUIの通知ベル
 
-`ui.bell` はboolで既定true。TUIが起動後に新たな復旧待ちを観測したとき、現在会話と背景会話のどちらも端末BELで通知する。起動時に既に存在する復旧待ちは通知せず、同じ復旧待ちの再取得・画面切替・再描画でも鳴らさない。複数の通知は2秒間隔へ集約し、ベル専用worker・永続event・保存状態を追加しない。既存UI通知からローカルに判断し、falseなら通知を無効化する。音・visual bell・画面flashの実際の表現は端末とmultiplexerの設定へ委ねる。詳細は [画面操作](../guides/tui.md#復旧待ちの通知ベル) に示す。
+`ui.bell` はboolで既定true。TUIが起動後に新たな復旧待ちを観測したとき、現在会話と背景会話のどちらも端末BELで通知する。起動時に既に存在する復旧待ちは通知せず、同じ復旧待ちの再取得・画面切替・再描画でも鳴らさない。複数の通知は2秒間隔へ集約し、ベル専用worker・永続event・保存状態を追加しない。既存UI通知からローカルに判断し、falseなら通知を無効化する。音・visual bell・画面flashの実際の表現は端末とmultiplexerの設定へ委ねる。詳細は [画面操作](../guides/tui.md#recovery-wait-notification-bell) に示す。
 
 ## R3-6: 設定検証の局所化
 

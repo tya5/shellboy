@@ -1,41 +1,43 @@
 # Shellboy
 
-Rust製の軽量なターミナル向けAIエージェント環境です。モデルのツールはshellだけで、モデルは `shellboy` CLIを通じて自分の履歴を検索・分岐し、子エージェントへ再帰的に委譲します。単一の実行ファイルで動き、SQLiteに保存し、Responses互換のproxyへ接続します。
+A lightweight terminal AI agent environment written in Rust. Models have one tool: shell. Through the `shellboy` CLI, they can search and fork their own history and recursively delegate work to child agents. Shellboy runs as a single executable, stores data in SQLite, and connects to a Responses-compatible proxy.
 
-## 特徴
+## Features
 
-- **軽量な単一binary**：実行ファイルは `shellboy` 1つです（Windows x64・macOS Apple Silicon・Linux x64）。会話と索引はローカルのSQLiteに保存し、常駐サービスや別のデータベースを必要としません。release binaryの起動は約41ms、待機中のRSSは約17MiBでした（空のDB・モデル未設定の限定条件。[検証状況](docs/validation/acceptance.md)）。
-- **ツールはshellだけ**：モデルに渡すツールはshell 1つです。履歴の検索、送信、子の会話、待機、添付は、すべて同じ `shellboy` CLIで行います。人も同じCLIを別の端末から使えます。
-- **モデルが自分の履歴を使える**：会話（Thread）、作業の寿命（Run）、次の回答までの処理（Turn）を区別して保存します。モデルはCLIで過去の発話やshellの出力をキーワード・意味の両方で検索し、原文と前後へ戻れます。履歴は書き換えずに分岐するので、要約や圧縮の後も出典へたどれます。
-- **再帰的な委譲**：モデルは子のThreadを作って調査や作業を任せ、その結果を待って読めます。親子の系譜と、どのRunが処理を所有するかは別に管理します。
-- **止めても失わない**：受け付けた依頼は先に保存します。通信の失敗やモデルの異常応答では、理由を残して復旧待ちにし、再試行・新しい指示・停止を選べます。
+- **One executable** for Windows x64, macOS Apple Silicon, and Linux x64. Conversations and indexes live in local SQLite databases; no separate service or database server is required. A release build started in about 41 ms and used about 17 MiB RSS while idle in a limited, empty-database fixture with no model configured. See the [verification record](docs/validation/acceptance.md) for conditions.
+- **Shell is the only model tool.** History, messaging, child conversations, waiting, and attachments all use the same CLI. People can use it from another terminal too.
+- **Inspectable history.** A Thread is a conversation, a Run owns ongoing work, and a Turn lasts until one normal response. Models can search past messages and shell output by keyword or meaning, retrieve originals, and follow their relationships. Forks, summaries, and compaction preserve provenance instead of rewriting history.
+- **Recursive delegation.** Models can create child Threads, assign work, wait, and read the results. Thread lineage and Run ownership are tracked separately.
+- **Durable requests and recovery.** Accepted requests are saved before execution. Communication failures and invalid model responses retain the reason and enter recovery wait, where you can retry, give a new instruction, or stop.
 
-使い始める人は [User Guide](docs/guides/user-guide.md)、Shellboy内で作業するモデルは [Agent Guide](docs/guides/agent-guide.md) を参照してください。[ガイド一覧](docs/guides/README.md) から設定・履歴検索・添付・復旧・CLIへ進めます。
+Start with the [User Guide](docs/guides/user-guide.md) ([Japanese](docs/guides/user-guide.ja.md)). Models working inside Shellboy should read the English-only [Agent Guide](docs/guides/agent-guide.md). The [guide index](docs/guides/README.md) covers configuration, history search, attachments, recovery, and the CLI.
 
-名称変更後の公開用ソースで標準チェックを実施しています。現在の実装・確認範囲は [開発状況](docs/development/status.md) と [検証状況](docs/validation/acceptance.md) に記録します。
+English is the default documentation language; Japanese user guides use `.ja.md`. The current TUI remains Japanese. UI language options are [evaluated here](docs/design/documentation-language.md); no UI language switch is implemented yet.
 
-## バイナリのダウンロード
+The [development status](docs/development/status.md) and [verification record](docs/validation/acceptance.md) distinguish implemented behavior from the checks actually performed.
 
-[Releases](https://github.com/tya5/shellboy/releases) でWindows x64、macOS Apple Silicon、Linux x64向けの配布物と `SHA256SUMS` を提供します。v0.1.6の配布先は [v0.1.6](https://github.com/tya5/shellboy/releases/tag/v0.1.6) です。
+## Download
 
-Windowsは `shellboy-v0.1.6-x86_64-pc-windows-msvc.zip` をダウンロードして展開します。PowerShellの例:
+[Releases](https://github.com/tya5/shellboy/releases) provide Windows x64, macOS Apple Silicon, and Linux x64 archives with `SHA256SUMS`. The current release is [v0.1.6](https://github.com/tya5/shellboy/releases/tag/v0.1.6).
+
+On Windows, download and extract `shellboy-v0.1.6-x86_64-pc-windows-msvc.zip`. For example, in PowerShell:
 
 ```powershell
 Expand-Archive .\shellboy-v0.1.6-x86_64-pc-windows-msvc.zip -DestinationPath .
 .\shellboy-v0.1.6-x86_64-pc-windows-msvc\shellboy.exe --help
 ```
 
-接続先とモデルは [設定ガイド](docs/guides/configuration.md) に従って設定してください。既知のreceipt予算・索引切替・巨大raw検索の制限は [既知の制限](docs/development/known-limitations.md) に記載しています。
+Set a connection and model as described in [configuration](docs/guides/configuration.md). Known receipt-budget, index-switching, and large raw-search limits are listed in [known limitations](docs/development/known-limitations.md).
 
-v0.1.6は長い履歴の採用・検索・描画と、遅い画面への更新配送を改善します。RAGにはソースの除外設定、検索準備の案内、索引結果の確認を追加しました。
+v0.1.6 improves adoption, search, and rendering of long histories, as well as delivery to a slow terminal. RAG adds persistent source exclusions, search-readiness guidance, and indexing-result visibility. The documentation language changes in the working source are not part of the already published v0.1.6 binaries.
 
-会話DBはschema v10、独立RAG DBはschema 3へ前進します。旧データは初回writerで移行しますが、移行後は対応上限が低い旧binaryでは開けません。更新前の整合backupを取り、戻す場合は[保存設計](docs/design/storage.md)に従って別data-dirへ復元してください。稼働中のアプリには再起動後に新binaryが適用されます。
+The conversation database advances to schema 10 and standalone RAG to schema 3. Existing data migrates on the first write-capable open; older binaries with a lower supported schema cannot reopen it afterward. Take a consistent backup before upgrading. To roll back, restore into a separate data directory following the [storage design](docs/design/storage.md). A running process uses the new executable only after restarting.
 
-PDF/Office専用の内部抽出と`--extractor`/`--adapter`は廃止しました。旧file sourceのPDF/Officeは次の完全同期で対象外/removedになるため、外部で変換し、出典を指定した`rag ingest`で登録し直してください。変換本文とモデル解釈の使い分けは[RAGガイド](docs/guides/rag.md)を参照してください。
+Built-in PDF/Office extraction and `--extractor` / `--adapter` have been removed. A complete scan marks old PDF/Office file-source entries as unsupported/removed. Convert externally, then register the text with provenance using `rag ingest`. See the [RAG guide](docs/guides/rag.md) for extracted text versus model interpretations.
 
-## ビルドと起動
+## Build and run
 
-RustupとOSのC/C++ビルド環境を用意します。ツールチェーンは `rust-toolchain.toml`、依存は `Cargo.lock` で固定します。
+Install Rustup and your OS's C/C++ build tools. The toolchain is pinned in `rust-toolchain.toml` and dependencies in `Cargo.lock`.
 
 ```sh
 cargo build --locked
@@ -43,32 +45,32 @@ cargo run --locked --bin shellboy -- --help
 cargo run --locked --bin shellboy -- --version
 ```
 
-[config.example.toml](config.example.toml) を任意の設定先へコピーし、接続URLとモデルIDを設定してください。資格情報は設定した環境変数から読みます。鍵や実会話をGitへ保存しません。
+Copy [config.example.toml](config.example.toml) to your chosen configuration location and set the connection URL and model ID. Credentials come from the configured environment variable. Do not commit keys or real conversations.
 
 ```sh
 cargo run --locked --bin shellboy -- --config /path/to/config.toml --data-dir /path/to/data
 ```
 
-引数なしの起動は対話端末が必要です。owner接続が必要なCLI操作は同じdata-dirで起動中のShellboyへ接続します。オフラインのガイドは `shellboy docs list` で確認できます。APIを使わない試行には [端末fixture](docs/validation/manual-terminal.md) を利用できます。
+Launching without a subcommand requires an interactive terminal. Owner-dependent CLI commands connect to a running Shellboy instance using the same data directory. Read offline guides with `shellboy docs list`. The [terminal fixture](docs/validation/manual-terminal.md) supports checks without a model API.
 
-標準チェックはmacOS/Linuxで `sh scripts/check.sh`、Windows PowerShellで `./scripts/check.ps1` です。詳しくは [開発環境](docs/development/setup.md) を参照してください。
+Run `sh scripts/check.sh` on macOS/Linux or `./scripts/check.ps1` in Windows PowerShell. See [development setup](docs/development/setup.md) for details.
 
-## 構成
+## Repository layout
 
 ```text
-src/              通常のRust moduleと製品入口
-migrations/       版付きSQLite migration
-tests/            結合試験と合成fixture
-examples/         ローカル確認用fixture
-scripts/          検証・端末キャプチャ用ツール
-docs/guides/      利用者とモデル向け同梱ガイド
-docs/design/      採用仕様と実装設計
-docs/development/ 開発環境・現在地・判断理由
-docs/validation/  確認手順と実施状況
+src/              Ordinary Rust modules and product entry points
+migrations/       Versioned SQLite migrations
+tests/            Integration tests and synthetic fixtures
+examples/         Local verification fixtures
+scripts/          Verification and terminal capture tools
+docs/guides/      User and model guides; English defaults, Japanese translations
+docs/design/      Adopted specifications and implementation designs
+docs/development/ Setup, status, and decision records
+docs/validation/  Verification procedures and observed results
 ```
 
-単一Cargo package・実行ファイル名ともに `shellboy` です。[適用仕様](docs/design/effective-spec.md) を開発の入口とし、[AGENTS.md](AGENTS.md) に作業境界を定めます。旧製品名のコマンド・環境変数・既定保存先との互換は提供しません。既存データの移動は不要で、Shellboyは新しい既定保存先を使います。
+The Cargo package and executable are both named `shellboy`. Start development from the [effective specification](docs/design/effective-spec.md); [AGENTS.md](AGENTS.md) defines development boundaries. Former command names, environment variables, and default paths are not supported. Existing data does not need to be moved; Shellboy uses its own default storage location.
 
-## ライセンス
+## License
 
 [MIT](LICENSE)

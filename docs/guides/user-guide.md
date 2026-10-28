@@ -1,35 +1,30 @@
 # User Guide
 
-[ガイド一覧](README.md) · [設定・導入](configuration.md) · [画面操作](tui.md)
+[Guide index](README.md) · [Configuration and installation](configuration.md) · [TUI controls](tui.md) · [日本語](user-guide.ja.md)
 
-Shellboyは端末で会話し、モデルにshell作業を依頼するアプリです。会話の保存先を管理するTUIを一つ起動し、外部の`shellboy` CLIもその起動済みアプリへ接続します。会話には接続先のResponses対応proxy、モデルID、資格情報を設定します。ガイドは設定前でも `shellboy docs list` から閲覧でき、文書検索の `shellboy rag` も独立して使えます。
+Shellboy is a terminal application for conversations and model-directed shell work. Start one TUI to own a conversation data directory; external `shellboy` CLI commands connect to that running application. Conversations require a Responses-compatible proxy endpoint, model ID, and credentials. You can read guides with `shellboy docs list` before configuring anything, and use the document-search CLI `shellboy rag` independently.
 
-## 会話と作業状態の読み方
+## Conversations and work states
 
-| 通常画面で読む言葉 | 意味 | 詳細で対応する内部情報 |
+The UI currently uses Japanese captions. The following table explains the terms you see on screen.
+
+| On-screen term | Meaning | Internal information in details |
 |---|---|---|
-| 会話 | 履歴・作業フォルダー・モデルをまとめた保存先 | Thread。親子の会話は履歴の系譜で、実行の所有関係とは別 |
-| 依頼 | 送った本文。受付済みなら保存されている | message。accepted/held/appliedは回答の成否ではない |
-| 処理中 | 準備、モデル応答、ツール実行や明示待機を進めている | Runは作業の寿命、Turnは次の回答までの処理単位。attemptは個々の通信 |
-| 背景処理 | 回答後もshellや所有する子の処理が続いている | 完了したTurnとliveなRunは両立する。会話切替でも処理は継続 |
-| 復旧待ち | 理由を保存し、再試行・新指示・停止の判断を待っている | Turnのrecovery_wait。Runはliveのまま、時間経過だけでは再開しない |
+| 会話 (conversation) | A saved container for history, working directory, and model | Thread. Parent/child conversations describe history lineage, separately from execution ownership |
+| 依頼 (request) | The message you sent; once accepted, it is persisted | message. accepted/held/applied do not indicate whether an answer succeeded |
+| 処理中 (working) | Preparation, model response, tool execution, or explicit waiting is in progress | Run is the work lifetime; Turn is the processing unit up to the next answer; attempt is one communication attempt |
+| 背景処理 (background work) | Shell work or owned children continue after the answer | A completed Turn can coexist with a live Run. Work continues across conversation switches |
+| 復旧待ち (recovery wait) | The reason is saved, awaiting a retry, new instruction, or stop decision | The Turn is in recovery_wait. The Run remains live; elapsed time alone does not resume it |
 
-会話を選ぶ操作、現在の作業を止める操作、過去の結果を詳しく読む操作を区別します。
-「受付済み」は保存の成功、「回答完了」はTurnの完了で、背景処理を含む作業全体の完了とは限りません。
-IDやreceiptは調査の詳細情報です。普段は状態と理由を読み、必要なときに詳細から取り出せます。
+Selecting a conversation, stopping current work, and inspecting past results are different operations. “Accepted” means persistence succeeded; “answer complete” means the Turn completed, which need not mean that all work, including background work, has finished. IDs and receipts are diagnostic details. Usually you can read the state and reason, then open details when you need them.
 
-復旧待ちでは保存済みの依頼を送り直す前に、理由と対象Runを確認します。
-原因を直して同じ処理を試すにはF8のRun再試行か `shellboy run retry --run RUN_ID`、
-やめるにはCtrl+Cか `shellboy run stop --run RUN_ID` を使います。
-人間の新指示で同じ復旧Turnを再開することと、元の処理をretryすることは別です。
-停止・再起動後の終端Runをretryで復活させることはできません。
-保存済み内容と未確認の副作用を確認する手順は [復旧ガイド](recovery-and-storage.md) にあります。
+In recovery wait, check the reason and target Run before resending a saved request. After addressing the cause, retry the same work with F8's Run retry operation or `shellboy run retry --run RUN_ID`. To stop it, use Ctrl+C or `shellboy run stop --run RUN_ID`. A new human instruction resuming the same recovery Turn differs from retrying the original work. Retry cannot revive a terminal Run after stopping or restarting. See [Recovery and storage](recovery-and-storage.md) for checking saved content and uncertain side effects.
 
-## 1. 作業フォルダーで起動する
+## 1. Start in a working directory
 
-作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、子Run、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.md#slash操作一覧)と[CLIの作業状態](cli-reference.md#共通構文と接続)を参照してください。
+Use `/status` in the TUI or `shellboy status` in another terminal for an overview of current work. Saved IDs let you track background shells, child Runs, held requests, and model requests. Include terminal work with `/status all` or `shellboy status --all`. See [TUI slash commands](tui.md#slash-commands) and [CLI connection and common syntax](cli-reference.md#common-syntax-and-connection).
 
-まず[環境別の起動方法](configuration.md#環境別の起動方法)で、端末・OS版binary・モデル用shellの組合せを選びます。[設定・導入](configuration.md) に従ってビルド・インストールと接続設定を行った後、ターミナルで次を実行します。例はBash/zsh用です。
+First choose your terminal, OS binary, and model shell combination in [Starting on each platform](configuration.md#starting-on-each-platform). Follow [Configuration and installation](configuration.md) to build or install Shellboy and configure the connection, then run the following in a terminal. These examples use Bash/zsh.
 
 ```sh
 command -v shellboy
@@ -38,43 +33,43 @@ cd /path/to/project
 shellboy
 ```
 
-`/path/to/project`は実在する作業フォルダーへ置き換えます。短い名前がPATH上で見つからない場合は、インストール先のディレクトリを利用者のPATHへ追加するか、binaryを絶対パスで呼んでください。モデル用shellのCLI探索にはShellboyがPATHを自動設定します。接続先と資格情報の設定は [設定・導入](configuration.md) を参照してください。ソースcheckoutからのビルド手順は[開発環境](../development/setup.md)にもあります。
+Replace `/path/to/project` with an existing working directory. If the short command is not on PATH, add the installation directory to your user PATH or invoke the binary by absolute path. Shellboy configures PATH automatically for CLI discovery in the model's shell. See [Configuration](configuration.md) for endpoint and credentials, or [Development setup](../development/setup.md) to build a source checkout.
 
-設定と保存先を明示する場合は次の形です。
+To choose configuration and data explicitly:
 
 ```sh
 shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 ```
 
-引数なしの起動には対話端末が必要です。同じdata-dirではownerを二重起動できません。別ターミナルからのサブコマンドは起動済みownerを使い、ownerを自動起動しません。独立した環境が必要なら別のdata-dirを選びます。
+Starting without a subcommand requires an interactive terminal. You cannot run two owners against the same data-dir. Subcommands from another terminal use the running owner; they do not start one automatically. Choose a different data-dir for an independent environment.
 
-起動中は設定・DB更新・前回中断した処理の整理など、現在の準備内容を表示します。会話入力は起動完了後に行います。Esc / Ctrl+C / Ctrl+Qで終了を要求すると、開始済みの初期化と保存処理を安全な境界まで進めてから閉じます。DB更新を巻き戻したり、直ちにlockを解放したりする操作ではありません。起動に失敗した場合は表示された理由を確認し、EnterかEscで閉じます。
+During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
 
-新しいルートThreadのcwdは起動フォルダーです。保存済みThreadを開くと、そのThreadのcwdを使い、今回の起動フォルダーで上書きしません。`/cwd`、又はF8の「Thread · 詳細」で確認できます。
+A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “Thread · 詳細” (Thread details).
 
-## 2. 最初の依頼を送る
+## 2. Send your first request
 
-下書き欄に依頼を入力し、既定ではEnterで送信します。Ctrl+JまたはShift+Enterで改行します。例えば「このフォルダーのREADMEを読み、構成と次の作業候補を説明してください」と依頼できます。モデルにはshellツールがあるので、実ファイルを変更する依頼はその作業フォルダーで実行され得ます。
+Type into the composer and press Enter to send by default. Ctrl+J or Shift+Enter inserts a newline. For example: “Read this folder's README and explain its structure and possible next tasks.” The model has a shell tool, so a request to modify files may run in that working directory.
 
-初回送信でThreadと依頼が保存されます。「受付済み」はDB保存を表し、回答・shell・Runの完了とは別です。受付後の準備や通信に失敗した場合も、保存済み依頼は残ります。失敗内容に従い対処してから明示的にretryします。[復旧・保存](recovery-and-storage.md)を参照してください。
+The first send persists the Thread and request. “Accepted” means DB persistence, separately from completion of an answer, shell, or Run. A saved request remains even if preparation or communication fails after acceptance. Address the reported failure and explicitly retry; see [Recovery and storage](recovery-and-storage.md).
 
-受付完了までは本文・添付を表示し続けます。この間の編集は送信時点のsnapshotには反映されず、遅れて届く受付結果も編集後の下書きを消しません。キュー満杯や保存失敗の表示が出た場合は、本文を確認してから再操作します。長文貼付けは自動送信されず、[折りたたみ表示](tui.md#長文の貼付け)から確認できます。
+Until acceptance completes, the submitted text and attachments remain visible. Edits during that interval do not change the submission snapshot, and a late acceptance response does not erase a subsequently edited draft. If the queue is full or persistence fails, check the text before trying again. Pasting a long passage does not send it automatically; inspect its [collapsed display](tui.md#pasting-long-text).
 
-## 3. 会話を切り替える
+## 3. Switch conversations
 
-- `/new`またはCtrl+Nで新しい下書きを作ります。最初の送信前はまだ保存済みThreadではありません。
-- `/threads`またはCtrl+Tで1行ずつの一覧を開き、上下キーとEnterで選びます。左右キーで親子を開閉・移動し、文字入力で絞り込みます。選択した項目の詳細と短い会話抜粋は下部、完全値はF1から確認できます。
-- IDが分かる場合は`/switch THREAD_ID`で移動できます。
+- `/new` or Ctrl+N opens a new draft. It is not a saved Thread until the first send.
+- `/threads` or Ctrl+T opens a one-row-per-item list. Select with Up/Down and Enter. Left/Right expand, collapse, or move through parent/child relationships; typing filters the list. Details and a short conversation excerpt appear below; F1 opens full values.
+- If you know an ID, use `/switch THREAD_ID`.
 
-Threadごとに下書きと閲覧位置を持ちます。切替は実行停止を意味しません。前のThreadでshellや子Runが動いていれば処理を続けます。回答後も背景処理が残ると、Turnは完了していてもRunは継続する場合があります。Thread・Run・Turnの違いは[委譲](delegation.md)を参照してください。
+Each Thread retains its own draft and reading position. Switching does not stop execution. Shells or child Runs in the previous Thread continue. Background work may keep a Run live after its Turn's answer completes. See [Delegation](delegation.md) for the Thread/Run/Turn distinction.
 
-通常の会話は発話・実行結果・状態変更を種類別に表示します。完全なIDや元の値を調べるときはF6で項目を選んで詳細、Oで原文pageへ進みます。F7はリンク一覧と完全URLのコピーです。F8では会話状態に応じた候補・よく使う操作・全36操作を表示します。人向け名・CLI名・関連するslashで絞り込み、対象IDや引数をfieldごとに入力して履歴・Run・shell・索引・保存へ進めます。結果はfieldと値で読み、必要な部分を詳細pageで取得します。[画面操作](tui.md#詳細から原文とリンクを読む) にキーとコピー範囲をまとめています。
+The conversation view distinguishes messages, execution results, and state changes. For full IDs or source values, use F6 to select an item and open its details, then O for the original-text page. F7 lists links and copies full URLs. F8 shows context-sensitive suggestions, common actions, and the full operation catalogue. Filter by human-facing name, CLI name, or related slash command; enter target IDs and arguments in separate fields to inspect history, Runs, shells, indexes, and storage. Results use field/value presentation; retrieve needed portions in a detail page. [TUI controls](tui.md#read-source-text-and-links-from-details) documents keys and copy ranges.
 
-履歴を読むと末尾追従を止め、「新着あり」を表示します。Ctrl+Endで末尾追従へ戻ります。フォークや依頼編集、検索filterと出典・直接の関係の確認は[履歴と検索](history-and-search.md)で説明します。
+Reading older history pauses following the tail and shows “新着あり” (new content). Ctrl+End resumes tail following. [History and search](history-and-search.md) explains forks, request editing, search filters, provenance, and direct relationships.
 
-## 4. 接続・モデルを変える
+## 4. Change connection or model
 
-`/model`だけで現在値を表示します。`/models`で現在の接続先のモデル一覧を取得できます。文字入力で絞込み、上下で選択、Enterで現在の会話のモデルを変更します。Escは閉じるだけです。別の接続先を見る場合は `/models CONNECTION` を使います。直接指定する場合は以下です。
+`/model` alone shows the current selection. `/models` retrieves the current connection's model list. Type to filter, select with Up/Down, and press Enter to change the current conversation's model. Esc only closes the list. Use `/models CONNECTION` for another connection. To set values directly:
 
 ```text
 /model CONNECTION MODEL_ID
@@ -82,33 +77,34 @@ Threadごとに下書きと閲覧位置を持ちます。切替は実行停止�
 /cwd /path/to/other-project
 ```
 
-`CONNECTION`と`MODEL_ID`は実際の設定値へ置き換えます。一覧は接続先から取得し、モデルや対応effortをShellboyが内蔵しているわけではありません。接続先がembedding等も列挙した場合は一覧に含まれ、会話APIで使える保証ではありません。取得未対応の接続先では `/model CONNECTION MODEL_ID` で直接指定できます。`/effort none`はeffort指定を解除し、モデルへ`none`を必ず送る指示ではありません。モデル変更でも既存effortは保持するので、必要なら明示的に変更・解除します。
+Replace `CONNECTION` and `MODEL_ID` with configured values. The list comes from the endpoint; Shellboy does not embed a model or supported-effort catalogue. If the endpoint also lists embedding models, they appear too; listing is not a guarantee of conversation API compatibility. If listing is unsupported, use `/model CONNECTION MODEL_ID` directly. `/effort none` clears the effort setting; it does not instruct Shellboy to always send `none` to the model. Changing a model preserves the existing effort, so change or clear it explicitly when needed.
 
-変更は以後の要求に反映され、既に送信済みの通信を書き換えません。接続・モデル変更では推論の送信epochも変わり、元モデルへ戻しても古いopaque reasoningを自動復活しません。会話原文は残ります。
+Changes apply to subsequent requests, without rewriting communication already sent. Changing connection or model also changes the reasoning-send epoch; returning to the original model does not automatically revive old opaque reasoning. Conversation source text remains saved.
 
-## 5. 子へ委譲する
+## 5. Delegate to a child
 
-「サブエージェントを使って」と言うだけで、モデルがShellboyの子Thread操作を正確に理解する保証はありません。Agent Guideは自動注入されません。checkoutにある実在する絶対パスを指定して、まず読ませます。
+Simply saying “use subagents” does not guarantee that the model understands Shellboy's child-Thread operations. The Agent Guide is not injected automatically. When using a checkout, provide actual absolute paths and ask the model to read them first:
 
 ```text
-まず /path/to/shellboy/docs/guides/agent-guide.md と
-/path/to/shellboy/docs/guides/delegation.md をshellで読んでください。
-その手順で所有する子Threadを作り、調査だけを委譲してください。
-子の依頼を送った後は割当と完了状態を確認し、原文を取得して結果をまとめてください。
+First use shell to read /path/to/shellboy/docs/guides/agent-guide.md and
+/path/to/shellboy/docs/guides/delegation.md.
+Follow those procedures to create an owned child Thread and delegate research only.
+After sending its request, check assignment and completion, retrieve the original
+answer, and summarize the results.
 ```
 
-binaryだけを別フォルダーへ置いた場合、docsが一緒に存在するとは限りません。ガイドの実際の保存先へ書き換えてください。親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。
+If you copied only the binary elsewhere, the docs need not exist alongside it. Replace these paths with the actual guide locations. [Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
 
-Threadの`AGENTS.md`参照先は作業上の指示です。新しいルートThreadの既定はcwdの`AGENTS.md`で、新Turnの準備で読み、同じTurnのretryは保存済みsnapshotを使います。Agent Guideは操作の説明書、リポジトリ直下の`AGENTS.md`はそのリポジトリの作業指示で、用途が異なります。
+A Thread's `AGENTS.md` reference points to working instructions. A new root Thread defaults to the cwd's `AGENTS.md`; it is read when preparing a new Turn, while a retry in the same Turn uses the saved snapshot. The Agent Guide explains product operations; a repository's root `AGENTS.md` supplies that repository's work instructions. They serve different purposes.
 
-## 6. 中断・終了する
+## 6. Interrupt and exit
 
-Ctrl+Cは現在Threadの中断、Ctrl+Bは現在のforeground shellを背景へ移す操作です。背景化では対象shellを継続し、同じgroupに未実行後続callがあれば取消しにします。画面を切り替える操作とは区別してください。 背景化後は対象shellと後続の扱いを画面へ通知し、モデルにも対応する結果を渡します。後続がない場合は存在しない取消しを表示しません。中断は保存済み状態に従って停止処理中から中断済みへ変わり、背景化や完了と区別されます。
+Ctrl+C interrupts the current Thread. Ctrl+B moves its current foreground shell into the background: the target shell continues, while any unexecuted later calls in the same group are canceled. This differs from changing screens. After backgrounding, the screen reports the target shell and treatment of later calls, and the model receives the corresponding result. If no later calls exist, no nonexistent cancellation is shown. An interruption progresses from stopping to interrupted according to saved state, distinctly from backgrounding or completion.
 
-処理の完了を観測するwaitと、対象を中断する操作は別です。F8の待機フォームから開始した観測だけをやめるなら、結果画面で小文字w、又は `/cancel-wait` を使います。対象Run/shellは止まりません。フォーム内ではEnterが実行、複数行の本文入力はCtrl+J、候補値の置換はCtrl+Uです。
+Waiting to observe completion differs from interrupting the target. To cancel only an observation started in F8's wait form, press lowercase w on the result screen or use `/cancel-wait`. This does not stop the target Run or shell. In forms, Enter executes, Ctrl+J inserts a newline in multiline text, and Ctrl+U replaces a suggested value.
 
-終了はCtrl+Qまたは`/quit`です。保存と所有する処理の停止・回収を待ちます。猶予を超えるとW/Enterで待機継続、Fで強制終了の確認へ進み、さらにYで確定します。強制終了は未保存・未回収の可能性を伴います。詳細は[復旧・保存](recovery-and-storage.md)にあります。
+Exit with Ctrl+Q or `/quit`. Shellboy waits for persistence and for owned work to stop and be reaped. After the grace period, W/Enter continues waiting; F opens force-exit confirmation, then Y confirms. Force exit can leave unsaved state or unreaped work. See [Recovery and storage](recovery-and-storage.md).
 
-次に使う機能は[添付](attachments.md)、[履歴と検索](history-and-search.md)、[全CLI参照](cli-reference.md)から確認できます。
+Next, explore [Attachments](attachments.md), [History and search](history-and-search.md), and the [CLI reference](cli-reference.md).
 
-削除前にF8の「Thread · 削除影響」で、動作中Run・子孫・共有や出典・添付参照を確認できます。照会だけでは削除せず、容量の回収見積もりは未対応です。受付や圧縮結果を見失った場合はF8の「操作 · 受付結果」で対象operationを照会し、後続状態も確認します。詳しくは[復旧・保存](recovery-and-storage.md)を参照してください。
+Before deleting, use F8's “Thread · 削除影響” (deletion impact) to inspect live Runs, descendants, sharing, provenance, and attachment references. Preview does not delete anything; reclaimable-capacity estimates are unsupported. If you lose an acceptance or compaction result, query its operation using F8's “操作 · 受付結果” (operation receipt), then check downstream state. See [Recovery and storage](recovery-and-storage.md).
