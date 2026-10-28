@@ -249,7 +249,7 @@ list/get/readのcursorは不透明な継続tokenです。返された文字列�
 | `thread_not_found` | ID/削除状態を確認 |
 | `target_unavailable` | Run/Turn/shell等が不在・利用不能。元状態を再照会 |
 | `operation_conflict` | 同一IDを別内容に再利用した。元receiptを確認 |
-| `operation_expired` | 別instanceの新規操作ID。旧結果を照会し、重複実行の有無を判断 |
+| `operation_expired` | 未保存の旧instance ID、または現instanceの回収済み結果を含む失効済み結果での変更再送。保全中の操作メタデータと対象状態を確認し、重複実行の有無を判断 |
 | `operation_not_found` | receipt未発見。通信断時は対象状態も確認 |
 | `invalid_state` | 現状態・所有境界では実行不可。details/hintと対象getを確認 |
 | `wait_cycle` | 自分/所有辺/他waitを含む循環。待機の分解や報告へ切替 |
@@ -267,9 +267,9 @@ list/get/readのcursorは不透明な継続tokenです。返された文字列�
 
 構文は [cli.rs](../../src/cli.rs)、公開型/定数は [protocol.rs](../../src/protocol.rs)、JSON出力とexitは [main.rs](../../src/main.rs)、操作結果は [Control](../../src/control.rs) / [DB操作](../../src/control/db.rs) と照合しています。公開CLIにはTUI専用の編集送信・添付reload・索引費用previewの独立サブコマンドはありません。画面操作は [TUIガイド](tui.ja.md) を参照してください。
 
-### v0.1.2の非推奨alias
+### 非推奨alias
 
-`status --operation ID` は `operation get --operation ID` と同じ照会へ正規化し、stderrで移行先を案内します。v0.1.2の1リリースだけ残し、次リリースで削除します。JSON stdoutのresultは正規照会の結果です。通常の作業一覧filterとの併用は拒否します。
+`status --operation ID` は `operation get --operation ID` と同じ照会へ正規化し、stderrで移行先を案内します。現在も受け付けますが非推奨です。新しいスクリプトでは正規の `operation get` を使ってください。JSON stdoutのresultは正規照会の結果です。通常の作業一覧filterとの併用は拒否します。
 
 
 ## compactの範囲指定

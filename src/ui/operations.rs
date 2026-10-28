@@ -2091,6 +2091,44 @@ mod entry_tests {
         text
     }
     #[test]
+    fn guide_navigation_quotes_the_actual_operation_labels_in_both_languages() {
+        use OpKind::*;
+        for (text, kinds) in [
+            (
+                include_str!("../../docs/guides/tui.md"),
+                &[ThreadGet, ThreadSet, ThreadDeletePreview, Wait][..],
+            ),
+            (
+                include_str!("../../docs/guides/tui.ja.md"),
+                &[ThreadGet, ThreadSet, ThreadDeletePreview, Wait][..],
+            ),
+            (
+                include_str!("../../docs/guides/user-guide.md"),
+                &[ThreadGet, ThreadDeletePreview][..],
+            ),
+            (
+                include_str!("../../docs/guides/user-guide.ja.md"),
+                &[ThreadGet, ThreadDeletePreview][..],
+            ),
+            (
+                include_str!("../../docs/guides/recovery-and-storage.md"),
+                &[Wait][..],
+            ),
+            (
+                include_str!("../../docs/guides/recovery-and-storage.ja.md"),
+                &[Wait][..],
+            ),
+        ] {
+            for kind in kinds {
+                assert!(
+                    text.contains(kind.label()),
+                    "Guide navigation must match visible operation {}",
+                    kind.label()
+                );
+            }
+        }
+    }
+    #[test]
     fn recovery_candidates_alias_filter_and_empty_results_keep_all_thirty_six_typed_operations() {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();

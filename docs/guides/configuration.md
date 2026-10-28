@@ -1,6 +1,6 @@
 # Configuration reference
 
-[Guide index](README.md) · [User Guide](user-guide.md) · [CLI reference](cli-reference.md)
+[日本語](configuration.ja.md) · [Guide index](README.md) · [User Guide](user-guide.md) · [CLI reference](cli-reference.md)
 
 Configuration is TOML read when the owner (`shellboy` without a subcommand) starts. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner.
 
@@ -238,7 +238,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 
 `cache.history_bytes` exclusively budgets the cross-Thread send-history conversion LRU. `body_bytes` retains UI bodies and node metadata; `layout_bytes` budgets render layouts including widths/folds; `attachment_base64_bytes` budgets converted attachments. These are not a whole-process RSS cap including active viewport/HTTP pins, SQLite/OS caches, runtime resources, or saved history. Cache eviction does not delete history; data is fetched again as needed. A zero cache budget disables retained caching, not all active working memory.
 
-Other numeric settings generally require positive integers. Exceptions are `connections.<name>.stream_idle_timeout_ms=0`, `connections.<name>.response_max_retries=0`, `indexing.retries=0`, and matching `retry_delays_ms=[]`. Retry delays must contain as many positive integers as retries. `wait --timeout-ms 0` is immediate CLI observation, not a configuration setting. Worker counts also have runtime-supported upper bounds.
+Other numeric settings generally require positive integers. Exceptions include all four `cache.*` byte budgets (`body_bytes`, `layout_bytes`, `history_bytes`, `attachment_base64_bytes`), `connections.<name>.stream_idle_timeout_ms=0`, `connections.<name>.response_max_retries=0`, `indexing.retries=0`, and matching `retry_delays_ms=[]`. A zero cache budget disables retained caching; it does not select the default budget. These exceptions do not permit zero for `io.*` or the indexing chunk size `indexing.split_chars`. Retry delays must contain as many positive integers as retries. `wait --timeout-ms 0` is immediate CLI observation, not a configuration setting. Worker counts also have runtime-supported upper bounds.
 
 Additional constraints: attachment_file ≤ attachment_request, data_warning < data_max, output_batch ≤ output_buffer. `shell.env` maps valid environment names to values without NUL. `copy_backend` is `auto|os|osc52`. Send/newline keys combine supported names such as Enter with Ctrl/Alt/Shift; the newline list cannot be empty or overlap the send key. `shell.kind` accepts only `bash|powershell`.
 

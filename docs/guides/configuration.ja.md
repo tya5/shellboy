@@ -245,7 +245,7 @@ shellboy
 
 `cache.history_bytes` は全Thread共有の送信履歴変換LRU専用です。`body_bytes` はUI本文とnode metadataの保持、`layout_bytes` は幅・折畳み等を含む描画layout LRU、`attachment_base64_bytes` は添付変換結果です。active viewportやHTTP送信中のpin等の作業領域、SQLite/OS cache、runtime資源、保存履歴を含む全プロセスRSSの上限ではありません。cache退避は履歴削除ではなく必要時に再取得します。各cache予算0は保持cacheを無効化します。使用中の作業領域までゼロになる意味ではありません。
 
-それ以外の数値は原則正整数です。例外は `connections.<名前>.stream_idle_timeout_ms=0`、`connections.<名前>.response_max_retries=0`、`indexing.retries=0` と対応する `retry_delays_ms=[]`。retry_delaysはretriesと同数の正整数が必要です。`wait --timeout-ms 0` は設定ではなくCLIの即時観測です。worker数にはruntimeが扱える上限もあります。
+それ以外の数値は原則正整数です。例外は4つの `cache.*` byte予算（`body_bytes`、`layout_bytes`、`history_bytes`、`attachment_base64_bytes`）、`connections.<名前>.stream_idle_timeout_ms=0`、`connections.<名前>.response_max_retries=0`、`indexing.retries=0` と対応する `retry_delays_ms=[]`。cache予算の0は保持cacheの無効化で、既定予算の選択ではありません。この例外は `io.*` や索引chunkサイズ `indexing.split_chars` の0を許容しません。retry_delaysはretriesと同数の正整数が必要です。`wait --timeout-ms 0` は設定ではなくCLIの即時観測です。worker数にはruntimeが扱える上限もあります。
 
 追加制約は attachment_file ≤ attachment_request、data_warning < data_max、output_batch ≤ output_bufferです。`shell.env` は有効な環境変数名とNULを含まない値の辞書。`copy_backend` は `auto|os|osc52`。送信/改行キーはEnter等の対応キー名とCtrl/Alt/Shiftの組合せで、改行キー一覧は空不可、送信キーとの重複不可です。`shell.kind` は `bash|powershell` のみです。
 

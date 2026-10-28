@@ -224,4 +224,4 @@ shellboy compact --restore --thread THREAD_ID --from MARKER_NODE
 
 履歴semantic検索の同時枠はownerごとに1個で、embedding HTTPの前からランキング・結果再照合まで保持します。子Thread同士も同じ枠を共有します。空いていない場合は追加のquery embeddingを送る前に即座に`InvalidState`を返すため、その拒否では課金されません。先行するHTTPが遅いと、完了・取消し・既存のembedding timeout（既定60秒）まで他の検索も拒否されます。子の検索を直列化するか親が一度検索して共有し、先行検索の完了を待って再試行してください。並列再送や短い間隔での連続再試行は避けます。
 
-read-only接続のopen・lock・query・読取りの失敗は元の原因を含む`IoFailed`として返し、ownerや他Runを停止させません。ファイルアクセス、リソース不足、ロックなどの原因を解決して明示的に再試行してください。HTTP後の再試行は再びembedding費用が発生し得ます。本来のwriterの保存失敗は引き続きownerを停止させます。取消し・切断は`InvalidState`となり、検索の観測だけを止め、対象Runは止めません。
+read-only接続のopen・lock・query・読取りの失敗は元の原因を含む`IoFailed`として返し、ownerや他Runを停止させません。ファイルアクセス、リソース不足、ロックなどの原因を解決して明示的に再試行してください。DB破損（`SQLITE_CORRUPT` / `NOTADB`）やテーブル欠落（`no such table`）も`IoFailed`ですが、再試行だけでは直りません。原因を調査し、必要に応じて対象索引を復元または明示的に再構築してから再試行してください。同じDBエラーが続く場合でも、embedding HTTPに到達する再試行ごとに費用が再発生し得ます。本来のwriterの保存失敗は引き続きownerを停止させます。取消し・切断は`InvalidState`となり、検索の観測だけを止め、対象Runは止めません。

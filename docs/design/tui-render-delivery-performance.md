@@ -89,3 +89,23 @@ both reserved main-producer capacity and incremental result-batch continuation;
 merely increasing the queue bound does not solve it. Revisit with a focused
 saturation test and a bounded continuation design, without adding a Core job
 service.
+
+### Re-review: worker wakeup and explicit-force display
+
+The shared delivery state owns one Tokio Notify (at most one stored wake permit).
+An empty-to-pending transition notifies the frontend. Its existing select always
+polls that notification, even when the conditional flush timer was disabled when
+select began. The branch performs the same bounded 32-item flush. No new task,
+channel, Core event or periodic poller is added; all worker clones share the
+existing Arc owner and shutdown releases it after joins/drain.
+
+ForceShutdown delivery is best effort after explicit force: a nonempty/full UI
+queue can prevent that presentation marker from reaching the UI. The frontend
+still returns forced_shutdown failure and main reports the shutdown error with
+nonzero exit. Do not restore a capacity/drain wait to guarantee a cosmetic marker;
+that would undo the accepted one-request force boundary. This exception does not
+permit dropping ordinary operation results during normal delivery.
+
+The exceptional full-reserve priority-delay follow-up is tracked in
+[Issue #32](https://github.com/tya5/shellboy/issues/32), with bounded continuation
+and main-reserve acceptance criteria. It is not implemented by this wakeup fix.

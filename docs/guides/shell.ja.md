@@ -171,7 +171,7 @@ Windows PowerShell 5.1と新しいpwshではnative commandへJSONを渡す引用
 shellboy --% wait --conditions-json [{\"type\":\"run_ended\",\"run_id\":\"ACTUAL_RUN_ID\"}] --timeout-ms 30000
 ```
 
-`--%` 以降で `$env:...` が通常どおり展開されることを期待しません。Windows実機検証は今回対象外なので、この例を全PowerShell版での実行保証とはしません。通常の文字列sendには `shellboy message send --thread 'ACTUAL_THREAD_ID' --text '確認してください'` のように単純な引数を使えます。
+`--%` 以降で `$env:...` が通常どおり展開されることを期待しません。このPowerShell例はWindows実機で未検証です。各PowerShell版での実行確認も未実施です。通常の文字列sendには `shellboy message send --thread 'ACTUAL_THREAD_ID' --text '確認してください'` のように単純な引数を使えます。
 
 ## shellの経過時間
 

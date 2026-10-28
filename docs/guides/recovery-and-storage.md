@@ -1,6 +1,6 @@
 # Recovery, stopping, and storage
 
-[Guide index](README.md) / [User Guide](user-guide.md) / [Agent Guide](agent-guide.md)
+[Guide index](README.md) / [User Guide](user-guide.md) / [Agent Guide](agent-guide.md) / [日本語](recovery-and-storage.ja.md)
 
 When responses stop, inspect saved acceptance, Turn, and Run state before repeatedly sending the same request. Use the CLI in another terminal while the owner remains running. Examples below use Bash; replace IDs with values from actual responses.
 
@@ -27,7 +27,7 @@ shellboy run get --run RUN_ID
 
 When `answer_node_id` is returned, retrieve it with `shellboy history get --node NODE_ID`. Follow `next_cursor` for long bodies. Terminal `failed` / `stopped` states are not successful answers.
 
-In the TUI, start via F8 `待機 · any条件` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
+In the TUI, start via F8 `待機 · 条件を観測` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
 
 Use `shellboy wait` to wait for execution. `timeout` does not mean the target stopped or failed. `satisfied` need not mean target success: inspect the returned snapshot and state. [Delegation](delegation.md) and [CLI reference](cli-reference.md) show JSON and state-dependent branches.
 
@@ -71,9 +71,9 @@ Get-result `context.recovery_reason` is structured. Restart interruption with `r
 
 ## Inspecting the previous shutdown record
 
-After restart, opening a conversation that had background work shows `前回の終了時の記録` (previous shutdown record), with counts of work, response processing, commands, children, and interrupted wait observations. In F6 select that record and Enter for IDs/reasons or O for saved source. Entries such as previous saved commands, child work, and interrupted prior wait observations lead to individual targets. Use get commands or F8 for their current saved Run/Turn/shell state.
+After restart, opening a conversation that had background work shows `前回の終了時の記録` (previous shutdown record), with counts of work, response processing, commands, children, and interrupted wait observations. In F6 select that record and Enter for IDs/reasons or O for saved source. Entries labeled `前回の保存記録 · コマンド` (previous saved commands), `子の作業` (child work), and `前回の待機観測は中断済み` (previous wait observation interrupted) lead to individual targets. Use get commands or F8 for their current saved Run/Turn/shell state.
 
-The shutdown record is a snapshot before stopping begins. Distinguish intended state from actual cleanup outcome; uncertain external side effects remain uncertain. Normal Ctrl+Q shutdown alone does not prove every external outcome. Restart does not automatically rerun previous work: inspect saved targets, answers, and unapplied requests before choosing an action.
+The shutdown record is a snapshot before stopping begins. Distinguish `予定した状態` (intended state) from actual cleanup outcome; uncertain external side effects remain uncertain. Normal Ctrl+Q shutdown alone does not prove every external outcome. Restart does not automatically rerun previous work: inspect saved targets, answers, and unapplied requests before choosing an action.
 
 ## Resuming recovery wait
 
@@ -200,7 +200,7 @@ Windows default: `%LOCALAPPDATA%\shellboy\data\logs\shellboy.log`. With a custom
 
 TUI `message_send` traces individual submissions using `send.draft_id` / `revision` / `operation_id`. `queued` means the frontend took the request, `processing` means send processing began, `saved` means persistence succeeded, and `failed` / `queue_full` indicate failure/admission shortage. Link saved `message_id` and Thread ID to history. `operation_id` also works in existing operation queries.
 
-If accepting-submission persists, inspect the last stage: only `queued` precedes processing, `processing` precedes confirmed save, and `saved` without screen progress points toward notification/history-fetch/rendering investigation. `queued` does not record Enter or a rendered frame; `saved` does not prove visible reflection. Logging is best effort through the existing bounded asynchronous writer: disabled settings, capacity, or crashes may omit records. Absence alone proves neither nonacceptance nor cause. Body/attachment paths are not additionally logged.
+If `送信受付中` (accepting submission) persists, inspect the last stage: only `queued` precedes processing, `processing` precedes confirmed save, and `saved` without screen progress points toward notification/history-fetch/rendering investigation. `queued` does not record Enter or a rendered frame; `saved` does not prove visible reflection. Logging is best effort through the existing bounded asynchronous writer: disabled settings, capacity, or crashes may omit records. Absence alone proves neither nonacceptance nor cause. Body/attachment paths are not additionally logged.
 
 Fatal aborts such as stack overflow bypass normal shutdown and may leave no cause text in the file. Terminal stderr, crash time, screen, and preceding actions also help investigation. Missing normal shutdown alone does not identify the cause.
 
@@ -218,13 +218,13 @@ GC `managed_deleted` / `managed_failures` contain at most 128 details each. `man
 
 ### Text received before failure
 
-Text streamed on screen remains readable on recovery wait when saved source exists, labeled interrupted response, saved and excluded from conversation. `/received` reaches older failures and successful-response stream differences; Enter opens saved source. Attention color applies only during the original Turn's recovery wait, then becomes a normal notification after recovery/stop. Request excerpts and timestamps identify records. See [receive records](tui.md#reading-saved-receive-records) for paging. Preserving provisional text differs from adopting it into model retry input.
+Text streamed on screen remains readable on recovery wait when saved source exists, labeled `途中で切れた応答（保存済み・会話には含めない）` (interrupted response, saved but excluded from conversation). `/received` reaches older failures and successful-response stream differences; Enter opens saved source. Attention color applies only during the original Turn's recovery wait, then becomes a normal notification after recovery/stop. Request excerpts and timestamps identify records. See [receive records](tui.md#reading-saved-receive-records) for paging. Preserving provisional text differs from adopting it into model retry input.
 
 ### Shutdown grace and Unix execution identity
 
 After Quit, Runs may briefly continue until persistence and owned-work stop finish. Wait for normal shutdown; forcing exit while saving can leave uncertain external effects. Unix stop checks owned-process records, but PGID inspection and signal delivery cannot atomically exclude OS ID reuse between them.
 
-Processes detached outside the owned group with `setsid` or similar can survive stop. Complete cleanup is also not guaranteed for `nohup` use that detaches beyond ownership tracking. Tracking/maintaining self-daemonized work across restart is outside this scope.
+Processes detached outside the owned group with `setsid` or similar can survive stop. Complete cleanup is also not guaranteed for `nohup` use that detaches beyond ownership tracking. Shellboy does not track or maintain self-daemonized work across restarts.
 
 ## When HTTP reception stalls
 
@@ -238,7 +238,7 @@ Embeddings, semantic search, and RAG use per-connection `request_timeout_ms` (de
 
 `EOF before response.completed` means Shellboy had not recognized a completed event when the HTTP body ended. This wording alone does not prove the API never sent one.
 
-Saved failure reasons include `received_bytes`, `parsed_events` (parsed JSON count), `completed_items`, `done_markers`, `pending_line_bytes` / `pending_data_bytes` (unfinished tail), and fixed-category `last_event`. Inspect the same Turn/attempt reason through `/received` source and share these diagnostic values rather than the full body. Normal `model_failure` logs still contain classification and attempt ID, not automatic complete error bodies.
+Newer versions save EOF diagnostic fields in failure reasons; older records may lack them. These fields include `received_bytes`, `parsed_events` (parsed JSON count), `completed_items`, `done_markers`, `pending_line_bytes` / `pending_data_bytes` (unfinished tail), and fixed-category `last_event`. Inspect the same Turn/attempt reason through `/received` source and share these diagnostic values rather than the full body. Normal `model_failure` logs still contain classification and attempt ID, not automatic complete error bodies.
 
 `last_event=untyped` means JSON lacked a string type; `done_markers` counts `[DONE]` markers. Neither proves a completed response. Nonzero bytes with zero parsed events can mean comments only, so avoid inferring a cause. Events lacking their final blank line remain incomplete and are not automatically committed as answers or tool execution.
 

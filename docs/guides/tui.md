@@ -1,6 +1,6 @@
 # TUI controls
 
-[User Guide](user-guide.md) · [Guide index](README.md)
+[User Guide](user-guide.md) · [Guide index](README.md) · [日本語](tui.ja.md)
 
 The current UI calls a Thread `会話` (conversation), a Run `作業` (work), and a Turn `応答処理` (response processing). CLI names, identifier keys, and source text retain their original spelling. Japanese captions quoted below identify the unchanged current UI.
 
@@ -12,13 +12,13 @@ Simplified display does not delete saved source. Details and typed action forms 
 
 ## Activity display
 
-The existing bottom status line shows processing stages for the current conversation. Immediately after Enter, `送信受付中` (accepting submission) animates. After successful storage, `保存済み・表示待ち` (saved, awaiting display) remains until the corresponding message is observed in history. If response processing has already advanced, its stage becomes primary and pending display is noted on the same line. Multiple pending sends show a count; waits of at least one second show time since submission. This measures elapsed UI time since sending, not API processing time. Failure, cancellation, or holding stops the send animation; no automatic resend occurs.
+The existing bottom status line shows processing stages for the current conversation. Immediately after Enter, `送信受付中` (accepting submission) animates. After successful storage, `保存済み・表示待ち` (saved, awaiting display) remains until the corresponding message is observed in history. If response processing has already advanced, its stage becomes primary and pending display is noted on the same line. Multiple pending sends show a count; waits of at least one second show `送信からN秒` (N seconds since submission). This measures elapsed UI time since sending, not API processing time. Failure, cancellation, or holding stops the send animation; no automatic resend occurs.
 
 `準備中` (preparing), `モデル応答待ち` (awaiting model), `応答受信中` (receiving response), and `ツール処理中` (processing tools) use moving text brightness. `待機中` (waiting), `回答済み背景処理中` (answered, background work active), `実行継続中` (execution continuing), and `停止処理中` (stopping) use a slowly pulsing marker. Completed, interrupted, failed, and recovery-wait states are static; failure and recovery wait use an attention color.
 
-The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `Thread · 詳細`.
+The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `会話 · 詳細`.
 
-Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable work, such as the model's internal thought or the target of an unspecified wait, is not guessed. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
+Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought or the target behind `待機中` (waiting), are not guessed. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
 
 Animations affect only the status line, never history text or scroll position. Animation redraws stop during selection/copy mode or overlays. Selection mode shows `表示固定` (display frozen) and exit keys at the top; F2/Esc resumes updates. The conversation list is a snapshot and has no running-state animation.
 
@@ -173,7 +173,7 @@ Ordinary lists, detail fields, and forms use Up/Down for selection and PgUp/PgDn
 
 The conversation list uses one row per conversation with name, working directory, state, and update time columns. Filter text appears immediately; fetching follows 150ms without typing. Ctrl+R refreshes immediately. An empty saved title displays a short name from the first user request, searchable by that name, without rewriting explicit titles or history. Branch lines show ancestry; `▾` / `▸` mean expanded/collapsed, `●` marks the open conversation, and `›` with background marks the selected item. Left collapses children or moves to the parent when already collapsed/a leaf. Right expands or enters the first child when already expanded. Up/Down traverse visible rows and keep selection in view.
 
-In F8 Thread settings, set `タイトル操作` (title action) to `set` and enter a title to rename. `auto` clears the manual name and returns to conversation-derived display; `keep` preserves it. CLI: `shellboy thread set --thread THREAD --title 'Name'`; clear with `--title ''`.
+In F8 `会話 · 設定` (conversation settings), set `タイトル操作` (title action) to `set` and enter a title to rename. `auto` clears the manual name and returns to conversation-derived display; `keep` preserves it. CLI: `shellboy thread set --thread THREAD --title 'Name'`; clear with `--title ''`.
 
 Fixed bottom details show the selection's cwd, ID, parent, state, and a one-line excerpt of roughly at most 80 characters with Markdown/newlines normalized. Narrow screens omit columns; details or F1 show complete values. Enter opens the conversation; F6 reads source.
 
@@ -214,7 +214,7 @@ Reasons, unapplied instructions, and saved tool results remain below the convers
 
 Ordinary answer details emphasize known-format body, state, and references, simplifying single-array nesting and default internal values. V shows retained internal fields; O reads source. C preserves original text/ID values.
 
-F8 actions, searches, attachment/index/storage management results use structured field names, values, and array counts rather than dumping full JSON. Tab / Shift+Tab select a field; Enter fetches its details. `全結果の詳細` (full result details) also exposes unknown fields beyond ordinary display limits.
+F8 actions, searches, attachment/index/storage management results use structured field names, values, and array counts rather than dumping full JSON. Tab / Shift+Tab select a field; Enter fetches its details. `すべての詳細を見る` (full result details) also exposes unknown fields beyond ordinary display limits.
 
 C on a shortened `[詳細は原文参照]` value fetches details instead of copying; omission marks never become a purported complete clipboard value.
 
@@ -226,11 +226,11 @@ Esc closes management display without cancelling an accepted operation. `/stop` 
 
 ### Entering action forms
 
-F8 (`/actions`, `/operations`) lists all 36 actions grouped as current-conversation, common, and all actions. Type/paste up to 128 characters to filter human names, CLI names, and related slash actions. Choose with Up/Down and Enter, then enter target IDs/arguments per field. Conversation-state updates affect suggestions in the next form, not the target currently being edited; IDs opened from references also remain fixed. Suggestions do not guarantee acceptance: verify the target before submission. Shown slash actions are related shortcuts; `/attach` adds to the draft whereas F8 attachment-add is a saved operation.
+F8 (`/actions`, `/operations`) lists all 36 actions under `この会話で` (in this conversation), `よく使う` (common), and `すべての操作` (all actions). Type/paste up to 128 characters to filter human names, CLI names, and related slash actions. Choose with Up/Down and Enter, then enter target IDs/arguments per field. Conversation-state updates affect suggestions in the next form, not the target currently being edited; IDs opened from references also remain fixed. Suggestions do not guarantee acceptance: verify the target before submission. Shown slash actions are related shortcuts; `/attach` adds to the draft whereas F8 attachment-add is a saved operation.
 
 `履歴 · 検索` accepts Thread, kind/excluded kind (space-separated), and creation from/to (offset-bearing RFC3339) filters. An empty Thread means global, never automatically current Thread. `/search QUERY` remains global. `履歴 · 関係` takes node, previous/next/sources/replacements, count, and cursor. Structured fields expose provenance, source revision, and indexed spans. See [history and search](history-and-search.md) for scope and relation semantics.
 
-F8 `Thread · 削除影響` queries blocking Runs, reference counts, sharing, and update time for a Thread/descendant choice. It does not open actual deletion confirmation, and execution still requires a new deletion check. Reclaimable size is unestimated. Structured fields expose get-result context and operation targets/downstream. Distinguish acceptance from downstream completion.
+F8 `会話 · 削除影響` queries blocking Runs, reference counts, sharing, and update time for a Thread/descendant choice. It does not open actual deletion confirmation, and execution still requires a new deletion check. Reclaimable size is unestimated. Structured fields expose get-result context and operation targets/downstream. Distinguish acceptance from downstream completion.
 
 Typing/paste appends to a field. Ctrl+U clears a suggested ID before replacement; Backspace removes its last character. Multiline request/stdin fields use Ctrl+J for newline. **Enter submits the action request, not a newline**: inspect pasted content before pressing it. Total form input is limited to 1MiB; overflow preserves existing values.
 
@@ -260,6 +260,6 @@ During sent-text recall with Up/Down, current unsent attachments move to the rec
 
 `/received` lists receive records for the current conversation newest first, 32 per page. Specify a page with `/received 2`; previous/next list-page entries also open with Enter. The list shows count/page; select an item and Enter to read its saved JSON in the existing source viewer. N continues source pages, P returns to the first, C copies the current page. No memorized ID is required.
 
-Failed requests display readable received reasoning/answers as `途中で切れた応答（保存済み・会話には含めない）` (interrupted response, saved but excluded from conversation). Differences between streaming and final content on successful requests are marked `ストリーム差分・最終確定済み` (stream difference, final adopted). Ordinary conversation retains display windows for the latest two records; older records and omitted portions remain accessible in the list. Attention color applies only while the original Turn is in recovery wait, becoming a normal notification after recovery/stop. Local time and the same Turn's request excerpt identify records. Reselecting a conversation or restarting reconstructs display from saved records.
+Failed requests display readable received reasoning/answers as `途中で切れた応答（保存済み・会話には含めない）` (interrupted response, saved but excluded from conversation). Differences between streaming and final content on successful requests are marked `ストリーム差分 · 最終応答は確定済み` (stream difference, final adopted). Ordinary conversation retains display windows for the latest two records; older records and omitted portions remain accessible in the list. Attention color applies only while the original Turn is in recovery wait, becoming a normal notification after recovery/stop. Local time and the same Turn's request excerpt identify records. Reselecting a conversation or restarting reconstructs display from saved records.
 
 These are receive-audit records, excluded from adopted history resent to the model. Display windows extract text/reasoning excerpts rather than showing source JSON itself. Source retains partial text, completed items, final response, and failure/difference information. Encrypted reasoning is never expanded as screen text.

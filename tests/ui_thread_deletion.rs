@@ -362,6 +362,34 @@ fn closing_and_reopening_cannot_submit_a_second_delete_of_the_same_thread() {
 }
 
 #[test]
+fn worker_panic_reply_releases_global_deletion_ownership_for_another_thread() {
+    let mut ui = ui();
+    list(&mut ui, &["chosen", "next"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    key(&mut ui, KeyCode::Esc);
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: true,
+        result: Err(ApiError::new(
+            ErrorCode::IoFailed,
+            "削除処理が予期せず停止しました。結果は未確認です。一覧を再取得してください",
+        )),
+    });
+    assert!(ui.view().status.contains("結果は未確認"));
+    assert_eq!(
+        ui.threads().len(),
+        2,
+        "uncertain deletion must not remove rows"
+    );
+    key(&mut ui, KeyCode::Down);
+    let (_, next) = request(key(&mut ui, KeyCode::Delete), false);
+    assert_eq!(next.thread_id, "next");
+}
+
+#[test]
 fn late_delete_failure_survives_a_closed_browser_in_the_status_line() {
     let mut ui = ui();
     list(&mut ui, &["chosen"]);

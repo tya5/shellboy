@@ -1,7 +1,11 @@
-# 検証案内
+# Validation entry point
 
-[検証状況](acceptance.md) に実施環境と結果を記録し、[実端末手順](manual-terminal.md) で手動確認を行います。
+Record environments and observed results in [acceptance](acceptance.md).
+Use the [manual terminal procedures](manual-terminal.md) for interactive checks.
 
-標準チェックはリポジトリ直下で `sh scripts/check.sh`（PowerShellは `./scripts/check.ps1`）です。API利用や私的データは必要ありません。
+Run standard checks from the repository root with `sh scripts/check.sh`
+(PowerShell: `./scripts/check.ps1`). No model API or private data is required.
 
-追加の合成fixtureと検証ツールは `tests/`、`examples/`、`scripts/` にあります。生成物はGit管理外の `target/` 等へ保存し、実会話・個人のパス・資格情報を公開記録へ含めません。
+Additional synthetic fixtures and verification tools live in `tests/`, `examples/`
+and `scripts/`. Keep generated artifacts in ignored locations such as `target/`.
+Do not include real conversations, personal paths or credentials in public records.

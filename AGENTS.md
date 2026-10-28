@@ -4,7 +4,7 @@ This file contains instructions for developing Shellboy itself. Product users sh
 
 ## Working baseline
 
-- Read the [effective specification](docs/design/effective-spec.md) first, then the adopted designs for the area you are changing. Check public types, configuration, migrations, fixtures, and implementation against the design; record contract changes before implementing them.
+- Read the [effective specification](docs/design/effective-spec.md) first, then the adopted designs for the area you are changing. Check public types, configuration, migrations, fixtures, and implementation against the design. Resolve and reflect discovered discrepancies in the adopted design before changing code or fixtures, including existing mismatches beyond intentional contract changes.
 - Keep the [development status](docs/development/status.md) current. Record verified and untested behavior separately in [acceptance](docs/validation/acceptance.md). An existing document or an earlier successful test does not prove the current change works.
 - Make routine decisions autonomously. Record uncertain decisions, their reasoning, impact, and conditions for revisiting them in the [decision log](docs/development/decisions.md).
 - Follow the [documentation layout and maintenance rules](docs/README.md). Adopted designs must be usable from this repository alone.
@@ -18,6 +18,7 @@ This file contains instructions for developing Shellboy itself. Product users sh
 - Preserve the ordering of state adoption, persistence, cancellation, and late results in the [Control design](docs/design/control.md) and relevant subsystem designs. For every new table, event, worker, queue, or dependency, document why it is necessary, its bounds, owner, and shutdown responsibility.
 - Use ordinary Rust modules. Do not add a generic Repository or independent job engine. Do not hide incomplete behavior behind successful stubs.
 - Keep credentials, local databases, real conversations, and private logs out of Git. Do not add compatibility paths for the former product's command names, environment variables, or default storage locations.
+- Before 1.0.0, do not add one-off migrations or compatibility shims for earlier releases (old data formats, deprecated aliases, legacy keys). Breaking changes are acceptable. General mechanisms needed for long-term compatibility (the schema migration runner, `user_version`, protocol version checks) are allowed. Compatibility is guaranteed from 1.0.0.
 
 ## Validation and handoff
 

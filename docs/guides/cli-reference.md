@@ -1,6 +1,6 @@
 # CLI reference
 
-[Guide index](README.md) · [Agent Guide](agent-guide.md) · [Configuration](configuration.md)
+[日本語](cli-reference.ja.md) · [Guide index](README.md) · [Agent Guide](agent-guide.md) · [Configuration](configuration.md)
 
 Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments starts the TUI owner in an interactive terminal. The owner tables below describe the current 37 operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `docs` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
 
@@ -14,7 +14,7 @@ shellboy rag --help
 shellboy rag search --scope docs --scope history --query 'recovery' --mode keyword
 ```
 
-`docs` reads same-version guides embedded in the executable without an API. `rag` searches registered documents, guides, and explicitly selected history scopes without starting a generative model. Standalone JSON has no owner operation_id; combining with `--operation-id` is rejected. RAG partial failures return `ok:false` alongside partial results; inspect per-scope errors.
+`docs` reads same-version English guides embedded in the executable without an API; the offline catalogue is English only. `rag` searches registered documents, guides, and explicitly selected history scopes without starting a generative model. Standalone JSON has no owner operation_id; combining with `--operation-id` is rejected. RAG partial failures return `ok:false` alongside partial results; inspect per-scope errors.
 
 ## Common syntax and connection
 
@@ -244,7 +244,7 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 | `thread_not_found` | Check ID/deletion state |
 | `target_unavailable` | Missing/unavailable Run/Turn/shell; requery original state |
 | `operation_conflict` | ID reused for different content; inspect original receipt |
-| `operation_expired` | Old-instance new-operation ID or expired result; inspect old outcome before deciding on duplicate execution |
+| `operation_expired` | Mutation replay with an unsaved old-instance ID or an expired outcome, including a collected current-instance result; inspect retained operation metadata and target state before deciding on duplicate execution |
 | `operation_not_found` | Receipt missing; after disconnect also inspect target state |
 | `invalid_state` | Current state/ownership disallows it; inspect details/hint/get |
 | `wait_cycle` | Cycle through self/ownership/other waits; split waits or report |
@@ -262,9 +262,9 @@ Errors/timeouts never justify unconditional repetition under a new ID. Inspect s
 
 Syntax follows [cli.rs](../../src/cli.rs), public types/constants [protocol.rs](../../src/protocol.rs), JSON/exit behavior [main.rs](../../src/main.rs), and results [Control](../../src/control.rs) / [DB operations](../../src/control/db.rs). Public CLI has no standalone subcommands for TUI-only edited sending, attachment reload, or index cost preview. See [TUI guide](tui.md) for screen controls.
 
-### Deprecated v0.1.2 alias
+### Deprecated alias
 
-`status --operation ID` normalizes to `operation get --operation ID`, with migration guidance on stderr. It is retained for the single v0.1.2 release and scheduled for removal in the next release. JSON stdout contains the canonical query result. Combining it with ordinary work-list filters is rejected.
+`status --operation ID` normalizes to `operation get --operation ID`, with migration guidance on stderr. The alias is currently accepted but deprecated; use the canonical `operation get` command for new scripts. JSON stdout contains the canonical query result. Combining it with ordinary work-list filters is rejected.
 
 ## Compact range selection
 

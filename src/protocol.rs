@@ -145,7 +145,7 @@ impl ApiError {
             return self;
         }
         self.hint = Some(match self.code {
-            ErrorCode::InvalidArgument => "Read shellboy <command> --help; find examples with shellboy docs search --query '操作'",
+            ErrorCode::InvalidArgument => "Read shellboy <command> --help; find English guide examples with shellboy docs search --query 'background'",
             ErrorCode::ConfigInvalid => "Inspect the selected configuration and shellboy docs get --id shellboy/configuration; do not repeat an unconfirmed mutation",
             ErrorCode::AppNotRunning => "Check --data-dir and start its owner if needed; query any known operation receipt before repeating a mutation",
             ErrorCode::ProtocolMismatch => "Check the selected owner and client version; inspect any known operation receipt before repeating a mutation",

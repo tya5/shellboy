@@ -30,11 +30,11 @@ shellboy rag source add /absolute/path/to/notes --name notes --clear-excludes
 
 `--exclude`は複数指定でき、最大64個・各1024bytes以内。sourceに保存するのでindexごとの再指定は不要です。同じ名前/rootへの除外指定なしの再登録は維持、非空の指定で全置換、解除は`--clear-excludes`です。照合は全OSで大文字小文字を区別し、macOSやWindowsでも`*.LOG`は`a.log`に一致しません。rootからの相対pathをslash区切りで照合し、slashのないpatternは各階層のbasenameにも適用します。配下のdirectoryに一致すれば配下を読みません。登録したdirectoryのroot自体はglobで除外しませんが、fileを直接登録した場合は除外対象になり得ます。gitignoreの読込みや否定規則には対応しません。
 
-dotで始まる配下entry（`.git`や`.DS_Store`）、現在使うRAG DBと`-wal`/`-shm`/`-journal`/writer lockは既定で対象外です。明示登録したhidden root自体は選択意図を優先します。シンボリックリンクは辿りません。未対応形式も失敗ではなく対象外です。結果の`skipped`、source別`selection`のtargets/excluded/unsupported/symlinks、拡張子別の内訳と上限20件の例を確認してください。1 sourceあたり対応資料10000件・訪問entry100000件・深さ64が上限です。
+dotで始まる配下entry（`.git`や`.DS_Store`）、現在使うRAG DBと`-wal`/`-shm`/`-journal`/writer lockは既定で対象外です。明示登録したhidden root自体は選択意図を優先します。シンボリックリンクは辿りません。登録済みrootがシンボリックリンクに置き換わった場合は`source_unavailable`として、そのsourceの更新と削除検出をすべて見送り、以前の検索可能な版をstaleとして保持します。未対応形式も失敗ではなく対象外です。結果の`skipped`、source別`selection`のtargets/excluded/unsupported/symlinks、拡張子別の内訳と上限20件の例を確認してください。1 sourceあたり対応資料10000件・訪問entry100000件・深さ64が上限です。
 
 directory走査が完了すると、対象外になった旧資料や削除済み資料は検索のactive版から外れ、`removed`に数えます。原本は削除しません。個別fileの読取り/抽出失敗では、そのfileの旧版だけを`stale`として保持します（旧版がなければ`failed`）。他の見つからなかったfileの削除検出は継続します。rootへアクセスできない場合や走査上限などの走査不全では、そのsourceの**新規・変更fileの索引更新と削除検出をすべて見送ります**。provider breakerによる後回しがある場合も、再試行まで削除検出を抑止します。
 
-0.2.0ではWindowsのdocument keyをslash区切りにします。旧索引からの移行・互換性は提供しません。旧backslash key・ID・revisionの引き継ぎには依存せず、索引を作り直してください。POSIXのfile名中のbackslashは通常の文字として扱います。
+Windowsのdocument keyはv0.1.6からslash区切りです。最初の完全な同期で旧backslash keyの資料はactive索引からremovedとなり、現行slash keyが新しいdocument IDで登録されます。DBの作り直しは不要です。旧keyやIDを`inspect --id`へ渡しても置換後の資料は取得できません。旧keyのlookupやID・revisionの引き継ぎは提供しません。POSIXのfile名中のbackslashは通常の文字として扱います。
 
 既定はkeyword検索・索引で、API接続は不要です。登録やdry-runはAPIを呼びません。
 管理DBは既定データディレクトリの `rag.db`、`shellboy rag --db /absolute/path/knowledge.db`
@@ -134,7 +134,7 @@ metadataは最大64KiBのJSON objectです。変換ツール名/版、生成時�
 
 ## 索引の結果と最終更新を確認する
 
-`rag index`のJSONは`changed`/`unchanged`/`removed`/`processed`、`failure_count`/`failures`/`failures_truncated`、`partial_failure`、`embedding_paused`/`deferred`と再試行案内を返します。sourceごとの結果も`result.sources`で確認できます。新規資料で一度も成功していなければ`failed`、旧active版を残していれば`stale`です。失敗一覧は最大50件で、総数と省略有無を併記します。
+`rag index`のJSONは`changed`/`unchanged`/`removed`/`processed`、`failure_count`/`failures`/`failures_truncated`、`partial_failure`、`embedding_paused`/`deferred`と再試行案内を返します。sourceごとの結果も`result.sources`で確認できます。新規資料で一度も成功していなければ`failed`、旧active版を残していれば`stale`です。失敗一覧は最大50件で、総数と省略有無を併記します。対応形式のfileが毎回失敗する場合、他の変更や削除が正常に適用されても、`rag index`は毎回`ok:false`・`partial_failure`と非0終了コードを返します。成功済みの処理のrollbackではないため、件数と失敗内容を確認してから再試行してください。
 
 `rag status`は既存の保存行からsourceごとの状態、`last_scan`（最終走査）、`last_changed_at`（有効版の内容作成時刻の最大値）、失敗資料のkey/code/messageを返します。現在のembedding設定で欠けるchunk数が`semantic_missing`です。0は現在のactive chunksのembedding不足がないことを表し、索引を実行した時刻やAPI呼出回数とは異なります。設定を確認できない場合はnullを返し、`semantic_configuration`を確認します。
 

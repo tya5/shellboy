@@ -42,6 +42,7 @@ struct Delivery {
     raw: SyncSender<UiUpdate>,
     pending: Mutex<Pending>,
     closed: AtomicBool,
+    ready: tokio::sync::Notify,
 }
 #[derive(Clone)]
 pub(super) struct BufferedUpdates {
@@ -54,12 +55,17 @@ impl BufferedUpdates {
                 raw,
                 pending: Mutex::new(Pending::default()),
                 closed: AtomicBool::new(false),
+                ready: tokio::sync::Notify::new(),
             }),
         }
     }
     /// All producers share the same order and finite outbox; no raw bypass.
     pub(super) fn worker(&self) -> Self {
         self.clone()
+    }
+    /// Notify keeps one wake permit if a worker enqueues before select polls.
+    pub(super) async fn notified(&self) {
+        self.delivery.ready.notified().await;
     }
     pub(super) fn backpressured(&self) -> bool {
         self.delivery
@@ -170,7 +176,8 @@ impl UpdateTarget for BufferedUpdates {
             return Err(TrySendError::Disconnected(value));
         }
         let mut q = self.delivery.pending.lock().expect("UI delivery lock");
-        let value = if q.critical.is_empty() && q.latest.is_empty() {
+        let was_empty = q.critical.is_empty() && q.latest.is_empty();
+        let value = if was_empty {
             match self.delivery.raw.try_send(value) {
                 Ok(()) => return Ok(()),
                 Err(std::sync::mpsc::TrySendError::Disconnected(value)) => {
@@ -196,11 +203,17 @@ impl UpdateTarget for BufferedUpdates {
             q.sequence = q.sequence.wrapping_add(1);
             let sequence = q.sequence;
             q.latest.insert(key, Item { sequence, value });
+            if was_empty {
+                self.delivery.ready.notify_one();
+            }
             Ok(())
         } else if q.critical.len() < CRITICAL_LIMIT {
             q.sequence = q.sequence.wrapping_add(1);
             let sequence = q.sequence;
             q.critical.push_back(Item { sequence, value });
+            if was_empty {
+                self.delivery.ready.notify_one();
+            }
             Ok(())
         } else {
             // Reserve exhaustion cannot discard a receipt or report success.
@@ -477,5 +490,33 @@ mod tests {
             out.delivery.pending.lock().unwrap().critical.len(),
             CRITICAL_LIMIT
         );
+    }
+    #[tokio::test]
+    async fn worker_enqueue_wakes_an_idle_select_with_flush_initially_disabled() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        let worker = out.worker();
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let bridge = tokio::spawn(async move {
+            let pending = out.pending();
+            assert!(!pending);
+            entered.send(()).unwrap();
+            tokio::select! {
+                _ = out.notified() => out.flush(),
+                _ = tokio::time::sleep(Duration::from_secs(30)), if pending => out.flush(),
+            }
+        });
+        waiting.await.unwrap();
+        // The raw queue is still full, so the worker must use the empty outbox.
+        update(&worker, UiUpdate::Shutdown).await;
+        assert!(worker.pending());
+        assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
+        tokio::time::timeout(Duration::from_secs(1), bridge)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), UiUpdate::Shutdown));
+        assert!(!worker.pending());
     }
 }

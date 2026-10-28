@@ -106,3 +106,37 @@ fn document_pages_omit_terminal_cursor_and_follow_real_continuations_offline() {
     assert!(empty["result"].get("next_cursor").is_none());
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn protocol_recovery_hint_finds_real_offline_shell_examples() {
+    let root = tempfile::tempdir().unwrap();
+    // Owner RPC errors use Response::failure; standalone docs errors have a
+    // separate envelope and are not expected to contain this recovery hint.
+    let response = shellboy::protocol::Response::<Value>::failure(
+        "fixture:invalid-argument",
+        shellboy::protocol::ApiError::new(
+            shellboy::protocol::ErrorCode::InvalidArgument,
+            "fixture",
+        ),
+    );
+    let value = serde_json::to_value(response).unwrap();
+    let hint = value["error"]["hint"].as_str().unwrap();
+    let query = hint
+        .split("--query '")
+        .nth(1)
+        .unwrap()
+        .split('\'')
+        .next()
+        .unwrap();
+    let (success, found) = call(root.path(), &["docs", "search", "--query", query]);
+    assert!(success && found["ok"] == true, "{found}");
+    assert!(
+        found["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "shellboy/shell"),
+        "Recovery hint must find executable shell examples: {found}"
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+}

@@ -1,15 +1,18 @@
-# 採用設計
+# Adopted designs
 
-開発は [適用仕様](effective-spec.md) から読みます。通常のCargo packageとして `src/` にmodule、`tests/` に結合試験、`migrations/` に版付きSQLを置き、必要なmoduleだけ子ディレクトリへ分けます。
+Start with the [effective specification](effective-spec.md). Use ordinary Cargo
+layout: modules in `src/`, integration tests in `tests/`, versioned SQL in
+`migrations/`, and subdirectories only for modules that need them.
 
-- 基本構造: [実装](implementation.md)、[runtime](runtime.md)、[Control](control.md)、[状態境界](control-boundary-map.md)
-- 公開契約: [protocol](protocol.md)、[CLI](cli.md)、[設定](config.md)
-- 保存と履歴: [storage](storage.md)、[history](history.md)、[compaction](compaction.md)、[GC](gc.md)、[索引](index.md)、[末尾採用とhot query](history-adoption-performance.md)
-- 外部処理: [モデルHTTP](model-http.md)、[shell](shell.md)、[出力](output.md)、[wait](wait.md)、[添付](attachments.md)、[添付出典](attachment-provenance.md)
-- 検索と観測: [検索・関係](search-and-relations.md)、[検索readerとwait通知](history-search-readers-and-waits.md)、[作業状態](work-observability.md)、[操作](operation-observability.md)、[削除影響](deletion-impact.md)、[実行context](execution-context.md)
-- 画面: [UI](ui.md)、[構造化表示](tui-presentation.md)、[popup](tui-popup-framework.md)、[スクロール](tui-scrolling.md)、[入力補助](composer.md)、[会話一覧](thread-browser.md)、[モデル一覧](models.md)、[activity](tui-activity-indicator.md)、[復旧ベル](tui-recovery-bell.md)、[描画と配送](tui-render-delivery-performance.md)
-- ガイド・文書検索: [ガイド構成](guides.md)、[docs/RAG採用仕様](docs-and-rag-spec.md)、[docs/RAG実装](docs-and-rag.md)
+- Architecture: [implementation](implementation.md), [runtime](runtime.md), [Control](control.md), [state boundaries](control-boundary-map.md)
+- Public contracts: [protocol](protocol.md), [CLI](cli.md), [configuration](config.md)
+- Persistence and history: [storage](storage.md), [history](history.md), [compaction](compaction.md), [GC](gc.md), [index](index.md), [history adoption and hot queries](history-adoption-performance.md)
+- External execution: [model HTTP](model-http.md), [shell](shell.md), [output](output.md), [wait](wait.md), [attachments](attachments.md), [attachment provenance](attachment-provenance.md)
+- Search and observation: [search and relations](search-and-relations.md), [search readers and wait notifications](history-search-readers-and-waits.md), [work observability](work-observability.md), [operations](operation-observability.md), [deletion impact](deletion-impact.md), [execution context](execution-context.md)
+- Presentation: [UI](ui.md), [structured output](tui-presentation.md), [popups](tui-popup-framework.md), [scrolling](tui-scrolling.md), [composer](composer.md), [thread browser](thread-browser.md), [models](models.md), [activity](tui-activity-indicator.md), [recovery bell](tui-recovery-bell.md), [rendering and delivery](tui-render-delivery-performance.md)
+- Guides and document search: [guide layout](guides.md), [docs/RAG specification](docs-and-rag-spec.md), [docs/RAG implementation](docs-and-rag.md)
+- Documentation language and future UI options: [English defaults and Japanese translations](documentation-language.md)
 
-各設計では責務・不変条件・上限・所有者・失敗時の扱いを保ちます。設計の存在と動作検証の成功は別です。[現在地](../development/status.md) と [検証状況](../validation/acceptance.md) を確認してください。
-
-- Documentation language and future UI options: [English defaults and Japanese translations](documentation-language.md).
+Each design preserves responsibilities, invariants, limits, ownership and failure
+handling. A design document does not establish successful verification. Check the
+[current status](../development/status.md) and [acceptance](../validation/acceptance.md).

@@ -137,6 +137,7 @@ fn observation_error(mut error: ApiError) -> ApiError {
     if error.is_storage_failure() {
         error.code = ErrorCode::IoFailed;
         error.message = format!("Read-only history search failed: {}", error.message);
+        error.hint = Some("Inspect the reported SQLite read failure and repair its cause before retrying history search; corrupt databases or missing tables are not repaired by retries. Repeating search after HTTP may incur another query embedding charge.".into());
     }
     error
 }
@@ -565,6 +566,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn readonly_space_check_replaces_writer_hint_and_keeps_sqlite_cause() {
+        let (_root, db, space) = fixture().await;
+        // check_space uses db_error, which already carries a writer recovery
+        // hint. The actual ranking boundary must replace it before Control can
+        // decline to add its own observation hint.
+        db.call(|db| {
+            db.execute_batch("ALTER TABLE index_space RENAME TO unavailable_index_space")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let error = failed_rank(db.path().into(), space).await;
+        assert!(
+            error.message.contains("no such table: index_space"),
+            "{error:?}"
+        );
+        let hint = error.hint.as_deref().unwrap();
+        assert!(hint.contains("embedding charge"), "{error:?}");
+        assert!(hint.contains("not repaired by retries"), "{error:?}");
+        assert!(!hint.contains("existing data was preserved"), "{error:?}");
+        subsequent_mutation(&db).await;
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn readonly_busy_failure_is_an_observation_and_allows_writes_after_unlock() {
         let (_root, db, space) = fixture().await;
         let path = db.path().to_path_buf();
@@ -712,6 +738,32 @@ mod tests {
             ErrorCode::IoFailed
         );
         assert_eq!(sql_error(sqlite()).code, ErrorCode::SaveFailed);
+        let writer_hint = db_error(StorageError::from(sqlite()));
+        assert!(
+            writer_hint
+                .hint
+                .as_deref()
+                .unwrap()
+                .contains("storage capacity")
+        );
+        let observed = observation_error(writer_hint.clone());
+        assert_eq!(observed.code, ErrorCode::IoFailed);
+        assert!(observed.message.contains(&writer_hint.message));
+        assert!(
+            observed
+                .hint
+                .as_deref()
+                .unwrap()
+                .contains("embedding charge")
+        );
+        assert!(writer_hint.is_storage_failure());
+        assert!(
+            writer_hint
+                .hint
+                .as_deref()
+                .unwrap()
+                .contains("storage capacity")
+        );
     }
 
     #[tokio::test]

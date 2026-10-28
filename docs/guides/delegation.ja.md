@@ -98,4 +98,4 @@ shellboy run stop --run CHILD_RUN_ID
 
 retryとstopは選択肢です。上の両方を続けて実行する例ではありません。子の `recovery_wait` へモデルが普通のmessageを送っても、その本文は保留され、自動復旧の代わりになりません。再起動後は以前のRunを自動再実行せず、中断情報・保存済み回答/未処理messageを見て新しい実行を判断します。停止時は未実行指示のmessage IDを保持してください。
 
-PowerShellでは `$env:SHELLBOY_THREAD_ID` を使います。単一引用符のJSON例は利用shellの引数渡しに合わせ、詳しくは [shell](shell.ja.md) を参照してください。Windows実機での動作確認は今回対象外です。
+PowerShellでは `$env:SHELLBOY_THREAD_ID` を使います。単一引用符のJSON例は利用shellの引数渡しに合わせ、詳しくは [shell](shell.ja.md) を参照してください。これらの委譲コマンド例はWindows実機で動作確認していません。

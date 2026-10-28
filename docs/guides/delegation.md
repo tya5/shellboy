@@ -1,6 +1,6 @@
 # Delegation and coordination
 
-[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
+[日本語](delegation.ja.md) · [Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
 A Shellboy child agent (also called a subagent) is a Run executing on a child Thread. A Thread holds stored conversation and configuration; a Run owns shells and child Runs; a Turn is one response interval. Creating a child alone does not start execution. Sending a request assigns a Run/Turn. Parent and child share the runtime and filesystem, not separate isolated environments.
 
@@ -91,4 +91,4 @@ shellboy run stop --run CHILD_RUN_ID
 
 Retry and stop are alternatives; the example does not instruct running both consecutively. An ordinary model message to a child in `recovery_wait` is held, not substituted for automatic recovery. After restart, earlier Runs are not automatically executed again. Decide on new execution using interruption information, stored answers, and unprocessed messages. Retain IDs of unexecuted instruction messages when stopping.
 
-In PowerShell, use `$env:SHELLBOY_THREAD_ID`. Adapt single-quoted JSON examples to the shell's argument passing; see [Shell](shell.md). Physical Windows verification was outside the scope of this change.
+In PowerShell, use `$env:SHELLBOY_THREAD_ID`. Adapt single-quoted JSON examples to the shell's argument passing; see [Shell](shell.md). These delegation command examples have not been verified on physical Windows hardware.

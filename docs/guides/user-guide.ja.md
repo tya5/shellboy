@@ -50,7 +50,7 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 起動中は設定・DB更新・前回中断した処理の整理など、現在の準備内容を表示します。会話入力は起動完了後に行います。Esc / Ctrl+C / Ctrl+Qで終了を要求すると、開始済みの初期化と保存処理を安全な境界まで進めてから閉じます。DB更新を巻き戻したり、直ちにlockを解放したりする操作ではありません。起動に失敗した場合は表示された理由を確認し、EnterかEscで閉じます。
 
-新しいルートThreadのcwdは起動フォルダーです。保存済みThreadを開くと、そのThreadのcwdを使い、今回の起動フォルダーで上書きしません。`/cwd`、又はF8の「Thread · 詳細」で確認できます。
+新しいルートThreadのcwdは起動フォルダーです。保存済みThreadを開くと、そのThreadのcwdを使い、今回の起動フォルダーで上書きしません。`/cwd`、又はF8の「会話 · 詳細」で確認できます。
 
 ## 2. 最初の依頼を送る
 
@@ -111,4 +111,4 @@ Ctrl+Cは現在Threadの中断、Ctrl+Bは現在のforeground shellを背景へ�
 
 次に使う機能は[添付](attachments.ja.md)、[履歴と検索](history-and-search.ja.md)、[全CLI参照](cli-reference.ja.md)から確認できます。
 
-削除前にF8の「Thread · 削除影響」で、動作中Run・子孫・共有や出典・添付参照を確認できます。照会だけでは削除せず、容量の回収見積もりは未対応です。受付や圧縮結果を見失った場合はF8の「操作 · 受付結果」で対象operationを照会し、後続状態も確認します。詳しくは[復旧・保存](recovery-and-storage.ja.md)を参照してください。
+削除前にF8の「会話 · 削除影響」で、動作中Run・子孫・共有や出典・添付参照を確認できます。照会だけでは削除せず、容量の回収見積もりは未対応です。受付や圧縮結果を見失った場合はF8の「操作 · 受付結果」で対象operationを照会し、後続状態も確認します。詳しくは[復旧・保存](recovery-and-storage.ja.md)を参照してください。

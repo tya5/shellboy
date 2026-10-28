@@ -104,6 +104,10 @@ Coreの削除成功は後片付け失敗で取り消さない。少なくとも�
 
 A failed cleanup write uses the existing checked-storage boundary: `SaveFailed` stops owner admission and execution, while the frontend still emits the confirmed deletion, root cleanup, and separate warning. A bounded observation/admission error is not a persistence failure and does not stop the owner. Read-only tombstone observation remains best effort after a failed cleanup transaction.
 
+The cleanup warning explicitly reports stopped admission and resource recovery only for a persistence failure. That warning reaches the new draft after the deleted active view is removed; ordinary bounds/observation warnings do not claim the owner stopped.
+
+The existing deletion worker catches unwinding panics at the operation-future boundary and sends a request-scoped error through its existing result channel. This releases the global deletion-in-flight record and existing admission permit without adding tasks or queues. A panic leaves the mutation outcome uncertain: the UI keeps the current rows, asks for a fresh list/preview, and never retries automatically. Abort-mode/process termination cannot be recovered this way.
+
 Deletion execution is serialized at the UI boundary (one in-flight deletion, including after closing its dialog). This prevents overlapping parent/descendant requests without traversing the DAG or trusting incomplete paginated ancestry. The existing request ID map remains the owner; no persistent state or worker is added. Independent deletions can be submitted after the first result.
 
 A browser notice is consumed for reopening only after its header has actually been drawn and the browser is the top input overlay. A header hidden by a small viewport or covered by another overlay does not consume the notice. Outcomes arriving while the browser is closed survive its next open; after display, another open starts without the old notice. This state is UI-local and is not saved to the database.

@@ -17,7 +17,9 @@ Shellboyへの改名では旧名の実行名・環境変数・既定保存先へ
 
 The next release targets 0.2.0 without a migration or backward-compatibility
 promise for earlier releases. In particular, RAG does not preserve Windows
-backslash document keys: recreate the index with current slash-separated keys.
+backslash document keys: a complete synchronization indexes current slash keys
+with new identities and removes absent legacy keys from active search. Recreating
+the database is unnecessary; slash normalization already shipped in 0.1.6.
 Do not add fallback lookup or identity migration for those keys. This records the
 Issue #20 clarification; it does not trigger deletion or conversion of user data.
 

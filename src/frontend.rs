@@ -751,6 +751,9 @@ async fn run_with_clipboard_slots(
                     _ => {}
                 }
             },
+            _=updates.notified()=> {
+                updates.flush();delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
+            },
             _=tokio::time::sleep_until(delivery_next),if updates.pending()=> {
                 updates.flush();delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
             },
@@ -1101,7 +1104,7 @@ async fn run_with_clipboard_slots(
                         let action_args = args.clone();
                         let refusal_args = args.clone();
                         let work = async move {
-                            let result = thread_deletion::run(&control, action_args, execute).await;
+                            let result = thread_deletion::guard(thread_deletion::run(&control, action_args, execute)).await;
                             let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, known_thread_ids, result }).await;
                         };
                         if execute {

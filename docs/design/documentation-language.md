@@ -4,7 +4,7 @@
 
 ## Documentation policy
 
-- English is the default for new documentation and development instructions. `README.md`, root `AGENTS.md`, documentation entry points, and all unsuffixed files under `docs/guides/` are English.
+- English is the default for new documentation and development instructions. `README.md`, root `AGENTS.md`, the entry points `docs/README.md`, `docs/guides/README.md`, `docs/design/README.md` and `docs/validation/README.md`, and all unsuffixed files under `docs/guides/` are English.
 - Preserve the Japanese user-facing guides as `name.ja.md`, including `user-guide.ja.md` and `README.ja.md`. Use ordinary sibling links to Japanese translations. They link to `agent-guide.md` when model instructions are needed: there is no Japanese Agent Guide.
 - `agent-guide.md` is English only. The root development `AGENTS.md` and the model-facing Agent Guide remain distinct documents with different audiences.
 - Feature guides are shared by people and models. Translate the complete guide, examples, limits, errors, ownership rules, and recovery distinctions; do not replace them with a shorter English overview that sends readers back to Japanese prose.

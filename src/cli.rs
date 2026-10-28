@@ -222,10 +222,10 @@ pub struct ListOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nThe deprecated status --operation alias uses operation get and will be removed after v0.1.2.\nGuide: shellboy docs get --id shellboy/agent-guide"
+    after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nThe deprecated status --operation alias is still accepted; use operation get --operation ID instead.\nGuide: shellboy docs get --id shellboy/agent-guide"
 )]
 pub struct StatusOptions {
-    /// Deprecated until the next release: use operation get --operation ID.
+    /// Deprecated alias: use operation get --operation ID.
     #[arg(
         long = "operation",
         id = "status_lookup_operation_id",

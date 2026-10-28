@@ -270,6 +270,89 @@ async fn incomplete_walk_defers_updates_and_preserves_unseen_saved_revisions() {
     );
 }
 
+// Windows symlink creation may require privileges; this regression uses real
+// Unix filesystem links rather than claiming an unavailable Windows result.
+#[cfg(unix)]
+#[tokio::test]
+async fn root_replaced_by_symlink_preserves_all_saved_revisions() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::create_dir(root.join("materials")).unwrap();
+    std::fs::write(root.join("materials/old.md"), "original revision").unwrap();
+    std::fs::write(root.join("materials/deleted.md"), "also retain").unwrap();
+    init(root).await;
+    // The root's basename matches, but directory roots are intentionally kept.
+    add(root, "materials", &["materials"], false).await;
+    assert_eq!(
+        index(root, false, IndexMode::Keyword).await["result"]["changed"],
+        2
+    );
+    let before = call(
+        root,
+        RagCommand::Inspect {
+            id: "old.md".into(),
+        },
+    )
+    .await;
+    std::fs::rename(root.join("materials"), root.join("moved")).unwrap();
+    std::fs::write(root.join("moved/old.md"), "changed behind link").unwrap();
+    std::fs::remove_file(root.join("moved/deleted.md")).unwrap();
+    std::fs::write(root.join("moved/new.md"), "must not publish").unwrap();
+    std::os::unix::fs::symlink(root.join("moved"), root.join("materials")).unwrap();
+    for dry_run in [true, false] {
+        let unavailable = index(root, dry_run, IndexMode::Keyword).await;
+        assert_eq!(unavailable["ok"], false, "{unavailable}");
+        assert_eq!(unavailable["error"]["code"], "partial_failure");
+        assert_eq!(unavailable["result"]["removed"], 0);
+        assert_eq!(unavailable["result"]["processed"], 0);
+        assert_eq!(unavailable["result"]["changed"], 0);
+        assert_eq!(unavailable["result"]["sources"][0]["scan_complete"], false);
+        assert_eq!(
+            unavailable["result"]["sources"][0]["error"],
+            "source_unavailable"
+        );
+        let retained = call(
+            root,
+            RagCommand::Inspect {
+                id: "old.md".into(),
+            },
+        )
+        .await;
+        assert_eq!(retained["result"]["revision"], before["result"]["revision"]);
+        assert_eq!(
+            retained["result"]["state"],
+            if dry_run { "ready" } else { "stale" }
+        );
+        assert_eq!(
+            call(
+                root,
+                RagCommand::Inspect {
+                    id: "deleted.md".into()
+                }
+            )
+            .await["result"]["state"],
+            if dry_run { "ready" } else { "stale" }
+        );
+        assert_eq!(
+            call(
+                root,
+                RagCommand::Inspect {
+                    id: "new.md".into()
+                }
+            )
+            .await["ok"],
+            false
+        );
+    }
+    // Restore the registered directory and verify normal synchronization resumes.
+    std::fs::remove_file(root.join("materials")).unwrap();
+    std::fs::rename(root.join("moved"), root.join("materials")).unwrap();
+    let recovered = index(root, false, IndexMode::Keyword).await;
+    assert_eq!(recovered["ok"], true, "{recovered}");
+    assert_eq!(recovered["result"]["changed"], 2);
+    assert_eq!(recovered["result"]["removed"], 1);
+}
+
 #[tokio::test]
 async fn exclusions_skip_descendants_but_do_not_exclude_directory_source_root() {
     let root = tempfile::tempdir().unwrap();
@@ -304,18 +387,35 @@ async fn exclusions_skip_descendants_but_do_not_exclude_directory_source_root() 
         .await["ok"],
         true
     );
+    assert_eq!(add(root, "materials/a.md", &[], false).await["ok"], true);
+    assert_eq!(
+        index(root, false, IndexMode::Keyword).await["result"]["changed"],
+        1
+    );
     assert_eq!(
         add(root, "materials/a.md", &["*.md"], false).await["ok"],
         true
     );
-    let excluded_file = index(root, true, IndexMode::Keyword).await;
-    assert_eq!(
-        excluded_file["result"]["sources"][0]["selection"]["targets"],
-        0
-    );
-    assert_eq!(
-        excluded_file["result"]["sources"][0]["selection"]["excluded"],
-        1
+    for dry_run in [true, false] {
+        let excluded_file = index(root, dry_run, IndexMode::Keyword).await;
+        assert_eq!(excluded_file["ok"], true);
+        assert_eq!(excluded_file["result"]["removed"], 1);
+        assert_eq!(
+            excluded_file["result"]["sources"][0]["selection"]["targets"],
+            0
+        );
+        assert_eq!(
+            excluded_file["result"]["sources"][0]["selection"]["excluded"],
+            1
+        );
+        assert_eq!(
+            call(root, RagCommand::Inspect { id: "a.md".into() }).await["result"]["state"],
+            if dry_run { "ready" } else { "missing" }
+        );
+    }
+    assert!(
+        root.join("materials/a.md").exists(),
+        "exclusion must not delete the original file"
     );
 }
 

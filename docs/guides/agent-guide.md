@@ -2,11 +2,11 @@
 
 [Guide index](README.md) · [Delegation](delegation.md) · [Shell](shell.md) · [CLI reference](cli-reference.md)
 
-This guide describes how a model works in Shellboy. A conversation is a Thread, one answer interval is a Turn, and a lifetime grouping owned execution is a Run. “Child agent,” “subagent,” and “sub-agent” mean an owned Run started in a child Thread; they do not introduce another model-facing tool.
+This guide describes how a model works in Shellboy. A conversation is a Thread, one answer interval is a Turn, and a Run owns execution over its lifetime. “Child agent,” “subagent,” and “sub-agent” mean an owned Run started in a child Thread; they do not introduce another model-facing tool.
 
 ## Read this guide in the running environment
 
-Guides are bundled into the executable. System instructions point to `shellboy docs list` and search, so you can read only the documents you need. They work outside a repository cwd and require no owner, API, or configuration.
+Guides are bundled into the executable. System instructions point to `shellboy docs list` and search, so you can read only the documents you need. They work outside a repository cwd and require no owner, API, or configuration. The bundled catalogue is English; use English terms for `docs search`, regardless of the conversation language. Queries are literal matches and are not translated automatically.
 
 ```bash
 shellboy docs list
@@ -70,7 +70,7 @@ Give children their purpose, scope, permitted files, completion criteria, and ex
 
 CLI `ok:true` means that the operation succeeded, not that a sent request has an answer. In `message send` results, inspect `message_id`, `delivery_status`, `assignment`, and optional `run_id` / `turn_id`. Do not equate `accepted` with `applied`; track `held` / `pending` using `message get`.
 
-If a connection drops and the result is uncertain, first query your saved `operation_id` with `shellboy operation get --operation OPERATION_ID`. After a post-send connection failure, even an automatically generated ID remains in the returned JSON's `operation_id` / `error.details.operation_id`. A missing receipt is not proof that the operation never executed. Do not unconditionally repeat the same side effect with a new operation ID; inspect the target's state and original text. get/list/search/preview/status do not persist receipts and observe again even with the same query ID. History semantic search may incur query-embedding cost again. Retain original IDs for mutations and wait to correlate results. See [Recovery](recovery-and-storage.md) and [CLI reference](cli-reference.md).
+If a connection drops and the result is uncertain, first query your saved `operation_id` with `shellboy operation get --operation OPERATION_ID`. After a post-send connection failure, even an automatically generated ID remains in the returned JSON's `operation_id` / `error.details.operation_id`. A missing receipt is not proof that the operation never executed. Do not unconditionally repeat the same side effect with a new operation ID; inspect the target's state and original text. get/list/search/preview/status do not persist receipts and observe again even with the same query ID. History semantic search may incur query-embedding cost again. Retain the original operation IDs of mutations and `wait` requests to correlate their results. See [Recovery](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 
 ## Retrieve the original text you need
 
@@ -95,7 +95,7 @@ Do not request disclosure of private model reasoning or secret values. Report co
 
 ## PowerShell usage
 
-Executable blocks in this guide use Bash. In PowerShell, use `$env:SHELLBOY_RUN_ID` for the current Run and `$env:SHELLBOY_THREAD_ID` for the current Thread; do not copy `$SHELLBOY_RUN_ID` unchanged. JSON argument quoting differs by shell; use the [Shell guide](shell.md) examples. The Windows native adapter has been implemented and cross-codechecked; this is not a guarantee that every usage example has been run on physical Windows hardware.
+Executable blocks in this guide use Bash. In PowerShell, use `$env:SHELLBOY_RUN_ID` for the current Run and `$env:SHELLBOY_THREAD_ID` for the current Thread; do not copy `$SHELLBOY_RUN_ID` unchanged. JSON argument quoting differs by shell; use the [Shell guide](shell.md) examples. The Windows native adapter has been implemented and cross-codechecked; these usage examples have not been verified on physical Windows hardware.
 
 ## If you lose track of an output's target
 
@@ -143,7 +143,7 @@ Repeated reads do not consume operation-receipt budget. Pending reservations for
 
 `thread get`'s `context_usage` shows estimated input, the connection's guidance, and last successful usage. When input approaches the guidance or large tool outputs are no longer useful, use `compact --spill/--summary --from NODE --to NODE`. `--omit --from NODE --to NODE` can omit a detour in the middle; `--trim --to NODE` omits the prefix through that node. Boundaries are inclusive, complete groups. Omitting the current request, an incomplete group, or the newest group is rejected. Inspect candidates and adjust the range.
 
-Acceptance is queued; check operation get through downstream completion. Repeating an operation ID does not edit twice. Changes apply to the next request, not one already in progress. Prefer infrequent, substantial edits over repeated small edits that unnecessarily invalidate caches.
+Acceptance is queued; check operation get through downstream completion. Repeating an operation ID does not edit twice. Changes apply to the next request, not one already in progress. Make infrequent, substantial edits. Do not repeatedly edit the path and unnecessarily invalidate caches.
 
 The first/last original node IDs in an omission notification can also be used to summarize that range with `--summary --from ... --to ...`. Specify the whole omitted range of one marker. Prefer summarizing a range to rereading large amounts of original text and growing the input. Retrieve needed source text in small pieces with `history get --node NODE --limit-bytes BYTES`. `compact --restore [--from MARKER]` restores the original range, while later conversation remains and previously excluded attachments do not automatically return. Check current state before repeating an already executed operation. See [Input size and range editing](history-and-search.md#input-size-and-range-editing).
 

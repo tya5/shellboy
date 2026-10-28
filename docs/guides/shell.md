@@ -1,6 +1,6 @@
 # Shell execution and output
 
-[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
+[日本語](shell.ja.md) · [Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
 The model uses the `shell` tool for external work. The `shellboy shell ...` CLI observes, supplies stdin to, and stops executions that have already started. There is no `shellboy shell start` command. Humans can run arbitrary commands in their own terminals, but those commands alone are not recorded as Shellboy-owned executions.
 
@@ -168,7 +168,7 @@ Windows PowerShell 5.1 and newer pwsh differ in quoting JSON passed to native co
 shellboy --% wait --conditions-json [{\"type\":\"run_ended\",\"run_id\":\"ACTUAL_RUN_ID\"}] --timeout-ms 30000
 ```
 
-Do not expect `$env:...` to expand normally after `--%`. This change was not verified on a physical Windows machine, so this example does not guarantee execution on every PowerShell version. Ordinary text sends can use simple arguments such as `shellboy message send --thread 'ACTUAL_THREAD_ID' --text 'Please check this'`.
+Do not expect `$env:...` to expand normally after `--%`. This PowerShell example has not been verified on a physical Windows machine; execution on each PowerShell version remains unverified. Ordinary text sends can use simple arguments such as `shellboy message send --thread 'ACTUAL_THREAD_ID' --text 'Please check this'`.
 
 ## Shell elapsed time
 

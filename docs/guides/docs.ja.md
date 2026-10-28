@@ -25,7 +25,7 @@ shellboy docs search --query 'child agent'
 shellboy docs search --query 'background' --parent shellboy/work
 ```
 
-既定検索は大文字小文字を区別しないliteral部分一致です。日本語も空白で区切らず検索できます。検索結果の抜粋は全文ではありません。`id` を使って `docs get` で確認します。意味検索や資料との横断検索は `rag search` で明示選択します。
+既定検索は大文字小文字を区別しないliteral部分一致です。同梱ガイドは英語なので、操作を探すときは英語の検索語を使います。日本語の文字列検索もできますが、本文中に引用された画面ラベルなどに一致するだけで、自動翻訳はしません。検索結果の抜粋は全文ではありません。`id` を使って `docs get` で確認します。意味検索や資料との横断検索は `rag search` で明示選択します。
 
 ## 版と続きの取得
 

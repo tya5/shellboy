@@ -29,7 +29,7 @@ shellboy run get --run RUN_ID
 
 回答は `answer_node_id` が返されたら `shellboy history get --node NODE_ID` で取得します。長い本文は `next_cursor` を使って続きも読みます。状態が終端でも `failed` / `stopped` を成功回答と扱わないでください。
 
-TUIではF8の「待機 · any条件」から開始し、管理画面の小文字w又は `/cancel-wait` で観測だけを取消せます。Escで画面を閉じても対象を停止しません。Ctrl+Cは現在Threadの実行中断なので区別してください。[待機の画面操作](tui.ja.md#待機の取消しと対象の中断を区別する) を参照してください。
+TUIではF8の「待機 · 条件を観測」から開始し、管理画面の小文字w又は `/cancel-wait` で観測だけを取消せます。Escで画面を閉じても対象を停止しません。Ctrl+Cは現在Threadの実行中断なので区別してください。[待機の画面操作](tui.ja.md#待機の取消しと対象の中断を区別する) を参照してください。
 
 実行待ちには `shellboy wait` を使えます。`timeout` は対象の停止や失敗ではありません。`satisfied` も対象の成功とは限らないため、同じ返却値のsnapshotと状態を確認します。[委譲](delegation.ja.md) と [CLI reference](cli-reference.ja.md) にJSON形式と状態別の分岐があります。
 
@@ -234,13 +234,13 @@ GC結果のmanaged_deleted/managed_failuresは各128件までの詳細です。m
 
 Quitの後も保存と所有処理の停止が終わるまでは、Runが短時間動き続ける場合があります。通常終了の完了を待ち、保存中の強制終了は未確認の外部副作用を残し得ることを考慮してください。Unixでは所有プロセスの記録を検査して停止しますが、PGIDの検査とsignal送信の間にOSがIDを再利用する競合を原子的に除く保証はありません。
 
-所有groupの外へ `setsid` 等で切り離した処理は、停止後も残り得ます。`nohup` 等を使う処理も、所有追跡の範囲外へ切り離す場合の完全回収は保証しません。自分でデーモン化した処理を再起動後まで追跡・維持する機能は今回の対象外です。
+所有groupの外へ `setsid` 等で切り離した処理は、停止後も残り得ます。`nohup` 等を使う処理も、所有追跡の範囲外へ切り離す場合の完全回収は保証しません。自分でデーモン化した処理を再起動後まで追跡・維持する機能はありません。
 
 ## HTTP応答が止まったとき
 
 会話画面は、同じモデル要求について30秒以上受信を観測しなければ、活動表示へ受信待ち又は最後の受信観測からの経過を補足します。受信通知は最大1回/秒のため表示には1秒未満の差があります。生成や推論が止まったと断定する表示ではありません。Ctrl+Cや`run stop`で停止できます。
 
-会話が受信停滞期限に達した場合は、受信済みの本文を保全し、前述の連続失敗予算・部分応答設定に従って自動再試行又は復旧待ちへ進みます。要約の停滞timeoutは今回の会話再試行には含めず、従来の復旧経路を使います。エラーのheader/body段階・経過ms・設定keyを確認してください。設定ガイドの`connections.<名前>.stream_idle_timeout_ms`は既定600000で、長い無通信を許すモデルには増やすか、0で期限を無効にできます。接続確立の固定30秒と手動取消しは有効なままです。未知の失敗で自動再送はしません。
+会話が受信停滞期限に達した場合は、受信済みの本文を保全し、前述の連続失敗予算・部分応答設定に従って自動再試行又は復旧待ちへ進みます。要約の停滞timeoutは会話の再試行には含めず、要約の復旧経路を使います。エラーのheader/body段階・経過ms・設定keyを確認してください。設定ガイドの`connections.<名前>.stream_idle_timeout_ms`は既定600000で、長い無通信を許すモデルには増やすか、0で期限を無効にできます。接続確立の固定30秒と手動取消しは有効なままです。未知の失敗で自動再送はしません。
 
 embedding・意味検索・RAGは`connections.<名前>.request_timeout_ms`（既定60000、最小1000）の要求全体期限を使います。モデル一覧は同設定と20000msの短い方です。索引workerのtimeoutは既存の有限retryへ渡し、続く失敗はspaceをpauseします。statusの失敗理由を確認して接続や設定を直し、明示retryします。ownerの設定変更は再起動後に反映されます。検索CLIの切断・owner停止時は残った検索HTTPも取り消します。
 
@@ -248,7 +248,7 @@ embedding・意味検索・RAGは`connections.<名前>.request_timeout_ms`（既
 
 `EOF before response.completed` は、HTTP本文が終了した時点でShellboyがcompletedイベントを認識できなかったことを示します。API側が送信しなかったことまでは、この文言だけでは分かりません。
 
-修正版では保存される失敗理由に `received_bytes`（受信量）、`parsed_events`（解析できたJSON数）、`completed_items`、`done_markers`、`pending_line_bytes` / `pending_data_bytes`（末尾の未完了量）、`last_event`（固定分類）を含みます。`/received`の保存原文などで同じTurn/attemptの理由を確認し、共有時は本文全体でなくこれらの診断値を使ってください。通常ログの`model_failure`は従来どおり分類とattempt IDであり、完全なエラー本文を自動記録するものではありません。
+新しい版で保存するEOFの失敗理由には、`received_bytes`（受信量）、`parsed_events`（解析できたJSON数）、`completed_items`、`done_markers`、`pending_line_bytes` / `pending_data_bytes`（末尾の未完了量）、`last_event`（固定分類）が含まれます。古い記録にはこれらの項目がない場合があります。`/received`の保存原文などで同じTurn/attemptの理由を確認し、共有時は本文全体でなくこれらの診断値を使ってください。通常ログの`model_failure`は従来どおり分類とattempt IDであり、完全なエラー本文を自動記録するものではありません。
 
 `last_event=untyped` はJSONに文字列のtypeがなかった場合、`done_markers`は`[DONE]`の受信数です。いずれもcompleted responseの存在を保証しません。受信量があって解析数0でも、コメントだけの受信などがあり得るため原因を断定しないでください。最後の空行まで届かないイベントは未完了のまま保持し、自動で回答やtool実行として確定しません。
 

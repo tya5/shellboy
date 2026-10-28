@@ -1,5 +1,23 @@
 //! Bounded frontend deletion observations; Core remains the mutation authority.
 use super::*;
+use futures_util::FutureExt;
+
+/// Keep request ownership intact if the operation future panics. The existing
+/// worker still delivers a terminal reply and releases its admission permit;
+/// an uncertain mutation must be checked again, never automatically replayed.
+pub(super) async fn guard<T>(
+    work: impl std::future::Future<Output = Result<T, ApiError>>,
+) -> Result<T, ApiError> {
+    std::panic::AssertUnwindSafe(work)
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| {
+            Err(ApiError::new(
+                ErrorCode::IoFailed,
+                "削除処理が予期せず停止しました。結果は未確認です。一覧を再取得し、削除影響を確認してから再操作してください",
+            ))
+        })
+}
 
 pub(super) const MAX_KNOWN_THREADS: usize = 4_096;
 /// Selection generations are stale-response fences, not owned view IDs. They
@@ -131,7 +149,12 @@ pub(super) async fn finish_cleanup(
             deleted.push(root.to_owned());
             deleted.sort();
             deleted.dedup();
-            (deleted, vec![], Some(error.to_string()))
+            let warning = if error.is_storage_failure() {
+                format!("正本DBの保存障害により新規実行を停止し資源を回収しています: {error}")
+            } else {
+                error.to_string()
+            };
+            (deleted, vec![], Some(warning))
         }
     }
 }
@@ -139,6 +162,140 @@ pub(super) async fn finish_cleanup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn panicked_delete_returns_uncertain_outcome_without_claiming_not_applied() {
+        let result: Result<Outcome, ApiError> = guard(async {
+            tokio::task::yield_now().await;
+            panic!("fixture deletion panic");
+        })
+        .await;
+        let error = result.err().expect("panic must become a terminal error");
+        assert_eq!(error.code, ErrorCode::IoFailed);
+        assert!(error.message.contains("結果は未確認"));
+        assert!(error.message.contains("一覧を再取得"));
+        assert!(!error.is_storage_failure());
+        assert!(matches!(
+            guard(async { Ok(Outcome::Applied) }).await,
+            Ok(Outcome::Applied)
+        ));
+    }
+
+    #[tokio::test]
+    async fn frontend_cleanup_save_failed_warns_new_draft_and_stops_admission() {
+        let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        control.store.database.call(|db| {
+            db.execute("UPDATE turn SET state='completed' WHERE id='target-run'", [])?;
+            db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;
+            db.execute("INSERT INTO view_state(thread_id,follow_tail) VALUES('thread',1)", [])?;
+            db.execute_batch("CREATE TRIGGER fixture_cleanup_failure BEFORE DELETE ON view_state BEGIN SELECT RAISE(ABORT,'fixture frontend cleanup failure'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        let mut ui = crate::ui::UiState::new(&control.store.config, root.path().into());
+        let (sender, receiver) = crate::ui::actions::channel(32);
+        let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+        let mut bridge = tokio::spawn(crate::frontend::run(
+            control.clone(),
+            receiver,
+            updates,
+            root.path().into(),
+            owner,
+            server,
+        ));
+        for action in ui.select_thread("thread".into()) {
+            sender.try_send(action).unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    let loaded = matches!(&update, UiUpdate::History { thread_id, .. } if thread_id == "thread");
+                    ui.apply(update);
+                    if loaded { return; }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+        let old_draft = ui.view().draft.draft_id.clone();
+        sender
+            .try_send(UiAction::ThreadDeletion {
+                request_id: 144,
+                args: ThreadDeleteArgs {
+                    thread_id: "thread".into(),
+                    descendants: false,
+                },
+                execute: true,
+                known_thread_ids: vec!["thread".into()],
+            })
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    let deleted = matches!(
+                        &update,
+                        UiUpdate::ThreadDeletion {
+                            request_id: 144,
+                            result: Ok(ThreadDeletionReply::DeletedWithWarning { .. }),
+                            ..
+                        }
+                    );
+                    ui.apply(update);
+                    if deleted {
+                        return;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(ui.view().thread_id.is_none());
+        assert_ne!(ui.view().draft.draft_id, old_draft);
+        assert!(
+            ui.view()
+                .status
+                .contains("削除しました。後片付けに失敗しました")
+        );
+        assert!(ui.view().status.contains("新規実行を停止"));
+        assert!(
+            ui.view()
+                .status
+                .contains("fixture frontend cleanup failure")
+        );
+        ui.insert("retained fresh draft", false);
+        assert_eq!(ui.view().draft.text, "retained fresh draft");
+        assert!(
+            request(
+                &control,
+                Command::ThreadCreate(ThreadCreateArgs {
+                    parent_id: None,
+                    cwd: None,
+                    connection: None,
+                    model: None,
+                    effort: None,
+                })
+            )
+            .await
+            .is_err(),
+            "cleanup failure must close owner admission before delivering the warning"
+        );
+        sender.try_send(UiAction::Quit).unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(if cfg!(windows) { 30 } else { 15 }),
+            async {
+                loop {
+                    while incoming.try_recv().is_ok() {}
+                    tokio::select! {
+                        result = &mut bridge => return result,
+                        _ = tokio::time::sleep(Duration::from_millis(5)) => {},
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap()
+        .expect("frontend task must not panic");
+        assert_eq!(result.unwrap_err().code, ErrorCode::SaveFailed);
+    }
+
     #[tokio::test]
     async fn delete_projects_known_descendants_and_late_autosave_cannot_recreate_deleted_drafts() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
@@ -463,7 +620,9 @@ mod tests {
         }).await.unwrap();
         let (deleted, _, warning) = finish_cleanup(&control, "thread", vec!["thread".into()]).await;
         assert_eq!(deleted, ["thread"]);
-        assert!(warning.unwrap().contains("fixture cleanup failure"));
+        let warning = warning.unwrap();
+        assert!(warning.contains("fixture cleanup failure"));
+        assert!(warning.contains("新規実行を停止"));
         assert!(
             request(
                 &control,
@@ -499,7 +658,9 @@ mod tests {
         )
         .await;
         assert_eq!(deleted, ["confirmed-root"]);
-        assert!(warning.unwrap().contains("Too many cached Thread IDs"));
+        let warning = warning.unwrap();
+        assert!(warning.contains("Too many cached Thread IDs"));
+        assert!(!warning.contains("新規実行を停止"));
         assert!(
             request(
                 &control,

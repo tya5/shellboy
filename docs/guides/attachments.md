@@ -1,6 +1,6 @@
 # Attaching files and images
 
-[User Guide](user-guide.md) · [TUI controls](tui.md) · [Guide index](README.md)
+[日本語](attachments.ja.md) · [User Guide](user-guide.md) · [TUI controls](tui.md) · [Guide index](README.md)
 
 Ordinary attachments are references to resolved absolute paths, not file copies. Send preparation reads the path's current contents. Saving a conversation does not save or restore earlier versions of external files.
 

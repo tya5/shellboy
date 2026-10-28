@@ -45,7 +45,7 @@ Starting without a subcommand requires an interactive terminal. You cannot run t
 
 During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
 
-A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “Thread · 詳細” (Thread details).
+A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “会話 · 詳細” (conversation details).
 
 ## 2. Send your first request
 
@@ -63,7 +63,7 @@ Until acceptance completes, the submitted text and attachments remain visible. E
 
 Each Thread retains its own draft and reading position. Switching does not stop execution. Shells or child Runs in the previous Thread continue. Background work may keep a Run live after its Turn's answer completes. See [Delegation](delegation.md) for the Thread/Run/Turn distinction.
 
-The conversation view distinguishes messages, execution results, and state changes. For full IDs or source values, use F6 to select an item and open its details, then O for the original-text page. F7 lists links and copies full URLs. F8 shows context-sensitive suggestions, common actions, and the full operation catalogue. Filter by human-facing name, CLI name, or related slash command; enter target IDs and arguments in separate fields to inspect history, Runs, shells, indexes, and storage. Results use field/value presentation; retrieve needed portions in a detail page. [TUI controls](tui.md#read-source-text-and-links-from-details) documents keys and copy ranges.
+The conversation view distinguishes messages, execution results, and state changes. For full IDs or source values, use F6 to select an item and open its details, then O for the original-text page. F7 lists links and copies full URLs. F8 shows `この会話で` (in this conversation), `よく使う` (common), and `すべての操作` (all actions). Filter by human-facing name, CLI name, or related slash command; enter target IDs and arguments in separate fields to inspect history, Runs, shells, indexes, and storage. Results use field/value presentation; retrieve needed portions in a detail page. [TUI controls](tui.md#read-source-text-and-links-from-details) documents keys and copy ranges.
 
 Reading older history pauses following the tail and shows “新着あり” (new content). Ctrl+End resumes tail following. [History and search](history-and-search.md) explains forks, request editing, search filters, provenance, and direct relationships.
 
@@ -107,4 +107,4 @@ Exit with Ctrl+Q or `/quit`. Shellboy waits for persistence and for owned work t
 
 Next, explore [Attachments](attachments.md), [History and search](history-and-search.md), and the [CLI reference](cli-reference.md).
 
-Before deleting, use F8's “Thread · 削除影響” (deletion impact) to inspect live Runs, descendants, sharing, provenance, and attachment references. Preview does not delete anything; reclaimable-capacity estimates are unsupported. If you lose an acceptance or compaction result, query its operation using F8's “操作 · 受付結果” (operation receipt), then check downstream state. See [Recovery and storage](recovery-and-storage.md).
+Before deleting, use F8's “会話 · 削除影響” (deletion impact) to inspect live Runs, descendants, sharing, provenance, and attachment references. Preview does not delete anything; reclaimable-capacity estimates are unsupported. If you lose an acceptance or compaction result, query its operation using F8's “操作 · 受付結果” (operation receipt), then check downstream state. See [Recovery and storage](recovery-and-storage.md).
