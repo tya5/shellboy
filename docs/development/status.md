@@ -1,5 +1,12 @@
 # 開発状況
 
+## v0.1.5公開完了
+
+検証済みsource `25d53bd` をタグ `v0.1.5` としてpushしました。#16〜#18のレビュー追補と#19の会話一覧からの削除を含みます。[native CI](https://github.com/tya5/shellboy/actions/runs/40604076661)は各71群、Windows 1,140 passed / 0 failed / 14 ignored、macOS 1,245 / 0 / 19、Linux 1,246 / 0 / 18で成功。fmt・全target strict Clippyも3 OSで成功しました。
+
+[配布workflow](https://github.com/tya5/shellboy/actions/runs/40605371702)は全4 jobが成功し、[v0.1.5](https://github.com/tya5/shellboy/releases/tag/v0.1.5)を公開しました。Windows ZIPを含む3 archiveの認証なし取得・SHA-256一致・同梱内容・CPU形式、取得したmacOS版のversion/help/オフラインguideを確認済みです。#16〜#19へCI・公開結果をコメントしています。既定データ・設定・稼働process・常用0.1.4 binaryは変更していません。検証の詳細は[acceptance](../validation/acceptance.md)を参照。以下の未公開・未実施の記述は作業当時の記録です。
+
+
 ## Issue #16〜#19: レビュー追補と会話一覧の削除（未公開）
 
 #16〜#18のレビューは`641da47`で対応しました。現在依頼の後ろの作業省略通知、対象markerを特定した復元、mode別の境界候補、実際の添付除外だけの警告、縮小を採用しなかった理由の保存を追加しています。コミット再分割をしない理由、旧履歴の入力見積もりの限界、明示summaryの扱いは[判断記録](decisions.md)へ残しました。

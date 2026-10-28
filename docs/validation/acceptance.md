@@ -1,5 +1,22 @@
 # 検証状況
 
+## v0.1.5公開・配布物と検証記録
+
+2026-10-28、tag `v0.1.5` / source `25d53bd` を[公開](https://github.com/tya5/shellboy/releases/tag/v0.1.5)しました。#16〜#18のレビュー追補と#19の一覧削除を含みます。[native CI 40604076661](https://github.com/tya5/shellboy/actions/runs/40604076661)は各71群、Windows 1,140 passed / 0 failed / 14 ignored、macOS 1,245 / 0 / 19、Linux 1,246 / 0 / 18。fmt・全target strict Clippyも3 OSで成功。Windows診断stepの重複実行は合算していません。
+
+[配布workflow 40605371702](https://github.com/tya5/shellboy/actions/runs/40605371702)は3 OSのnative release build・tag/version/host照合・version/helpの起動確認・packaging、publishの全4 jobが成功しました。公開後、認証headerなしで全3 archiveとSHA256SUMSを取得し、全checksum・公開size・同梱MIT/README/設定例/ガイド、Windows PE x64・macOS Mach-O arm64・Linux ELF x64を確認しました。私的snapshotやローカル開発directoryは同梱していません。
+
+| 配布物 | SHA-256 |
+| --- | --- |
+| `shellboy-v0.1.5-aarch64-apple-darwin.tar.gz` | `1bb091acc97daf38182d16f52e4091d5dec6311013f2e26e4aa7e009a9f267cd` |
+| `shellboy-v0.1.5-x86_64-pc-windows-msvc.zip` | `97f0481bfeb88363989946afa72f655712bdaac968135de4fae828f897cf0574` |
+| `shellboy-v0.1.5-x86_64-unknown-linux-gnu.tar.gz` | `99982c524d734996e8f2ec62d96bc7104a0dbb187344287b033489011a47d40c` |
+
+取得したmacOS版は一時HOME/config/data・資格情報とproxyを継承しない環境でversion=0.1.5、help、offline Agent Guideが正常終了し、DB/endpointを作らないことを確認しました。#16〜#19の対応コメントを公開結果へ更新し、返却本文との一致を確認しています。Issueはレビュー用に開いたままにしています。
+
+既定DB・設定・稼働process・インストール済み0.1.4は変更していません。Windows Terminalの対話実機、会社proxyでの切断率改善、実providerでの巨大入力は未検証です。旧tag・配布物は保持。公開後のcommitはstatus/acceptanceの結果記録だけで、製品・同梱guide・workflowは変更しないため、上記tagのCIを根拠に `[skip ci]` でpushします。以下の未公開・未実施の記述は作業当時の記録です。
+
+
 ## Issue #16〜#19: レビュー追補と会話一覧の削除（2026-10-28、未公開）
 
 #16〜#18レビュー修正は`641da47`、#19は`92a875f`と分岐編集下書きの画像所有の追補`68e2f98`。version準備は`c3715ad`、広い一覧の密度を保つfooter修正は`31822c0`。macOS ARM64 / Rust 1.99.1で、一時DB・合成データのみを使いました。初回静的検査で入れ子ifを整理。初回の全体試験はlib 528 passed / 1 failed / 6 ignoredで、低い画面の会話一覧footerからEnter切替の案内が隠れる退行を検出しました。案内順を修正し、同内容の分岐をClippyに従って共通化しました。確認後にRunが始まるケースも、実Coreの削除拒否を通す試験へ補強しています。その後の結合試験で、広い一覧のfooterが2行になり従来の7行表示が6行へ減る退行を検出し、広い幅では案内を1行に収める修正を加えました。既存試験の表示件数の期待は緩めていません。
