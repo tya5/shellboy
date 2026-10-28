@@ -1,5 +1,12 @@
 # Issue #19〜#30と0.1.6
 
+## Reopened after 0.1.6
+
+Issues #19, #20, #27 and #30 were reopened. Their previous completion entries
+below are historical release evidence; current findings and dispositions are
+tracked in [the reopened-issue plan](reopened-19-20-27-30.md).
+
+
 2026-10-28、利用者のgoal: 全件の設計・実装・検証、その後push・0.1.6公開・常用ローカルbinary更新。判断は自律的に行い、根拠と未実施は記録する。個別のIssue提案は設計候補として吟味し、コアを小さく保つ。
 
 ## 追跡

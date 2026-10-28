@@ -1,5 +1,26 @@
 # 開発状況
 
+## Reopened #19/#20/#27/#30 (2026-10-29; local verification complete)
+
+All four Medium findings are fixed. Deletion cleanup write failures stop owner
+admission while preserving confirmed deletion plus warning; file extraction
+failures no longer block unrelated RAG removals; readonly search errors do not
+stop the writer; root/worker UI updates share one ordered bounded outbox.
+Every Low finding has a fix or explicit disposition in the
+[reopened-issue plan](reopened-19-20-27-30.md).
+
+The final standard check passed: **76 groups / 1,315 passed / 0 failed / 24
+ignored**, with format and strict all-target Clippy. Additional delivery pressure,
+actual-executable RAG (13 scenarios), offline docs (33 checks), deletion PTY
+(5 scenarios) and local HTTP+PTY (10 completed conversations) passed. See
+[acceptance](../validation/acceptance.md) for measurements and untested cases.
+
+Changes are local commits only. Current-task Windows/Linux CI and push are not
+performed; issues remain open pending their requested push/three-OS gates. No
+release, installed-binary replacement, paid API call or user-data change occurred.
+The pre-existing English documentation commit remains on the same local branch.
+Below are historical records of earlier tasks/releases.
+
 ## English documentation defaults (2026-10-29; complete locally)
 
 All 13 unsuffixed product guides are English. Twelve Japanese user-facing counterparts use `.ja.md`; the Agent Guide is English only. Root README/AGENTS and documentation entry points are English. Existing guide IDs remain stable; bundled docs metadata/categories and the RAG docs scope use English. Japanese guide files remain in source/release archives rather than adding a second runtime catalogue.

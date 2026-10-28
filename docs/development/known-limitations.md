@@ -39,3 +39,17 @@ hybridや複数scopeの検索では、成功した側だけが返る場合があ
 ## provider互換と監査保存量
 
 会社Windowsの社内proxy、任意providerのreasoning再送、実IME/clipboardの組合せは未検証です。過去の特定proxy/modelの成功を任意providerへ一般化しません。metadataだけのストリーム差分でも受信内容の監査nodeが追加されるため、毎応答で差が出るproxyでは論理保存量が増えます。頻度・DB増分は未測定で、64MiBの受信stream上限はDB増分上限を意味しません。原文の保全は維持しています。
+
+## Live selection and exceptional UI saturation (#30)
+
+A queued thread switch can miss a transient prefix while Control still filters
+for the previous thread. Gap marking and canonical terminal-history refresh are
+retained; switching is not a promise to replay every live delta.
+
+The shared UI outbox preserves result order and finite memory. Under exceptional
+512-critical-result exhaustion inside a single frontend handler, it waits
+asynchronously for UI delivery and may delay processing Cancel/Quit until space
+returns. The UI OS thread and priority mailbox remain nonblocking. Normal
+bounded-pressure tests do not prove responsiveness for every such batch. See the
+[delivery design](../design/tui-render-delivery-performance.md) for the boundary
+and the bounded-continuation follow-up needed to remove it.

@@ -340,3 +340,36 @@ Windows CIのRust harnessは同時2件へ制限し、独立DB/IPC/file worker fi
 - Recommend English-default UI with explicit Japanese startup selection, preserving one renderer and the current Japanese copy. This needs only presentation-layer resources/settings in a future task. Do not implement it, add an unsupported config field, change stored error/domain values, or force a response language in this task. Live switching, OS locale detection, per-Thread locale, and more languages have no current requirement. The [comparison](../design/documentation-language.md) records costs and later acceptance criteria.
 - Translation exposed an existing shell-guide typo: ASCII `SHELLBOY_BG_READ_V1` is 19 bytes, not 15. Correct both languages. Also remove the contradictory claim that CLI has no preview-only command immediately before its `index preview` example; CLI lacks the TUI confirmation screen, not the preview command. Remove the stale fixed operation total in the User Guide while retaining access to the full catalogue. Update a previously stale Control-to-HTTP heading link and translation-affected heading links.
 - No UI implementation/configuration files, Core API, migration, dependency, model prompt, or user data change. Validate guide fidelity, links, TOML examples, actual offline catalogue, and docs/RAG behavior; do not run paid discovery APIs or claim real-terminal/other-OS verification for a documentation change. Local commits only; the preceding release authorization covered the completed 0.1.6 release, not publishing this new task.
+
+
+## 2026-10-29: Reopened #19/#20/#27/#30 boundaries
+
+Adopt all four Medium findings against the existing contracts. Confirmed deletion
+is independent of cleanup success, but a cleanup write failure still stops the
+owner. A per-file extraction failure is independent of complete-scan removal of
+other keys. A readonly search failure is independent of writer durability.
+Transient UI state and worker results need one ordering boundary.
+
+The [reopened-issue plan](reopened-19-20-27-30.md) records every Low disposition.
+Use one shared, finite UI outbox rather than adding a dispatcher task or Core
+state. Keep the semantic admission slot across embedding to avoid charging for
+queries that cannot be admitted; document parallel-child contention and retries.
+Keep incomplete RAG walks conservative for all updates. Preserve Windows legacy
+file-key identities where possible without changing POSIX backslash semantics.
+Serialize UI deletions rather than querying an unbounded parent/descendant graph.
+
+Defer replay of a live prefix filtered before a queued thread-selection action
+is handled: offset gaps and canonical terminal refresh remain the recovery path.
+A separate Core replay buffer/handshake adds ownership and retention rules for
+transient presentation. Revisit if canonical history cannot be recovered. Force
+quit may abandon UI delivery, but must not silently enter another grace or wait
+for UI queue capacity after it has already been accepted.
+
+
+Cross-review also identified inherited exceptional backpressure at all 512
+critical entries: one frontend handler can wait before polling priority controls.
+Preserve finite FIFO rather than dropping a result or bypassing the shared queue.
+Document the responsiveness limitation; removing it needs both a finite main
+reserve and incremental batch continuation, not a larger queue. The ordinary
+pressure test is not evidence for every exhausted-reserve case. This follow-up
+is tracked in the reopened-issue plan and known limitations.

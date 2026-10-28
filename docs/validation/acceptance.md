@@ -1,5 +1,76 @@
 # 検証状況
 
+## Reopened #19/#20/#27/#30 (2026-10-29; local source)
+
+Baseline is local `8f00000` (including the English documentation changes), not
+only the public 0.1.6 source. The [tracking plan](../development/reopened-19-20-27-30.md)
+accounts for all Medium/Low findings. On macOS ARM64 with Rust 1.99.1, the final
+`sh scripts/check.sh` passed format, locked all-target strict Clippy and
+**76 test groups / 1,315 passed / 0 failed / 24 ignored**. An initial compile
+caught missing arguments in existing browser draw fixtures; those were fixed.
+The intermediate full check was stopped after Clippy to incorporate an additional
+force-shutdown review finding; only the final completed run establishes the
+whole-suite result.
+
+Focused delivery tests passed **6/6**: root/worker ordering under saturated UI,
+512-result overflow FIFO, latest-state coalescing, disconnect cleanup, final-drain
+force and one accepted force with both raw queue and critical reserve full. The
+last case also proves a consumed force does not enter a second UI drain. The
+normal owned-work shutdown grace regression remains unchanged and passes.
+
+Readonly search regressions exercise missing-path open, exclusive-lock timeout,
+query failure, preserved writer error classification, cancellation and a real
+Control search using a loopback embedding mock followed by a successful mutation.
+Deletion tests cover storage-failure shutdown/rejected admission, a benign bounds
+error, serialized targets, rejected-action release and unseen/covered/tiny notice
+lifecycle. Warning-plus-new-draft UI behavior and cleanup-failure stopping are
+component tests; the frontend late-stream integration uses successful deletion
+without an injected cleanup write failure. Do not describe that combination as a
+single end-to-end warning-path test.
+
+RAG regression tests cover supported-file failure with unrelated removal,
+repeat/dry-run, incomplete walks, provider-deferred removal protection, root and
+descendant globs, case sensitivity and legacy Windows key lookup. Synthetic
+native-key lookup runs on macOS; the Windows-only full-sync case is unexecuted
+locally and still requires Windows CI.
+
+Additional actual-executable checks used debug binary SHA-256
+`8136e7461293423e896da0752e5b9b9a3accb146ae35e134dfff3b110d84a9e4`:
+
+- **13 RAG CLI scenarios** passed, including an invalid-UTF-8 supported file
+  alongside a removed file. Dry-run reports removal without applying it; actual
+  sync removes only the absent file, preserves the failed file's searchable stale
+  revision, and repeat sync reports no duplicate removal. These operations return
+  the expected nonzero `partial_failure` envelope while preserving successful
+  changes; the smoke helper explicitly checks that envelope rather than treating
+  it as ordinary success. No external model request was made.
+- **33 offline docs checks**, 13 guides / 3 categories / 127 bundled links passed
+  from empty cwd/environment and nonexistent config/data paths. Repository audit
+  checked **722 relative links / 50 heading fragments**, with no errors.
+- **5 macOS deletion PTY scenarios** passed: abort, background delete, parent-only,
+  explicit descendants and editable draft after current-thread deletion.
+- **10 local HTTP-mock + PTY conversations** completed. With terminal reading
+  paused for **1,122 ms**, all canonical outputs matched exactly without missing
+  or duplicate text; visible selected-thread tokens stayed ordered and unique,
+  the early first delta appeared, and completed hidden threads remained in the
+  tree. This made 10 loopback requests and zero external requests.
+- The explicitly run ignored slow-UI bridge fixture passed: 10 Threads, 1,000
+  deltas/trial, seven 250-ms UI stops, action p50 **5.94 ms**, p95 **7.12 ms**,
+  lagged **0**, reloads **7**. These are synthetic observations on this machine,
+  not timing guarantees or proof for the exceptional full-reserve case.
+
+No default data/configuration, installed binary or release was changed. No paid
+provider, corporate Windows proxy, hardware clipboard/IME, or new Windows/Linux
+CI was exercised. Push and three-OS CI remain required before closing the four
+issues. The live selection-prefix gap and exceptional full-reserve frontend
+priority delay are explicit limitations in the
+[delivery design](../design/tui-render-delivery-performance.md) and
+[known limitations](../development/known-limitations.md). Earlier release CI does
+not validate this source. Local private logs/fixtures are ignored by Git. Implementation commits are
+`cdc04d6`, `4c8dfe3` and `9c83898`; later edits are tracking records only.
+Staged gitleaks scans passed with zero findings.
+
+
 ## English documentation defaults (2026-10-29; local source only)
 
 Based on `9f4a9b6`, all 13 unsuffixed product guides and bundled docs metadata/categories are English. Twelve Japanese user-facing originals are retained as `.ja.md`; there is no Japanese Agent Guide. README/AGENTS and documentation entry points are English. Independent translation reviews compared CLI flags, examples, limits, ownership, retry, receipt, retention, and recovery caveats with the originals. Current Japanese UI captions remain literal quoted data with English explanations.
