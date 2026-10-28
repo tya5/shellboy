@@ -16,6 +16,8 @@
 
 常用 `~/.local/bin/shellboy` は旧0.1.5をGit管理外へバックアップし、取得した公開macOS版へ原子的に置換。SHA-256 `ed1bd720e676e1ba3d4c0f74a268327bf82d04f4a1cf74703253cf26876d0d87` は配布archive内の値と一致しました。配置後のversion/help/offline Guideも成功し、一時環境に保存fileを作りませんでした。既定データ・設定・稼働processは変更せず、次回起動から適用されます。起動前backupが必要な会話DB v10/独立RAG v3への移行は、今回の配置確認では実行していません。
 
+配布workflow更新後のmain `42c9519` の[追加CI 40717576935](https://github.com/tya5/shellboy/actions/runs/40717576935)も3 OSすべて成功しました。公開後のcommitは非同梱の開発/検証記録のみで、製品・ガイド・workflowを変更しないため `[skip ci]` でpushします。
+
 全12 Issueへ採用/見送り・測定の境界・CI/公開結果をコメントし、completedでcloseしました。差分/追加履歴のgitleaksは検出0。会社proxy、外部モデルによる性能・切断率、実機Windows Terminal、macOS 14の操作は未検証です。以下は公開までの経緯で、未公開の表現は当該段階の記録です。
 
 ## v0.1.6: native CIと配布runnerの更新（公開までの経緯）
