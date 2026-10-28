@@ -1,5 +1,12 @@
 # 検証状況
 
+## 常用0.1.5の配置確認（2026-10-28）
+
+公開済みmacOS ARM64 archiveのSHA-256 `1bb091acc97daf38182d16f52e4091d5dec6311013f2e26e4aa7e009a9f267cd`を再照合し、archiveから実行ファイルを読み出して常用`~/.local/bin/shellboy`へ原子的に配置しました。旧binaryはGit管理外へ保持。配置後の実行ファイルSHA-256は `3730862d1d6b5a5eb999ddfb7bbc5ea1b323099c6cbe932d92fc18a75c35da4c` で、archive内の値と一致しました。
+
+一時cwd/HOME・存在しないconfig/data-dir・資格情報を継承しない環境で、配置後binaryのversion=0.1.5、help、offline Agent Guideのok:trueを確認し、fileやDBを作らないことも確認しました。既定の設定・保存データ・稼働processは変更していません。製品source・公開tag・配布物は変更せず、ローカル配置と結果記録だけのため全体テストは再実行しません。
+
+
 ## v0.1.5公開・配布物と検証記録
 
 2026-10-28、tag `v0.1.5` / source `25d53bd` を[公開](https://github.com/tya5/shellboy/releases/tag/v0.1.5)しました。#16〜#18のレビュー追補と#19の一覧削除を含みます。[native CI 40604076661](https://github.com/tya5/shellboy/actions/runs/40604076661)は各71群、Windows 1,140 passed / 0 failed / 14 ignored、macOS 1,245 / 0 / 19、Linux 1,246 / 0 / 18。fmt・全target strict Clippyも3 OSで成功。Windows診断stepの重複実行は合算していません。

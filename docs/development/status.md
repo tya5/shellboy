@@ -1,5 +1,10 @@
 # 開発状況
 
+## 常用ローカルバイナリ更新（2026-10-28）
+
+利用者の指示により、`~/.local/bin/shellboy`を公開macOS ARM64版0.1.5へ更新しました。公開archiveのSHA-256を再照合し、archive内の実行ファイルを同じdirectory内の一時fileから原子的に配置。旧binaryはGit管理外へ退避しました。配置後のSHA-256一致、version=0.1.5、help、オフラインAgent Guideが正常終了することを確認済みです。既定データ・設定・稼働processは変更せず、再起動から適用されます。以下の常用0.1.4の記述は公開直後の記録です。
+
+
 ## v0.1.5公開完了
 
 検証済みsource `25d53bd` をタグ `v0.1.5` としてpushしました。#16〜#18のレビュー追補と#19の会話一覧からの削除を含みます。[native CI](https://github.com/tya5/shellboy/actions/runs/40604076661)は各71群、Windows 1,140 passed / 0 failed / 14 ignored、macOS 1,245 / 0 / 19、Linux 1,246 / 0 / 18で成功。fmt・全target strict Clippyも3 OSで成功しました。
