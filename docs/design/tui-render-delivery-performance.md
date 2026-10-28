@@ -37,13 +37,37 @@ replacing a latest-state key removes only its superseded transient state.
 Consequently an earlier preparing/saving status cannot arrive after a later
 worker completion or image failure.
 
-Normal action/read admission stops at 128 queued critical results. Remaining
-space accommodates already admitted command/send/read/clipboard/draft workers
-and bounded background results. Workers keep their existing permits while
-waiting. At 512 critical results, a producer retains its original value and
-retries the shared outbox after a bounded flush of older entries. It must never
-bypass queued entries by sending directly to the UI channel. Priority controls
-remain separately admitted. These are item bounds, not RSS or SQLite limits.
+Normal action/read admission stops at 128 queued critical results. The existing
+512-entry critical budget reserves its last 32 entries for the frontend's main
+producer. Worker handles can insert critical results only while the shared count
+is below 480; they retain rejected values and their existing permits and retry
+through the same outbox. Main background-result admission and draft-failure
+projection require the count to be at most 480, leaving space for the at-most-two
+critical updates in a single admitted main handler. Normal-action handlers are
+already limited by the 128-entry threshold. No producer bypasses queued entries
+by sending directly to the UI channel. These are item bounds, not RSS limits.
+
+The main producer does not retry a large receipt-result loop inside a handler.
+Each refresh selects at most 128 pending receipt IDs. A checked bit on each
+existing pending receipt schedules not-yet-checked entries before repeating a
+scan; a further dirty refresh covers the remaining IDs. This avoids an unbounded
+query/result vector or a separate cursor cache. There is one frontend-owned
+continuation of at most 128 `(message, status)` entries, drained synchronously
+at most 32 entries per frontend turn and only while main capacity is available.
+Further background-result intake pauses until that continuation is empty; the
+existing 32-entry background channel and existing worker permits retain their
+backpressure responsibilities. Each insertion keeps the shared sequence/FIFO;
+important results are neither coalesced nor truncated. Initialization similarly
+retains at most one undelivered update instead of blocking the action loop.
+
+Priority Cancel/Quit remain polled even with the raw channel and all 512 critical
+slots full. Queued Send/SendEdited actions drained during Quit retain their
+Accepting projection in their existing send worker after its permit acquisition,
+so closing action drainage cannot consume the main reserve indefinitely. The
+worker still emits that receipt before executing its send. Ordinary Send retains
+its immediate main-loop receipt. Closing draft snapshots retain their existing
+coalesced autosave ownership. No extra task, worker service, Core API, persistent
+state or queue is introduced.
 
 UI disconnect releases queued values and enters existing shutdown. Normal
 shutdown joins admitted work and drains delivery. The final UI-only drain does
@@ -73,22 +97,36 @@ observers remain unfiltered. A Core replay cache or new selection handshake is
 deferred: either adds ownership, budgets and cross-layer coupling for transient
 presentation, while canonical results already recover through the existing path.
 
-### Exceptional full-reserve backpressure
+### Full-reserve continuation (Issue #32)
 
-The 128-entry admission threshold and 512-entry reserve improve responsiveness
-under normal bounded pressure; they do not prove responsiveness under every
-possible batch. A history refresh can emit many receipt/mapping results, and
-already admitted workers can fill the reserve. If the frontend itself reaches
-512 critical entries inside one handler, it retains its next value and waits
-asynchronously for delivery. Memory and ordering remain bounded, and the UI OS
-thread remains responsive, but the frontend cannot poll its action loop until
-that retry completes. Cancel/Quit remain in the reserved mailbox; they may be
-delayed by a permanently stalled UI at this exceptional boundary. This inherited
-limitation is not claimed fixed by the shared-outbox change. Correcting it needs
-both reserved main-producer capacity and incremental result-batch continuation;
-merely increasing the queue bound does not solve it. Revisit with a focused
-saturation test and a bounded continuation design, without adding a Core job
-service.
+The reserve and incremental continuation are a single design: a reserve alone
+cannot contain an arbitrarily large main batch, and continuation alone cannot
+progress when workers can consume every main slot. With both, the main loop
+retains at most one bounded batch and continues polling priority controls while
+UI delivery is stopped. Work results waiting in worker futures retain their
+original admission permits. Normal shutdown first stops IPC intake, then admits
+any retained initialization and receipt batch while the outer shutdown select
+continues flushing UI output and accepting the existing shutdown choices.
+After owned shutdown completes, at most one error status and one Shutdown marker
+remain in a local terminal continuation. Its capacity retry still polls explicit
+ForceQuit, so a full 512-entry outbox cannot trap the shutdown-complete branch.
+This UI-only wait does not restart the owned-work grace. Ordinary shutdown does
+not claim delivery until the outbox drains; explicit force may abandon
+undelivered presentation and returns forced-shutdown failure.
+UI disconnect releases the outbox and bounded continuation through their current
+owners. The 512/128/32 budgets are unchanged; no additional queue or service is
+introduced.
+
+A private test-only startup fixture runs the actual frontend with a full raw UI
+channel, 480 worker critical results, 32 reserved main results and a retained
+128-entry receipt batch. It must prove durable cancellation, drainage of 40
+queued closing sends, and Quit/one explicit ForceQuit without reading any UI
+update. Owned-shutdown-complete fixtures cover terminal-marker saturation for
+both success and error, plus ordinary FIFO delivery after UI resumes. Separate continuation tests verify FIFO,
+lossless receipt order, permit retention/release, bounded query scans and
+receiver-disconnect cleanup. Synthetic watchdogs establish regression behavior,
+not scheduling latency guarantees on all terminals or OSes. Existing ten-thread
+pressure and HTTP-mock/PTY fixtures remain separate acceptance checks.
 
 ### Re-review: worker wakeup and explicit-force display
 
@@ -106,6 +144,12 @@ nonzero exit. Do not restore a capacity/drain wait to guarantee a cosmetic marke
 that would undo the accepted one-request force boundary. This exception does not
 permit dropping ordinary operation results during normal delivery.
 
-The exceptional full-reserve priority-delay follow-up is tracked in
-[Issue #32](https://github.com/tya5/shellboy/issues/32), with bounded continuation
-and main-reserve acceptance criteria. It is not implemented by this wakeup fix.
+The worker-wakeup fix and the full-reserve continuation serve separate purposes:
+Notify wakes an idle select; the reserve and continuation prevent one main
+handler from waiting for permanently stalled UI capacity. Neither replaces the
+other.
+
+The priority guarantee uses the TUI's reserved `ui::actions::channel` mailbox.
+The retained plain Tokio receiver adapter has one ordinary FIFO and no separate
+priority slots; it cannot promise priority bypass of earlier normal actions.
+It preserves its existing embedding behavior and is not the actual TUI path.

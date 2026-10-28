@@ -8,6 +8,8 @@ use std::{
     },
 };
 const CRITICAL_LIMIT: usize = 512;
+const MAIN_RESERVE: usize = 32;
+const WORKER_LIMIT: usize = CRITICAL_LIMIT - MAIN_RESERVE;
 const ADMISSION_LIMIT: usize = 128;
 const LATEST_LIMIT: usize = 128;
 struct Item {
@@ -47,10 +49,12 @@ struct Delivery {
 #[derive(Clone)]
 pub(super) struct BufferedUpdates {
     delivery: Arc<Delivery>,
+    worker: bool,
 }
 impl BufferedUpdates {
     pub(super) fn new(raw: SyncSender<UiUpdate>) -> Self {
         Self {
+            worker: false,
             delivery: Arc::new(Delivery {
                 raw,
                 pending: Mutex::new(Pending::default()),
@@ -61,7 +65,30 @@ impl BufferedUpdates {
     }
     /// All producers share the same order and finite outbox; no raw bypass.
     pub(super) fn worker(&self) -> Self {
-        self.clone()
+        Self {
+            delivery: self.delivery.clone(),
+            worker: true,
+        }
+    }
+    /// A main-loop handler emits at most two critical updates. Workers cannot
+    /// consume the reserve between this check and those nonblocking insertions.
+    pub(super) fn main_ready(&self) -> bool {
+        self.delivery
+            .pending
+            .lock()
+            .expect("UI delivery lock")
+            .critical
+            .len()
+            <= WORKER_LIMIT
+    }
+    pub(super) fn main_slot(&self) -> bool {
+        self.delivery
+            .pending
+            .lock()
+            .expect("UI delivery lock")
+            .critical
+            .len()
+            < CRITICAL_LIMIT
     }
     /// Notify keeps one wake permit if a worker enqueues before select polls.
     pub(super) async fn notified(&self) {
@@ -207,7 +234,13 @@ impl UpdateTarget for BufferedUpdates {
                 self.delivery.ready.notify_one();
             }
             Ok(())
-        } else if q.critical.len() < CRITICAL_LIMIT {
+        } else if q.critical.len()
+            < if self.worker {
+                WORKER_LIMIT
+            } else {
+                CRITICAL_LIMIT
+            }
+        {
             q.sequence = q.sequence.wrapping_add(1);
             let sequence = q.sequence;
             q.critical.push_back(Item { sequence, value });
@@ -251,6 +284,330 @@ fn latest_key(value: &UiUpdate) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn critical(request_id: u64) -> UiUpdate {
+        UiUpdate::ThreadDeletion {
+            request_id,
+            args: ThreadDeleteArgs {
+                thread_id: "t".into(),
+                descendants: false,
+            },
+            execute: true,
+            result: Ok(ThreadDeletionReply::Deleted(vec!["t".into()])),
+        }
+    }
+    fn receipt_startup() -> receipt_delivery::Startup {
+        let mut pending = HashMap::new();
+        let mut receipts = Vec::new();
+        for revision in 0..receipt_delivery::BATCH_LIMIT as u64 {
+            let message = format!("message-{revision}");
+            pending.insert(
+                message.clone(),
+                receipt_delivery::PendingReceipt {
+                    thread: "thread".into(),
+                    draft: "draft".into(),
+                    revision,
+                    checked: true,
+                },
+            );
+            receipts.push((message, ReceiptStatus::Completed));
+        }
+        receipt_delivery::Startup {
+            pending,
+            batch: receipt_delivery::Batch::new(receipts),
+        }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch() {
+        let (root, owner, control, server) = control_tests::fixture().await;
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        let worker = out.worker();
+        for n in 0..WORKER_LIMIT {
+            assert!(worker.defer(critical(n as u64)).is_none());
+        }
+        assert!(worker.defer(critical(WORKER_LIMIT as u64)).is_some());
+        for n in WORKER_LIMIT..CRITICAL_LIMIT {
+            assert!(out.defer(critical(n as u64)).is_none());
+        }
+        let (sender, receiver) = crate::ui::actions::channel(64);
+        sender
+            .try_send(UiAction::RenderWidth { width: 120 })
+            .unwrap();
+        let closing_cwd = root.path().to_path_buf();
+        let bridge = tokio::spawn(run_with_delivery(
+            control.clone(),
+            receiver,
+            out.clone(),
+            root.path().into(),
+            owner,
+            server,
+            Arc::new(ClipboardAdapter::new().unwrap()),
+            Arc::new(Semaphore::new(32)),
+            Some(receipt_startup()),
+        ));
+        sender
+            .try_send(UiAction::Cancel {
+                thread_id: "thread".into(),
+            })
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let state: String = control
+                    .store
+                    .database
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT state FROM run WHERE id='target-run'",
+                            [],
+                            |row| row.get(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if state == "stopped" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // No UI receiver has read a single update. Cancellation is real durable
+        // control work, not just acceptance into the reserved action mailbox.
+        assert_eq!(
+            out.delivery.pending.lock().unwrap().critical.len(),
+            CRITICAL_LIMIT
+        );
+        // Quit must also drain queued accepted Send actions while UI remains
+        // stalled; their Accepting updates belong to their existing workers.
+        // More closing sends than reserved slots must not prevent reaching
+        // Quit. No worker can start model I/O:
+        // each is waiting to enqueue Accepting below the full worker limit.
+        for revision in 0..40 {
+            sender
+                .try_send(UiAction::Send {
+                    draft_id: format!("closing-{revision}"),
+                    revision,
+                    thread_id: Some("thread".into()),
+                    cwd: closing_cwd.clone(),
+                    text: "synthetic queued closing request".into(),
+                    attachments: vec![],
+                    connection: None,
+                    model: None,
+                    effort: None,
+                })
+                .unwrap();
+        }
+        sender.try_send(UiAction::Quit).unwrap();
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if out
+                    .delivery
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .latest
+                    .values()
+                    .any(|item| {
+                        matches!(
+                            item.value,
+                            UiUpdate::ShutdownProgress {
+                                force_available: true,
+                                ..
+                            }
+                        )
+                    })
+                {
+                    break;
+                }
+                assert!(
+                    !bridge.is_finished(),
+                    "ordinary Quit cannot discard retained results"
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        sender.try_send(UiAction::ForceQuit).unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), bridge)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["forced_shutdown"], true);
+    }
+    #[tokio::test]
+    async fn completed_owned_shutdown_honors_one_force_while_terminal_marker_is_retained() {
+        for failed in [false, true] {
+            let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+            tx.send(UiUpdate::RecoveryBell).unwrap();
+            let out = BufferedUpdates::new(tx);
+            for n in 0..CRITICAL_LIMIT {
+                assert!(out.defer(critical(n as u64)).is_none());
+            }
+            let (sender, mut actions) = crate::ui::actions::channel(1);
+            sender.try_send(UiAction::ForceQuit).unwrap();
+            let result = if failed {
+                Err(ApiError::new(
+                    ErrorCode::IoFailed,
+                    "synthetic shutdown error",
+                ))
+            } else {
+                Ok(())
+            };
+            // Owned work is already done; final presentation cannot restart its
+            // grace or consume this explicit force without acting on it.
+            let error = tokio::time::timeout(
+                Duration::from_millis(250),
+                wait_for_shutdown_delivery(&mut actions, &out, Duration::from_secs(60), async {
+                    result
+                }),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+            assert_eq!(error.details.unwrap()["forced_shutdown"], true);
+            assert_eq!(
+                out.delivery.pending.lock().unwrap().critical.len(),
+                CRITICAL_LIMIT
+            );
+        }
+    }
+    #[tokio::test]
+    async fn completed_shutdown_terminal_marker_remains_after_all_older_results() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        for n in 0..CRITICAL_LIMIT {
+            assert!(out.defer(critical(n as u64)).is_none());
+        }
+        let (_sender, mut actions) = crate::ui::actions::channel(1);
+        let producer = out.clone();
+        let task = tokio::spawn(async move {
+            wait_for_shutdown_delivery(&mut actions, &producer, Duration::from_secs(60), async {
+                Ok(())
+            })
+            .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
+        let mut count = 0;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                while let Ok(value) = rx.try_recv() {
+                    match value {
+                        UiUpdate::ThreadDeletion { request_id, .. } => {
+                            assert_eq!(request_id, count);
+                            count += 1;
+                        }
+                        UiUpdate::Shutdown => {
+                            assert_eq!(count, CRITICAL_LIMIT as u64);
+                            return;
+                        }
+                        _ => panic!("unexpected terminal update"),
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.await.unwrap().unwrap();
+        assert!(!out.pending());
+    }
+    #[tokio::test]
+    async fn reserved_batch_continuation_keeps_fifo_and_worker_permit_until_ui_resumes() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        let worker = out.worker();
+        for n in 0..WORKER_LIMIT {
+            assert!(worker.defer(critical(n as u64)).is_none());
+        }
+        let receipt_delivery::Startup {
+            mut pending,
+            mut batch,
+        } = receipt_startup();
+        batch.drain(&mut pending, &out);
+        assert_eq!(
+            out.delivery.pending.lock().unwrap().critical.len(),
+            CRITICAL_LIMIT
+        );
+        assert!(batch.active());
+        let slots = Arc::new(Semaphore::new(1));
+        let permit = slots.clone().acquire_owned().await.unwrap();
+        let task = tokio::spawn(async move {
+            let _permit = permit;
+            update(&worker, critical(9999)).await;
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(slots.available_permits(), 0);
+        for _ in 0..10 {
+            batch.drain(&mut pending, &out);
+        }
+        assert_eq!(pending.len(), receipt_delivery::BATCH_LIMIT - MAIN_RESERVE);
+        rx.try_recv().unwrap();
+        let mut older = 0;
+        let mut revisions = Vec::new();
+        let mut worker_finished = false;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                batch.drain(&mut pending, &out);
+                out.flush();
+                while let Ok(value) = rx.try_recv() {
+                    match value {
+                        UiUpdate::ThreadDeletion {
+                            request_id: 9999, ..
+                        } => worker_finished = true,
+                        UiUpdate::ThreadDeletion { request_id, .. } => {
+                            assert_eq!(request_id, older);
+                            older += 1;
+                        }
+                        UiUpdate::Receipt { revision, .. } => {
+                            assert_eq!(older, WORKER_LIMIT as u64);
+                            revisions.push(revision);
+                        }
+                        _ => panic!("unexpected result"),
+                    }
+                }
+                if !batch.active() && !out.pending() && worker_finished {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.await.unwrap();
+        assert_eq!(slots.available_permits(), 1);
+        assert!(pending.is_empty());
+        assert_eq!(
+            revisions,
+            (0..receipt_delivery::BATCH_LIMIT as u64).collect::<Vec<_>>()
+        );
+    }
+    #[test]
+    fn disconnect_releases_the_bounded_batch_and_outbox() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        for n in 0..CRITICAL_LIMIT {
+            assert!(out.defer(critical(n as u64)).is_none());
+        }
+        let receipt_delivery::Startup {
+            mut pending,
+            mut batch,
+        } = receipt_startup();
+        drop(rx);
+        out.flush();
+        batch.drain(&mut pending, &out);
+        assert!(out.closed());
+        assert!(!out.pending());
+        assert!(!batch.active());
+    }
     #[test]
     fn latest_status_coalesces_but_ordered_results_and_capacity_are_preserved() {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
@@ -374,9 +731,9 @@ mod tests {
                 .is_none()
             );
         }
-        let worker = out.worker();
+        let producer = out.clone();
         let task = tokio::spawn(async move {
-            update(&worker, UiUpdate::Shutdown).await;
+            update(&producer, UiUpdate::Shutdown).await;
         });
         tokio::task::yield_now().await;
         rx.recv().unwrap();
@@ -518,5 +875,77 @@ mod tests {
             .unwrap();
         assert!(matches!(rx.try_recv().unwrap(), UiUpdate::Shutdown));
         assert!(!worker.pending());
+    }
+    #[tokio::test]
+    async fn shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(128);
+        for _ in 0..128 {
+            tx.send(UiUpdate::RecoveryBell).unwrap();
+        }
+        let out = BufferedUpdates::new(tx);
+        let worker = out.worker();
+        let (sender, mut actions) = crate::ui::actions::channel(1);
+        let task = tokio::spawn(async move {
+            wait_for_shutdown_delivery(
+                &mut actions,
+                &worker,
+                Duration::from_millis(20),
+                std::future::pending(),
+            )
+            .await
+        });
+        // Start with no pending outbox so the timer branch is initially disabled.
+        // Actual shutdown progress is the producer; the fixture never flushes it.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if out
+                    .delivery
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .latest
+                    .values()
+                    .any(|item| {
+                        matches!(
+                            item.value,
+                            UiUpdate::ShutdownProgress {
+                                force_available: true,
+                                ..
+                            }
+                        )
+                    })
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for _ in 0..128 {
+            assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Ok(UiUpdate::ShutdownProgress {
+                    force_available: true,
+                    ..
+                }) = rx.try_recv()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // UI has now received the real force-available state; one request suffices.
+        sender.try_send(UiAction::ForceQuit).unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["forced_shutdown"], true);
     }
 }

@@ -6,6 +6,7 @@ mod draft_images;
 mod draft_saver;
 mod history_reader;
 mod input_history;
+mod receipt_delivery;
 mod received;
 mod thread_deletion;
 mod update_delivery;
@@ -616,7 +617,7 @@ pub async fn run_with_clipboard(
 #[allow(clippy::too_many_arguments)]
 async fn run_with_clipboard_slots(
     control: Arc<Control>,
-    mut actions: crate::ui::actions::ActionReceiver,
+    actions: crate::ui::actions::ActionReceiver,
     updates: SyncSender<UiUpdate>,
     cwd: PathBuf,
     owner: DataOwner,
@@ -624,7 +625,33 @@ async fn run_with_clipboard_slots(
     clipboard: Arc<dyn ClipboardBackend>,
     command_slots: Arc<Semaphore>,
 ) -> Result<(), ApiError> {
-    let updates = BufferedUpdates::new(updates);
+    run_with_delivery(
+        control,
+        actions,
+        BufferedUpdates::new(updates),
+        cwd,
+        owner,
+        server,
+        clipboard,
+        command_slots,
+        #[cfg(test)]
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_with_delivery(
+    control: Arc<Control>,
+    mut actions: crate::ui::actions::ActionReceiver,
+    updates: BufferedUpdates,
+    cwd: PathBuf,
+    owner: DataOwner,
+    server: LocalServer,
+    clipboard: Arc<dyn ClipboardBackend>,
+    command_slots: Arc<Semaphore>,
+    #[cfg(test)] startup: Option<receipt_delivery::Startup>,
+) -> Result<(), ApiError> {
     actions.close_tool_starts_on_quit(&control);
     let mut selection = selection::Selection::default();
     let mut ipc_failure = server.failures();
@@ -637,7 +664,16 @@ async fn run_with_clipboard_slots(
     let mut delivery_next = tokio::time::Instant::now();
     let stream_period =
         Duration::from_secs_f64(1.0 / f64::from(control.store.config.ui.max_fps.clamp(1, 30)));
-    let mut pending: HashMap<String, (String, String, u64)> = HashMap::new();
+    #[cfg(not(test))]
+    let (mut pending, mut receipt_batch) = (
+        HashMap::<String, receipt_delivery::PendingReceipt>::new(),
+        receipt_delivery::Batch::default(),
+    );
+    #[cfg(test)]
+    let receipt_delivery::Startup {
+        mut pending,
+        batch: mut receipt_batch,
+    } = startup.unwrap_or_default();
     let mut images = draft_images::DraftImages::default();
     let (background_tx, mut background_rx) = mpsc::channel(32);
     let mut workers = JoinSet::new();
@@ -657,9 +693,17 @@ async fn run_with_clipboard_slots(
     let mut ui_subscription = control.subscribe_ui();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    update(&updates, UiUpdate::Initialize { cwd }).await;
+    let mut initialize = Some(UiUpdate::Initialize { cwd });
     loop {
-        if let Some(thread_id) = draft_saver.pump() {
+        if let Some(value) = initialize.take() {
+            initialize = updates.defer(value);
+        }
+        if initialize.is_none() {
+            receipt_batch.drain(&mut pending, &updates);
+        }
+        if updates.main_ready()
+            && let Some(thread_id) = draft_saver.pump()
+        {
             update(
                 &updates,
                 UiUpdate::DraftSaveFailed {
@@ -681,11 +725,7 @@ async fn run_with_clipboard_slots(
                 break;
             };
             dirty_threads.remove(&thread);
-            let ids = pending
-                .iter()
-                .filter(|(_, value)| value.0 == thread)
-                .map(|(id, _)| id.clone())
-                .collect::<Vec<_>>();
+            let ids = receipt_delivery::next_ids(&mut pending, &thread);
             let generation = selection.generations.get(&thread).copied();
             let visible = selection.active_thread.as_deref() == Some(&thread);
             if ids.is_empty() && !visible {
@@ -717,6 +757,7 @@ async fn run_with_clipboard_slots(
         ui_subscription.select(selection.active_thread.as_deref());
         actions.enable_cancel(control_tasks.is_empty());
         tokio::select! {
+            _=tokio::task::yield_now(),if receipt_batch.active() && updates.main_slot()=> {},
             changed=ipc_failure.changed(),if watch_ipc_failure=> {
                 watch_ipc_failure = false;
                 let error = if changed.is_ok() {
@@ -883,17 +924,19 @@ async fn run_with_clipboard_slots(
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, thread_id.as_deref(), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = thread_id.clone();
-                        update(
-                            &updates,
-                            UiUpdate::Receipt {
+                        let accepting = UiUpdate::Receipt {
                                 draft_id: draft_id.clone(),
                                 revision,
                                 thread_id: thread_id.clone(),
                                 status: ReceiptStatus::Accepting,
                                 message: None,
-                            },
-                        )
-                        .await;
+                            };
+                        let deferred_accepting = if actions.is_closing() {
+                            Some(accepting)
+                        } else {
+                            update(&updates, accepting).await;
+                            None
+                        };
                         let permit = if actions.is_closing() {
                             None
                         } else {
@@ -922,6 +965,7 @@ async fn run_with_clipboard_slots(
                         let image_leases = images.leases(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
+                        let outcomes = updates.worker();
                         send_workers.spawn(async move {
                             let _image_leases = image_leases;
                             let _permit = match permit {
@@ -931,6 +975,9 @@ async fn run_with_clipboard_slots(
                                     .await
                                     .expect("frontend send slots remain open"),
                             };
+                            if let Some(accepting) = deferred_accepting {
+                                update(&outcomes, accepting).await;
+                            }
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, thread_id.as_deref(), None);
                             let trace_thread = thread_id.as_deref().map(str::to_owned);
                             let ids = attachments
@@ -1345,17 +1392,19 @@ async fn run_with_clipboard_slots(
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, Some(source_thread_id.as_str()), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = None;
-                        update(
-                            &updates,
-                            UiUpdate::Receipt {
+                        let accepting = UiUpdate::Receipt {
                                 draft_id: draft_id.clone(),
                                 revision,
                                 thread_id: None,
                                 status: ReceiptStatus::Accepting,
                                 message: None,
-                            },
-                        )
-                        .await;
+                            };
+                        let deferred_accepting = if actions.is_closing() {
+                            Some(accepting)
+                        } else {
+                            update(&updates, accepting).await;
+                            None
+                        };
                         let permit = if actions.is_closing() {
                             None
                         } else {
@@ -1384,6 +1433,7 @@ async fn run_with_clipboard_slots(
                         let image_leases = images.leases(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
+                        let outcomes = updates.worker();
                         send_workers.spawn(async move {
                             let _image_leases = image_leases;
                             let _permit = match permit {
@@ -1393,6 +1443,9 @@ async fn run_with_clipboard_slots(
                                     .await
                                     .expect("frontend send slots remain open"),
                             };
+                            if let Some(accepting) = deferred_accepting {
+                                update(&outcomes, accepting).await;
+                            }
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, Some(source_thread_id.as_str()), None);
                             let trace_thread = Some(source_thread_id.clone());
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
@@ -2343,7 +2396,7 @@ async fn run_with_clipboard_slots(
                     }
                 }
             },
-            result=background_rx.recv()=> match result {
+            result=background_rx.recv(),if !receipt_batch.active() && updates.main_ready()=> match result {
                 Some(BackgroundResult::ThreadDeletion { request_id, args, execute, mut known_thread_ids, result }) => {
                     let result = match result {
                         Ok(thread_deletion::Outcome::Preview(value)) => Ok(ThreadDeletionReply::Preview(value)),
@@ -2358,7 +2411,7 @@ async fn run_with_clipboard_slots(
                             selection.generations.retain(|thread, _| !ids.contains(thread));
                             dirty_threads.retain(|thread| !ids.contains(thread));
                             refreshing.retain(|thread| !ids.contains(thread));
-                            pending.retain(|_, value| !ids.contains(&value.0));
+                            pending.retain(|_, value| !ids.contains(&value.thread));
                             if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
                                 ui_subscription.select(None);
                                 selection.activate_draft(uuid::Uuid::new_v4().to_string());
@@ -2431,30 +2484,9 @@ async fn run_with_clipboard_slots(
                     }
                     match receipts {
                         Ok(receipts) => {
-                            for (message, status) in receipts {
-                                if let Some((thread_id, draft_id, revision)) = pending.remove(&message)
-                                {
-                                    let hint = matches!(
-                                        status,
-                                        ReceiptStatus::Cancelled | ReceiptStatus::Failed
-                                    )
-                                    .then(|| {
-                                        format!(
-                                            "依頼を保持しました · /restore {revision} で入力欄へ戻す"
-                                        )
-                                    });
-                                    update(
-                                        &updates,
-                                        UiUpdate::Receipt {
-                                            draft_id,
-                                            revision,
-                                            thread_id: Some(thread_id),
-                                            status,
-                                            message: hint,
-                                        },
-                                    )
-                                    .await;
-                                }
+                            receipt_batch = receipt_delivery::Batch::new(receipts);
+                            if pending.values().any(|value| value.thread == thread_id && !value.checked) {
+                                dirty_threads.insert(thread_id);
                             }
                         }
                         Err(error) => status(&updates, Some(thread_id), error).await,
@@ -2488,7 +2520,7 @@ async fn run_with_clipboard_slots(
                         ) {
                             pending.insert(
                                 message.to_owned(),
-                                (target.clone(), draft_id.clone(), revision),
+                                receipt_delivery::PendingReceipt { thread: target.clone(), draft: draft_id.clone(), revision, checked: false },
                             );
                         }
                         let state =
@@ -2765,7 +2797,7 @@ async fn run_with_clipboard_slots(
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
                     }
-                    dirty_threads.extend(pending.values().map(|value| value.0.clone()));
+                    dirty_threads.extend(pending.values().map(|value| value.thread.clone()));
                     if let Some(thread) = &selection.active_thread {
                         dirty_threads.insert(thread.clone());
                     }
@@ -2833,8 +2865,15 @@ async fn run_with_clipboard_slots(
     cancel.cancel();
     drop(background_rx);
     let grace = Duration::from_millis(control.store.config.io.shutdown_grace_ms);
+    let shutdown_updates = updates.clone();
     let shutdown = async move {
+        // Transfer the single bounded remainder into its original delivery owner
+        // while shutdown's outer select continues flushing and accepting force.
         let server_result = server.shutdown().await;
+        if let Some(value) = initialize {
+            update(&shutdown_updates, value).await;
+        }
+        receipt_batch.finish(&mut pending, &shutdown_updates).await;
         // Coalesced autosaves retain the newest snapshot per Thread; FIFO
         // database admission within each Thread is preserved on shutdown too.
         let save_worker = draft_saver.finish().await;
@@ -2858,17 +2897,28 @@ async fn run_with_clipboard_slots(
             .and(control_result)
             .and(owner_result)
     };
+    wait_for_shutdown_delivery(&mut actions, &updates, grace, shutdown).await
+}
+
+// Drive delivery while the shutdown future is pending, not just the active loop.
+async fn wait_for_shutdown_delivery<F: Future<Output = Result<(), ApiError>>>(
+    actions: &mut crate::ui::actions::ActionReceiver,
+    updates: &BufferedUpdates,
+    grace: Duration,
+    shutdown: F,
+) -> Result<(), ApiError> {
     let result = {
-        let waiting = wait_for_shutdown_updates(&mut actions, &updates, grace, shutdown);
+        let waiting = wait_for_shutdown_updates(actions, updates, grace, shutdown);
         tokio::pin!(waiting);
         loop {
             tokio::select! {
-                result=&mut waiting=>break result,
-                _=tokio::time::sleep(Duration::from_millis(5)),if updates.pending()=> {updates.flush();},
+                result = &mut waiting => break result,
+                _ = updates.notified() => updates.flush(),
+                _ = tokio::time::sleep(Duration::from_millis(5)), if updates.pending() => updates.flush(),
             }
         }
     };
-    updates.finish(&mut actions, result).await
+    updates.finish(actions, result).await
 }
 
 /// Keep the terminal responsive while owned shutdown proceeds. A force request
@@ -2897,9 +2947,7 @@ async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
     loop {
         tokio::select! {biased;
             result=&mut shutdown=>{
-                if let Err(error)=&result{status(updates,None,error).await;}
-                update(updates,UiUpdate::Shutdown).await;
-                return result;
+                return finish_shutdown_updates(actions, updates, result).await;
             },
             action=actions.next_action(),if actions_open=>match action {
                 Some(UiAction::ForceQuit) if force_available=>{
@@ -2920,6 +2968,44 @@ async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
             },
         }
     }
+}
+
+// Owned work has finished. Retain at most its error status and terminal marker;
+// waiting for presentation capacity must still honor one explicit ForceQuit.
+async fn finish_shutdown_updates(
+    actions: &mut impl crate::ui::actions::ActionStream,
+    updates: &(impl UpdateTarget + ?Sized),
+    result: Result<(), ApiError>,
+) -> Result<(), ApiError> {
+    let terminal = result
+        .as_ref()
+        .err()
+        .map(|error| UiUpdate::Status {
+            thread_id: None,
+            text: error.to_string(),
+        })
+        .into_iter()
+        .chain(std::iter::once(UiUpdate::Shutdown));
+    for mut value in terminal {
+        loop {
+            let Some(retained) = updates.defer(value) else {
+                break;
+            };
+            value = retained;
+            updates.flush_pending();
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(5)) => {},
+                action = actions.next_action() => {
+                    if matches!(action, Some(UiAction::ForceQuit) | None) {
+                        return Err(ApiError::new(ErrorCode::InvalidState,
+                            "Forced shutdown while terminal UI delivery was pending")
+                            .details(serde_json::json!({"forced_shutdown": true})));
+                    }
+                }
+            }
+        }
+    }
+    result
 }
 
 async fn save_draft(
