@@ -16,18 +16,22 @@ Rust製の軽量なターミナル向けAIエージェント環境です。モ�
 
 ## バイナリのダウンロード
 
-[Releases](https://github.com/tya5/shellboy/releases) でWindows x64、macOS Apple Silicon、Linux x64向けの配布物と `SHA256SUMS` を提供します。v0.1.5の配布先は [v0.1.5](https://github.com/tya5/shellboy/releases/tag/v0.1.5) です。
+[Releases](https://github.com/tya5/shellboy/releases) でWindows x64、macOS Apple Silicon、Linux x64向けの配布物と `SHA256SUMS` を提供します。v0.1.6の配布先は [v0.1.6](https://github.com/tya5/shellboy/releases/tag/v0.1.6) です。
 
-Windowsは `shellboy-v0.1.5-x86_64-pc-windows-msvc.zip` をダウンロードして展開します。PowerShellの例:
+Windowsは `shellboy-v0.1.6-x86_64-pc-windows-msvc.zip` をダウンロードして展開します。PowerShellの例:
 
 ```powershell
-Expand-Archive .\shellboy-v0.1.5-x86_64-pc-windows-msvc.zip -DestinationPath .
-.\shellboy-v0.1.5-x86_64-pc-windows-msvc\shellboy.exe --help
+Expand-Archive .\shellboy-v0.1.6-x86_64-pc-windows-msvc.zip -DestinationPath .
+.\shellboy-v0.1.6-x86_64-pc-windows-msvc\shellboy.exe --help
 ```
 
 接続先とモデルは [設定ガイド](docs/guides/configuration.md) に従って設定してください。既知のreceipt予算・索引切替・巨大raw検索の制限は [既知の制限](docs/development/known-limitations.md) に記載しています。
 
-v0.1.5はv0.1.4と同じschema v9を使い、既存の設定・保存データを引き継げます。入力範囲の省略・復元と切断後の縮小、会話一覧からの削除を追加しました。更新前のバックアップを推奨します。新しい範囲編集後の旧版への巻戻しは検証していません。v0.1.1以前からの更新ではschema v9の索引2本を追加し、更新後のDBを旧binaryで開けません。旧版へ戻す手順は [保存設計](docs/design/storage.md) を参照してください。
+v0.1.6は長い履歴の採用・検索・描画と、遅い画面への更新配送を改善します。RAGにはソースの除外設定、検索準備の案内、索引結果の確認を追加しました。
+
+会話DBはschema v10、独立RAG DBはschema 3へ前進します。旧データは初回writerで移行しますが、移行後は対応上限が低い旧binaryでは開けません。更新前の整合backupを取り、戻す場合は[保存設計](docs/design/storage.md)に従って別data-dirへ復元してください。稼働中のアプリには再起動後に新binaryが適用されます。
+
+PDF/Office専用の内部抽出と`--extractor`/`--adapter`は廃止しました。旧file sourceのPDF/Officeは次の完全同期で対象外/removedになるため、外部で変換し、出典を指定した`rag ingest`で登録し直してください。変換本文とモデル解釈の使い分けは[RAGガイド](docs/guides/rag.md)を参照してください。
 
 ## ビルドと起動
 

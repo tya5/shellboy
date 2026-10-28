@@ -1,5 +1,11 @@
 # 開発状況
 
+## 0.1.6の最終検証
+
+利用者のgoalである#19〜#30を実装し、同一合成fixtureの前後測定、個別回帰、local HTTP+PTYによる10会話の確認まで進めました。最終標準checkはfmt・strict Clippy・76群1,296 passed / 0 failed / 24 ignoredで成功しました。全件の採用範囲は[追跡表](issue-19-30-plan.md)、測定範囲と判断は[acceptance](../validation/acceptance.md)と[判断記録](decisions.md)へ記録。通過後にmainをpush、3 OS native CIを確認し、0.1.6の公開・配布物検証・常用binary更新へ進みます。公開とbinary更新は未完了です。
+
+以下は各段階の記録です。
+
 ## Issue #19〜#23の追補（ローカル検証済み、未公開）
 
 - #19: 削除成功と後片付け警告の分離、閉じた一覧の失敗通知、重複削除抑止、過去のgeneration履歴に依存しない有限候補、画像失敗の二重表示と確認キーを修正。

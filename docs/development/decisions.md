@@ -310,3 +310,19 @@ Windows CIのRust harnessは同時2件へ制限し、独立DB/IPC/file worker fi
 - #21は明示hybridの準備不足だけを成功したkeywordへのdegraded結果として返す。従来の全てのscope_errorで非0終了という契約を、確認済み未準備warningだけに限って変更する。利用者とモデルが結果を使えることを優先し、scopeごとに使用手段・理由・次の索引操作を示す。本当の実行失敗や設定不正は隠さない。別の人間向け出力modeはJSON統一の方針に反するため採用しない。
 - #22の新しい操作結果保存表やCore receipt連携は採用しない。既存shell出力と既存RAGの永続状態で取得・追跡できるため、status投影とガイドを補う。最終走査時刻と内容更新時刻は区別し、embedding作成時刻の新列は作らず現在設定の不足件数を示す。
 - #23は提案1と3を採用し、2のJSON重複除去は今回は見送る。共有nodeの生成元context.thread_idとfork先selection.thread_idは同じとは限らず、ExecutionContextとPageは他の公開操作/構造表示にも利用されている。一覧だけの派生型と後方互換投影を増やすより、既存形を保ち抜粋制限とSQL長さだけを追加する。0指定は本文の転送/解析を避けるが、provenanceや実行リンクが残るので16KiB/50件を保証しない。実測と意味の異なる長さの説明をガイドへ残す。
+
+## 2026-10-28: 0.1.6へ対象拡大（Issue #24〜#30）
+
+- 利用者が#19〜#30完了、push、0.1.6公開、常用binary更新をgoalとして明示。初期5件を検証済みcommitへ分け、#24は#20の対象選択へ重ねて内部形式変換を削除する。外部変換の主経路とモデル解釈の代替経路を分け、原本hashと生成側申告を混同しない。原本の大きさは保存量ではないため固定bufferの逐次hashで16MiB制限を外し、保存する本文/metadataの上限は保持する。
+- #25〜#30のレビューの推定値を性能の証拠とは扱わず、同じ合成fixtureで変更前/後を測定する。#25/#26（経路と索引）、#27/#28（読取り隔離と通知）、#29/#30（描画と配送）を並行準備し、Cargo/Gitはrootで直列管理する。新しい表・汎用pool・worker engineを作らず、追加する有限admissionや通知の所有/終了を各設計へ記録する。
+- #26コメントの未起票項目（全DB使用量counter、retention/VACUUM、履歴keyword FTS、下書き/一覧全体の再設計）は今回の範囲へ広げない。必要な索引はEXPLAINと測定に根拠があるものだけ採用する。
+
+## 2026-10-29: #24〜#30の採用境界と最終検証
+
+- #25は既存node採用の末尾追加だけを共通化し、任意経路の置換APIを増やさない。revision/CAS、末尾とcursorの整合、順序、既採用nodeのno-opを維持する。既存edgeのINSERT前triggerを再実行しないSQLにし、新規cycleの拒否は保持する。
+- #26は会話DBの3索引と独立RAGの2索引を採用する。実際のEXPLAINと同一fixtureの比較を根拠にし、app_metaの不正JSONに対する認可の意味を変える部分索引は採用しない。schemaは会話10/RAG3で、起動前バックアップと旧版への直接復帰不可を公開時にも明記する。
+- #27はIndexService所有の1検索slotと既存runtimeのreadonly blocking処理に限定する。取消し後も実処理終了までpermitを保持し、owner終了でdrainする。ランキング後に新しいsnapshotで出典/可視性を確認するため、検索自体の高速化や長期snapshot保証とは扱わない。GCの集計分離は同じtransactionの回収判定と一緒に別途検討する。
+- #28は出力Notifyをownerに1個追加する。終了待ちをraw出力ごとに起こす負荷を除き、ShellOutput待ちのexecution別分配mapや専用workerは作らない。
+- #29は既存16MiBのlayout予算内でrender unitを共有する。高さ変更は再描画のcache keyにしない。全可視nodeのresize取得と、本文window再取得のpreflightを保持する。最終試験が検出したwindow再読込の退行は期待値を緩めず修正した。debug測定のp95は約52msであり、常時30fpsの保証とはしない。
+- #30はfrontend所有の有限outboxとUI専用の有限broadcastを採用する。通常受付を抑制する閾値と既受理結果の予備枠を設け、重要な結果をcoalesceしない。例外的な上限ではbackpressureを残し、停止/終了のpriorityと強制終了を維持する。詳細な所有・上限・切断・遅着・終了は採用設計へ記録した。
+- 性能はdebug build・合成DB・loopback HTTPで測る。会社proxyや外部モデル、Windows端末の体感を推測しない。3 OS native CIと配布物の実取得はローカル検証から分離して記録する。

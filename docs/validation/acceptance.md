@@ -1,5 +1,41 @@
 # 検証状況
 
+## Issue #19〜#30: 0.1.6の統合検証（2026-10-29）
+
+最終の `sh scripts/check.sh` は終了0、fmt・全target strict Clippy・76群1,296 passed / 0 failed / 24 ignoredで成功しました。下記性能用ignored試験6種類は別途明示実行し、すべて成功しています。
+
+macOS ARM64 / Rust 1.99.1、一時DB・合成fixture・ローカルHTTP mockを使用。性能比較はdebug/unoptimized buildで、実ユーザーの会話・既定DB・会社proxy・外部モデルAPIを使っていません。#19〜#23の初期検証は下節、以下は#24〜#30を統合した測定です。
+
+| 対象と測定範囲 | 変更前 → 変更後 |
+| --- | --- |
+| #25: DbWorker内の末尾1node採用、1,000経路、5回p50 | 956,226 → 216 µs |
+| 同3,000経路 | 8,598,210 → 537 µs |
+| #26: native Control、50,000 shell/10,000 Run/1,000 Thread、9回、終了済みshell Wait p50 | 30,798 → 12,287 µs |
+| 同ThreadList 50件の投影p50 | 116,973 → 10,377 µs |
+| #27: 20,000 chunk×1,536次元、検索中の出力commit、5標本の範囲 | 1,581〜1,818 → 0.50〜6.50 ms |
+| 同検索中のControl ThreadGet | 1,590〜1,833 → 10.1〜38.8 ms |
+| #28: 実shell 10個/終了wait 10個、約1.2秒の出力だけの区間、wait再観測DB job数 | 1,111 → 0 |
+| 同出力commit p50/p95 | 4,177/93,965 → 3,260/7,352 µs |
+| #29: 127node/保持180,247 bytes、stream 28,258 bytes、120frame layout p50/p95 | 706,690/766,023 → 26,842/51,650 µs |
+| 同更新p50/p95 | 103.75/358.25 → 59.92/234.75 µs |
+| 同128nodeの幅変更、取得要求数/計測時間 | 128件/32.80秒 → 3件/0.636秒 |
+| #30: 実frontendへ10Thread分の合成delta、UI停止250ms×7回、action消費p50/p95 | 256.19/265.83 → 6.41/7.65 ms |
+| 同lagged/reload数 | 7/14 → 0/7 |
+
+#25は同じfixtureを毎回rollbackし、receipt照会・replay・HTTP・commit/fsync・UIは含まない。#26は同一現行コードで3索引だけを外した/付けた比較で、schema ledgerは維持。Waitは既に終了したshellの受付・保存・所有照会・cleanupまで、ThreadListはtitle/excerpt投影までを含み、IPCとUIは含まない。別のSQL-only測定とEXPLAINは[履歴採用と索引](../design/history-adoption-performance.md)に記録し、native Control測定へ混ぜていない。
+
+#27は実IndexServiceとsqlite-vec、loopback embedding mock。検索そのものは変更前約1.61〜1.85秒、変更後約1.54〜2.08秒で、高速化の主張ではなくwriterと読取りの待ちを切り離した結果。取消しからdrainは0.50ms、future abortから実処理drainは1.88ms。第2検索はembedding前に拒否。ランキング後・返却前にGCと経路変更を挟む決定的gate試験で、新snapshotが古いwinning witnessを含む2候補を除くことも確認した。
+
+#28の0件は出力だけの計測区間であり、初回・終了の必要な観測は区間外。通常ShellOutput条件の通知、終了/取消し/timeoutも維持する。Thread読取probeのp50/p95は3,889/44,520→3,093/7,636µsだが、これはSQL照会でfull ThreadGetではない。
+
+#29は全量rendererとの文字/style/link/source/行数一致、combined layout予算、heightだけの再構築0回、全可視nodeのresize取得を試験。全体試験で本文window再取得のpreflightが描画時のviewport初期化に消される退行を検出し、既存スクロール試験の期待値を変更せず修正した。最終fixtureではunit再利用14,770回/構築247回、全layout構築120回。p95は約52msなので常時30fpsは保証しない。#30はactionをfrontendが消費する時間で、画面反映時間ではない。残るreload 7回は注入Errorによる通常refresh。重要結果の非coalesce、有限上限、Cancel/Quit/ForceQuit、切断・終了・購読世代も別途回帰試験で扱う。
+
+#24は内部Office/PDF/adapterを除去し、UTF-8 textを直接索引する経路と、外部変換後のingestを統一。17MiB原本の逐次hash、派生本文と原本/申告hashの区別、原本削除後の検索/get、以前のPDF revisionのremovedを確認する。RAG v1/v2はreadonly/dry-runで移行せず、writerでatomicにv3へ移行しfresh v3と索引を照合。会話DBはv10へ移行するため、更新前backupと旧版への直接復帰不可をREADME/guideへ明記した。
+
+最終debug binary（SHA-256 `5d9c18ea11e3c4580221079dda2ca295b174fca9cdaa63232ee60b6e9befc604`）で、オフラインdocs 33項目/13 guides/3 categories/127 links、実RAG CLI 10項目、一覧削除のmacOS PTY 5項目が成功。削除済み内部変換flag 2個も、JSON protocolのinvalid_argument/UnknownArgumentとして拒否し、DBやownerを起動しないことを確認した。最初の手動probeはClap標準stderrを仮定して失敗したため、既存JSON protocolを観測するprobeへ直し、製品の出力は変更していない。
+
+実debug TUIを55行×130列のmacOS PTYで動かし、loopback Responses SSE 10要求を同時生成。最初のdeltaの表示後、PTY排出を約1,172ms止めてSIGWINCH負荷を入れ、10件の保存済み回答の完全一致、表示中の50 tokenの順序と重複なし、非表示9会話の一覧残存、10 Turnのcompletedを確認した。画面はANSI差分を端末cellへ適用して観測し、再描画の累積文字列を重複表示と誤認しない。外部API要求0件。Windows Terminalの対話実機、会社proxy/実モデルの速度と切断率は未実施であり、native CIとは区別する。
+
 ## Issue #19〜#23: ローカル検証（2026-10-28、0.1.6公開前）
 
 macOS ARM64 / Rust 1.99.1、一時DBと合成fixtureで検証。`sh scripts/check.sh` は終了0、fmt・全target strict Clippy・73群1,274 passed / 0 failed / 19 ignoredで成功しました。初回Clippyでextract単独試験の未使用helperを検出し、形式判定/上限の意味のある試験を追加。全体試験で旧hybrid失敗の期待値が残っていたため、確認済み未準備のwarning成功へ更新しています。次の全体試験は閉じた一覧の通知を再openで失うケースを検出。通常slash操作のstatus更新を変えず、一覧のnoticeをopen時に保持し、画面に失敗本文が残る試験へ修正した後、上記標準checkが成功しました。
