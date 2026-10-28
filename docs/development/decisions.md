@@ -373,3 +373,15 @@ Document the responsiveness limitation; removing it needs both a finite main
 reserve and incremental batch continuation, not a larger queue. The ordinary
 pressure test is not evidence for every exhausted-reserve case. This follow-up
 is tracked in the reopened-issue plan and known limitations.
+
+
+## 2026-10-29: Remove #20 Windows legacy-key compatibility for 0.2.0
+
+Issue #20 comment `6480908316` clarifies that the next release is 0.2.0 and does
+not carry forward old-version migration/compatibility. This overrides the initial
+Windows-key preservation decision above. Remove the native-key lookup and its
+two preservation tests rather than carrying compatibility-only database queries
+and identity rules. Keep current slash normalization, failure/removal separation,
+root-glob protection and case-sensitive matching unchanged. Older indexes must
+be recreated. Do not open, reset or convert user data automatically. No version
+bump or release is performed as part of this targeted follow-up.

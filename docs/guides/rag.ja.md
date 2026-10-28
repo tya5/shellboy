@@ -34,7 +34,7 @@ dotで始まる配下entry（`.git`や`.DS_Store`）、現在使うRAG DBと`-wa
 
 directory走査が完了すると、対象外になった旧資料や削除済み資料は検索のactive版から外れ、`removed`に数えます。原本は削除しません。個別fileの読取り/抽出失敗では、そのfileの旧版だけを`stale`として保持します（旧版がなければ`failed`）。他の見つからなかったfileの削除検出は継続します。rootへアクセスできない場合や走査上限などの走査不全では、そのsourceの**新規・変更fileの索引更新と削除検出をすべて見送ります**。provider breakerによる後回しがある場合も、再試行まで削除検出を抑止します。
 
-Windowsでは、旧索引のbackslash区切りkeyが存在し、slash区切りkeyがまだなければ、同期時に旧keyとdocument ID・revisionを保持し、`inspect --id`もそのまま使えます。glob照合とselectionの例はslash区切り、新規文書のkeyもslash区切りです。以前の同期で両方のkeyが既にできた場合はslash側を優先し、完全な同期で重複するbackslash側をremovedにします。不変のrevision履歴は統合しません。POSIXのfile名中のbackslashをseparatorとして読み替えることもありません。
+0.2.0ではWindowsのdocument keyをslash区切りにします。旧索引からの移行・互換性は提供しません。旧backslash key・ID・revisionの引き継ぎには依存せず、索引を作り直してください。POSIXのfile名中のbackslashは通常の文字として扱います。
 
 既定はkeyword検索・索引で、API接続は不要です。登録やdry-runはAPIを呼びません。
 管理DBは既定データディレクトリの `rag.db`、`shellboy rag --db /absolute/path/knowledge.db`

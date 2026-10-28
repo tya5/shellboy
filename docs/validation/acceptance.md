@@ -1,5 +1,32 @@
 # 検証状況
 
+## Issue #20 no-compatibility follow-up (2026-10-29)
+
+Issue comment `6480908316` overrides the previous Windows-key compatibility
+choice for the planned 0.2.0 release. Removed the Windows legacy-key remapping,
+lookup and two dedicated retention tests. Current source uses the scanner's
+slash-separated keys directly. Adopted specification, RAG design and both guide
+languages require recreating older indexes rather than promising key/ID/revision
+preservation. This change does not open or modify existing user data.
+
+On macOS ARM64 / Rust 1.99.1, format and locked all-target strict Clippy passed.
+`cargo test --locked --test rag_selection_status --test rag_store --test rag_cli
+--test docs_cli` passed **4 groups / 40 passed / 0 failed / 0 ignored**. Existing
+failure/removal, incomplete-walk, root-glob, case-sensitivity, provider-breaker and
+bundled-doc contracts still pass. Actual-executable offline docs passed **33
+checks / 13 guides / 3 categories / 127 bundled links**. Repository audit passed
+**722 relative links / 50 heading fragments**. Removed helper and dedicated-test
+names have no remaining source/test references.
+
+Debug executable SHA-256:
+`c88f5978b1afd8f32794dbbd1e1fc7a59b3ec1d596d611d82908303563d38a88`.
+No new full-suite, Windows/Linux CI, paid API, hardware terminal or installed
+binary check was performed for this focused removal. The 1,315-pass result below
+is evidence for the earlier `deee3e1` worktree, not a rerun of this follow-up.
+Push/release/version bump remain outside this change. Staged secret scanning
+passed without findings; local logs and fixtures remain ignored.
+
+
 ## Reopened #19/#20/#27/#30 (2026-10-29; local source)
 
 Baseline is local `8f00000` (including the English documentation changes), not

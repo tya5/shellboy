@@ -13,6 +13,14 @@ Shellboyの開発で使う採用仕様の入口です。仕様の採用と実装
 
 Shellboyへの改名では旧名の実行名・環境変数・既定保存先への互換を提供しない。旧データの移動は不要であり、既存環境を変更しない。新しい既定保存先は [setup](../development/setup.md) に記載する。
 
+## 0.2.0 compatibility boundary
+
+The next release targets 0.2.0 without a migration or backward-compatibility
+promise for earlier releases. In particular, RAG does not preserve Windows
+backslash document keys: recreate the index with current slash-separated keys.
+Do not add fallback lookup or identity migration for those keys. This records the
+Issue #20 clarification; it does not trigger deletion or conversion of user data.
+
 ## 変えない責務
 
 Rust / Ratatui / Crossterm / Tokio / bundled SQLite / sqlite-vec を使い、依存版は固定する。

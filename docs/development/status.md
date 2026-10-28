@@ -1,5 +1,17 @@
 # 開発状況
 
+## Issue #20 clarification for 0.2.0 (2026-10-29; verified locally)
+
+The updated ticket withdraws Windows legacy-key compatibility. Removed the
+lookup and its two retention tests; corrected the adopted specification, RAG
+design, English/Japanese guides and the Low 2 disposition. Windows uses current
+slash keys and earlier indexes must be recreated. No user index is modified.
+Format and all-target strict Clippy passed, as did four focused RAG/docs test
+groups (40 passed, 0 failed) and 33 actual offline docs checks. The full-suite
+result below belongs to earlier `deee3e1`, before this follow-up. No push, release,
+version bump, installed-binary update or user-data change occurred.
+
+
 ## Reopened #19/#20/#27/#30 (2026-10-29; local verification complete)
 
 All four Medium findings are fixed. Deletion cleanup write failures stop owner

@@ -485,16 +485,6 @@ pub(super) async fn index(
         skipped += scan.excluded + scan.unsupported + scan.symlinks;
         let before_counts = (counts.changed, counts.unchanged, counts.processed);
         let before_failures = failure_count;
-        // Storage keys are stable identities, while selection paths use slash
-        // separators. Preserve pre-normalization Windows document references.
-        #[cfg(windows)]
-        let scan = {
-            let mut scan = scan;
-            for (key, _) in &mut scan.files {
-                *key = sync::existing_windows_file_key(&s.db, &source, key)?;
-            }
-            scan
-        };
         let seen: HashSet<String> = scan.files.iter().map(|(k, _)| k.clone()).collect();
         let mut source_failed = false;
         let mut source_deferred = false;

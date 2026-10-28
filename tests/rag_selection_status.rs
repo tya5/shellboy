@@ -338,57 +338,6 @@ async fn glob_case_sensitivity_is_independent_of_filesystem_case_rules() {
     );
 }
 
-#[cfg(windows)]
-#[tokio::test]
-async fn windows_legacy_backslash_key_keeps_document_identity_across_sync() {
-    let root = tempfile::tempdir().unwrap();
-    let root = root.path();
-    std::fs::create_dir_all(root.join("materials/sub")).unwrap();
-    std::fs::write(root.join("materials/sub/a.md"), "stable material").unwrap();
-    init(root).await;
-    add(root, "materials", &[], false).await;
-    index(root, false, IndexMode::Keyword).await;
-    // Model the key representation stored by the pre-normalization scanner.
-    let db = rusqlite::Connection::open(root.join("rag.db")).unwrap();
-    db.execute(
-        "UPDATE documents SET key='sub\\a.md' WHERE key='sub/a.md'",
-        [],
-    )
-    .unwrap();
-    drop(db);
-    let before = call(
-        root,
-        RagCommand::Inspect {
-            id: "sub\\a.md".into(),
-        },
-    )
-    .await;
-    assert_eq!(before["ok"], true);
-    for dry_run in [true, false] {
-        let synced = index(root, dry_run, IndexMode::Keyword).await;
-        assert_eq!(synced["result"]["removed"], 0, "{synced}");
-        assert_eq!(synced["result"]["changed"], 0);
-        assert_eq!(synced["result"]["unchanged"], 1);
-        let saved = call(
-            root,
-            RagCommand::Inspect {
-                id: "sub\\a.md".into(),
-            },
-        )
-        .await;
-        assert_eq!(
-            saved["result"]["document_id"],
-            before["result"]["document_id"]
-        );
-        assert_eq!(saved["result"]["revision"], before["result"]["revision"]);
-    }
-    // Glob matching still uses slash paths even when storage uses an old key.
-    add(root, "materials", &["sub/*.md"], false).await;
-    assert_eq!(
-        index(root, false, IndexMode::Keyword).await["result"]["removed"],
-        1
-    );
-}
 #[tokio::test]
 async fn version_one_read_and_dry_run_are_write_free_then_writer_migrates_existing_sources() {
     let root = tempfile::tempdir().unwrap();
