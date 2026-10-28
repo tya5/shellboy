@@ -1,4 +1,80 @@
-# 検証状況
+# Validation record
+
+## Latest comments and #32 / #33: final local validation (2026-10-29)
+
+Verified source: `0a72f9c`, including `02b994a` for saturated frontend delivery.
+On macOS ARM64 / Rust 1.99.1, the final `sh scripts/check.sh` completed with exit
+0: format, locked all-target strict Clippy and **76 groups / 1,334 passed / 0
+failed / 24 ignored**. Earlier attempts stopped on obsolete test fixtures: absent
+attachment positions and duplicated degraded scope_errors warnings. They were
+updated to current inputs/contracts; the final whole-suite run is authoritative.
+The UI fixtures now use real clipboard updates and verify retained marker
+positions and the full byte limit rather than accepting old append-only input.
+
+New/extended regressions establish:
+
+- Real frontend cancellation with raw channel full, critical outbox 512 full,
+  retained receipt batch 128, and 40 queued closing sends. Durable Cancel, Quit
+  and one explicit ForceQuit work without consuming UI updates. Separate tests
+  cover terminal shutdown success/error saturation, FIFO after resumption,
+  worker-permit retention/release, finite receipt scans and disconnect cleanup.
+- Owned-shutdown Notify delivery from an initially empty outbox while the normal
+  conditional flush timer is inactive; the test reaches one explicit force.
+- Uncertain deletion outcomes never acquire a contradictory definitive-failure
+  prefix in the dialog/status, and deletion admission can be reused.
+- Actual Unix FIFO/socket and symlink source-root replacements preserve previous
+  documents/revisions in dry-run and live sync. Directory/regular-file transitions
+  follow the current path; no historical-root-type column is added.
+- Actual readonly SQLite busy, missing-table and NOTADB failures retain typed
+  cause-specific guidance and do not stop the writer/owner. The exclusive-lock
+  fixture uses rollback journal after closing the WAL writer; it does not prove
+  production WAL contention behavior.
+- Public conversation schema v8/v9/v10 upgrades preserve data and match the fresh
+  current schema across repeated opens. Isolated current bootstrap/validation
+  does not interpret old formats. Older readonly RAG/conversation schemas reject
+  without migration, while writer upgrades remain startup-only. Independent
+  SQLite comparison confirms all 98 schema objects, metadata, quota counters and
+  ledger names match the immutable migrations (application timestamps excluded).
+- Current required fields reject absence instead of accepting old responses;
+  genuine tombstone/unknown/inapplicable values remain nullable or omitted.
+  Missing query markers reject before HTTP without repair. The actual CLI rejects
+  `status --operation` with clap UnknownArgument without creating a data directory;
+  offline envelopes report protocol 2. IPC regression rejects an older welcome
+  before sending a command.
+- Full bundled-guide navigation captions match actual labels, with invalid old
+  captions rejected even when valid captions also appear. Catalogue scope is 13
+  English guides / 3 categories; only the Japanese User Guide remains.
+
+Actual executable SHA-256:
+`4f7f4ffe575beb22317f91b5141b3739121d18f92f18047e2c1d38cd7a36c63c`.
+Offline docs: **33 checks / 13 guides / 3 categories / 127 bundled links**, empty
+environment/cwd and absent config/owner/API. RAG CLI: **13 scenarios**, including
+partial failure, stale retention/removal and warnings without duplicated errors;
+no model API requests. Relative-link/fragment and TOML example audit passed.
+
+Actual macOS PTY deletion passed 5 scenarios. Local HTTP mock + PTY passed 10
+conversations, a 1,171ms reading pause, exact canonical outputs without missing or
+duplicated content, 50 ordered unique visible tokens, and completed background
+threads in the tree. These functional checks ran alongside the standard suite;
+their timings are not isolated performance evidence. No external API was used.
+
+The separate ignored ten-thread pressure test ran serially after all other checks:
+7 samples, 1,000 deltas/trial, 250ms UI stopped/trial, action p50 **6.499833ms**,
+p95 **6.842125ms**, lagged 0, reloads 7. Regression watchdogs and debug synthetic
+measurements do not guarantee latency on arbitrary terminals or OSes.
+
+Source audit found no legacy index preparation/key, previous pending-snapshot
+key, unused history budget, status operation argument or old-owner IPC guidance.
+Historical SQL imports are startup migration code or cfg(test) fixtures. Remaining
+legacy-named tests exercise current safety policies or performance baselines.
+Secret scans of staged changes and added local source history found no leaks.
+Raw evidence is retained under ignored `.local/review-32-33/`.
+
+No native Windows/Linux, corporate proxy, real IME/clipboard or production
+WAL-contention validation is claimed. No push, release, installed-binary update,
+paid API request or modification of the user's default data/settings occurred.
+The issues remain open for their requested push and three-OS CI gate. The records
+below describe earlier verified source and may contain superseded scope choices.
 
 ## Latest review follow-ups #19/#20/#27/#30/#31 (2026-10-29)
 
@@ -114,7 +190,7 @@ force and one accepted force with both raw queue and critical reserve full. The
 last case also proves a consumed force does not enter a second UI drain. The
 normal owned-work shutdown grace regression remains unchanged and passes.
 
-Readonly search regressions exercise missing-path open, exclusive-lock timeout,
+Readonly search regressions exercise missing-path open, exclusive-lock timeout in rollback-journal mode (not WAL),
 query failure, preserved writer error classification, cancellation and a real
 Control search using a loopback embedding mock followed by a successful mutation.
 Deletion tests cover storage-failure shutdown/rejected admission, a benign bounds

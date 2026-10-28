@@ -86,6 +86,11 @@ Windows全target試験で判明した添付fixtureのUnix絶対パス11件と、
 
 ## レビューgoal再開時の検索境界（2026-10-26）
 
+> Historical decision: earlier compatibility choices are superseded by Issue #33
+> and the latest current-format decision at the end of this log.
+
+> Historical choice; compatibility portions are superseded by Issue #33.
+
 PR2-2は採用する。旧splitter identityの選択空間を、新規sourceの索引成功だけで非選択へ変えない。旧vectorへ異なる分割を混在させず、既存candidate/group pointerへ新規分を保管し、全job成功後の明示selectまたはrebuildで切り替える。自動の全履歴再索引は行わない。新しい表・worker・Core状態は不要。
 
 PR2-3は採用する。巨大rawは既存decoder/SQLite BLOB page読取りでspan全体をincremental hash検証し、返す原文referenceを最大64K文字rangeに限定する。小rawの全文referenceとhybrid融合は保持する。正常な巨大hitをinput_limitでscope全体失敗にせず、実際のsource不整合は区別する。
@@ -124,6 +129,8 @@ PR2-17/18の実端末再確認で、正式な親子終了記録のkind・詳細�
 
 外部レビューは採否の入力とし、コード・保存契約・再現条件で判断する。受信本文の有無と最終本文との差を表示の根拠にし、監査記録の存在だけで会話本文があるとは表示しない。巨大rawの複数spanは同じwitnessの検証走査を共有する。起動エラーの次操作は起動段階に合わせる。いずれも既存の保存形式・worker・Core状態を増やさず対処する。
 
+> Historical choice; compatibility portions are superseded by Issue #33.
+
 索引更新時の旧active維持は継続採用する。新candidateの履歴はselectまで既定semantic検索から外れ、select後に新旧を統合するには明示的な有料再索引が必要という制限を明示する。pause/失敗理由と切替案内は併記し、一方を隠さない。自動selectや暗黙の有料backfillは追加しない。
 
 最初のv0.1.2候補のWindows CIはUnix専用テストの補助accessorがWindowsのtest buildにも含まれ、strict Clippyのdead_codeで停止した。全呼出しがUnix限定であるため同じcfgへ揃える。警告抑制やWindows jobの成功扱いには変更しない。macOS/Linuxは同候補で成功したが、後続修正は改めて3 OS CIで確認する。
@@ -136,11 +143,18 @@ PR2-17/18の実端末再確認で、正式な親子終了記録のkind・詳細�
 
 Issue #3は採用する。観測は同IDでも再計算しreceiptを作らない。waitはTurn待機/解除を保存するため従来のintentと再送保護を維持する。semantic検索の再観測で外部費用が再発生する場合があり、read-onlyを無課金や完全なSQLite query_onlyとは扱わない。変更とwaitの終端結果はcreated_atから24時間経過後の既存GC保守、又は圧迫時に回収するが、ID/hash/origin等を同じrowの期限切れ記録として保持する。古い結果を失った同IDで変更を再実行せずoperation_expiredを返す。pendingと未反映参照は保護し、無制限のID tombstone削除はしない。任意IDを安全に失効させる新しいticket発行機構より、既存表の小さい結果縮退を選ぶ。墓標のmetadataも有限予算内なので、無限稼働は保証しない。
 
+> Historical choice; compatibility portions are superseded by Issue #33.
+
 Issue #3の追記を採用し、受付記録の正規入口はoperation getへ統合する。status --operationはv0.1.2だけ非推奨aliasとして残し、同じ処理へ正規化してstderrで移行先を案内する。古いwireのstatus wrapperも同じ詳細投影を共有する。次のリリースでaliasを削除する。別pool・表・worker・queue・依存や新error codeは追加しない。読取りの保存済み観測再取得を廃止する契約変更は、このIssue対応と利用者の実装指示に基づく。
 
 macOSのユーザー一時領域優先案を採用する。環境変数TMPDIRを盲信せず、既存libcのconfstrでOSの選択を取得し、canonical化・uid/0700・祖先保護・103byteのsocket長を検証する。XDGを優先し、その後OSユーザー領域、最後に/tmpを使う。再起動cleanupも同じ候補集合で認識し、LinuxだけのflockをmacOSのage清掃保証とは扱わない。
 
-旧名への互換不要という指示を、公開済みShellboy v0.1.0/v0.1.1の正常DB・資格情報除去migration・索引witness検証まで削除する指示とは解釈しない。旧launcher/env/data-dir fallbackは追加せず、公開保存契約のmigrationと検証付きlegacy読取りは維持する。根拠のない無条件fallbackやendpoint/model再束縛は引き続き拒否する。
+Historical interpretation, superseded by Issue #33 on 2026-10-29: startup
+schema upgrades and credential-removal transforms stay only inside removable
+migration modules. Normal runtime readers accept the current format only; legacy
+index reads, marker inference and old-owner response defaults are removed.
+General validation and current witness checks remain, without a release-specific
+compatibility promise. Launcher/env/data-directory fallbacks remain absent.
 
 index previewは無課金・有限の候補観測、operation getは結果不明の副作用を重複させない観測として採用を維持する。通常の追加設計は自律判断の委任範囲として進める。Quit後の保存完了までは所有Runが短時間動き得ること、Unix PGID再利用の検査/送信間競合を原子的には排除できないことは、対象設計と利用ガイドに限界として明記する。
 
@@ -439,3 +453,22 @@ nonzero forced result/error remains reliable, while waiting to guarantee the UI
 marker would break the one-request force contract. Create Issue #32 for exceptional
 full-reserve priority responsiveness. This remains separate from the Notify wakeup
 fix; neither ordinary pressure tests nor FIFO exhaustion tests prove its solution.
+
+
+## 2026-10-29: latest agreements and #32 / #33 supersede compatibility choices
+
+Adopt the [complete tracking plan](issue-32-33-plan.md). This supersedes earlier
+entries preserving pre-G5 keys, inferred query markers, deprecated status aliases,
+and runtime old-owner optional fields. Those entries describe earlier decisions,
+not the current contract. Keep the general schema runner, immutable historical
+SQL, ledger/user_version/sqlite-vec checks and strict protocol validation. Isolate
+all startup transforms in removable migration modules; initialize fresh databases
+from the current schema independently. Old readonly schemas are rejected without
+conversion. Conversation schema stays 10, RAG stays 3; wire protocol becomes 2.
+
+Only User Guide Japanese is maintained. The earlier twelve-pair language scope
+and prescribed English search queries are superseded by the full #31 comment
+agreements. Catalogue language and query-language choice are separate concerns.
+UI language work remains an evaluated future task. The intended next release is
+0.2.0; source package version stays at the last release until release preparation.
+No push/release or user-data mutation is part of this work.

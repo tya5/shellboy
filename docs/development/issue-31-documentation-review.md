@@ -1,3 +1,8 @@
+> Superseded in part by the full intermediate-comment agreements and latest
+> review: see [current tracking](issue-32-33-plan.md). Only User Guide Japanese
+> remains; query language is unrestricted; #33 removes the status alias. Results
+> below apply to the earlier source, not the current working tree.
+
 # Issue #31: English guide review
 
 Review baseline: `8f00000`; this follow-up starts at `69be5ad`, including the

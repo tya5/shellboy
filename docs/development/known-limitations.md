@@ -16,13 +16,14 @@ v0.1.1では読取り結果も現在instanceのreceiptへ蓄積します。v0.1.
 
 目安として、1件0.7〜0.9KiBのID metadataを新IDで1秒に1回保存すると仮定すれば、1日約60〜80MiB、数日で通常予算を圧迫します。これはmetadata長・予約・保護量を省いた計算例で、現環境の実測値や稼働日数の保証ではありません。waitの既定30秒待機では増加速度が下がります。既に満たされた条件へのwaitを高速反復せず、現在値の確認にはreceipt不要のgetを使い、実際の使用量はstatusのreceipt_budgetを確認してください。
 
-## 索引方式の更新とsemantic検索の対象
+## Current index identities (#33)
 
-v0.1.1ではsplitter identity更新後に旧空間が既定検索から外れることがあります。v0.1.2は旧activeを維持し、新規sourceを現行candidateへ索引化します。
-
-明示selectするまでは、新しい履歴は既定のsemantic検索には出ません。select後は旧spaceの履歴が既定検索から外れるため、新旧を同じspaceで検索するには対象を明示したrebuild/backfillが必要で、embedding費用が生じ得ます。keyword検索と原文参照はこの切替の影響を受けません。自動の有料再索引はしません。
-
-candidateの許可済み入力・jobが全て成功するまでselectを拒否します。保存入力がある失敗は `index retry`、原文/入力欠落や中断した準備は、対象を確認して明示rebuildしてください。接続先/modelが違う索引は読めません。旧spaceの元の分割設定が不明な場合は推測で再束縛せず、元の設定の復元が必要です。
+Only current profile keys and saved query-profile markers are accepted. Missing,
+malformed or endpoint/model-mismatched markers fail before query embedding; no
+legacy-key lookup, marker inference or automatic paid rebuilding is provided.
+Rebuild explicitly with the intended configuration when required. Keyword and raw
+retrieval remain available independently. Candidate activation still requires
+successful authorized work. Pre-1.0 releases do not promise old index compatibility.
 
 ## 独立RAGと巨大raw出力
 
@@ -46,17 +47,16 @@ A queued thread switch can miss a transient prefix while Control still filters
 for the previous thread. Gap marking and canonical terminal-history refresh are
 retained; switching is not a promise to replay every live delta.
 
-The shared UI outbox preserves result order and finite memory. Under exceptional
-512-critical-result exhaustion inside a single frontend handler, it waits
-asynchronously for UI delivery and may delay processing Cancel/Quit until space
-returns. The UI OS thread and priority mailbox remain nonblocking. Normal
-bounded-pressure tests do not prove responsiveness for every such batch. See the
-[delivery design](../design/tui-render-delivery-performance.md) for the boundary
-and the bounded-continuation follow-up needed to remove it.
+The shared UI outbox preserves result order and finite memory. Issue #32 adds
+480 worker slots plus 32 main slots within the existing critical capacity 512,
+and a bounded main receipt continuation. Priority Cancel/Quit remain polled under
+full UI backpressure; terminal-marker retries also poll explicit ForceQuit.
+Current integrated validation is recorded in [acceptance](../validation/acceptance.md).
+The guarantee uses the real TUI's separate priority mailbox. A plain embedded
+FIFO action adapter cannot bypass normal actions queued ahead of a control.
 
-
-The full-reserve continuation/reserved-capacity work is tracked in
-[Issue #32](https://github.com/tya5/shellboy/issues/32). On explicit force,
-ForceShutdown is a best-effort UI marker: a stalled/full queue can suppress that
-marker while the frontend still returns a forced shutdown error and nonzero exit.
-Normal result ordering and lossless delivery are not relaxed by this exception.
+On explicit force, ForceShutdown is a best-effort UI marker: a stalled/full queue
+can suppress that marker while the frontend returns a forced shutdown error and
+nonzero exit. Normal result ordering and lossless delivery are not relaxed by
+this exception. Forced termination can abandon undelivered presentation and
+unfinished cleanup; it is never reported as a successful graceful shutdown.

@@ -1,4 +1,31 @@
-# 開発状況
+# Development status
+
+## Latest comments and #32 / #33: verified locally (2026-10-29)
+
+The latest comments supersede parts of the previously verified batch below.
+Implementation is committed locally as `02b994a` (#32/shutdown delivery) and
+`0a72f9c` (#33 and review corrections). The final standard check passed format,
+all-target strict Clippy and **76 groups / 1,334 passed / 0 failed / 24 ignored**.
+The [tracking plan](issue-32-33-plan.md) covers every item.
+The documentation catalogue remains English; only the User Guide retains a
+Japanese translation. Search language is not prescribed. Runtime UI language is
+unchanged.
+
+#32 reserves bounded main-loop delivery capacity and preserves priority actions
+through receipt batches and shutdown. #33 isolates startup migrations, removes
+runtime compatibility branches and deprecated CLI/config entries, and advances
+the wire protocol to 2. Existing conversation schema 10 and RAG schema 3 remain;
+no automatic paid index rebuild or changes to user data are performed.
+
+Additional actual-executable checks passed: offline docs 33, RAG CLI 13,
+macOS deletion PTY 5, and local HTTP/PTY 10 conversations with exact canonical
+outputs. The isolated ten-thread delivery test passed (action p50 6.50ms, p95
+6.84ms, lagged 0, seven 250ms UI pauses). These are synthetic observations, not
+production latency guarantees. Links, schema equivalence and secret scans passed.
+
+Push, release, three-OS CI and installed-binary updates are outside this request.
+The intended next release is 0.2.0; the package remains at the last released
+version until release preparation. Earlier sections below are historical results.
 
 ## Latest reviews #19/#20/#27/#30/#31 (2026-10-29; verified locally)
 
