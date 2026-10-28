@@ -1,5 +1,74 @@
 # 検証状況
 
+## Latest review follow-ups #19/#20/#27/#30/#31 (2026-10-29)
+
+Source implementation commit: `8f7b036` (starting at `69be5ad`). Implement the new English-guide review and subsequent
+re-reviews recorded in [Issue #31 tracking](../development/issue-31-documentation-review.md)
+and the [reopened-issue table](../development/reopened-19-20-27-30.md).
+The final `sh scripts/check.sh` passed on macOS ARM64 / Rust 1.99.1:
+format, locked all-target strict Clippy, **76 groups / 1,322 passed / 0 failed /
+24 ignored**. Only this final completed run establishes the whole-suite result;
+the initial preflight was stopped to correct the recovery-hint fixture and add
+the reviews received during work.
+
+New or extended checks cover:
+
+- Production RPC `Response::failure` recovery hint followed through the actual
+  executable's offline search, requiring executable shell examples. Standalone
+  docs errors use a separate envelope and are not asserted to contain that hint.
+- Fourteen guide navigation references across six English/Japanese guides checked
+  against actual OpKind labels, without changing runtime UI labels. All twelve
+  reciprocal guide-language links are present. English/Japanese semantics were
+  reviewed against source for cache zero budgets, expiry, alias behavior, search
+  busy/no-charge, and current displayed captions.
+- Actual frontend + UiState cleanup SaveFailed: warning, explicit stopped-admission
+  message, a new editable draft, rejection of a later mutation and SaveFailed
+  shutdown. Deletion unwind becomes an uncertain terminal result; UI releases its
+  global deletion inflight state. Abort/stack overflow/process termination are
+  not caught or represented as recoverable.
+- Actual Unix root-directory replacement with symlink: incomplete source,
+  unchanged prior revisions and no removals in dry-run or write; restored root
+  resumes ordinary synchronization. Explicit-file glob exclusion now verifies
+  real sync removal while preserving the original file. Windows real symlinks
+  remain untested.
+- Actual readonly rank/check_space/db_error failure with inherited writer hint:
+  returned guidance is readonly-specific and warns about repeat embedding charges;
+  writer classification/hint remain unchanged. Corrupt/missing-table guidance is
+  explicit. The existing exclusive-lock fixture uses **rollback journal after
+  closing the WAL writer**, not production WAL-contention evidence.
+- Worker enqueue into an initially empty outbox wakes a select whose conditional
+  flush timer was disabled, and delivers the queued result. One finite Notify
+  permit is shared by existing worker clones; no new task/channel/Core state.
+
+The debug executable SHA-256 is
+`b1e68246eccb61e5537c09f3f4c2361bf0627d9bbd92840f0e604f8b5070cb04`.
+Actual offline docs passed **33 checks / 13 guides / 3 categories / 127 bundled
+links**. Actual RAG CLI passed **13 scenarios**, including partial-failure
+nonzero exit with unrelated removals applied and stale failing-file content
+retained. There were zero external model requests.
+
+The explicitly invoked ignored slow-UI fixture passed: 10 Threads, seven 250-ms
+UI stops, 1,000 deltas/trial, action p50 **6.26 ms**, p95 **7.37 ms**, lagged **0**,
+reloads **7**. This synthetic observation is not a performance guarantee.
+
+macOS PTY deletion passed **5 scenarios**. A separate real HTTP-mock/PTY run
+completed **10 conversations**, with **1,126 ms** of stopped terminal reading,
+exact canonical bodies without missing/duplicate text, ordered unique selected
+stream tokens and completed hidden threads in the tree. All ten requests were
+loopback mocks. Repository audit passed **734 relative links / 50 heading
+fragments**, plus twelve reciprocal guide-language pairs. Staged secret scanning
+passed without findings; private local logs/fixtures remain ignored.
+
+Explicit ForceShutdown is a best-effort UI marker under stalled/full delivery;
+the forced result and nonzero exit are authoritative. The exceptional 512-critical
+frontend priority-delay case is tracked in
+[Issue #32](https://github.com/tya5/shellboy/issues/32) and is not solved by Notify.
+No new Windows/Linux CI, corporate proxy, physical Windows terminal/clipboard/IME,
+paid provider, default data, installed-binary replacement or release was tested
+or performed. Keep all five reviewed issues open pending push/three-OS CI.
+Earlier records below describe their own source versions.
+
+
 ## Issue #20 no-compatibility follow-up (2026-10-29)
 
 Issue comment `6480908316` overrides the previous Windows-key compatibility

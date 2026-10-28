@@ -53,3 +53,10 @@ returns. The UI OS thread and priority mailbox remain nonblocking. Normal
 bounded-pressure tests do not prove responsiveness for every such batch. See the
 [delivery design](../design/tui-render-delivery-performance.md) for the boundary
 and the bounded-continuation follow-up needed to remove it.
+
+
+The full-reserve continuation/reserved-capacity work is tracked in
+[Issue #32](https://github.com/tya5/shellboy/issues/32). On explicit force,
+ForceShutdown is a best-effort UI marker: a stalled/full queue can suppress that
+marker while the frontend still returns a forced shutdown error and nonzero exit.
+Normal result ordering and lossless delivery are not relaxed by this exception.

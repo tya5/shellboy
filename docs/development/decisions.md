@@ -338,7 +338,7 @@ Windows CIのRust harnessは同時2件へ制限し、独立DB/IPC/file worker fi
 - Interpret the English default across all product guides, not just `user-guide.md`: sending English readers to Japanese-only feature guides would leave the requested navigation incomplete. Preserve all twelve user-facing originals as `.ja.md`, sharing one English-only Agent Guide. Root README/AGENTS and documentation entry points are English. Historical design/development/verification records are not bulk-translated; new records are English.
 - Keep the existing thirteen bundled IDs and three categories, with English text and metadata. Do not add a docs locale API or duplicate every guide in semantic indexing. Japanese copies are source/archive files; mark links as repository references and explain literal English search in both languages. Existing version hashes invalidate old cursors/index readiness normally; no automatic paid rebuild is authorized.
 - Recommend English-default UI with explicit Japanese startup selection, preserving one renderer and the current Japanese copy. This needs only presentation-layer resources/settings in a future task. Do not implement it, add an unsupported config field, change stored error/domain values, or force a response language in this task. Live switching, OS locale detection, per-Thread locale, and more languages have no current requirement. The [comparison](../design/documentation-language.md) records costs and later acceptance criteria.
-- Translation exposed an existing shell-guide typo: ASCII `SHELLBOY_BG_READ_V1` is 19 bytes, not 15. Correct both languages. Also remove the contradictory claim that CLI has no preview-only command immediately before its `index preview` example; CLI lacks the TUI confirmation screen, not the preview command. Remove the stale fixed operation total in the User Guide while retaining access to the full catalogue. Update a previously stale Control-to-HTTP heading link and translation-affected heading links.
+- Translation exposed an existing shell-guide typo: ASCII `SHELLBOY_BG_READ_V1` is 19 bytes, not 15. Correct both languages. Also remove the contradictory claim that CLI has no preview-only command immediately before its `index preview` example; CLI lacks the TUI confirmation screen, not the preview command. Remove the fixed operation total in the User Guide while retaining access to the full catalogue. (Correction from Issue #31: the TUI total of 36 was accurate; removing a duplicated count was a maintenance choice, not correction of a stale value. The CLI count of 37 describes a different catalogue.) Update a previously stale Control-to-HTTP heading link and translation-affected heading links.
 - No UI implementation/configuration files, Core API, migration, dependency, model prompt, or user data change. Validate guide fidelity, links, TOML examples, actual offline catalogue, and docs/RAG behavior; do not run paid discovery APIs or claim real-terminal/other-OS verification for a documentation change. Local commits only; the preceding release authorization covered the completed 0.1.6 release, not publishing this new task.
 
 
@@ -382,6 +382,60 @@ not carry forward old-version migration/compatibility. This overrides the initia
 Windows-key preservation decision above. Remove the native-key lookup and its
 two preservation tests rather than carrying compatibility-only database queries
 and identity rules. Keep current slash normalization, failure/removal separation,
-root-glob protection and case-sensitive matching unchanged. Older indexes must
-be recreated. Do not open, reset or convert user data automatically. No version
+root-glob protection and case-sensitive matching unchanged. Legacy key identities are not preserved; ordinary complete synchronization registers
+current keys under new identities. Database recreation is unnecessary (clarified
+by the subsequent #20 re-review); slash normalization shipped in 0.1.6. Do not
+open, reset or convert user data automatically. No version
 bump or release is performed as part of this targeted follow-up.
+
+
+## 2026-10-29: Issue #31 documentation review
+
+Accept all four Medium findings. English literal search needs English discovery
+terms in recovery hints, Agent Guide and RAG guidance; Japanese quoted labels
+remain searchable without query translation. Keep the system prompt unchanged:
+it already routes models to Agent Guide, whose explicit English-search instruction
+fixes discovery without a new prompt or language state. Restore the full strength
+of Windows unverified-status and cache-invalidation instructions. Restore the
+AGENTS requirement to reflect discovered design discrepancies, including existing
+ones beyond intentional contract changes, before changing code or fixtures.
+
+Quote the actual current Japanese TUI labels in both languages, with English
+explanations, rather than translating navigational targets into nonexistent UI.
+A narrow regression compares documented operation labels with the real OpKind
+labels; an actual-binary regression follows the InvalidArgument recovery search
+and requires useful shell examples. No runtime UI language implementation changes.
+
+Resolve all eight Low findings in this task. Correct the earlier count-removal
+rationale: F8 has 36 operations and CLI has 37; the former was accurate. Keep the
+User Guide free of a duplicated total for maintenance, without calling it stale.
+Add all missing user-guide sibling links, state busy InvalidState and rejection
+before charge separately from cancellation, remove change-relative product prose,
+restore version/catalogue qualifiers, correct English and zero-budget/expiry
+wording. Correct the existing deprecated alias help without changing alias behavior.
+Define documentation entry points explicitly and translate the small design and
+validation indices; existing design/validation records are not bulk-translated.
+
+
+## 2026-10-29: Follow-up to reopened-issue re-review
+
+Adopt the small boundary fixes: explicit storage-stop wording, local deletion
+unwind-to-uncertain-result handling, unavailable symlink root, readonly-specific
+repair/charge hints, and one shared UI Notify. Keep existing workers, permits,
+result channel, cleanup ownership and Core contracts. Add the missing complete
+frontend cleanup-failure test and actual direct-file removal test. Label the lock
+fixture as rollback journal, not WAL. Retain current #31 guide fixes when updating
+search and RAG wording. AGENTS now records the requested pre-1.0.0 no-shim policy;
+general migration/protocol-version mechanisms are allowed. Existing one-off code
+inventory is a separate forthcoming review, not a reason to add more shims now.
+
+Correct the earlier #20 “recreate indexes” phrasing: users need not recreate the
+DB. Complete sync deactivates old keys and creates new identities, without
+preserving legacy IDs/keys; slash normalization is already in 0.1.6. A persistent
+file failure still returns partial_failure/nonzero even with other applied work.
+
+Accept best-effort ForceShutdown presentation when explicitly forcing termination:
+nonzero forced result/error remains reliable, while waiting to guarantee the UI
+marker would break the one-request force contract. Create Issue #32 for exceptional
+full-reserve priority responsiveness. This remains separate from the Notify wakeup
+fix; neither ordinary pressure tests nor FIFO exhaustion tests prove its solution.

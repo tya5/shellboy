@@ -1,5 +1,30 @@
 # 開発状況
 
+## Latest reviews #19/#20/#27/#30/#31 (2026-10-29; verified locally)
+
+All four Medium and eight Low findings from #31 are resolved or adopted as
+recorded choices in the [tracking table](issue-31-documentation-review.md),
+including the added pre-1.0.0 no-shim policy in AGENTS. Runtime UI language and the
+system prompt remain unchanged. Recovery discovery and guide/real-operation
+navigation are covered by cross-component regressions.
+
+The reopened-issue re-review confirms prior Medium fixes. Its additional Low
+findings now have bounded fixes or recorded limitations in the
+[tracking plan](reopened-19-20-27-30.md): stopped-admission warning, deletion unwind
+recovery, complete warning-path test, symlink-root protection, precise key/sync
+wording, readonly repair/charge hint and worker wakeup notification. Explicit-force
+presentation remains best effort. Exceptional full-reserve priority delay is
+tracked separately in Issue #32 rather than claimed solved.
+
+The final standard check passed **76 groups / 1,322 passed / 0 failed / 24
+ignored**, including strict Clippy and format. Offline docs (33 checks), actual
+RAG CLI (13 scenarios) and the separate ten-thread delivery pressure fixture
+passed, along with five deletion PTY scenarios and ten HTTP-mock/PTY
+conversations. Current acceptance records distinguish native-platform and terminal
+coverage. Changes remain local: no push, release, version bump, installed binary
+replacement, paid API or user-data modification. Issue closing gates still require
+push and three-OS CI.
+
 ## Issue #20 clarification for 0.2.0 (2026-10-29; verified locally)
 
 The updated ticket withdraws Windows legacy-key compatibility. Removed the
