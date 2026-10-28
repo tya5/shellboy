@@ -3,12 +3,18 @@ name: Release binaries
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -22,7 +28,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             executable: shellboy.exe
             archive: zip
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             executable: shellboy
             archive: tar.gz
@@ -36,13 +42,14 @@ jobs:
       run:
         shell: bash
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
       RELEASE_TARGET: ${{ matrix.target }}
       RELEASE_EXECUTABLE: ${{ matrix.executable }}
       RELEASE_ARCHIVE: ${{ matrix.archive }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: refs/tags/${{ inputs.release_tag || github.ref_name }}
           persist-credentials: false
       - name: Install pinned native Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
@@ -63,7 +70,12 @@ jobs:
           assert f"host: {os.environ['RELEASE_TARGET']}" in rustc, rustc
           PY
       - name: Build locked release binary
-        run: cargo +1.99.1 build --locked --release --bin shellboy --target "$RELEASE_TARGET"
+        run: |
+          if [[ "$RELEASE_TARGET" == "aarch64-apple-darwin" ]]; then
+            export MACOSX_DEPLOYMENT_TARGET=14.0
+          fi
+          git rev-parse HEAD
+          cargo +1.99.1 build --locked --release --bin shellboy --target "$RELEASE_TARGET"
       - name: Smoke-test the native executable
         run: |
           "target/$RELEASE_TARGET/release/$RELEASE_EXECUTABLE" --version
@@ -113,7 +125,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:

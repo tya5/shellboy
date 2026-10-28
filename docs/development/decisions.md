@@ -326,3 +326,9 @@ Windows CIのRust harnessは同時2件へ制限し、独立DB/IPC/file worker fi
 - #29は既存16MiBのlayout予算内でrender unitを共有する。高さ変更は再描画のcache keyにしない。全可視nodeのresize取得と、本文window再取得のpreflightを保持する。最終試験が検出したwindow再読込の退行は期待値を緩めず修正した。debug測定のp95は約52msであり、常時30fpsの保証とはしない。
 - #30はfrontend所有の有限outboxとUI専用の有限broadcastを採用する。通常受付を抑制する閾値と既受理結果の予備枠を設け、重要な結果をcoalesceしない。例外的な上限ではbackpressureを残し、停止/終了のpriorityと強制終了を維持する。詳細な所有・上限・切断・遅着・終了は採用設計へ記録した。
 - 性能はdebug build・合成DB・loopback HTTPで測る。会社proxyや外部モデル、Windows端末の体感を推測しない。3 OS native CIと配布物の実取得はローカル検証から分離して記録する。
+
+## 2026-10-29: 配布runnerの更新と既存tagの再ビルド
+
+- 0.1.6の3 OS CIはすべて成功したが、配布用macos-14 jobが10分以上queuedになった。GitHubの公式告知 [runner-images #13518](https://github.com/actions/runner-images/issues/13518) で、2026-11-02の廃止と、それに先立つ待ち時間増加を確認した。待機の唯一の原因とは断定しないが、4日後に使えなくなるrunnerを維持しない。
+- 配布runnerをmacos-15へ更新し、macOS deployment target 14.0を明示する。実行OSを対応最低OSと混同せず、配布物のMach-O load commandも確認する。14実機の動作確認とは扱わない。
+- 公開済みtagを書き換えず、既存の安定tagをcheckoutするworkflow_dispatchを追加する。v0.1.6の製品sourceは3 OS CI済み025388cのままで、mainのworkflowだけを直す。tag/version/native hostの照合、全3 archive/checksumが揃ってから公開する規則、公開済みreleaseの上書き拒否を維持する。再実行でもdraftのrelease notesを保持する。
