@@ -55,8 +55,6 @@ async fn index(root: &Path, name: &str, mode: IndexMode) -> Value {
             source: Some(name.into()),
             dry_run: false,
             mode,
-            extractor: None,
-            adapter: None,
         },
     )
     .await

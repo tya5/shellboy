@@ -5,7 +5,7 @@
 `shellboy rag` は会話本体を起動せず使う検索CLIです。質問への回答を生成する機能ではありません。
 まず `shellboy docs search --query '検索'` で操作ガイドを探せます。
 
-既存の独立RAG DBは最初の書込み時にschema 1から2へ移行し、sourceの除外指定を保存できるようになります。読取りとdry-runだけでは移行しません。移行後のDBはv0.1.5の旧バイナリでは開けないため、戻す必要がある場合は更新前にRAG DBをバックアップしてください。会話DBのschemaには変更ありません。
+既存の独立RAG DBは最初の書込み時にschema 1/2から3へ移行し、sourceの除外指定と索引の高速化を適用します。読取りとdry-runだけでは移行しません。移行後のDBはv0.1.5の旧バイナリでは開けないため、戻す必要がある場合は更新前にRAG DBをバックアップしてください。この独立RAGの移行は会話DBを変更しません。会話DBは別のmigrationで更新されます。
 
 ## 文書を登録する
 
@@ -100,51 +100,33 @@ shellboy rag get --ref REFERENCE --limit-bytes 16384 --cursor CURSOR
 deferredとして返します。通常の通信失敗も同じ実行で3件になると止めます。障害解消後に同じindexを
 明示的に再実行すると、保存済み成功分を再利用します。無限retryは行いません。
 
-## PDF と Office
+## PDF・Office・画像は外部で変換して登録する
 
-UTF-8 text/Markdownはそのまま扱えます。文字層PDF、DOCX、PPTX、XLSXは
-[Xberg v1.3.10](https://github.com/xberg-io/xberg/releases/tag/v1.3.10) の実行ファイルを
-明示します。macOSの配布物は同梱dylibを含めて展開先ごと保持してください。
+RAGのフォルダ同期はUTF-8 text/Markdownを扱います。形式変換はモデルがshellで利用可能なツールを調べ、資料に合うものを選びます。ツールを新たに導入する前は利用者へ確認してください。社内環境には導入規則がある場合があります。Shellboyは変換ツールを取得・起動せず、許可一覧も管理しません。
+
+1. 元ファイルを外部ツールでMarkdown/UTF-8 textへ変換する。
+2. 変換した本文とmetadataを、原本を指定して登録する。
+3. 必要ならsemantic索引を明示作成する。
 
 ```bash
-shellboy rag index --source notes --extractor /absolute/path/to/xberg
+shellboy rag ingest --id report-1 --source-file /absolute/path/to/report.pdf \
+  --kind extracted --text-file /absolute/path/to/report.md \
+  --metadata-file /absolute/path/to/meta.json
+shellboy rag index --source derived --mode semantic
+shellboy rag search --scope source:derived --mode hybrid --query '報告の要点'
 ```
 
-Shellboyがbackendやモデルを自動取得することはありません。OCR、旧Office、マクロ形式、
-完全な版面再現は対象外です。ページ・スライド・シート位置は抽出backendが示した範囲で返し、
-抽出本文のbyte offsetと原本内の位置を区別します。追加のJSON extractorは
-`--adapter MANIFEST_PATH` で明示します。たとえば次のmanifestを保存します。
+metadataは最大64KiBのJSON objectです。変換ツール名/版、生成時刻、原本hashなど、分かる範囲を記録してください。以下は項目例です。
 
 ```json
-{
-  "schema_version": 1,
-  "id": "my-extractor",
-  "version": "1.0",
-  "executable": "/absolute/path/to/extractor",
-  "argv": ["--json", "{input}"],
-  "extensions": ["pdf"]
-}
+{"tool":"chosen-converter","tool_version":"recorded-version","generated_at":"2026-10-28T00:00:00Z","source_format":"application/pdf","source_hash":"hash-observed-by-workflow","review_required":true}
 ```
 
-`{input}` は一つのargv要素として必要で、入力の絶対パスへ置換されます。
-shellを介さず実行し、相対executableはmanifestの親から解決します。
-stdoutは単一JSON `{"blocks":[{"text":"抽出本文","location":{"unit":"page","number":1}}]}`
-を返します。locationは実際に分かる位置だけを記録します。Shellboyはblock順に改行で連結し、
-本文とadapter ID/version/manifest hashを保存します。
-入力16MiB、出力16MiB、stderr64KiB、実行60秒が上限です。
-API資格情報は子プロセスへ継承しません。backend自身が信頼できることは利用者が確認します。
+ツールの変換本文は`extracted`。スキャン画像や図をモデルに読ませて要約・解釈した本文は`llm-explanation`/`summary`を指定し、metadataに`model`も記録します。原本添付はそのための代替手段で、対応可否は接続先/proxy/モデル次第です。検索とgetは`kind`で原文に近い変換とモデル解釈を区別できます。変換結果だけを`source add`で登録すると原本との関連が残らないため、出典を必要とする派生本文はingestを使います。
 
-## 外部で作成した解説を取り込む
+`--text-stdin`も使用できます。本文は最大16MiBのUTF-8。原本はregular fileを逐次hashするため16MiBを超えていても登録でき、原本の中身はRAGへ保存しません。`provenance.source`の`original_path`、`observed_original_hash`（取り込み時の観測）、`original_hash_claim`（metadataの申告）、`derived_body_hash`（派生本文）を区別します。`hash_observation`の通り、記録は要約生成に使った原本や更新中ファイルのsnapshotを証明しません。原本が移動・削除されても保存済み本文と出典は残ります。再検証やreviewの自動処理はありません。metadata/pathを含むRAG DBは適切な保存範囲で扱ってください。
 
-```bash
-shellboy rag ingest --id explanation-1 --source-file /absolute/path/to/original.pdf \
-  --kind llm-explanation --text-file /absolute/path/to/explanation.md
-```
-
-`--text-stdin` も使えます。元ファイルのhashと解説本文のhashを区別して保存します。
-`--metadata-file PATH` では生成者・モデル等の任意JSON情報を記録できますが、
-記録があること自体がLLMによる原本読取りの証明ではありません。
-派生本文は通常の原本フォルダ同期で上書きしません。
+0.1.6では`--extractor`/`--adapter`と内部PDF/Office抽出経路を削除しました。旧file sourceのPDF/Officeは次の完全同期で対象外/removedになるため、必要な資料は外部で変換してingestし直してください。既存の派生本文を通常のフォルダ同期で上書きしません。
 
 
 ## 索引の結果と最終更新を確認する
@@ -153,7 +135,7 @@ shellboy rag ingest --id explanation-1 --source-file /absolute/path/to/original.
 
 `rag status`は既存の保存行からsourceごとの状態、`last_scan`（最終走査）、`last_changed_at`（有効版の内容作成時刻の最大値）、失敗資料のkey/code/messageを返します。現在のembedding設定で欠けるchunk数が`semantic_missing`です。0は現在のactive chunksのembedding不足がないことを表し、索引を実行した時刻やAPI呼出回数とは異なります。設定を確認できない場合はnullを返し、`semantic_configuration`を確認します。
 
-semantic dry-runは外部APIを呼ばず、`text_bytes`/`segments`と`embedding_may_charge`を示します。外部extractorが必要で実測していない資料があれば`segments_complete:false`と`unmeasured_documents`を返し、未知の分割量を0件と決めつけません。単価を内蔵しないため料金の総額は算出しません。
+semantic dry-runは外部APIを呼ばず、`text_bytes`/`segments`と`embedding_may_charge`を示します。対象はUTF-8 textなので分割量を計測し、未対応形式は`selection.unsupported`へ分けます。単価を内蔵しないため料金の総額は算出しません。
 
 ### background shellで実行した索引の最終結果
 

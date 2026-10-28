@@ -38,8 +38,6 @@ async fn index(root: &Path, dry_run: bool, mode: IndexMode) -> Value {
             source: Some("materials".into()),
             dry_run,
             mode,
-            extractor: None,
-            adapter: None,
         },
     )
     .await
@@ -174,7 +172,7 @@ async fn version_one_read_and_dry_run_are_write_free_then_writer_migrates_existi
     let original = add(root, "materials", &[], false).await["result"]["source_id"].clone();
     {
         let db = rusqlite::Connection::open(root.join("rag.db")).unwrap();
-        db.execute_batch("ALTER TABLE sources DROP COLUMN exclude_json; PRAGMA user_version=1; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; ALTER TABLE sources DROP COLUMN exclude_json; PRAGMA user_version=1; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     }
     let before = std::fs::read(root.join("rag.db")).unwrap();
     assert_eq!(
@@ -196,8 +194,9 @@ async fn version_one_read_and_dry_run_are_write_free_then_writer_migrates_existi
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        2
+        3
     );
+    assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN ('embeddings_vec_rowid','chunks_hash')", [], |row| row.get::<_,i64>(0)).unwrap(), 2);
     assert_eq!(
         db.query_row(
             "SELECT count(*) FROM sources WHERE name='materials'",
@@ -222,8 +221,12 @@ async fn semantic_preview_reports_segments_without_configuration_or_external_api
     assert!(preview["result"]["segments"].as_u64().unwrap() > 0);
     assert!(preview["result"]["text_bytes"].as_u64().unwrap() > 0);
     assert_eq!(preview["result"]["embedding_may_charge"], true);
-    assert_eq!(preview["result"]["unmeasured_documents"], 1);
-    assert_eq!(preview["result"]["segments_complete"], false);
+    assert_eq!(preview["result"]["unmeasured_documents"], 0);
+    assert_eq!(preview["result"]["segments_complete"], true);
+    assert_eq!(
+        preview["result"]["sources"][0]["selection"]["unsupported"],
+        1
+    );
     assert_eq!(
         call(root, RagCommand::Status).await["result"]["documents"],
         0
@@ -298,4 +301,32 @@ async fn status_uses_current_embedding_profile_and_bounds_saved_failures() {
     assert_eq!(source(&status)["failures"].as_array().unwrap().len(), 50);
     assert_eq!(source(&status)["failures_truncated"], true);
     assert_eq!(source(&status)["state"], "partial_failure");
+}
+
+#[tokio::test]
+async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touching_readers() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    init(root).await;
+    let path = root.join("rag.db");
+    let indexes = |db: &rusqlite::Connection| -> Vec<(String, String)> {
+        db.prepare("SELECT name,sql FROM sqlite_schema WHERE type='index' AND name IN ('embeddings_vec_rowid','chunks_hash') ORDER BY name").unwrap().query_map([],|row|Ok((row.get(0)?,row.get(1)?))).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()
+    };
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let expected = indexes(&db);
+    assert_eq!(expected.len(), 2);
+    db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; PRAGMA user_version=2; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(db);
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(call(root, RagCommand::Status).await["ok"], true);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    std::fs::create_dir(root.join("notes")).unwrap();
+    assert_eq!(add(root, "notes", &[], false).await["ok"], true);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(indexes(&db), expected);
 }

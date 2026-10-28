@@ -21,7 +21,12 @@ CREATE TABLE blocks(revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal I
 CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,text TEXT NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
 CREATE TABLE spaces(id TEXT PRIMARY KEY,dimension INTEGER NOT NULL,profile TEXT NOT NULL,model TEXT NOT NULL,endpoint_hash TEXT NOT NULL,table_name TEXT NOT NULL);
 CREATE TABLE embeddings(space_id TEXT NOT NULL REFERENCES spaces(id),hash TEXT NOT NULL,vec_rowid INTEGER NOT NULL,PRIMARY KEY(space_id,hash));
-PRAGMA user_version=2;";
+PRAGMA user_version=3;";
+
+// Proven hot paths: max vector row allocation and orphan-hash cleanup (#26).
+const HOT_QUERY_INDEXES: &str = "
+CREATE INDEX IF NOT EXISTS embeddings_vec_rowid ON embeddings(space_id,vec_rowid);
+CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash);";
 
 pub(super) struct Store {
     pub db: Connection,
@@ -54,7 +59,7 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
         db.execute_batch("PRAGMA query_only=ON;")?;
     }
     let mut version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if !matches!(version, 1 | 2) {
+    if !matches!(version, 1..=3) {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema is not supported; no migration was attempted",
@@ -73,9 +78,17 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
             "Not a Shellboy document database",
         ));
     }
-    if write && version == 1 {
-        db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE sources ADD COLUMN exclude_json TEXT NOT NULL DEFAULT '[]'; PRAGMA user_version=2; COMMIT;")?;
-        version = 2;
+    if write && version < 3 {
+        let tx = db.unchecked_transaction()?;
+        if version == 1 {
+            tx.execute_batch(
+                "ALTER TABLE sources ADD COLUMN exclude_json TEXT NOT NULL DEFAULT '[]';",
+            )?;
+        }
+        tx.execute_batch(HOT_QUERY_INDEXES)?;
+        tx.pragma_update(None, "user_version", 3)?;
+        tx.commit()?;
+        version = 3;
     }
     if write {
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
@@ -101,73 +114,6 @@ fn writer_lock(path: &Path) -> Result<File> {
         )
     })?;
     Ok(file)
-}
-fn selection_fingerprint(backend: Option<&Path>, adapter: Option<&Path>) -> Result<String> {
-    use std::io::Read;
-    let mut digest = Sha256::new();
-    digest.update(b"rag-extractor-selection-v1");
-    for path in [backend, adapter] {
-        if let Some(path) = path {
-            let canonical = std::fs::canonicalize(path).map_err(|_| {
-                err(
-                    "extractor_failed",
-                    "Explicit extractor/adapter is unavailable",
-                )
-            })?;
-            let metadata = std::fs::metadata(&canonical)?;
-            if !metadata.is_file() || metadata.len() > 256 * 1024 * 1024 {
-                return Err(err(
-                    "extractor_failed",
-                    "Extractor inputs must be regular files of at most 256 MiB",
-                ));
-            }
-            digest.update(canonical.to_string_lossy().as_bytes());
-            let mut file = File::open(&canonical)?;
-            let mut buffer = [0u8; 65536];
-            loop {
-                let count = file.read(&mut buffer)?;
-                if count == 0 {
-                    break;
-                }
-                digest.update(&buffer[..count]);
-            }
-        } else {
-            digest.update(b"none");
-        }
-    }
-    if let Some(manifest) = adapter {
-        let value: Value = serde_json::from_slice(&bounded_read(manifest)?)
-            .map_err(|_| err("extractor_failed", "Invalid extractor manifest"))?;
-        if let Some(executable) = value.get("executable").and_then(Value::as_str) {
-            let executable = absolute(
-                Path::new(executable),
-                manifest.parent().unwrap_or_else(|| Path::new(".")),
-            );
-            let metadata = std::fs::metadata(&executable)
-                .map_err(|_| err("extractor_failed", "Adapter executable is unavailable"))?;
-            if !metadata.is_file() || metadata.len() > 256 * 1024 * 1024 {
-                return Err(err(
-                    "extractor_failed",
-                    "Adapter executable must be a regular file of at most 256 MiB",
-                ));
-            }
-            let mut file = File::open(executable)
-                .map_err(|_| err("extractor_failed", "Adapter executable is unavailable"))?;
-            let mut buffer = [0u8; 65536];
-            loop {
-                let n = file.read(&mut buffer)?;
-                if n == 0 {
-                    break;
-                }
-                digest.update(&buffer[..n]);
-            }
-        }
-    }
-    Ok(digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect())
 }
 fn prune_embeddings(db: &Connection) -> Result<()> {
     let spaces = {
@@ -215,6 +161,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     db.execute_batch("PRAGMA journal_mode=WAL;PRAGMA synchronous=FULL;PRAGMA foreign_keys=ON;")?;
     let tx = db.transaction()?;
     tx.execute_batch(SCHEMA)?;
+    tx.execute_batch(HOT_QUERY_INDEXES)?;
     let uuid = format!("rag-{}", uuid::Uuid::new_v4());
     tx.execute("INSERT INTO meta VALUES('uuid',?1)", [&uuid])?;
     tx.execute("INSERT INTO meta VALUES('generation','0')", [])?;
@@ -468,16 +415,8 @@ pub(super) async fn index(
     source: Option<&str>,
     dry_run: bool,
     mode: IndexMode,
-    backend: Option<&Path>,
-    adapter: Option<&Path>,
 ) -> Result<Value> {
     if source.is_some_and(|id| matches!(id, "docs" | "@docs")) {
-        if backend.is_some() || adapter.is_some() {
-            return Err(err(
-                "invalid_argument",
-                "Bundled guides do not use an external extractor or adapter",
-            ));
-        }
         return super::builtin::index(context, dry_run, mode).await;
     }
     let mut s = open(&context.database, !dry_run)?;
@@ -508,18 +447,11 @@ pub(super) async fn index(
     } else {
         None
     };
-    let selection = selection_fingerprint(backend, adapter)?;
-    let policy = FileIndexPolicy {
-        dry_run,
-        backend,
-        adapter,
-        profile,
-        selection,
-    };
+    let policy = FileIndexPolicy { dry_run, profile };
     for (source, root, patterns) in sources {
         let patterns: Vec<String> = serde_json::from_str(&patterns)
             .map_err(|_| err("schema_unsupported", "Invalid persisted source exclusions"))?;
-        let scanned = scan::collect(Path::new(&root), &context.database, &patterns, adapter);
+        let scanned = scan::collect(Path::new(&root), &context.database, &patterns);
         let scan = match scanned {
             Ok(scan) => scan,
             Err(error) => {
@@ -619,8 +551,40 @@ pub(super) async fn index(
         .await?;
     }
     Ok(
-        json!({"dry_run":dry_run,"sources":source_results,"skipped":skipped,"text_bytes":counts.text_bytes,"segments":counts.segments,"segments_complete":counts.unmeasured==0,"unmeasured_documents":counts.unmeasured,"embedding_may_charge":mode==IndexMode::Semantic && (counts.changed+counts.unchanged+counts.unmeasured>0),"billing":if dry_run {"This preview makes no external requests. Explicit semantic indexing may charge; unit price is unknown."}else{"Explicit semantic indexing may call the configured embedding API; successful cached content is reused and unit price is unknown."},"changed":counts.changed,"unchanged":counts.unchanged,"removed":removed,"processed":counts.processed,"failures":failures,"failure_count":failure_count,"failures_truncated":failure_count>failures.len(),"partial_failure":failure_count>0,"embedding_paused":breaker.paused(),"deferred":deferred,"retry_hint":breaker.paused().then_some("Resolve provider rate/auth/credit issue, then rerun the same index command; successful embeddings are retained")}),
+        json!({"dry_run":dry_run,"sources":source_results,"skipped":skipped,"text_bytes":counts.text_bytes,"segments":counts.segments,"segments_complete":true,"unmeasured_documents":0,"embedding_may_charge":mode==IndexMode::Semantic && (counts.changed+counts.unchanged>0),"billing":if dry_run {"This preview makes no external requests. Explicit semantic indexing may charge; unit price is unknown."}else{"Explicit semantic indexing may call the configured embedding API; successful cached content is reused and unit price is unknown."},"changed":counts.changed,"unchanged":counts.unchanged,"removed":removed,"processed":counts.processed,"failures":failures,"failure_count":failure_count,"failures_truncated":failure_count>failures.len(),"partial_failure":failure_count>0,"embedding_paused":breaker.paused(),"deferred":deferred,"retry_hint":breaker.paused().then_some("Resolve provider rate/auth/credit issue, then rerun the same index command; successful embeddings are retained")}),
     )
+}
+
+/// Hash the original with fixed memory; only the derived text is retained.
+fn original_file_hash(path: &Path) -> Result<String> {
+    use std::io::Read;
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(err(
+            "invalid_argument",
+            "Original source must be a regular file",
+        ));
+    }
+    let mut file = File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(err(
+            "invalid_argument",
+            "Original source must be a regular file",
+        ));
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        digest.update(&buffer[..n]);
+    }
+    Ok(digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 pub(super) fn ingest(
@@ -670,7 +634,7 @@ pub(super) fn ingest(
     if !metadata.is_object() {
         return Err(err("invalid_argument", "Metadata must be a JSON object"));
     }
-    let original_hash = hash(&bounded_read(source_file)?);
+    let original_hash = original_file_hash(source_file)?;
     let kind = match kind {
         IngestKind::Extracted => "extracted",
         IngestKind::LlmExplanation => "llm-explanation",

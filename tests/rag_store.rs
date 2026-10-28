@@ -52,8 +52,6 @@ async fn index(root: &Path, source: Option<&str>, mode: IndexMode) -> Value {
             source: source.map(str::to_owned),
             dry_run: false,
             mode,
-            extractor: None,
-            adapter: None,
         },
     )
     .await
@@ -1104,8 +1102,6 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
             source: Some("docs".into()),
             dry_run: true,
             mode: IndexMode::Semantic,
-            extractor: None,
-            adapter: None,
         },
     )
     .await;
@@ -1682,4 +1678,125 @@ async fn history_semantic_streams_large_raw_spans_and_preserves_valid_hits() {
     assert_eq!(expired["error"]["code"], "revision_unavailable");
     db.shutdown().await.unwrap();
     server.abort();
+}
+
+#[tokio::test]
+async fn large_original_keeps_observed_and_claimed_hashes_and_survives_original_removal() {
+    use sha2::{Digest, Sha256};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    init(root).await;
+    let original = root.join("original.pdf");
+    std::fs::File::create(&original)
+        .unwrap()
+        .set_len(17 * 1024 * 1024)
+        .unwrap();
+    let expected = Sha256::digest(std::fs::read(&original).unwrap())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    std::fs::write(
+        root.join("summary.md"),
+        "SYNTHETIC_DERIVED_SUMMARY 日本語の外部解釈",
+    )
+    .unwrap();
+    std::fs::write(root.join("metadata.json"), json!({"model":"fixture-model","generated_at":"2026-10-28T00:00:00Z","source_format":"application/pdf","source_hash":"generation-input-claim","review_required":true}).to_string()).unwrap();
+    let ingested = call(
+        root,
+        RagCommand::Ingest {
+            id: "external-summary".into(),
+            source_file: original.clone(),
+            kind: shellboy::rag::IngestKind::LlmExplanation,
+            text_file: Some(root.join("summary.md")),
+            text_stdin: false,
+            metadata_file: Some(root.join("metadata.json")),
+        },
+    )
+    .await;
+    assert_eq!(ingested["ok"], true, "{ingested}");
+    std::fs::remove_file(original).unwrap();
+    let found = search(
+        root,
+        "source:derived",
+        "SYNTHETIC_DERIVED_SUMMARY",
+        SearchMode::Keyword,
+    )
+    .await;
+    assert_eq!(found["ok"], true, "{found}");
+    let item = &found["result"]["items"][0];
+    assert_eq!(item["kind"], "llm-explanation");
+    let source = &item["provenance"]["source"];
+    assert_eq!(
+        source["original_path"],
+        root.join("original.pdf").to_string_lossy().as_ref()
+    );
+    assert_eq!(source["observed_original_hash"], expected);
+    assert_eq!(source["original_hash_claim"], "generation-input-claim");
+    assert_eq!(source["metadata"]["review_required"], true);
+    assert_ne!(
+        source["derived_body_hash"],
+        source["observed_original_hash"]
+    );
+    let fetched = call(
+        root,
+        RagCommand::Get {
+            reference: item["reference"].as_str().unwrap().into(),
+            limit_bytes: 65536,
+            cursor: None,
+        },
+    )
+    .await;
+    assert_eq!(fetched["ok"], true, "{fetched}");
+    assert!(
+        fetched
+            .to_string()
+            .contains("at_ingest_not_proof_of_generation_input")
+    );
+    assert!(fetched.to_string().contains("SYNTHETIC_DERIVED_SUMMARY"));
+}
+
+#[tokio::test]
+async fn previously_extracted_office_revision_becomes_removed_without_a_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("materials")).unwrap();
+    std::fs::write(root.join("materials/legacy.md"), "OLD_OFFICE_DERIVED_TEXT").unwrap();
+    init(root).await;
+    add(root, "notes", "materials").await;
+    assert_eq!(
+        index(root, Some("notes"), IndexMode::Keyword).await["ok"],
+        true
+    );
+    // Represent a prior native PDF extraction in the same persisted schema.
+    let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
+    db.execute(
+        "UPDATE documents SET key='legacy.pdf' WHERE key='legacy.md'",
+        [],
+    )
+    .unwrap();
+    db.execute("UPDATE revisions SET extractor='xberg:1.3.10'", [])
+        .unwrap();
+    std::fs::rename(
+        root.join("materials/legacy.md"),
+        root.join("materials/legacy.pdf"),
+    )
+    .unwrap();
+    let result = index(root, Some("notes"), IndexMode::Keyword).await;
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["result"]["removed"], 1);
+    assert_eq!(result["result"]["failure_count"], 0);
+    assert_eq!(
+        result["result"]["sources"][0]["selection"]["unsupported"],
+        1
+    );
+    assert_eq!(
+        search(
+            root,
+            "source:notes",
+            "OLD_OFFICE_DERIVED_TEXT",
+            SearchMode::Keyword
+        )
+        .await["result"]["items"],
+        json!([])
+    );
 }

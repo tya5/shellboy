@@ -72,12 +72,7 @@ fn relative(path: &Path, root: &Path) -> Result<String> {
         })
         .ok_or_else(|| err("invalid_argument", "Source filenames must be Unicode"))
 }
-pub(super) fn collect(
-    root: &Path,
-    database: &Path,
-    patterns: &[String],
-    adapter: Option<&Path>,
-) -> Result<Scan> {
+pub(super) fn collect(root: &Path, database: &Path, patterns: &[String]) -> Result<Scan> {
     validate_patterns(patterns)?;
     let rules = patterns
         .iter()
@@ -104,23 +99,11 @@ pub(super) fn collect(
         name.push(suffix);
         own.push(PathBuf::from(name));
     }
-    let extensions = adapter
-        .map(extract::adapter_extensions)
-        .transpose()
-        .map_err(|message| err("extractor_failed", message))?;
     let mut scan = Scan {
         examples_limit: SAMPLE_LIMIT,
         ..Default::default()
     };
-    walk(
-        root,
-        root,
-        &own,
-        &rules,
-        extensions.as_deref(),
-        0,
-        &mut scan,
-    )?;
+    walk(root, root, &own, &rules, 0, &mut scan)?;
     Ok(scan)
 }
 fn walk(
@@ -128,7 +111,6 @@ fn walk(
     root: &Path,
     own: &[PathBuf],
     rules: &[Rule],
-    extensions: Option<&[String]>,
     depth: usize,
     scan: &mut Scan,
 ) -> Result<()> {
@@ -191,21 +173,10 @@ fn walk(
         scan.visited += entries.len();
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
-            walk(&entry.path(), root, own, rules, extensions, depth + 1, scan)?;
+            walk(&entry.path(), root, own, rules, depth + 1, scan)?;
         }
     } else if meta.is_file() {
-        let supported = extensions.map_or_else(
-            || extract::supported(path, None),
-            |extensions| {
-                let extension = path
-                    .extension()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("");
-                extensions
-                    .iter()
-                    .any(|value| value.eq_ignore_ascii_case(extension))
-            },
-        );
+        let supported = extract::supported(path);
         if !supported {
             scan.unsupported += 1;
             let extension = path

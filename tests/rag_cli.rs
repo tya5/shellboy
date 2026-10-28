@@ -383,19 +383,5 @@ fn bundled_guide_index_has_an_explicit_cost_preview_without_configuration() {
         &["search", "--scope", "docs", "--query", "復旧"],
         true,
     );
-    assert_eq!(
-        call(
-            root,
-            &[
-                "index",
-                "--source",
-                "docs",
-                "--extractor",
-                "missing-extractor"
-            ],
-            false
-        )["error"]["code"],
-        "invalid_argument"
-    );
     assert!(!root.join("data/shellboy.db").exists());
 }

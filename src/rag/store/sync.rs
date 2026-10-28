@@ -7,16 +7,12 @@ pub(super) struct SyncCounts {
     pub(super) processed: usize,
     pub(super) text_bytes: usize,
     pub(super) segments: usize,
-    pub(super) unmeasured: usize,
 }
-pub(super) struct FileIndexPolicy<'a> {
+pub(super) struct FileIndexPolicy {
     pub(super) dry_run: bool,
-    pub(super) backend: Option<&'a Path>,
-    pub(super) adapter: Option<&'a Path>,
     pub(super) profile: Option<search::Profile>,
-    pub(super) selection: String,
 }
-impl FileIndexPolicy<'_> {
+impl FileIndexPolicy {
     pub(super) async fn synchronize(
         &self,
         store: &mut Store,
@@ -27,18 +23,10 @@ impl FileIndexPolicy<'_> {
     ) -> Result<()> {
         let bytes = bounded_read(path)?;
         let source_hash = hash(&bytes);
-        let current:Option<(String,String,String,String)>=store.db.query_row("SELECT d.id,r.id,r.source_hash,r.provenance FROM documents d JOIN revisions r ON r.id=d.active_revision WHERE d.source_id=?1 AND d.key=?2",params![source,key],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
-        if let Some((document, revision, current_hash, previous_provenance)) = &current
+        let current:Option<(String,String,String,String)>=store.db.query_row("SELECT d.id,r.id,r.source_hash,r.extractor FROM documents d JOIN revisions r ON r.id=d.active_revision WHERE d.source_id=?1 AND d.key=?2",params![source,key],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+        if let Some((document, revision, current_hash, previous_extractor)) = &current
             && current_hash == &source_hash
-            && serde_json::from_str::<Value>(previous_provenance)
-                .ok()
-                .and_then(|v| {
-                    v.get("extractor_selection")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                })
-                .as_deref()
-                == Some(self.selection.as_str())
+            && previous_extractor == "text:utf8-v1"
         {
             counts.unchanged += 1;
             let (segments, bytes): (i64, i64) = store.db.query_row("SELECT COUNT(*),COALESCE(SUM(length(CAST(text AS BLOB))),0) FROM chunks WHERE revision_id=?1", [revision], |row| Ok((row.get(0)?,row.get(1)?)))?;
@@ -61,18 +49,14 @@ impl FileIndexPolicy<'_> {
         }
         counts.changed += 1;
         if self.dry_run {
-            if self.adapter.is_none() && extract::native_text(path) {
-                let text = std::str::from_utf8(&bytes)
-                    .map_err(|_| err("extractor_failed", "Text input must be UTF-8"))?;
-                counts.text_bytes += text.len();
-                counts.segments += crate::index::split_text(text, SPLIT, 0).len();
-            } else {
-                counts.unmeasured += 1;
-            }
+            let text = std::str::from_utf8(&bytes)
+                .map_err(|_| err("extractor_failed", "Text input must be UTF-8"))?;
+            counts.text_bytes += text.len();
+            counts.segments += crate::index::split_text(text, SPLIT, 0).len();
             return Ok(());
         }
-        let extracted = extract::extract(path, self.backend, self.adapter)
-            .map_err(|message| err("extractor_failed", message))?;
+        let extracted =
+            extract::extract(path).map_err(|message| err("extractor_failed", message))?;
         if hash(bounded_read(path)?) != source_hash {
             return Err(err(
                 "source_changed",
@@ -85,7 +69,7 @@ impl FileIndexPolicy<'_> {
             .iter()
             .map(|block| crate::index::split_text(&block.text, SPLIT, 0).len())
             .sum::<usize>();
-        let provenance = json!({"path":path.to_string_lossy(),"source_hash":source_hash,"content_kind":"extracted","extractor_selection":self.selection});
+        let provenance = json!({"path":path.to_string_lossy(),"source_hash":source_hash,"content_kind":"extracted"});
         let (document, revision, _) = prepare(
             store,
             RevisionInput {

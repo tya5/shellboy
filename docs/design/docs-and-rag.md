@@ -28,7 +28,7 @@ driverのsystem promptには `shellboy docs list` と `shellboy docs search --qu
 
 ## 文書store
 
-独立SQLite schema 1。metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
+独立SQLite schema 3（旧版の読取りとwriter時の移行を支援）。metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
 documentsにsource/key/active_revision/status、revisionsにcontent/extractor hashと
 原本/派生provenance、blocksに本文/位置、chunksにUTF-8範囲、embedding spaceに
 endpoint/profile/model/dimension/splitter fingerprint、vectorsと処理状態を保存する。
@@ -39,18 +39,11 @@ keywordはliteral substringを正確な基準とし、日本語短語にも対�
 SQLite FTSは候補高速化に使えてもliteral意味を変えない。
 UUID付きref/cursorはURL-safe base64のversioned JSON。secretではなく条件と版を検証する。
 
-## 抽出
+## UTF-8入力と外部変換
 
-`src/rag/extract.rs` の公開型:
-`Extracted { text: String, blocks: Vec<Block>, extractor: String }`、
-`Block { text: String, location: serde_json::Value }`。
-`pub fn extract(path: &Path, backend: Option<&Path>, adapter: Option<&Path>)
- -> Result<Extracted, String>`。同期処理はstandalone専用blocking workerから呼ぶ。
-backendはXberg v1.3.10を初期対応とし、明示path/版検査、固定argv、config discovery/OCR/
-layout/embedding無効、有限timeout/出力/input、child回収を行う。
-追加adapterはJSON manifestのexecutable/argvをshellなしで呼び、共通Blockへ変換する。
-backend設定は `rag index --extractor PATH`、第三者は `--adapter PATH` で明示する。
-原本読み取り前後hashを照合し、処理中更新は採用しない。
+`src/rag/extract.rs`はUTF-8 text/Markdownの有限読取りのみを行う。
+`Extracted { text, blocks, extractor }` / `Block { text, location }`の保存用構造を保持し、
+`extract(path: &Path) -> Result<Extracted,String>`とする。PDF/Office/画像の変換・モデル解釈は外部で行い、原本を指定したingestで出典を結ぶ。詳細は末尾のIssue #24採用節。
 
 ## Embedding と共通検索
 
@@ -73,7 +66,7 @@ partial failureはscope別の失敗を返し、正常scopeの結果を保持す�
 
 docs catalogueの整合とページ復元、native CLIのIPC非依存を先に検査する。
 RAGは一時store/匿名fixture/偽embedding transportで境界を検査し、最後に実LiteLLMと
-固定backendで同じ公開CLIを通す。既定会話storeへの書込み/再索引は行わない。
+外部変換後のingestで同じ公開CLIを通す。既定会話storeへの書込み/再索引は行わない。
 上流資料の原文を変更せず、実装で確定した詳細は本設計とguidesへ反映する。
 
 ## 履歴keywordのraw走査と有限reference（G13）
@@ -101,7 +94,7 @@ HistoryBodyはbody kind/実本文/raw witnessを一組として所有し、make_
 
 ## 同期処理の段分離（R2-8）
 
-file一件のhash照合→既存版再利用→抽出→再hash→prepare→明示embedding→publishをFileIndexPolicyへ分ける。policyは既存の固定profile/extractor/selection/dry-runだけを保持し、SyncCountsは公開結果に既存のchanged/unchanged/processedを集める。失敗前に増えるchanged/unchangedも従来の時点で加算する。新しいruntime state/予算/Repositoryは作らない。
+file一件のhash照合→既存版再利用→抽出→再hash→prepare→明示embedding→publishをFileIndexPolicyへ分ける。policyは固定profile/dry-runだけを保持し、SyncCountsは公開結果に既存のchanged/unchanged/processedを集める。失敗前に増えるchanged/unchangedも従来の時点で加算する。新しいruntime state/予算/Repositoryは作らない。
 
 消失文書sweepとderivedの明示embeddingは別private関数にする。source失敗時も既存参照一覧の読取順を保ち、破壊的sweepだけを止める。fileとderivedに同じ呼出し限定breakerを渡し、順序・失敗上限50・pause/正常reset・成功cache・旧公開版を保持する。HTTP await中に新しいDB transactionを持ち込まない。
 
@@ -125,10 +118,22 @@ marker導入前のspaceは従来の完全fingerprint照合をfallbackとする�
 
 ## 走査対象・検索準備・状態の追補（Issue #20〜#22）
 
-独立RAGのwriterが旧schema 1から2へ短いatomic migrationを行い、sourcesに除外globのJSON列だけを加える。旧sourceの既定は空集合で、会話DB/schemaには触れない。旧schemaの読み取りとdry-runはmigrationをせず空の除外を投影できる。source addの複数 `--exclude` を永続化し、無指定の再登録では維持、非空指定で置換、`--clear-excludes` で明示解除する。pattern数64・各1024bytes以内。構文とマッチは固定版globsetを利用し、gitignoreや否定規則の独自解釈は加えない。pathはsource相対のslashへ正規化し、slashなしpatternはbasenameにも適用、directory一致で配下を走査しない。
+独立RAGのwriterが旧schema 1/2から3へ短いatomic migrationを行い、schema 1のsourcesに除外globのJSON列、旧版に下記hot query索引を加える。旧sourceの既定は空集合で、会話DB/schemaには触れない。旧schemaの読み取りとdry-runはmigrationをせず空の除外を投影できる。source addの複数 `--exclude` を永続化し、無指定の再登録では維持、非空指定で置換、`--clear-excludes` で明示解除する。pattern数64・各1024bytes以内。構文とマッチは固定版globsetを利用し、gitignoreや否定規則の独自解釈は加えない。pathはsource相対のslashへ正規化し、slashなしpatternはbasenameにも適用、directory一致で配下を走査しない。
 
 dot entryと現在使うRAG DB・sidecarを既定対象外とする。unsupported形式は失敗ではなくskippedで、拡張子別内訳と上限付き対象/除外例を返す。対象外の旧active資料は完全な走査成功時にremovedへ移す。実read/extract失敗・走査不全・入力上限では従来どおり削除検出を抑止し、アクセス不能を削除扱いしない。新規文書の失敗はfailed、成功版を残す失敗はstaleとする。dry-runは外部API・DB書込みをせず、semantic分割量と課金可能性を示す。
 
 statusはsourceごとのlast_scan・有効revisionの最大created_at（last_changed_at）・現在のembedding profileに欠けるchunk数（semantic_missing）と、上限付きの失敗資料/key/理由を既存行から投影する。未知のprofileで0や成功時刻を捏造しない。embedding完了時刻の列、結果保存表、operation receipt、会話Coreとの連携を増やさない。長時間index結果は既存shell executionのwait/readで回収する。
 
 hybridは既にkeywordとsemanticを明示要求しているため、keywordに成功し、設定・identityを検証したうえでsemanticの未作成/不足だけが確認できた場合は `ok:true` と `degraded:true` を返す。scope_statusと集約warningsで使用した手段・不足量・対象source付きnextを示す。互換のscope_errorsはwarningであることを区別する。設定不正・認証・通信・DB・identity不一致等の本当のエラーはpartial_failureと非0終了を維持する。明示semantic検索はkeywordへ切り替えない。CLIはJSONのままとし、別の人間向け出力modeを作らない。
+
+## 外部変換からの登録（Issue #24、0.1.6で採用）
+
+RAGはUTF-8 text/Markdownと登録・出典管理へ絞る。PDF/Office固有backend、`--extractor`/`--adapter`、manifest・subprocess supervisorと選択fingerprintは削除し、互換経路を作らない。外部の変換ツールはモデルがshellで選び、変換本文は`ingest --kind extracted`、モデル解釈は`llm-explanation`/`summary`として原本と関連付ける。ツールの追加導入は利用環境の管理方針を利用者へ確認する。RAG自身は変換ツール・マルチモーダルモデルを取得/起動しない。
+
+原本は固定64KiB bufferで逐次hashし、regular fileだけを許可する。原本の16MiB上限は廃止し、本文16MiB・metadata64KiBの上限は保持する。保存するhashは取り込み時の観測で、生成入力との一致や更新中ファイルのsnapshotを証明しない。原本の移動/削除後も保存済み派生本文と観測出典を取得でき、自動再検証/自動削除は行わない。
+
+既存のPDF/Officeのfile-source revisionは次の完全同期でunsupported/removedとなるため、必要な資料は外部変換後にingestし直す。#20の失敗/対象外の区別を先に適用する。既存UTF-8 revisionは本文hashとtext extractor名で再利用し、旧extractor選択に由来する差は新しい互換機構を設けず通常再索引で同期する。新しいCore操作・表・worker・queue・event・依存は作らない。
+
+### 独立RAGのhot query索引（Issue #26）
+
+`embeddings(space_id,vec_rowid)`はMAX行IDの割当てと削除、`chunks(hash)`は孤立embedding回収のNOT EXISTSに使用する。EXPLAINと同一fixture比較で旧走査を確認した2本だけを追加し、新しい表は作らない。新規schema 3と既存schema 1/2のwriter移行で同じ索引を作り、移行は単一transactionでschema番号まで確定する。readonly/dry-runは旧schemaを変更しない。会話DB migrationとは独立する。

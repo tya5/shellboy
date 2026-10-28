@@ -39,10 +39,6 @@ pub enum RagCommand {
         dry_run: bool,
         #[arg(long, value_enum, default_value = "keyword")]
         mode: IndexMode,
-        #[arg(long)]
-        extractor: Option<PathBuf>,
-        #[arg(long)]
-        adapter: Option<PathBuf>,
     },
     Ingest {
         #[arg(long)]
@@ -298,19 +294,7 @@ async fn run(
             source,
             dry_run,
             mode,
-            extractor,
-            adapter,
-        } => {
-            store::index(
-                &context,
-                source.as_deref(),
-                dry_run,
-                mode,
-                extractor.as_deref(),
-                adapter.as_deref(),
-            )
-            .await?
-        }
+        } => store::index(&context, source.as_deref(), dry_run, mode).await?,
         RagCommand::Ingest {
             id,
             source_file,

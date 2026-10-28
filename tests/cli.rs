@@ -846,3 +846,10 @@ async fn history_excerpt_cli_default_zero_and_upper_bound_map_to_the_wire() {
         );
     }
 }
+
+#[test]
+fn rag_conversion_backend_flags_are_no_longer_part_of_the_cli() {
+    for flag in ["--extractor", "--adapter"] {
+        assert!(Cli::try_parse_from(["shellboy", "rag", "index", flag, "anything"]).is_err());
+    }
+}
