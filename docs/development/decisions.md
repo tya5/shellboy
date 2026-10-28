@@ -472,3 +472,82 @@ agreements. Catalogue language and query-language choice are separate concerns.
 UI language work remains an evaluated future task. The intended next release is
 0.2.0; source package version stays at the last release until release preparation.
 No push/release or user-data mutation is part of this work.
+
+
+## 2026-10-29: review round 4 persistence and current-format upgrade
+
+The [round-4 tracking record](review-round-4.md) supersedes remaining pre-upgrade
+assumptions in the earlier #32/#33 plan. The new reviews confirm #19/#20/#27/#30/
+#31 fixes; no change is justified solely to rewrite already accepted behavior.
+
+Use schema 11 for the derived failure-counter format boundary. A startup-only
+migration removes malformed/non-object/wrongly typed counters, preserves current
+objects and existing pauses, and drops the unused receipt_turn_source index.
+Fresh schema and historical upgrades must converge. This is preferable to a Core
+scalar fallback: public v0.1.x wrote integer reset values while remaining schema
+10, so accepting that schema without normalizing derived metadata stranded work.
+No content, vectors, authorizations or immutable interruption nodes are rewritten.
+Current malformed counters still fail strict decoding; a separate transaction
+preserves the provider failure and fixed input, marks work failed and pauses
+spending. General worker failures also acquire an existing durable pause; if even
+that diagnostic cannot be saved, stop the index workers rather than keep billing.
+If both normal and diagnostic DB writes fail, preservation of the original
+provider failure is not guaranteed. Avoid adding another diagnostic queue/service
+for that exceptional storage-failure boundary; revisit if concrete operational
+failures show the existing error/pause reporting is insufficient.
+
+Keep immutable versioned SQL in conventional root migrations/. Only the isolated
+storage::migrate imports historical SQL in src; ordinary Core tests use current
+schema. Explicit migration integration tests retain old SQL intentionally. Moving
+all SQL under a custom module directory adds path churn without improving runtime
+isolation. Removing the runner in future requires removing its declaration/call;
+obsolete SQL can then be removed alongside the explicit migration fixtures.
+
+The metadata audit finds no further required startup conversion: public Work
+writers already supplied the now-required fields and public draft writers supplied
+positions. Invalid versioned GC cursors restart safely. A missing query-profile
+marker cannot be inferred without configured endpoint identity and remains an
+explicit pre-HTTP error. Saved mutation receipts remain scoped to their original
+owner instance, so changed draft fingerprints do not authorize old-instance replay.
+The old interruption payload key remains an intentional display-format break;
+known limitations describe raw/F6 access rather than a fallback reader.
+
+For #32, persist accepted closing sends and drafts before presentation-only
+shutdown waits. Omit closing Accepting projection: after Quit the main loop no
+longer handles its completion, and this transient label must not gate persistence.
+Normal sends retain immediate Accepting. Keep autosave pumping independent of UI
+reserve; retain only its failed-thread projection while snapshot ownership stays
+in the existing backlog. A repeat bit on existing pending receipts preserves a
+fair scan before starting a finite follow-up pass, including lag recovery. Clone
+always yields worker admission; shutdown borrows the unique main handle. No new
+Core operation, table, channel, task service, dependency or background poller.
+
+Use rag init as the explicit writer-owned upgrade for an existing RAG store;
+it does not register a source, index documents or call a model API. Protocol
+mismatch reports both versions and same-release recovery; only endpoint/instance
+change recommends refreshing/reconnecting. Preserve uncertainty after a request
+was sent. Earlier guide old-record notes are replaced with actual unknown-state
+conditions. The pre-1.0 policy permits isolated schema upgrades and forbids Core
+compatibility shims, rather than forbidding migration itself.
+
+Validation fixture decisions: stalled mock HTTP was also reproduced on baseline
+`e977dfe`, before this follow-up. In the index fixture, the seed request stalled
+before the migration/workers under test, with a small queued server response.
+Use TCP_NODELAY on accepted local mock sockets and write JSON response headers
+and body together in the index/shell fixtures. Apply TCP_NODELAY to the two
+summary fixtures as well. Keep assertions, deadlines and production HTTP clients
+unchanged. The index worker regressions pass with these fixture changes. High
+host load was observed, but is not established as the cause. Record unsuccessful
+whole-suite/manual attempts rather than treating earlier runs as evidence for
+the current source.
+
+The saturated shutdown test sends forty messages to forty independent existing
+Threads held in recovery_wait. This isolates UI delivery from valid same-Thread
+selection-revision CAS conflicts. Assert exactly forty durable receipt/user-node
+pairs and draft revision 99 before forcing the blocked presentation to exit;
+do not reduce the expected count to accommodate rejected concurrent requests.
+
+RAG migration assertions use the new actionable rag init hint and preserve the
+original source count (including built-in sources). Existing readers must still
+reject without modifying the old store. Both v1 and v2 writer-only migration
+regressions pass, without registering material sources or indexing.

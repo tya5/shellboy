@@ -1,5 +1,78 @@
 # Validation record
 
+## Review round 4: local fixes and verification (2026-10-29)
+
+Product fixes: `7fb41d9` and `c6f2b39`; test-only mock stabilization: `8368874`.
+Conversation schema 11, wire protocol 2, RAG schema 3. Complete finding-by-finding
+tracking is in [review round 4](../development/review-round-4.md); judgment and
+migration boundaries are in [decisions](../development/decisions.md).
+
+Focused checks on this source:
+
+| Check | Result |
+| --- | --- |
+| Frontend unit/integration boundaries | 104 passed, 1 opt-in ignored |
+| Stopped UI, full 512 reserve, closing sends | Exactly 40 receipt/user-node pairs and draft revision 99 persisted before ForceQuit |
+| IPC diagnostics and dispatch boundaries | 44 passed |
+| Storage / hot-query regressions | 22 / 3 passed |
+| RAG selection and old-store writer upgrades | 14 passed |
+| Complete index integration suite | 50 passed, including both new real-worker counter/failure regressions; explicit retry succeeds |
+| Fresh schema versus all startup migrations | 97 schema objects identical; current version 11 |
+| Offline bundled docs | 33 checks, 13 English guides, 3 categories, 127 links |
+| Actual offline RAG CLI | 13 scenarios, no external model requests |
+| macOS deletion PTY | 5 scenarios passed |
+| Isolated ten-Thread / 250ms stopped-UI delivery pressure | p50 7.29ms, p95 12.16ms, lagged 0; synthetic local observation |
+
+Final standard gate on `8368874`: format, locked all-target strict Clippy and
+all-target test compilation passed. The standard script did **not** complete
+successfully: library cases finished with 579 passed / 2 failed / 10 ignored,
+while one summary case remained stuck after all other 591 cases had finished.
+The owned lib-test process was interrupted (script exit 101); integration targets
+were not reached by the script. Separately executed index/storage/hot-query/RAG
+integration suites passed as recorded above.
+
+Remaining failed cases:
+
+- `compaction::edit::summary_tests::explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_character_partitioning`:
+  HTTP-header inactivity deadline. Same failure reproduced on baseline `e977dfe`.
+- `control::progress_tests::completed_shell_cannot_be_backgrounded_while_excerpt_is_loading`:
+  fixture deadline; unchanged by this batch, but baseline equivalence is not yet
+  established for this specific failure.
+- Unfinished `compaction::tests::nested_summary_and_spills_preserve_current_turn_boundary`:
+  still awaiting the mock; separate 30-second bounded run also failed to finish.
+
+TCP_NODELAY alone did not resolve the summary fixture stalls. Do not infer a
+production fix or an environmental cause from index mock stabilization alone.
+The successful focused checks do not waive this whole-suite gate.
+
+Final document audit: 612 relative links / 38 heading fragments, four TOML blocks
+parsed, English entry points and 13 English + one Japanese guide preserved;
+zero errors. Gitleaks found no secrets in all three implementation/test commits
+and their staged diffs. The records commit is also scanned before committing.
+
+Validation attempts matter: before mock stabilization, a whole-library run
+completed with 571 passed / 10 failed / 10 ignored, excluding one summary test
+that had hung in the earlier standard run. Failures were HTTP/native-shell
+fixture deadlines, not evidence of a passing gate. The unchanged baseline
+`e977dfe` also failed the large-summary mock's HTTP-header deadline. Index seed
+HTTP stalled before the new migration/worker assertions; setting TCP_NODELAY and
+writing its headers/body together made both index regressions pass. Deadlines and
+assertions were not relaxed. Two RAG test expectations were corrected: the new
+hint names rag init, and built-in sources count as existing sources.
+
+The ten-conversation HTTP+PTY manual script did **not** pass this round: it timed
+out observing the first delta, before launching the other nine requests. The
+installed public 0.1.6 binary also failed this precondition. TCP_NODELAY and a
+fuller initial Responses lifecycle did not establish success. This does not
+validate concurrent HTTP streaming; cause and a controlled retest remain open.
+A prior run's successful manual result does not apply to this source. High host
+load was observed during tests, but causality is unproven.
+
+Raw synthetic captures/logs remain ignored locally. No default data, installed
+binary, external model API, push, release or native three-OS CI was changed/run.
+Issues remain open until their push and three-OS CI gate is met.
+
+
 ## Latest comments and #32 / #33: final local validation (2026-10-29)
 
 Verified source: `0a72f9c`, including `02b994a` for saturated frontend delivery.

@@ -1,5 +1,25 @@
 # Development status
 
+## Review round 4: fixes committed, whole-suite gate unresolved (2026-10-29)
+
+The reviews of `e977dfe` confirm #19/#20/#27/#30/#31 are resolved. #32's four
+new findings are addressed in `7fb41d9`: shutdown persistence precedes UI waits,
+autosave is independent of UI capacity, receipt scans repeat fairly and Clone
+cannot consume the main reserve. #33's Medium and eight Low findings are
+addressed in `c6f2b39`, including schema-11 counter migration and failure/pause
+preservation. `8368874` changes only local HTTP mock transport behavior.
+
+Focused storage, index-worker, IPC, frontend and RAG checks pass; see the
+[tracking record](review-round-4.md) and [acceptance](../validation/acceptance.md)
+for exact evidence and unsuccessful attempts. The final standard check passed format, strict Clippy and compilation, but
+ended with two failed library cases and one stuck summary case after the other
+591 finished (579 passed / 2 failed / 10 ignored). See acceptance for names and
+the limited baseline comparison. The manual HTTP+PTY initial-delta observation remains unsuccessful;
+prior whole-suite/manual success below is historical. No push, release or
+installed-binary update is part of this request. All seven issues remain open
+pending their push and native three-OS CI gate.
+
+
 ## Latest comments and #32 / #33: verified locally (2026-10-29)
 
 The latest comments supersede parts of the previously verified batch below.
