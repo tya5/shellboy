@@ -62,7 +62,7 @@ Shell readの `--encoding` は任意で、未指定時はexecutionの保存済�
 
 ## 削除影響と保存済みコンテキスト
 
-`thread delete-preview`（wire `thread.delete_preview`）を加え、現在の公開操作は35。ThreadDeleteArgsの必須Threadとdescendantsだけを用い、読み取りで削除確認やGCを始めない。F8は既存indexを維持して末尾index 34に「Thread · 削除影響」を追加する。contextとoperation.get追加fieldはCLI出力の構造化resultへそのまま公開する。API契約は[全体設計](observability-and-deletion.md)と[protocol](protocol.md)を参照。
+`thread delete-preview`（wire `thread.delete_preview`）を加え、現在の公開操作は35。ThreadDeleteArgsの必須Threadとdescendantsだけを用い、読み取りで削除確認やGCを始めない。F8は既存indexを維持して末尾index 34に「会話 · 削除影響」を追加する。contextとoperation.get追加fieldはCLI出力の構造化resultへそのまま公開する。API契約は[全体設計](observability-and-deletion.md)と[protocol](protocol.md)を参照。
 
 ## 入力境界と起動経路の整理（R3-8、R3-9）
 

@@ -109,7 +109,7 @@ fn prioritize_interruption_identity(p: &mut NodePresentation, value: &Value, kin
         "owned_children",
         "unreflected_messages",
         "cancelled_waits",
-        "legacy_pending_operations_with_unknown_targets",
+        "pending_operations_with_unknown_targets",
     ];
     fn push(fields: &mut Vec<PresentationField>, key: &str, value: &Value) {
         if fields.len() >= MAX_FIELDS {

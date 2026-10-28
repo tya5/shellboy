@@ -86,10 +86,7 @@ async fn provenance_records_actual_origin_without_inventing_turns_or_thread_memb
         })
         .await
         .unwrap();
-    assert_eq!(
-        body.provenance.unwrap().origin_thread_id.as_deref(),
-        Some("origin")
-    );
+    assert_eq!(body.provenance.origin_thread_id.as_deref(), Some("origin"));
     db.shutdown().await.unwrap();
 }
 
@@ -136,7 +133,7 @@ async fn summary_and_spill_source_pages_preserve_ordinals_and_recorded_witness_a
         tombstone.tombstone_reason.as_deref(),
         Some("fixture collection")
     );
-    assert_eq!(tombstone.provenance.unwrap().source_revision, 1);
+    assert_eq!(tombstone.provenance.source_revision, 1);
     db.shutdown().await.unwrap();
 }
 

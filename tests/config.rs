@@ -329,7 +329,6 @@ fn every_positive_field_and_zero_allowed_section_keeps_the_existing_contract() {
                 "attachment_request_bytes",
                 "shell_raw_bytes",
                 "tool_excerpt_bytes",
-                "history_read_bytes",
                 "shell_stdin_bytes",
                 "draft_bytes",
                 "data_warning_bytes",
@@ -652,4 +651,11 @@ fn disconnect_trim_settings_have_defaults_and_strict_connection_overrides() {
             );
         }
     }
+}
+
+#[test]
+fn obsolete_history_read_budget_is_rejected_instead_of_silently_ignored() {
+    assert!(
+        toml::from_str::<shellboy::config::Config>("[limits]\nhistory_read_bytes=65536\n").is_err()
+    );
 }

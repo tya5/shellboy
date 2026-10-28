@@ -286,7 +286,6 @@ impl IndexService {
             .call(move |db| read_preparation(db, key))
             .await
             .map_err(db_error)?;
-        let legacy_preparation = self.legacy_preparation().await?;
         let mut coverage = CoverageCounts::default();
         for node in self.selected_sources(&args).await? {
             let Some(source) = self.load_source(&node).await? else {
@@ -302,7 +301,7 @@ impl IndexService {
             );
         }
         Ok(json!({
-            "spaces":spaces, "preparation":preparation, "legacy_preparation":legacy_preparation,
+            "spaces":spaces, "preparation":preparation,
             "active_space":active, "selected_space":selected,
             "scope":{"scope":args.scope,"thread_ids":args.thread_ids,"source_ids":args.source_ids},
             "coverage":coverage,"definitions":definitions(),

@@ -6,7 +6,7 @@ This guide describes how a model works in Shellboy. A conversation is a Thread, 
 
 ## Read this guide in the running environment
 
-Guides are bundled into the executable. System instructions point to `shellboy docs list` and search, so you can read only the documents you need. They work outside a repository cwd and require no owner, API, or configuration. The bundled catalogue is English; use English terms for `docs search`, regardless of the conversation language. Queries are literal matches and are not translated automatically.
+Guides are bundled into the executable. System instructions point to `shellboy docs list` and search, so you can read only the documents you need. They work outside a repository cwd and require no owner, API, or configuration. The bundled catalogue is English. Queries are literal matches and are not translated automatically.
 
 ```bash
 shellboy docs list
@@ -101,7 +101,7 @@ Executable blocks in this guide use Bash. In PowerShell, use `$env:SHELLBOY_RUN_
 
 Compare `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shellboy shell get --execution ID` against the same fields in the launching tool result. If `command` is `shellboy message send ...`, acceptance JSON from read is that process's actual stdout. Do not infer another shell's successful launch or ID from acceptance JSON. Retrieve the tool result that executed the intended command; if it was never executed, pass that command directly to the shell tool. Prefer saved commands and tool arguments over your own description that you “ran it directly.”
 
-New fields require an updated owner. When continuing to use an old running owner, absent fields are not evidence of mixed output; inspect the original tool arguments in history. After graceful owner shutdown and restart, saved executions can also be queried through the new get implementation.
+Use the same current release for the owner and CLI. A protocol-version mismatch is rejected; do not interpret it as a successful operation or retry side effects under a new operation ID.
 
 ## List models and change your Thread's model
 
@@ -125,7 +125,7 @@ Once the conversation's purpose is clear, edit your own title with `shellboy thr
 
 Query a lost operation result with `shellboy operation get --operation OPERATION_ID`. Distinguish its receipt state/outcome from downstream completion, and follow targets to their get commands. Check downstream for message and compact. Repeating compact with the same ID returns its original queued acceptance even after downstream completion. pending/result_uncertain do not prove that side effects never occurred or that retrying with a new ID is safe. The query itself creates no receipt; its operation ID does not guarantee replay of the observation. Repeating attachment.add with the same ID returns the original result before mutable preflight, while preserving authentication and request-equality checks.
 
-Context on Thread/Run/Turn/message/history get contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` means execution ownership. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
+Run/Turn/message/history get always includes `context`; Thread context can be absent for a fork. `history list` requires `provenance`, `context`, and `selection` on each item; `history get` requires `provenance` and `context`. Context contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` means execution ownership. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
 
 Within an authorized deletion task, use `shellboy thread delete-preview --thread THREAD_ID` (add `--descendants` to include descendants) to inspect blocking Runs, targeted descendants, and direct sharing, source, and attachment references. This is neither deletion authorization nor a guarantee of GC capacity; `reclaimable_bytes` is null. Actual delete rechecks current state. See [Recovery and storage](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 

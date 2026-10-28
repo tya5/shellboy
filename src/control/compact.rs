@@ -50,7 +50,7 @@ fn take_batch(tx: &Transaction<'_>, thread: &str) -> Result<Option<CompactBatch>
     let edit = saved_edit_args(tx, first)?;
     let mut count = 1;
     if edit.is_none() {
-        // Preserve legacy coalescing without reordering an explicit edit or
+        // Coalesce automatic compaction requests without reordering an explicit edit or
         // applying one edit's range/action to any other operation.
         for operation in pending.iter().skip(1) {
             if saved_edit_args(tx, operation)?.is_some() {
@@ -253,10 +253,10 @@ mod tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE operation_receipt(operation_id TEXT PRIMARY KEY,result_ref_json TEXT NOT NULL);").unwrap();
         for (operation, explicit) in [
-            ("legacy-a", false),
-            ("legacy-b", false),
+            ("automatic-a", false),
+            ("automatic-b", false),
             ("explicit", true),
-            ("legacy-c", false),
+            ("automatic-c", false),
         ] {
             let mut saved =
                 json!({"result":{"thread_id":"thread","status":"queued","operation_id":operation}});
@@ -273,7 +273,7 @@ mod tests {
             "INSERT INTO app_meta VALUES(?1,?2)",
             params![
                 CompactionKeys::new("thread").pending(),
-                json!(["legacy-a", "legacy-b", "explicit", "legacy-c"]).to_string()
+                json!(["automatic-a", "automatic-b", "explicit", "automatic-c"]).to_string()
             ],
         )
         .unwrap();
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_prefix_coalesces_once_without_crossing_an_explicit_edit() {
+    fn automatic_prefix_coalesces_once_without_crossing_an_explicit_edit() {
         let mut db = fixture();
         let original = db
             .prepare("SELECT result_ref_json FROM operation_receipt ORDER BY operation_id")
@@ -327,21 +327,21 @@ mod tests {
         assert_eq!(
             batches,
             vec![
-                vec!["legacy-a", "legacy-b"],
+                vec!["automatic-a", "automatic-b"],
                 vec!["explicit"],
-                vec!["legacy-c"]
+                vec!["automatic-c"]
             ]
         );
         assert_eq!(
-            saved_outcome(&db, "legacy-a"),
-            saved_outcome(&db, "legacy-b")
+            saved_outcome(&db, "automatic-a"),
+            saved_outcome(&db, "automatic-b")
         );
         assert_ne!(
-            saved_outcome(&db, "legacy-b"),
-            saved_outcome(&db, "legacy-c")
+            saved_outcome(&db, "automatic-b"),
+            saved_outcome(&db, "automatic-c")
         );
         assert_ne!(
-            saved_outcome(&db, "legacy-b"),
+            saved_outcome(&db, "automatic-b"),
             saved_outcome(&db, "explicit")
         );
         let tx = db.transaction().unwrap();
@@ -361,10 +361,10 @@ mod tests {
     }
 
     #[test]
-    fn malformed_following_receipt_rolls_back_the_entire_legacy_batch_selection() {
+    fn malformed_following_receipt_rolls_back_the_entire_automatic_batch_selection() {
         let mut db = fixture();
         db.execute(
-            "UPDATE operation_receipt SET result_ref_json=?1 WHERE operation_id='legacy-b'",
+            "UPDATE operation_receipt SET result_ref_json=?1 WHERE operation_id='automatic-b'",
             [json!({"result":{"context_edit":{"action":"unsupported"}}}).to_string()],
         )
         .unwrap();
@@ -381,7 +381,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::from_str::<Vec<String>>(&pending).unwrap(),
-            ["legacy-a", "legacy-b", "explicit", "legacy-c"]
+            ["automatic-a", "automatic-b", "explicit", "automatic-c"]
         );
         assert_eq!(
             db.query_row(
@@ -395,7 +395,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_worker_drains_legacy_batches_and_individual_edits_without_model_calls() {
+    async fn cancelled_worker_drains_automatic_batches_and_individual_edits_without_model_calls() {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
         std::fs::write(&config, "").unwrap();

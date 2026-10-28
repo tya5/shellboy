@@ -126,7 +126,7 @@ pub struct IndexService {
     config: Arc<Config>,
     notify: Arc<Notify>,
     profile_key: Option<String>,
-    legacy_profile_key: Option<String>,
+    endpoint_family_key: Option<String>,
     started: AtomicBool,
     reader: ShellOutputReader,
     source_slots: Arc<Semaphore>,
@@ -160,7 +160,7 @@ impl IndexService {
         clients: Arc<crate::model::http::HttpClients>,
     ) -> Arc<Self> {
         let profile_key = identity::profile_key(&config);
-        let legacy_profile_key = identity::legacy_profile_key(&config);
+        let endpoint_family_key = identity::endpoint_family_key(&config);
         Arc::new(Self {
             clients,
             reader: ShellOutputReader::new(database.clone(), instance),
@@ -170,7 +170,7 @@ impl IndexService {
             config,
             notify: Arc::new(Notify::new()),
             profile_key,
-            legacy_profile_key,
+            endpoint_family_key,
             started: AtomicBool::new(false),
             stop: CancellationToken::new(),
         })
@@ -696,14 +696,13 @@ impl IndexService {
         Ok(false)
     }
     async fn process_key(&self, key: String, cancel: CancellationToken) -> Result<bool, ApiError> {
-        let legacy = self.profile_key.as_deref() != Some(key.as_str());
         if cancel.is_cancelled() {
             return Ok(false);
         }
         if !self.capacity_allowed(&key).await? {
             return Ok(false);
         }
-        if !legacy && self.drain_authorization(&key).await? {
+        if self.drain_authorization(&key).await? {
             return Ok(true);
         }
         let key_copy = key.clone();
@@ -788,7 +787,6 @@ impl IndexService {
                     embedding,
                     dimension: response.dimension,
                     vector,
-                    legacy,
                 };
                 let adopted = self
                     .database
@@ -891,7 +889,6 @@ mod error_tests {
                 },
                 "candidate",
                 3,
-                true,
             )?;
             tx.commit()?;
             Ok(())
@@ -911,7 +908,6 @@ mod error_tests {
                     },
                     "candidate",
                     4,
-                    true,
                 )?;
                 tx.commit()?;
                 Ok(())
@@ -934,7 +930,6 @@ mod error_tests {
                     },
                     "new-candidate",
                     0,
-                    true,
                 )?;
                 tx.commit()?;
                 Ok(())

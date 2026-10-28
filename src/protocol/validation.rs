@@ -17,11 +17,6 @@ pub(crate) fn rfc3339(
 
 impl StatusArgs {
     fn validate(&self) -> Result<(), ApiError> {
-        optional_nonempty(self.operation_id.as_deref(), "operation_id")?;
-        if self.operation_id.as_ref().is_some_and(|id| id.len() > 1024) {
-            return Err(invalid("status operation selector exceeds 1024 bytes"));
-        }
-
         limit(self.limit, MAX_LIST_LIMIT)?;
         optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
         optional_nonempty(self.run_id.as_deref(), "run_id")?;

@@ -47,10 +47,7 @@ pub struct StatusSnapshot {
     pub items: Vec<WorkItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
-    #[serde(default)]
     pub receipt_budget: Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operation: Option<Value>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -401,33 +398,6 @@ fn encode_cursor(cursor: &Cursor) -> String {
 /// The caller supplies an already-open read transaction. No DB/filesystem/API
 /// mutations, process liveness inspection, or other store observations occur.
 pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<StatusSnapshot> {
-    if let Some(id) = &args.operation_id {
-        if args.thread_id.is_some()
-            || args.run_id.is_some()
-            || args.since.is_some()
-            || !args.state.is_empty()
-            || args.all
-            || args.cursor.is_some()
-        {
-            return Err(ApiError::new(
-                ErrorCode::InvalidArgument,
-                "status --operation cannot be combined with work filters or a cursor",
-            ));
-        }
-        return Ok(StatusSnapshot {
-            instance_id: instance.into(),
-            observed_at: chrono::Utc::now().to_rfc3339(),
-            scope: "operation".into(),
-            consistency: "one_read_transaction".into(),
-            fingerprint: String::new(),
-            filters: args.clone(),
-            items: Vec::new(),
-            next_cursor: None,
-            receipt_budget: crate::control::receipt::summary(db, instance)?,
-            operation: Some(crate::control::db::operation_details(db, id, instance)?),
-        });
-    }
-
     let scope = check_scope(db, args)?;
     let cursor = decode_cursor(args, instance, &scope.filter)?;
     let mut watermark = cursor.as_ref().map(|position| position.watermark);
@@ -511,7 +481,6 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     filters.state = scope.states;
     Ok(StatusSnapshot {
         receipt_budget: crate::control::receipt::summary(db, instance)?,
-        operation: None,
         filters,
         instance_id: instance.into(),
         observed_at: chrono::Utc::now().to_rfc3339(),

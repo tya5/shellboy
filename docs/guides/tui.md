@@ -1,6 +1,6 @@
 # TUI controls
 
-[User Guide](user-guide.md) · [Guide index](README.md) · [日本語](tui.ja.md)
+[User Guide](user-guide.md) · [Guide index](README.md)
 
 The current UI calls a Thread `会話` (conversation), a Run `作業` (work), and a Turn `応答処理` (response processing). CLI names, identifier keys, and source text retain their original spelling. Japanese captions quoted below identify the unchanged current UI.
 

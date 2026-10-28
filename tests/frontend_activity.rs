@@ -75,7 +75,7 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
     assert!(shown.contains(&summary), "{shown}");
     // The current attempt has no automatic_trim; earlier evidence remains in
     // the activity summary while the next retry wait is running too.
-    change(&db,"UPDATE turn SET state='running',recovery_reason_json=NULL; UPDATE model_attempt SET state='failed',error_json='{\"automatic_retry\":{\"number\":1,\"limit\":8,\"delay_ms\":1000}}' WHERE id='latest';").await;
+    change(&db,"UPDATE turn SET state='running',recovery_reason_json=NULL; UPDATE model_attempt SET state='failed',error_json='{\"automatic_retry\":{\"number\":1,\"limit\":8,\"delay_ms\":1000,\"partial_response_discarded\":false}}' WHERE id='latest';").await;
     let retry = projection(&db).await;
     assert_eq!(retry.snapshot.phase, ActivityPhase::Retrying);
     assert_eq!(
@@ -671,7 +671,7 @@ async fn retry_projection_requires_current_failed_attempt_and_live_running_turn(
         INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','now');
         INSERT INTO turn(id,thread_id,run_id,state,generation,created_at) VALUES('u','t','r','running',2,'now');
         INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)
-        VALUES('a','u',2,0,'p','m',0,'failed','{}','now','{"automatic_retry":{"number":1,"limit":2,"delay_ms":1000,"possible_duplicate_charge":true}}');
+        VALUES('a','u',2,0,'p','m',0,'failed','{}','now','{"automatic_retry":{"number":1,"limit":2,"delay_ms":1000,"partial_response_discarded":false,"possible_duplicate_charge":true}}');
     "#).await;
     let retry = projection(&db).await;
     assert_eq!(retry.snapshot.phase, ActivityPhase::Retrying);
@@ -711,9 +711,11 @@ async fn retry_projection_requires_current_failed_attempt_and_live_running_turn(
     for body in [
         "{}",
         "not-json",
-        r#"{"automatic_retry":{"number":0,"limit":2}}"#,
-        r#"{"automatic_retry":{"number":3,"limit":2}}"#,
+        r#"{"automatic_retry":{"number":0,"limit":2,"delay_ms":1000,"partial_response_discarded":false}}"#,
+        r#"{"automatic_retry":{"number":3,"limit":2,"delay_ms":1000,"partial_response_discarded":false}}"#,
         r#"{"automatic_retry":{"number":1}}"#,
+        r#"{"automatic_retry":{"number":1,"limit":2,"partial_response_discarded":false}}"#,
+        r#"{"automatic_retry":{"number":1,"limit":2,"delay_ms":1000}}"#,
     ] {
         let body = body.to_owned();
         db.call(move |db| {
@@ -726,7 +728,7 @@ async fn retry_projection_requires_current_failed_attempt_and_live_running_turn(
         assert_eq!(saved.phase, ActivityPhase::Running);
         assert!(saved.automatic_retry.is_none());
     }
-    change(&db, r#"UPDATE model_attempt SET error_json='{"automatic_retry":{"number":2,"limit":2}}';
+    change(&db, r#"UPDATE model_attempt SET error_json='{"automatic_retry":{"number":2,"limit":2,"delay_ms":1000,"partial_response_discarded":false}}';
         INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
         VALUES('b','u',2,0,'p','m',0,'inflight','{}','now');"#).await;
     let next = projection(&db).await.snapshot;

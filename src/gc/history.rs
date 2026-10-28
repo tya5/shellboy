@@ -34,11 +34,7 @@ pub(super) fn history_step(db: &mut Connection, job: &str) -> Result<HistoryStep
         )
         .map_err(sql_error)?;
     let parsed = body.and_then(|body| serde_json::from_str::<Progress>(&body).ok());
-    if !session
-        || parsed
-            .as_ref()
-            .is_none_or(|progress| progress.horizon.is_none())
-    {
+    if !session || parsed.is_none() {
         reset(&tx, job, current)?;
         tx.commit().map_err(sql_error)?;
         report.stage = Stage::Roots.as_str().into();
@@ -78,7 +74,7 @@ fn roots_step(
     progress: &mut Progress,
     report: &mut HistoryStep,
 ) -> Result<()> {
-    let horizon = progress.horizon.expect("validated collection horizon");
+    let horizon = progress.horizon;
     let rows = tx
                 .prepare("SELECT rowid,id,turn_id FROM node WHERE rowid>?1 AND rowid<=?3 ORDER BY rowid LIMIT ?2")
                 .map_err(sql_error)?
@@ -173,7 +169,7 @@ fn sweep_step(
     report: &mut HistoryStep,
     root: i64,
 ) -> Result<()> {
-    let horizon = progress.horizon.expect("validated collection horizon");
+    let horizon = progress.horizon;
     // Pins can change without a persistent root revision. Keep the
     // sweep cursor advancing and validate all remaining candidates
     // against current roots/provenance in this same transaction.
@@ -235,7 +231,7 @@ fn sweep_step(
 mod tests {
     use super::*;
     #[test]
-    fn durable_stage_bytes_and_legacy_progress_defaults_are_unchanged() {
+    fn durable_stage_bytes_and_current_progress_fields_are_required() {
         for (stage, literal) in [
             (Stage::Roots, "roots"),
             (Stage::Provenance, "provenance"),
@@ -248,10 +244,14 @@ mod tests {
             let decoded: Stage = serde_json::from_str(&format!("\"{literal}\"")).unwrap();
             assert_eq!(decoded.as_str(), literal);
         }
-        let legacy: Progress =
-            serde_json::from_str(r#"{"stage":"sweep","last_rowid":123}"#).unwrap();
-        assert!(legacy.horizon.is_none() && !legacy.revalidate_roots);
-        assert_eq!(legacy.last_rowid, 123);
+        let current =
+            r#"{"stage":"sweep","last_rowid":123,"horizon":456,"revalidate_roots":false}"#;
+        let progress: Progress = serde_json::from_str(current).unwrap();
+        assert_eq!(progress.horizon, 456);
+        assert!(!progress.revalidate_roots);
+        assert_eq!(progress.last_rowid, 123);
+        assert_eq!(serde_json::to_string(&progress).unwrap(), current);
+        assert!(serde_json::from_str::<Progress>(r#"{"stage":"sweep","last_rowid":123}"#).is_err());
         assert!(
             serde_json::from_str::<Progress>(r#"{"stage":"future","last_rowid":123}"#).is_err()
         );

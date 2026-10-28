@@ -222,16 +222,9 @@ pub struct ListOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nThe deprecated status --operation alias is still accepted; use operation get --operation ID instead.\nGuide: shellboy docs get --id shellboy/agent-guide"
+    after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nUse operation get --operation ID to inspect an operation receipt.\nGuide: shellboy docs get --id shellboy/agent-guide"
 )]
 pub struct StatusOptions {
-    /// Deprecated alias: use operation get --operation ID.
-    #[arg(
-        long = "operation",
-        id = "status_lookup_operation_id",
-        conflicts_with_all = ["thread_id", "run_id", "since", "state", "all", "limit", "cursor"]
-    )]
-    pub operation_id: Option<String>,
     /// Exact Thread; model callers default to their own Thread.
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
@@ -585,34 +578,15 @@ impl Cli {
             return Ok(None);
         };
         let command = match command {
-            CliCommand::Status(a) => {
-                if let Some(operation_id) = a.operation_id {
-                    if a.thread_id.is_some()
-                        || a.run_id.is_some()
-                        || a.since.is_some()
-                        || !a.state.is_empty()
-                        || a.all
-                        || a.limit != wire::DEFAULT_LIST_LIMIT
-                        || a.cursor.is_some()
-                    {
-                        return Err(invalid(
-                            "status --operation cannot be combined with work filters, a limit, or a cursor; use operation get --operation ID",
-                        ));
-                    }
-                    C::OperationGet(wire::OperationTarget { operation_id })
-                } else {
-                    C::Status(wire::StatusArgs {
-                        operation_id: None,
-                        thread_id: a.thread_id,
-                        run_id: a.run_id,
-                        since: a.since,
-                        state: a.state,
-                        all: a.all,
-                        limit: a.limit,
-                        cursor: a.cursor,
-                    })
-                }
-            }
+            CliCommand::Status(a) => C::Status(wire::StatusArgs {
+                thread_id: a.thread_id,
+                run_id: a.run_id,
+                since: a.since,
+                state: a.state,
+                all: a.all,
+                limit: a.limit,
+                cursor: a.cursor,
+            }),
             CliCommand::Docs { .. } | CliCommand::Rag(_) => return Ok(None),
             CliCommand::Model {
                 command: ModelCommand::List(a),

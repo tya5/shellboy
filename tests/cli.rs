@@ -478,27 +478,6 @@ async fn non_utf8_paths_are_explicit_errors_instead_of_lossy_references() {
 async fn operation_lookup_target_is_independent_of_global_request_id() {
     let cases: &[(&[&str], Option<&str>)] = &[
         (&["operation", "get", "--operation", "target:receipt"], None),
-        (&["status", "--operation", "target:receipt"], None),
-        (
-            &[
-                "--operation-id",
-                "request:lookup",
-                "status",
-                "--operation",
-                "target:receipt",
-            ],
-            Some("request:lookup"),
-        ),
-        (
-            &[
-                "status",
-                "--operation",
-                "target:receipt",
-                "--operation-id",
-                "request:lookup",
-            ],
-            Some("request:lookup"),
-        ),
         (
             &[
                 "--operation-id",
@@ -568,7 +547,7 @@ async fn operation_lookup_target_is_independent_of_global_request_id() {
 }
 
 #[tokio::test]
-async fn deprecated_status_operation_alias_rejects_work_filters_and_invalid_targets() {
+async fn removed_status_operation_alias_is_rejected_and_help_uses_canonical_lookup() {
     for filter in [
         vec!["--thread", "t"],
         vec!["--run", "r"],
@@ -584,14 +563,9 @@ async fn deprecated_status_operation_alias_rejects_work_filters_and_invalid_targ
             .collect();
         assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
     }
-    let cli = Cli::try_parse_from(["shellboy", "status", "--operation", ""]).unwrap();
-    assert_eq!(
-        cli.into_command_with_stdin(cwd(), &mut &b""[..])
-            .await
-            .unwrap_err()
-            .code,
-        ErrorCode::InvalidArgument
-    );
+    for target in ["", "target:receipt"] {
+        assert!(Cli::try_parse_from(["shellboy", "status", "--operation", target]).is_err());
+    }
     use clap::CommandFactory;
     let mut root = Cli::command();
     let status = root
@@ -599,7 +573,8 @@ async fn deprecated_status_operation_alias_rejects_work_filters_and_invalid_targ
         .unwrap()
         .render_long_help()
         .to_string();
-    assert!(status.contains("deprecated") && status.contains("operation get"));
+    assert!(!status.contains("Deprecated alias"));
+    assert!(status.contains("operation get"));
     let operation = root
         .find_subcommand_mut("operation")
         .unwrap()

@@ -713,8 +713,7 @@ async fn history_keyword_hides_deleted_thread_exclusive_nodes_before_physical_gc
 }
 
 #[tokio::test]
-async fn history_semantic_accepts_custom_split_and_legacy_without_default_embedding_configuration()
-{
+async fn history_semantic_requires_query_marker_without_default_embedding_configuration() {
     use sha2::{Digest, Sha256};
     use shellboy::{config::Config, index::IndexService, storage::DbWorker};
     let root = tempfile::tempdir().unwrap();
@@ -794,8 +793,13 @@ async fn history_semantic_accepts_custom_split_and_legacy_without_default_embedd
     std::fs::write(root.join("config.toml"), &read_config).unwrap();
     let matching = search(root, "history", "NEAR", SearchMode::Semantic).await;
     assert_eq!(
-        matching["ok"], true,
-        "unmarked spaces retain strict verified fallback: {matching}"
+        matching["result"]["scope_errors"][0]["code"], "index_incompatible",
+        "matching current split cannot authorize an unmarked space: {matching}"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        query_count,
+        "missing markers must fail before query embedding, with no source reindex"
     );
     assert_eq!(
         db.call(|db| Ok(db.query_row(
@@ -806,34 +810,8 @@ async fn history_semantic_accepts_custom_split_and_legacy_without_default_embedd
         .await
         .unwrap(),
         0,
-        "standalone RAG must not supplement owner metadata"
+        "standalone RAG must not repair owner metadata"
     );
-    std::fs::write(root.join("config.toml"), &changed_split).unwrap();
-    let legacy =
-        Sha256::digest(format!("fixture\0{endpoint}\0synthetic\0unicode-paragraph-v1").as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
-    db.call(move|db|{db.execute("UPDATE index_space SET splitter_version=?1 WHERE id=(SELECT value FROM app_meta WHERE key='index.active_space')",[format!("unicode-paragraph-v1:{legacy}")])?;Ok(())}).await.unwrap();
-    let old = search(root, "history", "NEAR", SearchMode::Semantic).await;
-    assert_eq!(old["ok"], true, "{old}");
-    assert!(!old["result"]["items"].as_array().unwrap().is_empty());
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        indexed + 4,
-        "only explicit query embeddings; no source reindex"
-    );
-    std::fs::write(
-        root.join("config.toml"),
-        changed_split.replace(&endpoint, "http://127.0.0.1:1/v1"),
-    )
-    .unwrap();
-    let incompatible = search(root, "history", "NEAR", SearchMode::Semantic).await;
-    assert_eq!(
-        incompatible["result"]["scope_errors"][0]["code"],
-        "index_incompatible"
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), indexed + 4);
     db.shutdown().await.unwrap();
     server.abort();
 }
@@ -1164,7 +1142,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     assert_eq!(
         requests.load(Ordering::SeqCst),
         indexed,
-        "existing and legacy-format successful cache is reused"
+        "current successful cache is reused"
     );
     let generation: String = db
         .query_row("SELECT value FROM meta WHERE key='generation'", [], |r| {
@@ -1233,7 +1211,18 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     let unavailable = search(root, "docs", "recovery", SearchMode::Hybrid).await;
     assert_eq!(unavailable["ok"], true);
     assert_eq!(unavailable["result"]["degraded"], true);
-    assert_eq!(unavailable["result"]["scope_errors"][0]["warning"], true);
+    assert!(
+        unavailable["result"]["scope_errors"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !unavailable["result"]["warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         !unavailable["result"]["items"]
             .as_array()

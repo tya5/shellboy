@@ -73,8 +73,9 @@ pub struct UiAttachment {
     pub path: PathBuf,
     pub kind: String,
     pub state: String,
-    /// Byte position of this attachment's UI marker; absent legacy refs append.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Byte position of the owned marker. Metadata awaiting marker placement
+    /// uses explicit null; a sendable draft must contain a concrete position.
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     pub position: Option<usize>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

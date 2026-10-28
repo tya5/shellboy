@@ -1,5 +1,9 @@
 # operation受付と後続処理の観測
 
+## Current-only contract (Issue #33, 0.2.0)
+
+Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
+
 ユーザー採用のローカル拡張。採用済みのCLI契約にある「送信受付と処理の成功は別」「旧instanceは保存結果の照会のみ」を実装へ揃える。既存のoperation ID、receipt、対象状態を再利用し、共通jobエンジンや外部副作用のexactly-once保証は追加しない。観測field自体は既存schemaを使い、後述のreceipt予算にはschema v6、開発途中版との整合にはv8を使う。
 
 ## 保存済み結果と再送
@@ -105,4 +109,4 @@ TUI停止/通常終了、既存の回収/明示restartは維持する。未受�
 
 ## 受付記録の照会入口
 
-正規CLIはoperation getとする。status --operationはv0.1.2の1リリースだけ非推奨aliasとして正規化し、stderrで移行先を案内する。旧wireのstatus wrapperは互換表示だけを残し、詳細の計算はoperation.getと共用する。以前のoutcomeなしの独立projectionは持たない。
+The canonical operation receipt query is `operation get` / `operation.get`. Issue #33 removes the expired `status --operation` alias and old status receipt wrapper. Work status remains its distinct current query; no compatibility projection or alias is retained.

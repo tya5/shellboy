@@ -1,6 +1,6 @@
 # Find a guide
 
-[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md) · [日本語](docs.ja.md)
+[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
 `shellboy docs` reads operation guides bundled into the executable. It needs no repository, running Shellboy owner, configuration, or API connection. `skill` is reserved for a possible separate feature; it is not the name of this guide reader.
 
@@ -23,7 +23,7 @@ shellboy docs search --query 'child agent'
 shellboy docs search --query 'background' --parent shellboy/work
 ```
 
-The bundled catalogue is English; use English search terms. Search uses case-insensitive literal substring matching, not query translation. Japanese literals present in quoted UI captions can also match without word spacing. A search excerpt is not the full document. Use its `id` with `docs get` to read the source. Explicitly select `rag search` for semantic search or searches spanning guides and other documents.
+The bundled catalogue is English. Search uses case-insensitive literal substring matching, not query translation. Japanese literals present in quoted UI captions can also match without word spacing. A search excerpt is not the full document. Use its `id` with `docs get` to read the source. Explicitly select `rag search` for semantic search or searches spanning guides and other documents.
 
 ## Versions and pagination
 

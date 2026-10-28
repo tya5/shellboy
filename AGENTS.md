@@ -8,7 +8,7 @@ This file contains instructions for developing Shellboy itself. Product users sh
 - Keep the [development status](docs/development/status.md) current. Record verified and untested behavior separately in [acceptance](docs/validation/acceptance.md). An existing document or an earlier successful test does not prove the current change works.
 - Make routine decisions autonomously. Record uncertain decisions, their reasoning, impact, and conditions for revisiting them in the [decision log](docs/development/decisions.md).
 - Follow the [documentation layout and maintenance rules](docs/README.md). Adopted designs must be usable from this repository alone.
-- English is the default for new documentation and development instructions. User-facing guide translations use `name.ja.md`; the Agent Guide is English only. Follow the [documentation language policy and UI evaluation](docs/design/documentation-language.md). Existing Japanese UI labels are unchanged until a separate implementation task.
+- English is the default for new documentation and development instructions. Only the User Guide has a Japanese translation, `user-guide.ja.md`; other guides, including the Agent Guide, are English only. Follow the [documentation language policy and UI evaluation](docs/design/documentation-language.md). Existing Japanese UI labels are unchanged until a separate implementation task.
 
 ## Implementation boundaries
 

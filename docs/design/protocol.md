@@ -1,5 +1,9 @@
 # P1 公開操作・ローカル通信の実装契約
 
+## Current-only contract (Issue #33, 0.2.0)
+
+Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
+
 採用状態: 実装基準。公開wire・型・エラー・永続化境界を本書で具体化する。契約の由来となった初期仕様資料は非同梱であり、現行の採用範囲は [適用仕様](effective-spec.md) と本書を正本とする。
 
 `src/protocol.rs` がTUI/Control/CLIで共有する公開型である。CLIの空白区切り操作名はwireでは `thread.list` のようなドット区切りとする。35操作を `Command` の閉じたenumと各操作専用argsへ対応させる。shell起動はこのenumに含めず、モデル唯一のshellツール `ShellToolArgs` のみで表す。`attach` はCLIで `attachment.add` に正規化する。`--text-stdin` はCLIが読み取り `text` に正規化し、wireへOSのstdinハンドルを送らない。
@@ -54,7 +58,7 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 
 検索はfilter後にL2距離で順位を決め、chunkをnode単位にまとめる。同じ内容の異なるnodeは統合しない。各hitはnode_id/excerpt/distance/spans/provenanceを持つ。spansはsource_revision/content_hash/body_kind/start/endを持ち、抽出本文のUnicode scalar位置 `[start,end)` を示す意味検索chunk範囲である。語の一致範囲ではなく、threshold指定もない。Thread限定時だけthread_scope={thread_id,on_current_path}を返し、採用path上ならtrue、completed出典としてだけ対象ならfalse。globalではこのfieldを省略し、所属を推定しない。
 
-`NodeProvenance` はkind/created_at/source_revisionと任意turn_id/run_id/origin_thread_id。未確定のIDを生成せず省略し、originを共有nodeの全所属と同一視しない。`HistoryBody.provenance` は後方互換の任意fieldとして公開し、現行getは保存上のnode情報から返す。
+`NodeProvenance` はkind/created_at/source_revisionと任意turn_id/run_id/origin_thread_id。未確定のIDを生成せず省略し、originを共有nodeの全所属と同一視しない。`HistoryBody.provenance` is required and is derived from the saved node.
 
 `HistoryRelationsArgs` はnode_id、必須relation（previous/next/sources/replacements）、limit既定50・最大200、任意cursor。`Page<RelationItem>` の各要素はnode_id/provenanceと、置換関係に限るreplacement_id/source_revision/source_hashを持つ。previous/nextは会話辺、sourcesはcompleted置換出力→出典、replacementsは出典→completed置換出力である。relation item直下のsource_revision/hashは置換記録時の出典witness、provenance.source_revisionは返却nodeの現在版であり区別する。cursorは対象node・relation・revisionとwatermarkに束縛し、追加関係を途中pageへ混入させない。履歴変更・無制限の祖先/子孫探索は含めない。採用経路は既存history.listで取得する。
 
@@ -62,7 +66,7 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 
 現行操作数は37。`thread.delete_preview` は既存ThreadDeleteArgsを用いる読み取り専用操作で、CLIは `thread delete-preview --thread ID [--descendants]`。同snapshotの阻害Run・直接参照・対象件数を返し、実削除の再判定は維持する。`reclaimable_bytes` はnullと理由を返し、GC到達性や物理容量を推定しない。[全体設計](observability-and-deletion.md)、[削除影響](deletion-impact.md)を参照。
 
-ThreadDetails/RunDetails/TurnDetails/MessageDetails/HistoryBodyにdefault・省略可能なcontextを追加する。保存された時刻・所有・状態と構造化理由だけを返し、検索NodeProvenanceは拡大しない。lifetime_msの閉区間と未知値省略は[実行情報](execution-context.md)に従う。
+RunDetails/TurnDetails/MessageDetails/HistoryBody require context. HistorySnippet requires provenance, context, and selection; HistoryBody also requires provenance. ThreadDetails may omit context for a fork. These records are not defaulted to empty values to accept older owners. Current ShellOutput.decode_errors, history execution_count/executions_truncated, and StatusSnapshot.receipt_budget are also required; payload_chars remains nullable for reclaimed bodies and an empty executions array may be omitted. 保存された時刻・所有・状態と構造化理由だけを返し、検索NodeProvenanceは拡大しない。lifetime_msの閉区間と未知値省略は[実行情報](execution-context.md)に従う。
 
 operation.getは既存state/outcomeへinstance_id/created_at/current_instance/result_uncertain/replay_policy/targets/downstreamを追加する。compactの受付receiptは不変とし、後続結果はdownstreamへ分離する。attachment.addの保存済み同ID照合は現在のファイル/Threadのpreflightに先行する。認証・構文・要求fingerprintは維持する。全mutationの境界は[operation観測](operation-observability.md)を参照。
 
@@ -192,15 +196,7 @@ OSごとの所有対象を型の構成で明確にする。Windowsの実機受�
 
 ### 同じwire版の旧ownerと未知操作（PR1-10）
 
-protocol_version=1はframe/envelopeの版であり、全command/argsの能力一致を保証しない。
-旧ownerが未知commandをdecode時に拒否した切断と、適用後に返信を失った切断を、client側の
-EOFだけから区別できない。したがって送信後にreceiptがないことから未適用と断定せず、既存の
-uncertain/operation IDを保持する。案内はversion/command不一致も候補として明示し、対象の保存
-状態を確認して同じ版のCLI/ownerへ揃える。新IDでの自動再送はしない。
-
-deny_unknown_fieldsを使う既存Hello/Welcomeへ能力fieldを一方的に足したり、wire版を上げて
-旧CLIを拒否したりはしない。新しいcapability negotiationを公開契約として導入する場合は別途
-設計が必要であり、この是正では既存wire互換と不明な副作用の保全を優先する。
+Historical older-owner guidance is superseded by Issue #33. Current request/response envelopes use `protocol_version=2`. Other versions are rejected, and current required fields are not made optional for older owners. Use the same release for CLI and owner. Unknown operations remain errors; a connection loss is still not proof that a mutation did not execute. No capability negotiation or old status wrapper is added.
 
 ## R3-3 / R3-4: Command分類・語彙・既定値の正本
 

@@ -148,21 +148,20 @@ pub(crate) fn decode(
         if !ids.insert(&a.id) {
             return Err(invalid());
         }
-        if let Some(p) = a.position
-            && (!text.is_char_boundary(p) || !text[p..].starts_with(MARKER) || !positions.insert(p))
-        {
+        let p = a.position.ok_or_else(invalid)?;
+        if !text.is_char_boundary(p) || !text[p..].starts_with(MARKER) || !positions.insert(p) {
             return Err(invalid());
         }
     }
-    attachments.sort_by_key(|a| a.position.unwrap_or(text.len()));
+    attachments.sort_by_key(|a| a.position.expect("validated marker position"));
     let mut plain = String::new();
     let mut source = 0;
     let mut offsets = Vec::new();
     for a in &attachments {
-        let position = a.position.unwrap_or(text.len());
+        let position = a.position.expect("validated marker position");
         plain.push_str(&text[source..position]);
         offsets.push(plain.len());
-        source = position + a.position.map_or(0, |_| MARKER.len());
+        source = position + MARKER.len();
     }
     plain.push_str(&text[source..]);
     let content = DraftContent {
@@ -315,7 +314,7 @@ mod tests {
             assert_eq!(draft.cursor, expected, "{key:?}");
         }
         assert_eq!(draft.text, original);
-        draft.cursor = start + "日".len(); // A legacy saved cursor inside a collapsed block.
+        draft.cursor = start + "日".len(); // A restored cursor inside a collapsed block.
         draft.insert_text("追加", false, None);
         assert_eq!(&draft.text[end..], "追加末");
         assert_eq!(draft.folds[0].end, end);
@@ -372,13 +371,13 @@ mod tests {
     fn marker_is_owned_by_id_position_and_literal_unicode_stays_plain_text() {
         let text = format!("literal {MARKER} 前{MARKER}後");
         let at = format!("literal {MARKER} 前").len();
-        let attachments = vec![attachment("a", Some(at)), attachment("legacy", None)];
+        let attachments = vec![attachment("a", Some(at))];
         let (content, ordered) = decode(&text, attachments.clone()).unwrap();
         assert_eq!(content.text, format!("literal {MARKER} 前後"));
-        assert_eq!(content.positions, [at, content.text.len()]);
+        assert_eq!(content.positions, [at]);
         assert_eq!(
             ordered.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
-            ["a", "legacy"]
+            ["a"]
         );
         let draft = DraftSnapshot {
             text,
@@ -402,13 +401,24 @@ mod tests {
             .is_err()
         );
         assert!(decode("normal", vec![attachment("a", Some(0))]).is_err());
-        let old: UiAttachment =
-            serde_json::from_value(json!({"id":"old","path":"/old","kind":"file","state":"ready"}))
-                .unwrap();
-        assert_eq!(old.position, None);
-        assert_eq!(
-            decode("旧本文", vec![old]).unwrap().0.positions,
-            ["旧本文".len()]
+        assert!(
+            serde_json::from_value::<UiAttachment>(json!({
+                "id":"old","path":"/old","kind":"file","state":"ready"
+            }))
+            .is_err(),
+            "a missing position is not silently appended"
+        );
+        let pending: UiAttachment = serde_json::from_value(json!({
+            "id":"pending","path":"/pending","kind":"file","state":"ready","position":null
+        }))
+        .unwrap();
+        assert!(
+            pending.position.is_none(),
+            "unpositioned metadata is valid before marker placement"
+        );
+        assert!(
+            decode("text", vec![pending]).is_err(),
+            "sending requires owned markers"
         );
     }
     #[test]

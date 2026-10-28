@@ -85,13 +85,9 @@ pub(super) struct Work {
     pub(super) segment: Segment,
     pub(super) group: String,
     pub(super) authorization: String,
-    #[serde(default)]
     pub(super) attempts: usize,
-    #[serde(default)]
     pub(super) state: String,
-    #[serde(default)]
     pub(super) next_at: Option<String>,
-    #[serde(default)]
     pub(super) error: Option<Value>,
 }
 

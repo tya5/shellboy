@@ -15,7 +15,7 @@ pub(super) async fn guard<T>(
             Err(ApiError::new(
                 ErrorCode::IoFailed,
                 "削除処理が予期せず停止しました。結果は未確認です。一覧を再取得し、削除影響を確認してから再操作してください",
-            ))
+            ).details(serde_json::json!({"deletion_outcome_uncertain": true})))
         })
 }
 
@@ -174,6 +174,10 @@ mod tests {
         assert!(error.message.contains("結果は未確認"));
         assert!(error.message.contains("一覧を再取得"));
         assert!(!error.is_storage_failure());
+        assert_eq!(
+            error.details.as_ref().unwrap()["deletion_outcome_uncertain"],
+            true
+        );
         assert!(matches!(
             guard(async { Ok(Outcome::Applied) }).await,
             Ok(Outcome::Applied)

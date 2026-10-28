@@ -1,6 +1,6 @@
 # Delegation and coordination
 
-[日本語](delegation.ja.md) · [Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
+[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
 A Shellboy child agent (also called a subagent) is a Run executing on a child Thread. A Thread holds stored conversation and configuration; a Run owns shells and child Runs; a Turn is one response interval. Creating a child alone does not start execution. Sending a request assigns a Run/Turn. Parent and child share the runtime and filesystem, not separate isolated environments.
 

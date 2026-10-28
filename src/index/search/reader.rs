@@ -56,33 +56,33 @@ pub(super) async fn rank(
         let _permit = permit;
         let operation = || -> Result<Vec<IndexHit>, ApiError> {
             ensure_running(Some(&cancel))?;
-            crate::storage::register_vec().map_err(db_error)?;
+            crate::storage::register_vec().map_err(read_db_error)?;
             let db = Connection::open_with_flags(
                 path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )
-            .map_err(sql_error)?;
+            .map_err(read_sql_error)?;
             *interrupt.lock().expect("search interrupt poisoned") = Some(db.get_interrupt_handle());
             // A cancellation racing connection creation still interrupts before
             // the first statement, without relying on a lost Notify permit.
             ensure_running(Some(&cancel))?;
             db.busy_timeout(Duration::from_millis(100))
-                .map_err(sql_error)?;
+                .map_err(read_sql_error)?;
             db.execute_batch("PRAGMA query_only=ON;")
-                .map_err(sql_error)?;
+                .map_err(read_sql_error)?;
             let version: i64 = db
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
-                .map_err(sql_error)?;
+                .map_err(read_sql_error)?;
             if version != crate::storage::SCHEMA_VERSION {
                 return Err(err(
                     ErrorCode::InvalidState,
                     "History search schema changed; retry after reopening the owner",
                 ));
             }
-            let snapshot = db.unchecked_transaction().map_err(sql_error)?;
+            let snapshot = db.unchecked_transaction().map_err(read_sql_error)?;
             check_space(&snapshot, &space)?;
             let ranked = ranked_hits(&snapshot, &space, &query, &args, Some(&cancel))?;
-            snapshot.commit().map_err(sql_error)?;
+            snapshot.commit().map_err(read_sql_error)?;
             #[cfg(test)]
             if let Some(gate) = refresh_gate {
                 if let Some(ready) = gate.ready.lock().unwrap().take() {
@@ -102,10 +102,10 @@ pub(super) async fn rank(
             ensure_running(Some(&cancel))?;
             // Writers may commit deletion/GC while ranking uses its WAL snapshot.
             // Revalidate only the bounded returned nodes against a fresh snapshot.
-            let current = db.unchecked_transaction().map_err(sql_error)?;
+            let current = db.unchecked_transaction().map_err(read_sql_error)?;
             check_space(&current, &space)?;
             let hits = refresh_hits(&current, ranked, &args, &cancel)?;
-            current.commit().map_err(sql_error)?;
+            current.commit().map_err(read_sql_error)?;
             ensure_running(Some(&cancel))?;
             Ok(hits)
         };
@@ -137,18 +137,67 @@ fn observation_error(mut error: ApiError) -> ApiError {
     if error.is_storage_failure() {
         error.code = ErrorCode::IoFailed;
         error.message = format!("Read-only history search failed: {}", error.message);
-        error.hint = Some("Inspect the reported SQLite read failure and repair its cause before retrying history search; corrupt databases or missing tables are not repaired by retries. Repeating search after HTTP may incur another query embedding charge.".into());
+        let primary = error
+            .details
+            .as_ref()
+            .and_then(|details| details.get("sqlite_primary_code"))
+            .and_then(serde_json::Value::as_i64);
+        let recovery = match primary {
+            Some(code)
+                if code == i64::from(rusqlite::ffi::SQLITE_BUSY)
+                    || code == i64::from(rusqlite::ffi::SQLITE_LOCKED) =>
+            {
+                "Wait for the database lock or competing operation to finish, then retry history search."
+            }
+            Some(code)
+                if code == i64::from(rusqlite::ffi::SQLITE_CORRUPT)
+                    || code == i64::from(rusqlite::ffi::SQLITE_NOTADB)
+                    || code == i64::from(rusqlite::ffi::SQLITE_SCHEMA)
+                    || code == i64::from(rusqlite::ffi::SQLITE_ERROR) =>
+            {
+                "Inspect the reported database/schema failure and repair its cause before retrying; corrupt databases or missing tables are not repaired by retries."
+            }
+            _ => {
+                "Inspect the reported read failure: for SQLITE_BUSY/SQLITE_LOCKED wait for the lock to clear before retrying; for corruption, a non-database file, or missing/incompatible schema, repair the cause first. Other read failures require checking the reported path and cause."
+            }
+        };
+        error.hint = Some(format!(
+            "{recovery} This is a read-only observation with no operation receipt to query. Repeating search after HTTP may incur another query embedding charge."
+        ));
     }
     error
 }
 
+// Preserve SQLite codes before the existing shared helpers erase their types.
+// Shared ranking/provenance errors without codes receive conditional guidance;
+// do not infer a SQLite category by parsing provider- or platform-specific prose.
+fn read_sql_error(error: rusqlite::Error) -> ApiError {
+    let extended = error.sqlite_error().map(|sqlite| sqlite.extended_code);
+    let mut error = sql_error(error);
+    if let Some(extended) = extended {
+        let details = error.details.get_or_insert_with(|| serde_json::json!({}));
+        if let Some(details) = details.as_object_mut() {
+            details.insert("sqlite_primary_code".into(), (extended & 0xff).into());
+            details.insert("sqlite_extended_code".into(), extended.into());
+        }
+    }
+    error
+}
+
+fn read_db_error(error: StorageError) -> ApiError {
+    match error {
+        StorageError::Sqlite(error) => read_sql_error(error),
+        other => db_error(other),
+    }
+}
+
 fn check_space(db: &Connection, expected: &Space) -> Result<(), ApiError> {
-    let selected = meta(db, IndexKeys::ACTIVE_SPACE).map_err(db_error)?;
+    let selected = meta(db, IndexKeys::ACTIVE_SPACE).map_err(read_db_error)?;
     let current = selected
         .as_deref()
         .map(|id| load_space(db, id))
         .transpose()
-        .map_err(db_error)?
+        .map_err(read_db_error)?
         .flatten();
     if current.as_ref().is_none_or(|current| {
         current.id != expected.id
@@ -177,7 +226,7 @@ fn refresh_hits(
         ensure_running(Some(cancel))?;
         let raw = witness.raw.is_some();
         let valid = witness_valid(db, &witness, if raw { "tool_raw" } else { "canonical" })
-            .map_err(db_error)?;
+            .map_err(read_db_error)?;
         validity
             .entry(witness.node_id)
             .or_default()
@@ -192,7 +241,7 @@ fn refresh_hits(
                 [thread],
                 |row| row.get(0),
             )
-            .map_err(sql_error)?;
+            .map_err(read_sql_error)?;
         if !exists {
             return Err(err(
                 ErrorCode::ThreadNotFound,
@@ -207,13 +256,13 @@ fn refresh_hits(
                 .collect::<Vec<_>>(),
         )
         .map_err(|_| err(ErrorCode::InvalidState, "Cannot encode search result IDs"))?;
-        let mut query=db.prepare("WITH RECURSIVE scope(id) AS(SELECT node_id FROM thread_path WHERE thread_id=?1 UNION SELECT rs.source_node_id FROM scope s JOIN replacement r ON r.output_node_id=s.id AND r.state='completed' JOIN replacement_source rs ON rs.replacement_id=r.id) SELECT id FROM scope WHERE id IN(SELECT value FROM json_each(?2))").map_err(sql_error)?;
+        let mut query=db.prepare("WITH RECURSIVE scope(id) AS(SELECT node_id FROM thread_path WHERE thread_id=?1 UNION SELECT rs.source_node_id FROM scope s JOIN replacement r ON r.output_node_id=s.id AND r.state='completed' JOIN replacement_source rs ON rs.replacement_id=r.id) SELECT id FROM scope WHERE id IN(SELECT value FROM json_each(?2))").map_err(read_sql_error)?;
         Some(
             query
                 .query_map(params![thread, ids], |row| row.get::<_, String>(0))
-                .map_err(sql_error)?
+                .map_err(read_sql_error)?
                 .collect::<Result<HashSet<_>, _>>()
-                .map_err(sql_error)?,
+                .map_err(read_sql_error)?,
         )
     } else {
         None
@@ -224,7 +273,7 @@ fn refresh_hits(
         if scoped
             .as_ref()
             .is_some_and(|scope| !scope.contains(&hit.node_id))
-            || !history::reachability::searchable(db, &hit.node_id).map_err(sql_error)?
+            || !history::reachability::searchable(db, &hit.node_id).map_err(read_sql_error)?
         {
             continue;
         }
@@ -259,7 +308,7 @@ mod tests {
         let space = worker.call(|db| {
             let tx = db.transaction()?;
             let embedding = identity::EmbeddingIdentity { key:"fixture-key".into(), profile:"fixture".into(), model:"synthetic".into(), query_key:"fixture-query".into() };
-            let space = ensure_space(&tx, &embedding, "active", 2, true)?;
+            let space = ensure_space(&tx, &embedding, "active", 2)?;
             tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('thread','/','/a','fixture','synthetic','now'); INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES('first','user','now','{}','body'),('second','user','now','{}','body'); INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('thread',0,'first'),('thread',1,'second');")?;
             for (ordinal, id) in [(1, "first"), (2, "second")] {
                 let watermark=json!({"witness":{"node_id":id,"revision":0,"body_hash":"body","raw":null}}).to_string();
@@ -548,6 +597,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn non_database_reader_file_requires_repair_without_poisoning_writer() {
+        let (root, db, space) = fixture().await;
+        let path = root.path().join("not-a-database.sqlite");
+        std::fs::write(
+            &path,
+            b"This file is not a SQLite database; preserve the reported cause.",
+        )
+        .unwrap();
+        let error = failed_rank(path, space).await;
+        assert!(error.message.contains("not a database"), "{error:?}");
+        let hint = error.hint.as_deref().unwrap();
+        assert!(
+            hint.contains("repair its cause before retrying"),
+            "{error:?}"
+        );
+        assert!(!hint.contains("Wait for"), "{error:?}");
+        assert!(hint.contains("no operation receipt"), "{error:?}");
+        assert!(hint.contains("embedding charge"), "{error:?}");
+        assert_eq!(
+            error.details.as_ref().unwrap()["sqlite_primary_code"],
+            rusqlite::ffi::SQLITE_NOTADB
+        );
+        subsequent_mutation(&db).await;
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn readonly_query_failure_is_an_observation_and_preserves_the_sqlite_cause() {
         let (_root, db, space) = fixture().await;
         db.call(|db| {
@@ -561,6 +637,10 @@ mod tests {
             error.message.contains("no such table: embedding_chunk"),
             "{error:?}"
         );
+        let hint = error.hint.as_deref().unwrap();
+        assert!(hint.contains("repair the cause first"), "{error:?}");
+        assert!(hint.contains("no operation receipt"), "{error:?}");
+        assert!(hint.contains("embedding charge"), "{error:?}");
         subsequent_mutation(&db).await;
         db.shutdown().await.unwrap();
     }
@@ -585,6 +665,11 @@ mod tests {
         let hint = error.hint.as_deref().unwrap();
         assert!(hint.contains("embedding charge"), "{error:?}");
         assert!(hint.contains("not repaired by retries"), "{error:?}");
+        assert!(hint.contains("no operation receipt"), "{error:?}");
+        assert_eq!(
+            error.details.as_ref().unwrap()["sqlite_primary_code"],
+            rusqlite::ffi::SQLITE_ERROR
+        );
         assert!(!hint.contains("existing data was preserved"), "{error:?}");
         subsequent_mutation(&db).await;
         db.shutdown().await.unwrap();
@@ -602,6 +687,15 @@ mod tests {
             .unwrap();
         let error = failed_rank(path.clone(), space).await;
         assert!(error.message.contains("database is locked"), "{error:?}");
+        let hint = error.hint.as_deref().unwrap();
+        assert!(hint.contains("Wait for the database lock"), "{error:?}");
+        assert!(!hint.contains("repair"), "{error:?}");
+        assert!(hint.contains("no operation receipt"), "{error:?}");
+        assert!(hint.contains("embedding charge"), "{error:?}");
+        assert_eq!(
+            error.details.as_ref().unwrap()["sqlite_primary_code"],
+            rusqlite::ffi::SQLITE_BUSY
+        );
         lock.execute_batch("ROLLBACK").unwrap();
         drop(lock);
         let db = DbWorker::open(path).await.unwrap();
@@ -631,7 +725,7 @@ mod tests {
         let table = owner.db.call(move |db| {
             let tx = db.transaction()?;
             let embedding = identity::EmbeddingIdentity::configured(&config, identity::profile_key(&config).unwrap());
-            let space = ensure_space(&tx, &embedding, "active", 2, true)?;
+            let space = ensure_space(&tx, &embedding, "active", 2)?;
             tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('thread','/','/a','fixture','synthetic','now'); INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES('first','user','now','{}','body'); INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('thread',0,'first');")?;
             let watermark=json!({"witness":{"node_id":"first","revision":0,"body_hash":"body","raw":null}}).to_string();
             tx.execute("INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state,authorized_watermark)VALUES('first',?1,'first',0,'canonical','body',0,1,'done',?2)", params![space.id,watermark])?;

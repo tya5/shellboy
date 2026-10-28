@@ -125,7 +125,7 @@ impl Store {
     ) -> Result<MutationResult> {
         request.validate()?;
         if let Command::Status(mut args) = request.command.clone() {
-            if args.operation_id.is_none() && args.thread_id.is_none() && args.run_id.is_none() {
+            if args.thread_id.is_none() && args.run_id.is_none() {
                 args.thread_id = caller.as_ref().map(|origin| origin.thread_id.clone());
             }
             let instance = self.instance_id.clone();
@@ -1439,7 +1439,7 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
             .unwrap_or(Assignment::ExistingTurn)
     };
     Ok(MessageDetails {
-        context: Some(crate::context::for_message(connection, id)?),
+        context: crate::context::for_message(connection, id)?,
         message_id: id.into(),
         thread_id: row.0,
         delivery_status: status,
@@ -1474,7 +1474,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
             (Some(id), answer, reason)
         });
     Ok(RunDetails {
-        context: Some(crate::context::for_run(connection, id)?),
+        context: crate::context::for_run(connection, id)?,
         run_id: id.into(),
         thread_id: row.0,
         state,
@@ -1496,7 +1496,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
 }
 
 pub fn turn_details(connection: &Connection, id: &str) -> Result<TurnDetails> {
-    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{context:Some(crate::context::for_turn(connection,id)?),turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,answer_node_id:row.3,recovery_hint:row.4}))
+    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,answer_node_id:row.3,recovery_hint:row.4}))
 }
 
 pub(super) fn authorize_owned_run(

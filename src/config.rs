@@ -271,7 +271,6 @@ section!(positive "limits", Limits {
     attachment_request_bytes: u64 = 40 * MIB,
     shell_raw_bytes: u64 = 64 * MIB,
     tool_excerpt_bytes: u64 = 16 * 1024,
-    history_read_bytes: u64 = 64 * 1024,
     shell_stdin_bytes: u64 = MIB,
     draft_bytes: u64 = MIB,
     data_warning_bytes: u64 = 8 * GIB,

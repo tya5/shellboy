@@ -1,6 +1,6 @@
 # Shell execution and output
 
-[日本語](shell.ja.md) · [Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
+[Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
 The model uses the `shell` tool for external work. The `shellboy shell ...` CLI observes, supplies stdin to, and stops executions that have already started. There is no `shellboy shell start` command. Humans can run arbitrary commands in their own terminals, but those commands alone are not recorded as Shellboy-owned executions.
 
@@ -101,7 +101,7 @@ Evaluate `result.text` and `raw_bytes` in the saved `read.json`, not the whole s
 
 When a shell calls `shellboy message send`, that shell's `execution_id` identifies **the process running the sending CLI**. Its stdout legitimately contains acceptance JSON such as `accepted` / `message_id`. Acceptance does not mean the receiving model has completed launching a shell. Message/run/turn IDs in the acceptance result are not shell execution IDs either. For delegated verification, obtain the target ID from the shell tool result actually returned to the receiving model. Calling the tool directly in this minimal check avoids that distinction.
 
-Updated launching tool results and `shell get` return the actual command and ownership context. An older owner that lacks fields such as command can expose the newer query information after a normal exit and restart.
+Launching tool results and `shell get` return the actual command and ownership context. Use the same current release for the CLI and owner.
 
 `shell read` decodes the specified execution's stored stdout/stderr raw bytes. It does not automatically mix in CLI response JSON from another execution. However, if the target command itself calls `shellboy message send` or another CLI, that CLI's stdout really does become part of the target shell's raw output. For unexpected characters, first compare `result.execution_id`, the `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shell get`, and shell configuration. Distinguish display confusion from output actually present in raw bytes.
 

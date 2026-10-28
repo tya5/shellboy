@@ -353,6 +353,76 @@ async fn root_replaced_by_symlink_preserves_all_saved_revisions() {
     assert_eq!(recovered["result"]["removed"], 1);
 }
 
+// Both replacements must be rejected before root-glob matching. In particular,
+// no reader may open a FIFO and wait for a writer to produce document bytes.
+#[cfg(unix)]
+#[tokio::test]
+async fn special_file_root_preserves_saved_revisions_before_exclusion() {
+    for socket in [false, true] {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        let materials = root.join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("old.md"), "retained original revision").unwrap();
+        init(root).await;
+        add(root, "materials", &["materials"], false).await;
+        assert_eq!(
+            index(root, false, IndexMode::Keyword).await["result"]["changed"],
+            1
+        );
+        let before = call(
+            root,
+            RagCommand::Inspect {
+                id: "old.md".into(),
+            },
+        )
+        .await;
+        std::fs::remove_dir_all(&materials).unwrap();
+        // Keep the socket listener alive throughout both synchronization modes.
+        let _listener = if socket {
+            Some(std::os::unix::net::UnixListener::bind(&materials).unwrap())
+        } else {
+            assert!(
+                std::process::Command::new("mkfifo")
+                    .arg(&materials)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            None
+        };
+        for dry_run in [true, false] {
+            let unavailable = index(root, dry_run, IndexMode::Keyword).await;
+            assert_eq!(unavailable["ok"], false, "socket={socket}: {unavailable}");
+            assert_eq!(unavailable["error"]["code"], "partial_failure");
+            assert_eq!(
+                unavailable["result"]["sources"][0]["error"],
+                "source_unavailable"
+            );
+            assert_eq!(unavailable["result"]["sources"][0]["scan_complete"], false);
+            assert_eq!(unavailable["result"]["removed"], 0);
+            assert_eq!(unavailable["result"]["changed"], 0);
+            assert_eq!(unavailable["result"]["processed"], 0);
+            let retained = call(
+                root,
+                RagCommand::Inspect {
+                    id: "old.md".into(),
+                },
+            )
+            .await;
+            assert_eq!(retained["result"]["revision"], before["result"]["revision"]);
+            assert_eq!(
+                retained["result"]["state"],
+                if dry_run { "ready" } else { "stale" }
+            );
+        }
+        assert_eq!(
+            call(root, RagCommand::Status).await["result"]["documents"],
+            1
+        );
+    }
+}
+
 #[tokio::test]
 async fn exclusions_skip_descendants_but_do_not_exclude_directory_source_root() {
     let root = tempfile::tempdir().unwrap();
@@ -439,7 +509,7 @@ async fn glob_case_sensitivity_is_independent_of_filesystem_case_rules() {
 }
 
 #[tokio::test]
-async fn version_one_read_and_dry_run_are_write_free_then_writer_migrates_existing_sources() {
+async fn version_one_readers_reject_without_writes_then_writer_migrates_existing_sources() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     std::fs::create_dir(root.join("materials")).unwrap();
@@ -451,18 +521,27 @@ async fn version_one_read_and_dry_run_are_write_free_then_writer_migrates_existi
         db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; ALTER TABLE sources DROP COLUMN exclude_json; PRAGMA user_version=1; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     }
     let before = std::fs::read(root.join("rag.db")).unwrap();
-    assert_eq!(
+    for result in [
         call(
             root,
             RagCommand::Source {
-                command: SourceCommand::List
-            }
+                command: SourceCommand::List,
+            },
         )
-        .await["ok"],
-        true
-    );
-    assert_eq!(call(root, RagCommand::Status).await["ok"], true);
-    assert_eq!(index(root, true, IndexMode::Keyword).await["ok"], true);
+        .await,
+        call(root, RagCommand::Status).await,
+        index(root, true, IndexMode::Keyword).await,
+    ] {
+        assert_eq!(result["ok"], false, "{result}");
+        assert_eq!(result["error"]["code"], "schema_unsupported", "{result}");
+        assert!(
+            result["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("writer command"),
+            "{result}"
+        );
+    }
     assert_eq!(std::fs::read(root.join("rag.db")).unwrap(), before);
     let readded = add(root, "materials", &["*.log"], false).await;
     assert_eq!(readded["result"]["source_id"], original);
@@ -594,7 +673,9 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; PRAGMA user_version=2; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     drop(db);
     let before = std::fs::read(&path).unwrap();
-    assert_eq!(call(root, RagCommand::Status).await["ok"], true);
+    let rejected = call(root, RagCommand::Status).await;
+    assert_eq!(rejected["ok"], false, "{rejected}");
+    assert_eq!(rejected["error"]["code"], "schema_unsupported");
     assert_eq!(std::fs::read(&path).unwrap(), before);
     std::fs::create_dir(root.join("notes")).unwrap();
     assert_eq!(add(root, "notes", &[], false).await["ok"], true);
@@ -605,4 +686,49 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
         3
     );
     assert_eq!(indexes(&db), expected);
+}
+
+#[tokio::test]
+async fn readonly_history_rejects_older_conversation_schema_without_migrating() {
+    use shellboy::{rag::SearchMode, storage::DbWorker};
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::create_dir(root.join("data")).unwrap();
+    init(root).await;
+    let path = root.join("data/shellboy.db");
+    let writer = DbWorker::open(&path).await.unwrap();
+    writer.shutdown().await.unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DELETE FROM schema_migration WHERE version=10; PRAGMA user_version=9; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    db.close().unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let result = call(
+        root,
+        RagCommand::Search {
+            query: "synthetic migration".into(),
+            scope: vec!["history".into()],
+            mode: SearchMode::Keyword,
+            limit: 10,
+        },
+    )
+    .await;
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(
+        result["result"]["scope_errors"][0]["code"], "schema_unsupported",
+        "{result}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let writer = DbWorker::open(&path).await.unwrap();
+    writer.shutdown().await.unwrap();
+    let result = call(
+        root,
+        RagCommand::Search {
+            query: "synthetic migration".into(),
+            scope: vec!["history".into()],
+            mode: SearchMode::Keyword,
+            limit: 10,
+        },
+    )
+    .await;
+    assert_eq!(result["ok"], true, "{result}");
 }

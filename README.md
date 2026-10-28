@@ -12,7 +12,7 @@ A lightweight terminal AI agent environment written in Rust. Models have one too
 
 Start with the [User Guide](docs/guides/user-guide.md) ([Japanese](docs/guides/user-guide.ja.md)). Models working inside Shellboy should read the English-only [Agent Guide](docs/guides/agent-guide.md). The [guide index](docs/guides/README.md) covers configuration, history search, attachments, recovery, and the CLI.
 
-English is the default documentation language; Japanese user guides use `.ja.md`. The current TUI remains Japanese. UI language options are [evaluated here](docs/design/documentation-language.md); no UI language switch is implemented yet.
+English is the default documentation language; only the User Guide has a Japanese translation, `user-guide.ja.md`. The current TUI remains Japanese. UI language options are [evaluated here](docs/design/documentation-language.md); no UI language switch is implemented yet.
 
 The [development status](docs/development/status.md) and [verification record](docs/validation/acceptance.md) distinguish implemented behavior from the checks actually performed.
 
@@ -63,7 +63,7 @@ migrations/       Versioned SQLite migrations
 tests/            Integration tests and synthetic fixtures
 examples/         Local verification fixtures
 scripts/          Verification and terminal capture tools
-docs/guides/      User and model guides; English defaults, Japanese translations
+docs/guides/      User and model guides; English defaults; Japanese User Guide
 docs/design/      Adopted specifications and implementation designs
 docs/development/ Setup, status, and decision records
 docs/validation/  Verification procedures and observed results

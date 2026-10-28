@@ -302,7 +302,7 @@ pub(super) fn interruption(value: &serde_json::Value, kind: &str) -> (String, Ve
             "owned_children",
             "unreflected_messages",
             "cancelled_waits",
-            "legacy_pending_operations_with_unknown_targets",
+            "pending_operations_with_unknown_targets",
         ] {
             if let Some(count) = change
                 .get(section)
@@ -338,7 +338,7 @@ fn section_label(section: &str) -> &str {
         "owned_children" => "子の作業",
         "unreflected_messages" => "未反映の依頼",
         "cancelled_waits" => "中断した待機観測",
-        "legacy_pending_operations_with_unknown_targets" => "対象不明の旧受付",
+        "pending_operations_with_unknown_targets" => "対象不明の受付",
         _ => "対象",
     }
 }

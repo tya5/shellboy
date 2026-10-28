@@ -6,7 +6,7 @@
 
 人間はUser Guideから起動・会話・操作へ進む。shellboy内のモデルはAgent GuideからshellとCLIを使った実行手順へ進む。開発者向けの設計・検証・原文仕様は既存の配置を維持する。リポジトリ直下の `AGENTS.md` はshellboy自体の開発指示であり、Agent Guideと混同しない。
 
-ガイドは `docs/guides/` の一階層へまとめる。読者ごとに同じ機能説明を複製せず、二つの入口から機能別文書を共有する。English is the default for unsuffixed user/feature guides and the English-only Agent Guide. Japanese user-facing guides are preserved as `.ja.md`; the [language policy](documentation-language.md) supersedes the original Japanese-only guide language choice. 短いsystemから詳細を参照する方針を保ち、巨大なプロンプトをガイドへ転記しない。
+ガイドは `docs/guides/` の一階層へまとめる。読者ごとに同じ機能説明を複製せず、二つの入口から機能別文書を共有する。English is the default for unsuffixed user/feature guides and the English-only Agent Guide. Only the User Guide has a Japanese translation, `user-guide.ja.md`; the [language policy](documentation-language.md) supersedes the original Japanese-only guide language choice. 短いsystemから詳細を参照する方針を保ち、巨大なプロンプトをガイドへ転記しない。
 
 ## 作成する文書と責任
 

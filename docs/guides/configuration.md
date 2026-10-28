@@ -1,6 +1,6 @@
 # Configuration reference
 
-[日本語](configuration.ja.md) · [Guide index](README.md) · [User Guide](user-guide.md) · [CLI reference](cli-reference.md)
+[Guide index](README.md) · [User Guide](user-guide.md) · [CLI reference](cli-reference.md)
 
 Configuration is TOML read when the owner (`shellboy` without a subcommand) starts. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner.
 
@@ -224,7 +224,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `shell` | `kind` = Unix `bash` / Windows `powershell`, `executable` = automatic, `env` = empty dictionary | Shell kind, executable, additional environment; not direct WSL startup |
 | `retention` | `tool_raw_days=7`, `tool_raw_bytes=1073741824`, `clipboard_days=7`, `clipboard_bytes=268435456` | Raw output seven days/1GiB; managed images seven days/256MiB. Active pins/selections/drafts protected |
 | `limits` | `attachment_file_bytes=20971520`, `attachment_request_bytes=41943040` | 20MiB per attachment, 40MiB per request |
-| `limits` | `shell_raw_bytes=67108864`, `tool_excerpt_bytes=16384`, `history_read_bytes=65536` | Shell raw 64MiB, result excerpt 16KiB, body page 64KiB |
+| `limits` | `shell_raw_bytes=67108864`, `tool_excerpt_bytes=16384` | Shell raw 64MiB, result excerpt 16KiB; history body pages have a fixed 64KiB maximum, not a configuration key |
 | `limits` | `shell_stdin_bytes=1048576`, `draft_bytes=1048576` | Stdin and draft, 1MiB each |
 | `limits` | `data_warning_bytes=8589934592`, `data_max_bytes=10737418240` | Logical usage warning at 8GiB, stop new work at 10GiB |
 | `cache` | `body_bytes=33554432`, `layout_bytes=16777216`, `history_bytes=33554432`, `attachment_base64_bytes=67108864` | Body 32MiB, layout 16MiB, send history 32MiB, attachment conversion 64MiB |

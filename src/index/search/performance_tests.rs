@@ -71,7 +71,7 @@ async fn performance_semantic_ranking_writer_contention() {
     db.call(move |db| {
         let tx=db.transaction()?;
         let identity=identity::EmbeddingIdentity::configured(&config,identity::profile_key(&config).unwrap());
-        let space=ensure_space(&tx,&identity,"active",1536,true)?;
+        let space=ensure_space(&tx,&identity,"active",1536)?;
         tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('probe','/','/a','fixture','synthetic','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('probe-run','probe','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('probe-turn','probe','probe-run','running','now'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('probe-shell','probe-run','probe-turn','probe-operation','running','/','{}','UTF-8','UTF-8','open','now');")?;
         let first=serde_json::to_string(&vec![0.1f32;1536]).unwrap();
         let mut node=tx.prepare("INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES(?1,'user','2026-10-28T00:00:00Z','{\"text\":\"synthetic\"}','fixture-body')")?;

@@ -1,6 +1,6 @@
 # Shellboy guides
 
-Operation guides for people using Shellboy and models working inside it. Start with the [User Guide](user-guide.md) as a person, or the English-only [Agent Guide](agent-guide.md) as a model. [Japanese user guides](README.ja.md) are available as `.ja.md` files in the repository and release archives. The executable's `docs` catalogue uses the English guides; it does not implement a language selector.
+Operation guides for people using Shellboy and models working inside it. Start with the [User Guide](user-guide.md) as a person, or the English-only [Agent Guide](agent-guide.md) as a model. A [Japanese User Guide](user-guide.ja.md) is available in the repository and release archives. The executable's `docs` catalogue uses the English guides; it does not implement a language selector.
 
 ## Find a guide by task
 

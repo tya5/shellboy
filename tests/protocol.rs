@@ -106,7 +106,7 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
     ];
     assert_eq!(fixtures.len(), 38);
     for (command, args) in fixtures {
-        let request = Request::from_value(json!({"protocol_version":1,"operation_id":"instance:nonce","command":command,"args":args})).unwrap_or_else(|e| panic!("{command}: {e}"));
+        let request = Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"instance:nonce","command":command,"args":args})).unwrap_or_else(|e| panic!("{command}: {e}"));
         assert_eq!(request.command.name(), command);
         let value = serde_json::to_value(&request).unwrap();
         assert_eq!(value["command"], command);
@@ -119,26 +119,26 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
 #[test]
 fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
     for value in [
-        json!({"protocol_version":1,"operation_id":"op","command":"thread.list","args":{"limit":201}}),
-        json!({"protocol_version":1,"operation_id":"op","command":"history.get","args":{"node_id":"n","limit_bytes":65537}}),
-        json!({"protocol_version":1,"operation_id":"op","command":"history.search","args":{"query":"q","limit":51}}),
-        json!({"protocol_version":1,"operation_id":"op","command":"thread.list","args":{"secret":"do not echo"}}),
-        json!({"protocol_version":1,"operation_id":"op","command":"thread.list","args":{},"unknown":"do not echo"}),
-        json!({"protocol_version":1,"operation_id":"op","command":"run.stop","args":{"run_id":""}}),
-        json!({"protocol_version":1,"operation_id":"op","command":"wait","args":{"conditions":[]}}),
-        json!({"protocol_version":1,"operation_id":"op","command":"index.backfill","args":{}}),
-        json!({"protocol_version":1,"operation_id":"op","command":"thread.set","args":{}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{"limit":201}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"history.get","args":{"node_id":"n","limit_bytes":65537}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"history.search","args":{"query":"q","limit":51}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{"secret":"do not echo"}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{},"unknown":"do not echo"}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"run.stop","args":{"run_id":""}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"wait","args":{"conditions":[]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"index.backfill","args":{}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.set","args":{}}),
     ] {
         let error = Request::from_value(value).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgument);
         assert!(!error.message.contains("do not echo"));
     }
     let bad_version = Request::from_value(
-        json!({"protocol_version":2,"operation_id":"op","command":"thread.list","args":{}}),
+        json!({"protocol_version":0,"operation_id":"op","command":"thread.list","args":{}}),
     )
     .unwrap_err();
     assert_eq!(bad_version.code, ErrorCode::ProtocolMismatch);
-    assert!(serde_json::from_value::<Request>(json!({"protocol_version":1,"operation_id":"op","command":"thread.list","args":{},"unknown":true})).is_err());
+    assert!(serde_json::from_value::<Request>(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{},"unknown":true})).is_err());
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn assignment_never_exposes_fabricated_or_partial_ids() {
 
 #[test]
 fn wait_conditions_and_timeout_are_typed_and_any() {
-    let request = Request::from_value(json!({"protocol_version":1,"operation_id":"op","command":"wait","args":{"conditions":[{"type":"turn_completed","turn_id":"t"},{"type":"run_ended","run_id":"r"},{"type":"shell_ended","execution_id":"e"},{"type":"shell_output","execution_id":"e","cursor":"c"}],"timeout_ms":0}})).unwrap();
+    let request = Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"wait","args":{"conditions":[{"type":"turn_completed","turn_id":"t"},{"type":"run_ended","run_id":"r"},{"type":"shell_ended","execution_id":"e"},{"type":"shell_output","execution_id":"e","cursor":"c"}],"timeout_ms":0}})).unwrap();
     match request.command {
         Command::Wait(a) => {
             assert_eq!(a.timeout_ms, 0);
@@ -386,8 +386,8 @@ fn fixed_error_codes_and_persisted_state_values_are_closed() {
 #[test]
 fn connection_profile_changes_are_independent_and_shell_nul_is_preflight_error() {
     for command in ["thread.create", "thread.set"] {
-        Request::from_value(json!({"protocol_version":1,"operation_id":"op","command":command,"args":{"connection":"home-proxy"}})).unwrap();
-        assert!(Request::from_value(json!({"protocol_version":1,"operation_id":"op","command":command,"args":{"connection":""}})).is_err());
+        Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":command,"args":{"connection":"home-proxy"}})).unwrap();
+        assert!(Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":command,"args":{"connection":""}})).is_err());
     }
     for field in ["command", "input_encoding", "output_encoding"] {
         let mut value = json!({"command":"printf hi"});
@@ -411,7 +411,7 @@ fn connection_profile_changes_are_independent_and_shell_nul_is_preflight_error()
 fn search_filter_validation_rejects_ambiguous_times_and_unbounded_lists() {
     let validate = |args: Value| {
         Request::from_value(
-            json!({"protocol_version":1,"operation_id":"op","command":"history.search","args":args}),
+            json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"history.search","args":args}),
         )
     };
     for args in [
@@ -507,14 +507,14 @@ fn shared_enum_names_are_exact_serde_wire_values_and_closed_parsers() {
 
 #[test]
 fn both_request_entry_points_keep_top_level_and_nested_unknown_fields_closed() {
-    let valid = json!({"protocol_version":1,"operation_id":"op","command":"thread.list","args":{},"origin":null});
+    let valid = json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{},"origin":null});
     assert!(Request::from_value(valid.clone()).is_ok());
     assert!(serde_json::from_value::<Request>(valid.clone()).is_ok());
     let mut top = valid.clone();
     top["PRIVATE_FIELD"] = json!("PRIVATE_VALUE");
     let mut nested = valid;
     nested["args"]["extra"] = json!("PRIVATE_VALUE");
-    let condition = json!({"protocol_version":1,"operation_id":"op","command":"wait","args":{"conditions":[{"type":"run_ended","run_id":"r","extra":"PRIVATE_VALUE"}]}});
+    let condition = json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"wait","args":{"conditions":[{"type":"run_ended","run_id":"r","extra":"PRIVATE_VALUE"}]}});
     for value in [top, nested, condition, json!([])] {
         let api = Request::from_value(value.clone()).unwrap_err();
         assert_eq!(api.code, ErrorCode::InvalidArgument);
@@ -524,21 +524,21 @@ fn both_request_entry_points_keep_top_level_and_nested_unknown_fields_closed() {
     }
     assert_eq!(
         Request::from_value(
-            json!({"protocol_version":2,"operation_id":"op","command":"thread.list","args":{}})
+            json!({"protocol_version":0,"operation_id":"op","command":"thread.list","args":{}})
         )
         .unwrap_err()
         .code,
         ErrorCode::ProtocolMismatch
     );
-    assert_eq!(Request::from_value(json!({"protocol_version":2,"operation_id":"op","command":"thread.list","args":{"unknown":1}})).unwrap_err().message, "invalid request shape");
+    assert_eq!(Request::from_value(json!({"protocol_version":0,"operation_id":"op","command":"thread.list","args":{"unknown":1}})).unwrap_err().message, "invalid request shape");
 }
 
 #[test]
 fn argument_local_validation_keeps_first_error_order_and_distinct_units() {
     for (command, message) in [
         (
-            json!({"command":"status","args":{"operation_id":"","limit":0}}),
-            "operation_id must not be empty",
+            json!({"command":"status","args":{"limit":0}}),
+            "limit must be in 1..=200",
         ),
         (
             json!({"command":"thread.set","args":{"connection":"","title":"\n"}}),
@@ -700,4 +700,107 @@ fn history_excerpt_legacy_default_and_new_bounds_are_validated() {
     )
     .unwrap();
     assert!(command.validate().is_err());
+}
+
+#[test]
+fn old_status_operation_wire_argument_is_rejected() {
+    let value = json!({"protocol_version": PROTOCOL_VERSION, "operation_id": "request:lookup", "command": "status", "args": {"operation_id": "target:receipt"}});
+    assert_eq!(
+        Request::from_value(value).unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
+}
+
+#[test]
+fn history_body_requires_provenance_from_current_owner() {
+    let mut body = json!({"node_id":"n","kind":"user","text":"synthetic","context":{"state":"present","node_id":"n","created_at":"2026-10-25T00:00:00Z"},"source_node_ids":[],"previous_node_ids":[],"next_node_ids":[]});
+    assert!(serde_json::from_value::<HistoryBody>(body.clone()).is_err());
+    body["provenance"] =
+        json!({"kind":"user","created_at":"2026-10-25T00:00:00Z","source_revision":0});
+    assert!(serde_json::from_value::<HistoryBody>(body.clone()).is_ok());
+    body.as_object_mut().unwrap().remove("context");
+    assert!(serde_json::from_value::<HistoryBody>(body).is_err());
+}
+
+#[test]
+fn current_lifecycle_details_require_observed_context() {
+    for (kind, mut value) in [
+        (
+            "message",
+            json!({"message_id":"m","thread_id":"t","delivery_status":"accepted","assignment":"existing_turn"}),
+        ),
+        (
+            "run",
+            json!({"run_id":"r","thread_id":"t","state":"live","owned_run_ids":[],"owned_execution_ids":[]}),
+        ),
+        (
+            "turn",
+            json!({"turn_id":"u","run_id":"r","thread_id":"t","state":"running"}),
+        ),
+    ] {
+        let missing = match kind {
+            "message" => serde_json::from_value::<MessageDetails>(value.clone()).is_err(),
+            "run" => serde_json::from_value::<RunDetails>(value.clone()).is_err(),
+            _ => serde_json::from_value::<TurnDetails>(value.clone()).is_err(),
+        };
+        assert!(missing, "{kind} must carry its current observation context");
+        let state = match kind {
+            "message" => "accepted",
+            "run" => "live",
+            _ => "running",
+        };
+        value["context"] =
+            json!({"state":state,"thread_id":"t","created_at":"2026-10-25T00:00:00Z"});
+        match kind {
+            "message" => {
+                serde_json::from_value::<MessageDetails>(value).unwrap();
+            }
+            "run" => {
+                serde_json::from_value::<RunDetails>(value).unwrap();
+            }
+            _ => {
+                serde_json::from_value::<TurnDetails>(value).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn current_output_and_history_results_require_observation_fields() {
+    let output = json!({"execution_id":"x","text":"synthetic","encoding":"UTF-8","cursor":"c","raw_bytes":9,"output_complete":false,"decode_errors":false});
+    serde_json::from_value::<ShellOutput>(output.clone()).unwrap();
+    let mut missing_decode = output;
+    missing_decode
+        .as_object_mut()
+        .unwrap()
+        .remove("decode_errors");
+    assert!(serde_json::from_value::<ShellOutput>(missing_decode).is_err());
+    let snippet = json!({"node_id":"n","kind":"user","excerpt":"[removed]","payload_chars":null,
+        "provenance":{"kind":"user","created_at":"2026-10-25T00:00:00Z","source_revision":1},
+        "context":{"state":"tombstone","node_id":"n","created_at":"2026-10-25T00:00:00Z","tombstone_reason":"removed"},
+        "selection":{"thread_id":"t","ordinal":0,"current_cwd":"/synthetic"},
+        "execution_count":0,"executions_truncated":false});
+    let parsed = serde_json::from_value::<HistorySnippet>(snippet.clone()).unwrap();
+    assert!(
+        parsed.payload_chars.is_none(),
+        "tombstone length is unknown"
+    );
+    assert!(
+        parsed.executions.is_empty(),
+        "current wire omits empty execution lists"
+    );
+    for field in [
+        "provenance",
+        "context",
+        "selection",
+        "execution_count",
+        "executions_truncated",
+    ] {
+        let mut missing = snippet.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<HistorySnippet>(missing).is_err(),
+            "{field}"
+        );
+    }
 }

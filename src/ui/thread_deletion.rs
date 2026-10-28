@@ -1,6 +1,20 @@
 //! Request-scoped deletion review on the existing confirmation overlay.
 use super::*;
 use serde_json::Value;
+fn failure_text(error: &crate::protocol::ApiError) -> String {
+    let prefix = if error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("deletion_outcome_uncertain"))
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        "削除結果は未確認です"
+    } else {
+        "削除できません"
+    };
+    format!("{prefix}: {}", error.message)
+}
 pub(super) const FOOTER: &str =
     "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 削除 · ↑↓/PgUp/PgDn 閲覧";
 #[derive(Clone, Debug)]
@@ -43,8 +57,8 @@ impl DeletionDialog {
                 text.push_str("\n削除を実行中… 閉じても受理済みの処理は継続します。")
             }
             Phase::Failed(error) => text.push_str(&format!(
-                "\n削除できません: {}\n閉じてから再度選んでください。",
-                error.message
+                "\n{}\n閉じてから再度選んでください。",
+                failure_text(error)
             )),
             Phase::Ready(value) => {
                 let number = |pointer: &str| {
@@ -248,7 +262,7 @@ impl UiState {
             }
             Err(error) => {
                 if execute {
-                    let message = format!("削除できません: {}", error.message);
+                    let message = failure_text(&error);
                     self.thread_browser.notice(message.clone());
                     self.active_view_mut().status = message;
                 }

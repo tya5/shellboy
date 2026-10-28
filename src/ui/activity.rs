@@ -93,9 +93,7 @@ pub struct RecoverySnapshot {
 pub struct AutomaticRetrySnapshot {
     pub number: u64,
     pub limit: u64,
-    #[serde(default)]
     pub delay_ms: u64,
-    #[serde(default)]
     pub partial_response_discarded: bool,
 }
 impl AutomaticRetrySnapshot {

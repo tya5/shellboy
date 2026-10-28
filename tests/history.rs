@@ -448,23 +448,12 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
     );
     let request = page.items.iter().find(|n| n.node_id == "calls").unwrap();
     assert_eq!(
-        request
-            .provenance
-            .as_ref()
-            .unwrap()
-            .origin_thread_id
-            .as_deref(),
+        request.provenance.origin_thread_id.as_deref(),
         Some("thread")
     );
-    assert_eq!(
-        request.context.as_ref().unwrap().owner_run_id.as_deref(),
-        Some("parent-run")
-    );
-    assert_eq!(request.selection.as_ref().unwrap().thread_id, "fork");
-    assert_eq!(
-        request.selection.as_ref().unwrap().current_cwd,
-        "/fork-current"
-    );
+    assert_eq!(request.context.owner_run_id.as_deref(), Some("parent-run"));
+    assert_eq!(request.selection.thread_id, "fork");
+    assert_eq!(request.selection.current_cwd, "/fork-current");
     assert_eq!(request.execution_count, 9);
     assert_eq!(request.executions.len(), 8);
     assert!(request.executions_truncated);
@@ -622,7 +611,7 @@ async fn listing_excerpt_limits_bind_cursors_and_payload_sizes_include_unicode_a
     let page = history.list(tombstone).await.unwrap();
     assert_eq!(page.items[0].payload_chars, None);
     assert!(page.items[0].excerpt.is_empty());
-    assert_eq!(page.items[0].context.as_ref().unwrap().state, "tombstone");
+    assert_eq!(page.items[0].context.state, "tombstone");
     database.shutdown().await.unwrap();
 }
 
@@ -692,7 +681,7 @@ async fn compact_history_listing_size_is_measured_without_removing_provenance() 
         compact
             .items
             .iter()
-            .all(|item| item.provenance.is_some() && item.selection.is_some())
+            .all(|item| item.provenance.kind == item.kind && item.selection.thread_id == "thread")
     );
     println!(
         "history_list_50_sample before_bytes={before} after_bytes={after} before_per_item={} after_per_item={} fits_16k={}",

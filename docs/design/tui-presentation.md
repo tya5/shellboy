@@ -180,7 +180,7 @@ F6で履歴項目とfield、Oで原文page、F7で現在項目の完全URL、F8�
 
 ## 保存済み実行情報と削除影響の追加
 
-F8末尾index 34に「Thread · 削除影響」を追加し全35操作へ到達可能とする。読み取りのpreviewに削除確認を課さず、結果から実削除が保証されたとは表示しない。阻害Run・共有や出典・添付参照・更新時刻を構造化fieldとして表示し、容量未見積もりの理由を残す。既存getのcontextとoperation照会のtargets/downstreamも構造化表示し、受付完了と後続完了、未知値とゼロを区別する。[採用設計](observability-and-deletion.md)。
+F8末尾index 34に「会話 · 削除影響」を追加し全35操作へ到達可能とする。読み取りのpreviewに削除確認を課さず、結果から実削除が保証されたとは表示しない。阻害Run・共有や出典・添付参照・更新時刻を構造化fieldとして表示し、容量未見積もりの理由を残す。既存getのcontextとoperation照会のtargets/downstreamも構造化表示し、受付完了と後続完了、未知値とゼロを区別する。[採用設計](observability-and-deletion.md)。
 
 ## 2026-10-25 表示用の要点・原値の分離（X3/UX5.5）
 
@@ -472,7 +472,7 @@ streamの終了時、保存済み未確定sourceがある場合は、既存の�
 
 取得・投影は既存DB/presentation workerで行う。新しいCore操作、業務event、永続表、独立workerは追加しない。失敗中の保持、原文へのsource一致、再選択/再起動での復元、古い失敗の発見、通常成功時の二重表示抑止、採用path/再送への非混入を合成データで確認する。
 
-成功時の `model_stream_observation` も同じ読取り専用の受信一覧へ含め、失敗とは分けて「ストリーム差分・最終確定済み」と表示する。最終応答は通常の採用履歴にあり、差分記録を再送しない。channelごとにpartial_reasoning/partial_textを優先し、失敗時はfinal→done、成功時差分はdone→finalを代替候補とする。途中内容を最終内容で上書きせず、暗号化推論は表示しない。成功差分の会話previewは表示本文・平文推論が実際の最終応答と異なる場合だけとし、content構造・call_id・引数だけの差では同じ回答を再表示しない。比較に必要な最終本文を表示予算内に取得できない場合も会話previewを推測せず、受信一覧と原文への到達性を維持する。
+成功時の `model_stream_observation` も同じ読取り専用の受信一覧へ含め、失敗とは分けて「ストリーム差分 · 最終応答は確定済み」と表示する。最終応答は通常の採用履歴にあり、差分記録を再送しない。channelごとにpartial_reasoning/partial_textを優先し、失敗時はfinal→done、成功時差分はdone→finalを代替候補とする。途中内容を最終内容で上書きせず、暗号化推論は表示しない。成功差分の会話previewは表示本文・平文推論が実際の最終応答と異なる場合だけとし、content構造・call_id・引数だけの差では同じ回答を再表示しない。比較に必要な最終本文を表示予算内に取得できない場合も会話previewを推測せず、受信一覧と原文への到達性を維持する。
 
 一覧は `/received [page]`、1page32件、総件数・前後page・分類・Turn・保存時刻を既存管理popupへ表示し、Enterで実source IDの既存原文readerへ進む。表示一覧は現在のDBを読むものでsnapshot予約ではない。最新previewは2件、それぞれ最大64KiB窓。保存envelopeのRust側materializeは1MiBまで、大きいenvelopeはSQLiteから各partial channel先頭16k Unicode字を取得し、省略を明示する。既存body cacheを超えて保持せず、UI OS threadでDB/JSON/Markdown処理をしない。
 

@@ -21,7 +21,7 @@ fn open_connection(path: &Path) -> Result<Connection> {
     if version != crate::storage::SCHEMA_VERSION {
         return Err(err(
             "schema_unsupported",
-            "History schema is not the supported version; no migration was attempted",
+            "History schema is not the supported version; open the database with the writer to migrate before read-only access",
         ));
     }
     let ledger = {
@@ -258,11 +258,12 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
     let descriptor = {
         let db = open_connection(&context.history)?;
         crate::index::rag_space(&db)
-            .map_err(|_| {
-                err(
-                    "history_unavailable",
-                    "Cannot inspect history embedding space",
-                )
+            .map_err(|error| {
+                if error.code == crate::protocol::ErrorCode::InvalidState {
+                    err("index_incompatible", "History index query identity is unavailable; explicitly rebuild with the intended embedding configuration")
+                } else {
+                    err("history_unavailable", "Cannot inspect history embedding space")
+                }
             })?
             .ok_or_else(|| {
                 err(
@@ -292,7 +293,7 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
         )
     })?;
     let key = crate::index::rag_profile_key(&loaded.config, &descriptor)
-        .ok_or_else(||err("index_incompatible","History index endpoint/model identity is unverified; restore its original split_chars setting or select a verified index space"))?;
+        .ok_or_else(||err("index_incompatible","History index endpoint/model identity is unverified; explicitly rebuild with the intended embedding configuration"))?;
     let profile = search::Profile {
         id: key,
         name: name.into(),

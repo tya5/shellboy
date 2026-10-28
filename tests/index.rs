@@ -2183,270 +2183,6 @@ async fn model_switch_selects_only_successful_new_work_and_keeps_old_space_resto
     f.close().await;
 }
 
-/// Reproduce pre-G5 metadata without guessing old split_chars or altering fixed Work.
-async fn legacy_fixture(f: &Fixture) -> String {
-    fn digest(input: &str) -> String {
-        Sha256::digest(input.as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
-    }
-    let legacy = digest(&format!(
-        "embed\0{}\0embedding-fixture\0unicode-paragraph-v1",
-        f.proxy.url
-    ));
-    let legacy_copy = legacy.clone();
-    f.db.call(move |db| {
-        let current = digest(&format!("split-chars-v1\0{legacy_copy}\08"));
-        let rows = db
-            .prepare("SELECT key,value FROM app_meta WHERE instr(key,?1)>0")?
-            .query_map([&current], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (key, value) in rows {
-            db.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
-            db.execute(
-                "INSERT OR REPLACE INTO app_meta(key,value)VALUES(?1,?2)",
-                params![key.replace(&current, &legacy_copy), value],
-            )?;
-        }
-        db.execute(
-            "UPDATE index_space SET splitter_version=?1 WHERE splitter_version=?2",
-            params![
-                format!("unicode-paragraph-v1:{legacy_copy}"),
-                format!("unicode-paragraph-v1:{current}")
-            ],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    legacy
-}
-
-#[tokio::test]
-async fn legacy_fixed_bootstrap_preserves_new_active_and_holds_unsegmented_permissions() {
-    let mut config = Config::default();
-    config.indexing.split_chars = 8;
-    let f = Fixture::new(config).await;
-    f.node("legacy-fixed", "abcdefghijklmnop").await;
-    f.node("legacy-auto", "NEVER EMBED THIS OLD PERMISSION")
-        .await;
-    f.node("current", "abcdefghijklmnopqrstuvwx").await;
-    f.service
-        .enqueue_new(&["legacy-fixed".into()])
-        .await
-        .unwrap();
-    let service = f.service.clone();
-    f.db.call(move |db| {
-        let tx = db.transaction()?;
-        service
-            .authorize_new_tx(&tx, &["legacy-auto".into()])
-            .unwrap();
-        tx.commit()?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let legacy = legacy_fixture(&f).await;
-    let changed = configured_service(&f, 12);
-    changed.enqueue_new(&["current".into()]).await.unwrap();
-    drain_service(&changed).await;
-    assert_eq!(f.proxy.count(), 4);
-    let status = changed.status(args()).await.unwrap();
-    assert!(status.reason.unwrap().contains("explicitly backfill"));
-    let selected = status.space_id.unwrap();
-    let selected_copy = selected.clone();
-    let old =
-        f.db.call(move |db| {
-            let old: String = db.query_row(
-                "SELECT id FROM index_space WHERE splitter_version=?1",
-                [format!("unicode-paragraph-v1:{legacy}")],
-                |r| r.get(0),
-            )?;
-            assert_ne!(old, selected_copy);
-            assert_eq!(
-                db.query_row("SELECT state FROM index_space WHERE id=?1", [&old], |r| {
-                    r.get::<_, String>(0)
-                })?,
-                "inactive"
-            );
-            assert_eq!(
-                db.query_row(
-                    "SELECT COUNT(*) FROM embedding_chunk WHERE space_id=?1",
-                    [&old],
-                    |r| r.get::<_, i64>(0)
-                )?,
-                2
-            );
-            assert_eq!(
-                db.query_row(
-                    "SELECT value FROM app_meta WHERE key='index.active_space'",
-                    [],
-                    |r| r.get::<_, String>(0)
-                )?,
-                selected_copy
-            );
-            Ok(old)
-        })
-        .await
-        .unwrap();
-    let management = changed.management_status(args()).await.unwrap();
-    assert_eq!(management["legacy_preparation"]["unprepared_sources"], 1);
-    let lengths: Vec<_> = f
-        .proxy
-        .requests
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|v| v["input"][0].as_str().unwrap().len())
-        .collect();
-    assert_eq!(lengths, vec![12, 12, 8, 8]);
-    changed.select_space(&old).await.unwrap();
-    assert!(!changed.search("cat", 10).await.unwrap().is_empty());
-    f.close().await;
-}
-
-#[tokio::test]
-async fn legacy_failed_inputs_retry_exactly_without_implicit_resegmentation() {
-    let mut config = Config::default();
-    config.indexing.split_chars = 8;
-    config.indexing.retries = 0;
-    config.indexing.retry_delays_ms.clear();
-    let f = Fixture::new(config).await;
-    f.node("old-done", "abcdefgh").await;
-    f.service.enqueue_new(&["old-done".into()]).await.unwrap();
-    f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
-    f.node("old-failed", "ijklmnopqrstuvwx").await;
-    f.service.enqueue_new(&["old-failed".into()]).await.unwrap();
-    f.proxy.push(Reply::Error(402, "billing"));
-    f.drain().await;
-    assert!(f.service.status(args()).await.unwrap().paused);
-    legacy_fixture(&f).await;
-    let changed = configured_service(&f, 12);
-    assert!(!changed.process_one(CancellationToken::new()).await.unwrap());
-    assert_eq!(f.proxy.count(), 2);
-    changed
-        .retry(IndexArgs {
-            space_id: Some(old.clone()),
-            ..args()
-        })
-        .await
-        .unwrap();
-    drain_service(&changed).await;
-    assert_eq!(f.proxy.count(), 4);
-    assert!(!changed.status(args()).await.unwrap().paused);
-    let lengths: Vec<_> = f
-        .proxy
-        .requests
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|v| v["input"][0].as_str().unwrap().len())
-        .collect();
-    assert_eq!(lengths, vec![8, 8, 8, 8]);
-    changed.select_space(&old).await.unwrap();
-    f.close().await;
-}
-
-#[tokio::test]
-async fn legacy_rebuild_completion_honors_unprepared_sources_and_keeps_new_active() {
-    for (held_auto, held_fence) in [(false, false), (true, false), (false, true)] {
-        let mut config = Config::default();
-        config.indexing.split_chars = 8;
-        config.indexing.retries = 0;
-        config.indexing.retry_delays_ms.clear();
-        let f = Fixture::new(config).await;
-        f.node("old-active", "abcdefgh").await;
-        f.service.enqueue_new(&["old-active".into()]).await.unwrap();
-        f.drain().await;
-        f.node("rebuild", "ijklmnopqrstuvwx").await;
-        f.service
-            .rebuild(IndexArgs {
-                source_ids: vec!["rebuild".into()],
-                ..args()
-            })
-            .await
-            .unwrap();
-        f.proxy.push(Reply::Error(503, "unavailable"));
-        // Bootstrap and terminal failure are both driven before migration.
-        f.drain().await;
-        if held_auto {
-            f.node("old-auto", "DO NOT GUESS SPLITTING").await;
-            let service = f.service.clone();
-            f.db.call(move |db| {
-                let tx = db.transaction()?;
-                service.authorize_new_tx(&tx, &["old-auto".into()]).unwrap();
-                tx.commit()?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        }
-        if held_fence {
-            f.db.call(|db| {
-                db.execute("INSERT INTO app_meta(key,value) SELECT 'index.enqueueing.'||substr(key,length('index.rebuild.')+1)||'.'||value,'1' FROM app_meta WHERE key LIKE 'index.rebuild.%'",[])?;
-                Ok(())
-            }).await.unwrap();
-        }
-        let legacy = legacy_fixture(&f).await;
-        let changed = configured_service(&f, 12);
-        f.node("current", "abcdefghijklmnopqrstuvwx").await;
-        changed.enqueue_new(&["current".into()]).await.unwrap();
-        drain_service(&changed).await;
-        // Upgrade now preserves the selected legacy space. This case checks
-        // that an explicit choice of the ready current-policy candidate is not
-        // subsequently replaced by completion of an older legacy rebuild.
-        let current = f.db.call(|db| {
-            db.query_row("SELECT s.id FROM index_space s JOIN embedding_job j ON j.space_id=s.id WHERE j.source_node_id='current' LIMIT 1", [], |r| r.get::<_, String>(0)).map_err(Into::into)
-        }).await.unwrap();
-        assert_ne!(
-            changed.status(args()).await.unwrap().space_id.as_deref(),
-            Some(current.as_str())
-        );
-        changed.select_space(&current).await.unwrap();
-        changed.retry(args()).await.unwrap();
-        drain_service(&changed).await;
-        assert_eq!(f.proxy.count(), 6); // one old, one failed, two current, two fixed legacy
-        f.db.call(move|db| {
-            assert_eq!(db.query_row("SELECT value FROM app_meta WHERE key='index.active_space'",[],|r|r.get::<_,String>(0))?,current);
-            let rebuild_key=format!("index.rebuild.{legacy}");
-            let remaining:i64=db.query_row("SELECT COUNT(*) FROM app_meta WHERE key=?1",[rebuild_key],|r|r.get(0))?;
-            assert_eq!(remaining,i64::from(held_auto || held_fence));
-            let state:String=db.query_row("SELECT state FROM index_space WHERE splitter_version=?1 AND id IN(SELECT space_id FROM embedding_job WHERE source_node_id='rebuild')",[format!("unicode-paragraph-v1:{legacy}")],|r|r.get(0))?;
-            assert_eq!(state,if held_auto || held_fence {"candidate"}else{"inactive"});
-            Ok(())
-        }).await.unwrap();
-        f.close().await;
-    }
-}
-
-#[tokio::test]
-async fn billing_pause_stops_both_current_and_legacy_input_namespaces() {
-    let mut config = Config::default();
-    config.indexing.split_chars = 8;
-    let f = Fixture::new(config).await;
-    f.node("old", "abcdefgh").await;
-    f.service.enqueue_new(&["old".into()]).await.unwrap();
-    legacy_fixture(&f).await;
-    let changed = configured_service(&f, 12);
-    f.node("new", "abcdefghijkl").await;
-    changed.enqueue_new(&["new".into()]).await.unwrap();
-    f.proxy.push(Reply::Error(402, "billing"));
-    drain_service(&changed).await;
-    assert_eq!(
-        f.proxy.count(),
-        1,
-        "legacy must not bypass shared endpoint pause"
-    );
-    changed.retry(args()).await.unwrap();
-    drain_service(&changed).await;
-    assert_eq!(f.proxy.count(), 3);
-    f.close().await;
-}
-
 #[tokio::test]
 async fn deleted_thread_exclusive_nodes_disappear_before_gc_while_live_roots_and_unknown_owners_stay()
  {
@@ -2922,106 +2658,6 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
 }
 
 #[tokio::test]
-async fn upgrade_keeps_legacy_search_and_reuses_ready_candidate_until_explicit_selection() {
-    let mut config = Config::default();
-    config.indexing.split_chars = 8;
-    let f = Fixture::new(config).await;
-    f.node("old-history", "cat old").await;
-    f.service
-        .enqueue_new(&["old-history".into()])
-        .await
-        .unwrap();
-    f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
-    legacy_fixture(&f).await;
-    let current = configured_service(&f, 8);
-    f.node("fresh", "dog new history longer").await;
-    current.enqueue_new(&["fresh".into()]).await.unwrap();
-    assert!(current.process_one(CancellationToken::new()).await.unwrap());
-    let candidate =
-        f.db.call(|db| {
-            db.query_row(
-                "SELECT id FROM index_space WHERE state='candidate'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .map_err(Into::into)
-        })
-        .await
-        .unwrap();
-    assert!(
-        current.select_space(&candidate).await.is_err(),
-        "unfinished candidate cannot be selected"
-    );
-    drain_service(&current).await;
-    assert_eq!(
-        current.status(args()).await.unwrap().space_id.as_deref(),
-        Some(old.as_str())
-    );
-    let status = current.status(args()).await.unwrap();
-    assert!(
-        status.reason.as_deref().is_some_and(
-            |reason| reason.contains(&candidate) && reason.contains("Explicitly select")
-        )
-    );
-    f.db.call(|db| {
-        db.execute("INSERT INTO app_meta(key,value) SELECT 'index.pause.'||substr(key,13,length(key)-19),'test pause reason' FROM app_meta WHERE key LIKE 'index.group.%.active'", [])?;
-        Ok(())
-    }).await.unwrap();
-    let paused = current.status(args()).await.unwrap();
-    assert!(paused.paused);
-    let reason = paused.reason.as_deref().unwrap();
-    assert!(reason.contains("test pause reason"));
-    assert!(reason.contains(&candidate));
-    assert!(reason.contains("excluded from default semantic search until selection"));
-    f.db.call(|db| {
-        db.execute("DELETE FROM app_meta WHERE key LIKE 'index.pause.%'", [])?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let hits = current.search("cat", 10).await.unwrap();
-    assert_eq!(
-        hits.iter()
-            .map(|hit| hit.node_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["old-history"]
-    );
-    f.node("fresh-again", "dog more").await;
-    current.enqueue_new(&["fresh-again".into()]).await.unwrap();
-    drain_service(&current).await;
-    f.db.call(|db| {
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM index_space", [], |r|r.get::<_,i64>(0))?, 2);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id WHERE s.state='active'", [], |r|r.get::<_,i64>(0))?, 1);
-        Ok(())
-    }).await.unwrap();
-    current.select_space(&candidate).await.unwrap();
-    assert_eq!(
-        current.status(args()).await.unwrap().space_id.as_deref(),
-        Some(candidate.as_str())
-    );
-    current.select_space(&old).await.unwrap();
-    f.node("last-new", "dog last").await;
-    current.enqueue_new(&["last-new".into()]).await.unwrap();
-    drain_service(&current).await;
-    assert_eq!(
-        current.status(args()).await.unwrap().space_id.as_deref(),
-        Some(old.as_str())
-    );
-    f.db.call(|db| {
-        assert_eq!(
-            db.query_row("SELECT COUNT(*) FROM index_space", [], |r| r
-                .get::<_, i64>(0))?,
-            2
-        );
-        Ok(())
-    })
-    .await
-    .unwrap();
-    f.close().await;
-}
-
-#[tokio::test]
 async fn changing_uncoded_400_details_do_not_bypass_the_terminal_failure_breaker() {
     let mut config = Config::default();
     config.indexing.retries = 0;
@@ -3074,12 +2710,11 @@ async fn query_identity_survives_split_changes_and_never_silently_rebinds_endpoi
     let marker_copy = marker_key.clone();
     let marker =
         f.db.call(move |db| {
-            db.query_row(
+            Ok(db.query_row(
                 "SELECT value FROM app_meta WHERE key=?1",
                 [marker_copy],
                 |r| r.get::<_, String>(0),
-            )
-            .map_err(Into::into)
+            )?)
         })
         .await
         .unwrap();
@@ -3087,21 +2722,6 @@ async fn query_identity_survives_split_changes_and_never_silently_rebinds_endpoi
     assert!(marker.bytes().all(|byte| byte.is_ascii_hexdigit()));
     let changed = configured_service(&f, 12);
     assert!(!changed.search("cat", 10).await.unwrap().is_empty());
-    let marker_copy = marker_key.clone();
-    f.db.call(move |db| {
-        db.execute("DELETE FROM app_meta WHERE key=?1", [marker_copy])?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let requests = f.proxy.count();
-    let error = changed.search("cat", 10).await.unwrap_err();
-    assert!(error.message.contains("original embedding/split"));
-    assert_eq!(
-        f.proxy.count(),
-        requests,
-        "unknown old splitter is refused before HTTP"
-    );
     assert!(
         changed.select_space(&space).await.is_err(),
         "select still requires matching split configuration"
@@ -3159,17 +2779,15 @@ async fn query_identity_survives_split_changes_and_never_silently_rebinds_endpoi
 }
 
 #[tokio::test]
-async fn owner_search_verifies_and_completes_pre_g5_query_metadata_without_guessing_split() {
-    let mut config = Config::default();
-    config.indexing.split_chars = 8;
-    let f = Fixture::new(config).await;
-    f.node("query-legacy", "cat legacy").await;
+async fn missing_query_marker_is_rejected_without_http_or_read_repair() {
+    let f = Fixture::new(Config::default()).await;
+    f.node("query-source", "cat source").await;
     f.service
-        .enqueue_new(&["query-legacy".into()])
+        .enqueue_new(&["query-source".into()])
         .await
         .unwrap();
     f.drain().await;
-    legacy_fixture(&f).await;
+    let space = f.service.status(args()).await.unwrap().space_id.unwrap();
     f.db.call(|db| {
         db.execute(
             "DELETE FROM app_meta WHERE key LIKE 'index.query_profile.%'",
@@ -3179,8 +2797,19 @@ async fn owner_search_verifies_and_completes_pre_g5_query_metadata_without_guess
     })
     .await
     .unwrap();
-    let changed = configured_service(&f, 12);
-    assert!(!changed.search("cat", 10).await.unwrap().is_empty());
+    let requests = f.proxy.count();
+    for error in [
+        f.service.search("cat", 10).await.unwrap_err(),
+        f.service.select_space(&space).await.unwrap_err(),
+    ] {
+        assert_eq!(error.code, shellboy::protocol::ErrorCode::InvalidState);
+        assert!(error.message.contains("explicitly rebuild"));
+    }
+    assert_eq!(
+        f.proxy.count(),
+        requests,
+        "verification failure must precede paid HTTP"
+    );
     f.db.call(|db| {
         assert_eq!(
             db.query_row(
@@ -3188,7 +2817,7 @@ async fn owner_search_verifies_and_completes_pre_g5_query_metadata_without_guess
                 [],
                 |r| r.get::<_, i64>(0)
             )?,
-            1
+            0
         );
         Ok(())
     })

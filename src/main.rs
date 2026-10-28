@@ -175,9 +175,7 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
             .into_command(cwd)
             .await?
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidArgument, "Missing command"))?;
-        if matches!(&cli.command, Some(CliCommand::Status(options)) if options.operation_id.is_some()) {
-            eprintln!("status --operation is deprecated and will be removed after v0.1.2; use shellboy operation get --operation ID");
-        }
+
         let data_dir =
             resolve_cli_data_dir(cli.data_dir.as_deref(), &PathEnvironment::current(), cwd)
                 .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;

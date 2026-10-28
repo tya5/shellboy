@@ -53,7 +53,7 @@ pub(super) fn set_meta(tx: &Transaction<'_>, key: &str, value: &str) -> Result<(
     Ok(())
 }
 /// Keep strict malformed-record classification local; callers that deliberately
-/// tolerate legacy/corrupt cache entries explicitly choose `.ok()`.
+/// tolerate stale/corrupt cache entries explicitly choose `.ok()`.
 pub(super) fn decode_json<T: serde::de::DeserializeOwned>(body: &str) -> Result<T, StorageError> {
     serde_json::from_str(body).map_err(|_| serde_error())
 }
@@ -163,7 +163,6 @@ pub(super) fn ensure_space(
     embedding: &identity::EmbeddingIdentity,
     group: &str,
     dimension: usize,
-    activate_active: bool,
 ) -> Result<Space, StorageError> {
     let index_space_sql = "INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name)VALUES(?1,?2,?3,?4,?5,?6,?7)";
     let keys = embedding.keys();
@@ -191,12 +190,12 @@ pub(super) fn ensure_space(
     tx.execute_batch(&format!(
         "CREATE VIRTUAL TABLE {table} USING vec0(embedding float[{dimension}]);"
     ))?;
-    let state = if group == "active" && activate_active {
+    let state = if group == "active" {
         "active"
     } else {
         "candidate"
     };
-    if group == "active" && activate_active {
+    if group == "active" {
         tx.execute(
             "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused')",
             [],
@@ -318,16 +317,8 @@ pub(super) fn maybe_activate_candidate(
     keys: IndexKeys<'_>,
     group: &str,
 ) -> Result<(), StorageError> {
-    finish_candidate(tx, keys, group, true)
-}
-pub(super) fn finish_candidate(
-    tx: &Transaction<'_>,
-    keys: IndexKeys<'_>,
-    group: &str,
-    activate: bool,
-) -> Result<(), StorageError> {
     let embedding_job_sql = "SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state NOT IN ('done','split'))";
-    if (group == "active" && activate)
+    if group == "active"
         || !group_current(tx, keys, group)?
         || meta(tx, &keys.enqueueing(group))?.is_some()
     {
@@ -338,7 +329,7 @@ pub(super) fn finish_candidate(
         [keys.auto_pattern()],
         |row| row.get(0),
     )?;
-    if auto_pending && group != "active" {
+    if auto_pending {
         return Ok(());
     }
     let Some(space) = space_for_group(tx, keys, group)? else {
@@ -356,28 +347,16 @@ pub(super) fn finish_candidate(
         }
     }
     drop(statement);
-    if activate {
-        tx.execute(
-            "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused')",
-            [],
-        )?;
-        tx.execute(
-            "UPDATE index_space SET state='active' WHERE id=?1",
-            [&space.id],
-        )?;
-        set_meta(tx, IndexKeys::ACTIVE_SPACE, &space.id)?;
-    } else {
-        tx.execute(
-            "UPDATE index_space SET state='inactive' WHERE id=?1",
-            [&space.id],
-        )?;
-        if group == "active" {
-            tx.execute("DELETE FROM app_meta WHERE key=?1", [keys.group("active")])?;
-        }
-    }
-    if group != "active" {
-        tx.execute("DELETE FROM app_meta WHERE key=?1", [keys.rebuild()])?;
-    }
+    tx.execute(
+        "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused')",
+        [],
+    )?;
+    tx.execute(
+        "UPDATE index_space SET state='active' WHERE id=?1",
+        [&space.id],
+    )?;
+    set_meta(tx, IndexKeys::ACTIVE_SPACE, &space.id)?;
+    tx.execute("DELETE FROM app_meta WHERE key=?1", [keys.rebuild()])?;
     Ok(())
 }
 /// Delete every derived body in the transaction that tombstones source text.
@@ -460,7 +439,6 @@ pub(super) struct EmbeddingAdoption {
     pub(super) embedding: identity::EmbeddingIdentity,
     pub(super) dimension: usize,
     pub(super) vector: Vec<f32>,
-    pub(super) legacy: bool,
 }
 impl EmbeddingAdoption {
     pub(super) fn adopt_embedding_tx(&self, tx: &Transaction<'_>) -> Result<(), StorageError> {
@@ -469,7 +447,6 @@ impl EmbeddingAdoption {
         let failure_key = self.failure_key.as_str();
         let dimension = self.dimension;
         let vector = self.vector.as_slice();
-        let legacy = self.legacy;
         if !claim_valid(tx, claimed)?
             || !witness_valid(tx, &claimed.work.witness, &claimed.work.body_kind)?
             || !group_current(tx, IndexKeys::new(key_copy), &claimed.work.group)?
@@ -477,20 +454,9 @@ impl EmbeddingAdoption {
             discard_claim(tx, claimed, "Source or index group changed before adoption")?;
             return Ok(());
         }
-        let preserve_selection = !legacy
-            && claimed.work.group == "active"
-            && identity::preserve_legacy_selection(tx, failure_key)?;
-        let activate = !preserve_selection
-            && (!legacy || identity::legacy_may_activate(tx, IndexKeys::new(key_copy))?);
         let space = match &claimed.space {
             Some(space) => load_space(tx, &space.id)?.ok_or_else(serde_error)?,
-            None => ensure_space(
-                tx,
-                &self.embedding,
-                &claimed.work.group,
-                dimension,
-                activate,
-            )?,
+            None => ensure_space(tx, &self.embedding, &claimed.work.group, dimension)?,
         };
         if !matches!(space.state.as_str(), "active" | "candidate") {
             claim::defer_claim(tx, claimed, &space.state)?;
@@ -533,10 +499,11 @@ impl EmbeddingAdoption {
         if let Some(bootstrap) = &claimed.bootstrap_key {
             tx.execute("DELETE FROM app_meta WHERE key=?1", [bootstrap])?;
         }
-        set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
-        if !preserve_selection {
-            finish_candidate(tx, IndexKeys::new(key_copy), &claimed.work.group, activate)?;
-        }
+        tx.execute(
+            "DELETE FROM app_meta WHERE key=?1",
+            [IndexKeys::new(failure_key).common_failures()],
+        )?;
+        maybe_activate_candidate(tx, IndexKeys::new(key_copy), &claimed.work.group)?;
         Ok(())
     }
 }
@@ -585,13 +552,10 @@ mod metadata_tests {
             !claim_valid(&db, &claimed).unwrap(),
             "a corrupt cancelled/stale claim is not a strict record read"
         );
-        let legacy = r#"{"witness":{"node_id":"node","revision":1,"body_hash":null,"raw":null},"body_kind":"user","segment":{"start":0,"end":1,"text":"界"},"group":"active","authorization":"explicit"}"#;
-        let decoded: Work = decode_json(legacy).unwrap();
-        assert_eq!(decoded.attempts, 0);
-        assert_eq!(decoded.state, "");
-        assert!(decoded.next_at.is_none() && decoded.error.is_none());
+        let incomplete = r#"{"witness":{"node_id":"node","revision":1,"body_hash":null,"raw":null},"body_kind":"user","segment":{"start":0,"end":1,"text":"界"},"group":"active","authorization":"explicit"}"#;
+        assert!(decode_json::<Work>(incomplete).is_err());
         for state in ["", "pending", "running", "failed", "future-provider-state"] {
-            let mut work = decoded.clone();
+            let mut work = work();
             work.state = state.into();
             let encoded = encode_json(&work).unwrap();
             let reread: Work = decode_json(&encoded).unwrap();

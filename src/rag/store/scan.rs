@@ -152,11 +152,11 @@ fn walk(
     } else {
         None
     };
-    // A root changed into a symlink is unavailable, not an empty source. Check
+    // A symlink or special-file root is unavailable, not an empty source. Check
     // before globs so an excluded basename cannot turn this into a complete walk.
     if root_metadata
         .as_ref()
-        .is_some_and(|meta| meta.file_type().is_symlink())
+        .is_some_and(|meta| !meta.is_dir() && !meta.is_file())
     {
         return Err(unavailable());
     }

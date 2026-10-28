@@ -41,9 +41,9 @@ impl NoticeOwner {
         }
     }
 }
-/// Operation lookup uses Status's receipt-free route but is not an overview page.
+/// Only work status results enable overview navigation; operation lookups do not.
 pub(super) fn work_status(command: &Command) -> bool {
-    matches!(command, Command::Status(args) if args.operation_id.is_none())
+    matches!(command, Command::Status(_))
 }
 pub(super) fn completion_text(
     title: &str,
@@ -468,9 +468,8 @@ mod tests {
     #[test]
     fn status_receipt_lookup_does_not_enable_overview_navigation() {
         assert!(work_status(&Command::Status(StatusArgs::default())));
-        assert!(!work_status(&Command::Status(StatusArgs {
-            operation_id: Some("fixture:receipt".into()),
-            ..Default::default()
+        assert!(!work_status(&Command::OperationGet(OperationTarget {
+            operation_id: "fixture:receipt".into(),
         })));
         assert!(!work_status(&Command::ThreadGet(ThreadTarget {
             thread_id: Some("thread".into())

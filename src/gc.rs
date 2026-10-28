@@ -76,9 +76,7 @@ pub struct HistoryStep {
 struct Progress {
     stage: Stage,
     last_rowid: i64,
-    #[serde(default)]
-    horizon: Option<i64>,
-    #[serde(default)]
+    horizon: i64,
     revalidate_roots: bool,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -491,7 +489,7 @@ fn reset(tx: &Transaction<'_>, job: &str, root: i64) -> Result<()> {
             row.get(0)
         })
         .map_err(sql_error)?;
-    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Roots,last_rowid:0,horizon:Some(horizon),revalidate_roots:false}).unwrap()]).map_err(sql_error)?;
+    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Roots,last_rowid:0,horizon,revalidate_roots:false}).unwrap()]).map_err(sql_error)?;
     Ok(())
 }
 fn start_history(db: &mut Connection) -> Result<Option<String>> {
@@ -505,7 +503,7 @@ fn start_history(db: &mut Connection) -> Result<Option<String>> {
         ).optional().map_err(sql_error)?.flatten();
         let resumable = cursor
             .and_then(|body| serde_json::from_str::<Progress>(&body).ok())
-            .is_some_and(|progress| progress.horizon.is_some());
+            .is_some();
         if !resumable {
             let root = revision(&tx)?;
             reset(&tx, job, root)?;

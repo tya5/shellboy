@@ -921,7 +921,7 @@ async fn late_pins_keep_sweep_advancing_and_protect_sources_beyond_the_pin_batch
 }
 
 #[tokio::test]
-async fn legacy_cursor_without_a_horizon_rebuilds_before_resuming() {
+async fn malformed_cursor_rebuilds_marks_before_resuming() {
     let f = Fixture::new(Config::default()).await;
     f.node("keep", None).await;
     f.node("garbage", None).await;

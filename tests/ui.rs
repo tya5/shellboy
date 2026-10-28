@@ -1492,8 +1492,8 @@ fn typed_conversation_has_inline_markers_and_details_copy_full_urls_without_chan
         _ => panic!("original action"),
     };
     let body = shellboy::protocol::HistoryBody {
-        context: None,
-        provenance: None,
+        context: serde_json::from_value(serde_json::json!({"state":"present","node_id":node_id,"created_at":"2026-10-25T00:00:00Z"})).unwrap(),
+        provenance: shellboy_provenance_fixture(),
         node_id: node_id.into(),
         kind: "assistant_response".into(),
         text: "current-page".into(),
@@ -3122,24 +3122,28 @@ fn rejected_slash_quit_recovers_but_cannot_undo_acknowledged_shutdown() {
 #[test]
 fn editing_while_accepting_keeps_text_attachments_and_counts_the_full_byte_limit() {
     let mut config = Config::default();
-    config.limits.draft_bytes = 8;
+    config.limits.draft_bytes = 11;
     let mut ui = UiState::new(&config, cwd());
     ui.insert("日本", false);
-    ui.view_mut().draft.attachments.push(UiAttachment {
-        id: "image".into(),
-        path: cwd().join("image.png"),
-        kind: "image".into(),
-        state: "ready".into(),
-        position: None,
+    ui.apply(UiUpdate::ClipboardAttachment {
+        draft_id: ui.view().draft.draft_id.clone(),
+        revision: ui.view().draft.revision,
+        attachment: UiAttachment {
+            id: "image".into(),
+            path: cwd().join("image.png"),
+            kind: "image".into(),
+            state: "ready".into(),
+            position: None,
+        },
     });
     let actions = enter(&mut ui);
     let (draft_id, revision) = sent(&actions);
     let attachments = ui.view().draft.attachments.clone();
     ui.insert("abc", false);
-    assert_eq!(ui.view().draft.text, "日本");
+    assert_eq!(ui.view().draft.text, "日本\u{fffc}");
     assert_eq!(ui.view().draft.attachments, attachments);
     ui.insert("!", false);
-    assert_eq!(ui.view().draft.text, "日本!");
+    assert_eq!(ui.view().draft.text, "日本\u{fffc}!");
     assert_eq!(ui.view().draft.attachments, attachments);
     ui.apply(UiUpdate::Receipt {
         draft_id,
@@ -3148,10 +3152,10 @@ fn editing_while_accepting_keeps_text_attachments_and_counts_the_full_byte_limit
         status: ReceiptStatus::Failed,
         message: Some("not accepted".into()),
     });
-    assert_eq!(ui.view().draft.text, "日本!");
+    assert_eq!(ui.view().draft.text, "日本\u{fffc}!");
     assert!(ui.view().status.contains(&format!("/restore {revision}")));
     assert!(!ui.view().status.contains("<revision>"));
-    assert_eq!(ui.view().pending[&revision].snapshot.text, "日本");
+    assert_eq!(ui.view().pending[&revision].snapshot.text, "日本\u{fffc}");
 }
 
 #[test]
@@ -3167,12 +3171,16 @@ fn slash_rejection_restores_the_complete_input_without_relying_on_status_text() 
         let mut ui = state();
         ui.select_thread("saved".into());
         ui.insert(command, false);
-        ui.view_mut().draft.attachments.push(UiAttachment {
-            id: "attachment".into(),
-            path: cwd().join("not-read.png"),
-            kind: "image".into(),
-            state: "ready".into(),
-            position: None,
+        ui.apply(UiUpdate::ClipboardAttachment {
+            draft_id: ui.view().draft.draft_id.clone(),
+            revision: ui.view().draft.revision,
+            attachment: UiAttachment {
+                id: "attachment".into(),
+                path: cwd().join("not-read.png"),
+                kind: "image".into(),
+                state: "ready".into(),
+                position: None,
+            },
         });
         ui.event(key(KeyCode::Left));
         let original = ui.view().draft.clone();
@@ -3181,7 +3189,10 @@ fn slash_rejection_restores_the_complete_input_without_relying_on_status_text() 
             matches!(actions[0], UiAction::SubmittedCommand { .. }),
             "{command}"
         );
-        assert!(ui.view().draft.text.is_empty());
+        assert_eq!(ui.view().draft.text, "\u{fffc}");
+        let mut retained = original.attachments.clone();
+        retained[0].position = Some(0);
+        assert_eq!(ui.view().draft.attachments, retained);
         let (sender, _receiver) = actions::channel(1);
         sender
             .try_send(UiAction::RenderWidth { width: 80 })
@@ -3575,5 +3586,16 @@ fn omitted_long_and_deep_metadata_use_the_complete_value_reader_for_copy() {
         });
         assert!(matches!(&ui.event(key(KeyCode::Char('c')))[..],
             [UiAction::CopyText { text, scope: shellboy::ui::CopyScope::ManagementPage { has_more: false } }] if text == "完全な原文の値"));
+    }
+}
+
+fn shellboy_provenance_fixture() -> shellboy::protocol::NodeProvenance {
+    shellboy::protocol::NodeProvenance {
+        kind: "assistant_response".into(),
+        created_at: "2026-10-25T00:00:00Z".into(),
+        source_revision: 0,
+        turn_id: None,
+        run_id: None,
+        origin_thread_id: None,
     }
 }

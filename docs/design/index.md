@@ -1,5 +1,9 @@
 # 埋め込み索引と許可されたsourceの境界
 
+## Current-only contract (Issue #33, 0.2.0)
+
+Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
+
 本文単位・新規のみ自動・空間別・再構築失敗時に旧索引を維持・原文削除の全space反映という採用契約を具体化する。実装 `src/index/`、検証 `tests/index.rs`。初期索引仕様は非同梱。
 
 `IndexService::new(DbWorker, Arc<Config>)` は接続/model/分割版からprofile keyを作る。URLは接続同一性の入力に含めるが、資格情報はkeyへ含めず表示しない。`with_instance` はreader pinにownerと共通のinstance IDを使う入口。`start` は設定concurrency個の共有Tokio taskを開始し、`IndexWorkers::shutdown` はcancelしてjoinする。UI threadで実行しない。埋め込み未設定なら会話は動き、通常の新規source通知は無課金のno-op。
@@ -107,33 +111,7 @@ raw-onlyかつcanonicalが空のsourceは、保存内容に索引対象がない
 
 ## split_charsを含むidentityと旧入力互換（G5）
 
-新profile keyは従来のendpoint/接続名/model/分割algorithm identityへ`indexing.split_chars`
-を加えたhashとし、保存splitter_versionとjob/bootstrap/auto namespaceを分離する。設定変更だけで
-過去sourceを投入せず、新sourceと明示backfill/rebuildだけを新identityへ入れる。費用previewは
-実際の投入先identityのcoverageだけを計上し、旧spaceの重なる範囲を新policyの支払済みとは扱わない。
-旧spaceへ新segmentを混在させず、旧dimension/vec/成功済みjobを保持する。
-
-旧spaceには元のsplit_charsが保存されておらず、既存範囲から設定値を推測しない。同じendpoint/
-接続名/modelのlegacy hashを有限2つ目の互換keyとして照合し、既にtext/span/hashが固定された
-Workだけを既存worker slotで処理・明示retryできる。旧spaceの明示selectと検索も保持する。
-まだnode IDしかない旧auto許可は再分割せず保留し、既存の管理表示/statusで明示backfillを案内する。
-旧auto/fenceを無視してlegacy rebuildの完了を宣言しない。新たなworker/queue/table/eventは加えない。
-
-legacy bootstrapにspaceがなく、新current activeが既に存在する場合は、既存group pointerと
-candidateを一時的な採用先に使う。既に固定されたWorkだけの処理完了後にinactiveとして保持し、
-新current activeを上書きしない。旧rebuild candidateも同じ保全境界で完了させるが、未分割auto/
-投入fence/失敗入力が残ればcandidateを完了扱いにしない。適用直前のtransactionでactiveを再確認する。
-
-互換2keyは同じ接続障害を共有するため、pause/連続失敗は従来の接続identityへ束ねる。
-402等で片方を停止した直後に別keyのHTTPを始めず、明示retryまで待つ。停止・cancel・late採用の
-既存transaction境界とconcurrency上限は変えない。新しい一時group pointerは元のWorkと同じ派生寿命で、
-完了時に解放し、space自体は既存のinactive履歴として保持する。
-
-Standalone RAGのhistory semanticも同じcurrent/legacy identity関数で照合する（PR1-22）。
-active descriptorのprofile/modelと、その接続の現在endpoint・configured split_charsを使い、
-config.embeddingの既定接続/modelが未設定又は別でも選択済みspaceの読取を妨げない。
-互換keyは有限2つのままで、endpoint不一致はquery API前に拒否する。これはquery用の照合であり、
-旧spaceへの新source投入や自動backfillを許可しない。
+Historical compatibility behavior is superseded by Issue #33. Only current profile keys and current splitter metadata are accepted. Do not look up a second legacy key, process legacy bootstrap/fences, preserve old-splitter automatic selection, or repair missing query identity during observation. Existing explicit scope authorization and paid-work boundaries remain.
 
 ## 論理容量上限とsemantic閲覧（G10）
 
@@ -172,15 +150,15 @@ UNIQUE dedupと衝突して復旧不能にならず、正常retryも同じjob/sp
 
 R2-3では既存DB job内の成功採用を `EmbeddingAdoption::adopt_embedding_tx`、失敗採用を `adopt_failure_tx`、起動回復・明示retry/space選択・status/次回時刻の取得も名前付き関数へ分ける。成功・失敗採用と明示retry/space選択ではcallerがtransactionをcommitし、採用helperの既存の早期正常returnでもcommit、不採用errorではrollbackする。起動回復/source claimは従来の各helper内transactionを保持し、起動回復の二つのDB jobとworkerのwake/timeout順序も維持する。`coverage::classify_source` は準備済みsource/jobの純粋な分類だけを行う。
 
-新しい内部型は、DB jobが既存の成功API結果と固定許可を所有し採用methodを持つ `EmbeddingAdoption`（key/failure key/claim/embedding組/dimension/vector/legacyの7 field）と、既存pin付きreaderとcarry/Unicode offset/split_charsを保持する `RawSegments`（4 field）だけである。後者でpreview/投入のpage分割を共有し、投入時だけの既存watermark検査と最大128 jobのDB batchを残す。`Work::pending` は既存のpending初期値を共有する。新しい永続state/queue/cache/workerではない。
+新しい内部型は、DB jobが既存の成功API結果と固定許可を所有し採用methodを持つ `EmbeddingAdoption`（failure key/claim/embedding identity/dimension/vectorの5 field; no legacy adoption flag）と、既存pin付きreaderとcarry/Unicode offset/split_charsを保持する `RawSegments`（4 field）だけである。後者でpreview/投入のpage分割を共有し、投入時だけの既存watermark検査と最大128 jobのDB batchを残す。`Work::pending` は既存のpending初期値を共有する。新しい永続state/queue/cache/workerではない。
 
-公開前のmodule整理時点の記録値（現sourceの再測定ではない）: index入口は2,410行から1,058行、全index moduleは3,028行から3,957行、非空白文字数は92,019から99,016、200文字超の行は46から11。残存する長行はSQL/固定説明文のliteralで、statement-dense closureは分解する。移動のみの先行commitは全体+57行（private moduleのimport/公開path維持と移動signatureのrustfmt展開）で、原提案の+40行目安を17行超える。後続増分は名前付き関数・通常の整形・所有境界の明示であり、行数を目標にminifyしない。`process_key` は191行から127行へ整理し、IndexServiceの9 fieldは変更しない。成功採用DB closureのcaptureは9から1（所有command）、失敗採用は13から7（設定の共有参照を保持）である。公開Rust path・引数は維持する。これらの旧数値を現sourceの規模・性能の保証として使わない。現在の責務は上記moduleの [実装](../../src/index/mod.rs) と [固定key試験](../../src/index/keys.rs)、動作境界は [index統合試験](../../tests/index.rs)、実行した版と結果は [検証状況](../validation/acceptance.md) で確認する。
+公開前のmodule整理時点の記録値（現sourceの再測定ではない）: index入口は2,410行から1,058行、全index moduleは3,028行から3,957行、非空白文字数は92,019から99,016、200文字超の行は46から11。残存する長行はSQL/固定説明文のliteralで、statement-dense closureは分解する。移動のみの先行commitは全体+57行（private moduleのimport/公開path維持と移動signatureのrustfmt展開）で、原提案の+40行目安を17行超える。後続増分は名前付き関数・通常の整形・所有境界の明示であり、行数を目標にminifyしない。`process_key` は191行から127行へ整理し、IndexServiceの9 fieldは変更しない。成功採用DB closureのcaptureは9から1（所有command）、失敗採用は13から7（設定の共有参照を保持）である。公開Rust path・引数は維持する（この段落の規模・field数は整理時点の記録であり、Issue #33で削除した互換処理を保持する根拠にはしない）。これらの旧数値を現sourceの規模・性能の保証として使わない。現在の責務は上記moduleの [実装](../../src/index/mod.rs) と [固定key試験](../../src/index/keys.rs)、動作境界は [index統合試験](../../tests/index.rs)、実行した版と結果は [検証状況](../validation/acceptance.md) で確認する。
 
 ## 永続metadata keyの所有（R2-2）
 
 `IndexKeys` は既存profile identityを借用してindexのpoint key・scan pattern・splitter値を生成する内部型とする。新IDや保存版ではない。compactionのpending/inflight/result/summary cacheはcompaction側の `CompactionKeys`、wait.pendingはwait側の `WaitKeys` が生成する。既存実装のkey spellingsとWork/AutoAdmission JSONをgoldenへ固定してから呼出しを移す。公開型・保存文字列・既存SQLのpredicate/順序/件数上限は変えず、SQLのpartial-index条件や範囲走査literalを汎用scanへ置換しない。
 
-JSONの読書きは既存index store内の小さい型付き関数へ集約する。厳格decodeの失敗分類を維持し、legacy failure counter/claim検証/compaction cacheの意図的な不正JSON無視はcaller側で区別する。既存UPDATEをupsertへ変えず、行ごとのdecode/書込み順序とtransaction境界を保つ。汎用repository・新table・cache・workerは追加しない。
+JSONの読書きは既存index store内の小さい型付き関数へ集約する。厳格decodeの失敗分類を維持し、current failure counter/claim検証/compaction cacheの意図的な不正JSON無視はcaller側で区別する。既存UPDATEをupsertへ変えず、行ごとのdecode/書込み順序とtransaction境界を保つ。汎用repository・新table・cache・workerは追加しない。
 
 3種類のkey builderはそれぞれprofile/thread/operationを借用する1 fieldだけで、namespace生成method以外の状態を持たない。`IndexKeys` の外部利用は同crateのThread削除時observed keyにも必要なためcrate-privateとし、公開Rust APIへは出さない。index内部10 helperのprofile用 `&str` は `IndexKeys` に置き換える。async DB投入に必要な所有Stringと、既存app_meta全体のpoint key用 `&str` は別責務として残す。
 
@@ -188,9 +166,9 @@ index storeの `decode_json` / `encode_json` / `json_meta` / `set_json_meta` / `
 
 ## Index/RAGの共有境界（R2-4）
 
-履歴のembedding identityはG5の `compatible_profile_key` を引き続き共有する。独立RAG資料storeの `rag-unicode-2000-v1` identity・固定split2000は履歴indexの可変split_charsとは別契約であり統合しない。保存hash、選択済み旧spaceの明示検索、課金許可範囲は変えない。
+履歴のembedding identityはcurrent profile-key validationを共有する。独立RAG資料storeの `rag-unicode-2000-v1` identity・固定split2000は履歴indexの可変split_charsとは別契約であり統合しない。保存hashと課金許可範囲を維持し、明示検索にもcurrent profileと必須query markerの検証を適用する。
 
-`SpaceDescriptor` はstandalone RAGとのcrate内の型付きsnapshot（id/profile/model/dimension/splitter/table）。旧JSONの全6項目比較を維持し、状態/寿命を新たに共有しない。`history::RawWitness` は保存済み4項目の同一性とterminal/retention照合だけを共有する。indexのlive source観測とRAGのterminal限定選択は別query predicateのまま。encoding変更のexecution→複数node逆引きは別cardinalityのため残す。既存reference内の未知field/rangeは引き続きJSONで保持し、厳しい全体再deserializeを導入しない。canonical bodyのlegacy rawを無視するG2規則も維持する。
+`SpaceDescriptor` はstandalone RAGとのcrate内の型付きsnapshot（id/profile/model/dimension/splitter/table）。Current descriptor fields and the required query-profile marker are compared as one bounded snapshot; state/lifetime ownership is not shared.`history::RawWitness` は保存済み4項目の同一性とterminal/retention照合だけを共有する。indexのlive source観測とRAGのterminal限定選択は別query predicateのまま。encoding変更のexecution→複数node逆引きは別cardinalityのため残す。既存reference内の未知field/rangeは引き続きJSONで保持し、厳しい全体再deserializeを導入しない。Canonical body eligibility does not depend on raw-retention metadata; raw witness checks apply only to tool_raw.
 
 `ModelError` は認証/credit・設定・入力長・一時障害・429の独立した事実を共有し、永続indexのretry/pauseとRAG呼出し内のstopは分離する。402を含む認証/credit即停止、indexの429再試行、RAGの429で後続要求停止は既存通り。sqlite-vec dimension上限はstorageの定数、RAG内hit順位は同一comparatorへ整理し、indexの距離昇順とは統合しない。
 
@@ -217,19 +195,17 @@ previewは長期snapshot/対象予約/費用承認の証明ではなく、その
 
 ## 旧splitterからの更新で検索選択を保つ（PR2-2）
 
-設定値を保存していないlegacy splitterと、split_charsを含む現行identityを、利用者が行った設定変更と同一視しない。同じ接続名/endpoint/modelのlegacy spaceがactiveの場合、新規許可分は現行policy専用の既存candidate spaceへ投入し、成功しても旧activeを自動で上書きしない。通常group.active pointerを候補の再利用に使い、後続新規sourceも同じ候補へ入れる。旧vectorへの書足し、過去分の自動再課金、旧索引の削除は行わない。
-
-利用者はstatusのspacesで候補を確認し、既存の明示selectで切り替えるか、対象を指定したrebuildを行う。通常候補のselectは許可済みauto/bootstrap/jobが全て終了成功している場合だけ認め、rebuild途中のcandidateは引き続き拒否する。旧spaceへ戻した後も新規sourceだけでは再び勝手に切り替えない。明示的に異なる接続/model/split_charsを選んだ現行space間のG9動作は変えない。新しい永続状態・表・worker・queueは追加しない。
+Historical old-splitter selection preservation is superseded by Issue #33. Unsupported legacy profiles fail explicitly; no compatibility candidate, fallback key, or automatic rebinding is created.
 
 ## query接続identityと分割policyの分離（PR2-14）
 
 query embeddingは選択spaceの接続名/endpoint/model/次元を使い、索引作成時のsplit_charsをquery互換条件にしない。新spaceの作成transactionで、接続名/endpoint/model/既存algorithmから得た独立fingerprintを `app_meta/index.query_profile.<space-id>` に保存する。各spaceに64文字hash一件、資格情報・URL本文・原文を含めない。既存index.*容量計上対象で、spaceと同じ寿命。spaceを削除する機構を追加する場合は同transactionで回収し、source/raw削除だけでは共有spaceのmarkerを消さない。新table/worker/queueは加えない。
 
-保存markerがある場合、core/RAGとも現在の接続名/endpoint/modelとの一致をHTTP前に検証する。split_chars変更だけでは拒否しない。markerのない旧spaceは、現在設定の完全なsplitter key（またはpre-G5 legacy key）を検証できる場合だけ読取を許可する。ownerの通常検索と明示selectは、その検証成功後にmarkerを補完する。RAGはread-onlyで補完しない。marker不一致や未知値はfallbackせず拒否し、設定変更だけで接続を再束縛しない。
+Core and standalone RAG require a saved query-profile marker and verify connection/endpoint/model before HTTP. A split-policy change alone does not reject a compatible query. A missing, malformed, or mismatched marker fails explicitly (`InvalidState` in the owner, with explicit reindexing guidance); readers and selection do not infer or repair it, and no embedding is sent for that rejection.
 
-明示selectの従来のembedding/split一致条件を維持する。G5以後・marker導入前のspaceをsplit変更後に読むには、一度元のsplit設定へ戻してselectまたはowner検索で補完する。元split値はhashから復元できず、不明ならsemantic読取を安全側で拒否する。原文/keyword検索の保持と、有料対象を明示した新しい索引の構築は別であり、回復のための自動課金はしない。pre-G5 key自体はendpoint fingerprintを検証できるため、未知の元split値を推測せず補完できる。
+Explicit reindexing is a separate authorized, potentially paid operation. Missing metadata never authorizes automatic reconstruction, query rebinding, or historical backfill.
 
-RAGの内部SpaceDescriptorは従来6項目にoptional query_profile_keyを加え、query前後でmarkerを含むsnapshot一致を検査する。公開CLI/wireや保存済みspace/jobのhashは変更しない。
+RAGの内部SpaceDescriptorは従来6項目にrequired query_profile_keyを加え、query前後でmarkerを含むsnapshot一致を検査する。公開CLI/wireや保存済みspace/jobのhashは変更しない。
 
 ## 可視性CTEのコスト観測（PR2-14）
 

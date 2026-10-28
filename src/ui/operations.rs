@@ -1115,7 +1115,6 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::Status(StatusArgs {
-                        operation_id: None,
                         thread_id: form.optional("thread")?,
                         run_id: form.optional("run")?,
                         since: form.optional("since")?,
@@ -2091,42 +2090,69 @@ mod entry_tests {
         text
     }
     #[test]
-    fn guide_navigation_quotes_the_actual_operation_labels_in_both_languages() {
-        use OpKind::*;
-        for (text, kinds) in [
-            (
-                include_str!("../../docs/guides/tui.md"),
-                &[ThreadGet, ThreadSet, ThreadDeletePreview, Wait][..],
-            ),
-            (
-                include_str!("../../docs/guides/tui.ja.md"),
-                &[ThreadGet, ThreadSet, ThreadDeletePreview, Wait][..],
-            ),
-            (
-                include_str!("../../docs/guides/user-guide.md"),
-                &[ThreadGet, ThreadDeletePreview][..],
-            ),
-            (
-                include_str!("../../docs/guides/user-guide.ja.md"),
-                &[ThreadGet, ThreadDeletePreview][..],
-            ),
-            (
-                include_str!("../../docs/guides/recovery-and-storage.md"),
-                &[Wait][..],
-            ),
-            (
-                include_str!("../../docs/guides/recovery-and-storage.ja.md"),
-                &[Wait][..],
-            ),
-        ] {
-            for kind in kinds {
+    fn all_guide_navigation_captions_match_actual_display_labels() {
+        fn captions(text: &str) -> Vec<&str> {
+            let mut found = Vec::new();
+            for line in text
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("```"))
+            {
+                for (open, close) in [('`', '`'), ('“', '”'), ('「', '」')] {
+                    let mut rest = line;
+                    while let Some(start) = rest.find(open) {
+                        rest = &rest[start + open.len_utf8()..];
+                        let Some(end) = rest.find(close) else { break };
+                        let quoted = &rest[..end];
+                        if quoted.contains(" · ") {
+                            found.push(quoted);
+                        }
+                        rest = &rest[end + close.len_utf8()..];
+                    }
+                }
+            }
+            found
+        }
+        // Use real operation labels and a real projection for a generated title.
+        // The received caption is an exact source literal: this does not repeat
+        // an expected label in a whitelist that could drift with the guide.
+        let envelope = serde_json::json!({"section":"shells","items":[]});
+        let text = envelope.to_string();
+        let payload = serde_json::json!({"text":text});
+        let saved = crate::presentation::project("interruption_details", &payload, &text, 0);
+        let received_source = include_str!("../frontend/received.rs");
+        let management_source = include_str!("management.rs");
+        let actual = |caption: &str| {
+            OpKind::ALL.iter().any(|kind| kind.label() == caption)
+                || saved.title == caption
+                || received_source.contains(&format!("\"{caption}\""))
+                || management_source.contains(&format!("\"{caption}\""))
+        };
+        // A wrong caption must be rejected even if another correct caption is
+        // present elsewhere in the same guide (the old test's blind spot).
+        let wrong = captions("Use `会話 · 詳細`, never `Thread · 詳細`.");
+        assert!(actual(wrong[0]));
+        assert!(!actual(wrong[1]));
+        let mut documents = crate::docs::documents();
+        assert_eq!(documents.len(), 13);
+        documents.push(crate::docs::Document {
+            id: "user-guide.ja.md".into(),
+            parent_id: String::new(),
+            title: String::new(),
+            summary: String::new(),
+            text: include_str!("../../docs/guides/user-guide.ja.md").into(),
+        });
+        let mut quoted = 0;
+        for guide in documents {
+            for caption in captions(&guide.text) {
+                quoted += 1;
                 assert!(
-                    text.contains(kind.label()),
-                    "Guide navigation must match visible operation {}",
-                    kind.label()
+                    actual(caption),
+                    "{} quotes nonexistent UI label: {caption}",
+                    guide.id
                 );
             }
         }
+        assert!(quoted >= 20, "the scan must cover the full guide set");
     }
     #[test]
     fn recovery_candidates_alias_filter_and_empty_results_keep_all_thirty_six_typed_operations() {

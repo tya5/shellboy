@@ -496,7 +496,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         4
     );
     assert_eq!(
-        parent["change"]["legacy_pending_operations_with_unknown_targets"]["items"][0]["wait_targets"],
+        parent["change"]["pending_operations_with_unknown_targets"]["items"][0]["wait_targets"],
         "unknown"
     );
     let original = shellboy::history::History::new(owner.db.clone())

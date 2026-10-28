@@ -363,30 +363,42 @@ fn closing_and_reopening_cannot_submit_a_second_delete_of_the_same_thread() {
 
 #[test]
 fn worker_panic_reply_releases_global_deletion_ownership_for_another_thread() {
-    let mut ui = ui();
-    list(&mut ui, &["chosen", "next"]);
-    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
-    accept(&mut ui, id, &args, true);
-    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
-    key(&mut ui, KeyCode::Esc);
-    ui.apply(UiUpdate::ThreadDeletion {
-        request_id: id,
-        args,
-        execute: true,
-        result: Err(ApiError::new(
-            ErrorCode::IoFailed,
-            "削除処理が予期せず停止しました。結果は未確認です。一覧を再取得してください",
-        )),
-    });
-    assert!(ui.view().status.contains("結果は未確認"));
-    assert_eq!(
-        ui.threads().len(),
-        2,
-        "uncertain deletion must not remove rows"
-    );
-    key(&mut ui, KeyCode::Down);
-    let (_, next) = request(key(&mut ui, KeyCode::Delete), false);
-    assert_eq!(next.thread_id, "next");
+    for close_dialog in [false, true] {
+        let mut ui = ui();
+        list(&mut ui, &["chosen", "next"]);
+        let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+        accept(&mut ui, id, &args, true);
+        let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+        if close_dialog {
+            key(&mut ui, KeyCode::Esc);
+        }
+        ui.apply(UiUpdate::ThreadDeletion {
+            request_id: id,
+            args,
+            execute: true,
+            result: Err(ApiError::new(
+                ErrorCode::IoFailed,
+                "削除処理が予期せず停止しました。結果は未確認です。一覧を再取得してください",
+            )
+            .details(json!({"deletion_outcome_uncertain": true}))),
+        });
+        assert!(ui.view().status.contains("削除結果は未確認です"));
+        assert!(!ui.view().status.contains("削除できません"));
+        let rendered = screen(&mut ui);
+        assert!(rendered.contains("削除結果は未確認です"), "{rendered}");
+        assert!(!rendered.contains("削除できません"), "{rendered}");
+        assert_eq!(
+            ui.threads().len(),
+            2,
+            "uncertain deletion must not remove rows"
+        );
+        if !close_dialog {
+            key(&mut ui, KeyCode::Esc);
+        }
+        key(&mut ui, KeyCode::Down);
+        let (_, next) = request(key(&mut ui, KeyCode::Delete), false);
+        assert_eq!(next.thread_id, "next");
+    }
 }
 
 #[test]

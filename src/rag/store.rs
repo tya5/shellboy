@@ -1,3 +1,4 @@
+mod migrate;
 mod observation;
 mod scan;
 mod sync;
@@ -31,7 +32,6 @@ CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash);";
 pub(super) struct Store {
     pub db: Connection,
     pub uuid: String,
-    version: i64,
     _lock: Option<File>,
 }
 pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
@@ -58,7 +58,7 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     if !write {
         db.execute_batch("PRAGMA query_only=ON;")?;
     }
-    let mut version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if !matches!(version, 1..=3) {
         return Err(err(
             "schema_unsupported",
@@ -78,27 +78,28 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
             "Not a Shellboy document database",
         ));
     }
-    if write && version < 3 {
-        let tx = db.unchecked_transaction()?;
-        if version == 1 {
-            tx.execute_batch(
-                "ALTER TABLE sources ADD COLUMN exclude_json TEXT NOT NULL DEFAULT '[]';",
-            )?;
-        }
-        tx.execute_batch(HOT_QUERY_INDEXES)?;
-        tx.pragma_update(None, "user_version", 3)?;
-        tx.commit()?;
-        version = 3;
+    if write {
+        migrate::run(&db, version)?;
     }
+    validate_schema(&db)?;
     if write {
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
     }
     Ok(Store {
         db,
         uuid,
-        version,
         _lock: lock,
     })
+}
+fn validate_schema(db: &Connection) -> Result<()> {
+    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version != 3 {
+        return Err(err(
+            "schema_unsupported",
+            "Knowledge database schema requires migration; open it with a writer command such as shellboy rag source add before reading",
+        ));
+    }
+    Ok(())
 }
 fn writer_lock(path: &Path) -> Result<File> {
     let file = OpenOptions::new()
@@ -258,7 +259,7 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
             Ok(json!({"source_id":id,"name":name,"root":root,"existing":false,"exclude":exclude}))
         }
         SourceCommand::List => {
-            let mut q=s.db.prepare(&format!("SELECT id,name,root,kind,last_scan,error,{} FROM sources WHERE kind!='builtin' ORDER BY name LIMIT 201", if s.version>=2 {"exclude_json"}else{"'[]'"}))?;
+            let mut q=s.db.prepare("SELECT id,name,root,kind,last_scan,error,exclude_json FROM sources WHERE kind!='builtin' ORDER BY name LIMIT 201")?;
             let items=q.query_map([],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?,"exclude":serde_json::from_str::<Value>(&r.get::<_,String>(6)?).unwrap_or(Value::Null)})))?.collect::<std::result::Result<Vec<_>,_>>()?;
             if items.len() > 200 {
                 return Err(err(
@@ -423,7 +424,7 @@ pub(super) async fn index(
     let selected = source.map(|id| resolve_source(&s.db, id)).transpose()?;
     let sources = {
         let mut q = s.db.prepare(
-            &format!("SELECT id,root,{} FROM sources WHERE kind='file' AND (?1 IS NULL OR id=?1) ORDER BY id", if s.version>=2 {"exclude_json"}else{"'[]'"}),
+            "SELECT id,root,exclude_json FROM sources WHERE kind='file' AND (?1 IS NULL OR id=?1) ORDER BY id",
         )?;
         q.query_map([selected.as_deref()], |r| {
             Ok((
@@ -676,7 +677,7 @@ pub(super) fn status(context: &search::Context) -> Result<Value> {
 }
 pub(super) fn inspect(path: &Path, id: &str) -> Result<Value> {
     let s = open(path, false)?;
-    let source=s.db.query_row(&format!("SELECT id,name,root,kind,last_scan,error,{} FROM sources WHERE id=?1 OR name=?1",if s.version>=2 {"exclude_json"}else{"'[]'"}),[id],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?,"exclude":serde_json::from_str::<Value>(&r.get::<_,String>(6)?).unwrap_or(Value::Null)}))).optional()?;
+    let source=s.db.query_row("SELECT id,name,root,kind,last_scan,error,exclude_json FROM sources WHERE id=?1 OR name=?1",[id],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?,"exclude":serde_json::from_str::<Value>(&r.get::<_,String>(6)?).unwrap_or(Value::Null)}))).optional()?;
     if let Some(value) = source {
         return Ok(value);
     }

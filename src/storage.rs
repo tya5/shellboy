@@ -28,20 +28,8 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
-const HOT_QUERY_INDEX_MIGRATION: &str = include_str!("../migrations/0010_hot_query_indexes.sql");
-const INITIAL_MIGRATION: &str = include_str!("../migrations/0001_initial.sql");
-const GC_INDEX_MIGRATION: &str = include_str!("../migrations/0002_gc_indexes.sql");
-const ATTACHMENT_PROVENANCE_MIGRATION: &str =
-    include_str!("../migrations/0004_attachment_provenance.sql");
-const ORIGIN_CREDENTIAL_MIGRATION: &str = include_str!("../migrations/0005_origin_credentials.sql");
-const RECEIPT_BUDGET_MIGRATION: &str = include_str!("../migrations/0006_receipt_budget.sql");
-const USAGE_SOURCE_INDEX_MIGRATION: &str =
-    include_str!("../migrations/0007_usage_and_source_indexes.sql");
-const RECEIPT_ACCOUNTING_COMPAT_MIGRATION: &str =
-    include_str!("../migrations/0008_receipt_accounting_compat.sql");
-const COMPACTION_TURN_INDEX_MIGRATION: &str =
-    include_str!("../migrations/0009_compaction_turn_indexes.sql");
-const CONTEXT_INDEX_MIGRATION: &str = include_str!("../migrations/0003_context_indexes.sql");
+mod migrate;
+const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -454,7 +442,8 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
         )));
     }
     // Validate before changing persistent journal mode on an unknown database.
-    let version = validate_schema(&connection)?;
+    let version = schema_version(&connection)?;
+    validate_ledger(&connection, version)?;
     let journal: String = connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
     if !journal.eq_ignore_ascii_case("wal") {
         return Err(StorageError::Configuration(format!(
@@ -469,67 +458,16 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
             "FULL/FK required, found synchronous={synchronous}, foreign_keys={foreign_keys}"
         )));
     }
-    if version == 0 {
+    let version = if version == 0 {
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(INITIAL_MIGRATION)?;
+        transaction.execute_batch(CURRENT_SCHEMA)?;
         transaction.commit()?;
-    }
-    if version < 2 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(GC_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 3 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(CONTEXT_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 4 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(ATTACHMENT_PROVENANCE_MIGRATION)?;
-        migrate_attachment_sources(&transaction)?;
-        transaction.commit()?;
-    }
-    if version < 5 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(ORIGIN_CREDENTIAL_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 6 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(RECEIPT_BUDGET_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 7 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(USAGE_SOURCE_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 8 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(RECEIPT_ACCOUNTING_COMPAT_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 9 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(COMPACTION_TURN_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 10 {
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(HOT_QUERY_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
+        SCHEMA_VERSION
+    } else {
+        version
+    };
+    migrate::run(&mut connection, version)?;
     validate_schema(&connection)?;
     if connection.prepare("PRAGMA foreign_key_check")?.exists([])? {
         return Err(StorageError::Schema("foreign key violations".into()));
@@ -541,97 +479,43 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
     Ok(connection)
 }
 
-/// Preserve known user provenance; unknown legacy origins stay pending and are
-/// never silently attached to the newest human message.
-fn migrate_attachment_sources(tx: &rusqlite::Transaction<'_>) -> Result<(), StorageError> {
-    use rusqlite::params;
-    use serde_json::{Value, json};
-    use sha2::{Digest, Sha256};
-    let rows=tx.prepare("SELECT a.id,a.source_node_id,n.kind,n.payload_json FROM attachment_ref a LEFT JOIN node n ON n.id=a.source_node_id ORDER BY a.created_at,a.id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<String>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
-    for (attachment, source, kind, raw) in rows {
-        let selections=tx.prepare("SELECT thread_id,reason FROM attachment_selection WHERE attachment_id=?1 ORDER BY thread_id")?.query_map([&attachment],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
-        // Compaction already retired these source slots. Preserve their
-        // tombstones instead of manufacturing a pending source for replay.
-        if source.is_some()
-            && kind.is_some()
-            && raw.is_none()
-            && selections
-                .iter()
-                .all(|(_, reason)| reason.as_deref() == Some("context_replacement"))
-        {
-            continue;
-        }
-        let mut payload: Value = raw
-            .as_deref()
-            .and_then(|r| serde_json::from_str(r).ok())
-            .unwrap_or(Value::Null);
-        let known = payload.is_object()
-            && (matches!(kind.as_deref(), Some("user") | Some("attachment"))
-                || (kind.as_deref() == Some("event")
-                    && payload.get("role").and_then(Value::as_str) == Some("user")
-                    && payload.get("content").and_then(Value::as_array).is_some()));
-        let source = if known {
-            source.expect("joined source")
-        } else {
-            let previous_source = source;
-            let source = format!("legacy-attachment-{attachment}");
-            let payload=json!({"role":"user","content":[{"type":"input_text","text":"[Shellboy legacy attachment recovery] Original provenance or historical position could not be recovered. This auxiliary attachment source is not a new human message."},{"type":"attachment_ref","attachment_id":attachment}],"attachment_operation":{"origin":"legacy_unknown","previous_source_node_id":previous_source,"provenance_uncertain":true}}).to_string();
-            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,'attachment',?2,?3,?4,?5)",params![source,chrono::Utc::now().to_rfc3339(),payload,payload.len() as i64,Sha256::digest(payload.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>()])?;
-            tx.execute(
-                "UPDATE attachment_ref SET source_node_id=?2 WHERE id=?1",
-                params![attachment, source],
-            )?;
-            // Forks share one immutable source but adopt it independently.
-            for (thread, reason) in &selections {
-                let status = if reason.as_deref() == Some("context_replacement") {
-                    "cancelled"
-                } else {
-                    "accepted"
-                };
-                tx.execute("INSERT INTO attachment_delivery(node_id,thread_id,status,operation_id,origin_json,created_at)VALUES(?1,?2,?3,?4,?5,?6)",params![source,thread,status,format!("migration:{attachment}"),json!({"origin":"legacy_unknown","provenance_uncertain":true}).to_string(),chrono::Utc::now().to_rfc3339()])?;
-            }
-            continue;
-        };
-        if let Some(text) = payload.get("content").and_then(Value::as_str) {
-            payload["content"] = json!([{"type":"input_text","text":text}]);
-        }
-        if payload.get("content").and_then(Value::as_array).is_none() {
-            payload["content"] = json!([]);
-        }
-        let content = payload["content"]
-            .as_array_mut()
-            .expect("normalized content");
-        if !content.iter().any(|v| {
-            v.get("type").and_then(Value::as_str) == Some("attachment_ref")
-                && v.get("attachment_id").and_then(Value::as_str) == Some(attachment.as_str())
-        }) {
-            content.push(json!({"type":"attachment_ref","attachment_id":attachment}));
-        }
-        let payload = payload.to_string();
-        tx.execute("UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4,payload_revision=payload_revision+1 WHERE id=?1",params![source,payload,payload.len() as i64,Sha256::digest(payload.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>()])?;
+fn validate_schema(connection: &Connection) -> Result<i64, StorageError> {
+    let version = schema_version(connection)?;
+    if version != SCHEMA_VERSION {
+        return Err(StorageError::Schema(format!(
+            "user_version {version} requires migration to {SCHEMA_VERSION}; open with the current writer first"
+        )));
     }
-    Ok(())
+    validate_ledger(connection, version)?;
+    Ok(version)
 }
 
-fn validate_schema(connection: &Connection) -> Result<i64, StorageError> {
+fn schema_version(connection: &Connection) -> Result<i64, StorageError> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if !(0..=SCHEMA_VERSION).contains(&version) {
         return Err(StorageError::Schema(format!(
             "user_version {version}; supported {SCHEMA_VERSION}"
         )));
     }
-    let objects: i64 = connection.query_row(
-        "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
-        [],
-        |row| row.get(0),
-    )?;
     if version == 0 {
+        let objects: i64 = connection.query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )?;
         if objects != 0 {
             return Err(StorageError::Schema(
                 "unversioned nonempty database; automatic adoption is prohibited".into(),
             ));
         }
-        return Ok(0);
+    }
+    Ok(version)
+}
+
+/// Ledger validation is general schema bookkeeping, independent of upgrades.
+fn validate_ledger(connection: &Connection, version: i64) -> Result<(), StorageError> {
+    if version == 0 {
+        return Ok(());
     }
     let ledger = connection
         .prepare("SELECT version,name FROM schema_migration ORDER BY version")
@@ -649,7 +533,7 @@ fn validate_schema(connection: &Connection) -> Result<i64, StorageError> {
             "migration ledger disagrees with user_version".into(),
         ));
     }
-    Ok(version)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -673,5 +557,27 @@ mod checkpoint_tests {
         checkpoint.attempted(retry, 11, true);
         assert!(!checkpoint.due(retry + IDLE_CHECKPOINT_INTERVAL, 11));
         assert!(checkpoint.due(retry + IDLE_CHECKPOINT_INTERVAL, 12));
+    }
+}
+
+#[cfg(test)]
+mod schema_validation_tests {
+    use super::*;
+
+    #[test]
+    fn current_bootstrap_and_validation_do_not_depend_on_upgrade_module() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(CURRENT_SCHEMA).unwrap();
+        assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
+        db.execute_batch("DELETE FROM schema_migration WHERE version=10; PRAGMA user_version=9;")
+            .unwrap();
+        assert!(
+            matches!(validate_schema(&db), Err(StorageError::Schema(message)) if message.contains("current writer"))
+        );
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            9
+        );
     }
 }

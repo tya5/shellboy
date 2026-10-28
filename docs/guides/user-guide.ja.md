@@ -1,6 +1,6 @@
 # User Guide
 
-[ガイド一覧](README.ja.md) · [設定・導入](configuration.ja.md) · [画面操作](tui.ja.md) · [English](user-guide.md)
+[ガイド一覧](README.md) · [設定・導入](configuration.md) · [画面操作](tui.md) · [English](user-guide.md)
 
 Shellboyは端末で会話し、モデルにshell作業を依頼するアプリです。会話の保存先を管理するTUIを一つ起動し、外部の`shellboy` CLIもその起動済みアプリへ接続します。会話には接続先のResponses対応proxy、モデルID、資格情報を設定します。ガイドは設定前でも `shellboy docs list` から閲覧でき、文書検索の `shellboy rag` も独立して使えます。
 
@@ -23,13 +23,13 @@ IDやreceiptは調査の詳細情報です。普段は状態と理由を読み�
 やめるにはCtrl+Cか `shellboy run stop --run RUN_ID` を使います。
 人間の新指示で同じ復旧Turnを再開することと、元の処理をretryすることは別です。
 停止・再起動後の終端Runをretryで復活させることはできません。
-保存済み内容と未確認の副作用を確認する手順は [復旧ガイド](recovery-and-storage.ja.md) にあります。
+保存済み内容と未確認の副作用を確認する手順は [復旧ガイド](recovery-and-storage.md) にあります。
 
 ## 1. 作業フォルダーで起動する
 
-作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、子Run、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.ja.md#slash操作一覧)と[CLIの作業状態](cli-reference.ja.md#共通構文と接続)を参照してください。
+作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、子Run、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.md#slash-commands)と[CLIの作業状態](cli-reference.md#common-syntax-and-connection)を参照してください。
 
-まず[環境別の起動方法](configuration.ja.md#環境別の起動方法)で、端末・OS版binary・モデル用shellの組合せを選びます。[設定・導入](configuration.ja.md) に従ってビルド・インストールと接続設定を行った後、ターミナルで次を実行します。例はBash/zsh用です。
+まず[環境別の起動方法](configuration.md#starting-on-each-platform)で、端末・OS版binary・モデル用shellの組合せを選びます。[設定・導入](configuration.md) に従ってビルド・インストールと接続設定を行った後、ターミナルで次を実行します。例はBash/zsh用です。
 
 ```sh
 command -v shellboy
@@ -38,7 +38,7 @@ cd /path/to/project
 shellboy
 ```
 
-`/path/to/project`は実在する作業フォルダーへ置き換えます。短い名前がPATH上で見つからない場合は、インストール先のディレクトリを利用者のPATHへ追加するか、binaryを絶対パスで呼んでください。モデル用shellのCLI探索にはShellboyがPATHを自動設定します。接続先と資格情報の設定は [設定・導入](configuration.ja.md) を参照してください。ソースcheckoutからのビルド手順は[開発環境](../development/setup.md)にもあります。
+`/path/to/project`は実在する作業フォルダーへ置き換えます。短い名前がPATH上で見つからない場合は、インストール先のディレクトリを利用者のPATHへ追加するか、binaryを絶対パスで呼んでください。モデル用shellのCLI探索にはShellboyがPATHを自動設定します。接続先と資格情報の設定は [設定・導入](configuration.md) を参照してください。ソースcheckoutからのビルド手順は[開発環境](../development/setup.md)にもあります。
 
 設定と保存先を明示する場合は次の形です。
 
@@ -56,9 +56,9 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 下書き欄に依頼を入力し、既定ではEnterで送信します。Ctrl+JまたはShift+Enterで改行します。例えば「このフォルダーのREADMEを読み、構成と次の作業候補を説明してください」と依頼できます。モデルにはshellツールがあるので、実ファイルを変更する依頼はその作業フォルダーで実行され得ます。
 
-初回送信でThreadと依頼が保存されます。「受付済み」はDB保存を表し、回答・shell・Runの完了とは別です。受付後の準備や通信に失敗した場合も、保存済み依頼は残ります。失敗内容に従い対処してから明示的にretryします。[復旧・保存](recovery-and-storage.ja.md)を参照してください。
+初回送信でThreadと依頼が保存されます。「受付済み」はDB保存を表し、回答・shell・Runの完了とは別です。受付後の準備や通信に失敗した場合も、保存済み依頼は残ります。失敗内容に従い対処してから明示的にretryします。[復旧・保存](recovery-and-storage.md)を参照してください。
 
-受付完了までは本文・添付を表示し続けます。この間の編集は送信時点のsnapshotには反映されず、遅れて届く受付結果も編集後の下書きを消しません。キュー満杯や保存失敗の表示が出た場合は、本文を確認してから再操作します。長文貼付けは自動送信されず、[折りたたみ表示](tui.ja.md#長文の貼付け)から確認できます。
+受付完了までは本文・添付を表示し続けます。この間の編集は送信時点のsnapshotには反映されず、遅れて届く受付結果も編集後の下書きを消しません。キュー満杯や保存失敗の表示が出た場合は、本文を確認してから再操作します。長文貼付けは自動送信されず、[折りたたみ表示](tui.md#pasting-long-text)から確認できます。
 
 ## 3. 会話を切り替える
 
@@ -66,11 +66,11 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 - `/threads`またはCtrl+Tで1行ずつの一覧を開き、上下キーとEnterで選びます。左右キーで親子を開閉・移動し、文字入力で絞り込みます。選択した項目の詳細と短い会話抜粋は下部、完全値はF1から確認できます。
 - IDが分かる場合は`/switch THREAD_ID`で移動できます。
 
-Threadごとに下書きと閲覧位置を持ちます。切替は実行停止を意味しません。前のThreadでshellや子Runが動いていれば処理を続けます。回答後も背景処理が残ると、Turnは完了していてもRunは継続する場合があります。Thread・Run・Turnの違いは[委譲](delegation.ja.md)を参照してください。
+Threadごとに下書きと閲覧位置を持ちます。切替は実行停止を意味しません。前のThreadでshellや子Runが動いていれば処理を続けます。回答後も背景処理が残ると、Turnは完了していてもRunは継続する場合があります。Thread・Run・Turnの違いは[委譲](delegation.md)を参照してください。
 
-通常の会話は発話・実行結果・状態変更を種類別に表示します。完全なIDや元の値を調べるときはF6で項目を選んで詳細、Oで原文pageへ進みます。F7はリンク一覧と完全URLのコピーです。F8では会話状態に応じた候補・よく使う操作・全操作を表示します。人向け名・CLI名・関連するslashで絞り込み、対象IDや引数をfieldごとに入力して履歴・Run・shell・索引・保存へ進めます。結果はfieldと値で読み、必要な部分を詳細pageで取得します。[画面操作](tui.ja.md#詳細から原文とリンクを読む) にキーとコピー範囲をまとめています。
+通常の会話は発話・実行結果・状態変更を種類別に表示します。完全なIDや元の値を調べるときはF6で項目を選んで詳細、Oで原文pageへ進みます。F7はリンク一覧と完全URLのコピーです。F8では「この会話で」「よく使う」「すべての操作」を表示します。人向け名・CLI名・関連するslashで絞り込み、対象IDや引数をfieldごとに入力して履歴・Run・shell・索引・保存へ進めます。結果はfieldと値で読み、必要な部分を詳細pageで取得します。[画面操作](tui.md#read-source-text-and-links-from-details) にキーとコピー範囲をまとめています。
 
-履歴を読むと末尾追従を止め、「新着あり」を表示します。Ctrl+Endで末尾追従へ戻ります。フォークや依頼編集、検索filterと出典・直接の関係の確認は[履歴と検索](history-and-search.ja.md)で説明します。
+履歴を読むと末尾追従を止め、「新着あり」を表示します。Ctrl+Endで末尾追従へ戻ります。フォークや依頼編集、検索filterと出典・直接の関係の確認は[履歴と検索](history-and-search.md)で説明します。
 
 ## 4. 接続・モデルを変える
 
@@ -92,12 +92,12 @@ Threadごとに下書きと閲覧位置を持ちます。切替は実行停止�
 
 ```text
 まず /path/to/shellboy/docs/guides/agent-guide.md と
-/path/to/shellboy/docs/guides/delegation.ja.md をshellで読んでください。
+/path/to/shellboy/docs/guides/delegation.md をshellで読んでください。
 その手順で所有する子Threadを作り、調査だけを委譲してください。
 子の依頼を送った後は割当と完了状態を確認し、原文を取得して結果をまとめてください。
 ```
 
-binaryだけを別フォルダーへ置いた場合、docsが一緒に存在するとは限りません。ガイドの実際の保存先へ書き換えてください。親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.ja.md)にあります。
+binaryだけを別フォルダーへ置いた場合、docsが一緒に存在するとは限りません。ガイドの実際の保存先へ書き換えてください。親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。
 
 Threadの`AGENTS.md`参照先は作業上の指示です。新しいルートThreadの既定はcwdの`AGENTS.md`で、新Turnの準備で読み、同じTurnのretryは保存済みsnapshotを使います。Agent Guideは操作の説明書、リポジトリ直下の`AGENTS.md`はそのリポジトリの作業指示で、用途が異なります。
 
@@ -107,8 +107,8 @@ Ctrl+Cは現在Threadの中断、Ctrl+Bは現在のforeground shellを背景へ�
 
 処理の完了を観測するwaitと、対象を中断する操作は別です。F8の待機フォームから開始した観測だけをやめるなら、結果画面で小文字w、又は `/cancel-wait` を使います。対象Run/shellは止まりません。フォーム内ではEnterが実行、複数行の本文入力はCtrl+J、候補値の置換はCtrl+Uです。
 
-終了はCtrl+Qまたは`/quit`です。保存と所有する処理の停止・回収を待ちます。猶予を超えるとW/Enterで待機継続、Fで強制終了の確認へ進み、さらにYで確定します。強制終了は未保存・未回収の可能性を伴います。詳細は[復旧・保存](recovery-and-storage.ja.md)にあります。
+終了はCtrl+Qまたは`/quit`です。保存と所有する処理の停止・回収を待ちます。猶予を超えるとW/Enterで待機継続、Fで強制終了の確認へ進み、さらにYで確定します。強制終了は未保存・未回収の可能性を伴います。詳細は[復旧・保存](recovery-and-storage.md)にあります。
 
-次に使う機能は[添付](attachments.ja.md)、[履歴と検索](history-and-search.ja.md)、[全CLI参照](cli-reference.ja.md)から確認できます。
+次に使う機能は[添付](attachments.md)、[履歴と検索](history-and-search.md)、[全CLI参照](cli-reference.md)から確認できます。
 
-削除前にF8の「会話 · 削除影響」で、動作中Run・子孫・共有や出典・添付参照を確認できます。照会だけでは削除せず、容量の回収見積もりは未対応です。受付や圧縮結果を見失った場合はF8の「操作 · 受付結果」で対象operationを照会し、後続状態も確認します。詳しくは[復旧・保存](recovery-and-storage.ja.md)を参照してください。
+削除前にF8の「会話 · 削除影響」で、動作中Run・子孫・共有や出典・添付参照を確認できます。照会だけでは削除せず、容量の回収見積もりは未対応です。受付や圧縮結果を見失った場合はF8の「操作 · 受付結果」で対象operationを照会し、後続状態も確認します。詳しくは[復旧・保存](recovery-and-storage.md)を参照してください。

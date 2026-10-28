@@ -151,18 +151,6 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
             .output()
             .await
             .unwrap();
-        let warning = String::from_utf8_lossy(&output.stderr);
-        if args.first() == Some(&"status") && args.contains(&"--operation") {
-            assert!(
-                warning.contains("deprecated") && warning.contains("shellboy operation get"),
-                "{warning}"
-            );
-        } else {
-            assert!(
-                !warning.contains("status --operation is deprecated"),
-                "{warning}"
-            );
-        }
         (
             output.status.success(),
             serde_json::from_slice(&output.stdout).unwrap(),
@@ -273,7 +261,7 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
     assert_eq!(refused["error"]["code"], "storage_limit");
     let (ok, lookup) = cli(
         &owner.loaded.data_dir,
-        &["status", "--operation", &operation],
+        &["operation", "get", "--operation", &operation],
     )
     .await;
     assert!(ok, "{lookup}");

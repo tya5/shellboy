@@ -13,7 +13,7 @@ impl EmbeddingIdentity {
     pub(super) fn configured(config: &Config, key: String) -> Self {
         Self {
             key,
-            query_key: legacy_profile_key(config).expect("configured embedding identity"),
+            query_key: endpoint_family_key(config).expect("configured embedding identity"),
             profile: config.embedding.connection.clone().unwrap_or_default(),
             model: config.embedding.model.clone().unwrap_or_default(),
         }
@@ -23,7 +23,7 @@ impl EmbeddingIdentity {
     }
 }
 
-pub(super) fn legacy_profile_key(config: &Config) -> Option<String> {
+pub(super) fn endpoint_family_key(config: &Config) -> Option<String> {
     config
         .embedding
         .connection
@@ -37,41 +37,25 @@ pub(super) fn legacy_profile_key(config: &Config) -> Option<String> {
         })
 }
 pub(super) fn profile_key(config: &Config) -> Option<String> {
-    legacy_profile_key(config).map(|legacy| split_key(&legacy, config.indexing.split_chars))
+    endpoint_family_key(config).map(|family| split_key(&family, config.indexing.split_chars))
 }
 fn endpoint_key(name: &str, endpoint: &str, model: &str) -> String {
     hash(format!("{name}\0{endpoint}\0{model}\0{SPLITTER}").as_bytes())
 }
-fn split_key(legacy: &str, split_chars: usize) -> String {
-    hash(format!("split-chars-v1\0{legacy}\0{split_chars}").as_bytes())
+fn split_key(family: &str, split_chars: usize) -> String {
+    hash(format!("split-chars-v1\0{family}\0{split_chars}").as_bytes())
 }
-pub(super) fn compatible_profile_key(
-    config: &Config,
-    name: &str,
-    model: &str,
-    splitter: &str,
-) -> Option<String> {
-    let connection = config.connections.get(name)?;
-    let legacy = endpoint_key(name, &connection.base_url, model);
-    [split_key(&legacy, config.indexing.split_chars), legacy]
-        .into_iter()
-        .find(|key| splitter == IndexKeys::new(key).splitter())
-}
-/// Query compatibility is independent of the source segmentation policy.
-/// Unknown old keys still require the full current-policy compatibility proof.
+/// Query identity is mandatory and independent of source segmentation policy.
+/// Missing markers require an explicit rebuild, never read-time repair.
 pub(super) fn query_profile_key(
     config: &Config,
     name: &str,
     model: &str,
-    splitter: &str,
-    stored: Option<&str>,
+    stored: &str,
 ) -> Option<String> {
     let connection = config.connections.get(name)?;
     let expected = endpoint_key(name, &connection.base_url, model);
-    if let Some(stored) = stored {
-        return (stored == expected).then_some(expected);
-    }
-    compatible_profile_key(config, name, model, splitter).map(|_| expected)
+    (stored == expected).then_some(expected)
 }
 
 pub(super) fn bind_query_profile(
@@ -90,42 +74,12 @@ pub(super) fn bind_query_profile(
     }
 }
 
-pub(super) fn legacy_may_activate(
-    db: &Connection,
-    keys: IndexKeys<'_>,
-) -> Result<bool, StorageError> {
-    let selected = meta(db, IndexKeys::ACTIVE_SPACE)?
-        .map(|id| load_space(db, &id))
-        .transpose()?
-        .flatten();
-    Ok(selected.is_none_or(|space| space.splitter == keys.splitter()))
-}
-
-/// The old hash omits split_chars, so an upgrade must not infer user consent
-/// to replace its selected coverage with a freshly segmented current space.
-pub(super) fn preserve_legacy_selection(
-    db: &Connection,
-    legacy_key: &str,
-) -> Result<bool, StorageError> {
-    let selected = meta(db, IndexKeys::ACTIVE_SPACE)?
-        .map(|id| load_space(db, &id))
-        .transpose()?
-        .flatten();
-    Ok(selected.is_some_and(|space| space.splitter == IndexKeys::new(legacy_key).splitter()))
-}
-
 impl IndexService {
     pub(super) fn identity_keys(&self) -> Vec<String> {
-        let mut keys: Vec<_> = self.profile_key.iter().cloned().collect();
-        if let Some(key) = &self.legacy_profile_key
-            && !keys.contains(key)
-        {
-            keys.push(key.clone());
-        }
-        keys
+        self.profile_key.iter().cloned().collect()
     }
     pub(super) fn failure_key(&self) -> Option<&str> {
-        self.legacy_profile_key.as_deref()
+        self.endpoint_family_key.as_deref()
     }
 
     pub(super) async fn write_space(&self, args: &IndexArgs) -> Result<Option<String>, ApiError> {
@@ -140,20 +94,11 @@ impl IndexService {
             .map_err(db_error)
     }
 
-    pub(super) async fn legacy_preparation(&self) -> Result<Value, ApiError> {
-        let Some(key) = self.legacy_profile_key.clone() else {
-            return Ok(Value::Null);
-        };
-        self.database
-            .call(move |db| read_legacy_preparation(db, &key))
-            .await
-            .map_err(db_error)
-    }
-
     pub async fn retry(&self, args: IndexArgs) -> Result<(), ApiError> {
         self.key()?;
         let current_key = self.profile_key.clone().unwrap();
         let compatible_keys = self.identity_keys();
+        let family = self.failure_key().map(str::to_owned);
         let filter =
             if args.scope.is_some() || !args.source_ids.is_empty() || !args.thread_ids.is_empty() {
                 Some(
@@ -168,7 +113,7 @@ impl IndexService {
         self.database
             .call(move |db| {
                 let tx = db.transaction()?;
-                retry_tx(&tx, args, current_key, compatible_keys, filter)?;
+                retry_tx(&tx, args, current_key, compatible_keys, family, filter)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -188,11 +133,10 @@ impl IndexService {
                 let tx = db.transaction()?;
                 select_space_tx(&tx, &id, &keys)?;
                 let space = load_space(&tx, &id)?.ok_or_else(serde_error)?;
-                let query_key = query_profile_key(&config, &space.profile, &space.model,
-                    &space.splitter, meta(&tx, &IndexKeys::query_profile(&id))?.as_deref())
+                let marker = meta(&tx, &IndexKeys::query_profile(&id))?;
+                query_profile_key(&config, &space.profile, &space.model, marker.as_deref().unwrap_or(""))
                     .ok_or_else(|| StorageError::from(err(ErrorCode::InvalidState,
-                        "Selected index space endpoint/model fingerprint does not match current configuration")))?;
-                bind_query_profile(&tx, &id, &query_key)?;
+                        "Selected index space query fingerprint is missing or incompatible; explicitly rebuild with the intended embedding configuration")))?;
                 tx.commit()?;
                 Ok(())
             })
@@ -204,9 +148,9 @@ impl IndexService {
 
     pub async fn status(&self, args: IndexArgs) -> Result<IndexStatus, ApiError> {
         let keys = self.identity_keys();
-        let legacy = self.legacy_profile_key.clone();
+        let family = self.endpoint_family_key.clone();
         self.database
-            .call(move |db| read_status(db, args, keys, legacy))
+            .call(move |db| read_status(db, args, keys, family))
             .await
             .map_err(db_error)
     }
@@ -242,29 +186,12 @@ fn read_write_space(
     }
     Ok(compatible.then_some(id))
 }
-fn read_legacy_preparation(db: &Connection, key: &str) -> Result<Value, StorageError> {
-    let count: i64 = db.query_row(
-        "SELECT COUNT(*) FROM app_meta WHERE key LIKE ?1",
-        [IndexKeys::new(key).auto_pattern()],
-        |row| row.get(0),
-    )?;
-    let required_action = if count > 0 {
-        Some(
-            "Explicitly backfill the intended source IDs with the current configuration; retry only resumes already prepared legacy input",
-        )
-    } else {
-        None
-    };
-    Ok(json!({"unprepared_sources":count,
-        "policy":"stored segments only; legacy node-ID authorizations are held without guessing the old split_chars",
-        "required_action":required_action}))
-}
-
 fn retry_tx(
     tx: &Transaction<'_>,
     args: IndexArgs,
     current_key: String,
     compatible_keys: Vec<String>,
+    family: Option<String>,
     filter: Option<HashSet<String>>,
 ) -> Result<(), StorageError> {
     let embedding_job_sql =
@@ -349,7 +276,10 @@ fn retry_tx(
         )?;
     }
     for key in &keys {
-        set_meta(tx, &IndexKeys::new(key).common_failures(), "0")?;
+        tx.execute(
+            "DELETE FROM app_meta WHERE key=?1",
+            [IndexKeys::new(key).common_failures()],
+        )?;
         if key == &current_key {
             let mut statement = tx.prepare("SELECT key,value FROM app_meta WHERE key LIKE ?1")?;
             let rows = statement
@@ -394,12 +324,15 @@ fn retry_tx(
             }
         }
     } // The endpoint family pause is shared even for an explicit current space.
-    if let Some(family) = compatible_keys.last() {
+    if let Some(family) = family {
         tx.execute(
             "DELETE FROM app_meta WHERE key=?1",
-            [IndexKeys::new(family).pause()],
+            [IndexKeys::new(&family).pause()],
         )?;
-        set_meta(tx, &IndexKeys::new(family).common_failures(), "0")?;
+        tx.execute(
+            "DELETE FROM app_meta WHERE key=?1",
+            [IndexKeys::new(&family).common_failures()],
+        )?;
     }
     Ok(())
 }
@@ -416,25 +349,7 @@ fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<()
             "Select the corresponding embedding/split_chars configuration before activating this old space",
         )));
     }
-    let prepared_upgrade = if space.state == "candidate" {
-        let mut prepared = false;
-        for key in keys {
-            let keys = IndexKeys::new(key);
-            if meta(tx, &keys.group("active"))?.as_deref() != Some(id) {
-                continue;
-            }
-            let pending: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state NOT IN ('done','split')) OR EXISTS(SELECT 1 FROM app_meta WHERE key LIKE ?2 OR key LIKE ?3)",
-                params![id, keys.bootstrap_pattern(), keys.auto_pattern()],
-                |row| row.get(0),
-            )?;
-            prepared = !pending;
-        }
-        prepared
-    } else {
-        false
-    };
-    if !matches!(space.state.as_str(), "active" | "inactive" | "paused") && !prepared_upgrade {
+    if !matches!(space.state.as_str(), "active" | "inactive" | "paused") {
         return Err(StorageError::from(err(
             ErrorCode::InvalidState,
             "Incomplete candidate cannot become active",
@@ -446,27 +361,13 @@ fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<()
     )?;
     tx.execute("UPDATE index_space SET state='active' WHERE id=?1", [&id])?;
     set_meta(tx, IndexKeys::ACTIVE_SPACE, id)?;
-    // Returning to a legacy selection keeps its prepared current-policy space
-    // writable as a candidate, without allowing new sources to select it again.
-    if keys
-        .last()
-        .is_some_and(|key| space.splitter == IndexKeys::new(key).splitter())
-        && keys.len() > 1
-        && let Some(candidate) = meta(tx, &IndexKeys::new(&keys[0]).group("active"))?
-        && candidate != id
-    {
-        tx.execute(
-            "UPDATE index_space SET state='candidate' WHERE id=?1 AND state='inactive'",
-            [candidate],
-        )?;
-    }
     Ok(())
 }
 fn read_status(
     db: &Connection,
     args: IndexArgs,
     keys: Vec<String>,
-    legacy: Option<String>,
+    family: Option<String>,
 ) -> Result<IndexStatus, StorageError> {
     let embedding_job_sql = "SELECT source_node_id,error_json FROM embedding_job WHERE space_id=?1 AND state='failed' ORDER BY id LIMIT 1";
     let explicit = args.space_id.is_some();
@@ -484,21 +385,11 @@ fn read_status(
     if let Some(space) = &selected {
         spaces.insert(space.clone());
     }
-    let mut upgrade_candidate = None;
-    if !explicit
-        && keys.len() > 1
-        && selected
-            .as_ref()
-            .map(|id| load_space(db, id))
-            .transpose()?
-            .flatten()
-            .is_some_and(|space| {
-                legacy
-                    .as_ref()
-                    .is_some_and(|key| space.splitter == IndexKeys::new(key).splitter())
-            })
+    if let Some(family) = family
+        && let Some(pause) = meta(db, &IndexKeys::new(&family).pause())?
     {
-        upgrade_candidate = meta(db, &IndexKeys::new(&keys[0]).group("active"))?;
+        status.paused = true;
+        status.reason = Some(pause);
     }
     for key in &keys {
         if let Some(pause) = meta(db, &IndexKeys::new(key).pause())? {
@@ -532,14 +423,7 @@ fn read_status(
                     "failed" => status.failed += 1,
                     _ => {}
                 }
-                if legacy.as_ref() == Some(key) {
-                    if status.reason.is_none() {
-                        status.reason = Some(format!(
-                            "Legacy source {} is not segmented; explicitly backfill intended sources under the current split_chars policy",
-                            admission.node_id
-                        ));
-                    }
-                } else if status.reason.is_none() {
+                if status.reason.is_none() {
                     status.reason = admission
                         .error
                         .map(|error| format!("Source {}: {error}", admission.node_id));
@@ -595,15 +479,6 @@ fn read_status(
     if keys.is_empty() {
         status.reason = Some("Embedding connection/model is not configured".into());
     }
-    if let Some(candidate) = upgrade_candidate {
-        let selection = format!(
-            "Legacy search selection is preserved; new history in candidate {candidate} is excluded from default semantic search until selection. Explicitly select this candidate after all authorized inputs succeed; old history then requires authorized rebuild/backfill to join the selected space"
-        );
-        status.reason = Some(match status.reason {
-            Some(reason) => format!("{reason}; {selection}"),
-            None => selection,
-        });
-    }
 
     Ok(status)
 }
@@ -612,7 +487,7 @@ fn read_next_delay(
     keys: Vec<String>,
     family: Option<String>,
 ) -> Result<Duration, StorageError> {
-    let embedding_job_sql = "SELECT MIN(j.next_attempt_at) FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND j.next_attempt_at IS NOT NULL AND s.state IN ('active','candidate') AND (s.splitter_version=?1 OR s.splitter_version=?2)";
+    let embedding_job_sql = "SELECT MIN(j.next_attempt_at) FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND j.next_attempt_at IS NOT NULL AND s.state IN ('active','candidate') AND s.splitter_version=?1";
     if let Some(family) = family
         && meta(db, &IndexKeys::new(&family).pause())?.is_some()
     {
@@ -622,11 +497,10 @@ fn read_next_delay(
         .iter()
         .map(|key| IndexKeys::new(key).splitter())
         .collect();
-    let next: Option<String> = db.query_row(
-        embedding_job_sql,
-        params![splitters.first(), splitters.get(1)],
-        |row| row.get(0),
-    )?;
+    let next: Option<String> =
+        db.query_row(embedding_job_sql, params![splitters.first()], |row| {
+            row.get(0)
+        })?;
     let mut earliest = next.and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok());
     for key in keys {
         let mut statement = db.prepare("SELECT value FROM app_meta WHERE key LIKE ?1")?;
@@ -708,15 +582,15 @@ mod tests {
         config.embedding.model = Some("embed-model".into());
         config.indexing.split_chars = 8;
         let old = profile_key(&config).unwrap();
-        let family = legacy_profile_key(&config).unwrap();
+        let family = endpoint_family_key(&config).unwrap();
         config.indexing.split_chars = 12;
         assert_ne!(profile_key(&config).unwrap(), old);
-        assert_eq!(legacy_profile_key(&config).unwrap(), family);
+        assert_eq!(endpoint_family_key(&config).unwrap(), family);
         config.embedding.model = Some("other".into());
-        assert_ne!(legacy_profile_key(&config).unwrap(), family);
+        assert_ne!(endpoint_family_key(&config).unwrap(), family);
     }
     #[test]
-    fn readonly_identity_accepts_current_and_legacy_but_rejects_changed_endpoint_or_policy() {
+    fn query_identity_requires_marker_and_survives_split_policy_changes() {
         let mut config = Config::default();
         config.connections.insert(
             "embed".into(),
@@ -727,29 +601,18 @@ mod tests {
         );
         config.embedding.connection = Some("embed".into());
         config.embedding.model = Some("model".into());
-        config.indexing.split_chars = 8;
-        let current = profile_key(&config).unwrap();
-        let legacy = legacy_profile_key(&config).unwrap();
-        let current_splitter = format!("{SPLITTER}:{current}");
-        let legacy_splitter = format!("{SPLITTER}:{legacy}");
-        for (splitter, key) in [(&current_splitter, &current), (&legacy_splitter, &legacy)] {
-            assert_eq!(
-                compatible_profile_key(&config, "embed", "model", splitter).as_ref(),
-                Some(key)
-            );
-        }
-        // The selected space descriptor, not the current default embedding model,
-        // identifies the query endpoint/model, matching prior RAG behavior.
-        config.embedding.connection = None;
-        config.embedding.model = Some("other-default".into());
-        assert!(compatible_profile_key(&config, "embed", "model", &current_splitter).is_some());
-        config.indexing.split_chars = 12;
-        assert!(compatible_profile_key(&config, "embed", "model", &current_splitter).is_none());
-        assert!(compatible_profile_key(&config, "embed", "model", &legacy_splitter).is_some());
-        config.connections.get_mut("embed").unwrap().base_url = "http://other/v1".into();
-        assert!(compatible_profile_key(&config, "embed", "model", &legacy_splitter).is_none());
-        assert!(
-            compatible_profile_key(&config, "embed", "other-model", &legacy_splitter).is_none()
+        let marker = endpoint_family_key(&config).unwrap();
+        assert!(query_profile_key(&config, "embed", "model", "").is_none());
+        assert_eq!(
+            query_profile_key(&config, "embed", "model", &marker),
+            Some(marker.clone())
         );
+        config.indexing.split_chars += 1;
+        assert_eq!(
+            query_profile_key(&config, "embed", "model", &marker),
+            Some(marker.clone())
+        );
+        config.connections.get_mut("embed").unwrap().base_url = "http://other/v1".into();
+        assert!(query_profile_key(&config, "embed", "model", &marker).is_none());
     }
 }

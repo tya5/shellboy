@@ -41,13 +41,13 @@ async fn pin_count(db: &DbWorker) -> i64 {
 }
 
 #[tokio::test]
-async fn get_exposes_saved_command_context_without_inventing_legacy_commands() {
+async fn get_exposes_saved_command_context_and_unknown_live_terminal_metadata() {
     let (_dir, db, reader) = fixture().await;
-    let legacy = reader.get("x").await.unwrap();
-    assert_eq!(legacy.command, None);
-    assert_eq!(legacy.cwd.as_deref(), Some("/"));
-    assert_eq!(legacy.thread_id.as_deref(), Some("t"));
-    assert_eq!(legacy.turn_id.as_deref(), Some("u"));
+    let details = reader.get("x").await.unwrap();
+    assert_eq!(details.command, None);
+    assert_eq!(details.cwd.as_deref(), Some("/"));
+    assert_eq!(details.thread_id.as_deref(), Some("t"));
+    assert_eq!(details.turn_id.as_deref(), Some("u"));
     let command = "shellboy message send --thread t --text 'a request, not a shell execution'";
     db.call(move |db| {
         db.execute(
@@ -62,26 +62,15 @@ async fn get_exposes_saved_command_context_without_inventing_legacy_commands() {
         reader.get("x").await.unwrap().command.as_deref(),
         Some(command)
     );
-    // New clients must still accept a get response from a running older owner.
-    let old: shellboy::protocol::ShellDetails = serde_json::from_value(serde_json::json!({
-        "execution_id":"x", "run_id":"r", "state":"running", "output_complete":false
-    }))
-    .unwrap();
-    assert_eq!(old.command, None);
-    assert_eq!(old.thread_id, None);
-    assert_eq!(old.forced, None);
-    assert_eq!(old.exit_signal, None);
-    assert_eq!(old.group_cleanup_confirmed, None);
-    assert_eq!(old.elapsed_ms, None);
-    let old = serde_json::to_value(old).unwrap();
-    for field in [
-        "forced",
-        "exit_signal",
-        "group_cleanup_confirmed",
-        "elapsed_ms",
-    ] {
-        assert!(!old.as_object().unwrap().contains_key(field));
-    }
+    // Running executions genuinely lack terminal metadata; serde optionality
+    // represents this state, rather than a promise to read an older owner.
+    let current = reader.get("x").await.unwrap();
+    assert_eq!(current.state, shellboy::protocol::ShellState::Running);
+    assert_eq!(current.forced, None);
+    assert_eq!(current.exit_signal, None);
+    assert_eq!(current.group_cleanup_confirmed, None);
+    // This fixture intentionally has no parseable saved timestamp.
+    assert_eq!(current.elapsed_ms, None);
 }
 
 #[tokio::test]

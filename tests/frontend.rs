@@ -2602,7 +2602,7 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
         } else {
             root.path().into()
         };
-        let attachments = vec![attachment(if bad_position { Some(1) } else { None })];
+        let attachments = vec![attachment(Some(if bad_position { 1 } else { 4 }))];
         let action = if edited {
             UiAction::SendEdited {
                 draft_id: "edited".into(),
@@ -2610,7 +2610,7 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
                 source_thread_id: "absent".into(),
                 source_node_id: "absent".into(),
                 confirmed_run_id: None,
-                text: "text".into(),
+                text: "text\u{fffc}".into(),
                 attachments,
                 cwd,
                 connection: None,
@@ -2622,7 +2622,7 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
                 draft_id: "send".into(),
                 revision: 0,
                 thread_id: None,
-                text: "text".into(),
+                text: "text\u{fffc}".into(),
                 attachments,
                 cwd,
                 connection: None,

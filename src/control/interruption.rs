@@ -176,7 +176,7 @@ AND (json_extract(m.value, '$.caller.thread_id') = ?1
                 WHERE r.thread_id = ?1))))
 ORDER BY m.key";
 
-const LEGACY_PENDING_SNAPSHOT: &str = r"SELECT json_object('operation_id', o.operation_id,
+const PENDING_UNKNOWN_SNAPSHOT: &str = r"SELECT json_object('operation_id', o.operation_id,
     'request_kind', 'unknown',
     'wait_targets', 'unknown',
     'state', o.state)
@@ -397,15 +397,15 @@ pub(crate) fn capture_interrupted_context(
         }
         let unknown = snapshot_section(
             tx,
-            LEGACY_PENDING_SNAPSHOT,
+            PENDING_UNKNOWN_SNAPSHOT,
             &thread,
             at,
-            "legacy_pending_operations_with_unknown_targets",
+            "pending_operations_with_unknown_targets",
             reason,
         )?;
         let actor = json!({"kind":"shellboy","source":source});
         let snapshot_node = uuid::Uuid::new_v4().to_string();
-        let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"legacy_pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
+        let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
         crate::history::append_node(
             tx,
             &thread,

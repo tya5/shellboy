@@ -40,7 +40,7 @@ impl Fixture {
     }
     async fn status(&self, args: StatusArgs) -> Result<StatusSnapshot, ApiError> {
         let request = Request {
-            protocol_version: 1,
+            protocol_version: shellboy::protocol::PROTOCOL_VERSION,
             operation_id: "fixture:status".into(),
             command: Command::Status(args),
             origin: None,
@@ -277,7 +277,7 @@ async fn model_origin_defaults_to_own_thread_without_reinterpreting_all_as_globa
         token: "private".into(),
     };
     let request = Request {
-        protocol_version: 1,
+        protocol_version: shellboy::protocol::PROTOCOL_VERSION,
         operation_id: "fixture:status".into(),
         command: Command::Status(StatusArgs {
             all: true,
@@ -300,7 +300,7 @@ async fn model_origin_defaults_to_own_thread_without_reinterpreting_all_as_globa
             .all(|i| i["thread_id"] == "a")
     );
     let request = Request {
-        protocol_version: 1,
+        protocol_version: shellboy::protocol::PROTOCOL_VERSION,
         operation_id: "fixture:status".into(),
         command: Command::Status(StatusArgs {
             run_id: Some("owned".into()),
@@ -414,75 +414,52 @@ fn status_request_defaults_and_bounds_are_part_of_the_wire_contract() {
 }
 
 #[tokio::test]
-async fn legacy_wire_receipt_lookup_shares_canonical_details_without_exposing_origin_tokens() {
+async fn canonical_receipt_lookup_does_not_expose_tokens_or_mutate_state() {
     let f = Fixture::new().await;
     let before = f.db.call(|db| Ok(db.total_changes())).await.unwrap();
-    let lookup = f
-        .status(StatusArgs {
-            operation_id: Some("fixture:held".into()),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    assert_eq!(lookup.scope, "operation");
-    assert!(lookup.items.is_empty());
-    let value = serde_json::to_value(&lookup).unwrap();
-    assert_eq!(value["operation"]["state"], "completed");
-    let canonical = f
+    let request = |id: &str| Request {
+        protocol_version: PROTOCOL_VERSION,
+        operation_id: "fixture:canonical-lookup".into(),
+        command: Command::OperationGet(OperationTarget {
+            operation_id: id.into(),
+        }),
+        origin: None,
+    };
+    let value = f
         .store
-        .execute(
-            Request {
-                protocol_version: 1,
-                operation_id: "fixture:canonical-lookup".into(),
-                command: Command::OperationGet(OperationTarget {
-                    operation_id: "fixture:held".into(),
-                }),
-                origin: None,
-            },
-            None,
-        )
+        .execute(request("fixture:held"), None)
         .await
         .unwrap()
         .result;
-    assert_eq!(
-        value["operation"], canonical,
-        "legacy wire wrapper shares canonical detail"
-    );
+    assert_eq!(value["state"], "completed");
     assert!(!value.to_string().contains("PRIVATE_TOKEN"));
-    assert_eq!(value["operation"]["targets"]["message_id"], "held-node");
+    assert_eq!(value["targets"]["message_id"], "held-node");
+    assert_eq!(value["outcome"]["result"]["message_id"], "held-node");
     assert_eq!(
-        value["operation"]["outcome"]["result"]["message_id"],
-        "held-node"
-    );
-    assert_eq!(
-        f.status(StatusArgs {
-            operation_id: Some("missing".into()),
-            ..Default::default()
-        })
-        .await
-        .unwrap_err()
-        .code,
+        f.store
+            .execute(request("missing"), None)
+            .await
+            .unwrap_err()
+            .code,
         ErrorCode::OperationNotFound
-    );
-    assert_eq!(
-        f.status(StatusArgs {
-            operation_id: Some("fixture:held".into()),
-            thread_id: Some("a".into()),
-            ..Default::default()
-        })
-        .await
-        .unwrap_err()
-        .code,
-        ErrorCode::InvalidArgument
     );
     assert_eq!(
         f.db.call(|db| Ok(db.total_changes())).await.unwrap(),
         before
     );
     use clap::Parser;
-    let parsed =
+    assert!(
         shellboy::cli::Cli::try_parse_from(["shellboy", "status", "--operation", "fixture:held"])
-            .unwrap();
+            .is_err()
+    );
+    let parsed = shellboy::cli::Cli::try_parse_from([
+        "shellboy",
+        "operation",
+        "get",
+        "--operation",
+        "fixture:held",
+    ])
+    .unwrap();
     let command = parsed
         .into_command_with_stdin(std::path::Path::new("/fixture"), &mut tokio::io::empty())
         .await

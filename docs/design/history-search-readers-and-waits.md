@@ -37,3 +37,22 @@ Callers should serialize child searches or let the parent perform one shared sea
 ## Reader lock fixture scope
 
 The deterministic busy-timeout regression closes the WAL writer and takes `BEGIN EXCLUSIVE` in rollback-journal (`journal_mode=DELETE`) mode. It verifies classification and admission release at the actual readonly task boundary, followed by a successful writer mutation after unlocking. It does not reproduce production WAL reader contention or establish a WAL timing guarantee.
+
+## Reader recovery guidance (Issue #27 follow-up)
+
+The reader-local SQLite adapters preserve numeric primary and extended result
+codes in the existing error details; shared writer mappings remain unchanged.
+`SQLITE_BUSY`/`SQLITE_LOCKED` advise waiting for the competing operation or lock
+before retrying. `SQLITE_CORRUPT`, `SQLITE_NOTADB`, schema errors, and SQL errors
+such as a missing table advise inspecting and repairing the cause first. Errors
+from shared ranking/provenance helpers may lack numeric codes; their hint gives
+these alternatives conditionally rather than guessing by parsing error prose.
+Every mapped read failure states that it is a read-only observation with no
+operation receipt to query and that repeating a search after HTTP may incur
+another query-embedding charge. Cancellation and domain failures retain their
+existing classification. No shared error framework or owner state is added.
+
+The rollback-journal busy fixture above verifies wait/retry guidance. A separate
+non-database-file regression exercises actual `SQLITE_NOTADB`, while
+the missing-table tests exercise both shared ranking and reader space-check
+error paths. These are synthetic local database faults, not user-data tests.

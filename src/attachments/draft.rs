@@ -27,28 +27,15 @@ impl DraftContent {
         }
         Ok(())
     }
-    /// Preserve the old fingerprint for the identical legacy append request.
+    /// Every request records its canonical positions, including append-only input.
     pub fn fingerprint_positions(&self, value: &mut Value) {
-        if self.positions.iter().any(|&p| p != self.text.len()) {
-            value["attachment_positions"] = json!(self.positions);
-        }
+        value["attachment_positions"] = json!(self.positions);
     }
     /// Allocate final references before the source node is inserted.
     pub fn new_source_elements(&self, files: usize) -> Result<Vec<Value>, ApiError> {
         self.validate(files)?;
         let attachments = (0..files).map(|_| id()).collect::<Vec<_>>();
-        if self.positions.iter().all(|&p| p == self.text.len()) {
-            // Preserve the legacy append representation, including empty text.
-            let mut elements = vec![json!({"type":"input_text","text":self.text})];
-            elements.extend(
-                attachments
-                    .into_iter()
-                    .map(|attachment| json!({"type":"attachment_ref","attachment_id":attachment})),
-            );
-            Ok(elements)
-        } else {
-            self.elements(&attachments)
-        }
+        self.elements(&attachments)
     }
     pub fn elements(&self, attachments: &[String]) -> Result<Vec<Value>, ApiError> {
         self.validate(attachments.len())?;
@@ -106,16 +93,25 @@ mod tests {
     }
 
     #[test]
-    fn legacy_append_fingerprint_stays_identical_but_position_changes_conflict() {
-        let mut legacy = json!({"text":"before after"});
-        DraftContent::appended("before after".into(), 2).fingerprint_positions(&mut legacy);
-        assert_eq!(legacy, json!({"text":"before after"}));
+    fn append_fingerprint_includes_positions_and_empty_attachment_has_no_text_part() {
+        let mut request = json!({"text":"before after"});
+        DraftContent::appended("before after".into(), 2).fingerprint_positions(&mut request);
+        assert_eq!(request["attachment_positions"], json!([12, 12]));
         DraftContent {
             text: "before after".into(),
             positions: vec![6, 6],
         }
-        .fingerprint_positions(&mut legacy);
-        assert_eq!(legacy["attachment_positions"], json!([6, 6]));
+        .fingerprint_positions(&mut request);
+        assert_eq!(request["attachment_positions"], json!([6, 6]));
+        let content = DraftContent::appended(String::new(), 1);
+        let elements = content.new_source_elements(1).unwrap();
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0]["type"], "attachment_ref");
+        assert!(elements[0]["attachment_id"].as_str().is_some());
+        let plain_empty = DraftContent::appended(String::new(), 0)
+            .new_source_elements(0)
+            .unwrap();
+        assert_eq!(plain_empty, vec![json!({"type":"input_text","text":""})]);
     }
     #[tokio::test]
     async fn ordered_acceptance_replays_same_receipt_and_position_conflicts_add_no_sources() {

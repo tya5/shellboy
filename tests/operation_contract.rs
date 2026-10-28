@@ -423,9 +423,8 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
     let lookup = control
         .request(request(
             &control.store.instance_id,
-            Command::Status(StatusArgs {
-                operation_id: Some(pending.clone()),
-                ..Default::default()
+            Command::OperationGet(OperationTarget {
+                operation_id: pending.clone(),
             }),
         ))
         .await;
@@ -434,7 +433,7 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
         "Capacity rejection must not enter save-failed shutdown: {:?}",
         lookup.error
     );
-    assert_eq!(lookup.result.unwrap()["operation"]["state"], "pending");
+    assert_eq!(lookup.result.unwrap()["state"], "pending");
     control
         .gc
         .collect(StorageCategory::All, chrono::Utc::now())
@@ -665,15 +664,21 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
     let lookup = control
         .request(request(
             &control.store.instance_id,
-            Command::Status(StatusArgs {
-                operation_id: Some(saved_request.operation_id.clone()),
-                ..Default::default()
+            Command::OperationGet(OperationTarget {
+                operation_id: saved_request.operation_id.clone(),
             }),
         ))
         .await;
     assert!(lookup.ok);
     assert_eq!(
-        lookup.result.unwrap()["receipt_budget"]["full_result_admission_blocked"],
+        control
+            .request(request(
+                &control.store.instance_id,
+                Command::Status(StatusArgs::default())
+            ))
+            .await
+            .result
+            .unwrap()["receipt_budget"]["full_result_admission_blocked"],
         true
     );
     assert_eq!(
@@ -845,9 +850,8 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
         .execute(
             request(
                 "first",
-                Command::Status(StatusArgs {
-                    operation_id: Some(runtime.operation_id.clone()),
-                    ..Default::default()
+                Command::OperationGet(OperationTarget {
+                    operation_id: runtime.operation_id.clone(),
                 }),
             ),
             None,
@@ -855,9 +859,19 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
         .await
         .unwrap()
         .result;
-    assert_eq!(status["operation"]["result_expired"], true);
-    assert_eq!(status["operation"]["replay_policy"], "operation_expired");
-    assert_eq!(status["receipt_budget"]["result_retention_seconds"], 86_400);
+    assert_eq!(status["result_expired"], true);
+    assert_eq!(status["replay_policy"], "operation_expired");
+    assert_eq!(
+        store
+            .execute(
+                request("first", Command::Status(StatusArgs::default())),
+                None
+            )
+            .await
+            .unwrap()
+            .result["receipt_budget"]["result_retention_seconds"],
+        86_400
+    );
     assert_eq!(store.collect_receipts().await.unwrap(), 0);
     store
         .database
@@ -936,9 +950,8 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
         .execute(
             request(
                 "first",
-                Command::Status(StatusArgs {
-                    operation_id: Some(original.operation_id.clone()),
-                    ..Default::default()
+                Command::OperationGet(OperationTarget {
+                    operation_id: original.operation_id.clone(),
                 }),
             ),
             None,
@@ -946,7 +959,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
         .await
         .unwrap()
         .result;
-    assert_eq!(status["operation"]["result_expired"], true);
+    assert_eq!(status["result_expired"], true);
     // Stops retain the existing finite headroom even when ordinary admission
     // remains blocked by protected pending reservations.
     let stop = request(

@@ -1,5 +1,9 @@
 # 添付の所属・再送位置の是正
 
+## Current-only contract (Issue #33, 0.2.0)
+
+Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
+
 2026-10-25採用の添付所属・出典・通知契約。添付を要求末尾のuser messageへ一括追加していた既存driverを修正する。情報の削減や画像の送信停止で症状を隠さない。初期の仕様・詳細設計・CLI・引継ぎ資料は非同梱。
 
 ## 保存と採用
@@ -20,7 +24,7 @@ CLI nodeは受付時に採用経路へ割り込ませない。専用delivery台�
 
 ## 既存データ
 
-migration 4で既知sourceの順序付き参照を補完し、今後のNULL sourceを禁止する。旧実装のNULL／assistant起点など正しい所属位置を復元できない場合は、人間の過去発言を改変して所属を捏造しない。独立したlegacy recovery sourceで不明な出典であることを明記し、安全境界で採用する。これは旧バージョンが記録していなかった正確な挿入位置を復元できたという保証ではない。本文と外部ファイルは維持する。移行の対象と再確認条件は開発判断にも記録する。
+Historical migration-4 attachment-origin reconstruction is superseded by Issue #33. Current attachments require a real source node and ordered source reference elements. Missing provenance is an error; do not fabricate a legacy recovery source or infer an insertion position. General schema migration infrastructure remains separate from runtime attachment validation.
 
 ## 検証
 

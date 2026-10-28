@@ -1,10 +1,13 @@
 # History, forks, and search
 
-[日本語](history-and-search.ja.md) · [User Guide](user-guide.md) · [TUI controls](tui.md) · [Guide index](README.md)
+[User Guide](user-guide.md) · [TUI controls](tui.md) · [Guide index](README.md)
 
 Original conversation content is stored as nodes; each Thread has an adopted path. Forks, summaries, and spills do not overwrite original nodes. They preserve access to original preceding/following nodes and sources. Search uses a separate embedding index: existence of original content alone does not mean it is searchable.
 
 CLI examples below use Bash/zsh. Replace `THREAD_ID`, `NODE_ID`, `CURSOR`, and `SPACE_ID` with actual returned values. Human external terminals must connect to the same data directory as the TUI. For another location, add `--data-dir /path/to/shellboy-data` to each command.
+
+
+Current `history list` items always include `provenance`, `context`, and `selection`; `history get` always includes `provenance` and `context`. Individual unknown associations inside these records remain omitted rather than inventing IDs or times. These required records are not optional older-owner fields.
 
 ## Finding and reading original content
 
@@ -183,15 +186,15 @@ Select targets with `--scope all`, `--scope threads --thread ID`, `--source NODE
 
 IndexSpaces are separated by connection, embedding model, observed dimensions, and related settings. Configuration changes do not silently delete old spaces; failed rebuild candidates preserve the old active space. Historical content needs explicit backfill/rebuild to enter the new space. Automatically detecting a changed model behind an alias is not guaranteed.
 
+Search excludes deleted nodes, reclaimed bodies, and stale index entries. Deleting a Thread differs from deleting a shared node; originals retained by other Threads or references can still appear in global search. provenance.origin_thread_id records origin, not necessarily a Thread still available for operations. Search does not pin originals: inspect tombstone_reason when getting content later too.
+
+Relations cursors exclude relationships added after the first page but do not reserve a whole-DB snapshot or body retention. A target node revision change produces CursorExpired. Related-node metadata reflects page retrieval time. Re-searching or querying current values creates no receipt and observes again even with the same operation ID. Cursor snapshot conditions and expiration remain separately enforced. Repeating semantic search can incur another query embedding charge.
+
 ## Concurrent searches and reader recovery
 
 `history search` permits one semantic search at a time per owner. The single slot is held from before embedding HTTP through ranking and result revalidation; concurrent child Threads share it. When busy, it immediately rejects another request with `InvalidState` before sending an additional query embedding; this rejection incurs no embedding charge. A slow embedding provider can therefore keep other searches busy until completion, cancellation, or the existing embedding timeout (60 seconds by default). Serialize child searches, or have the parent search once and share the results. Wait for the current search to finish before retrying; do not spin or launch parallel retries.
 
 Search uses a separate readonly connection, allowing conversation and shell output writes during heavy ranking. Read-only connection/open, lock, query, or read failures return `IoFailed` with the underlying cause and do not stop the owner or other Runs. Fix the reported file-access, resource, or locking problem before retrying. Database corruption (`SQLITE_CORRUPT` / `NOTADB`) and missing-table errors (`no such table`) also return `IoFailed`; blind retries do not repair them. Diagnose the cause and restore or explicitly rebuild the affected index as appropriate before retrying. Each retry that reaches embedding HTTP may incur another charge even if the same database error follows. This does not change real writer failures, which still stop the owner for storage safety. Cancellation or disconnection returns `InvalidState` and stops observation only, not the target Run. Deletion/reclamation/selection changes during search are checked again before returning, so fewer results than the requested limit may be returned.
-
-Search excludes deleted nodes, reclaimed bodies, and stale index entries. Deleting a Thread differs from deleting a shared node; originals retained by other Threads or references can still appear in global search. provenance.origin_thread_id records origin, not necessarily a Thread still available for operations. Search does not pin originals: inspect tombstone_reason when getting content later too.
-
-Relations cursors exclude relationships added after the first page but do not reserve a whole-DB snapshot or body retention. A target node revision change produces CursorExpired. Related-node metadata reflects page retrieval time. Re-searching or querying current values creates no receipt and observes again even with the same operation ID. Cursor snapshot conditions and expiration remain separately enforced. Repeating semantic search can incur another query embedding charge.
 
 ## Input size and range editing
 

@@ -380,13 +380,13 @@ fn model_list_contract_rejects_blank_and_unknown_fields_and_strictly_types_resul
     ] {
         assert!(
             Request::from_value(
-                json!({"protocol_version":1,"operation_id":"op","command":"model.list","args":args})
+                json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"operation_id":"op","command":"model.list","args":args})
             )
             .is_err()
         );
     }
     let req = Request::from_value(
-        json!({"protocol_version":1,"operation_id":"op","command":"model.list","args":{}}),
+        json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"operation_id":"op","command":"model.list","args":{}}),
     )
     .unwrap();
     assert_eq!(req.command, list(None, None));

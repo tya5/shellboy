@@ -1,6 +1,6 @@
 # Recovery, stopping, and storage
 
-[Guide index](README.md) / [User Guide](user-guide.md) / [Agent Guide](agent-guide.md) / [日本語](recovery-and-storage.ja.md)
+[Guide index](README.md) / [User Guide](user-guide.md) / [Agent Guide](agent-guide.md)
 
 When responses stop, inspect saved acceptance, Turn, and Run state before repeatedly sending the same request. Use the CLI in another terminal while the owner remains running. Examples below use Bash; replace IDs with values from actual responses.
 
@@ -230,7 +230,7 @@ Processes detached outside the owned group with `setsid` or similar can survive 
 
 After at least thirty seconds without observed reception for the same model request, conversation activity adds receiving-wait or elapsed-since-last-reception information. Receive notifications occur at most once per second, introducing less than a second of display difference. This does not assert that generation/reasoning stopped. Ctrl+C or `run stop` can stop it.
 
-At the conversation receive-idle deadline, received text is preserved and consecutive-failure/partial-output settings choose automatic retry or recovery wait. Summary idle timeout is outside conversation retries and follows existing recovery. Inspect header/body stage, elapsed milliseconds, and configuration key. Per-connection `stream_idle_timeout_ms` defaults to 600000; raise it for models with long silence or use 0 to disable. The fixed thirty-second connection deadline and manual cancellation remain. Unknown failures are not automatically resent.
+At the conversation receive-idle deadline, received text is preserved and consecutive-failure/partial-output settings choose automatic retry or recovery wait. Summary idle timeout is outside conversation retries and follows the summary recovery path. Inspect header/body stage, elapsed milliseconds, and configuration key. Per-connection `stream_idle_timeout_ms` defaults to 600000; raise it for models with long silence or use 0 to disable. The fixed thirty-second connection deadline and manual cancellation remain. Unknown failures are not automatically resent.
 
 Embeddings, semantic search, and RAG use per-connection `request_timeout_ms` (default 60000, minimum 1000) as the total request deadline. Model lists use its minimum with 20000ms. Index-worker timeout follows existing bounded retries; repeated failures pause the space. Read the status reason, repair connection/settings, then explicitly retry. Owner changes require restart. Search CLI disconnection or owner shutdown also cancels remaining search HTTP requests.
 
@@ -238,7 +238,7 @@ Embeddings, semantic search, and RAG use per-connection `request_timeout_ms` (de
 
 `EOF before response.completed` means Shellboy had not recognized a completed event when the HTTP body ended. This wording alone does not prove the API never sent one.
 
-Newer versions save EOF diagnostic fields in failure reasons; older records may lack them. These fields include `received_bytes`, `parsed_events` (parsed JSON count), `completed_items`, `done_markers`, `pending_line_bytes` / `pending_data_bytes` (unfinished tail), and fixed-category `last_event`. Inspect the same Turn/attempt reason through `/received` source and share these diagnostic values rather than the full body. Normal `model_failure` logs still contain classification and attempt ID, not automatic complete error bodies.
+EOF failures save diagnostic fields in their reasons. These fields include `received_bytes`, `parsed_events` (parsed JSON count), `completed_items`, `done_markers`, `pending_line_bytes` / `pending_data_bytes` (unfinished tail), and fixed-category `last_event`. Inspect the same Turn/attempt reason through `/received` source and share these diagnostic values rather than the full body. Normal `model_failure` logs still contain classification and attempt ID, not automatic complete error bodies.
 
 `last_event=untyped` means JSON lacked a string type; `done_markers` counts `[DONE]` markers. Neither proves a completed response. Nonzero bytes with zero parsed events can mean comments only, so avoid inferring a cause. Events lacking their final blank line remain incomplete and are not automatically committed as answers or tool execution.
 

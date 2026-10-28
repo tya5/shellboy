@@ -636,7 +636,6 @@ pub(super) async fn search(
                 failure["reason"] = json!(preparation.reason);
                 failure["next"] = next;
                 if degraded {
-                    failure["warning"] = json!(true);
                     let warning = warnings.entry(preparation.reason.into()).or_insert_with(|| json!({
                         "code":"semantic_not_ready", "reason":preparation.reason,
                         "message":"Semantic index is not ready; keyword results are available. No document embedding or indexing was started.",
@@ -649,8 +648,8 @@ pub(super) async fn search(
             }
             if !degraded {
                 fatal = true;
+                failures.push(failure);
             }
-            failures.push(failure);
         } else if !duplicate && (mode == SearchMode::Keyword || semantic == "ok") {
             breaker.success();
         }

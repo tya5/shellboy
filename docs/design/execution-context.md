@@ -2,7 +2,7 @@
 
 採用状態: ユーザーが採用した実行コンテキスト整備のローカル拡張。引継ぎの状態モデル、CLI契約の既存get、production migration 0001の保存項目を基準にする。新たな実行・監査機構やmigrationは追加しない。
 
-`thread get`、`run get`、`turn get`、`message get`、`history get` にoptionalの `context` を追加する。既存フィールドは維持する。contextは保存済みの一次情報だけを返し、存在しない項目は省略する。Threadの親子関係 `parent_thread_id` とRunの実行所有 `owner_run_id` は別項目にする。nodeのthread/runは作成時のTurnから取得し、fork後の採用Threadへ置き換えない。
+Current `run get`, `turn get`, and `message get` require `context`: every current writer constructs it from saved facts. `thread get` may omit it for a fork result, and history list/get require saved context. These genuine unknown/not-applicable cases remain optional; old-owner compatibility is not a reason to omit a required field. contextは保存済みの一次情報だけを返し、存在しない項目は省略する。Threadの親子関係 `parent_thread_id` とRunの実行所有 `owner_run_id` は別項目にする。nodeのthread/runは作成時のTurnから取得し、fork後の採用Threadへ置き換えない。
 
 | 対象 | 時刻 | state / 理由 |
 |---|---|---|

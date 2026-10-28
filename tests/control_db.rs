@@ -1065,18 +1065,24 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
     );
     let status = store
         .execute(
-            request(Command::Status(StatusArgs {
-                operation_id: Some(intent.operation_id.clone()),
-                ..Default::default()
+            request(Command::OperationGet(OperationTarget {
+                operation_id: intent.operation_id.clone(),
             })),
             None,
         )
         .await
         .unwrap()
         .result;
-    assert_eq!(status["operation"]["state"], "pending");
-    assert_eq!(status["operation"]["result_uncertain"], true);
-    assert_eq!(status["receipt_budget"]["at_limit"], true);
+    assert_eq!(status["state"], "pending");
+    assert_eq!(status["result_uncertain"], true);
+    assert_eq!(
+        store
+            .execute(request(Command::Status(StatusArgs::default())), None)
+            .await
+            .unwrap()
+            .result["receipt_budget"]["at_limit"],
+        true
+    );
     assert_eq!(store.collect_receipts().await.unwrap(), 0);
     store
         .database
@@ -1551,7 +1557,14 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         "reclaiming small terminal results does not admit a full reservation"
     );
     assert_eq!(status["receipt_budget"]["available_bytes"], 0);
-    assert_eq!(status["receipt_budget"]["at_limit"], true);
+    assert_eq!(
+        store
+            .execute(request(Command::Status(StatusArgs::default())), None)
+            .await
+            .unwrap()
+            .result["receipt_budget"]["at_limit"],
+        true
+    );
     store
         .database
         .call(move |db| {

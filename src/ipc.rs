@@ -267,7 +267,7 @@ fn uncertain_reply(mut error: ApiError, operation_id: &str, command: &Command) -
             ""
         };
         error.hint = Some(format!(
-            "Repeat shellboy {} with the same arguments to observe fresh state; this observation does not create an operation receipt. The same operation ID also runs a new observation.{cost} Check CLI/owner release compatibility; older owners may have retained read receipts",
+            "Repeat shellboy {} with the same arguments to observe fresh state; this observation does not create an operation receipt. The same operation ID also runs a new observation.{cost}",
             command.name().replace('.', " ")
         ));
         error.details = Some(
@@ -275,7 +275,7 @@ fn uncertain_reply(mut error: ApiError, operation_id: &str, command: &Command) -
         );
         return error;
     }
-    error.hint = Some("Use details.operation_id with shellboy operation get --operation OPERATION_ID, then inspect saved target state. An older owner may not support this command; a missing receipt does not prove the request was never applied. If receipt lookup is also unsupported, inspect the target using commands available on that owner. Check that CLI and owner use the same release; do not resubmit the mutation under a new ID".into());
+    error.hint = Some("Use details.operation_id with shellboy operation get --operation OPERATION_ID, then inspect saved target state. A missing receipt does not prove the request was never applied; do not resubmit the mutation under a new ID".into());
     error.details = Some(serde_json::json!({
         "operation_id": operation_id,
         "request_may_have_been_applied": true,
@@ -550,59 +550,37 @@ mod frame_delivery_tests {
     }
 
     #[tokio::test]
-    async fn older_v1_command_decoder_disconnect_is_uncertain_and_explains_compatibility() {
-        // The pre-extension command set does not know operation.get, while its
-        // v1 envelope and hello/welcome are identical to the current ones.
-        #[derive(Deserialize)]
-        #[serde(tag = "command", content = "args")]
-        enum OldCommand {
-            #[serde(rename = "thread.list")]
-            ThreadList(crate::protocol::ThreadListArgs),
-        }
-        let known = serde_json::from_value::<OldCommand>(
-            serde_json::json!({"command":"thread.list","args":{"limit":1}}),
-        )
-        .unwrap();
-        let OldCommand::ThreadList(args) = known;
-        assert_eq!(args.limit, 1);
+    async fn mismatched_owner_protocol_is_rejected_before_sending_command() {
         let (client, mut peer) = tokio::io::duplex(4096);
         let task = tokio::spawn(async move {
-            read_frame::<_, Hello>(&mut peer).await.unwrap().unwrap();
+            let hello = read_frame::<_, Hello>(&mut peer).await.unwrap().unwrap();
+            assert_eq!(hello.protocol_version, PROTOCOL_VERSION);
             write_frame(
                 &mut peer,
                 &Welcome {
-                    protocol_version: PROTOCOL_VERSION,
+                    protocol_version: PROTOCOL_VERSION - 1,
                     instance_id: "instance".into(),
                 },
             )
             .await
             .unwrap();
-            let request = read_frame::<_, Value>(&mut peer).await.unwrap().unwrap();
-            assert_eq!(request["protocol_version"], 1);
-            assert_eq!(request["operation_id"], "instance:unsupported");
-            let error = serde_json::from_value::<OldCommand>(request).err().unwrap();
-            assert!(error.to_string().contains("unknown variant"));
-            // Like the old server, close on decode failure before dispatch.
+            assert!(read_frame::<_, Value>(&mut peer).await.unwrap().is_none());
         });
         let error = call_stream(
             client,
             endpoint(),
-            Command::OperationGet(crate::protocol::OperationTarget {
-                operation_id: "instance:previous".into(),
+            Command::ThreadList(crate::protocol::ThreadListArgs {
+                limit: 1,
+                cursor: None,
+                query: None,
             }),
-            Some("instance:unsupported".into()),
+            None,
             None,
         )
         .await
         .unwrap_err();
-        assert_eq!(error.code, ErrorCode::IoFailed);
-        let hint = error.hint.unwrap();
-        assert!(hint.contains("older owners"));
-        assert!(hint.contains("CLI/owner release compatibility"));
-        assert!(hint.contains("does not create an operation receipt"));
-        let details = error.details.unwrap();
-        assert_eq!(details["operation_id"], "instance:unsupported");
-        assert_eq!(details["request_may_have_been_applied"], false);
+        assert_eq!(error.code, ErrorCode::ProtocolMismatch);
+        assert!(error.details.is_none(), "no request was sent");
         task.await.unwrap();
     }
 

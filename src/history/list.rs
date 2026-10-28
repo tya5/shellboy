@@ -211,13 +211,13 @@ fn history_snippet(
             .get::<_, Option<i64>>(6)
             .map_err(sql_error)?
             .map(|n| n as u64),
-        provenance: Some(provenance(connection, &node_id)?),
-        context: Some(crate::context::for_node(connection, &node_id)?),
-        selection: Some(HistorySelection {
+        provenance: provenance(connection, &node_id)?,
+        context: crate::context::for_node(connection, &node_id)?,
+        selection: HistorySelection {
             thread_id: thread_id.into(),
             ordinal,
             current_cwd: current_cwd.into(),
-        }),
+        },
         executions_truncated: execution_count > executions.len() as u64,
         execution_count,
         executions,

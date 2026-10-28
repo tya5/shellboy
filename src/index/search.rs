@@ -99,11 +99,10 @@ impl IndexService {
                             "Selected index space connection is not configured")));
                     }
                     let marker = meta(&tx, &IndexKeys::query_profile(&space.id))?;
-                    let key = identity::query_profile_key(&config, &space.profile, &space.model,
-                        &space.splitter, marker.as_deref()).ok_or_else(|| StorageError::from(err(
+                    identity::query_profile_key(&config, &space.profile, &space.model,
+                        marker.as_deref().unwrap_or("")).ok_or_else(|| StorageError::from(err(
                             ErrorCode::InvalidState,
-                            "Index query fingerprint is incompatible; restore the original embedding/split configuration and select the space to verify it")))?;
-                    identity::bind_query_profile(&tx, &space.id, &key)?;
+                            "Index query fingerprint is missing or incompatible; explicitly rebuild with the intended embedding configuration")))?;
                 }
                 tx.commit()?;
                 Ok(space)
@@ -365,8 +364,7 @@ pub(crate) fn rag_profile_key(config: &Config, space: &SpaceDescriptor) -> Optio
         config,
         &space.profile,
         &space.model,
-        &space.splitter,
-        space.query_profile_key.as_deref(),
+        &space.query_profile_key,
     )
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -376,7 +374,7 @@ pub(crate) struct SpaceDescriptor {
     pub(crate) model: String,
     pub(crate) dimension: usize,
     pub(crate) splitter: String,
-    pub(crate) query_profile_key: Option<String>,
+    pub(crate) query_profile_key: String,
     table: String,
 }
 pub(crate) fn rag_space(db: &Connection) -> Result<Option<SpaceDescriptor>, ApiError> {
@@ -386,7 +384,8 @@ pub(crate) fn rag_space(db: &Connection) -> Result<Option<SpaceDescriptor>, ApiE
     let Some(space) = load_space(db, &id).map_err(db_error)? else {
         return Ok(None);
     };
-    let query_profile_key = meta(db, &IndexKeys::query_profile(&space.id)).map_err(db_error)?;
+    let query_profile_key = meta(db, &IndexKeys::query_profile(&space.id)).map_err(db_error)?
+        .ok_or_else(|| err(ErrorCode::InvalidState, "History index query fingerprint is missing; explicitly rebuild with the intended embedding configuration"))?;
     Ok(Some(SpaceDescriptor {
         query_profile_key,
         id: space.id,

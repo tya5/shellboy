@@ -15,6 +15,8 @@ Shellboyへの改名では旧名の実行名・環境変数・既定保存先へ
 
 ## 0.2.0 compatibility boundary
 
+Issue #33 adopts current-only formats: protocol version 2; required Message/Run/Turn/HistoryBody context, HistoryBody provenance and HistorySnippet provenance/context/selection; genuinely optional Thread/fork context; current index profile/query-marker validation; no expired status-operation alias, old-owner field defaults, legacy index fallback, attachment-origin repair, or duplicated RAG degradation warnings in `scope_errors`. Conversation schema v10 and standalone RAG schema v3 remain; fresh conversation DBs use the complete current schema. Keep the general schema migration runner, ledger/user_version checks, and protocol-version rejection. Historical compatibility notes in adopted designs are superseded by their current-only sections.
+
 The next release targets 0.2.0 without a migration or backward-compatibility
 promise for earlier releases. In particular, RAG does not preserve Windows
 backslash document keys: a complete synchronization indexes current slash keys
@@ -124,4 +126,4 @@ Issue #24の内部形式変換の廃止と原本付きingestは[Docs/RAG](docs-a
 
 Issue #29/#30のrender-unit再利用、可視範囲の幅再描画、有限outboxとUI専用購読は[描画・配送設計](tui-render-delivery-performance.md)に従う。layout予算は既存合計を維持し、重要結果は最新状態へ集約しない。新しい永続表/worker/event型は作らず、有限UI channelの所有とpriority終了経路を明示する。
 
-English is the default documentation language. Unsuffixed guides and the bundled docs catalogue are English; Japanese user guides use `.ja.md`, and the Agent Guide is English only. See [documentation language and the UI evaluation](documentation-language.md). The UI remains unchanged; the bilingual UI recommendation is a future implementation proposal, not a current configuration contract.
+English is the default documentation language. Unsuffixed guides and the bundled docs catalogue are English; only the User Guide has a Japanese translation (`user-guide.ja.md`), and the Agent Guide is English only. See [documentation language and the UI evaluation](documentation-language.md). The UI remains unchanged; the bilingual UI recommendation is a future implementation proposal, not a current configuration contract.

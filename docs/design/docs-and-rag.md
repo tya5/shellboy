@@ -1,5 +1,9 @@
 # Docs / RAG 実装設計
 
+## Current-only contract (Issue #33, 0.2.0)
+
+Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
+
 基準: [採用仕様](docs-and-rag-spec.md)。2026-10-25、実装前の設計。
 
 ## 分離と呼出し
@@ -28,7 +32,7 @@ driverのsystem promptには `shellboy docs list` と `shellboy docs search --qu
 
 ## 文書store
 
-独立SQLite schema 3（旧版の読取りとwriter時の移行を支援）。metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
+独立SQLite schema 3。Readers and dry-run require the current schema; only the writer owns schema preparation.metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
 documentsにsource/key/active_revision/status、revisionsにcontent/extractor hashと
 原本/派生provenance、blocksに本文/位置、chunksにUTF-8範囲、embedding spaceに
 endpoint/profile/model/dimension/splitter fingerprint、vectorsと処理状態を保存する。
@@ -54,7 +58,7 @@ read-only adapterで読む。会話DBへDDLや索引jobを書かない。
 履歴readはSQLITE_OPEN_READ_ONLY/query_only、schema完全一致、短いsnapshot。
 HTTP待機前にsnapshotを解放し、応答後space/source hashを再確認する。
 rawはretention witnessを含めて検証する。immutable=1は使わない。
-既存会話schema4はDB UUIDを持たないため、履歴store識別子にcanonical pathのhashを使い、
+会話DBは永続DB UUIDを持たないため、履歴store識別子にcanonical pathのhashを使い、
 node ID・版・本文hash・raw witnessと安定したfilesystem identityを併せて束縛する。
 Unixはdevice/inode、他のOSは取得可能なfile identity/作成時刻を使う。mtime/長さは使わない。
 path自体は参照へ含めない。DBの置換・コピー・VACUUMによるfile identity変更は保守的に失効する。
@@ -110,7 +114,7 @@ raw全体が64K文字以内なら従来の全本文referenceを保持し、小ra
 
 semantic queryは選択spaceに保存された接続名・modelを使い、現在のembedding既定値やsplit_charsで検索済みcoverageを切り替えない。新規spaceは生成時に独立したquery fingerprint（接続名・endpoint・model・既存splitter系統）を既存app_metaのspace別keyへ保存する。markerがあればRAGとcore検索は同じquery identity照合を使い、split_charsだけの変更を読取拒否の理由にしない。endpoint/modelの変更は拒否し、異なるvector空間で検索しない。markerの補完・削除はownerの索引責務で、read-only RAGは保存DBへ書かない。
 
-marker導入前のspaceは従来の完全fingerprint照合をfallbackとする。pre-G5 legacy fingerprintはsplit_charsを含まないため接続名・endpoint・modelから検証できるが、G5以降の旧fingerprintは元のsplit_charsを失うと逆算できない。その場合は推測・無条件再束縛をせず、元設定へ戻してownerの明示selectで検証・補完する。元設定が不明でもkeyword/raw取得は保ち、semanticはindex_incompatibleを明示する。再構築や有料embeddingを暗黙に開始しない。
+The saved query-profile marker is required. Missing or invalid metadata fails explicitly with reindexing guidance before query HTTP; neither owner search/select nor read-only RAG infers, falls back, or repairs identity. Reindexing requires explicit scope and cost authorization.
 
 ## Embeddingの停止期限（Issue #8）
 
@@ -118,13 +122,13 @@ marker導入前のspaceは従来の完全fingerprint照合をfallbackとする�
 
 ## 走査対象・検索準備・状態の追補（Issue #20〜#22）
 
-独立RAGのwriterが旧schema 1/2から3へ短いatomic migrationを行い、schema 1のsourcesに除外globのJSON列、旧版に下記hot query索引を加える。旧sourceの既定は空集合で、会話DB/schemaには触れない。旧schemaの読み取りとdry-runはmigrationをせず空の除外を投影できる。source addの複数 `--exclude` を永続化し、無指定の再登録では維持、非空指定で置換、`--clear-excludes` で明示解除する。pattern数64・各1024bytes以内。構文とマッチは固定版globsetを利用し、gitignoreや否定規則の独自解釈は加えない。pathはsource相対のslashへ正規化し、slashなしpatternはbasenameにも適用、directory一致で配下を走査しない。
+独立RAGのwriterが旧schema 1/2から3へ短いatomic migrationを行い、schema 1のsourcesに除外globのJSON列、旧版に下記hot query索引を加える。旧sourceの既定は空集合で、会話DB/schemaには触れない。Readers and dry-run reject noncurrent schema; they do not project missing exclusions as empty.source addの複数 `--exclude` を永続化し、無指定の再登録では維持、非空指定で置換、`--clear-excludes` で明示解除する。pattern数64・各1024bytes以内。構文とマッチは固定版globsetを利用し、gitignoreや否定規則の独自解釈は加えない。pathはsource相対のslashへ正規化し、slashなしpatternはbasenameにも適用、directory一致で配下を走査しない。
 
 dot entryと現在使うRAG DB・sidecarを既定対象外とする。unsupported形式は失敗ではなくskippedで、拡張子別内訳と上限付き対象/除外例を返す。対象外の旧active資料は完全な走査成功時にremovedへ移す。A complete traversal establishes the selected key set before reading or extracting any document. A per-file read/extraction failure retains that file’s old active revision as stale, but does not block removal of other unseen documents. Incomplete traversal or input limits skip all file updates and deletion detection for that source; provider-breaker deferred files also suppress deletion detection for that execution. This distinguishes a known unreadable file from an unknown directory listing.新規文書の失敗はfailed、成功版を残す失敗はstaleとする。dry-runは外部API・DB書込みをせず、semantic分割量と課金可能性を示す。
 
 statusはsourceごとのlast_scan・有効revisionの最大created_at（last_changed_at）・現在のembedding profileに欠けるchunk数（semantic_missing）と、上限付きの失敗資料/key/理由を既存行から投影する。未知のprofileで0や成功時刻を捏造しない。embedding完了時刻の列、結果保存表、operation receipt、会話Coreとの連携を増やさない。長時間index結果は既存shell executionのwait/readで回収する。
 
-hybridは既にkeywordとsemanticを明示要求しているため、keywordに成功し、設定・identityを検証したうえでsemanticの未作成/不足だけが確認できた場合は `ok:true` と `degraded:true` を返す。scope_statusと集約warningsで使用した手段・不足量・対象source付きnextを示す。互換のscope_errorsはwarningであることを区別する。設定不正・認証・通信・DB・identity不一致等の本当のエラーはpartial_failureと非0終了を維持する。明示semantic検索はkeywordへ切り替えない。CLIはJSONのままとし、別の人間向け出力modeを作らない。
+hybridは既にkeywordとsemanticを明示要求しているため、keywordに成功し、設定・identityを検証したうえでsemanticの未作成/不足だけが確認できた場合は `ok:true` と `degraded:true` を返す。scope_statusと集約warningsで使用した手段・不足量・対象source付きnextを示す。Degradation reasons appear only in warnings; scope_errors contains actual failures, without duplicated warning entries.設定不正・認証・通信・DB・identity不一致等の本当のエラーはpartial_failureと非0終了を維持する。明示semantic検索はkeywordへ切り替えない。CLIはJSONのままとし、別の人間向け出力modeを作らない。
 
 ## 外部変換からの登録（Issue #24、0.1.6で採用）
 
@@ -145,6 +149,6 @@ Glob matching is case-sensitive on every OS, uses `/` separators, and applies to
 
 Windows source keys have used slash separators since v0.1.6. There is no legacy-key lookup or identity migration. On the first complete synchronization, old backslash-key documents leave the active index as removed and current slash keys receive new document IDs; recreating the database is unnecessary. Old keys and IDs do not identify the replacement documents for `inspect --id`. POSIX backslashes remain literal filename characters. This supersedes the initial compatibility proposal and corrects the later database-recreation guidance.
 
-A registered root replaced by a symlink is `source_unavailable`, even when an exclusion glob would match its basename. It is an incomplete traversal: all updates and removal detection for that source are skipped, and existing active revisions are retained as stale. Descendant symlinks remain skipped entries. This protects a source moved behind a symlink without following an unregistered target.
+A registered root replaced by a symlink or a non-regular, non-directory entry (including a Unix socket or FIFO) is `source_unavailable`, even when an exclusion glob would match its basename. It is an incomplete traversal: all updates and removal detection for that source are skipped, and existing active revisions are retained as stale. Descendant symlinks remain skipped entries. This protects a source moved behind a symlink without following an unregistered target and prevents special files from being read or treated as empty sources. The source stores its current path, not an original filesystem-kind identity: replacement of a directory with an ordinary file is accepted as a new complete selection, which can remove the previous directory documents. Detecting that historical transition would require an additional persisted identity contract; no schema or inferred identity heuristic is added here.
 
 A supported file that fails on every synchronization keeps the overall index result at `partial_failure` (`ok:false`, nonzero CLI exit) on every attempt, even when unrelated changes and removals are applied successfully. Callers must inspect the result counts and individual failures rather than treating that exit as a rollback.

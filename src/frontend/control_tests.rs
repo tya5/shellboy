@@ -767,12 +767,14 @@ async fn send_preparation_failure_keeps_newer_input_and_the_original_snapshot() 
     let mut ui = UiState::new(&control.store.config, root.path().into());
     ui.select_thread("thread".into());
     ui.insert("original", false);
+    let attachment_position = ui.view().draft.text.len();
+    ui.insert(crate::ui::draft::MARKER, false);
     ui.view_mut().draft.attachments.push(UiAttachment {
         id: "invalid-kind".into(),
         path: root.path().join("not-opened"),
         kind: "invalid".into(),
         state: "ready".into(),
-        position: None,
+        position: Some(attachment_position),
     });
     let actions = ui.event(Event::Key(KeyEvent::new(
         KeyCode::Enter,
@@ -796,7 +798,10 @@ async fn send_preparation_failure_keeps_newer_input_and_the_original_snapshot() 
         }
     }).await.unwrap();
     assert_eq!(ui.view().draft, newer);
-    assert_eq!(ui.view().pending[&revision].snapshot.text, "original");
+    assert_eq!(
+        ui.view().pending[&revision].snapshot.text,
+        format!("original{}", crate::ui::draft::MARKER)
+    );
     assert!(ui.view().status.contains(&format!("/restore {revision}")));
     sender.try_send(UiAction::Quit).unwrap();
     finish_bridge(bridge, &incoming).await;

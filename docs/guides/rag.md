@@ -1,10 +1,10 @@
 # Search documents and history
 
-[Guide index](README.md) · [Find a guide](docs.md) · [Conversation history](history-and-search.md) · [日本語](rag.ja.md)
+[Guide index](README.md) · [Find a guide](docs.md) · [Conversation history](history-and-search.md)
 
-`shellboy rag` is a search CLI that works without starting the conversation application. It does not generate answers to questions. Start with `shellboy docs search --query 'search'` to find operation guides. The bundled guides are English; use English search terms. Queries are not translated automatically.
+`shellboy rag` is a search CLI that works without starting the conversation application. It does not generate answers to questions. Start with `shellboy docs search --query 'search'` to find operation guides. The bundled guides are English. Queries are not translated automatically.
 
-An existing standalone RAG DB migrates from schema 1/2 to 3 on its first write, adding source exclusions and indexing improvements. Reads and dry-run do not migrate it. A migrated DB cannot be opened by the old v0.1.5 binary; back up the RAG DB before upgrading if you need to revert. This standalone RAG migration does not modify the conversation DB, which has its own migration.
+The standalone RAG store uses schema 3. Readers and dry-run require the current schema and do not migrate it. The writer owns schema preparation; the general schema-version/ledger mechanism is separate from a promise to support older releases. The standalone store does not modify the conversation DB.
 
 ## Register documents
 
@@ -60,7 +60,7 @@ semantic/hybrid use the existing `[embedding]` and connection settings. Select c
 
 Semantic search of bundled guides also requires `rag init` and explicit `rag index --source docs --mode semantic` beforehand. Dry-run reports document counts, text bytes, segment counts, and whether charges may occur. Search does not automatically embed guides. If they are not ready, or their revision changed after a binary upgrade, it reports the next index operation. Index without `--source` processes registered documents without implicitly adding bundled guides. The query embedding for semantic/hybrid search can itself incur API cost.
 
-If hybrid keyword search succeeds and the only confirmed semantic issue is an uncreated index, unindexed current profile, or missing embeddings, it returns keyword results with `ok:true`, exit code 0, and `result.degraded:true`. `scope_status` reports each scope's keyword/semantic usage, reason, missing document/chunk counts, and recovery commands in `next.steps[].command` with explicit source selection. Repeated reasons are grouped into `warnings`; compatibility `scope_errors` entries include `warning:true` to distinguish them from failures. Unknown missing counts are null. Invalid/missing configuration, authentication, communication, DB/identity mismatches, and similar faults remain actual errors. Explicit semantic searches do not fall back to keyword. `shellboy docs` and docs keyword search remain available without a DB or API.
+If hybrid keyword search succeeds and the only confirmed semantic issue is an uncreated index, unindexed current profile, or missing embeddings, it returns keyword results with `ok:true`, exit code 0, and `result.degraded:true`. `scope_status` reports each scope's keyword/semantic usage, reason, missing document/chunk counts, and recovery commands in `next.steps[].command` with explicit source selection. Repeated degradation reasons appear only in `warnings`; `scope_errors` is reserved for actual scope failures. Unknown missing counts are null. Invalid/missing configuration, authentication, communication, DB/identity mismatches, and similar faults remain actual errors. Explicit semantic searches do not fall back to keyword. `shellboy docs` and docs keyword search remain available without a DB or API.
 
 Result excerpts are not full text. Retrieve originals through the returned reference:
 
@@ -100,8 +100,6 @@ Metadata must be a JSON object of at most 64 KiB. Record the converter name/vers
 Use `extracted` for tool-converted text. If a model reads scans or diagrams and produces interpretation or a summary, use `llm-explanation`/`summary` and record `model` in metadata too. Attaching the original is an alternative for that purpose; support depends on the endpoint/proxy/model. Search and get expose `kind` to distinguish close-to-source conversion from model interpretation. Registering only a converted file with `source add` does not retain its relationship to the original; use ingest when derived text needs provenance.
 
 `--text-stdin` is also supported. Derived text is limited to 16 MiB of UTF-8. The original must be a regular file and is hashed incrementally, so it may exceed 16 MiB; its contents are not saved in RAG. Distinguish `provenance.source` fields: `original_path`, `observed_original_hash` (observed at ingest), `original_hash_claim` (declared in metadata), and `derived_body_hash` (derived text). As `hash_observation` explains, the record does not prove which original was used to generate a summary or an atomic snapshot of a changing file. Saved text and provenance survive moving/deleting the original. There is no automatic revalidation or review workflow. Treat a RAG DB containing metadata and paths according to its appropriate storage/access scope.
-
-Version 0.1.6 removed `--extractor`/`--adapter` and internal PDF/Office extraction. PDFs/Office files from old file sources become unsupported/removed on the next complete synchronization; externally convert and re-ingest any you need. Ordinary folder synchronization does not overwrite existing derived text.
 
 ## Check index results and update times
 

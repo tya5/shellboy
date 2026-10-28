@@ -107,9 +107,9 @@ async fn unprepared_materials_keep_keyword_ranks_and_group_preparation_warnings(
         hybrid["result"]["scope_errors"]
             .as_array()
             .unwrap()
-            .iter()
-            .all(|e| e["warning"] == true)
+            .is_empty()
     );
+    assert!(!hybrid["result"]["warnings"].as_array().unwrap().is_empty());
     let semantic = search(root, &scopes, SearchMode::Semantic).await;
     assert_eq!(semantic["ok"], false);
     assert_eq!(semantic["error"]["code"], "partial_failure");

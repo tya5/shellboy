@@ -1,6 +1,6 @@
 # CLI reference
 
-[日本語](cli-reference.ja.md) · [Guide index](README.md) · [Agent Guide](agent-guide.md) · [Configuration](configuration.md)
+[Guide index](README.md) · [Agent Guide](agent-guide.md) · [Configuration](configuration.md)
 
 Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments starts the TUI owner in an interactive terminal. The owner tables below describe the current 37 operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `docs` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
 
@@ -50,14 +50,14 @@ Normal CLI success/failure writes one JSON line to stdout; help/version use ordi
 If a reply is lost, `details.read_only=true` identifies a nonmutating operation. Get/list/search/preview/status create no receipt and recompute current values even with the same operation ID. After disconnect, reissue the same command/filters, but semantic query embedding may charge again. `wait` is not read-only because it may save the caller's waiting state.
 
 ```json
-{"protocol_version":1,"operation_id":"INSTANCE:NONCE","ok":true,"result":{"accepted":true}}
+{"protocol_version":2,"operation_id":"INSTANCE:NONCE","ok":true,"result":{"accepted":true}}
 ```
 
 ```json
-{"protocol_version":1,"operation_id":"INSTANCE:NONCE","ok":false,"error":{"code":"invalid_state","message":"...","hint":"...","details":{}}}
+{"protocol_version":2,"operation_id":"INSTANCE:NONCE","ok":false,"error":{"code":"invalid_state","message":"...","hint":"...","details":{}}}
 ```
 
-`hint` / `details` are optional; success has no error and failure has no result. Errors before communication can have an empty operation_id. The whole protocol frame is limited to 8MiB.
+`hint` / `details` are optional; success has no error and failure has no result. Errors before communication can have an empty operation_id. The whole protocol frame is limited to 8MiB. Owner and CLI must use the current protocol version (2); there is no older-owner fallback.
 
 Without an explicit ID, the CLI generates an instance-specific operation ID. For mutations/wait, resending `--operation-id` with the same ID, content, and caller retrieves retained results; changed content yields `operation_conflict`. Reads reobserve under the same ID and create no receipt for themselves. Message acceptance and receipt share one transaction. An accepted side-effect intent with unknown outcome may return pending: **this does not justify reissuing it under another ID**. Inspect `operation get --operation ID` `state` / `outcome` and target state. Old-instance IDs query saved receipts, never execute as new operations. Mutation replay of an unsaved old ID or expired outcome yields `operation_expired`; querying a missing receipt yields `operation_not_found`. Current-instance terminal outcomes may be collected after 24 hours during maintenance or under pressure, retaining expiry metadata to prevent reexecution. Pending and unapplied references remain protected. Check `result_expired` / `replay_policy`; do not blindly repeat a mutation under a new ID after its result disappears.
 
@@ -67,7 +67,7 @@ For important changes, explicitly retain an ID in the already known same-instanc
 
 ### Saved execution context
 
-`thread get` / `run get` / `turn get` / `message get` / `history get` return optional `context`. It includes meaningful state, saved created_at/updated_at/ended_at, thread_id/run_id/turn_id/node_id, Thread parent_thread_id versus Run owner_run_id, and structured recovery_reason. Unrecorded started_at and Thread created_at are omitted. Run/Turn `lifetime_ms` is wall-clock creation-to-end time including preparation/waits and is absent before termination. A node's Thread is its origin, not a fork's selected path.
+`run get`, `turn get`, `message get`, and `history get` require `context`. `thread get` can omit it for a fork. `history get` requires `provenance`; every `history list` item requires `provenance`, `context`, and `selection`. It includes meaningful state, saved created_at/updated_at/ended_at, thread_id/run_id/turn_id/node_id, Thread parent_thread_id versus Run owner_run_id, and structured recovery_reason. Unrecorded started_at and Thread created_at are omitted. Run/Turn `lifetime_ms` is wall-clock creation-to-end time including preparation/waits and is absent before termination. A node's Thread is its origin, not a fork's selected path.
 
 `operation get` `state/outcome` is the saved acceptance-operation result. `replay_policy=return_saved_outcome` returns the original result; `do_not_reexecute` means pending effects are not restarted. `result_uncertain=true` is not evidence of nonexecution. `targets` includes only IDs in the saved result; `downstream` shows compaction processing or current message delivery. Otherwise follow targets to get commands; inspect indexing per space with `index status`. The query itself creates no receipt and rereads current values under one query ID. `result_expired=true` / `replay_policy=operation_expired` means the original outcome body was collected and that mutation ID will not execute again.
 
@@ -160,7 +160,7 @@ PowerShell native JSON argument passing differs from Bash. Reading a UTF-8 file 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `history list --thread THREAD [--excerpt-chars N] [--run RUN] [--since RFC3339] [--status STATE] [--limit N] [--cursor C]` | `items` (node_id/kind/excerpt/payload_chars/provenance/context/selection/executions), next_cursor. Status filters saved related-shell state. Selected path, default 50/max 200. excerpt-chars default 512/range 0–4096; zero retrieves no body and returns empty excerpt. payload_chars counts stored JSON characters, null if reclaimed. Up to eight execution links with total/truncation |
-| `history get --node NODE [--limit-bytes N] [--cursor C] [--encoding UTF-8]` | node_id/kind/text/provenance, source_node_ids/previous_node_ids/next_node_ids, next_cursor, tombstone_reason; display text excludes encrypted reasoning |
+| `history get --node NODE [--limit-bytes N] [--cursor C] [--encoding UTF-8]` | node_id/kind/text/provenance/context, source_node_ids/previous_node_ids/next_node_ids, next_cursor, tombstone_reason; display text excludes encrypted reasoning |
 | `history search --query TEXT [--limit N] [--thread THREAD] [--kind KIND]... [--exclude-kind KIND]... [--from RFC3339] [--to RFC3339]` | Array of node_id/excerpt/distance/spans/provenance and optional thread_scope; default 10/max 50. Filters before active-embedding-space ranking; no active space yields empty array |
 | `history relations --node NODE --relation previous\|next\|sources\|replacements [--limit N] [--cursor C]` | `items` (node_id/provenance and, for replacements, replacement_id/source_revision/source_hash), next_cursor; direct relations, default 50/max 200 |
 
@@ -178,7 +178,7 @@ Shell startup uses the model shell tool; there is no CLI `shell start`.
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `shell get --execution EXECUTION` | execution_id/run_id/state/output_complete/exit_code/reason, saved command/cwd/thread_id/turn_id. New fields optional and possibly absent in old records/owners |
+| `shell get --execution EXECUTION` | execution_id/run_id/state/output_complete/exit_code/reason, saved command/cwd/thread_id/turn_id. Use the current owner and CLI; absence is not handled by an older-owner compatibility path |
 | `shell read --execution EXECUTION [--cursor C] [--encoding NAME] [--limit-bytes N]` | execution_id/text/encoding/cursor/raw_bytes/output_complete/decode_errors; default/max 65536 bytes, minimum 1; omitted encoding uses the saved execution encoding |
 | `shell write --execution EXECUTION (--text TEXT | --text-stdin) [--encoding NAME]` | bytes_written/status/stdin_open/reason; status `complete|timeout|closed|stopped|failed`; bytes_written is actual bytes, including partial writes. Encoding defaults UTF-8. Only live shells started with stdin_open; stdin/write-deadline limits apply |
 | `shell eof --execution EXECUTION` | accepted and related fields; closes stdin, separate from stop; shell can continue afterward |
@@ -261,10 +261,6 @@ Errors/timeouts never justify unconditional repetition under a new ID. Inspect s
 ## Implementation references
 
 Syntax follows [cli.rs](../../src/cli.rs), public types/constants [protocol.rs](../../src/protocol.rs), JSON/exit behavior [main.rs](../../src/main.rs), and results [Control](../../src/control.rs) / [DB operations](../../src/control/db.rs). Public CLI has no standalone subcommands for TUI-only edited sending, attachment reload, or index cost preview. See [TUI guide](tui.md) for screen controls.
-
-### Deprecated alias
-
-`status --operation ID` normalizes to `operation get --operation ID`, with migration guidance on stderr. The alias is currently accepted but deprecated; use the canonical `operation get` command for new scripts. JSON stdout contains the canonical query result. Combining it with ordinary work-list filters is rejected.
 
 ## Compact range selection
 

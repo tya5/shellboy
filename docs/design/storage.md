@@ -1,5 +1,11 @@
 # SQLite migration と専用worker
 
+## Current-only contract (Issue #33, 0.2.0)
+
+Current conversation schema is v10. Fresh databases are created directly from `src/storage/current.sql`, with the complete current ledger. Existing older-schema upgrades run only through the isolated startup migration runner; ordinary runtime readers require the current schema. The historic v6 receipt-accounting repair and attachment-origin reconstruction are not runtime compatibility mechanisms.
+
+Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
+
 採用設計。履歴保存・所有lock・DB worker・migration・GCの確定境界を示す。初期の論理DDLは配布migrationではなく、現行schemaは `migrations/` を正本とする。初期設計資料は非同梱。
 
 初回migrationを `migrations/0001_initial.sql` とし、33 core表を維持し、順序付き経路の `thread_path` とmigration ledgerを加える。配布版は論理候補に次の補強を加える。候補には確定契約を表せない箇所があるため、この差分を先に採用する。
@@ -83,23 +89,7 @@ writerとread-only RAGはmigration名/版の同じ内部constantを照合し、R
 
 ## 開発途中v6のforward互換とdowngrade（PR1-13）
 
-公開前の開発途中v6にはreserved_bytes列だけの版と、同じmigration名へ
-counter/index/triggerを追記した版が存在した。配布前の開発途中DBに限定されるが、どちらもledgerが
-同じなので版番号だけでは識別できない。元migrationを再編集せず、v8で同名index/triggerを
-`IF NOT EXISTS`作成し、既存receiptから導出counter2行だけを一度再計算する。既存v7にも適用し、
-実行後は同じ完成schemaに揃える。一次receipt、pending intent、reserved_bytes、履歴を変えず、
-副作用/APIを再実行しない。counterは削除可能な導出量で、保守責任はreceipt専用module/3triggerに
-据え置く。新表/workerは作らない。再計算はupgradeの単一transaction内の線形走査であり、
-通常open/要求ごとの再走査ではない。失敗時は新しい版/ledger/counterを一緒にrollbackする。
-配布する処理は [migration 0008](../../migrations/0008_receipt_accounting_compat.sql)、
-移行・rollback・不一致拒否の公開回帰は [storage試験](../../tests/storage.rs) を参照する。
-
-migrationは前進のみである。v5以降は資格情報除去、v6以降は副作用前の永続予約、v7以降は
-派生index、v8は上記互換補強を含む。対応schema上限が低い旧binaryは既存の版検査で拒否し、
-自動downgradeをしない。`user_version`やledgerを手動で下げない。旧binaryへ戻す必要がある場合は
-ownerを終了してupgrade前に取得したDB全体の整合backupを別data-dirへ復元する。upgrade後の
-新規会話/操作を旧backupへ自動逆変換する保証はない。現在版writer/read-only RAGのledgerは
-同じconstantを使う。
+Historical: the development-v6 accounting workaround is superseded by Issue #33. Fresh databases use the complete current schema; do not recreate or infer partially developed schemas during normal open. Keep only the general migration runner and strict schema/ledger checks. Downgrade and release-specific compatibility are not promised.
 
 ## 共通のbyte digest（R2-8）
 

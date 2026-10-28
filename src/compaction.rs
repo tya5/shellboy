@@ -31,18 +31,11 @@ use summary::SummaryAdoption;
 const SEGMENT_CHARS: usize = 64_000;
 // A graph-work bound, independent of provider context capacity.
 const TURN_BOUNDARY_IDS: usize = 65_536;
-// Branches are disjoint: direct Turn nodes cannot also be NULL-Turn legacy
-// nodes. The legacy covering index streams repeated receipt IDs for DISTINCT.
+// Assigned nodes carry their Turn directly. Held unassigned messages receive
+// their Turn together with their receipt, in the same resume transaction.
 const TURN_BOUNDARY_SEEDS_SQL: &str = "
 SELECT n.id FROM node n
 WHERE n.turn_id=?1
-  AND EXISTS(SELECT 1 FROM replacement_source s WHERE s.source_node_id=n.id)
-UNION ALL
-SELECT DISTINCT r.message_node_id
-FROM receipt r CROSS JOIN node n ON n.id=r.message_node_id
-WHERE r.turn_id=?1
-  AND r.target_thread_id=(SELECT thread_id FROM turn WHERE id=?1)
-  AND n.turn_id IS NULL
   AND EXISTS(SELECT 1 FROM replacement_source s WHERE s.source_node_id=n.id)
 LIMIT ?2";
 
@@ -180,9 +173,7 @@ fn resolve_turn_boundary(
     let mut boundary = db
         .query_row(
             "SELECT p.ordinal,p.node_id FROM thread_path p JOIN node n ON n.id=p.node_id
-         WHERE p.thread_id=?1 AND (n.turn_id=?2 OR (n.turn_id IS NULL AND EXISTS(
-           SELECT 1 FROM receipt r WHERE r.target_thread_id=(SELECT thread_id FROM turn WHERE id=?2)
-           AND r.turn_id=?2 AND r.message_node_id=n.id))) ORDER BY p.ordinal LIMIT 1",
+         WHERE p.thread_id=?1 AND n.turn_id=?2 ORDER BY p.ordinal LIMIT 1",
             params![thread, turn],
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
         )
@@ -1388,13 +1379,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn turn_seed_seeks_preserve_old_sets_and_ignore_unrelated_replacement_growth() {
+    async fn turn_seed_seeks_ignore_unrelated_replacement_growth() {
         use rusqlite::StatementStatus;
         use std::collections::BTreeSet;
-        const OLD_SEEDS: &str = "SELECT DISTINCT s.source_node_id FROM replacement_source s JOIN node n ON n.id=s.source_node_id
-         WHERE n.turn_id=?1 OR (n.turn_id IS NULL AND EXISTS(
-           SELECT 1 FROM receipt r WHERE r.target_thread_id=(SELECT thread_id FROM turn WHERE id=?1)
-           AND r.turn_id=?1 AND r.message_node_id=n.id)) LIMIT ?2";
+        const OLD_SEEDS: &str = "SELECT DISTINCT s.source_node_id FROM replacement_source s CROSS JOIN node n ON n.id=s.source_node_id
+         WHERE n.turn_id=?1 LIMIT ?2";
         fn measured(db: &Connection, sql: &str) -> rusqlite::Result<(Vec<String>, i32, i32)> {
             let mut statement = db.prepare(sql)?;
             let rows = statement
@@ -1440,7 +1429,7 @@ mod tests {
                 tx.commit()?;
                 let old = measured(db, OLD_SEEDS)?;
                 let new = measured(db, TURN_BOUNDARY_SEEDS_SQL)?;
-                let expected = BTreeSet::from(["current-origin".to_owned(), "legacy-origin".to_owned(), "pending-origin".to_owned()]);
+                let expected = BTreeSet::from(["current-origin".to_owned(), "pending-origin".to_owned()]);
                 assert_eq!(old.0.iter().cloned().collect::<BTreeSet<_>>(), expected);
                 assert_eq!(new.0.iter().cloned().collect::<BTreeSet<_>>(), expected);
                 assert_eq!(new.0.len(), expected.len(), "duplicate receipts/fanout are one seed each");
@@ -1450,11 +1439,10 @@ mod tests {
             assert!(samples[1].0 > samples[0].0 * 20, "old full-source scan must grow in this fixture: {samples:?}");
             assert_eq!(samples[1].2, samples[0].2, "new VM work must not grow with unrelated replacements");
             assert_eq!(samples[1].3, samples[0].3, "new fullscan work must not grow");
-            assert_eq!(samples[1].3, 0, "both candidate branches use indexed seeks");
+            assert_eq!(samples[1].3, 0, "Turn candidates use indexed seeks");
             let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {TURN_BOUNDARY_SEEDS_SQL}"))?
                 .query_map(params!["current",65_537], |row| row.get::<_, String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
             assert!(plan.iter().any(|line| line.contains("node_turn")), "{plan:?}");
-            assert!(plan.iter().any(|line| line.contains("receipt_turn_source")), "{plan:?}");
             assert!(!plan.iter().any(|line| line.contains("TEMP B-TREE")), "streaming DISTINCT has no pre-limit sort: {plan:?}");
             // The child has only the selected replacement, no copied ancestor
             // thread_replacement rows. Provenance remains global until projection.
@@ -1473,7 +1461,7 @@ mod tests {
         db.call(|db| {
             db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('current','t','r','running','now');
-                INSERT INTO node(id,kind,created_at,payload_json)VALUES('origin','user','now','{}');
+                INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('origin','current','user','now','{}');
                 INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at)VALUES('receipt','op','{}','t','origin','r','current','applied','now'),('duplicate-receipt','duplicate-op','{}','t','origin','r','current','applied','now');
                 INSERT INTO node(id,kind,created_at,payload_json)VALUES('s1','summary','now','{}'),('s2','summary','now','{}');
                 INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES('r1','s1','k','v','v','completed','now'),('r2','s2','k','v','v','completed','now');
@@ -1609,7 +1597,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_boundary_and_legacy_receipt_do_not_consume_graph_budget() {
+    async fn direct_boundary_does_not_consume_graph_budget_and_receipt_cannot_infer_turn() {
         let (_root, db) = database().await;
         db.call(|db| {
             db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');
@@ -1620,7 +1608,7 @@ mod tests {
                 WITH RECURSIVE seq(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM seq WHERE x<65537)
                 INSERT INTO node(id,turn_id,kind,created_at,payload_json)SELECT 'n'||x,'current','message','now','{}' FROM seq;
                 INSERT INTO thread_path(thread_id,ordinal,node_id)SELECT 't',CAST(substr(id,2) AS INTEGER),id FROM node WHERE turn_id='current';")?;
-            assert_eq!(resolve_turn_boundary(db,"t","current",0)?,Some("legacy-user".into()));
+            assert_eq!(resolve_turn_boundary(db,"t","current",0)?,Some("n1".into()));
             db.execute("DELETE FROM thread_path WHERE node_id='legacy-user'",[])?;
             assert_eq!(resolve_turn_boundary(db,"t","current",0)?,Some("n1".into()));
             Ok(())

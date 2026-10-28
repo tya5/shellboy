@@ -958,3 +958,68 @@ async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without
         worker.shutdown().await.unwrap();
     }
 }
+
+/// Public databases began at v8. Every supported public starting version must
+/// converge to exactly the same schema, preserve rows, and reopen idempotently.
+#[tokio::test]
+async fn public_schema_versions_converge_to_fresh_schema_without_data_loss() {
+    fn schema(db: &Connection) -> rusqlite::Result<Vec<(String, String, String)>> {
+        db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY type,name")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect()
+    }
+    let fresh_root = tempfile::tempdir().unwrap();
+    let fresh_path = fresh_root.path().join("fresh.sqlite");
+    let fresh = DbWorker::open(&fresh_path).await.unwrap();
+    fresh.shutdown().await.unwrap();
+    let expected = schema(&Connection::open(&fresh_path).unwrap()).unwrap();
+    let migrations = [
+        include_str!("../migrations/0001_initial.sql"),
+        include_str!("../migrations/0002_gc_indexes.sql"),
+        include_str!("../migrations/0003_context_indexes.sql"),
+        include_str!("../migrations/0004_attachment_provenance.sql"),
+        include_str!("../migrations/0005_origin_credentials.sql"),
+        include_str!("../migrations/0006_receipt_budget.sql"),
+        include_str!("../migrations/0007_usage_and_source_indexes.sql"),
+        include_str!("../migrations/0008_receipt_accounting_compat.sql"),
+        include_str!("../migrations/0009_compaction_turn_indexes.sql"),
+        include_str!("../migrations/0010_hot_query_indexes.sql"),
+    ];
+    for version in [8, 9, 10] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("upgrade.sqlite");
+        let db = Connection::open(&path).unwrap();
+        for sql in &migrations[..version] {
+            db.execute_batch(sql).unwrap();
+        }
+        seed_thread(&db, "keep").unwrap();
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES('keep-node','user','now','{\"text\":\"preserved\"}',20,'preserved-hash')", []).unwrap();
+        db.close().unwrap();
+        for _ in 0..2 {
+            let writer = DbWorker::open(&path).await.unwrap();
+            writer.shutdown().await.unwrap();
+            let db = Connection::open(&path).unwrap();
+            assert_eq!(schema(&db).unwrap(), expected, "starting v{version}");
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                SCHEMA_VERSION
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT body_hash FROM node WHERE id='keep-node'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+                "preserved-hash"
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM thread WHERE id='keep'", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+    }
+}

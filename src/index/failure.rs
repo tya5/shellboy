@@ -1,8 +1,8 @@
 //! Embedding failure adoption and bounded automatic retry.
 use super::*;
 
-// One bounded record per existing profile key. Legacy integer counters have no
-// cause identity and conservatively begin a new streak; an existing pause stays.
+// One bounded current-format record per endpoint family. Reset deletes the
+// record, and malformed records never become an implicit successful reset.
 #[derive(Serialize, Deserialize)]
 struct FailureStreak {
     cause: String,
@@ -27,7 +27,9 @@ fn advance_streak(
     threshold: usize,
 ) -> Result<bool, StorageError> {
     let record = keys.common_failures();
-    let previous = meta(tx, &record)?.and_then(|value| decode_json::<FailureStreak>(&value).ok());
+    let previous = meta(tx, &record)?
+        .map(|value| decode_json::<FailureStreak>(&value))
+        .transpose()?;
     let count = previous
         .filter(|previous| previous.cause == cause)
         .map_or(1, |previous| previous.count.saturating_add(1))
@@ -100,7 +102,10 @@ fn adopt_failure_tx(
         return Ok(());
     }
     if length && claimed.work.segment.end - claimed.work.segment.start > 1 && !cancelled {
-        set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
+        tx.execute(
+            "DELETE FROM app_meta WHERE key=?1",
+            [IndexKeys::new(failure_key).common_failures()],
+        )?;
         let size = (claimed.work.segment.end - claimed.work.segment.start)
             .div_ceil(2)
             .max(1);
@@ -162,10 +167,16 @@ fn adopt_failure_tx(
             update_json_meta(tx, bootstrap, &work)?;
         }
         let pause = if cancelled {
-            set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
+            tx.execute(
+                "DELETE FROM app_meta WHERE key=?1",
+                [IndexKeys::new(failure_key).common_failures()],
+            )?;
             false
         } else if immediate {
-            set_meta(tx, &IndexKeys::new(failure_key).common_failures(), "0")?;
+            tx.execute(
+                "DELETE FROM app_meta WHERE key=?1",
+                [IndexKeys::new(failure_key).common_failures()],
+            )?;
             true
         } else if retry {
             false
@@ -205,10 +216,9 @@ mod tests {
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
             .unwrap();
         let tx = db.transaction().unwrap();
-        set_meta(&tx, "index.common_failures.key", "2").unwrap();
         assert!(
             !advance_streak(&tx, IndexKeys::new("key"), "transient".into(), 3).unwrap(),
-            "legacy integer does not prove a consecutive cause"
+            "a missing counter starts at one"
         );
         assert!(!advance_streak(&tx, IndexKeys::new("key"), "transient".into(), 3).unwrap());
         assert!(
