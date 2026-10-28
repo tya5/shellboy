@@ -542,25 +542,32 @@ async fn provider_rate_limit_stops_the_invocation_and_retry_preserves_old_and_ca
     for i in 0..4 {
         std::fs::write(root.join(format!("notes/{i}.md")), format!("OLD-{i}")).unwrap();
     }
+    std::fs::write(root.join("notes/deleted.md"), "OLD-deleted").unwrap();
     add(root, "notes", "notes").await;
     assert_eq!(index(root, None, IndexMode::Keyword).await["ok"], true);
     for i in 0..4 {
         std::fs::write(root.join(format!("notes/{i}.md")), format!("NEW-{i} NEAR")).unwrap();
     }
+    std::fs::remove_file(root.join("notes/deleted.md")).unwrap();
     fail_at.store(usize::MAX - 1, Ordering::SeqCst);
     let failed = index(root, None, IndexMode::Semantic).await;
     assert_eq!(failed["ok"], false, "{failed}");
     assert_eq!(failed["result"]["embedding_paused"], true);
     assert_eq!(failed["result"]["deferred"], 3);
+    assert_eq!(failed["result"]["removed"], 0);
+    assert_eq!(failed["result"]["sources"][0]["deletion_detection"], false);
     assert_eq!(
         requests.load(Ordering::SeqCst),
         1,
         "429 must not be retried per file"
     );
     let previous = search(root, "source:notes", "OLD", SearchMode::Keyword).await;
-    assert_eq!(previous["result"]["items"].as_array().unwrap().len(), 4);
+    assert_eq!(previous["result"]["items"].as_array().unwrap().len(), 5);
     fail_at.store(usize::MAX, Ordering::SeqCst);
-    assert_eq!(index(root, None, IndexMode::Semantic).await["ok"], true);
+    let retried = index(root, None, IndexMode::Semantic).await;
+    assert_eq!(retried["ok"], true);
+    assert_eq!(retried["result"]["removed"], 1);
+    assert_eq!(retried["result"]["sources"][0]["deletion_detection"], true);
     let before = requests.load(Ordering::SeqCst);
     assert_eq!(index(root, None, IndexMode::Semantic).await["ok"], true);
     assert_eq!(

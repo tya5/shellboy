@@ -28,11 +28,13 @@ shellboy rag index --source notes --dry-run
 shellboy rag source add /absolute/path/to/notes --name notes --clear-excludes
 ```
 
-`--exclude`は複数指定でき、最大64個・各1024bytes以内。sourceに保存するのでindexごとの再指定は不要です。同じ名前/rootへの除外指定なしの再登録は維持、非空の指定で全置換、解除は`--clear-excludes`です。rootからの相対pathをslash区切りで照合し、slashのないpatternは各階層のbasenameにも適用します。directoryに一致すれば配下を読みません。gitignoreの読込みや否定規則には対応しません。
+`--exclude`は複数指定でき、最大64個・各1024bytes以内。sourceに保存するのでindexごとの再指定は不要です。同じ名前/rootへの除外指定なしの再登録は維持、非空の指定で全置換、解除は`--clear-excludes`です。照合は全OSで大文字小文字を区別し、macOSやWindowsでも`*.LOG`は`a.log`に一致しません。rootからの相対pathをslash区切りで照合し、slashのないpatternは各階層のbasenameにも適用します。配下のdirectoryに一致すれば配下を読みません。登録したdirectoryのroot自体はglobで除外しませんが、fileを直接登録した場合は除外対象になり得ます。gitignoreの読込みや否定規則には対応しません。
 
 dotで始まる配下entry（`.git`や`.DS_Store`）、現在使うRAG DBと`-wal`/`-shm`/`-journal`/writer lockは既定で対象外です。明示登録したhidden root自体は選択意図を優先します。シンボリックリンクは辿りません。未対応形式も失敗ではなく対象外です。結果の`skipped`、source別`selection`のtargets/excluded/unsupported/symlinks、拡張子別の内訳と上限20件の例を確認してください。1 sourceあたり対応資料10000件・訪問entry100000件・深さ64が上限です。
 
-完全な走査が成功すると、対象外になった旧資料や削除済み資料は検索のactive版から外れ、`removed`に数えます。原本は削除しません。実際の読取り/抽出失敗や走査不全では削除検出を抑止し、一時的なアクセス不能を削除と取り違えません。
+directory走査が完了すると、対象外になった旧資料や削除済み資料は検索のactive版から外れ、`removed`に数えます。原本は削除しません。個別fileの読取り/抽出失敗では、そのfileの旧版だけを`stale`として保持します（旧版がなければ`failed`）。他の見つからなかったfileの削除検出は継続します。rootへアクセスできない場合や走査上限などの走査不全では、そのsourceの**新規・変更fileの索引更新と削除検出をすべて見送ります**。provider breakerによる後回しがある場合も、再試行まで削除検出を抑止します。
+
+Windowsでは、旧索引のbackslash区切りkeyが存在し、slash区切りkeyがまだなければ、同期時に旧keyとdocument ID・revisionを保持し、`inspect --id`もそのまま使えます。glob照合とselectionの例はslash区切り、新規文書のkeyもslash区切りです。以前の同期で両方のkeyが既にできた場合はslash側を優先し、完全な同期で重複するbackslash側をremovedにします。不変のrevision履歴は統合しません。POSIXのfile名中のbackslashをseparatorとして読み替えることもありません。
 
 既定はkeyword検索・索引で、API接続は不要です。登録やdry-runはAPIを呼びません。
 管理DBは既定データディレクトリの `rag.db`、`shellboy rag --db /absolute/path/knowledge.db`

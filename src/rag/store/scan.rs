@@ -139,22 +139,35 @@ fn walk(
         scan.excluded(&key, "dot_entry");
         return Ok(());
     }
-    if rules.iter().any(|rule| {
-        rule.matcher.is_match(&key)
-            || (rule.basename
-                && path
-                    .file_name()
-                    .is_some_and(|name| rule.matcher.is_match(Path::new(name))))
-    }) {
-        scan.excluded(&key, "source_glob");
-        return Ok(());
-    }
-    let meta = std::fs::symlink_metadata(path).map_err(|_| {
+    // Only the root needs metadata before matching: descendants excluded by a
+    // glob should not require a metadata read just to be skipped.
+    let unavailable = || {
         err(
             "source_unavailable",
             "Source traversal failed; deletion detection was skipped",
         )
-    })?;
+    };
+    let root_metadata = if path == root {
+        Some(std::fs::symlink_metadata(path).map_err(|_| unavailable())?)
+    } else {
+        None
+    };
+    if !root_metadata.as_ref().is_some_and(|meta| meta.is_dir())
+        && rules.iter().any(|rule| {
+            rule.matcher.is_match(&key)
+                || (rule.basename
+                    && path
+                        .file_name()
+                        .is_some_and(|name| rule.matcher.is_match(Path::new(name))))
+        })
+    {
+        scan.excluded(&key, "source_glob");
+        return Ok(());
+    }
+    let meta = match root_metadata {
+        Some(meta) => meta,
+        None => std::fs::symlink_metadata(path).map_err(|_| unavailable())?,
+    };
     if meta.file_type().is_symlink() {
         scan.symlinks += 1;
         return Ok(());

@@ -140,7 +140,78 @@ async fn newly_excluded_saved_documents_are_removed_and_failure_states_are_accur
     );
 }
 #[tokio::test]
-async fn real_file_failure_and_incomplete_walk_protect_unseen_saved_revisions() {
+async fn complete_walk_removes_unseen_documents_despite_file_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::create_dir(root.join("materials")).unwrap();
+    std::fs::write(root.join("materials/deleted.md"), "deleted revision").unwrap();
+    std::fs::write(root.join("materials/stale.md"), "retained revision").unwrap();
+    init(root).await;
+    add(root, "materials", &[], false).await;
+    index(root, false, IndexMode::Keyword).await;
+    let before = call(
+        root,
+        RagCommand::Inspect {
+            id: "stale.md".into(),
+        },
+    )
+    .await;
+    std::fs::remove_file(root.join("materials/deleted.md")).unwrap();
+    std::fs::write(root.join("materials/stale.md"), [0xff]).unwrap();
+    std::fs::write(root.join("materials/new.md"), [0xff]).unwrap();
+    let preview = index(root, true, IndexMode::Keyword).await;
+    assert_eq!(preview["result"]["removed"], 1, "{preview}");
+    assert_eq!(preview["result"]["failure_count"], 2);
+    assert_eq!(
+        call(
+            root,
+            RagCommand::Inspect {
+                id: "stale.md".into()
+            }
+        )
+        .await["result"],
+        before["result"],
+        "preview must not change saved revision or state"
+    );
+    for expected_removed in [1, 0] {
+        let partial = index(root, false, IndexMode::Keyword).await;
+        assert_eq!(partial["result"]["removed"], expected_removed, "{partial}");
+        assert_eq!(partial["result"]["failure_count"], 2);
+        assert_eq!(partial["result"]["sources"][0]["deletion_detection"], true);
+        let stale = call(
+            root,
+            RagCommand::Inspect {
+                id: "stale.md".into(),
+            },
+        )
+        .await;
+        assert_eq!(stale["result"]["state"], "stale");
+        assert_eq!(stale["result"]["revision"], before["result"]["revision"]);
+        assert_eq!(
+            call(
+                root,
+                RagCommand::Inspect {
+                    id: "deleted.md".into()
+                }
+            )
+            .await["result"]["state"],
+            "missing"
+        );
+        assert_eq!(
+            call(
+                root,
+                RagCommand::Inspect {
+                    id: "new.md".into()
+                }
+            )
+            .await["result"]["state"],
+            "failed"
+        );
+    }
+}
+
+#[tokio::test]
+async fn incomplete_walk_defers_updates_and_preserves_unseen_saved_revisions() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     std::fs::create_dir(root.join("materials")).unwrap();
@@ -148,17 +219,173 @@ async fn real_file_failure_and_incomplete_walk_protect_unseen_saved_revisions() 
     init(root).await;
     add(root, "materials", &[], false).await;
     index(root, false, IndexMode::Keyword).await;
-    std::fs::remove_file(root.join("materials/old.md")).unwrap();
-    std::fs::write(root.join("materials/unreadable.md"), [0xff]).unwrap();
-    let protected = index(root, false, IndexMode::Keyword).await;
-    assert_eq!(protected["result"]["removed"], 0);
-    assert_eq!(protected["result"]["failure_count"], 1);
-    std::fs::remove_dir_all(root.join("materials")).unwrap();
+    let before = call(
+        root,
+        RagCommand::Inspect {
+            id: "old.md".into(),
+        },
+    )
+    .await;
+    // The deterministic depth cap makes traversal fail after seeing a changed
+    // early file; the whole walk must finish before any revision is published.
+    std::fs::write(root.join("materials/old.md"), "changed revision").unwrap();
+    std::fs::write(root.join("materials/new.md"), "new revision").unwrap();
+    let mut deep = root.join("materials/z");
+    std::fs::create_dir(&deep).unwrap();
+    for _ in 0..65 {
+        deep = deep.join("d");
+        std::fs::create_dir(&deep).unwrap();
+    }
     let incomplete = index(root, false, IndexMode::Keyword).await;
     assert_eq!(incomplete["result"]["removed"], 0);
+    assert_eq!(incomplete["result"]["processed"], 0);
     assert_eq!(incomplete["result"]["sources"][0]["scan_complete"], false);
     assert_eq!(
+        call(
+            root,
+            RagCommand::Inspect {
+                id: "old.md".into()
+            }
+        )
+        .await["result"]["revision"],
+        before["result"]["revision"]
+    );
+    assert_eq!(
+        call(
+            root,
+            RagCommand::Inspect {
+                id: "new.md".into()
+            }
+        )
+        .await["ok"],
+        false
+    );
+    std::fs::remove_dir_all(root.join("materials")).unwrap();
+    let missing_root = index(root, false, IndexMode::Keyword).await;
+    assert_eq!(missing_root["result"]["removed"], 0);
+    assert_eq!(missing_root["result"]["sources"][0]["scan_complete"], false);
+    assert_eq!(
         call(root, RagCommand::Status).await["result"]["documents"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn exclusions_skip_descendants_but_do_not_exclude_directory_source_root() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::create_dir_all(root.join("materials/materials")).unwrap();
+    std::fs::write(root.join("materials/a.md"), "keep").unwrap();
+    std::fs::write(root.join("materials/materials/nested.md"), "exclude").unwrap();
+    init(root).await;
+    add(root, "materials", &[], false).await;
+    index(root, false, IndexMode::Keyword).await;
+    add(root, "materials", &["materials"], false).await;
+    for dry_run in [true, false] {
+        let selected = index(root, dry_run, IndexMode::Keyword).await;
+        assert_eq!(selected["result"]["sources"][0]["selection"]["targets"], 1);
+        assert_eq!(selected["result"]["removed"], 1);
+        assert_eq!(selected["result"]["unchanged"], 1);
+    }
+    assert_eq!(
+        call(root, RagCommand::Inspect { id: "a.md".into() }).await["result"]["state"],
+        "ready"
+    );
+    // An explicitly registered file, unlike a directory root, can be excluded.
+    assert_eq!(
+        call(
+            root,
+            RagCommand::Source {
+                command: SourceCommand::Remove {
+                    source: "materials".into()
+                }
+            }
+        )
+        .await["ok"],
+        true
+    );
+    assert_eq!(
+        add(root, "materials/a.md", &["*.md"], false).await["ok"],
+        true
+    );
+    let excluded_file = index(root, true, IndexMode::Keyword).await;
+    assert_eq!(
+        excluded_file["result"]["sources"][0]["selection"]["targets"],
+        0
+    );
+    assert_eq!(
+        excluded_file["result"]["sources"][0]["selection"]["excluded"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn glob_case_sensitivity_is_independent_of_filesystem_case_rules() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::create_dir(root.join("materials")).unwrap();
+    std::fs::write(root.join("materials/a.log"), "keep").unwrap();
+    init(root).await;
+    add(root, "materials", &["*.LOG"], false).await;
+    assert_eq!(
+        index(root, true, IndexMode::Keyword).await["result"]["sources"][0]["selection"]["targets"],
+        1
+    );
+    add(root, "materials", &["*.log"], false).await;
+    assert_eq!(
+        index(root, true, IndexMode::Keyword).await["result"]["sources"][0]["selection"]["targets"],
+        0
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_legacy_backslash_key_keeps_document_identity_across_sync() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::create_dir_all(root.join("materials/sub")).unwrap();
+    std::fs::write(root.join("materials/sub/a.md"), "stable material").unwrap();
+    init(root).await;
+    add(root, "materials", &[], false).await;
+    index(root, false, IndexMode::Keyword).await;
+    // Model the key representation stored by the pre-normalization scanner.
+    let db = rusqlite::Connection::open(root.join("rag.db")).unwrap();
+    db.execute(
+        "UPDATE documents SET key='sub\\a.md' WHERE key='sub/a.md'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    let before = call(
+        root,
+        RagCommand::Inspect {
+            id: "sub\\a.md".into(),
+        },
+    )
+    .await;
+    assert_eq!(before["ok"], true);
+    for dry_run in [true, false] {
+        let synced = index(root, dry_run, IndexMode::Keyword).await;
+        assert_eq!(synced["result"]["removed"], 0, "{synced}");
+        assert_eq!(synced["result"]["changed"], 0);
+        assert_eq!(synced["result"]["unchanged"], 1);
+        let saved = call(
+            root,
+            RagCommand::Inspect {
+                id: "sub\\a.md".into(),
+            },
+        )
+        .await;
+        assert_eq!(
+            saved["result"]["document_id"],
+            before["result"]["document_id"]
+        );
+        assert_eq!(saved["result"]["revision"], before["result"]["revision"]);
+    }
+    // Glob matching still uses slash paths even when storage uses an old key.
+    add(root, "materials", &["sub/*.md"], false).await;
+    assert_eq!(
+        index(root, false, IndexMode::Keyword).await["result"]["removed"],
         1
     );
 }

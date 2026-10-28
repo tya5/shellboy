@@ -120,7 +120,7 @@ marker導入前のspaceは従来の完全fingerprint照合をfallbackとする�
 
 独立RAGのwriterが旧schema 1/2から3へ短いatomic migrationを行い、schema 1のsourcesに除外globのJSON列、旧版に下記hot query索引を加える。旧sourceの既定は空集合で、会話DB/schemaには触れない。旧schemaの読み取りとdry-runはmigrationをせず空の除外を投影できる。source addの複数 `--exclude` を永続化し、無指定の再登録では維持、非空指定で置換、`--clear-excludes` で明示解除する。pattern数64・各1024bytes以内。構文とマッチは固定版globsetを利用し、gitignoreや否定規則の独自解釈は加えない。pathはsource相対のslashへ正規化し、slashなしpatternはbasenameにも適用、directory一致で配下を走査しない。
 
-dot entryと現在使うRAG DB・sidecarを既定対象外とする。unsupported形式は失敗ではなくskippedで、拡張子別内訳と上限付き対象/除外例を返す。対象外の旧active資料は完全な走査成功時にremovedへ移す。実read/extract失敗・走査不全・入力上限では従来どおり削除検出を抑止し、アクセス不能を削除扱いしない。新規文書の失敗はfailed、成功版を残す失敗はstaleとする。dry-runは外部API・DB書込みをせず、semantic分割量と課金可能性を示す。
+dot entryと現在使うRAG DB・sidecarを既定対象外とする。unsupported形式は失敗ではなくskippedで、拡張子別内訳と上限付き対象/除外例を返す。対象外の旧active資料は完全な走査成功時にremovedへ移す。A complete traversal establishes the selected key set before reading or extracting any document. A per-file read/extraction failure retains that file’s old active revision as stale, but does not block removal of other unseen documents. Incomplete traversal or input limits skip all file updates and deletion detection for that source; provider-breaker deferred files also suppress deletion detection for that execution. This distinguishes a known unreadable file from an unknown directory listing.新規文書の失敗はfailed、成功版を残す失敗はstaleとする。dry-runは外部API・DB書込みをせず、semantic分割量と課金可能性を示す。
 
 statusはsourceごとのlast_scan・有効revisionの最大created_at（last_changed_at）・現在のembedding profileに欠けるchunk数（semantic_missing）と、上限付きの失敗資料/key/理由を既存行から投影する。未知のprofileで0や成功時刻を捏造しない。embedding完了時刻の列、結果保存表、operation receipt、会話Coreとの連携を増やさない。長時間index結果は既存shell executionのwait/readで回収する。
 
@@ -137,3 +137,10 @@ RAGはUTF-8 text/Markdownと登録・出典管理へ絞る。PDF/Office固有bac
 ### 独立RAGのhot query索引（Issue #26）
 
 `embeddings(space_id,vec_rowid)`はMAX行IDの割当てと削除、`chunks(hash)`は孤立embedding回収のNOT EXISTSに使用する。EXPLAINと同一fixture比較で旧走査を確認した2本だけを追加し、新しい表は作らない。新規schema 3と既存schema 1/2のwriter移行で同じ索引を作り、移行は単一transactionでschema番号まで確定する。readonly/dry-runは旧schemaを変更しない。会話DB migrationとは独立する。
+
+
+### Reopened Issue #20: source identity and exclusion boundaries
+
+Glob matching is case-sensitive on every OS, uses `/` separators, and applies to descendants of a directory source, never to the registered directory root itself. An explicitly registered file remains eligible for glob exclusion. This prevents a root basename match from silently removing its entire index.
+
+Windows sources created before slash normalization may contain backslash-separated document keys. During synchronization, reuse an existing native backslash key when no slash key exists for that file; retain its document ID, active revision, and inspect key without rewriting provenance or migrating schema. New keys and selection examples use slash separators. If both identities already exist (for example after an earlier 0.1.6 sync), prefer the slash identity and let a complete sync remove the redundant native entry; do not merge immutable revision histories or silently reinterpret POSIX backslashes. Read-only preview uses the same identity lookup without writes.

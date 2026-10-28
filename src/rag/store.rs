@@ -485,12 +485,24 @@ pub(super) async fn index(
         skipped += scan.excluded + scan.unsupported + scan.symlinks;
         let before_counts = (counts.changed, counts.unchanged, counts.processed);
         let before_failures = failure_count;
+        // Storage keys are stable identities, while selection paths use slash
+        // separators. Preserve pre-normalization Windows document references.
+        #[cfg(windows)]
+        let scan = {
+            let mut scan = scan;
+            for (key, _) in &mut scan.files {
+                *key = sync::existing_windows_file_key(&s.db, &source, key)?;
+            }
+            scan
+        };
         let seen: HashSet<String> = scan.files.iter().map(|(k, _)| k.clone()).collect();
         let mut source_failed = false;
+        let mut source_deferred = false;
         for (key, path) in scan.files {
             if breaker.paused() {
                 deferred += 1;
                 source_failed = true;
+                source_deferred = true;
                 continue;
             }
             let result = policy
@@ -512,11 +524,12 @@ pub(super) async fn index(
                 breaker.success();
             }
         }
-        // Even complete traversal must not turn a source processing failure into
-        // an accidental deletion sweep. Successful document revisions remain.
-        let source_removed = collect_missing(&mut s, &source, &seen, dry_run, source_failed)?;
+        // The complete walk already observed failed files in `seen`. Their old
+        // revisions stay stale without retaining unrelated deleted documents.
+        // Preserve the conservative guard when provider work was deferred.
+        let source_removed = collect_missing(&mut s, &source, &seen, dry_run, source_deferred)?;
         removed += source_removed;
-        source_results.push(json!({"source_id":source,"scan_complete":true,"deletion_detection":!source_failed,"changed":counts.changed-before_counts.0,"unchanged":counts.unchanged-before_counts.1,"processed":counts.processed-before_counts.2,"removed":source_removed,"failure_count":failure_count-before_failures,"selection":summary}));
+        source_results.push(json!({"source_id":source,"scan_complete":true,"deletion_detection":!source_deferred,"changed":counts.changed-before_counts.0,"unchanged":counts.unchanged-before_counts.1,"processed":counts.processed-before_counts.2,"removed":source_removed,"failure_count":failure_count-before_failures,"selection":summary}));
         if !dry_run {
             s.db.execute(
                 "UPDATE sources SET last_scan=?2,error=?3 WHERE id=?1",
