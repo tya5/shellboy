@@ -62,10 +62,10 @@ retains at most one undelivered update instead of blocking the action loop.
 
 Priority Cancel/Quit remain polled even with the raw channel and all 512 critical
 slots full. Queued Send/SendEdited actions drained during Quit retain their
-Accepting projection in their existing send worker after its permit acquisition,
-so closing action drainage cannot consume the main reserve indefinitely. The
-worker still emits that receipt before executing its send. Ordinary Send retains
-its immediate main-loop receipt. Closing draft snapshots retain their existing
+existing send-worker ownership and permit acquisition,
+so closing action drainage cannot consume the main reserve indefinitely. Closing
+sends skip the obsolete transient Accepting projection and persist before result
+delivery; normal Send retains its immediate main-loop receipt. Closing draft snapshots retain their existing
 coalesced autosave ownership. No extra task, worker service, Core API, persistent
 state or queue is introduced.
 
@@ -104,9 +104,10 @@ cannot contain an arbitrarily large main batch, and continuation alone cannot
 progress when workers can consume every main slot. With both, the main loop
 retains at most one bounded batch and continues polling priority controls while
 UI delivery is stopped. Work results waiting in worker futures retain their
-original admission permits. Normal shutdown first stops IPC intake, then admits
-any retained initialization and receipt batch while the outer shutdown select
-continues flushing UI output and accepting the existing shutdown choices.
+original admission permits. Normal shutdown first stops IPC intake, saves draft backlog and joins admitted sends,
+then completes owned shutdown before admitting retained initialization and receipt
+projections. UI-only capacity waits cannot delay durable persistence. The outer
+shutdown select continues flushing UI output and accepting existing shutdown choices.
 After owned shutdown completes, at most one error status and one Shutdown marker
 remain in a local terminal continuation. Its capacity retry still polls explicit
 ForceQuit, so a full 512-entry outbox cannot trap the shutdown-complete branch.
@@ -153,3 +154,17 @@ The priority guarantee uses the TUI's reserved `ui::actions::channel` mailbox.
 The retained plain Tokio receiver adapter has one ordinary FIFO and no separate
 priority slots; it cannot promise priority bypass of earlier normal actions.
 It preserves its existing embedding behavior and is not the actual TUI path.
+
+### Issue #32 re-review: persistence and scan fairness
+
+Autosave pumps its existing bounded worker independently of UI capacity. A closed
+worker retains one failed-owner notification until the main reserve is available;
+further backlog stays owned by DraftSaver rather than being dropped. Shutdown
+completes durable work before waiting for retained UI-only projections. Closing
+sends omit their obsolete Accepting projection and commit before result delivery.
+
+Changed during a bounded receipt scan sets a repeat bit on the existing pending
+receipts of that Thread. Complete the current scan fairly before clearing checked
+bits for one further pass; repeated changes coalesce. No per-Thread cursor cache,
+new channel or worker is introduced. Clone of a delivery handle always produces
+a worker-limited handle; shutdown borrows the unique original main handle.

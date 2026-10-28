@@ -58,10 +58,36 @@ impl DraftSaver {
                     self.backlog.insert(thread, (draft, anchor, follow));
                     break;
                 }
-                Err(mpsc::error::TrySendError::Closed(_)) => return Some(thread),
+                Err(mpsc::error::TrySendError::Closed((_, draft, anchor, follow))) => {
+                    self.backlog.insert(thread.clone(), (draft, anchor, follow));
+                    return Some(thread);
+                }
             }
         }
         None
+    }
+    // Pump persistence on every frontend turn; only its failure projection waits
+    // for the main producer's reserved UI capacity.
+    pub(super) fn pump_delivery(
+        &mut self,
+        failure: &mut Option<String>,
+        updates: &BufferedUpdates,
+    ) {
+        if failure.is_none() {
+            *failure = self.pump();
+        }
+        if updates.main_ready()
+            && let Some(thread_id) = failure.take()
+        {
+            let rejected = updates.defer(UiUpdate::DraftSaveFailed {
+                thread_id,
+                message: "下書き保存workerが停止しました。本文を保持し再試行します".into(),
+            });
+            assert!(
+                rejected.is_none(),
+                "reserved main capacity was consumed concurrently"
+            );
+        }
     }
     pub(super) fn threads(&self) -> impl Iterator<Item = &String> {
         self.backlog.keys()
@@ -81,6 +107,73 @@ impl DraftSaver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn pumping_persists_backlog_while_ui_outbox_has_no_main_capacity() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (results, _incoming) = mpsc::channel(1);
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let updates = BufferedUpdates::new(tx);
+        // Receipt is deliberately critical; no raw UI or outbox capacity is freed.
+        for revision in 0..512 {
+            assert!(
+                updates
+                    .defer(UiUpdate::Receipt {
+                        draft_id: "draft".into(),
+                        revision,
+                        thread_id: Some("thread".into()),
+                        status: ReceiptStatus::Accepted,
+                        message: None
+                    })
+                    .is_none()
+            );
+        }
+        assert!(!updates.main_ready());
+        let mut saver = DraftSaver::new(control.clone(), results);
+        saver.enqueue(
+            "thread".into(),
+            DraftSnapshot {
+                draft_id: "autosave".into(),
+                text: "autosave despite stopped UI".into(),
+                revision: 5,
+                ..Default::default()
+            },
+            ViewAnchor::default(),
+            true,
+            false,
+        );
+        let mut failure = None;
+        // This is the same unconditional helper called by the actual frontend
+        // turn: gating pump on main_ready would leave this snapshot unsaved.
+        saver.pump_delivery(&mut failure, &updates);
+        assert!(failure.is_none());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let saved: bool = owner
+                    .db
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM draft WHERE id='autosave' AND revision=5)",
+                            [],
+                            |r| r.get(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if saved {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!updates.main_ready());
+        saver.finish().await.await.unwrap().unwrap();
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
     #[tokio::test]
     async fn closed_worker_reports_its_unsaved_owner_and_cannot_return_success_on_shutdown() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;

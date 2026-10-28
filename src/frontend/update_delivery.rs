@@ -46,10 +46,15 @@ struct Delivery {
     closed: AtomicBool,
     ready: tokio::sync::Notify,
 }
-#[derive(Clone)]
 pub(super) struct BufferedUpdates {
     delivery: Arc<Delivery>,
     worker: bool,
+}
+// Cloning may cross a task boundary: it must never duplicate main reserve rights.
+impl Clone for BufferedUpdates {
+    fn clone(&self) -> Self {
+        self.worker()
+    }
 }
 impl BufferedUpdates {
     pub(super) fn new(raw: SyncSender<UiUpdate>) -> Self {
@@ -307,6 +312,7 @@ mod tests {
                     draft: "draft".into(),
                     revision,
                     checked: true,
+                    repeat: false,
                 },
             );
             receipts.push((message, ReceiptStatus::Completed));
@@ -316,9 +322,38 @@ mod tests {
             batch: receipt_delivery::Batch::new(receipts),
         }
     }
+    #[test]
+    fn cloned_main_handle_cannot_consume_the_main_reserve() {
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let main = BufferedUpdates::new(tx);
+        let cloned = main.clone();
+        for n in 0..WORKER_LIMIT {
+            assert!(cloned.defer(critical(n as u64)).is_none());
+        }
+        assert!(cloned.defer(critical(9999)).is_some());
+        for n in WORKER_LIMIT..CRITICAL_LIMIT {
+            assert!(main.defer(critical(n as u64)).is_none());
+        }
+    }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch() {
         let (root, owner, control, server) = control_tests::fixture().await;
+        // Isolate delivery pressure from same-Thread selection-revision CAS:
+        // each queued request has a distinct existing recovery-wait owner and
+        // stays held, so this fixture starts no model HTTP request.
+        owner.db.call(|db| {
+            let tx = db.transaction()?;
+            for n in 0..40 {
+                let thread = format!("closing-thread-{n}");
+                let run = format!("closing-run-{n}");
+                tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) SELECT ?1,?1,cwd,agents_path,profile_id,model_id,'now' FROM thread WHERE id='thread'", [&thread])?;
+                tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')", rusqlite::params![run,thread])?;
+                tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES(?1,?2,?1,'recovery_wait','now')", rusqlite::params![run,thread])?;
+            }
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
         let (tx, _rx) = std::sync::mpsc::sync_channel(1);
         tx.send(UiUpdate::RecoveryBell).unwrap();
         let out = BufferedUpdates::new(tx);
@@ -335,10 +370,11 @@ mod tests {
             .try_send(UiAction::RenderWidth { width: 120 })
             .unwrap();
         let closing_cwd = root.path().to_path_buf();
+        let observer = out.worker();
         let bridge = tokio::spawn(run_with_delivery(
             control.clone(),
             receiver,
-            out.clone(),
+            out,
             root.path().into(),
             owner,
             server,
@@ -376,20 +412,17 @@ mod tests {
         // No UI receiver has read a single update. Cancellation is real durable
         // control work, not just acceptance into the reserved action mailbox.
         assert_eq!(
-            out.delivery.pending.lock().unwrap().critical.len(),
+            observer.delivery.pending.lock().unwrap().critical.len(),
             CRITICAL_LIMIT
         );
-        // Quit must also drain queued accepted Send actions while UI remains
-        // stalled; their Accepting updates belong to their existing workers.
-        // More closing sends than reserved slots must not prevent reaching
-        // Quit. No worker can start model I/O:
-        // each is waiting to enqueue Accepting below the full worker limit.
+        // Closing sends persist before any UI result wait. More sends than
+        // reserved slots must still reach Quit without consuming UI capacity.
         for revision in 0..40 {
             sender
                 .try_send(UiAction::Send {
                     draft_id: format!("closing-{revision}"),
                     revision,
-                    thread_id: Some("thread".into()),
+                    thread_id: Some(format!("closing-thread-{revision}")),
                     cwd: closing_cwd.clone(),
                     text: "synthetic queued closing request".into(),
                     attachments: vec![],
@@ -399,10 +432,46 @@ mod tests {
                 })
                 .unwrap();
         }
+        sender
+            .try_send(UiAction::SaveDraft {
+                thread_id: "thread".into(),
+                draft: DraftSnapshot {
+                    draft_id: "closing-draft".into(),
+                    text: "saved with UI stopped".into(),
+                    revision: 99,
+                    ..Default::default()
+                },
+                anchor: ViewAnchor::default(),
+                follow: true,
+            })
+            .unwrap();
         sender.try_send(UiAction::Quit).unwrap();
+        // Observe durable effects independently of the owner DB worker, which
+        // normal shutdown is allowed to close before presentation resumes.
+        let db = rusqlite::Connection::open_with_flags(
+            root.path().join("data/shellboy.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let saved: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE id='closing-draft' AND revision=99)", [], |r| r.get(0)).unwrap();
+                let sent: i64 = db.query_row("SELECT count(*) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE n.kind='user' AND r.target_thread_id GLOB 'closing-thread-*' AND n.payload_json LIKE '%synthetic queued closing request%'", [], |r| r.get(0)).unwrap();
+                if saved && sent == 40 { break; }
+                assert!(!bridge.is_finished(), "shutdown must retain pending UI results");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap_or_else(|error| {
+            let draft: Option<i64> = db.query_row("SELECT max(revision) FROM draft WHERE id='closing-draft'", [], |r| r.get(0)).unwrap();
+            let mut statement = db.prepare("SELECT kind,count(*) FROM node WHERE payload_json LIKE '%synthetic queued closing request%' GROUP BY kind ORDER BY kind").unwrap();
+            let nodes = statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            let mut statement = db.prepare("SELECT r.state,count(*) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE n.kind='user' AND n.payload_json LIKE '%synthetic queued closing request%' GROUP BY r.state ORDER BY r.state").unwrap();
+            let receipts = statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            panic!("durable closing work timed out: {error}; draft_revision={draft:?}, nodes_by_kind={nodes:?}, receipts_by_state={receipts:?}, frontend_finished={}", bridge.is_finished());
+        });
         tokio::time::timeout(Duration::from_secs(15), async {
             loop {
-                if out
+                if observer
                     .delivery
                     .pending
                     .lock()

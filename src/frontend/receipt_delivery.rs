@@ -9,6 +9,7 @@ pub(super) struct PendingReceipt {
     pub revision: u64,
     // One bit per existing pending receipt; no per-thread cursor cache.
     pub checked: bool,
+    pub repeat: bool,
 }
 pub(super) fn next_ids(pending: &mut HashMap<String, PendingReceipt>, thread: &str) -> Vec<String> {
     if !pending
@@ -31,6 +32,26 @@ pub(super) fn next_ids(pending: &mut HashMap<String, PendingReceipt>, thread: &s
             id.clone()
         })
         .collect()
+}
+
+// Do not restart a partial scan: that would starve IDs past its first page.
+pub(super) fn changed(pending: &mut HashMap<String, PendingReceipt>, thread: &str) {
+    for receipt in pending.values_mut().filter(|r| r.thread == thread) {
+        receipt.repeat = true;
+    }
+}
+pub(super) fn continue_scan(pending: &mut HashMap<String, PendingReceipt>, thread: &str) -> bool {
+    if pending.values().any(|r| r.thread == thread && !r.checked) {
+        return true;
+    }
+    if !pending.values().any(|r| r.thread == thread && r.repeat) {
+        return false;
+    }
+    for receipt in pending.values_mut().filter(|r| r.thread == thread) {
+        receipt.checked = false;
+        receipt.repeat = false;
+    }
+    true
 }
 
 #[derive(Default)]
@@ -118,6 +139,41 @@ pub(super) struct Startup {
 mod tests {
     use super::*;
     #[test]
+    fn change_during_partial_scan_revisits_early_ids_after_fair_completion() {
+        let mut pending = (0..200)
+            .map(|n| {
+                (
+                    n.to_string(),
+                    PendingReceipt {
+                        thread: "thread".into(),
+                        draft: "draft".into(),
+                        revision: n,
+                        checked: false,
+                        repeat: false,
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let first = next_ids(&mut pending, "thread");
+        assert_eq!(first.len(), 128);
+        let changed_id = first[0].clone();
+        changed(&mut pending, "thread");
+        assert!(continue_scan(&mut pending, "thread"));
+        let tail = next_ids(&mut pending, "thread");
+        assert_eq!(tail.len(), 72);
+        assert!(tail.iter().all(|id| !first.contains(id)));
+        assert!(continue_scan(&mut pending, "thread"));
+        let mut second_pass = next_ids(&mut pending, "thread");
+        assert!(continue_scan(&mut pending, "thread"));
+        second_pass.extend(next_ids(&mut pending, "thread"));
+        assert_eq!(second_pass.len(), 200);
+        assert!(second_pass.contains(&changed_id));
+        assert!(
+            !continue_scan(&mut pending, "thread"),
+            "one change requests exactly one further pass"
+        );
+    }
+    #[test]
     fn receipt_queries_bound_the_continuation_without_starving_later_pending_messages() {
         let mut pending = (0..BATCH_LIMIT * 2 + 1)
             .map(|n| {
@@ -128,6 +184,7 @@ mod tests {
                         draft: "draft".into(),
                         revision: n as u64,
                         checked: false,
+                        repeat: false,
                     },
                 )
             })

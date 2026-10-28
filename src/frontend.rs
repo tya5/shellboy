@@ -694,6 +694,7 @@ async fn run_with_delivery(
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut initialize = Some(UiUpdate::Initialize { cwd });
+    let mut draft_failure = None;
     loop {
         if let Some(value) = initialize.take() {
             initialize = updates.defer(value);
@@ -701,18 +702,7 @@ async fn run_with_delivery(
         if initialize.is_none() {
             receipt_batch.drain(&mut pending, &updates);
         }
-        if updates.main_ready()
-            && let Some(thread_id) = draft_saver.pump()
-        {
-            update(
-                &updates,
-                UiUpdate::DraftSaveFailed {
-                    thread_id,
-                    message: "下書き保存workerが停止しました。本文を保持し再試行します".into(),
-                },
-            )
-            .await;
-        }
+        draft_saver.pump_delivery(&mut draft_failure, &updates);
         while !updates.backpressured() {
             let Some(thread) = dirty_threads
                 .iter()
@@ -931,12 +921,9 @@ async fn run_with_delivery(
                                 status: ReceiptStatus::Accepting,
                                 message: None,
                             };
-                        let deferred_accepting = if actions.is_closing() {
-                            Some(accepting)
-                        } else {
+                        if !actions.is_closing() {
                             update(&updates, accepting).await;
-                            None
-                        };
+                        }
                         let permit = if actions.is_closing() {
                             None
                         } else {
@@ -965,7 +952,6 @@ async fn run_with_delivery(
                         let image_leases = images.leases(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
-                        let outcomes = updates.worker();
                         send_workers.spawn(async move {
                             let _image_leases = image_leases;
                             let _permit = match permit {
@@ -975,9 +961,6 @@ async fn run_with_delivery(
                                     .await
                                     .expect("frontend send slots remain open"),
                             };
-                            if let Some(accepting) = deferred_accepting {
-                                update(&outcomes, accepting).await;
-                            }
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, thread_id.as_deref(), None);
                             let trace_thread = thread_id.as_deref().map(str::to_owned);
                             let ids = attachments
@@ -1399,12 +1382,9 @@ async fn run_with_delivery(
                                 status: ReceiptStatus::Accepting,
                                 message: None,
                             };
-                        let deferred_accepting = if actions.is_closing() {
-                            Some(accepting)
-                        } else {
+                        if !actions.is_closing() {
                             update(&updates, accepting).await;
-                            None
-                        };
+                        }
                         let permit = if actions.is_closing() {
                             None
                         } else {
@@ -1433,7 +1413,6 @@ async fn run_with_delivery(
                         let image_leases = images.leases(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
-                        let outcomes = updates.worker();
                         send_workers.spawn(async move {
                             let _image_leases = image_leases;
                             let _permit = match permit {
@@ -1443,9 +1422,6 @@ async fn run_with_delivery(
                                     .await
                                     .expect("frontend send slots remain open"),
                             };
-                            if let Some(accepting) = deferred_accepting {
-                                update(&outcomes, accepting).await;
-                            }
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, Some(source_thread_id.as_str()), None);
                             let trace_thread = Some(source_thread_id.clone());
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
@@ -2485,7 +2461,7 @@ async fn run_with_delivery(
                     match receipts {
                         Ok(receipts) => {
                             receipt_batch = receipt_delivery::Batch::new(receipts);
-                            if pending.values().any(|value| value.thread == thread_id && !value.checked) {
+                            if receipt_delivery::continue_scan(&mut pending, &thread_id) {
                                 dirty_threads.insert(thread_id);
                             }
                         }
@@ -2520,7 +2496,7 @@ async fn run_with_delivery(
                         ) {
                             pending.insert(
                                 message.to_owned(),
-                                receipt_delivery::PendingReceipt { thread: target.clone(), draft: draft_id.clone(), revision, checked: false },
+                                receipt_delivery::PendingReceipt { thread: target.clone(), draft: draft_id.clone(), revision, checked: false, repeat: false },
                             );
                         }
                         let state =
@@ -2761,6 +2737,7 @@ async fn run_with_delivery(
                     }
                     streams.invalidate(&thread_id);
                     selection.changed(&thread_id);
+                    receipt_delivery::changed(&mut pending, &thread_id);
                     dirty_threads.insert(thread_id);
                 }
                 Ok(EngineEvent::Stream {
@@ -2797,6 +2774,7 @@ async fn run_with_delivery(
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
                     }
+                    for receipt in pending.values_mut() { receipt.repeat = true; }
                     dirty_threads.extend(pending.values().map(|value| value.thread.clone()));
                     if let Some(thread) = &selection.active_thread {
                         dirty_threads.insert(thread.clone());
@@ -2865,15 +2843,11 @@ async fn run_with_delivery(
     cancel.cancel();
     drop(background_rx);
     let grace = Duration::from_millis(control.store.config.io.shutdown_grace_ms);
-    let shutdown_updates = updates.clone();
+    let shutdown_updates = &updates;
     let shutdown = async move {
-        // Transfer the single bounded remainder into its original delivery owner
-        // while shutdown's outer select continues flushing and accepting force.
+        // Durable work precedes presentation-only waits; the outer select still
+        // flushes the bounded delivery and accepts explicit shutdown choices.
         let server_result = server.shutdown().await;
-        if let Some(value) = initialize {
-            update(&shutdown_updates, value).await;
-        }
-        receipt_batch.finish(&mut pending, &shutdown_updates).await;
         // Coalesced autosaves retain the newest snapshot per Thread; FIFO
         // database admission within each Thread is preserved on shutdown too.
         let save_worker = draft_saver.finish().await;
@@ -2892,6 +2866,10 @@ async fn run_with_delivery(
         let control_result = control.shutdown().await;
         while workers.join_next().await.is_some() {}
         let owner_result = owner.shutdown().await;
+        if let Some(value) = initialize {
+            update(shutdown_updates, value).await;
+        }
+        receipt_batch.finish(&mut pending, shutdown_updates).await;
         save_result
             .and(server_result)
             .and(control_result)
