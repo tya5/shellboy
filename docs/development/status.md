@@ -1,5 +1,16 @@
 # 開発状況
 
+## Issue #19〜#23の追補（ローカル検証済み、未公開）
+
+- #19: 削除成功と後片付け警告の分離、閉じた一覧の失敗通知、重複削除抑止、過去のgeneration履歴に依存しない有限候補、画像失敗の二重表示と確認キーを修正。
+- #20: sourceの永続除外glob、既定dot/self-DB除外、unsupportedのskipped分類、完全scanだけのremoved判定、独立RAG schema 1→2の除外列migration。
+- #21: scope別の検索実施状態・不足量・回復手順と集約警告。確認済み未準備だけのhybrid成功で、実エラーを隠さない。
+- #22: source別の走査/内容更新時刻・現profileの不足chunk数・上限付き失敗一覧、failed/staleの区別、semantic dry-runの量と課金可能性。最終結果は既存shell wait/readで回収するガイド。
+- #23: 0〜4096の抜粋制限とpayload_chars。既定512と既存JSONを維持し、forkの生成元/採用先を潰す重複削除は見送り。0指定の固定fixtureで出力量を測定する。
+
+採用設計・ガイド・[判断記録](decisions.md)を更新しました。新しいCore操作・表・worker・queue・eventはありません。globsetの固定依存と独立RAGの除外列だけを追加しています。標準checkは73群1,274 passed / 0 failed / 19 ignoredで成功し、CLI 10項目・macOS PTY 5項目・同梱docs 33項目も確認しました。詳細は[acceptance](../validation/acceptance.md)。既定データ・設定・稼働process・常用binaryは変更していません。利用者の追加指示により対象を#19〜#30へ拡大し、全件完了後にpush・0.1.6公開・常用binary更新へ進みます。#24〜#30は設計・変更前測定の準備中です。
+
+
 ## 常用ローカルバイナリ更新（2026-10-28）
 
 利用者の指示により、`~/.local/bin/shellboy`を公開macOS ARM64版0.1.5へ更新しました。公開archiveのSHA-256を再照合し、archive内の実行ファイルを同じdirectory内の一時fileから原子的に配置。旧binaryはGit管理外へ退避しました。配置後のSHA-256一致、version=0.1.5、help、オフラインAgent Guideが正常終了することを確認済みです。既定データ・設定・稼働processは変更せず、再起動から適用されます。以下の常用0.1.4の記述は公開直後の記録です。

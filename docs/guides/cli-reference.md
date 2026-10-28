@@ -162,7 +162,7 @@ PowerShellではnative引数へのJSONの渡し方がBashと異なります。UT
 
 | 操作・全固有flag | 主なresultと条件 |
 |---|---|
-| `history list --thread THREAD [--run RUN] [--since RFC3339] [--status STATE] [--limit N] [--cursor C]` | `items`（node_id/kind/excerpt/provenance/context/selection/executions）とnext_cursor。statusは関連shellの保存状態。選択経路を既定50・最大200件ずつ列挙。実行リンクは最大8件・総数/省略を明示 |
+| `history list --thread THREAD [--excerpt-chars N] [--run RUN] [--since RFC3339] [--status STATE] [--limit N] [--cursor C]` | `items`（node_id/kind/excerpt/payload_chars/provenance/context/selection/executions）とnext_cursor。statusは関連shellの保存状態。選択経路を既定50・最大200件ずつ列挙。excerpt-charsは既定512・0〜4096、0では本文を取得せずexcerptは空文字。payload_charsは保存JSONの文字数で回収済みはnull。実行リンクは最大8件・総数/省略を明示 |
 | `history get --node NODE [--limit-bytes N] [--cursor C] [--encoding UTF-8]` | node_id/kind/text/provenance、source_node_ids/previous_node_ids/next_node_ids、next_cursor、tombstone_reason。本文は表示用テキスト、encrypted reasoningは含めない |
 | `history search --query TEXT [--limit N] [--thread THREAD] [--kind KIND]... [--exclude-kind KIND]... [--from RFC3339] [--to RFC3339]` | 配列（node_id/excerpt/distance/spans/provenanceと任意thread_scope）。既定10・最大50。filter適用後にactive embedding空間で順位を決める。active空間がなければ空配列 |
 | `history relations --node NODE --relation previous\|next\|sources\|replacements [--limit N] [--cursor C]` | `items`（node_id/provenanceと置換時のreplacement_id/source_revision/source_hash）、next_cursor。直接の関係を既定50・最大200件ずつ取得 |
@@ -277,3 +277,6 @@ list/get/readのcursorは不透明な継続tokenです。返された文字列�
 `thread get` の `context_usage` は現在推定、接続の目安、直近成功の実測usageを返します。編集結果は `before_tokens` / `after_tokens` / `target_tokens` / `cache_invalidated_tokens`、`omitted_nodes`、`marker_node_id` と `warnings` を含みます。正確なtokenizer値やキャッシュhitの保証ではありません。手順と注意は[履歴と検索](history-and-search.md#入力の大きさと範囲編集)。
 
 `compact --restore --from ID`のIDは選択中markerか、その省略元の最初のnodeです。通知に書かれた特定範囲を戻す場合はこの指定を使います。引数なしの復元は最新作成markerを選ぶため、複数の省略がある場合に対象が異なることがあります。
+
+
+RAG sourceの除外は `rag source add PATH --name NAME --exclude '*.db' --exclude build` と複数指定します。既存sourceへの無指定再登録は維持、指定時に置換、`--clear-excludes`で解除。`rag index --dry-run`の`skipped`とsource別`selection`で対象/対象外を確認します。`rag status`はsource別の走査/内容更新時刻、現profileの`semantic_missing`、上限付き失敗一覧を返します。hybridの確認済みsemantic未準備は`ok:true`・`degraded:true`・`scope_status`/`warnings`で返し、実エラーや明示semanticは非0終了を保ちます。具体的な回復と背景indexの結果取得は[RAGガイド](rag.md)を参照してください。

@@ -107,3 +107,5 @@ Ctrl+Cの現在Run停止、CLI `run stop`。TUIの `/retry` を現在の復旧�
 
 
 Issue #16〜#18の範囲選択・明示spill/summary・prefix/途中omit・復元は[圧縮と採用](compaction.md)に従う。共通のgroup境界検証と既存replacement/Thread経路を使い、原文を削除しない。Thread getの`context_usage`は直近成功usageと現在経路の概算を区別し、キャッシュhitや将来の受入可能性を保証しない。
+
+Issue #19の削除確定と後片付け警告は[Thread一覧](thread-browser.md)、#20〜#22のsource除外・hybrid準備状態・独立RAGの状態投影は[Docs/RAG設計](docs-and-rag.md)、#23の抜粋制限とpayload_charsは[履歴検索設計](search-and-relations.md)に従う。独立RAGの除外列以外に表を増やさず、会話Coreの操作・worker・event・queueは追加しない。

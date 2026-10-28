@@ -122,3 +122,13 @@ marker導入前のspaceは従来の完全fingerprint照合をfallbackとする�
 ## Embeddingの停止期限（Issue #8）
 
 独立RAGのembeddingは履歴indexと同じHTTP clientの接続別 `request_timeout_ms`（既定60,000ms）へ統一する。RAGだけの90秒外側timeoutは置かない。期限超過は `embedding_failed`（内部causeはtimeout）として、HTTP clientが生成した設定key・stage・経過時間だけを診断へ残し、現在の明示処理を終了し、後続batchを送らない。永続indexのretry/pause政策はRAGへ持ち込まず、失敗revisionの旧公開版保全を維持する。
+
+## 走査対象・検索準備・状態の追補（Issue #20〜#22）
+
+独立RAGのwriterが旧schema 1から2へ短いatomic migrationを行い、sourcesに除外globのJSON列だけを加える。旧sourceの既定は空集合で、会話DB/schemaには触れない。旧schemaの読み取りとdry-runはmigrationをせず空の除外を投影できる。source addの複数 `--exclude` を永続化し、無指定の再登録では維持、非空指定で置換、`--clear-excludes` で明示解除する。pattern数64・各1024bytes以内。構文とマッチは固定版globsetを利用し、gitignoreや否定規則の独自解釈は加えない。pathはsource相対のslashへ正規化し、slashなしpatternはbasenameにも適用、directory一致で配下を走査しない。
+
+dot entryと現在使うRAG DB・sidecarを既定対象外とする。unsupported形式は失敗ではなくskippedで、拡張子別内訳と上限付き対象/除外例を返す。対象外の旧active資料は完全な走査成功時にremovedへ移す。実read/extract失敗・走査不全・入力上限では従来どおり削除検出を抑止し、アクセス不能を削除扱いしない。新規文書の失敗はfailed、成功版を残す失敗はstaleとする。dry-runは外部API・DB書込みをせず、semantic分割量と課金可能性を示す。
+
+statusはsourceごとのlast_scan・有効revisionの最大created_at（last_changed_at）・現在のembedding profileに欠けるchunk数（semantic_missing）と、上限付きの失敗資料/key/理由を既存行から投影する。未知のprofileで0や成功時刻を捏造しない。embedding完了時刻の列、結果保存表、operation receipt、会話Coreとの連携を増やさない。長時間index結果は既存shell executionのwait/readで回収する。
+
+hybridは既にkeywordとsemanticを明示要求しているため、keywordに成功し、設定・identityを検証したうえでsemanticの未作成/不足だけが確認できた場合は `ok:true` と `degraded:true` を返す。scope_statusと集約warningsで使用した手段・不足量・対象source付きnextを示す。互換のscope_errorsはwarningであることを区別する。設定不正・認証・通信・DB・identity不一致等の本当のエラーはpartial_failureと非0終了を維持する。明示semantic検索はkeywordへ切り替えない。CLIはJSONのままとし、別の人間向け出力modeを作らない。

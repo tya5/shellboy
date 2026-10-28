@@ -157,3 +157,12 @@ Thread/Run/Turn/message/history getのcontextは、保存済み時刻・状態�
 省略通知の元node始終IDは、その範囲を `--summary --from ... --to ...` で要約するためにも使えます。省略元は一つのmarkerの全体を指定します。大量の原文を読み直して入力を増やすより、範囲要約を優先してください。必要な原文は `history get --node NODE --limit-bytes BYTES` で小さく取得します。`compact --restore [--from MARKER]` で元の範囲を戻せますが、後続の会話は残り、除外済み添付は自動で復活しません。実行済みの操作を再実行する前に現在状態を確かめてください。詳細は[入力の大きさと範囲編集](history-and-search.md#入力の大きさと範囲編集)。
 
 省略通知が現在の依頼より後ろの作業も省略したと示す場合、実行済み操作は取り消されていません。再実行前に現在のファイル・execution・履歴等を確認してください。通知の範囲だけを戻すには `compact --restore --from FIRST_OMITTED_SOURCE_NODE` を使います。明示summaryは反映済みの現在依頼も置き換えられるので、通常は現在依頼を範囲外に残します。
+
+
+## 大きい経路と長時間の索引を扱う
+
+範囲編集の前は `shellboy history list --thread THREAD_ID --excerpt-chars 0 --limit 20` でnode ID・kind・`selection.ordinal`・`payload_chars`を取得し、必要な本文だけgetします。payload_charsは保存JSON文字数でtoken数ではなく、回収済みはnullです。ページの続きにも同じexcerpt-charsを指定します。
+
+長い `rag index` はshell toolへ固定したindex commandを`background:true`で渡し、そのtool返却の作業execution IDを保存します。`shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000`で待ち、`shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes 65536`で結果を取得します。`result.text`内のRAG JSONを読み、成功/部分失敗・failure_count/failuresを確認してください。waitのCLIやmessage sendを実行した別executionを読まないでください。途中/巨大出力はreadのcursorを継続します。後日のsource別状態・最終走査/内容更新時刻・失敗は`rag status`、特定資料は`rag inspect --id ID`で調べます。詳細は[RAGガイド](rag.md)。
+
+hybrid検索は`ok:true`でも`degraded:true`ならkeywordだけを使ったscopeがあります。`scope_status`の理由・不足数・`next.steps[].command`に従い、dry-runを確認してから有料になり得る索引を明示実行します。実際の設定/認証/通信エラーを準備不足だと推測しないでください。

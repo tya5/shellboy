@@ -302,3 +302,11 @@ Windows CIのRust harnessは同時2件へ制限し、独立DB/IPC/file worker fi
 - 既存ThreadDeletePreview/Deleteと確認popupを使う。子の会話も削除する指定は既定falseで、切替え後は最新previewが届くまでYを無効にする。子の存在だけをUIで独自blockにしない。Coreは親だけを削除し子を残せるため、その実際の意味を変えない。
 - Core削除結果はAcceptedでID一覧を持たない。Core契約を増やす代わりに、削除成功後、UI既知のIDだけをDB workerで照合して削除済みview/下書きを破棄する。新しい全子孫一覧APIや永続削除jobは不要。UI-localの要求/返答には対象・descendants・要求IDを持たせ、既存runtimeの寿命と有限admissionを使う。
 - 削除された現在会話からは新しい下書きへ移る。背景会話では一覧を開いたまま隣行へ移す。確認を閉じても受理済み削除は取消したことにせず、成功のcleanupは適用し、閉じたpopupは再表示しない。保存途中の古い下書きや画像所有が会話を復活させないよう、既存所有/世代とbacklog回収を再利用する。
+
+## 2026-10-28: Issue #19〜#23の対応範囲
+
+- #19は削除確定とFrontend後片付けの結果を分ける。後片付けの失敗でCoreの削除事実を否定せず、確定済みrootと照会できた子だけを整理し、未観測の子を推測しない。UI-localの有限inflight IDで重複操作を防ぐ。historical generation fenceを全て削除観測の候補に足すことはやめ、現在UIが所有する有限候補へ限る。Coreの操作/表/worker/eventは増やさない。
+- #20は既定除外とunsupportedのskipped分類を不具合修正として採用する。完全scanで新たに対象外となる旧active資料はremovedへ移すため検索から減り得るが、原本を消す処理ではなく現在の対象定義へ同期するための判断。除外忘れによる復活を避けるためpatternはsourceに保存し、解除は明示する。新しい独立RAG列とatomic migrationだけが必要で、会話schemaは変えない。glob構文を自作せず [globset 0.4.20](https://docs.rs/globset/0.4.20/globset/) を固定追加する。これはstandalone RAGでだけ使う有限pattern照合で、Core機構は増やさない。gitignoreのネスト・否定は今回範囲外。
+- #21は明示hybridの準備不足だけを成功したkeywordへのdegraded結果として返す。従来の全てのscope_errorで非0終了という契約を、確認済み未準備warningだけに限って変更する。利用者とモデルが結果を使えることを優先し、scopeごとに使用手段・理由・次の索引操作を示す。本当の実行失敗や設定不正は隠さない。別の人間向け出力modeはJSON統一の方針に反するため採用しない。
+- #22の新しい操作結果保存表やCore receipt連携は採用しない。既存shell出力と既存RAGの永続状態で取得・追跡できるため、status投影とガイドを補う。最終走査時刻と内容更新時刻は区別し、embedding作成時刻の新列は作らず現在設定の不足件数を示す。
+- #23は提案1と3を採用し、2のJSON重複除去は今回は見送る。共有nodeの生成元context.thread_idとfork先selection.thread_idは同じとは限らず、ExecutionContextとPageは他の公開操作/構造表示にも利用されている。一覧だけの派生型と後方互換投影を増やすより、既存形を保ち抜粋制限とSQL長さだけを追加する。0指定は本文の転送/解析を避けるが、provenanceや実行リンクが残るので16KiB/50件を保証しない。実測と意味の異なる長さの説明をガイドへ残す。

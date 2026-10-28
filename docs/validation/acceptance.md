@@ -1,5 +1,18 @@
 # 検証状況
 
+## Issue #19〜#23: ローカル検証（2026-10-28、0.1.6公開前）
+
+macOS ARM64 / Rust 1.99.1、一時DBと合成fixtureで検証。`sh scripts/check.sh` は終了0、fmt・全target strict Clippy・73群1,274 passed / 0 failed / 19 ignoredで成功しました。初回Clippyでextract単独試験の未使用helperを検出し、形式判定/上限の意味のある試験を追加。全体試験で旧hybrid失敗の期待値が残っていたため、確認済み未準備のwarning成功へ更新しています。次の全体試験は閉じた一覧の通知を再openで失うケースを検出。通常slash操作のstatus更新を変えず、一覧のnoticeをopen時に保持し、画面に失敗本文が残る試験へ修正した後、上記標準checkが成功しました。
+
+#19は後片付けのSQL失敗/4096件超過を注入し、削除確定を失敗へ戻さないこと、5000件の過去generationが候補を膨らませないこと、閉じた一覧・同一対象の重複・変更キー・画像失敗通知を回帰試験で確認。実debug binaryの40行×130列macOS PTYでも、取消し・背景削除・親だけで子保持・明示子孫削除・現在会話削除後の編集可能な新規下書き、の5項目が成功しました。
+
+#20〜#22はsource内にRAG DBを置く実CLI確認10項目が成功。複数globの永続化/解除、dot/self DB/unsupportedの除外、dry-run無書込み/無API、keyword索引、hybridのdegraded成功、時刻/不足量、削除検知を確認。独立RAG schema 1の読取り/dry-run無移行と初回writerのschema 2移行、failedと旧revision保持のstale、走査失敗時のremoved抑止、失敗一覧上限、準備済みhybrid、providerエラー/不正vector identityを成功へ変えないことも合成DB・ローカルHTTP mockで試験しました。外部モデルAPIは使用していません。
+
+#23は抜粋0/3/512、Unicode、4096超過拒否、cursorの抜粋条件束縛、tombstoneのnull長、不正JSONでも0なら本文解析しないことを確認。固定50件の合成Page JSON（protocol envelopeを除く）は従来相当99,051 bytes（平均1,981 bytes/項目）から抜粋0で20,051 bytes（平均401 bytes/項目）、約80%減でした。provenance/selection/実行情報は保持し、50件は16KiBには収まりません。測定testは`compact_history_listing_size_is_measured_without_removing_provenance`、固定cwd・ID・本文で比較しています。
+
+最終同梱docsはオフライン33 CLI確認・13 guides・3 categories・127 linksが成功。設定/owner/APIは不要です。差分gitleaksは検出0。Windows/LinuxのCI、会社proxy、実機Windows Terminalはこの時点で未実施です。既定データ/設定/稼働process/インストールbinaryは変更していません。追加された#24〜#30の実装と統合検証の後に0.1.6のpush・CI・公開へ進みます。
+
+
 ## 常用0.1.5の配置確認（2026-10-28）
 
 公開済みmacOS ARM64 archiveのSHA-256 `1bb091acc97daf38182d16f52e4091d5dec6311013f2e26e4aa7e009a9f267cd`を再照合し、archiveから実行ファイルを読み出して常用`~/.local/bin/shellboy`へ原子的に配置しました。旧binaryはGit管理外へ保持。配置後の実行ファイルSHA-256は `3730862d1d6b5a5eb999ddfb7bbc5ea1b323099c6cbe932d92fc18a75c35da4c` で、archive内の値と一致しました。
