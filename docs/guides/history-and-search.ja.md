@@ -219,3 +219,9 @@ shellboy compact --restore --thread THREAD_ID --from MARKER_NODE
 復元する範囲を通知から選ぶときは、`compact --restore --from FIRST_OMITTED_SOURCE_NODE` を使えます。`--from` は選択中marker ID、または省略元の最初のnode IDを一意に指定します。引数なしの復元は、その通知に限らず、最後に作成した選択中markerを戻します。明示`--summary`は反映済みの現在依頼も範囲に含められるため、通常は現在の依頼を範囲外にして重要な指示を残してください。
 
 旧履歴には入力文字数の計測がないため、特に日本語中心の会話では推定が小さく出ることがあります。`context_usage.last_successful_attempt.input_tokens`の実測も確認し、必要なら明示compactや接続の`compact_hint_tokens`で早めに縮小してください。未計測を正確なtoken数として扱いません。
+
+## 同時検索と読取障害からの復帰
+
+履歴semantic検索の同時枠はownerごとに1個で、embedding HTTPの前からランキング・結果再照合まで保持します。子Thread同士も同じ枠を共有します。空いていない場合は追加のquery embeddingを送る前に即座に`InvalidState`を返すため、その拒否では課金されません。先行するHTTPが遅いと、完了・取消し・既存のembedding timeout（既定60秒）まで他の検索も拒否されます。子の検索を直列化するか親が一度検索して共有し、先行検索の完了を待って再試行してください。並列再送や短い間隔での連続再試行は避けます。
+
+read-only接続のopen・lock・query・読取りの失敗は元の原因を含む`IoFailed`として返し、ownerや他Runを停止させません。ファイルアクセス、リソース不足、ロックなどの原因を解決して明示的に再試行してください。HTTP後の再試行は再びembedding費用が発生し得ます。本来のwriterの保存失敗は引き続きownerを停止させます。取消し・切断は`InvalidState`となり、検索の観測だけを止め、対象Runは止めません。

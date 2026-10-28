@@ -6,11 +6,11 @@ Issue #27 / #28の採用設計。検証結果はacceptanceへ別途記録する�
 
 IndexServiceの検索は、query embedding前の設定・選択space照合と旧query-profile markerの補完だけを既存writerへ渡す。候補走査、既存Witnessの検証、vec0 KNN、件数不足時の正確なL2、provenance読取りは、別のread-only SQLite接続で行う。検索自体の有料embeddingは従来どおり1回で、検索から索引を作らない。
 
-IndexServiceが専用semaphoreを1個所有する。同時に実行できる検索は1個で、待機queueは作らない。slotが空いていなければquery embedding前にInvalidStateで再試行を案内する。これは同時受付を無限に待たせないための局所admissionであり、汎用のpool、worker、job engineではない。
+IndexServiceが専用semaphoreを1個所有する。同時に実行できる検索は1個で、待機queueは作らない。slotが空いていなければquery embedding前にInvalidStateで再試行を案内する。slotはembedding HTTPの開始前から、ランキング・再照合・接続閉鎖まで同じ1個を保持する。子Threadの同時検索も同じownerのslotを共有し、先行HTTPが遅い間も即座に拒否する。これは同時受付を無限に待たせないための局所admissionであり、汎用のpool、worker、job engineではない。
 
 接続の作成から閉鎖までは既存Tokio runtimeのspawn_blocking closureが担当する。closureがslot permitを持ち、async観測が取り消されても実処理が終了するまで解放しない。接続はSQLITE_OPEN_READ_ONLYとquery_onlyを使い、migration・書込みfallbackをしない。元のDbWorkerが保持する実DB pathを使い、既定のファイル名を推測しない。
 
-callerの切断、futureのdrop、owner停止は検索専用tokenを取消し、登録済みSQLite InterruptHandleへinterruptを送る。行走査・KNNの再試行・L2走査・結果再検証の境界でも取消しを確認する。取消し由来のSQLiteエラーをSaveFailedへ写してownerを停止させず、観測のInvalidStateとして返す。SQLite拡張内部の単一計算を常に一定ms以内に中断するSLAは設けない。
+callerの切断、futureのdrop、owner停止は検索専用tokenを取消し、登録済みSQLite InterruptHandleへinterruptを送る。行走査・KNNの再試行・L2走査・結果再検証の境界でも取消しを確認する。取消し由来のSQLiteエラーをSaveFailedへ写してownerを停止させず、観測のInvalidStateとして返す。read-only接続のopen、busy/lock、query、行読取り、読取transactionの終了、再照合の保存エラー分類は、このclosureの出口だけでIoFailedへ写す。元のSQLite原因はmessageに残す。共用helperと、検索前のwriter上のquery-profile marker更新のSaveFailedは変更せず、真のwriter失敗は従来どおりownerを停止させる。SQLite拡張内部の単一計算を常に一定ms以内に中断するSLAは設けない。
 
 ランキング開始時のread snapshotで選択spaceのidentityと全適格Witnessを確認する。ランキング後はsnapshotを解放し、新しいsnapshotで選択spaceと返却候補最大50nodeのWitness、raw retention、tombstone、現在の検索可視性、明示Threadの採用経路/置換source所属を再確認する。変更された候補は除外する。winning spanのWitnessが変わった候補のdistanceを使い回さず、その候補全体を除外するため、要求件数より少なくなる場合がある。これはDB全体の長期snapshotや原文保持の保証ではない。
 
@@ -27,3 +27,9 @@ ShellOutput条件があるwaitだけが出力Notifyを購読する。すべて�
 ## 保守集計
 
 今回の読取分離は明示semantic検索へ限定する。GCのraw_stats等は回収・容量判定と同じ保守処理の一部であり、集計だけを別snapshotへ切り離すと、その集計と後続の書込み判断の時点が分かれる。計算量と同じtransactionでの再照合を含む別の設計が必要になる。今回は新しい共通読取poolを作らず、既存writer上の集計を維持し、関連索引の実測改善はIssue #26で扱う。
+
+## Reopened #27: admission and recovery decision
+
+Keep one admission permit across query embedding HTTP and SQLite ranking. Moving admission after HTTP would allow concurrent children to incur charges before learning that no ranking slot is available; a separate HTTP queue or larger pool adds resources without current evidence of need. This intentionally limits throughput: one slow provider request can reject every concurrent child search until it completes, is cancelled, or reaches the existing embedding request timeout (60 seconds by default). Busy rejections happen before HTTP and incur no new query embedding charge.
+
+Callers should serialize child searches or let the parent perform one shared search. After a busy error, wait for the original request to finish rather than spinning or reissuing in parallel. After a read-only observation failure, inspect the preserved SQLite cause (file access, descriptors, locking, or query), repair it, and retry explicitly. A retry after HTTP may incur another embedding charge. Cancellation ends the observation, not its target Run. There is no new automatic retry, queue, timeout, or owner-failure condition. Revisit admission concurrency only with measured workloads and an explicit bound on extra paid HTTP requests.

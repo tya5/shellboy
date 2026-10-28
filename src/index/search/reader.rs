@@ -118,7 +118,7 @@ pub(super) async fn rank(
                 "Semantic search was cancelled",
             ))
         } else {
-            result
+            result.map_err(observation_error)
         }
     })
     .await
@@ -128,6 +128,17 @@ pub(super) async fn rank(
             "Semantic search task ended unexpectedly",
         )
     })?
+}
+
+// Shared ranking helpers also run in writer transactions elsewhere and therefore
+// retain their SaveFailed mapping. Only this readonly task owns the observation
+// boundary: a failed open/read/lock cannot establish that a source write failed.
+fn observation_error(mut error: ApiError) -> ApiError {
+    if error.is_storage_failure() {
+        error.code = ErrorCode::IoFailed;
+        error.message = format!("Read-only history search failed: {}", error.message);
+    }
+    error
 }
 
 fn check_space(db: &Connection, expected: &Space) -> Result<(), ApiError> {
@@ -478,6 +489,229 @@ mod tests {
             .unwrap()
             .unwrap();
         db.shutdown().await.unwrap();
+    }
+
+    async fn failed_rank(path: PathBuf, space: Space) -> ApiError {
+        let slots = Arc::new(Semaphore::new(1));
+        let guard = SearchGuard::new(CancellationToken::new());
+        let error = rank(
+            path,
+            space,
+            "[0.1,0.2]".into(),
+            HistorySearchArgs::default(),
+            &guard,
+            slots.clone().try_acquire_owned().unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::IoFailed, "{error:?}");
+        assert!(!error.is_storage_failure());
+        assert!(
+            error
+                .message
+                .starts_with("Read-only history search failed:")
+        );
+        assert_eq!(slots.available_permits(), 1);
+        error
+    }
+
+    async fn subsequent_mutation(db: &DbWorker) {
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute(
+                "UPDATE thread SET title='still writable' WHERE id='thread'",
+                [],
+            )?;
+            tx.commit()?;
+            let title: String =
+                db.query_row("SELECT title FROM thread WHERE id='thread'", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(title, "still writable");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn readonly_open_failure_does_not_poison_the_writer_or_hold_admission() {
+        let (root, db, space) = fixture().await;
+        let error = failed_rank(root.path().join("absent/history.sqlite"), space).await;
+        assert!(
+            error.message.contains("unable to open database file"),
+            "{error:?}"
+        );
+        subsequent_mutation(&db).await;
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn readonly_query_failure_is_an_observation_and_preserves_the_sqlite_cause() {
+        let (_root, db, space) = fixture().await;
+        db.call(|db| {
+            db.execute_batch("DROP TABLE embedding_chunk")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let error = failed_rank(db.path().into(), space).await;
+        assert!(
+            error.message.contains("no such table: embedding_chunk"),
+            "{error:?}"
+        );
+        subsequent_mutation(&db).await;
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn readonly_busy_failure_is_an_observation_and_allows_writes_after_unlock() {
+        let (_root, db, space) = fixture().await;
+        let path = db.path().to_path_buf();
+        // Close WAL writer first so the fixture can deterministically use a
+        // rollback-journal exclusive lock on all supported desktop platforms.
+        db.shutdown().await.unwrap();
+        let lock = Connection::open(&path).unwrap();
+        lock.execute_batch("PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE;")
+            .unwrap();
+        let error = failed_rank(path.clone(), space).await;
+        assert!(error.message.contains("database is locked"), "{error:?}");
+        lock.execute_batch("ROLLBACK").unwrap();
+        drop(lock);
+        let db = DbWorker::open(path).await.unwrap();
+        subsequent_mutation(&db).await;
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn readonly_query_error_through_control_keeps_owner_open_for_later_mutation() {
+        use crate::protocol::{Command, Request, ThreadSetArgs};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let config_path = root.path().join("config.toml");
+        std::fs::write(&config_path, format!(
+            "default_connection=\"fixture\"\ndefault_model=\"synthetic\"\n[connections.fixture]\nbase_url=\"http://{}/v1\"\n[embedding]\nconnection=\"fixture\"\nmodel=\"synthetic\"\n",
+            listener.local_addr().unwrap()
+        )).unwrap();
+        let owner = crate::app::DataOwner::start(
+            Some(config_path),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let config = owner.loaded.config.clone();
+        let table = owner.db.call(move |db| {
+            let tx = db.transaction()?;
+            let embedding = identity::EmbeddingIdentity::configured(&config, identity::profile_key(&config).unwrap());
+            let space = ensure_space(&tx, &embedding, "active", 2, true)?;
+            tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('thread','/','/a','fixture','synthetic','now'); INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES('first','user','now','{}','body'); INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('thread',0,'first');")?;
+            let watermark=json!({"witness":{"node_id":"first","revision":0,"body_hash":"body","raw":null}}).to_string();
+            tx.execute("INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state,authorized_watermark)VALUES('first',?1,'first',0,'canonical','body',0,1,'done',?2)", params![space.id,watermark])?;
+            tx.execute(&format!("INSERT INTO {}(rowid,embedding)VALUES(1,'[0.1,0.2]')", space.table), [])?;
+            tx.execute("INSERT INTO embedding_chunk(id,job_id,space_id,source_node_id,source_revision,span_start,span_end,content_hash,vec_row_id)VALUES('first','first',?1,'first',0,0,1,'body',1)", [&space.id])?;
+            tx.commit()?;
+            Ok(space.table)
+        }).await.unwrap();
+        let writer = owner.db.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                assert_ne!(n, 0, "Embedding request must arrive before fault injection");
+                bytes.extend_from_slice(&buf[..n]);
+                if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&bytes[..end]);
+                    let len = header
+                        .lines()
+                        .find_map(|line| {
+                            line.split_once(':')
+                                .filter(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+                                .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap();
+                    if bytes.len() >= end + 4 + len {
+                        break;
+                    }
+                }
+            }
+            // Fault only the derived vector table after writer-side marker
+            // validation, so the next failure is in the real readonly ranking.
+            writer
+                .call(move |db| {
+                    db.execute_batch(&format!("DROP TABLE {table}"))?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let body = json!({"data":[{"index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":1,"total_tokens":1}}).to_string();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let control = crate::control::Control::new(&owner, root.path().into());
+        let search = control.request(Request::new(
+            format!("{}:search", owner.instance_id),
+            Command::HistorySearch(HistorySearchArgs {
+                query: "synthetic".into(),
+                limit: 10,
+                ..Default::default()
+            }),
+        ));
+        let response = tokio::time::timeout(Duration::from_secs(10), search)
+            .await
+            .unwrap();
+        assert!(!response.ok);
+        let error = response.error.unwrap();
+        assert_eq!(error.code, ErrorCode::IoFailed, "{error:?}");
+        assert!(error.message.contains("no such table"), "{error:?}");
+        assert!(error.hint.as_deref().unwrap().contains("embedding charge"));
+        server.await.unwrap();
+        let changed = control
+            .request(Request::new(
+                format!("{}:later-mutation", owner.instance_id),
+                Command::ThreadSet(ThreadSetArgs {
+                    thread_id: Some("thread".into()),
+                    title: Some("owner remained available".into()),
+                    ..Default::default()
+                }),
+            ))
+            .await;
+        assert!(
+            changed.ok,
+            "A readonly error must not close owner mutation admission: {:?}",
+            changed.error
+        );
+        let title = owner
+            .db
+            .call(|db| {
+                Ok(
+                    db.query_row("SELECT title FROM thread WHERE id='thread'", [], |row| {
+                        row.get::<_, String>(0)
+                    })?,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(title, "owner remained available");
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn readonly_boundary_keeps_domain_errors_and_does_not_change_shared_writer_mapping() {
+        let domain = err(ErrorCode::ThreadNotFound, "gone");
+        assert_eq!(observation_error(domain.clone()), domain);
+        let sqlite = || rusqlite::Error::InvalidQuery;
+        let writer_error = sql_error(sqlite());
+        assert_eq!(writer_error.code, ErrorCode::SaveFailed);
+        assert!(writer_error.is_storage_failure());
+        assert_eq!(
+            observation_error(sql_error(sqlite())).code,
+            ErrorCode::IoFailed
+        );
+        assert_eq!(sql_error(sqlite()).code, ErrorCode::SaveFailed);
     }
 
     #[tokio::test]
