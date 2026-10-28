@@ -1,5 +1,35 @@
 # 検証状況
 
+## v0.1.6公開・配布確認・常用更新（2026-10-29）
+
+#19〜#30を含むsource `025388c` を [v0.1.6](https://github.com/tya5/shellboy/releases/tag/v0.1.6) として公開しました。[製品sourceの3 OS CI](https://github.com/tya5/shellboy/actions/runs/40712696984)と[配布workflow](https://github.com/tya5/shellboy/actions/runs/40717582688)の全4 jobは成功。後者のworkflow headはrunner更新の42c9519ですが、全3 buildのログでcheckout/ビルドsourceが025388cbef17a2c7b79be23cdb250d768ec86b13であることを照合しました。tagの書換えはありません。
+
+認証なしで全3 archiveとSHA256SUMSを取得し、公開size・全checksum・Windows PE x64/macOS Mach-O arm64/Linux ELF x64、MIT/README/設定例/ガイドの同梱、private snapshot/開発directoryの非同梱を確認。release notesのDB migrationと内部変換廃止の注意が保持されていることも確認しました。
+
+| 配布物 | SHA-256 |
+| --- | --- |
+| `shellboy-v0.1.6-aarch64-apple-darwin.tar.gz` | `029b076f089809593f5990846ed4ee76acc095687bf64e2860b1f719873ec178` |
+| `shellboy-v0.1.6-x86_64-pc-windows-msvc.zip` | `843644d29283240df8bb099f2955987d17943f565f7ce8d5049a911ab015b90e` |
+| `shellboy-v0.1.6-x86_64-unknown-linux-gnu.tar.gz` | `971993631b345e1721532acbfcac62d6adacf539b703a454560ddedf57aef448` |
+
+取得したmacOS版のMach-O minosは14.0。一時HOME/config/data・資格情報とproxyを継承しない環境でversion=0.1.6、help、offline Agent Guideが正常終了し、DB/endpoint/設定fileを作らないことを確認しました。これはmacOS 14実機での操作成功ではありません。
+
+常用 `~/.local/bin/shellboy` は旧0.1.5をGit管理外へバックアップし、取得した公開macOS版へ原子的に置換。SHA-256 `ed1bd720e676e1ba3d4c0f74a268327bf82d04f4a1cf74703253cf26876d0d87` は配布archive内の値と一致しました。配置後のversion/help/offline Guideも成功し、一時環境に保存fileを作りませんでした。既定データ・設定・稼働processは変更せず、次回起動から適用されます。起動前backupが必要な会話DB v10/独立RAG v3への移行は、今回の配置確認では実行していません。
+
+全12 Issueへ採用/見送り・測定の境界・CI/公開結果をコメントし、completedでcloseしました。差分/追加履歴のgitleaksは検出0。会社proxy、外部モデルによる性能・切断率、実機Windows Terminal、macOS 14の操作は未検証です。以下は公開までの経緯で、未公開の表現は当該段階の記録です。
+
+## v0.1.6: native CIと配布runnerの更新（公開までの経緯）
+
+source `025388cbef17a2c7b79be23cdb250d768ec86b13` の [CI 40712696984](https://github.com/tya5/shellboy/actions/runs/40712696984) は3 OSすべて成功。fmt・全target strict Clippyと各76群の全体試験を通過しました。Windowsの専用診断stepの重複実行は合算しません。
+
+| OS | passed | failed | ignored |
+| --- | --- | --- | --- |
+| Windows | 1,195 | 0 | 18 |
+| macOS | 1,296 | 0 | 24 |
+| Linux | 1,297 | 0 | 23 |
+
+確認後に同じsourceへ `v0.1.6` をタグ付けしてpush。初回[配布workflow 40715518229](https://github.com/tya5/shellboy/actions/runs/40715518229)はWindows/Linuxのbuild・起動・梱包が成功しましたが、macos-14が10分以上queuedになりました。公式の廃止告知を確認し、`42c9519`で配布runnerをmacos-15へ更新、deployment target 14.0と既存tag用dispatchを追加。初回は公開前にcancelし、[再配布workflow 40717582688](https://github.com/tya5/shellboy/actions/runs/40717582688)を開始しました。workflowのheadは42c9519ですが、全3 buildのcheckoutは検証済みv0.1.6/025388cを指定します。tagは書き換えません。この節の時点ではdraftで、公開/取得/常用配置は未完了です。
+
 ## Issue #19〜#30: 0.1.6の統合検証（2026-10-29）
 
 最終の `sh scripts/check.sh` は終了0、fmt・全target strict Clippy・76群1,296 passed / 0 failed / 24 ignoredで成功しました。下記性能用ignored試験6種類は別途明示実行し、すべて成功しています。

@@ -6,18 +6,18 @@
 
 | Issue | 採用範囲 | 現在地 |
 |---|---|---|
-| #19 | 削除確定とcleanup警告、閉じた一覧の結果、重複/過去世代/画像通知/確認キー | `6b5edaf`、初期全体check成功、Issueコメント済 |
-| #20 | 永続glob、dot/self DB/unsupported除外、完全scanのremoved、旧RAG移行 | `ab76baa`、初期全体check成功、#24統合・最終標準check成功 |
-| #21 | scope状態/不足/次操作、確認済み未準備だけhybrid warning成功 | `ab76baa`、初期全体check成功、Issueコメント済 |
-| #22 | source別結果/保存状態/失敗根拠/dry-run量、既存shell readによる結果取得 | `ab76baa`、初期全体check成功、#24統合・最終標準check成功 |
-| #23 | 抜粋0〜4096、保存JSON長、既存出典/JSON形維持 | `ea8f2e6`、初期全体check成功、Page出力量を実測、Issueコメント済 |
-| #24 | 外部変換→ingest、内部Office/PDF/adapter削除、原本の逐次hash | 実装済み、原本hash/ingest/旧PDF removed/移行回帰を最終標準check成功、公開待ち |
-| #25 | 経路末尾への採用、CAS/順序維持、重複edge再検査を省く | 前後測定成功、CAS/順序/cycle回帰を最終標準check成功、公開待ち |
-| #26 | EXPLAINで根拠があるhot query索引、会話DB v10/独立RAG v3 | SQL/実Control前後比較成功、migration回帰を最終標準check成功、公開待ち |
-| #27 | 有限readonly semantic ranking、取消・版/出典再確認 | 20k chunk前後測定成功、取消/GC競合回帰を最終標準check成功、公開待ち |
-| #28 | shell出力通知とlifecycle待機の分離、既存ShellOutput条件維持 | 10shell/10wait前後測定成功、通知回帰を最終標準check成功、公開待ち |
-| #29 | 描画再利用・byte差分集計・visible優先resize | 前後測定・scroll/resize回帰成功、最終標準check成功、公開待ち |
-| #30 | 遅いUIでも中継を進める有限配送、表示中streamの購読/集約 | 前後測定・HTTP+PTY 10Thread成功、最終標準check成功、公開待ち |
+| #19 | 削除確定とcleanup警告、閉じた一覧の結果、重複/過去世代/画像通知/確認キー | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #20 | 永続glob、dot/self DB/unsupported除外、完全scanのremoved、旧RAG移行 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #21 | scope状態/不足/次操作、確認済み未準備だけhybrid warning成功 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #22 | source別結果/保存状態/失敗根拠/dry-run量、既存shell readによる結果取得 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #23 | 抜粋0〜4096、保存JSON長、既存出典/JSON形維持 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #24 | 外部変換→ingest、内部Office/PDF/adapter削除、原本の逐次hash | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #25 | 経路末尾への採用、CAS/順序維持、重複edge再検査を省く | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #26 | EXPLAINで根拠があるhot query索引、会話DB v10/独立RAG v3 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #27 | 有限readonly semantic ranking、取消・版/出典再確認 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #28 | shell出力通知とlifecycle待機の分離、既存ShellOutput条件維持 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #29 | 描画再利用・byte差分集計・visible優先resize | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
+| #30 | 遅いUIでも中継を進める有限配送、表示中streamの購読/集約 | 完了 · v0.1.6 / 3 OS CI / 完了コメント / close |
 
 初期5件の全体checkは73群1,274 passed / 0 failed / 19 ignored。これは追加7件の成功ではない。詳細は[検証状況](../validation/acceptance.md)、実装の判断は[判断記録](decisions.md)に残す。
 
@@ -32,3 +32,7 @@
 7. 公開・CI・binary更新の証拠を記録し、全件の完了条件を確認してgoalをcompleteにする。
 
 実機がないOSはnative CIの成功と実機操作を区別する。外部APIを使わない性能fixtureやローカルHTTP mockを、会社proxy/実モデルでの確認として報告しない。不要なデータ変換や既定DBの再索引は行わない。
+
+## 完了（2026-10-29）
+
+上記1〜7をすべて完了。source/tagは025388c/v0.1.6、製品CIは40712696984、配布は40717582688。配布runner更新42c9519はtagを変更せず既存tagをcheckoutする。全配布物の公開取得・検証、常用binaryのバックアップと原子的配置・配置後照合、12 Issueのコメント/closeまで完了した。[詳細と未検証範囲](../validation/acceptance.md)に証拠を記録。性能の測定範囲や採用見送りを変更せず、既定DBの移行や実データの再索引は行っていない。

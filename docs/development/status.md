@@ -1,10 +1,14 @@
 # 開発状況
 
-## 0.1.6の最終検証
+## v0.1.6公開・常用更新完了
 
-利用者のgoalである#19〜#30を実装し、同一合成fixtureの前後測定、個別回帰、local HTTP+PTYによる10会話の確認まで進めました。最終標準checkはfmt・strict Clippy・76群1,296 passed / 0 failed / 24 ignoredで成功しました。全件の採用範囲は[追跡表](issue-19-30-plan.md)、測定範囲と判断は[acceptance](../validation/acceptance.md)と[判断記録](decisions.md)へ記録。通過後にmainをpush、3 OS native CIを確認し、0.1.6の公開・配布物検証・常用binary更新へ進みます。公開とbinary更新は未完了です。
+#19〜#30の設計・実装・検証を完了し、検証済みsource `025388c`を[v0.1.6](https://github.com/tya5/shellboy/releases/tag/v0.1.6)として公開しました。最終ローカル標準checkは76群1,296 passed / 0 failed / 24 ignored、[3 OS CI](https://github.com/tya5/shellboy/actions/runs/40712696984)はWindows 1,195 / macOS 1,296 / Linux 1,297 passed・全OS failed 0。性能用6種類を別途実行し、実HTTP+PTY 10会話・削除PTY 5項目・RAG CLI 10項目・docs 33項目も成功しました。
 
-以下は各段階の記録です。
+廃止予定の配布runnerを`42c9519`でmacOS 15へ変更し、既存tagを固定して再ビルドするdispatchを追加。[配布workflow](https://github.com/tya5/shellboy/actions/runs/40717582688)は全4 jobが成功し、全buildが同じ025388cを使ったことを確認済みです。全3 archiveの認証なし取得・checksum・同梱内容・CPU形式、macOS版のminos 14.0とversion/help/offline Guideを確認しました。
+
+常用`~/.local/bin/shellboy`も公開0.1.6へ原子的に更新し、旧0.1.5はGit管理外へ保持。配置後SHA-256は`ed1bd720e676e1ba3d4c0f74a268327bf82d04f4a1cf74703253cf26876d0d87`で配布版と一致。既定データ・設定・稼働processは変更しておらず、再起動から適用されます。次回起動前にbackupが必要なDB移行はREADMEに明記しています。
+
+全12 Issueへ完了コメントを残しcloseしました。[追跡表](issue-19-30-plan.md)、[判断記録](decisions.md)、[検証範囲・未実施](../validation/acceptance.md)を参照してください。以下は作業当時の記録です。
 
 ## Issue #19〜#23の追補（ローカル検証済み、未公開）
 
