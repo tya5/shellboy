@@ -107,9 +107,7 @@ impl UiState {
                 .notice("未保存の下書きは会話の削除対象ではありません".into());
             return vec![];
         }
-        if self.thread_deletions_inflight.contains_key(&thread)
-            || self.thread_deletions_inflight.len() >= 32
-        {
+        if !self.thread_deletions_inflight.is_empty() {
             let message = "削除を実行中です。結果を待ってから再操作してください".to_owned();
             self.thread_browser.notice(message.clone());
             self.active_view_mut().status = message;

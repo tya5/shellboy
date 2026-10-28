@@ -99,3 +99,11 @@ UI-localの要求/返答だけを追加し、永続operation・Core command/even
 ### 削除確定後の後片付け失敗（Issue #19レビュー追補）
 
 Coreの削除成功は後片付け失敗で取り消さない。少なくとも対象rootの削除を一覧/表示へ反映し、DBの読み取りが可能なら削除された既知の子も照合して整理する。失敗した後片付けは「削除しました。後片付けに失敗」と別の警告で示す。一覧を閉じた後の失敗・警告もstatusへ残す。UI-localの有限inflight target/request IDを保持し、同じ会話への重複Y受付を防ぐ。候補IDは現在のUI/view/画像/保存backlog所有に限り、古いgeneration fenceの全履歴を含めない。上限を超えたときは再起動を案内する。画像結果は常にticketを回収するが、同じsubmissionで既に通知した失敗を二重表示しない。
+
+### Reopened Issue #19: storage failure and notice lifetime
+
+A failed cleanup write uses the existing checked-storage boundary: `SaveFailed` stops owner admission and execution, while the frontend still emits the confirmed deletion, root cleanup, and separate warning. A bounded observation/admission error is not a persistence failure and does not stop the owner. Read-only tombstone observation remains best effort after a failed cleanup transaction.
+
+Deletion execution is serialized at the UI boundary (one in-flight deletion, including after closing its dialog). This prevents overlapping parent/descendant requests without traversing the DAG or trusting incomplete paginated ancestry. The existing request ID map remains the owner; no persistent state or worker is added. Independent deletions can be submitted after the first result.
+
+A browser notice is consumed for reopening only after its header has actually been drawn and the browser is the top input overlay. A header hidden by a small viewport or covered by another overlay does not consume the notice. Outcomes arriving while the browser is closed survive its next open; after display, another open starts without the old notice. This state is UI-local and is not saved to the database.

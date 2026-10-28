@@ -4177,7 +4177,10 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     let popup_area = popup::viewport(area);
     if state.thread_browser.visible() {
         let active = state.view().thread_id.as_deref();
-        state.thread_browser.draw(frame, popup_area, active);
+        let notice_visible = state.top_overlay() == Some(overlay::Overlay::Threads);
+        state
+            .thread_browser
+            .draw(frame, popup_area, active, notice_visible);
     }
     if state.help_visible {
         let body = popup::panel(

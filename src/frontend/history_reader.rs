@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 pub(super) struct HistoryReader<'a> {
     control: &'a Control,
-    updates: &'a SyncSender<UiUpdate>,
+    updates: &'a dyn UpdateTarget,
     width: u16,
 }
 pub(super) struct Reply {
@@ -19,7 +19,7 @@ impl Reply {
             generation,
         }
     }
-    pub(super) async fn failed(&self, updates: &SyncSender<UiUpdate>, error: ApiError) {
+    pub(super) async fn failed(&self, updates: &dyn UpdateTarget, error: ApiError) {
         load_failed(updates, self.thread.clone(), self.generation, error).await;
     }
 }
@@ -34,7 +34,7 @@ impl WindowReply {
             view_revision,
         }
     }
-    pub(super) async fn failed(&self, updates: &SyncSender<UiUpdate>, error: ApiError) {
+    pub(super) async fn failed(&self, updates: &dyn UpdateTarget, error: ApiError) {
         load_failed_at(
             updates,
             self.target.thread.clone(),
@@ -44,7 +44,7 @@ impl WindowReply {
         )
         .await;
     }
-    pub(super) async fn deliver_node(&self, updates: &SyncSender<UiUpdate>, node: UiNode) {
+    pub(super) async fn deliver_node(&self, updates: &dyn UpdateTarget, node: UiNode) {
         update(
             updates,
             UiUpdate::NodeWindow {
@@ -58,7 +58,7 @@ impl WindowReply {
     }
     async fn deliver(
         &self,
-        updates: &SyncSender<UiUpdate>,
+        updates: &dyn UpdateTarget,
         nodes: Vec<UiNode>,
         info: HistoryInfo,
         anchor: ViewAnchor,
@@ -143,7 +143,7 @@ impl RawHistory {
     }
 }
 impl<'a> HistoryReader<'a> {
-    pub(super) fn new(control: &'a Control, updates: &'a SyncSender<UiUpdate>, width: u16) -> Self {
+    pub(super) fn new(control: &'a Control, updates: &'a dyn UpdateTarget, width: u16) -> Self {
         Self {
             control,
             updates,

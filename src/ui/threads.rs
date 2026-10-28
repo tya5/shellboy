@@ -41,6 +41,7 @@ pub(super) struct ThreadBrowser {
     loading: bool,
     error: Option<String>,
     notice: Option<String>,
+    notice_seen: std::cell::Cell<bool>,
     preferred: Option<String>,
     generation: u64,
     filter_deadline: Option<Instant>,
@@ -130,7 +131,7 @@ impl ThreadBrowser {
         self.selected = 0;
         // Reopening must retain a deletion outcome that arrived while closed.
         // Filtering/paging still clears it through normal invalidation.
-        let notice = self.notice.take();
+        let notice = self.notice.take().filter(|_| !self.notice_seen.get());
         let action = self.begin(None);
         self.notice = notice;
         action
@@ -143,6 +144,7 @@ impl ThreadBrowser {
     }
     pub fn notice(&mut self, message: String) {
         self.notice = Some(message);
+        self.notice_seen.set(false);
     }
     /// Apply confirmed deletion facts without accepting an older list response
     /// that could put a removed row back. Preserve filtering and pagination.
@@ -530,7 +532,13 @@ impl ThreadBrowser {
         }
     }
 
-    pub fn draw(&self, frame: &mut Frame<'_>, area: Rect, active_thread: Option<&str>) {
+    pub fn draw(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        active_thread: Option<&str>,
+        notice_visible: bool,
+    ) {
         let threads = &self.items;
         let selected_index = self.selected;
         let filter = &self.filter;
@@ -590,6 +598,15 @@ impl ThreadBrowser {
             },
         };
         let inner = popup::panel(frame, area, &title, &context, &footer_text);
+        // Tiny popups omit their context row. Use the shared geometry rather
+        // than consuming a notice which was never rendered on screen.
+        if notice_visible
+            && error.is_none()
+            && self.notice.is_some()
+            && inner.y > popup::body_area(area, "", &footer_text, None).y
+        {
+            self.notice_seen.set(true);
+        }
         if inner.width == 0 || inner.height == 0 {
             return;
         }
@@ -1037,6 +1054,22 @@ mod tests {
     }
 
     #[test]
+    fn tiny_browser_does_not_consume_a_notice_whose_header_is_hidden() {
+        let mut browser = ThreadBrowser::default();
+        browser.notice("unseen deletion warning".into());
+        browser.open(String::new(), vec![], None);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(8, 5)).unwrap();
+        terminal
+            .draw(|frame| browser.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert!(!browser.notice_seen.get());
+        browser.close();
+        browser.open(String::new(), vec![], None);
+        assert_eq!(browser.notice.as_deref(), Some("unseen deletion warning"));
+    }
+
+    #[test]
     fn deletion_notice_and_selected_information_keep_the_next_keys_visible() {
         let mut browser = ThreadBrowser {
             visible: true,
@@ -1047,7 +1080,7 @@ mod tests {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
         terminal
-            .draw(|frame| browser.draw(frame, frame.area(), None))
+            .draw(|frame| browser.draw(frame, frame.area(), None, true))
             .unwrap();
         let shown = text(terminal.backend().buffer());
         assert!(shown.contains("削除できません"), "{shown}");
@@ -1087,7 +1120,7 @@ mod tests {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
         terminal
-            .draw(|frame| tree.draw(frame, frame.area(), None))
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
             .unwrap();
         assert!(text(terminal.backend().buffer()).contains("12-31 23:59"));
         row.updated_at = "UNKNOWN".into();
@@ -1158,7 +1191,7 @@ mod tests {
         for width in [120, 24] {
             let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
             terminal
-                .draw(|frame| tree.draw(frame, frame.area(), None))
+                .draw(|frame| tree.draw(frame, frame.area(), None, true))
                 .unwrap();
             for (i, (_, color)) in states.iter().enumerate() {
                 let cell = find_title(terminal.backend().buffer(), &format!("Q{i:02}"));
@@ -1174,7 +1207,7 @@ mod tests {
         assert_eq!(tree.items()[tree.selected()].thread_id, "s7");
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         terminal
-            .draw(|frame| tree.draw(frame, frame.area(), None))
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
             .unwrap();
         assert_eq!(
             find_title(terminal.backend().buffer(), "Q07").fg,
@@ -1184,7 +1217,7 @@ mod tests {
         inactive[7].state = "idle".into();
         assert!(tree.apply(generation, None, inactive, vec![], None, vec![], None));
         terminal
-            .draw(|frame| tree.draw(frame, frame.area(), None))
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
             .unwrap();
         let selected = find_title(terminal.backend().buffer(), "Q07");
         assert_eq!(selected.fg, theme::SELECTION_FOREGROUND);
@@ -1277,7 +1310,7 @@ mod tests {
                     error: error.map(str::to_owned),
                     ..Default::default()
                 }
-                .draw(frame, frame.area(), Some("t03"));
+                .draw(frame, frame.area(), Some("t03"), true);
             })
             .unwrap();
         terminal.backend().buffer().clone()

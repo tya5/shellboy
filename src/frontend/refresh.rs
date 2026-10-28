@@ -11,7 +11,7 @@ pub(super) struct Query {
 pub(super) async fn run(
     query: Query,
     control: Arc<Control>,
-    updates: SyncSender<UiUpdate>,
+    updates: impl UpdateTarget + Send + 'static,
     sender: mpsc::Sender<BackgroundResult>,
     stop: CancellationToken,
     progress_slots: Arc<Semaphore>,

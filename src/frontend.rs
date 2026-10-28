@@ -90,20 +90,17 @@ impl ClipboardBackend for ClipboardAdapter {
         Box::pin(self.copy_text(text, backend, max_bytes, timeout_ms, cancel))
     }
 }
-async fn update(sender: &impl UpdateTarget, value: UiUpdate) {
-    let Some(mut value) = sender.defer(value) else {
-        return;
-    };
+async fn update(sender: &(impl UpdateTarget + ?Sized), mut value: UiUpdate) {
     loop {
-        match sender.raw().try_send(value) {
-            Ok(()) | Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
-            Err(std::sync::mpsc::TrySendError::Full(next)) => {
-                value = next;
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        }
+        let Some(next) = sender.defer(value) else {
+            return;
+        };
+        value = next;
+        sender.flush_pending();
+        tokio::time::sleep(Duration::from_millis(5)).await;
     }
 }
+
 fn operation(control: &Control, command: Command) -> Request {
     Request::new(
         format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
@@ -159,7 +156,7 @@ async fn management_request(
     Ok(result)
 }
 async fn management_update(
-    sender: &impl UpdateTarget,
+    sender: &(impl UpdateTarget + ?Sized),
     context: Option<ManagementContext>,
     value: UiUpdate,
 ) {
@@ -176,7 +173,7 @@ async fn management_update(
     .await;
 }
 async fn management_status(
-    sender: &impl UpdateTarget,
+    sender: &(impl UpdateTarget + ?Sized),
     context: Option<ManagementContext>,
     text: impl ToString,
 ) {
@@ -191,7 +188,7 @@ async fn management_status(
     .await;
 }
 async fn status(
-    sender: &impl UpdateTarget,
+    sender: &(impl UpdateTarget + ?Sized),
     thread_id: Option<String>,
     text: impl std::fmt::Display,
 ) {
@@ -369,7 +366,7 @@ fn command_title(command: &Command) -> String {
 // Report operation acceptance separately from presentation: a report-rendering
 // failure must not invite retrying an already-applied mutation.
 async fn command_outcome<T>(
-    updates: &impl UpdateTarget,
+    updates: &(impl UpdateTarget + ?Sized),
     submission: Option<CommandSubmission>,
     result: &Result<T, ApiError>,
 ) {
@@ -483,7 +480,7 @@ async fn checked_storage<T>(control: &Control, result: Result<T, ApiError>) -> R
     result
 }
 async fn load_failed(
-    sender: &impl UpdateTarget,
+    sender: &(impl UpdateTarget + ?Sized),
     thread_id: String,
     generation: u64,
     error: ApiError,
@@ -491,7 +488,7 @@ async fn load_failed(
     load_failed_at(sender, thread_id, generation, None, error).await;
 }
 async fn load_failed_at(
-    sender: &impl UpdateTarget,
+    sender: &(impl UpdateTarget + ?Sized),
     thread_id: String,
     generation: u64,
     view_revision: Option<u64>,
@@ -522,7 +519,7 @@ async fn load_failed_at(
 }
 
 async fn stream_commits(
-    updates: &impl UpdateTarget,
+    updates: &(impl UpdateTarget + ?Sized),
     thread: &str,
     generation: u64,
     mappings: Vec<(String, String)>,
@@ -2360,6 +2357,7 @@ async fn run_with_clipboard_slots(
                             refreshing.retain(|thread| !ids.contains(thread));
                             pending.retain(|_, value| !ids.contains(&value.0));
                             if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
+                                ui_subscription.select(None);
                                 selection.activate_draft(uuid::Uuid::new_v4().to_string());
                                 streams.clear();
                                 stream_retry = None;
@@ -2867,14 +2865,7 @@ async fn run_with_clipboard_slots(
             }
         }
     };
-    if updates.finish(&mut actions, grace).await {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Forced shutdown while UI delivery was pending",
-        )
-        .details(serde_json::json!({"forced_shutdown":true})));
-    }
-    result
+    updates.finish(&mut actions, result).await
 }
 
 /// Keep the terminal responsive while owned shutdown proceeds. A force request
@@ -2889,7 +2880,7 @@ pub async fn wait_for_shutdown<F: Future<Output = Result<(), ApiError>>>(
 }
 async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
     actions: &mut impl crate::ui::actions::ActionStream,
-    updates: &impl UpdateTarget,
+    updates: &(impl UpdateTarget + ?Sized),
     grace: Duration,
     shutdown: F,
 ) -> Result<(), ApiError> {
@@ -2909,7 +2900,8 @@ async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
             },
             action=actions.next_action(),if actions_open=>match action {
                 Some(UiAction::ForceQuit) if force_available=>{
-                    update(updates,UiUpdate::ForceShutdown).await;
+                    // Force is explicit: reporting it must never wait for a stalled UI.
+                    let _ = updates.defer(UiUpdate::ForceShutdown);
                     return Err(ApiError::new(ErrorCode::InvalidState,"Forced shutdown selected; saved data and owned process collection may be incomplete").details(serde_json::json!({"forced_shutdown":true})));
                 },
                 Some(UiAction::WaitForShutdown)=>{
@@ -2942,7 +2934,7 @@ async fn save_draft(
 }
 async fn select_thread(
     control: &Arc<Control>,
-    updates: &SyncSender<UiUpdate>,
+    updates: &dyn UpdateTarget,
     thread: &str,
     generation: u64,
     view_revision: u64,

@@ -14,23 +14,42 @@ rendererは物理折返し済みの行を返すので、組立後に全行をも
 
 streamの表示stampは本文の暗号学的provenanceではなく、Displayのsource serial・delta/gap revision・Thread/attempt・幅から作る一時projection識別子である。保存nodeのcontent/provenance hashを置換しない。本文64KiBの一回のsnapshot copyとMarkdown再解析は既存の有限presentation workerへ残す。並行して次のdeltaを受けるためのsnapshotと、確定保存順を守るDB admission確認は除去しない。受信済みsourceを消費済みだと誤認する最適化をしない。
 
-## 配送の境界
+## Delivery boundary (reopened #19 / #30)
 
 ```text
-Control 一般 broadcast ── 従来の全件診断observer
-       UI broadcast(256) ── frontend中心loop ── BufferedUpdates ── UI channel(128)
-                               │                   │
-                               ├─ 既存有限worker ── raw sender / permitを保持して待機
-                               └─ priority Cancel/Quitを通常admissionと別に読む
+Control UI broadcast(256) -> frontend loop -----+
+                              finite workers --+-> shared BufferedUpdates -> UI channel(128)
+priority Cancel/Quit -> separate action admission
 ```
 
-`BufferedUpdates`はfrontendのasync bridge futureが一つ所有する明示型。task-local、追加task、worker、pollerは使わない。中心loopの状態通知はUI送信を待たず、既存selectの有限flush分岐で配送する。spawnするworkerには`worker()`で従来のraw SyncSenderを明示的に渡す。workerの待ちはその既存permitの内側なので、UIが遅くても中心loopのevent/action消費を停止しない。
+The frontend and its existing finite workers clone one `Arc`-owned delivery
+state. Every producer uses the same lock, sequence, queue and latest-state
+coalescing. No worker receives a raw sender. This changes neither Core events
+nor persistence ordering and adds no task, service, channel or background poller.
+The frontend's existing select branch flushes at most 32 entries per turn.
 
-中心outboxは重要結果のFIFO最大512件と、最新表示状態128key。最新へ集約できるのはStatus、DraftStatus、Progress、ModelReceive、Activity/Unavailable、RecoveryBell、ShutdownProgressだけ。receipt、message、ThreadDeletion、CommandOutcome、履歴採用、添付などはこの分類に含めない。latest keyは対象Thread/draft/generationを区別し、128keyを超えた場合は古い一時表示状態から外す。既存の永続情報、操作結果、履歴は消さない。配送順はoutboxへの順序で管理し、同一keyの旧状態だけを最新へ置換する。
+The shared outbox holds at most 512 critical results and 128 latest-state keys.
+Only Status, DraftStatus, Progress, ModelReceive, Activity/Unavailable,
+RecoveryBell and ShutdownProgress coalesce. Keys distinguish Thread, draft and
+generation. Receipts, messages, ThreadDeletion, CommandOutcome, history adoption
+and attachments never coalesce. Insertion order is shared across producers;
+replacing a latest-state key removes only its superseded transient state.
+Consequently an earlier preparing/saving status cannot arrive after a later
+worker completion or image failure.
 
-重要結果128件から通常action/read admissionを止める。残る384枠は既受理のcommand 32、send 32、read 8、clipboard 2、background channel 32、draft backlog 64とその有限結果を扱うための余裕。通常actionの新規受付を止めるので、worker完了によるslot再利用で結果が際限なく増えることはない。priorityの停止/終了は止めず、継続して増え得るCoreの状態通知はlatest/coalesceまたは既存refreshへ畳む。例外的に重要FIFOの上限へ達しても、重要結果を捨てたり成功扱いしたりせず、元の値を保持してraw送信のbackpressureへ戻す。これは項目数の予算でありRSSやSQLite使用量の上限ではない。
+Normal action/read admission stops at 128 queued critical results. Remaining
+space accommodates already admitted command/send/read/clipboard/draft workers
+and bounded background results. Workers keep their existing permits while
+waiting. At 512 critical results, a producer retains its original value and
+retries the shared outbox after a bounded flush of older entries. It must never
+bypass queued entries by sending directly to the UI channel. Priority controls
+remain separately admitted. These are item bounds, not RSS or SQLite limits.
 
-UIが切断したらoutboxを解放し既存shutdownへ進む。通常shutdownでは受理済みworkerの保存/回収とoutboxの配送を行う。UI配送の終了待ちでもpriority ForceQuitを受け付け、明示強制終了の結果を返す。重要結果が未配送の状態を黙って正常終了にはしない。
+UI disconnect releases queued values and enters existing shutdown. Normal
+shutdown joins admitted work and drains delivery. The final UI-only drain does
+not restart the owner's shutdown grace: an explicit ForceQuit is honored
+immediately and reported as forced termination, never successful delivery.
+The existing grace policy while owned work is still running is unchanged.
 
 ## 購読と遅着
 
@@ -41,3 +60,32 @@ UIが切断したらoutboxを解放し既存shutdownへ進む。通常shutdown�
 ## 検証境界
 
 baseline/afterは同じignored合成fixtureを使用する。192KiB前後の履歴と120streamフレームについてlayout/update p50/p95、height再構築、幅変更の要求数/時間を記録する。配送fixtureは実frontendと一時DBで10Threadの合成delta、既存128枠UI停止250ms×7回を使い、action p50/p95、lagged、reloadを測る。これはHTTPや実端末の性能を保証する試験ではない。local HTTP mockの生成経路、文字/style/sourceの同値、有限予算、priority停止/終了、購読遅着も別途確認する。実測の実施/未実施と環境はvalidationへ記録する。
+
+### Selection-gap limitation (reopened #30, Low)
+
+Selection filtering happens when Control publishes an event. Until the frontend
+consumes a queued SelectThread action, deltas for its future target may still be
+filtered out. Updating the subscription at action handling prevents further
+loss, but cannot replay that prefix. Offset gaps remain marked as incomplete;
+terminal/Changed refresh reloads canonical persisted history. Switching threads
+is therefore not a promise of lossless live-delta observation. General diagnostic
+observers remain unfiltered. A Core replay cache or new selection handshake is
+deferred: either adds ownership, budgets and cross-layer coupling for transient
+presentation, while canonical results already recover through the existing path.
+
+### Exceptional full-reserve backpressure
+
+The 128-entry admission threshold and 512-entry reserve improve responsiveness
+under normal bounded pressure; they do not prove responsiveness under every
+possible batch. A history refresh can emit many receipt/mapping results, and
+already admitted workers can fill the reserve. If the frontend itself reaches
+512 critical entries inside one handler, it retains its next value and waits
+asynchronously for delivery. Memory and ordering remain bounded, and the UI OS
+thread remains responsive, but the frontend cannot poll its action loop until
+that retry completes. Cancel/Quit remain in the reserved mailbox; they may be
+delayed by a permanently stalled UI at this exceptional boundary. This inherited
+limitation is not claimed fixed by the shared-outbox change. Correcting it needs
+both reserved main-producer capacity and incremental result-batch continuation;
+merely increasing the queue bound does not solve it. Revisit with a focused
+saturation test and a bounded continuation design, without adding a Core job
+service.

@@ -182,7 +182,7 @@ pub(super) struct Scope {
 }
 pub(super) async fn refresh(
     control: &Control,
-    updates: &SyncSender<UiUpdate>,
+    updates: &dyn UpdateTarget,
     thread: &str,
     generation: u64,
     width: u16,

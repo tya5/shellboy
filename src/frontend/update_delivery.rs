@@ -1,4 +1,4 @@
-//! The frontend task owns deferred UI delivery; worker senders retain backpressure.
+//! One bounded, ordered UI outbox shared by the frontend and its finite workers.
 use super::*;
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -21,37 +21,49 @@ struct Pending {
     latest: BTreeMap<String, Item>,
 }
 pub(super) trait UpdateTarget: Sync {
-    fn raw(&self) -> &SyncSender<UiUpdate>;
+    #[allow(clippy::result_large_err)] // Preserve ownership on bounded-channel rejection, without allocation.
+    fn try_send(&self, value: UiUpdate) -> Result<(), std::sync::mpsc::TrySendError<UiUpdate>>;
+    fn flush_pending(&self) {}
     /// None means buffered/delivered, Some retains ownership for lossless retry.
     fn defer(&self, value: UiUpdate) -> Option<UiUpdate> {
-        Some(value)
+        match self.try_send(value) {
+            Ok(()) | Err(std::sync::mpsc::TrySendError::Disconnected(_)) => None,
+            Err(std::sync::mpsc::TrySendError::Full(value)) => Some(value),
+        }
     }
 }
 impl UpdateTarget for SyncSender<UiUpdate> {
-    fn raw(&self) -> &SyncSender<UiUpdate> {
-        self
+    #[allow(clippy::result_large_err)] // Preserve ownership on bounded-channel rejection, without allocation.
+    fn try_send(&self, value: UiUpdate) -> Result<(), std::sync::mpsc::TrySendError<UiUpdate>> {
+        SyncSender::try_send(self, value)
     }
 }
-pub(super) struct BufferedUpdates {
+struct Delivery {
     raw: SyncSender<UiUpdate>,
     pending: Mutex<Pending>,
     closed: AtomicBool,
 }
+#[derive(Clone)]
+pub(super) struct BufferedUpdates {
+    delivery: Arc<Delivery>,
+}
 impl BufferedUpdates {
     pub(super) fn new(raw: SyncSender<UiUpdate>) -> Self {
         Self {
-            raw,
-            pending: Mutex::new(Pending::default()),
-            closed: AtomicBool::new(false),
+            delivery: Arc::new(Delivery {
+                raw,
+                pending: Mutex::new(Pending::default()),
+                closed: AtomicBool::new(false),
+            }),
         }
     }
-    /// Spawned workers explicitly use the existing bounded raw queue, holding
-    /// their existing permit while waiting. No worker inherits the outbox.
-    pub(super) fn worker(&self) -> SyncSender<UiUpdate> {
-        self.raw.clone()
+    /// All producers share the same order and finite outbox; no raw bypass.
+    pub(super) fn worker(&self) -> Self {
+        self.clone()
     }
     pub(super) fn backpressured(&self) -> bool {
-        self.pending
+        self.delivery
+            .pending
             .lock()
             .expect("UI delivery lock")
             .critical
@@ -59,18 +71,35 @@ impl BufferedUpdates {
             >= ADMISSION_LIMIT
     }
     pub(super) fn pending(&self) -> bool {
-        let q = self.pending.lock().expect("UI delivery lock");
+        let q = self.delivery.pending.lock().expect("UI delivery lock");
         !q.critical.is_empty() || !q.latest.is_empty()
     }
     pub(super) fn closed(&self) -> bool {
-        self.closed.load(Ordering::Relaxed)
+        self.delivery.closed.load(Ordering::Relaxed)
     }
     pub(super) async fn finish(
         &self,
         actions: &mut crate::ui::actions::ActionReceiver,
-        grace: Duration,
-    ) -> bool {
-        let deadline = tokio::time::Instant::now() + grace;
+        result: Result<(), ApiError>,
+    ) -> Result<(), ApiError> {
+        if result.as_ref().err().is_some_and(|error| {
+            error
+                .details
+                .as_ref()
+                .is_some_and(|details| details["forced_shutdown"] == true)
+        }) {
+            return result;
+        }
+        if self.drain(actions).await {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Forced shutdown while UI delivery was pending",
+            )
+            .details(serde_json::json!({"forced_shutdown": true})));
+        }
+        result
+    }
+    async fn drain(&self, actions: &mut crate::ui::actions::ActionReceiver) -> bool {
         while self.pending() && !self.closed() {
             self.flush();
             if !self.pending() || self.closed() {
@@ -79,7 +108,7 @@ impl BufferedUpdates {
             tokio::select! {
                 _=tokio::time::sleep(Duration::from_millis(5))=>{},
                 action=actions.recv_with_admission(false)=> {
-                    if matches!(action,Some(UiAction::ForceQuit))&&tokio::time::Instant::now()>=deadline {return true;}
+                    if matches!(action,Some(UiAction::ForceQuit)) {return true;}
                     if action.is_none() {return true;}
                 }
             }
@@ -87,7 +116,7 @@ impl BufferedUpdates {
         false
     }
     pub(super) fn flush(&self) {
-        let mut q = self.pending.lock().expect("UI delivery lock");
+        let mut q = self.delivery.pending.lock().expect("UI delivery lock");
         for _ in 0..32 {
             let oldest = q
                 .latest
@@ -109,7 +138,7 @@ impl BufferedUpdates {
             let Some(mut item) = item else {
                 break;
             };
-            match self.raw.try_send(item.value) {
+            match self.delivery.raw.try_send(item.value) {
                 Ok(()) => {}
                 Err(std::sync::mpsc::TrySendError::Full(value)) => {
                     item.value = value;
@@ -121,7 +150,7 @@ impl BufferedUpdates {
                     break;
                 }
                 Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
-                    self.closed.store(true, Ordering::Relaxed);
+                    self.delivery.closed.store(true, Ordering::Relaxed);
                     q.latest.clear();
                     q.critical.clear();
                     break;
@@ -131,20 +160,22 @@ impl BufferedUpdates {
     }
 }
 impl UpdateTarget for BufferedUpdates {
-    fn raw(&self) -> &SyncSender<UiUpdate> {
-        &self.raw
+    fn flush_pending(&self) {
+        self.flush();
     }
-    fn defer(&self, value: UiUpdate) -> Option<UiUpdate> {
+    #[allow(clippy::result_large_err)] // Preserve ownership on bounded-channel rejection, without allocation.
+    fn try_send(&self, value: UiUpdate) -> Result<(), std::sync::mpsc::TrySendError<UiUpdate>> {
+        use std::sync::mpsc::TrySendError;
         if self.closed() {
-            return None;
+            return Err(TrySendError::Disconnected(value));
         }
-        let mut q = self.pending.lock().expect("UI delivery lock");
+        let mut q = self.delivery.pending.lock().expect("UI delivery lock");
         let value = if q.critical.is_empty() && q.latest.is_empty() {
-            match self.raw.try_send(value) {
-                Ok(()) => return None,
-                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
-                    self.closed.store(true, Ordering::Relaxed);
-                    return None;
+            match self.delivery.raw.try_send(value) {
+                Ok(()) => return Ok(()),
+                Err(std::sync::mpsc::TrySendError::Disconnected(value)) => {
+                    self.delivery.closed.store(true, Ordering::Relaxed);
+                    return Err(TrySendError::Disconnected(value));
                 }
                 Err(std::sync::mpsc::TrySendError::Full(value)) => value,
             }
@@ -165,16 +196,16 @@ impl UpdateTarget for BufferedUpdates {
             q.sequence = q.sequence.wrapping_add(1);
             let sequence = q.sequence;
             q.latest.insert(key, Item { sequence, value });
-            None
+            Ok(())
         } else if q.critical.len() < CRITICAL_LIMIT {
             q.sequence = q.sequence.wrapping_add(1);
             let sequence = q.sequence;
             q.critical.push_back(Item { sequence, value });
-            None
+            Ok(())
         } else {
             // Reserve exhaustion cannot discard a receipt or report success.
-            // Keep the original value for raw queue backpressure as a last resort.
-            Some(value)
+            // The producer retries through this outbox after flushing older items.
+            Err(TrySendError::Full(value))
         }
     }
 }
@@ -221,7 +252,7 @@ mod tests {
                 .is_none()
             );
         }
-        assert_eq!(out.pending.lock().unwrap().latest.len(), 1);
+        assert_eq!(out.delivery.pending.lock().unwrap().latest.len(), 1);
         for n in 0..CRITICAL_LIMIT {
             assert!(
                 out.defer(UiUpdate::ThreadDeletion {
@@ -260,5 +291,191 @@ mod tests {
         out.flush();
         assert!(out.closed());
         assert!(!out.pending());
+    }
+    #[tokio::test]
+    async fn worker_completion_cannot_be_followed_by_older_preparing_status() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        update(
+            &out,
+            UiUpdate::Status {
+                thread_id: None,
+                text: "preparing".into(),
+            },
+        )
+        .await;
+        let worker = out.worker();
+        let task = tokio::spawn(async move {
+            update(
+                &worker,
+                UiUpdate::Status {
+                    thread_id: None,
+                    text: "completed".into(),
+                },
+            )
+            .await;
+            update(&worker, UiUpdate::Shutdown).await;
+        });
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap();
+        rx.recv().unwrap();
+        let mut statuses = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                out.flush();
+                while let Ok(value) = rx.try_recv() {
+                    match value {
+                        UiUpdate::Status { text, .. } => statuses.push(text),
+                        UiUpdate::Shutdown => return,
+                        _ => {}
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(statuses.last().map(String::as_str), Some("completed"));
+        assert!(!out.pending());
+    }
+
+    #[tokio::test]
+    async fn full_outbox_retry_never_overtakes_older_critical_results() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        for n in 0..CRITICAL_LIMIT {
+            assert!(
+                out.defer(UiUpdate::ThreadDeletion {
+                    request_id: n as u64,
+                    args: ThreadDeleteArgs {
+                        thread_id: "t".into(),
+                        descendants: false
+                    },
+                    execute: true,
+                    result: Ok(ThreadDeletionReply::Deleted(vec!["t".into()])),
+                })
+                .is_none()
+            );
+        }
+        let worker = out.worker();
+        let task = tokio::spawn(async move {
+            update(&worker, UiUpdate::Shutdown).await;
+        });
+        tokio::task::yield_now().await;
+        rx.recv().unwrap();
+        let mut count = 0;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                out.flush();
+                while let Ok(value) = rx.try_recv() {
+                    match value {
+                        UiUpdate::ThreadDeletion { request_id, .. } => {
+                            assert_eq!(request_id, count);
+                            count += 1;
+                        }
+                        UiUpdate::Shutdown => {
+                            assert_eq!(count, CRITICAL_LIMIT as u64);
+                            return;
+                        }
+                        _ => panic!("unexpected UI update"),
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn final_ui_drain_honors_force_without_starting_another_grace() {
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        out.defer(UiUpdate::Shutdown);
+        let (actions, mut receiver) = crate::ui::actions::channel(1);
+        actions.try_send(UiAction::ForceQuit).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(250), out.drain(&mut receiver))
+                .await
+                .unwrap()
+        );
+        assert!(out.pending()); // An explicit forced exit may abandon undelivered UI values.
+    }
+    #[tokio::test]
+    async fn accepted_force_at_full_reserve_never_waits_for_ui_or_second_force() {
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let out = BufferedUpdates::new(tx);
+        for n in 0..CRITICAL_LIMIT {
+            assert!(
+                out.defer(UiUpdate::ThreadDeletion {
+                    request_id: n as u64,
+                    args: ThreadDeleteArgs {
+                        thread_id: "t".into(),
+                        descendants: false
+                    },
+                    execute: true,
+                    result: Ok(ThreadDeletionReply::Deleted(vec!["t".into()])),
+                })
+                .is_none()
+            );
+        }
+        let (actions, mut receiver) = crate::ui::actions::channel(1);
+        let worker = out.worker();
+        let task = tokio::spawn(async move {
+            let result = wait_for_shutdown_updates(
+                &mut receiver,
+                &worker,
+                Duration::ZERO,
+                std::future::pending(),
+            )
+            .await;
+            worker.finish(&mut receiver, result).await
+        });
+        // The first tick enables force. Observe it through the bounded shared
+        // outbox without freeing any raw UI capacity or sending a second force.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if out
+                    .delivery
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .latest
+                    .values()
+                    .any(|item| {
+                        matches!(
+                            item.value,
+                            UiUpdate::ShutdownProgress {
+                                force_available: true,
+                                ..
+                            }
+                        )
+                    })
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        actions.try_send(UiAction::ForceQuit).unwrap();
+        let error = tokio::time::timeout(Duration::from_millis(250), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["forced_shutdown"], true);
+        assert_eq!(
+            out.delivery.pending.lock().unwrap().critical.len(),
+            CRITICAL_LIMIT
+        );
     }
 }

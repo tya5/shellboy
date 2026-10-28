@@ -102,7 +102,8 @@ pub(super) async fn finish_cleanup(
     candidates: Vec<String>,
 ) -> (Vec<String>, Vec<String>, Option<String>) {
     let observed_candidates = candidates.clone();
-    match cleanup(control, candidates).await {
+    let cleanup_result = cleanup(control, candidates).await;
+    match checked_storage(control, cleanup_result).await {
         Ok((mut deleted, drafts)) => {
             if !deleted.iter().any(|id| id == root) {
                 deleted.push(root.to_owned());
@@ -292,6 +293,32 @@ mod tests {
             owner,
             server,
         ));
+        sender
+            .try_send(UiAction::SelectThread {
+                thread_id: "thread".into(),
+                generation: 0,
+                view_revision: 0,
+                known_view: None,
+                preview_sources: vec![],
+            })
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    if matches!(update, UiUpdate::History { ref thread_id, .. } if thread_id == "thread") {
+                        return;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+        control.emit_test_event(EngineEvent::Stream {
+            thread_id: "thread".into(),
+            node_id: "deleted-attempt".into(),
+            text: "pending output".into(),
+            reasoning: false,
+            stream_char_offset: 0,
+        });
         let draft = DraftSnapshot {
             draft_id: "worker-draft".into(),
             text: "queued autosave".into(),
@@ -335,6 +362,48 @@ mod tests {
         .await
         .unwrap();
         assert!(matches!(deleted, ThreadDeletionReply::Deleted(ids) if ids == ["thread"]));
+        // After the deletion result is delivered, stale stream/receive events
+        // cannot keep the deleted selection alive or repopulate its display.
+        control.emit_test_event(EngineEvent::ModelReceive {
+            thread_id: "thread".into(),
+            attempt_id: "after-deletion".into(),
+            observed_at: std::time::Instant::now(),
+        });
+        control.emit_test_event(EngineEvent::Stream {
+            thread_id: "thread".into(),
+            node_id: "deleted-attempt".into(),
+            text: "late output".into(),
+            reasoning: false,
+            stream_char_offset: 14,
+        });
+        control.emit_test_event(EngineEvent::Error {
+            thread_id: "independent".into(),
+            error: ApiError::new(ErrorCode::IoFailed, "post-deletion-event-fence"),
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    match update {
+                        UiUpdate::Stream { thread_id, .. }
+                        | UiUpdate::ModelReceive { thread_id, .. } => {
+                            assert_ne!(
+                                thread_id, "thread",
+                                "deleted selection must release stream ownership"
+                            );
+                        }
+                        UiUpdate::Status { text, .. }
+                            if text.contains("post-deletion-event-fence") =>
+                        {
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
         sender
             .try_send(UiAction::SaveDraft {
                 thread_id: "thread".into(),
@@ -395,16 +464,56 @@ mod tests {
         let (deleted, _, warning) = finish_cleanup(&control, "thread", vec!["thread".into()]).await;
         assert_eq!(deleted, ["thread"]);
         assert!(warning.unwrap().contains("fixture cleanup failure"));
+        assert!(
+            request(
+                &control,
+                Command::ThreadCreate(ThreadCreateArgs {
+                    parent_id: None,
+                    cwd: None,
+                    connection: None,
+                    model: None,
+                    effort: None,
+                })
+            )
+            .await
+            .is_err(),
+            "stopped owner must reject new mutations"
+        );
+        server.shutdown().await.unwrap();
+        assert_eq!(
+            control.shutdown().await.unwrap_err().code,
+            ErrorCode::SaveFailed
+        );
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bounded_cleanup_observation_error_preserves_root_without_stopping_owner() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (deleted, _, warning) = finish_cleanup(
             &control,
-            "thread",
+            "confirmed-root",
             (0..MAX_KNOWN_THREADS + 1)
                 .map(|n| format!("t{n}"))
                 .collect(),
         )
         .await;
-        assert_eq!(deleted, ["thread"]);
-        assert!(warning.is_some());
+        assert_eq!(deleted, ["confirmed-root"]);
+        assert!(warning.unwrap().contains("Too many cached Thread IDs"));
+        assert!(
+            request(
+                &control,
+                Command::ThreadCreate(ThreadCreateArgs {
+                    parent_id: None,
+                    cwd: None,
+                    connection: None,
+                    model: None,
+                    effort: None,
+                })
+            )
+            .await
+            .is_ok()
+        );
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();

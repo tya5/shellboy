@@ -45,14 +45,12 @@ impl StreamBody {
 }
 
 use super::{
-    ApiError, Control, UiNode, UiUpdate, checked_storage, presentation_work, storage_error,
+    ApiError, Control, UiNode, UiUpdate, UpdateTarget, checked_storage, presentation_work,
+    storage_error,
 };
 use std::{
     collections::VecDeque,
-    sync::{
-        Arc,
-        mpsc::{SyncSender, TrySendError},
-    },
+    sync::{Arc, mpsc::TrySendError},
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -268,7 +266,7 @@ impl Prepared {
     pub async fn deliver(
         self,
         control: &Control,
-        updates: SyncSender<UiUpdate>,
+        updates: impl UpdateTarget + Send + 'static,
         cancel: CancellationToken,
     ) -> Result<Outcome, ApiError> {
         if cancel.is_cancelled() {
@@ -886,7 +884,7 @@ fn corresponding_offset(
 }
 pub(super) async fn rebase(
     control: &Control,
-    updates: &SyncSender<UiUpdate>,
+    updates: &dyn super::UpdateTarget,
     request: crate::ui::StreamRebase,
     width: u16,
 ) -> Result<(), ApiError> {

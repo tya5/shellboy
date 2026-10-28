@@ -403,3 +403,110 @@ fn modified_cancel_keys_do_not_close_confirmation_but_plain_escape_does() {
     assert!(!screen(&mut ui).contains("会話の削除確認"));
     assert_eq!(ui.threads().len(), 1);
 }
+
+#[test]
+fn rejected_deletion_admission_releases_inflight_target_for_retry() {
+    let mut ui = ui();
+    list(&mut ui, &["chosen"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let actions = key(&mut ui, KeyCode::Char('y'));
+    let action = actions
+        .iter()
+        .find(|a| matches!(a, UiAction::ThreadDeletion { execute: true, .. }))
+        .unwrap();
+    ui.action_rejected(action);
+    assert!(screen(&mut ui).contains("削除は未受付"));
+    key(&mut ui, KeyCode::Esc);
+    request(key(&mut ui, KeyCode::Delete), false);
+}
+
+#[test]
+fn deletion_notice_is_preserved_until_display_then_not_replayed_on_reopen() {
+    let mut ui = ui();
+    list(&mut ui, &["chosen"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::Esc);
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: true,
+        result: Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "once-only browser notice",
+        )),
+    });
+    list(&mut ui, &["chosen"]);
+    assert!(screen(&mut ui).contains("once-only browser notice"));
+    key(&mut ui, KeyCode::Esc);
+    // The main status intentionally retains the outcome, so assert the browser
+    // search/header row rather than the full screen's status line.
+    list(&mut ui, &["chosen"]);
+    let image = screen(&mut ui);
+    assert!(
+        !image
+            .lines()
+            .any(|line| line.contains("once-only browser notice") && line.contains("検索"))
+    );
+}
+
+#[test]
+fn a_second_target_cannot_overlap_an_inflight_deletion() {
+    let mut ui = ui();
+    list(&mut ui, &["parent", "child"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::Down);
+    assert!(key(&mut ui, KeyCode::Delete).is_empty());
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: true,
+        result: Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "fixture completed rejection",
+        )),
+    });
+    request(key(&mut ui, KeyCode::Delete), false);
+}
+
+#[test]
+fn an_overlay_covering_the_browser_does_not_consume_an_unseen_deletion_notice() {
+    let mut ui = ui();
+    list(&mut ui, &["chosen"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::F(1));
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: true,
+        result: Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "covered deletion notice",
+        )),
+    });
+    let covered = screen(&mut ui);
+    assert!(
+        !covered
+            .lines()
+            .any(|line| line.contains("covered deletion notice") && line.contains("検索"))
+    );
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::Esc);
+    assert!(!ui.threads_visible());
+    list(&mut ui, &["chosen"]);
+    let shown = screen(&mut ui);
+    assert!(
+        shown
+            .lines()
+            .any(|line| line.contains("covered deletion notice") && line.contains("検索"))
+    );
+}
