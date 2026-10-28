@@ -1285,6 +1285,7 @@ async fn history_filter_validation_and_valid_reads_never_create_receipts() {
         .unwrap();
     for (since, state) in [("invalid", None), ("2026-10-25T07:00:00Z", Some("unknown"))] {
         let args = HistoryListArgs {
+            excerpt_chars: shellboy::protocol::DEFAULT_HISTORY_EXCERPT_CHARS,
             thread_id: thread.thread_id.clone(),
             limit: DEFAULT_LIST_LIMIT,
             cursor: None,
@@ -1318,6 +1319,7 @@ async fn history_filter_validation_and_valid_reads_never_create_receipts() {
         "invalid filters must not reserve/save a failed read receipt"
     );
     let valid = request(Command::HistoryList(HistoryListArgs {
+        excerpt_chars: shellboy::protocol::DEFAULT_HISTORY_EXCERPT_CHARS,
         thread_id: thread.thread_id,
         limit: DEFAULT_LIST_LIMIT,
         cursor: None,
@@ -1724,6 +1726,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
             turn_id: message.turn_id.unwrap(),
         }),
         Command::HistoryList(HistoryListArgs {
+            excerpt_chars: shellboy::protocol::DEFAULT_HISTORY_EXCERPT_CHARS,
             thread_id: thread.thread_id.clone(),
             limit: 50,
             cursor: None,

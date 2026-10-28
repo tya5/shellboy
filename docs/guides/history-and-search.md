@@ -17,6 +17,14 @@ shellboy history list --thread THREAD_ID --limit 20
 shellboy history get --node NODE_ID --limit-bytes 65536
 ```
 
+経路の整理や大きいnodeを探すときは、本文抜粋を省略できます。
+
+```bash
+shellboy history list --thread THREAD_ID --excerpt-chars 0 --limit 20
+```
+
+`--excerpt-chars`は0〜4096、既定512のUnicode scalar文字数です。0では`excerpt`は空文字になり、本文を取得・解析しません。`payload_chars`は保存JSON全体の文字数で、抽出本文長やtoken数とは異なります。回収済み本文はnullです。node ID・kind・採用順の`selection.ordinal`・大きさを見てから、必要なnodeだけgetしてください。生成元contextと採用先selectionはforkで異なることがあるため、そのまま保持します。リンクやprovenanceも残るので50件が常に16KiBに収まるわけではありません。大きければ`--limit`を下げるかshell出力の続きをreadします。続きのcursorにも同じ`--excerpt-chars`を指定してください。
+
 CLIの出力はJSON envelopeです。`ok`と`error`を確認し、内容は`result`から読みます。`history list`は選択経路のnode ID・kind・抜粋をpageで返します。`result.next_cursor`があれば、同じThread・条件で次へ進みます。
 
 ```sh

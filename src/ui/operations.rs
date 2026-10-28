@@ -873,11 +873,18 @@ impl Form {
                         f("run", "作業（空=全体）", String::new(), Text),
                         f("since", "開始日時（RFC3339）", String::new(), Text),
                         f("state", "状態（空=全体）", String::new(), Text),
+                        f(
+                            "excerpt_chars",
+                            "抜粋文字数（0=省略）",
+                            "512".into(),
+                            Number,
+                        ),
                     ]);
                     v
                 },
                 |form, _cwd| {
                     Ok(Command::HistoryList(HistoryListArgs {
+                        excerpt_chars: form.number("excerpt_chars")?,
                         thread_id: form.owned("thread")?,
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,

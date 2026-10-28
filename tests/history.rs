@@ -44,6 +44,7 @@ fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryGetArgs {
 }
 fn listing(thread: &str, limit: u32, cursor: Option<String>) -> HistoryListArgs {
     HistoryListArgs {
+        excerpt_chars: shellboy::protocol::DEFAULT_HISTORY_EXCERPT_CHARS,
         thread_id: thread.into(),
         limit,
         cursor,
@@ -571,4 +572,133 @@ async fn audit_received_originals_page_exact_saved_json_without_changing_replay_
         );
     }
     db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn listing_excerpt_limits_bind_cursors_and_payload_sizes_include_unicode_and_tombstones() {
+    let (_root, database, history) = repository().await;
+    let payload = json!({"text":"日本語🙂abcd".repeat(100)});
+    let expected = serde_json::to_string(&payload).unwrap().chars().count() as u64;
+    append(&database, "first", "user", payload).await;
+    append(&database, "second", "event", json!({"text":"second"})).await;
+    let default = history.list(listing("thread", 1, None)).await.unwrap();
+    assert_eq!(default.items[0].excerpt.chars().count(), 512);
+    assert_eq!(default.items[0].payload_chars, Some(expected));
+    let mut small = listing("thread", 1, None);
+    small.excerpt_chars = 3;
+    let small = history.list(small).await.unwrap();
+    assert_eq!(small.items[0].excerpt, "日本語");
+    let mut zero = listing("thread", 1, None);
+    zero.excerpt_chars = 0;
+    let first = history.list(zero.clone()).await.unwrap();
+    assert!(first.items[0].excerpt.is_empty());
+    assert_eq!(first.items[0].payload_chars, Some(expected));
+    let cursor = first.next_cursor.unwrap();
+    let mismatched = history
+        .list(listing("thread", 1, Some(cursor.clone())))
+        .await
+        .unwrap_err();
+    assert_eq!(mismatched.code, ErrorCode::CursorExpired);
+    zero.cursor = Some(cursor);
+    assert_eq!(history.list(zero).await.unwrap().items[0].node_id, "second");
+    let mut invalid = listing("thread", 1, None);
+    invalid.excerpt_chars = 4097;
+    assert_eq!(
+        history.list(invalid).await.unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
+    database
+        .call(|db| {
+            db.execute(
+                "UPDATE node SET payload_json=NULL,deleted_reason='collected' WHERE id='first'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut tombstone = listing("thread", 1, None);
+    tombstone.excerpt_chars = 0;
+    let page = history.list(tombstone).await.unwrap();
+    assert_eq!(page.items[0].payload_chars, None);
+    assert!(page.items[0].excerpt.is_empty());
+    assert_eq!(page.items[0].context.as_ref().unwrap().state, "tombstone");
+    database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn zero_excerpt_never_materializes_or_decodes_a_stored_payload() {
+    let (_root, database, history) = repository().await;
+    append(&database, "bad", "event", json!({"text":"placeholder"})).await;
+    database
+        .call(|db| {
+            // A deliberately damaged fixture demonstrates that the metadata-only
+            // projection does not deserialize payload_json at all.
+            db.execute_batch("PRAGMA ignore_check_constraints=ON")?;
+            db.execute(
+                "UPDATE node SET payload_json='invalid JSON' WHERE id='bad'",
+                [],
+            )?;
+            db.execute_batch("PRAGMA ignore_check_constraints=OFF")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut args = listing("thread", 50, None);
+    args.excerpt_chars = 0;
+    let result = history.list(args).await.unwrap();
+    assert!(result.items[0].excerpt.is_empty());
+    assert_eq!(result.items[0].payload_chars, Some(12));
+    assert_eq!(
+        history
+            .list(listing("thread", 50, None))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidState
+    );
+    database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn compact_history_listing_size_is_measured_without_removing_provenance() {
+    let (_root, database, history) = repository().await;
+    database.call(|connection| {
+        connection.execute("UPDATE thread SET cwd='/synthetic/history-size', agents_path='/synthetic/history-size/AGENTS.md' WHERE id='thread'", [])?;
+        Ok(())
+    }).await.unwrap();
+    for i in 0..50 {
+        append(
+            &database,
+            &format!("00000000-0000-0000-0000-{i:012}"),
+            "user",
+            json!({"text":"合成の長い本文🙂".repeat(100)}),
+        )
+        .await;
+    }
+    let verbose = history.list(listing("thread", 50, None)).await.unwrap();
+    let mut old_shape = serde_json::to_value(&verbose).unwrap();
+    for item in old_shape["items"].as_array_mut().unwrap() {
+        item.as_object_mut().unwrap().remove("payload_chars");
+    }
+    let before = serde_json::to_vec(&old_shape).unwrap().len();
+    let mut args = listing("thread", 50, None);
+    args.excerpt_chars = 0;
+    let compact = history.list(args).await.unwrap();
+    let after = serde_json::to_vec(&compact).unwrap().len();
+    assert_eq!(compact.items.len(), 50);
+    assert!(after < before / 2, "before={before}, after={after}");
+    assert!(
+        compact
+            .items
+            .iter()
+            .all(|item| item.provenance.is_some() && item.selection.is_some())
+    );
+    println!(
+        "history_list_50_sample before_bytes={before} after_bytes={after} before_per_item={} after_per_item={} fits_16k={}",
+        before / 50,
+        after / 50,
+        after <= 16384
+    );
+    database.shutdown().await.unwrap();
 }

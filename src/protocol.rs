@@ -8,6 +8,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
 pub const MAX_LIST_LIMIT: u32 = 200;
+pub const DEFAULT_HISTORY_EXCERPT_CHARS: u32 = 512;
+pub const MAX_HISTORY_EXCERPT_CHARS: u32 = 4096;
 pub const MAX_BODY_BYTES: u32 = 64 * 1024;
 pub const DEFAULT_SEARCH_LIMIT: u32 = 10;
 pub const MAX_SEARCH_LIMIT: u32 = 50;
@@ -411,6 +413,9 @@ args!(ExecutionTarget {
 fn list_limit() -> u32 {
     DEFAULT_LIST_LIMIT
 }
+fn history_excerpt_chars() -> u32 {
+    DEFAULT_HISTORY_EXCERPT_CHARS
+}
 fn body_limit() -> u32 {
     MAX_BODY_BYTES
 }
@@ -433,7 +438,7 @@ impl Default for ThreadListArgs {
         }
     }
 }
-args!(HistoryListArgs { thread_id: String, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>,
+args!(HistoryListArgs { #[serde(default = "history_excerpt_chars")] excerpt_chars: u32, thread_id: String, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] since: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<String>
@@ -822,6 +827,7 @@ args!(HistorySelection {
     current_cwd: String
 });
 args!(HistorySnippet {
+    #[serde(default)] payload_chars: Option<u64>,
     node_id: String,
     kind: String,
     excerpt: String,

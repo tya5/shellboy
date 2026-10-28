@@ -126,6 +126,7 @@ async fn performance_history_startup_and_pages() {
             let start = Instant::now();
             let page = history
                 .list(HistoryListArgs {
+                    excerpt_chars: shellboy::protocol::DEFAULT_HISTORY_EXCERPT_CHARS,
                     thread_id: "history".into(),
                     limit: 50,
                     cursor,

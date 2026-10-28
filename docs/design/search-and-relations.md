@@ -89,3 +89,9 @@ Thread論理削除時は最後のthread_path/thread_replacementを所有証拠�
 新表/markerや恒久auditを追加しない。生存共有/source/pinで本文が保持される間は所有証拠も残り、
 既存logical usageへ算入する。旧版が既に消したpath所有は復元/推測せず、残るTurn/receipt等で
 削除所有を確認できない原文は既存GCに従う。
+
+## 履歴一覧の抜粋制限と保存本文の大きさ（Issue #23）
+
+`history list --excerpt-chars N` はUnicode scalarで0〜4096、既定512。0ではexcerptは空文字とし、SQLのCASEでpayload_jsonを取得せず解析もしない。本文の存在や長さは別に `payload_chars` で返す。SQLite `length(payload_json)` による保存JSON全体の文字数であり、抽出本文長やモデルのtoken数ではない。tombstoneの回収済み本文はnull（不明）を返し、0と捏造しない。省略した一覧から必要なnodeだけhistory getで取得する。
+
+既存のPage/HistorySnippetとcontext/selection/provenance/実行リンクは保持し、上記fieldを加える。生成元Threadはfork先と異なるためcontext.thread_idをページの選択Threadへ置き換えない。今回は重複値のページ上位への移動を見送り、汎用field選択や別modeの枠組みを追加しない。既定値のcursor identityは維持し、512以外は抜粋上限もcursorへ束縛する。50件が常に16KiBに収まる保証はせず、固定fixtureで改善量を実測して記録する。

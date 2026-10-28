@@ -515,6 +515,7 @@ async fn measure_current_instance_receipt_sizes() {
         (
             "history.list (one 64KiB node)",
             Command::HistoryList(HistoryListArgs {
+                excerpt_chars: shellboy::protocol::DEFAULT_HISTORY_EXCERPT_CHARS,
                 thread_id: id,
                 limit: 50,
                 cursor: None,

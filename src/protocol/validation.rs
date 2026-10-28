@@ -169,6 +169,12 @@ impl WaitArgs {
 }
 
 impl HistoryListArgs {
+    pub(crate) fn validate_excerpt(&self) -> Result<(), ApiError> {
+        if self.excerpt_chars > MAX_HISTORY_EXCERPT_CHARS {
+            return Err(super::invalid("excerpt-chars must be in 0..=4096"));
+        }
+        Ok(())
+    }
     fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.thread_id, "thread_id")?;
         limit(self.limit, MAX_LIST_LIMIT)?;
@@ -176,6 +182,7 @@ impl HistoryListArgs {
         optional_nonempty(self.run_id.as_deref(), "run_id")?;
         optional_nonempty(self.since.as_deref(), "since")?;
         optional_nonempty(self.state.as_deref(), "state")?;
+        self.validate_excerpt()?;
         self.validate_state()?;
         self.parsed_since().map(|_| ())
     }

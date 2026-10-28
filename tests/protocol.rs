@@ -679,3 +679,25 @@ fn optional_operation_defaults_keep_empty_wire_and_explicit_index_target_semanti
     assert!(preview.validate().is_ok());
     assert!(preview.is_read_only());
 }
+
+#[test]
+fn history_excerpt_legacy_default_and_new_bounds_are_validated() {
+    for (value, expected) in [(None, 512), (Some(0), 0), (Some(4096), 4096)] {
+        let mut args = json!({"thread_id":"t"});
+        if let Some(value) = value {
+            args["excerpt_chars"] = json!(value);
+        }
+        let command: Command =
+            serde_json::from_value(json!({"command":"history.list","args":args})).unwrap();
+        command.validate().unwrap();
+        let Command::HistoryList(value) = command else {
+            panic!("history list")
+        };
+        assert_eq!(value.excerpt_chars, expected);
+    }
+    let command: Command = serde_json::from_value(
+        json!({"command":"history.list","args":{"thread_id":"t","excerpt_chars":4097}}),
+    )
+    .unwrap();
+    assert!(command.validate().is_err());
+}

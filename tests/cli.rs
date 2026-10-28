@@ -816,3 +816,33 @@ async fn malformed_history_since_is_rejected_before_trying_an_owner() {
     assert_eq!(error.code, ErrorCode::InvalidArgument);
     assert_eq!(error.message, "since must be RFC3339 with timezone");
 }
+
+#[tokio::test]
+async fn history_excerpt_cli_default_zero_and_upper_bound_map_to_the_wire() {
+    for (extra, expected) in [
+        (&[][..], 512),
+        (&["--excerpt-chars", "0"][..], 0),
+        (&["--excerpt-chars", "4096"][..], 4096),
+    ] {
+        let mut args = vec!["history", "list", "--thread", "t"];
+        args.extend(extra);
+        let Command::HistoryList(value) = convert(&args).await else {
+            panic!("history list")
+        };
+        assert_eq!(value.excerpt_chars, expected);
+    }
+    for invalid in ["-1", "4097", "x"] {
+        assert!(
+            Cli::try_parse_from([
+                "shellboy",
+                "history",
+                "list",
+                "--thread",
+                "t",
+                "--excerpt-chars",
+                invalid
+            ])
+            .is_err()
+        );
+    }
+}

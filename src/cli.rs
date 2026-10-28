@@ -388,6 +388,9 @@ pub struct WaitOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct HistoryListOptions {
+    /// Maximum Unicode scalar characters in each excerpt; zero omits its content.
+    #[arg(long, default_value_t=wire::DEFAULT_HISTORY_EXCERPT_CHARS, value_parser=clap::value_parser!(u32).range(0..=wire::MAX_HISTORY_EXCERPT_CHARS as i64))]
+    pub excerpt_chars: u32,
     #[arg(long = "thread")]
     pub thread_id: String,
     #[arg(long,default_value_t=wire::DEFAULT_LIST_LIMIT)]
@@ -685,6 +688,7 @@ impl Cli {
             }),
             CliCommand::History { command } => match command {
                 HistoryCommand::List(a) => C::HistoryList(wire::HistoryListArgs {
+                    excerpt_chars: a.excerpt_chars,
                     thread_id: a.thread_id,
                     limit: a.limit,
                     cursor: a.cursor,

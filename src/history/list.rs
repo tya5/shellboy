@@ -13,6 +13,7 @@ pub fn list_nodes(
     if args.run_id.as_deref().is_some_and(str::is_empty) {
         return Err(invalid("run_id must not be empty"));
     }
+    args.validate_excerpt()?;
     args.validate_state()?;
     let since = args.parsed_since()?;
     let (revision, current_cwd): (u64, String) = connection
@@ -35,7 +36,7 @@ pub fn list_nodes(
     let (start, watermark) = list_position(args, &filter, revision, count)?;
     let relation = EXECUTION_RELATION.replace("?1", "n.id");
     let sql = format!(
-        "SELECT n.id,n.kind,n.payload_json,n.deleted_reason,p.ordinal,n.created_at FROM thread_path p JOIN node n ON n.id=p.node_id LEFT JOIN turn u ON u.id=n.turn_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 AND (?4 IS NULL OR u.run_id=?4) AND (?5 IS NULL OR EXISTS(SELECT 1 {relation} AND s.state=?5)) ORDER BY p.ordinal"
+        "SELECT n.id,n.kind,CASE WHEN ?6=0 THEN NULL ELSE n.payload_json END,n.deleted_reason,p.ordinal,n.created_at,length(n.payload_json) FROM thread_path p JOIN node n ON n.id=p.node_id LEFT JOIN turn u ON u.id=n.turn_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 AND (?4 IS NULL OR u.run_id=?4) AND (?5 IS NULL OR EXISTS(SELECT 1 {relation} AND s.state=?5)) ORDER BY p.ordinal"
     );
     let mut statement = connection.prepare(&sql).map_err(sql_error)?;
     let mut rows = statement
@@ -44,7 +45,8 @@ pub fn list_nodes(
             start as i64,
             watermark as i64,
             args.run_id,
-            args.state
+            args.state,
+            args.excerpt_chars
         ])
         .map_err(sql_error)?;
     let mut items = Vec::new();
@@ -67,7 +69,13 @@ pub fn list_nodes(
             more = true;
             break;
         }
-        let (item, ordinal) = history_snippet(connection, row, &args.thread_id, &current_cwd)?;
+        let (item, ordinal) = history_snippet(
+            connection,
+            row,
+            &args.thread_id,
+            &current_cwd,
+            args.excerpt_chars,
+        )?;
         items.push(item);
         next = ordinal + 1;
     }
@@ -130,7 +138,12 @@ fn list_filter(
         ))
         .map_err(|_| invalid("Cannot encode history filters"))?
     };
-    Ok(filter)
+    if args.excerpt_chars == crate::protocol::DEFAULT_HISTORY_EXCERPT_CHARS {
+        Ok(filter)
+    } else {
+        serde_json::to_string(&(filter, "excerpt_chars", args.excerpt_chars))
+            .map_err(|_| invalid("Cannot encode history excerpt limit"))
+    }
 }
 fn list_position(
     args: &HistoryListArgs,
@@ -163,17 +176,23 @@ fn history_snippet(
     row: &rusqlite::Row<'_>,
     thread_id: &str,
     current_cwd: &str,
+    excerpt_chars: u32,
 ) -> Result<(HistorySnippet, u64), ApiError> {
     let node_id: String = row.get(0).map_err(sql_error)?;
     let body: Option<String> = row.get(2).map_err(sql_error)?;
-    let excerpt = if let Some(body) = body {
+    let excerpt = if excerpt_chars == 0 {
+        String::new()
+    } else if let Some(body) = body {
         let value: Value = serde_json::from_str(&body).map_err(|_| {
             ApiError::new(
                 ErrorCode::InvalidState,
                 "stored history payload is malformed",
             )
         })?;
-        text_of_payload(&value).chars().take(512).collect()
+        text_of_payload(&value)
+            .chars()
+            .take(excerpt_chars as usize)
+            .collect()
     } else {
         format!(
             "[{}]",
@@ -181,10 +200,17 @@ fn history_snippet(
                 .map_err(sql_error)?
                 .unwrap_or_else(|| "body unavailable".into())
         )
+        .chars()
+        .take(excerpt_chars as usize)
+        .collect()
     };
     let ordinal = row.get::<_, i64>(4).map_err(sql_error)? as u64;
     let (executions, execution_count) = execution_links(connection, &node_id)?;
     let item = HistorySnippet {
+        payload_chars: row
+            .get::<_, Option<i64>>(6)
+            .map_err(sql_error)?
+            .map(|n| n as u64),
         provenance: Some(provenance(connection, &node_id)?),
         context: Some(crate::context::for_node(connection, &node_id)?),
         selection: Some(HistorySelection {
