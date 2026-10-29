@@ -15,6 +15,10 @@ installed owner replacement, real provider traffic or user-data changes.
   no-candidate observations on still-large requests also show the reduction
   allowance remains available. Existing partial-output, Retry-After, stop,
   adopted-reduction and overflow checks pass in the same suite.
+- `CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 cargo test --locked --lib`:
+  the library suite passes, including the injected unsaved index-pause test.
+  Both processing and pause codes in readable status match search wire details;
+  the durable pause prefix survives and stopped workers do not silently restart.
 - The initial command could not find `cargo` on PATH and did not run tests;
   exporting `$HOME/.cargo/bin` corrected the environment without changing the
   toolchain or dependencies.

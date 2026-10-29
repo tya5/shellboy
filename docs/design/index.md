@@ -249,3 +249,6 @@ and appends the bounded local diagnosis while preserving any existing durable
 pause reason verbatim; do not overwrite capacity/provider evidence. Constructing
 a new service is still the only reset. This is diagnostic memory, not a new
 persistent state or recovery engine.
+
+Status stop reasons render both error codes using the same snake_case serde
+wire names as search error details, rather than Rust Debug variant names.

@@ -6,7 +6,8 @@ No-safe-reduction failures now retain ordinary retry eligibility and finite
 budgets without spending the reduction allowance. Failed attempts preserve the
 structured reduction diagnosis even when an ordinary retry recovers. The
 loopback Responses regression suite passes (22 passed, 1 intentionally ignored);
-full-suite and independent-review evidence will be recorded separately in
+Index storage-stop reasons now use the same snake_case codes as search details;
+the library suite passes. Full-suite and independent-review evidence belongs in
 [acceptance](../validation/acceptance.md).
 
 ## Issues #36–#39 review follow-up (2026-10-30)

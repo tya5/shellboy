@@ -217,9 +217,14 @@ impl IndexService {
         self.notify.notify_waiters();
     }
     fn storage_stop_reason(&self) -> Option<String> {
-        self.storage_diagnostic_stop.get().map(|stop| format!(
-            "Index workers stopped after a storage failure; the diagnostic pause could not be saved (processing={:?}, pause={:?}). Repair storage and restart the owner",
-            stop.processing_error_code, stop.pause_error_code))
+        self.storage_diagnostic_stop.get().map(|stop| {
+            let processing = json!(stop.processing_error_code);
+            let pause = json!(stop.pause_error_code);
+            format!(
+                "Index workers stopped after a storage failure; the diagnostic pause could not be saved (processing={}, pause={}). Repair storage and restart the owner",
+                processing.as_str().expect("ErrorCode serializes as a string"),
+                pause.as_str().expect("ErrorCode serializes as a string"))
+        })
     }
     fn stopped_search_error(&self) -> ApiError {
         if let Some(reason) = self.storage_stop_reason() {
@@ -983,7 +988,16 @@ mod idle_tests {
             "durable reason must survive: {reason}"
         );
         assert!(reason.contains("diagnostic pause could not be saved"));
-        assert!(reason.contains("pause=SaveFailed"));
+        let details = error.details.as_ref().unwrap();
+        for (label, field) in [
+            ("processing", "processing_error_code"),
+            ("pause", "pause_error_code"),
+        ] {
+            let code = details["storage_diagnostic_stop"][field].as_str().unwrap();
+            assert!(reason.contains(&format!("{label}={code}")), "{reason}");
+        }
+        assert!(reason.contains("pause=save_failed"));
+        assert!(!reason.contains("SaveFailed"));
         // Removing the trigger does not silently restart stopped workers.
         assert!(
             service
