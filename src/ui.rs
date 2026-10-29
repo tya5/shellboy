@@ -2393,6 +2393,7 @@ impl UiState {
                         || !view.pending.is_empty())
             })
             .map(|(key, view)| ThreadSummary {
+                activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,
                 thread_id: format!("draft:{key}"),

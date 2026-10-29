@@ -279,11 +279,12 @@ impl ThreadBrowser {
             KeyCode::F(1) => {
                 if let Some(thread) = self.items.get(self.selected) {
                     return ThreadOutcome::Info(format!(
-                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
+                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
                         thread.thread_id,
                         thread.title,
                         thread.cwd,
                         thread.parent_id.as_deref().unwrap_or("root"),
+                        activity_label(thread),
                         thread.state,
                         thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
                         thread.updated_at,
@@ -668,14 +669,14 @@ impl ThreadBrowser {
             let selected = row.index == selected_index;
             let current = active_thread == Some(thread.thread_id.as_str());
             let label = self.label(row, thread, selected, current, title_width);
-            let status_style = state_style(&thread.state);
+            let status_style = activity_style(thread.activity);
             let mut cells = vec![Cell::from(label).style(status_style)];
             if cwd_width > 0 {
                 cells.push(Cell::from(tail_path(&thread.cwd, cwd_width)));
             }
             if state_width > 0 {
                 cells.push(
-                    Cell::from(fit(&one_line(state(&thread.state)), state_width))
+                    Cell::from(fit(&one_line(activity_label(thread)), state_width))
                         .style(status_style),
                 );
             }
@@ -794,7 +795,7 @@ impl ThreadBrowser {
                         .as_deref()
                         .map(one_line)
                         .unwrap_or_else(|| "なし".into()),
-                    one_line(state(&thread.state)),
+                    one_line(activity_label(thread)),
                     if interrupted_by_app_exit(thread) {
                         " · Interrupted by app exit"
                     } else {
@@ -869,6 +870,25 @@ fn tail_path(path: &str, width: usize) -> String {
     format!("…{}", suffix.into_iter().rev().collect::<String>())
 }
 
+fn activity_label(thread: &ThreadSummary) -> &str {
+    if thread.thread_id.starts_with("draft:") {
+        &thread.state
+    } else {
+        thread.activity.label()
+    }
+}
+fn activity_style(phase: crate::activity::ActivityPhase) -> Style {
+    use crate::activity::ActivityPhase::*;
+    state_style(match phase {
+        Preparing | AwaitingModel | Tools | Running | Continuing => "running",
+        Retrying | Waiting | Background => "waiting",
+        Stopping => "stopping",
+        Recovery | Failed => "failed",
+        Completed => "completed",
+        _ => "idle",
+    })
+}
+
 fn state_style(value: &str) -> Style {
     Style::default().fg(match value {
         "preparing" | "running" | "live" => theme::ACCENT,
@@ -879,23 +899,6 @@ fn state_style(value: &str) -> Style {
         // selected row keeps its contrasting foreground on light terminals.
         _ => return Style::default(),
     })
-}
-
-fn state(value: &str) -> &str {
-    match value {
-        "preparing" => "準備",
-        "running" => "実行",
-        "waiting" => "待機",
-        "recovery_wait" => "復旧待ち",
-        "live" => "稼働",
-        "stopping" => "停止中",
-        "stopped" => "停止",
-        "completed" => "完了",
-        "failed" => "失敗",
-        "idle" => "未実行",
-        "draft" => "下書き",
-        other => other,
-    }
 }
 
 /// One line of visible Markdown text, bounded by graphemes and terminal cells.
@@ -1176,6 +1179,7 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
+            activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
             revisit: None,
             thread_id: id.into(),
@@ -1186,6 +1190,17 @@ mod tests {
             updated_at: "2026-10-25T09:30:00Z".into(),
             excerpt: "**選択した会話の抜粋**".into(),
         }
+    }
+
+    #[test]
+    fn activity_column_does_not_confuse_completed_answer_with_completed_work() {
+        let mut item = thread("background", None);
+        item.state = "completed".into();
+        item.activity = crate::activity::ActivityPhase::Background;
+        assert_eq!(activity_label(&item), item.activity.label());
+        assert_ne!(activity_style(item.activity), state_style(&item.state));
+        item.activity = crate::activity::ActivityPhase::Continuing;
+        assert_eq!(activity_label(&item), "実行継続中");
     }
 
     #[test]
@@ -1235,7 +1250,7 @@ mod tests {
                 if width == 120 {
                     assert_eq!(shown.contains("Interrupted by app exit"), marked);
                     assert!(
-                        shown.contains(state(&item.state)),
+                        shown.contains(activity_label(&item)),
                         "ordinary state must remain visible: {shown}"
                     );
                 }
@@ -1316,6 +1331,12 @@ mod tests {
                 let mut item = thread(&format!("s{i}"), None);
                 item.title = format!("Q{i:02}");
                 item.state = (*state).into();
+                item.activity = match *state {
+                    "live" => crate::activity::ActivityPhase::Continuing,
+                    "draft" | "future_state" => crate::activity::ActivityPhase::Idle,
+                    "recovery_wait" => crate::activity::ActivityPhase::Recovery,
+                    other => serde_json::from_value(serde_json::json!(other)).unwrap(),
+                };
                 item
             })
             .collect::<Vec<_>>();
@@ -1351,6 +1372,7 @@ mod tests {
         }
         let mut refreshed = items;
         refreshed[7].state = "recovery_wait".into();
+        refreshed[7].activity = crate::activity::ActivityPhase::Recovery;
         assert!(tree.apply(generation, None, refreshed, vec![], None, vec![], None));
         assert_eq!(tree.items()[tree.selected()].thread_id, "s7");
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
@@ -1363,6 +1385,7 @@ mod tests {
         );
         let mut inactive = tree.items().to_vec();
         inactive[7].state = "idle".into();
+        inactive[7].activity = crate::activity::ActivityPhase::Idle;
         assert!(tree.apply(generation, None, inactive, vec![], None, vec![], None));
         terminal
             .draw(|frame| tree.draw(frame, frame.area(), None, true))
@@ -1542,6 +1565,7 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
+            activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
             revisit: None,
             thread_id: "blank-title".into(),

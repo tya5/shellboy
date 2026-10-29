@@ -1342,10 +1342,16 @@ fn thread_excerpt(connection: &Connection, thread: &str) -> Result<String> {
 }
 
 const THREAD_LIST_SQL: &str = "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
-    COALESCE((SELECT state FROM turn WHERE run_id=latest.id ORDER BY created_at DESC,id DESC LIMIT 1),latest.state),
-    latest.stop_reason,latest.id
+    COALESCE(u.state,latest.state), latest.stop_reason,latest.id,latest.state,u.state,
+    EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=latest.id AND state IN ('starting','running','stopping'))
+      OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=latest.id AND state IN ('live','stopping')),
+    a.state,CASE WHEN a.state='failed' AND a.generation=u.generation AND json_valid(a.error_json)
+      THEN json_extract(a.error_json,'$.automatic_retry') END,
+    EXISTS(SELECT 1 FROM tool_group WHERE turn_id=u.id AND state='running')
 FROM thread t LEFT JOIN run latest ON latest.id=(
     SELECT r.id FROM run r WHERE r.thread_id=t.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
+LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=latest.id ORDER BY created_at DESC,id DESC LIMIT 1)
+LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id ORDER BY rowid DESC LIMIT 1)
 WHERE t.deleted_at IS NULL AND t.rowid<=?1
     AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
 ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
@@ -1403,7 +1409,25 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
             continue;
         }
         let excerpt = thread_excerpt(connection, &id)?;
+        let run: Option<String> = row.get(8).map_err(sql_error)?;
+        let turn: Option<String> = row.get(9).map_err(sql_error)?;
+        let attempt: Option<String> = row.get(11).map_err(sql_error)?;
+        let diagnostic: Option<String> = row.get(12).map_err(sql_error)?;
+        let retrying = diagnostic
+            .as_deref()
+            .and_then(|s| {
+                serde_json::from_str::<crate::ui::activity::AutomaticRetrySnapshot>(s).ok()
+            })
+            .is_some_and(|r| r.number > 0 && r.number <= r.limit);
         items.push(ThreadSummary {
+            activity: crate::activity::classify(
+                run.as_deref(),
+                turn.as_deref(),
+                row.get(10).map_err(sql_error)?,
+                attempt.as_deref() == Some("inflight"),
+                retrying,
+                row.get(13).map_err(sql_error)?,
+            ),
             thread_id: id,
             title,
             cwd,
@@ -1964,7 +1988,122 @@ mod thread_list_plan_tests {
             "{plans:?}"
         );
         assert!(!plans.iter().any(|p| p.contains("SCAN r")), "{plans:?}");
+        assert!(
+            plans.iter().any(|p| p.contains("shell_active_owner")),
+            "{plans:?}"
+        );
+        assert!(
+            plans.iter().any(|p| p.contains("runs_by_owner")),
+            "{plans:?}"
+        );
         // The outer Thread pagination may sort; the scalar Run lookup must use
         // its covering index instead of reading every Run in each Thread.
+    }
+}
+
+#[cfg(test)]
+mod activity_list_tests {
+    use super::*;
+    use crate::activity::ActivityPhase;
+    #[test]
+    fn many_threads_keep_activity_paged_and_indexed() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
+          INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+          SELECT printf('t%04d',x),'Synthetic','/','','p','m','2026-10-29T00:00:00Z' FROM n;
+          INSERT INTO run(id,thread_id,state,created_at) SELECT 'r'||id,id,'live',updated_at FROM thread;
+          INSERT INTO turn(id,thread_id,run_id,state,created_at) SELECT 'u'||id,id,'r'||id,'completed',updated_at FROM thread;
+          INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+          SELECT 's'||id,'r'||id,'u'||id,'op'||id,'running','/','{}','UTF-8','UTF-8','closed',updated_at FROM thread;").unwrap();
+        let begin = std::time::Instant::now();
+        let mut cursor = None;
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            let page = thread_list(
+                &db,
+                &ThreadListArgs {
+                    limit: 50,
+                    cursor,
+                    query: None,
+                },
+            )
+            .unwrap();
+            for item in page.items {
+                assert_eq!(item.state, "completed");
+                assert_eq!(item.activity, ActivityPhase::Background);
+                assert!(seen.insert(item.thread_id));
+            }
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(seen.len(), 2000);
+        eprintln!(
+            "issue44: 2000 background Threads, 40 pages: {:?}",
+            begin.elapsed()
+        );
+    }
+
+    #[test]
+    fn list_and_footer_share_owned_background_and_finalization_projection() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('parent','Parent','/','','p','m','2026-10-29T00:00:00Z'),('child','Child','/','','p','m','2026-10-29T00:00:00Z');
+          INSERT INTO run(id,thread_id,state,created_at) VALUES('r','parent','live','2026-10-29T00:00:00Z');
+          INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','parent','r','completed','2026-10-29T00:00:00Z');
+          INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+          VALUES('s','r','u','op','running','/','{}','UTF-8','UTF-8','closed','2026-10-29T00:00:00Z');").unwrap();
+        let verify = |expected, native| {
+            let page = thread_list(&db, &ThreadListArgs::default()).unwrap();
+            let item = page.items.iter().find(|t| t.thread_id == "parent").unwrap();
+            assert_eq!(item.state, native);
+            assert_eq!(item.activity, expected);
+            assert_eq!(
+                crate::frontend::activity::project(&db, "parent")
+                    .unwrap()
+                    .snapshot
+                    .phase,
+                expected
+            );
+        };
+        verify(ActivityPhase::Background, "completed");
+        db.execute("UPDATE shell_execution SET state='exited'", [])
+            .unwrap();
+        verify(ActivityPhase::Continuing, "completed");
+        db.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at) VALUES('kid','child','r','live','2026-10-29T00:00:00Z')", []).unwrap();
+        verify(ActivityPhase::Background, "completed");
+        db.execute("UPDATE run SET state='stopping' WHERE id='kid'", [])
+            .unwrap();
+        verify(ActivityPhase::Background, "completed");
+        db.execute("UPDATE run SET state='completed' WHERE id='kid'", [])
+            .unwrap();
+        verify(ActivityPhase::Continuing, "completed");
+        db.execute("UPDATE run SET state='completed' WHERE id='r'", [])
+            .unwrap();
+        verify(ActivityPhase::Completed, "completed");
+        db.execute("UPDATE run SET state='live' WHERE id='r'", [])
+            .unwrap();
+        db.execute("UPDATE turn SET state='running' WHERE id='u'", [])
+            .unwrap();
+        db.execute_batch("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)
+          VALUES('a','u',1,0,'p','m',0,'failed','{}','2026-10-29T00:00:00Z','{\"automatic_retry\":{\"number\":1,\"limit\":2,\"delay_ms\":10,\"partial_response_discarded\":false}}');").unwrap();
+        verify(ActivityPhase::Running, "running");
+        db.execute("UPDATE model_attempt SET generation=0", [])
+            .unwrap();
+        verify(ActivityPhase::Retrying, "running");
+        db.execute("UPDATE model_attempt SET state='inflight'", [])
+            .unwrap();
+        verify(ActivityPhase::AwaitingModel, "running");
+        db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+          SELECT 'bulk-'||value,'Synthetic','/','','p','m','2026-10-28T00:00:00Z' FROM json_each('[0,1,2]');").unwrap();
+        let idle = thread_list(&db, &ThreadListArgs::default()).unwrap();
+        assert!(
+            idle.items
+                .iter()
+                .filter(|t| t.thread_id.starts_with("bulk-"))
+                .all(|t| t.activity == ActivityPhase::Idle)
+        );
     }
 }

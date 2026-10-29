@@ -3404,6 +3404,7 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
+                activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,
                 thread_id: "valid".into(),
@@ -3415,6 +3416,7 @@ mod stream_tests {
                 excerpt: String::new(),
             },
             ThreadSummary {
+                activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,
                 thread_id: "unknown".into(),

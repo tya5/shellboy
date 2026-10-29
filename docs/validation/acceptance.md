@@ -1,5 +1,20 @@
 # Validation record
 
+## Issue #44: saved activity projection
+
+macOS arm64, pinned Rust 1.99.1, isolated worktree based on e194469.
+`cargo test --lib activity_list_tests -- --nocapture`: 2 passed, including
+2,000 synthetic active-shell Threads, 40 paged reads in 279 ms.
+`cargo test --test thread_browser`: 6 passed. Query-plan regression checks
+require run_thread_created, shell_active_owner and runs_by_owner access.
+The list/footer fixture verifies live shell and child work, stopping children,
+finalization without owned work, terminal Runs, idle Threads and current versus
+stale retry generations. Pure classifier and UI label/color tests also pass
+in the library run (632 passed / 0 failed / 10 ignored before the bulk fixture
+was added). Existing exit-marker and Revisit regressions remain covered.
+Full combined-task standard checks/CI and physical terminal use are not yet
+claimed here. No installed owner, real provider or user data was modified.
+
 ## Issue #40: focused validation
 
 Environment: macOS arm64, pinned Rust/Cargo 1.99.1, isolated issue worktree based

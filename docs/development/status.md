@@ -1,5 +1,15 @@
 # Development status
 
+## Issue #44: unified saved activity
+
+Thread list and conversation activity now share one pure classifier. Native
+ThreadSummary.state is unchanged; activity is separately available in JSON
+and used for list labels, colors and details. The query keeps one latest-Run
+seek and uses the existing shell/child ownership indexes. Focused list/footer
+fixtures, query-plan assertions and browser tests pass; 2,000 synthetic
+background Threads across 40 pages took 279 ms in the macOS debug fixture.
+Full-suite and native CI validation for the combined #44/#45 task is pending.
+
 ## Issue #40: remaining low-severity fixes
 
 No-safe-reduction failures now retain ordinary retry eligibility and finite

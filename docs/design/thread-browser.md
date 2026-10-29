@@ -139,3 +139,16 @@ against that actual statement, including outer Thread pagination. The selected
 detail appends `Interrupted by app exit` to the ordinary state rather than
 replacing it. Interrupted snapshot stop_reason follows the same COALESCE rule as
 startup terminalization: explicit_stop is retained.
+
+## Unified saved activity (Issues #44/#45)
+
+Thread list retains its native `state` field and adds a separate snake_case
+`activity` projection. One pure classifier is shared with the conversation
+footer: terminal/stopping Runs take precedence, completed Turns on live Runs
+with active owned shells/child Runs are background, and live Runs without
+remaining owned work are continuing. Running refinements use the latest saved
+attempt, retry diagnostic and tool-group facts. Latest Run and Turn ordering
+is created_at then ID, descending, on both surfaces. No Run means idle.
+The paged list obtains these facts in its existing query, using indexed EXISTS
+for owned work; no per-row activity queries or lifecycle writes are added.
+Exit markers and Revisit remain separate saved facts.

@@ -291,3 +291,12 @@ Argument-free `compact` follows spill then summary. `--spill` / `--summary` / `-
 `compact --restore --from ID` accepts a selected marker or the first node in its omitted source. Use it to restore the specific range named in a notification. Argument-free restore selects the most recently created marker and may target a different range when several omissions exist.
 
 Specify repeated source exclusions with `rag source add PATH --name NAME --exclude '*.db' --exclude build`. Reregistering without exclusions preserves them; supplied exclusions replace them; `--clear-excludes` clears them. Inspect `rag index --dry-run` `skipped` and per-source `selection`. `rag status` reports source scan/content-change times, current-profile `semantic_missing`, and bounded failures. Positively identified semantic-not-ready hybrid results return `ok:true`, `degraded:true`, and `scope_status`/`warnings`; actual errors and explicit semantic mode retain nonzero exit. See [RAG guide](rag.md) for recovery and background-index result retrieval.
+
+### Thread list activity (Issue #44)
+
+`thread list` preserves `state` (latest Turn/native fallback) and separately
+returns snake_case `activity`, using the same saved-fact classifier as the
+conversation footer. In particular, `state: "completed"` can coexist with
+`activity: "background"` or `"continuing"` while the latest Run remains live.
+`background` requires an active owned shell or child Run; `continuing` does
+not assert such work. Exit markers and Revisit are independent of activity.

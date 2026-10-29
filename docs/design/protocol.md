@@ -226,3 +226,12 @@ get/list/search/preview/statusはreceiptを作らず、同IDでも再観測す�
 
 
 `context.edit`は`thread_id`（省略可能）、`action`（spill/summary/omit/trim/restore）、`from_node_id` / `to_node_id`（モード別）を持つ。受付結果は既存compact同様のqueuedと`context_edit`引数を含み、receiptを上書きせず後続結果をdownstreamで返す。Thread詳細には`context_usage`を追加する。停止中など推定の非storageエラーは`available:false`/errorとして表現し、Thread照会自体を失敗させない。詳細は[圧縮設計](compaction.md)。
+
+### Thread list activity (Issue #44)
+
+`thread list` preserves `state` (latest Turn/native fallback) and separately
+returns snake_case `activity`, using the same saved-fact classifier as the
+conversation footer. In particular, `state: "completed"` can coexist with
+`activity: "background"` or `"continuing"` while the latest Run remains live.
+`background` requires an active owned shell or child Run; `continuing` does
+not assert such work. Exit markers and Revisit are independent of activity.

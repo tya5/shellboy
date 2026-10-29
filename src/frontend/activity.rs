@@ -5,7 +5,7 @@ use crate::{
     protocol::ApiError,
     ui::{
         UiUpdate,
-        activity::{ActivityPhase, ActivitySnapshot, AutomaticRetrySnapshot, RecoverySnapshot},
+        activity::{ActivitySnapshot, AutomaticRetrySnapshot, RecoverySnapshot},
     },
 };
 use rusqlite::{Connection, OptionalExtension};
@@ -105,7 +105,7 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::stora
             poll_running: false,
         });
     };
-    let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY rowid DESC LIMIT 1",[&run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
+    let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[&run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
     let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run_id],|r|r.get(0))?;
     let revisit = if matches!(run_state.as_str(), "live" | "stopping") {
         crate::control::revisit::summary(db, &run_id)?
@@ -224,26 +224,14 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::stora
         snapshot.turn_id = Some(turn_id);
         state = Some(turn_state);
     }
-    snapshot.phase = match (run_state.as_str(), state.as_deref()) {
-        ("stopping", _) => ActivityPhase::Stopping,
-        ("failed", _) => ActivityPhase::Failed,
-        ("stopped", _) => ActivityPhase::Stopped,
-        ("completed", _) => ActivityPhase::Completed,
-        (_, Some("recovery_wait")) => ActivityPhase::Recovery,
-        (_, Some("preparing")) => ActivityPhase::Preparing,
-        (_, Some("waiting")) => ActivityPhase::Waiting,
-        (_, Some("running")) if attempt_state.as_deref() == Some("inflight") => {
-            ActivityPhase::AwaitingModel
-        }
-        ("live", Some("running")) if snapshot.automatic_retry.is_some() => ActivityPhase::Retrying,
-        (_, Some("running")) if tool_running => ActivityPhase::Tools,
-        (_, Some("running")) => ActivityPhase::Running,
-        ("live", Some("completed")) if owned => ActivityPhase::Background,
-        (_, Some("failed")) => ActivityPhase::Failed,
-        (_, Some("stopped")) => ActivityPhase::Stopped,
-        ("live", _) => ActivityPhase::Continuing,
-        _ => ActivityPhase::Completed,
-    };
+    snapshot.phase = crate::activity::classify(
+        Some(&run_state),
+        state.as_deref(),
+        owned,
+        attempt_state.as_deref() == Some("inflight"),
+        snapshot.automatic_retry.is_some(),
+        tool_running,
+    );
     let poll_running = run_state == "stopping"
         || (run_state == "live"
             && (owned

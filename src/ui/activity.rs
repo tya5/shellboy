@@ -3,49 +3,8 @@ use super::theme;
 use ratatui::{style::Style, text::Span};
 use std::time::{Duration, Instant};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ActivityPhase {
-    #[default]
-    Idle,
-    Sending,
-    Reflecting,
-    Preparing,
-    AwaitingModel,
-    Retrying,
-    Receiving,
-    Tools,
-    Running,
-    Waiting,
-    Background,
-    Continuing,
-    Stopping,
-    Recovery,
-    Failed,
-    Stopped,
-    Completed,
-}
+pub use crate::activity::ActivityPhase;
 impl ActivityPhase {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Idle => "入力できます",
-            Self::Sending => "送信受付中",
-            Self::Reflecting => "保存済み・表示待ち",
-            Self::Preparing => "準備中",
-            Self::AwaitingModel => "モデル応答待ち",
-            Self::Retrying => "一時的なエラーのため再試行中",
-            Self::Receiving => "応答受信中",
-            Self::Tools => "ツール処理中",
-            Self::Running => "処理中",
-            Self::Waiting => "待機中",
-            Self::Background => "回答済み背景処理中",
-            Self::Continuing => "実行継続中",
-            Self::Stopping => "停止処理中",
-            Self::Recovery => "復旧待ち",
-            Self::Failed => "異常終了",
-            Self::Stopped => "中断済み",
-            Self::Completed => "完了",
-        }
-    }
     pub fn is_active(self) -> bool {
         self.motion() != Motion::Still
     }

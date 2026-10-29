@@ -1,5 +1,6 @@
 //! Shellboy native agent: typed operations, durable state and asynchronous workers.
 
+pub mod activity;
 pub mod app;
 pub mod attachments;
 pub mod cli;
