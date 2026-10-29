@@ -13,7 +13,13 @@ automatic retry for a rejected snapshot. Admission/coalescing and shutdown
 ownership are unchanged. The coder's macOS standard check passes: format,
 strict all-target Clippy, 86 test groups / 1,443 passed / 0 failed / 28 ignored.
 Independent review approves all three implementation commits with focused
-re-execution. Post-integration and three-OS CI results remain separate; see
+re-execution. The integrator's separate macOS standard check at `e01d397` also
+passes 86 groups / 1,443 passed / 0 failed / 28 ignored. The reviewed series
+through `8ff6c46` is pushed to `issue-40/integration`;
+[native CI 40916772603](https://github.com/tya5/shellboy/actions/runs/40916772603)
+passes all three OS jobs (Linux 1,444 / macOS 1,443 / Windows 1,332 passed,
+zero failed). Later documentation commits require their own review/CI boundary;
+see
 [acceptance](../validation/acceptance.md) and the
 [Shellboy trial record](issue-40-shellboy-trial.md).
 

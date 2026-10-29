@@ -12,7 +12,8 @@ and synthetic temporary stores are used for tests. The owner is not replaced
 or restarted.
 
 The main measurement window starts at the user's handoff signal,
-2026-10-29 16:41:31 +09:00, and ends at the final issue report. Read-only
+2026-10-29T16:41:31Z, using saved UTC event times, and ends at the fixed
+aggregate cutoff below. Read-only
 preparation is counted separately. The leader collects final model/Thread/Turn/
 message counts and measured cost for the integrator to append; no tentative
 count or inferred price is presented as final. The coder's configured model is
@@ -74,7 +75,57 @@ on this machine.
 
 Independent review approved all three implementation commits without findings
 and repeated Responses retries and the final library suite in its own worktree.
-No review-fix commit was necessary. Post-integration standard checks and final
-aggregate measurements remain separate evidence to append. The integrator
-alone performs any approved push and records three-OS CI; local success is not
-CI success.
+No review-fix commit was necessary. The integrator fast-forwarded the exact
+reviewed commits without squashing. Its separate standard check at `e01d397`
+passed format, strict all-target Clippy and 86 groups / 1,443 passed / 0 failed /
+28 ignored. The background shell completed in 433,698 ms (about 7 minutes
+14 seconds), with `shellboy wait` observations and paginated output retrieval.
+Neither local full check exceeded ten minutes. No artificial delay was added.
+
+The reviewed four-commit series through `8ff6c46` was pushed normally to
+`issue-40/integration`. [Native CI run 40916772603](https://github.com/tya5/shellboy/actions/runs/40916772603)
+passed all three OS jobs, including format, strict Clippy, full tests, the
+closed-proxy diagnostic and two fresh attachment processes; Windows also passed
+its separate overflow diagnostic. Full-test totals exclude those repeated
+focused checks: Linux 1,444 passed / 0 failed / 27 ignored, macOS 1,443 / 0 / 28,
+Windows 1,332 / 0 / 20, each across 86 groups. The Windows Tests step lasted
+10 minutes 48 seconds on CI; this is not evidence of a local ten-minute test
+being observed through `shellboy wait`. The CI watcher itself ran as a background
+shell for about 14 minutes 33 seconds and completed successfully.
+
+The final measurement/validation documentation is a separate review boundary.
+CI at `8ff6c46` does not establish success for a later documentation commit.
+No PR, issue closure, release, installed-binary replacement or owner restart is
+part of this task.
+
+## Fixed aggregate measurement
+
+The leader supplied the final aggregate over the half-open UTC interval
+[2026-10-29T16:41:31Z, 2026-10-29T17:13:09Z). Read-only preparation is excluded.
+Documentation after the cutoff, its re-review, final pushes and later CI
+observations are explicitly outside this measurement; it is not a count through
+the eventual final response.
+
+| Role | Observed model setting | Turns | Inbound user nodes |
+| --- | --- | ---: | ---: |
+| Leader | `gpt-6.1-sol` | 12 | 10 |
+| Coder | `gpt-6.1-sol` | 4 | 10 |
+| Reviewer | `gpt-6.1-sol` | 5 | 7 |
+| Integrator | `gpt-6.1-sol` | 9 | 9 |
+| Total (4 Threads) | | 30 | 36 |
+
+Method: paginate each Thread's `history list`, filter `provenance.created_at`
+by the interval above, count distinct `provenance.turn_id` within each Thread
+and sum, and separately count `kind=user` nodes. Inbound nodes include agent
+messages, not just human input; they are neither model-call counts nor human
+conversation counts. Event-started and empty-answer Turns are included. The
+leader checked each Thread's current configured model using `thread get`;
+that setting is not per-model API billing attribution. Cost and total token
+usage were not measured and are not estimated. Only aggregate counts and their
+definitions are recorded, not private conversations, raw logs or Thread IDs.
+
+During this final documentation pass, `apply_patch` was unavailable. The failed
+command made no edits; its compound shell ended with a successful read-only Git
+command, so the shell's exit 0 alone did not establish editing success. The
+integrator inspected the output and unchanged diff, then used bounded Python
+text replacements. This happened after the aggregate cutoff.

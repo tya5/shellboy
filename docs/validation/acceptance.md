@@ -43,7 +43,36 @@ separate macOS arm64 worktree. Post-integration full checks remain separate
 from the coder's standard check. Native Linux/Windows execution, physical
 terminal evaluation and three-OS CI are not established by these local results.
 See the [Shellboy development trial](../development/issue-40-shellboy-trial.md)
-for execution observations and pending aggregate measurements.
+for execution observations and aggregate measurements.
+
+### Post-integration and native CI evidence
+
+The integrator's separate macOS arm64 / Rust 1.99.1 worktree at `e01d397`
+passes the same standard command with exit 0: format, strict all-target Clippy,
+86 groups / 1,443 passed / 0 failed / 28 ignored. The background execution took
+433,698 ms (about 7 minutes 14 seconds). Its initial shell failed before testing
+because `rustc` was outside PATH; adding `$HOME/.cargo/bin` locally to the command
+fixed that without changing source or installed tools.
+
+The reviewed documentation through `8ff6c46` was then fast-forwarded and pushed
+normally to `issue-40/integration`.
+[Native CI run 40916772603](https://github.com/tya5/shellboy/actions/runs/40916772603)
+completed successfully at exact source `8ff6c46bad29ce9e88716a27c28c42e0d06ba588`:
+
+| Native runner | Test groups | Passed | Failed | Ignored |
+| --- | ---: | ---: | ---: | ---: |
+| Linux (`ubuntu-latest`) | 86 | 1,444 | 0 | 27 |
+| macOS (`macos-latest`) | 86 | 1,443 | 0 | 28 |
+| Windows (`windows-latest`) | 86 | 1,332 | 0 | 20 |
+
+These totals were independently summed from each job's Tests step. Each job
+also passes format, strict Clippy, the separate closed-proxy diagnostic and two
+fresh attachment runs; Windows passes its additional overflow diagnostic.
+Repeated focused runs are not counted as additional distinct full-suite tests.
+This native CI evidence supersedes the local-only platform boundary above,
+but does not establish physical-terminal or real-provider behavior. Ignored
+tests remain unexecuted. A later documentation commit is not covered by this
+run's exact source SHA.
 
 
 ## Review follow-up #36–#39 verification (2026-10-30)
