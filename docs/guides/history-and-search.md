@@ -222,3 +222,20 @@ Edit infrequently and in coherent ranges. Prompt caching after the edited positi
 To select a restoration range from its notice, use `compact --restore --from FIRST_OMITTED_SOURCE_NODE`. `--from` uniquely identifies either a selected marker ID or the first omitted source node ID. Argument-free restoration restores the most recently created selected marker, not necessarily that particular notice. Explicit `--summary` can include the currently adopted request, so normally keep the current request outside the range to preserve important instructions.
 
 Before the first successful request with usage information, estimates use a fixed character-to-token ratio and may be too small, especially for Japanese-heavy conversations. Also inspect observed `context_usage.last_successful_attempt.input_tokens`; if needed, shrink earlier with explicit compact or the connection's `compact_hint_tokens`. Do not treat unmeasured content as an exact token count.
+
+## Keyword retrieval after trimming
+
+`history search` uses the selected semantic index and query embedding. To search
+the same Thread membership without embedding, use:
+
+```sh
+shellboy rag search --query 'earlier decision' --scope history:THREAD_ID --mode keyword
+```
+
+Both scopes include the current path and recursive sources of completed
+summary/spill/omit replacements. A result with `thread_scope.on_current_path=false`
+is an original retained through replacement provenance, not a currently adopted
+node. This differs from `history list --thread`, which pages only the current
+path. Global `--scope history` intentionally searches all history instead.
+Read the original or summarize a selected range before restoring a large omitted
+range, which can recreate the same input failure.

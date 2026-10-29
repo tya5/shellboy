@@ -15,7 +15,10 @@ async fn call(root: &Path, command: RagCommand) -> Value {
     .await
 }
 async fn init(root: &Path) {
-    assert_eq!(call(root, RagCommand::Init).await["ok"], true);
+    let result = call(root, RagCommand::Init).await;
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["result"]["schema_version"], 3);
+    assert_eq!(result["result"]["migrated_from_schema"], Value::Null);
 }
 async fn add(root: &Path, path: &str, exclude: &[&str], clear: bool) -> Value {
     call(
@@ -546,6 +549,11 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     let migrated = call(root, RagCommand::Init).await;
     assert_eq!(migrated["ok"], true, "{migrated}");
     assert_eq!(migrated["result"]["already_initialized"], true);
+    assert_eq!(migrated["result"]["schema_version"], 3);
+    assert_eq!(migrated["result"]["migrated_from_schema"], 1);
+    let reopened = call(root, RagCommand::Init).await;
+    assert_eq!(reopened["result"]["migrated_from_schema"], Value::Null);
+    assert_eq!(reopened["result"]["schema_version"], 3);
     let listed = call(
         root,
         RagCommand::Source {
@@ -692,6 +700,8 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     assert_eq!(std::fs::read(&path).unwrap(), before);
     let migrated = call(root, RagCommand::Init).await;
     assert_eq!(migrated["ok"], true, "{migrated}");
+    assert_eq!(migrated["result"]["migrated_from_schema"], 2);
+    assert_eq!(migrated["result"]["schema_version"], 3);
     let db = rusqlite::Connection::open(&path).unwrap();
     assert_eq!(
         db.query_row("SELECT count(*) FROM sources", [], |r| r.get::<_, i64>(0))

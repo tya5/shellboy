@@ -154,3 +154,19 @@ A registered root replaced by a symlink or a non-regular, non-directory entry (i
 A supported file that fails on every synchronization keeps the overall index result at `partial_failure` (`ok:false`, nonzero CLI exit) on every attempt, even when unrelated changes and removals are applied successfully. Callers must inspect the result counts and individual failures rather than treating that exit as a rollback.
 
 Existing-store `rag init` takes the ordinary writer lock and applies the isolated schema migration without registering sources or starting indexing/embedding. Read-only old-schema errors recommend this non-content-mutating operation; dry-run remains read-only.
+
+## Thread-scoped history retrieval (Issue #34)
+
+`rag search --scope history:THREAD` applies the same current-path plus transitive completed-replacement-source scope as `history search --thread THREAD`, including summary, spill, and omit sources. Both adapters and semantic result revalidation share one SQL scope helper; no second membership rule, index, table, or worker is introduced. Filtering precedes keyword candidate collection and semantic ranking. A missing or deleted Thread is a scope failure. Keyword mode needs no embedding configuration and never starts indexing.
+
+Scoped history hits expose `thread_scope` with `thread_id` and `on_current_path`; false identifies a retained replacement source outside the current path. Existing `provenance.current_thread_paths` remains explicitly current-path-only. If several explicit Thread scopes return the same reference, RRF merges the reference and retains all memberships in `thread_scopes`; a single membership uses `thread_scope`. Global `history` remains opt-in and does not infer the caller's Thread. The existing finite per-node snapshots and revision witnesses remain; Thread scope is rechecked in each node snapshot, including after a previously collected candidate batch. Membership is not frozen across an entire keyword scan.
+
+
+### Explicit upgrade result (#33 follow-up)
+
+`rag init` returns `schema_version: 3` and nullable `migrated_from_schema` in its
+existing result. The latter is the pre-upgrade version only when this call
+actually upgraded an existing store; fresh creation and reopening a current
+store return null. Existing-source identities/counts remain unchanged and no
+indexing or model API is implied. The completion hint reports readiness before
+optional material-registration instructions.

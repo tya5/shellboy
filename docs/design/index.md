@@ -215,3 +215,23 @@ RAGの内部SpaceDescriptorは従来6項目にrequired query_profile_keyを加�
 Embeddingの全要求は接続設定 `request_timeout_ms`（既定60,000ms）のHTTP全体期限に従う。期限超過の `ModelError.kind=timeout` は一時障害として既存の有限retryと連続失敗pauseへ渡す。期限切れだけで即時無制限再送せず、既定の許可済入力・attempt・遅延を維持する。
 
 履歴検索のquery embeddingも同じ期限を使い、CLI切断tokenとowner停止tokenで待機中HTTPを中止する。直接API呼出しの `search_filtered` もowner停止に従い、明示caller tokenを必要とする経路は `search_filtered_cancellable` を使う。検索の取消しはindex workerの許可・pause・jobを変更せず、取消し後の再検索は外部課金が再発し得る。DB workerに既に投入した短い照会の巻戻しや、provider側の処理/課金取消しは保証しない。新worker・queue・表を加えない。
+
+## Failure-adoption coverage and local storage-stop diagnosis (#33 review)
+
+The process_one error boundary covers all Err results, not only provider-failure
+adoption: capacity_allowed database errors, drain_authorization/decode/write
+errors, claim database errors, and missing connection/model errors after claim
+also acquire the existing durable worker-error pause. A normal StorageLimit
+capacity pause remains its existing successful branch. Preserve a richer pause
+already saved by failure adoption rather than replacing its provider evidence.
+
+If the fallback diagnostic pause cannot be saved, stop the existing index
+workers and reject query embedding through their existing cancellation token.
+One AtomicBool owned by the existing IndexService records that this stop was a
+storage-diagnostic failure rather than owner shutdown. Search then says index
+workers stopped after a storage failure and advises repairing storage and
+restarting the owner. If the DB is still readable, status projects paused=true
+and this same in-memory reason; it is not presented as a durable pause. Normal
+owner shutdown keeps its existing owner-stopped message. The bit has exactly the
+service lifetime and is cleared only by constructing a new service, with no
+table, worker, queue, state machine or retry service added.

@@ -149,10 +149,16 @@ impl IndexService {
     pub async fn status(&self, args: IndexArgs) -> Result<IndexStatus, ApiError> {
         let keys = self.identity_keys();
         let family = self.endpoint_family_key.clone();
-        self.database
+        let mut status = self
+            .database
             .call(move |db| read_status(db, args, keys, family))
             .await
-            .map_err(db_error)
+            .map_err(db_error)?;
+        if let Some(reason) = self.storage_stop_reason() {
+            status.paused = true;
+            status.reason = Some(reason.into());
+        }
+        Ok(status)
     }
     pub(super) async fn next_delay(&self) -> Result<Duration, ApiError> {
         let keys = self.identity_keys();

@@ -1626,6 +1626,49 @@ async fn search_scope_is_selected_path_plus_transitive_completed_replacement_sou
         ids,
         vec!["nested-summary", "old-source", "shared", "summary"]
     );
+    // The independent keyword adapter observes precisely the same membership,
+    // even with no embedding configuration or selected knowledge database.
+    let data = f._temp.path().join("keyword-data");
+    std::fs::create_dir(&data).unwrap();
+    let history = data.join("shellboy.db");
+    f.db.call(move |db| {
+        db.execute("VACUUM INTO ?1", [history.to_string_lossy().as_ref()])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let keyword = shellboy::rag::execute(
+        shellboy::rag::RagOptions {
+            db: Some(f._temp.path().join("unused-rag.db")),
+            command: shellboy::rag::RagCommand::Search {
+                query: "cat".into(),
+                scope: vec!["history:fork".into()],
+                mode: shellboy::rag::SearchMode::Keyword,
+                limit: 100,
+            },
+        },
+        Some(f._temp.path().join("absent-config.toml")),
+        Some(data),
+        f._temp.path(),
+    )
+    .await;
+    assert_eq!(keyword["ok"], true, "{keyword}");
+    let mut keyword_ids = keyword["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| {
+            let id = hit["location"]["node_id"].as_str().unwrap().to_owned();
+            assert_eq!(hit["thread_scope"]["thread_id"], "fork");
+            assert_eq!(
+                hit["thread_scope"]["on_current_path"],
+                matches!(id.as_str(), "shared" | "summary")
+            );
+            id
+        })
+        .collect::<Vec<_>>();
+    keyword_ids.sort();
+    assert_eq!(keyword_ids, ids);
     f.db.call(|db| {
         db.execute("UPDATE thread SET deleted_at='now' WHERE id='fork'", [])?;
         Ok(())

@@ -116,6 +116,7 @@ fn make_hit(
     id: &str,
     body: HistoryBody,
     ranking: (f64, Option<f64>, Option<String>),
+    thread: Option<&str>,
 ) -> Result<search::Hit> {
     let db = &reader.connection;
     let (score, distance, space) = ranking;
@@ -137,7 +138,19 @@ fn make_hit(
         kind,
         location: json!({"node_id":id,"body_kind":body.kind,"coordinate":"extracted_unicode_characters"}),
         provenance,
-        scopes: vec!["history".into()],
+        scopes: vec![thread.map_or_else(|| "history".into(), |id| format!("history:{id}"))],
+        thread_scopes: thread
+            .map(|thread| {
+                crate::history::search_scope::on_current_path(db, thread, id).map(
+                    |on_current_path| crate::index::SearchThreadScope {
+                        thread_id: thread.into(),
+                        on_current_path,
+                    },
+                )
+            })
+            .transpose()?
+            .into_iter()
+            .collect(),
         score,
         distance,
         space,
@@ -178,13 +191,22 @@ fn raw_witness(db: &Connection, id: &str) -> Result<Option<Value>> {
     Ok(crate::history::RawWitness::for_node(db, id, true)?
         .map(|(raw, _)| json!({"execution":raw.execution,"generation":raw.generation,"saved_sequence":raw.saved_sequence,"encoding":raw.encoding})))
 }
-pub(super) fn keyword(path: &Path, query: &str) -> Result<Vec<search::Hit>> {
+fn validate_thread(db: &Connection, thread: Option<&str>) -> Result<()> {
+    if let Some(thread) = thread
+        && !crate::history::search_scope::exists(db, thread)?
+    {
+        return Err(err("thread_not_found", "Search Thread does not exist"));
+    }
+    Ok(())
+}
+pub(super) fn keyword(path: &Path, query: &str, thread: Option<&str>) -> Result<Vec<search::Hit>> {
     if query.trim().is_empty() {
         return Err(err("invalid_argument", "Provide a nonempty keyword query"));
     }
     // Reuse one finite reader and fetch only 32 IDs at a time. Release each
     // node snapshot; source witnesses, not one whole-history transaction, bind hits.
     let db = open(path)?;
+    validate_thread(&db.connection, thread)?;
     let mut after = 0i64;
     let watermark =
         db.connection
@@ -194,8 +216,12 @@ pub(super) fn keyword(path: &Path, query: &str) -> Result<Vec<search::Hit>> {
     let mut hits = Vec::new();
     loop {
         let rows = {
-            let mut q=db.connection.prepare("SELECT rowid,id FROM node WHERE rowid>?1 AND rowid<=?2 AND payload_json IS NOT NULL AND deleted_reason IS NULL ORDER BY rowid LIMIT 32")?;
-            q.query_map(params![after, watermark], |r| {
+            let sql = format!(
+                "{} SELECT rowid,id FROM node WHERE rowid>?1 AND rowid<=?2 AND payload_json IS NOT NULL AND deleted_reason IS NULL AND (?3 IS NULL OR id IN(SELECT id FROM scope)) ORDER BY rowid LIMIT 32",
+                crate::history::search_scope::cte("?3")
+            );
+            let mut q = db.connection.prepare(&sql)?;
+            q.query_map(params![after, watermark, thread], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?
@@ -205,6 +231,15 @@ pub(super) fn keyword(path: &Path, query: &str) -> Result<Vec<search::Hit>> {
         }
         for (rowid, id) in rows {
             after = rowid;
+            // A previous node releases its snapshot. Do not return a candidate
+            // from an obsolete Thread path/replacement set in this new snapshot.
+            validate_thread(&db.connection, thread)?;
+            if let Some(thread) = thread
+                && !crate::history::search_scope::contains(&db.connection, thread, &id)?
+            {
+                db.connection.execute_batch("ROLLBACK;BEGIN;")?;
+                continue;
+            }
             if !crate::history::reachability::searchable(&db.connection, &id)? {
                 db.connection.execute_batch("ROLLBACK;BEGIN;")?;
                 continue;
@@ -219,7 +254,7 @@ pub(super) fn keyword(path: &Path, query: &str) -> Result<Vec<search::Hit>> {
             };
             for body in bodies(&db.connection, &id, &kind, &payload)? {
                 if let Some(score) = search::keyword_score(&body.text, query) {
-                    hits.push(make_hit(&db, &id, body, (score, None, None))?);
+                    hits.push(make_hit(&db, &id, body, (score, None, None), thread)?);
                 }
             }
             if let Some(witness) = raw_witness(&db.connection, &id)? {
@@ -235,6 +270,7 @@ pub(super) fn keyword(path: &Path, query: &str) -> Result<Vec<search::Hit>> {
                                 raw: Some(found.witness),
                             },
                             (found.score, None, None),
+                            thread,
                         )?;
                         if !range.is_null() {
                             hit.location["range"] = range;
@@ -254,9 +290,14 @@ pub(super) fn keyword(path: &Path, query: &str) -> Result<Vec<search::Hit>> {
     }
     Ok(hits)
 }
-pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<Vec<search::Hit>> {
+pub(super) async fn semantic(
+    context: &search::Context,
+    query: &str,
+    thread: Option<&str>,
+) -> Result<Vec<search::Hit>> {
     let descriptor = {
         let db = open_connection(&context.history)?;
+        validate_thread(&db, thread)?;
         crate::index::rag_space(&db)
             .map_err(|error| {
                 if error.code == crate::protocol::ErrorCode::InvalidState {
@@ -310,13 +351,19 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
     let dimension = descriptor.dimension;
     let response = search::embed(&profile, &[query.into()], Some(dimension)).await?;
     let db = open(&context.history)?;
-    let matches = crate::index::rag_hits(&db.connection, &descriptor, &response.vectors[0], 100)
-        .map_err(|_| {
-            err(
-                "history_changed",
-                "History index changed or its witnesses expired; retry search",
-            )
-        })?;
+    let matches = crate::index::rag_hits(
+        &db.connection,
+        &descriptor,
+        &response.vectors[0],
+        100,
+        thread,
+    )
+    .map_err(|_| {
+        err(
+            "history_changed",
+            "History index changed or its witnesses expired; retry search",
+        )
+    })?;
     let mut hits = Vec::new();
     let mut raw_spans = Vec::new();
     for found in &matches {
@@ -379,6 +426,7 @@ pub(super) async fn semantic(context: &search::Context, query: &str) -> Result<V
                     Some(found.distance),
                     Some(descriptor.id.clone()),
                 ),
+                thread,
             )?;
             if let Some(range) = range {
                 hit.location["range"] = range;

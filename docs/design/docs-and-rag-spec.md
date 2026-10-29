@@ -53,7 +53,7 @@ PDF/Office はOSS backendを使うadapterを同梱する。backend実行ファ�
 
 ## 共通検索と原文
 
-scope は `docs`、`history`、`source:ID`（登録名も解決可）。省略時は
+scope は `docs`、`history`、`history:THREAD`、`source:ID`（登録名も解決可）。省略時は
 docs と全登録資料、履歴は明示opt-in。keyword が既定。
 semantic/hybrid は既存embedding接続設定を共用する。未設定・接続失敗・
 異なるendpoint/model/次元の混在は明示エラー。無断keyword fallbackはしない。
@@ -98,3 +98,15 @@ semantic/hybrid検索は既存RAG DBをread-onlyで開き、現在の同梱ガ�
 明示docs indexは従来のrevision/hash/embedding cacheを再利用し、途中失敗では成功済みcacheと旧公開版を保持する。同じindexの明示再実行で不足分だけ再開する。旧実装が検索時に作った互換cacheも使用可能で、不要な再課金をしない。binary更新後のguide版不一致/追加/除外は検索前に検知し、明示indexまで資料embeddingをしない。schema/worker/設定は増やさず、会話DBとは独立した既存RAG storeを使う。
 
 既定scopeの登録資料には、明示登録されたfile sourceと、公開済みingest本文のあるderived sourceを含める。初期化だけで作る空の内部derived容器は未登録資料と同じく既定scopeへ展開しない。これによりdocs準備済み/外部資料未登録のsemantic検索を、空容器の未索引エラーで失敗させない。空文字の明示scopeは引き続きscope_invalidであり、scope省略とは区別する。
+
+## Thread-scoped keyword history (Issue #34)
+
+The explicit `history:THREAD` scope shares the current-path plus transitive
+completed replacement-source membership of semantic `history search --thread`.
+Summary, spill, and omit sources are included, without extending to unrelated
+parent/fork history. Keyword mode needs no embedding or selected semantic index.
+Hits distinguish `thread_scope.on_current_path`; merged matches from several
+explicit Threads retain `thread_scopes`. `provenance.current_thread_paths`
+remains a current-path-only projection. The same SQL scope helper is used for
+ranking, candidate filtering and snapshot revalidation. A deleted/missing Thread
+is a scope failure, not an implicit all-history search.

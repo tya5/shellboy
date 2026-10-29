@@ -182,6 +182,7 @@ pub(super) struct Hit {
     pub location: Value,
     pub provenance: Value,
     pub scopes: Vec<String>,
+    pub thread_scopes: Vec<crate::index::SearchThreadScope>,
     pub score: f64,
     pub distance: Option<f64>,
     pub space: Option<String>,
@@ -195,7 +196,13 @@ impl Hit {
     }
 
     fn value(&self) -> Value {
-        json!({"reference":encode(&self.reference),"revision":self.reference.revision,"hash":self.reference.hash,"title":self.title,"excerpt":self.excerpt,"kind":self.kind,"location":self.location,"provenance":self.provenance,"scopes":self.scopes,"score":self.score,"distance":self.distance,"embedding_space":self.space,"method":self.method})
+        let mut value = json!({"reference":encode(&self.reference),"revision":self.reference.revision,"hash":self.reference.hash,"title":self.title,"excerpt":self.excerpt,"kind":self.kind,"location":self.location,"provenance":self.provenance,"scopes":self.scopes,"score":self.score,"distance":self.distance,"embedding_space":self.space,"method":self.method});
+        if self.thread_scopes.len() == 1 {
+            value["thread_scope"] = json!(self.thread_scopes[0]);
+        } else if !self.thread_scopes.is_empty() {
+            value["thread_scopes"] = json!(self.thread_scopes);
+        }
+        value
     }
 }
 fn excerpt(text: &str) -> String {
@@ -228,6 +235,7 @@ fn docs_keyword(query: &str) -> Vec<Hit> {
                 location: json!({"document_id":doc.id}),
                 provenance: json!({"parent_id":doc.parent_id,"source":"bundled_guide"}),
                 scopes: vec!["docs".into()],
+                thread_scopes: vec![],
                 score,
                 distance: None,
                 space: None,
@@ -249,7 +257,7 @@ fn material_hits(s: &store::Store, source: &str, query: &str) -> Result<Vec<Hit>
             let ordinal: i64 = row.get(0)?;
             let provenance: String = row.get(6)?;
             let content_hash = hash(text.as_bytes());
-            hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision:row.get(1)?,hash:content_hash,witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"block_offset_bytes":0,"block_end_bytes":text.len(),"coordinate":"extracted_utf8_bytes"}),provenance:json!({"source":serde_json::from_str::<Value>(&provenance).unwrap_or(Value::Null),"state":row.get::<_,String>(7)?,"document_id":row.get::<_,String>(8)?,"retrieval_unit":"block"}),scopes:vec![format!("source:{source}")],score,distance:None,space:None,method:"keyword".into()});
+            hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision:row.get(1)?,hash:content_hash,witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"block_offset_bytes":0,"block_end_bytes":text.len(),"coordinate":"extracted_utf8_bytes"}),provenance:json!({"source":serde_json::from_str::<Value>(&provenance).unwrap_or(Value::Null),"state":row.get::<_,String>(7)?,"document_id":row.get::<_,String>(8)?,"retrieval_unit":"block"}),scopes:vec![format!("source:{source}")],thread_scopes:vec![],score,distance:None,space:None,method:"keyword".into()});
             hits.sort_by(Hit::compare);
             hits.truncate(100);
         }
@@ -325,7 +333,7 @@ pub(super) async fn material_semantic(
         }
         let text: String = row.get(2)?;
         let distance: f64 = row.get(9)?;
-        hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision,hash:hash(text.as_bytes()),witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"chunk_start_bytes":row.get::<_,i64>(10)?,"chunk_end_bytes":row.get::<_,i64>(11)?,"coordinate":"extracted_utf8_bytes"}),provenance:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(6)?).unwrap_or(Value::Null),"state":row.get::<_,String>(7)?,"document_id":row.get::<_,String>(8)?,"retrieval_unit":"block"}),scopes:vec![format!("source:{source}")],score:distance,distance:Some(distance),space:Some(profile.id.clone()),method:"semantic".into()});
+        hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision,hash:hash(text.as_bytes()),witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"chunk_start_bytes":row.get::<_,i64>(10)?,"chunk_end_bytes":row.get::<_,i64>(11)?,"coordinate":"extracted_utf8_bytes"}),provenance:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(6)?).unwrap_or(Value::Null),"state":row.get::<_,String>(7)?,"document_id":row.get::<_,String>(8)?,"retrieval_unit":"block"}),scopes:vec![format!("source:{source}")],thread_scopes:vec![],score:distance,distance:Some(distance),space:Some(profile.id.clone()),method:"semantic".into()});
         if hits.len() >= 100 {
             break;
         }
@@ -385,6 +393,13 @@ fn command_prefix(context: &Context) -> Vec<String> {
     }
     command
 }
+fn history_scope(scope: &str) -> Option<Option<&str>> {
+    if scope == "history" {
+        Some(None)
+    } else {
+        scope.strip_prefix("history:").map(Some)
+    }
+}
 fn preparation_next(
     context: &Context,
     scope: &str,
@@ -392,7 +407,7 @@ fn preparation_next(
     preparation: &Preparation,
 ) -> Value {
     let mut prefix = command_prefix(context);
-    if scope == "history" {
+    if history_scope(scope).is_some() {
         prefix.extend(["index".into(), "status".into()]);
         return json!({"source":"history", "steps":[{"command":prefix,"purpose":"Inspect the matching running history owner before explicitly selecting/backfilling an index"}],
             "note":"History indexing belongs to the conversation owner, not rag index; no indexing was started"});
@@ -463,7 +478,7 @@ fn diagnose_preparation(
     };
     let observation = if scope == "docs" {
         super::builtin::preparation(context).ok().flatten()
-    } else if scope == "history" {
+    } else if history_scope(scope).is_some() {
         None
     } else {
         store::open(&context.database, false).ok().and_then(|s| {
@@ -561,10 +576,13 @@ pub(super) async fn search(
                 }
                 return Ok(());
             }
-            if scope == "history" {
+            if let Some(thread) = history_scope(scope) {
+                if thread.is_some_and(str::is_empty) {
+                    return Err(err("scope_invalid", "history: requires a Thread ID"));
+                }
                 if mode != SearchMode::Semantic {
                     keyword = "error";
-                    lists.push(history::keyword(&context.history, query)?);
+                    lists.push(history::keyword(&context.history, query, thread)?);
                     keyword = "ok";
                 }
                 if mode != SearchMode::Keyword {
@@ -575,14 +593,17 @@ pub(super) async fn search(
                             "Provider failure paused semantic search; no request was sent",
                         ));
                     }
-                    lists.push(history::semantic(context, query).await?);
+                    lists.push(history::semantic(context, query, thread).await?);
                     semantic = "ok";
                 }
                 return Ok(());
             }
-            let source = scope
-                .strip_prefix("source:")
-                .ok_or_else(|| err("scope_invalid", "Scope must be docs, history, or source:ID"))?;
+            let source = scope.strip_prefix("source:").ok_or_else(|| {
+                err(
+                    "scope_invalid",
+                    "Scope must be docs, history, history:THREAD, or source:ID",
+                )
+            })?;
             let s = store::open(&context.database, false)?;
             let id = store::resolve_source(&s.db, source)?;
             source_id = Some(id.clone());
@@ -669,6 +690,15 @@ pub(super) async fn search(
                 for scope in hit.scopes {
                     if !existing.scopes.contains(&scope) {
                         existing.scopes.push(scope);
+                    }
+                }
+                for membership in hit.thread_scopes {
+                    if !existing
+                        .thread_scopes
+                        .iter()
+                        .any(|item| item.thread_id == membership.thread_id)
+                    {
+                        existing.thread_scopes.push(membership);
                     }
                 }
                 if existing.method != hit.method {

@@ -18,6 +18,7 @@ mod thread;
 pub(crate) use raw_witness::RawWitness;
 pub(crate) use thread::{ThreadScope, selection_revision};
 mod search_bodies;
+pub(crate) mod search_scope;
 pub use relations::{provenance, relations};
 pub(crate) use search_bodies::search_bodies;
 

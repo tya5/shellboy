@@ -32,6 +32,7 @@ CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash);";
 pub(super) struct Store {
     pub db: Connection,
     pub uuid: String,
+    migrated_from_schema: Option<i64>,
     _lock: Option<File>,
 }
 pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
@@ -88,6 +89,7 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     Ok(Store {
         db,
         uuid,
+        migrated_from_schema: (write && version < 3).then_some(version),
         _lock: lock,
     })
 }
@@ -153,7 +155,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
         drop(_lock);
         let s = open(path, true)?;
         return Ok(
-            json!({"database_uuid":s.uuid,"already_initialized":true,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+            json!({"database_uuid":s.uuid,"already_initialized":true,"schema_version":3,"migrated_from_schema":s.migrated_from_schema,"next":"Knowledge database is ready. Optional: register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
         );
     }
     crate::storage::register_vec()
@@ -169,7 +171,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     tx.execute("INSERT INTO sources(id,name,root,kind) VALUES('@docs','@docs','','builtin'),('@derived','derived','','derived')",[])?;
     tx.commit()?;
     Ok(
-        json!({"database_uuid":uuid,"already_initialized":false,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+        json!({"database_uuid":uuid,"already_initialized":false,"schema_version":3,"migrated_from_schema":null,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
     )
 }
 pub(super) fn resolve_source(db: &Connection, id: &str) -> Result<String> {

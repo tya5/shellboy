@@ -256,7 +256,11 @@ fn refresh_hits(
                 .collect::<Vec<_>>(),
         )
         .map_err(|_| err(ErrorCode::InvalidState, "Cannot encode search result IDs"))?;
-        let mut query=db.prepare("WITH RECURSIVE scope(id) AS(SELECT node_id FROM thread_path WHERE thread_id=?1 UNION SELECT rs.source_node_id FROM scope s JOIN replacement r ON r.output_node_id=s.id AND r.state='completed' JOIN replacement_source rs ON rs.replacement_id=r.id) SELECT id FROM scope WHERE id IN(SELECT value FROM json_each(?2))").map_err(read_sql_error)?;
+        let sql = format!(
+            "{} SELECT id FROM scope WHERE id IN(SELECT value FROM json_each(?2))",
+            crate::history::search_scope::cte("?1")
+        );
+        let mut query = db.prepare(&sql).map_err(read_sql_error)?;
         Some(
             query
                 .query_map(params![thread, ids], |row| row.get::<_, String>(0))

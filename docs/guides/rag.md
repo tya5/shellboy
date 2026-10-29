@@ -55,10 +55,12 @@ shellboy rag index --source notes --mode semantic
 shellboy rag index --source docs --dry-run --mode semantic
 shellboy rag index --source docs --mode semantic
 shellboy rag search --query 'recover after restarting' --scope docs --scope source:notes --mode hybrid
+shellboy rag search --query 'earlier decisions' --scope history:THREAD_ID --mode keyword
+# Search every conversation only when that is intended:
 shellboy rag search --query 'earlier decisions' --scope history --mode keyword
 ```
 
-semantic/hybrid use the existing `[embedding]` and connection settings. Select configuration with `--config PATH`. A missing required API connection produces an explicit error rather than silently switching to keyword search. Repeat scopes to select `docs`, `history`, or `source:REGISTERED_ID_OR_NAME`. Without scopes, bundled guides and registered documents are searched. Conversation history is included only when explicitly selected. History access is read-only: it neither starts/recovers the conversation application nor reindexes it.
+semantic/hybrid use the existing `[embedding]` and connection settings. Select configuration with `--config PATH`. A missing required API connection produces an explicit error rather than silently switching to keyword search. Repeat scopes to select `docs`, `history:THREAD_ID`, global `history`, or `source:REGISTERED_ID_OR_NAME`. Without scopes, bundled guides and registered documents are searched. Conversation history is included only when explicitly selected. History access is read-only: it neither starts/recovers the conversation application nor reindexes it.
 
 Semantic search of bundled guides also requires `rag init` and explicit `rag index --source docs --mode semantic` beforehand. Dry-run reports document counts, text bytes, segment counts, and whether charges may occur. Search does not automatically embed guides. If they are not ready, or their revision changed after a binary upgrade, it reports the next index operation. Index without `--source` processes registered documents without implicitly adding bundled guides. The query embedding for semantic/hybrid search can itself incur API cost.
 
@@ -121,3 +123,21 @@ shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes
 ```
 
 A wait timeout means the work continues. After termination, read the index JSON inside read's `result.text` and inspect `ok`, counts, and failures. If output is long, continue with the returned `cursor`. Do not infer complete success from the exit code alone. The ID here belongs to the shell that ran the index command, not an acceptance CLI running `message send`, or an execution of wait/read itself. Raw output has a retention period; use `rag status` or `rag inspect` for later checks. No new operation-results DB or Core receipt is created. See the [Shell guide](shell.md).
+
+## Search one conversation without embedding
+
+Use `--scope history:THREAD_ID --mode keyword` to recover context after a trim,
+without embedding configuration, an index, or an API call. The scope is the same
+as `history search --thread THREAD_ID`: the current path and recursive sources
+of completed summary, spill and omit replacements. It does not include unrelated
+nodes or an entire parent/fork lineage.
+
+A scoped hit's `thread_scope` contains `thread_id` and `on_current_path`. False
+means the node belongs through replacement provenance, not that it is currently
+sent to the model. `provenance.current_thread_paths` still lists only actual
+current paths. When several explicit Thread scopes match one reference, the
+fused result retains their memberships in `thread_scopes`; global search has no
+implied caller Thread. A missing or deleted Thread reports a scope failure.
+Use the returned reference with `rag get`, or the original node with `history
+get`, before deciding whether to summarize or restore a smaller range. Restoring
+a large range may recreate the failure that led to trimming.

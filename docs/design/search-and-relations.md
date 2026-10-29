@@ -95,3 +95,7 @@ Thread論理削除時は最後のthread_path/thread_replacementを所有証拠�
 `history list --excerpt-chars N` はUnicode scalarで0〜4096、既定512。0ではexcerptは空文字とし、SQLのCASEでpayload_jsonを取得せず解析もしない。本文の存在や長さは別に `payload_chars` で返す。SQLite `length(payload_json)` による保存JSON全体の文字数であり、抽出本文長やモデルのtoken数ではない。tombstoneの回収済み本文はnull（不明）を返し、0と捏造しない。省略した一覧から必要なnodeだけhistory getで取得する。
 
 既存のPage/HistorySnippetとcontext/selection/provenance/実行リンクは保持し、上記fieldを加える。生成元Threadはfork先と異なるためcontext.thread_idをページの選択Threadへ置き換えない。今回は重複値のページ上位への移動を見送り、汎用field選択や別modeの枠組みを追加しない。既定値のcursor identityは維持し、512以外は抜粋上限もcursorへ束縛する。50件が常に16KiBに収まる保証はせず、固定fixtureで改善量を実測して記録する。
+
+## Shared keyword Thread scope (Issue #34)
+
+Standalone `rag search --scope history:THREAD` reuses the semantic search scope: current Thread path and recursive sources of completed replacements (summary, spill, and omit). The SQL scope definition and current-path projection live in `history::search_scope` and are shared by semantic ranking, semantic result revalidation, and RAG keyword retrieval. A source hit may have `thread_scope.on_current_path=false`; this is membership through replacement provenance, not current adoption. Keyword retrieval does not require embedding or alter the history/index.

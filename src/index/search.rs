@@ -43,7 +43,7 @@ impl IndexService {
         cancel: CancellationToken,
     ) -> Result<Vec<IndexHit>, ApiError> {
         tokio::select! { biased;
-            _ = self.stop.cancelled() => Err(err(ErrorCode::InvalidState, "Index owner stopped the search")),
+            _ = self.stop.cancelled() => Err(self.stopped_search_error()),
             _ = cancel.cancelled() => Err(err(ErrorCode::InvalidState, "Search caller disconnected")),
             result = self.search_filtered_inner(args, cancel.clone()) => result,
         }
@@ -215,17 +215,14 @@ fn ranked_hits(
         .map_err(|_| err(ErrorCode::InvalidArgument, "Invalid kinds"))?;
     let excluded = serde_json::to_string(&args.exclude_kinds)
         .map_err(|_| err(ErrorCode::InvalidArgument, "Invalid excluded kinds"))?;
-    let eligible_sql = "WITH RECURSIVE scope(id) AS (
-        SELECT node_id FROM thread_path WHERE thread_id=?2
-        UNION SELECT rs.source_node_id FROM scope s JOIN replacement r ON r.output_node_id=s.id AND r.state='completed' JOIN replacement_source rs ON rs.replacement_id=r.id
-    ) SELECT c.vec_row_id,c.source_node_id,c.source_revision,j.authorized_watermark,n.created_at,j.body_kind
+    let eligible_sql = format!("{} SELECT c.vec_row_id,c.source_node_id,c.source_revision,j.authorized_watermark,n.created_at,j.body_kind
     FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id AND j.state='done' AND j.space_id=c.space_id AND j.source_node_id=c.source_node_id AND j.source_revision=c.source_revision AND j.source_hash=c.content_hash AND j.span_start=c.span_start AND j.span_end=c.span_end
     JOIN node n ON n.id=c.source_node_id
     WHERE c.space_id=?1 AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL AND n.payload_revision=c.source_revision
       AND (?2 IS NULL OR n.id IN (SELECT id FROM scope))
       AND (json_array_length(?3)=0 OR n.kind IN (SELECT value FROM json_each(?3)))
-      AND n.kind NOT IN (SELECT value FROM json_each(?4))";
-    let mut statement = db.prepare(eligible_sql).map_err(sql_error)?;
+      AND n.kind NOT IN (SELECT value FROM json_each(?4))", crate::history::search_scope::cte("?2"));
+    let mut statement = db.prepare(&eligible_sql).map_err(sql_error)?;
     let mut rows = statement
         .query(params![space.id, args.thread_id, kinds, excluded])
         .map_err(sql_error)?;
@@ -401,6 +398,7 @@ pub(crate) fn rag_hits(
     descriptor: &SpaceDescriptor,
     vector: &[f32],
     limit: u32,
+    thread: Option<&str>,
 ) -> Result<Vec<IndexHit>, ApiError> {
     let Some(current) = rag_space(db)? else {
         return Err(err(
@@ -431,6 +429,7 @@ pub(crate) fn rag_hits(
         &HistorySearchArgs {
             query: "rag query".into(),
             limit,
+            thread_id: thread.map(str::to_owned),
             ..Default::default()
         },
     )
@@ -443,12 +442,7 @@ fn search_thread_scope(
     args.thread_id
         .as_ref()
         .map(|thread| {
-            let on_current_path = db
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2)",
-                    params![thread, node],
-                    |row| row.get(0),
-                )
+            let on_current_path = crate::history::search_scope::on_current_path(db, thread, node)
                 .map_err(sql_error)?;
             Ok(SearchThreadScope {
                 thread_id: thread.clone(),

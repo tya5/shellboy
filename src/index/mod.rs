@@ -128,6 +128,7 @@ pub struct IndexService {
     profile_key: Option<String>,
     endpoint_family_key: Option<String>,
     started: AtomicBool,
+    storage_diagnostic_failed: AtomicBool,
     reader: ShellOutputReader,
     source_slots: Arc<Semaphore>,
     search_slots: Arc<Semaphore>,
@@ -172,6 +173,7 @@ impl IndexService {
             profile_key,
             endpoint_family_key,
             started: AtomicBool::new(false),
+            storage_diagnostic_failed: AtomicBool::new(false),
             stop: CancellationToken::new(),
         })
     }
@@ -208,6 +210,21 @@ impl IndexService {
     pub(crate) fn cancel(&self) {
         self.stop.cancel();
         self.notify.notify_waiters();
+    }
+    fn storage_stop_reason(&self) -> Option<&'static str> {
+        self.storage_diagnostic_failed.load(Ordering::Acquire).then_some("Index workers stopped after a storage failure; the diagnostic pause could not be saved. Repair storage and restart the owner")
+    }
+    fn stopped_search_error(&self) -> ApiError {
+        if let Some(reason) = self.storage_stop_reason() {
+            let mut error = err(ErrorCode::InvalidState, reason);
+            error.hint = Some(
+                "Repair storage and restart the owner before issuing another semantic search"
+                    .into(),
+            );
+            error
+        } else {
+            err(ErrorCode::InvalidState, "Index owner stopped the search")
+        }
     }
     pub async fn start(self: &Arc<Self>) -> Result<IndexWorkers, ApiError> {
         if self.started.swap(true, Ordering::AcqRel) {
@@ -705,6 +722,8 @@ impl IndexService {
             if paused.is_err() {
                 // Storage cannot preserve even the diagnostic. Stop spending;
                 // restart/repair is required rather than a hidden retry loop.
+                self.storage_diagnostic_failed
+                    .store(true, Ordering::Release);
                 self.stop.cancel();
             }
         }
@@ -868,6 +887,77 @@ mod idle_tests {
         let error = service.search("synthetic query", 10).await.unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidState);
         assert!(error.message.contains("owner stopped"));
+        db.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn unsaved_diagnostic_pause_reports_storage_stop_in_search_and_readable_status() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(temp.path().join("storage-stop.sqlite"))
+            .await
+            .unwrap();
+        let mut config = Config::default();
+        config.connections.insert(
+            "fixture".into(),
+            crate::config::Connection {
+                base_url: "http://127.0.0.1:1/v1".into(),
+                ..Default::default()
+            },
+        );
+        config.embedding.connection = Some("fixture".into());
+        config.embedding.model = Some("synthetic".into());
+        let service = IndexService::new(db.clone(), Arc::new(config));
+        let record = IndexKeys::new(service.profile_key.as_deref().unwrap()).auto("malformed");
+        let saved_record = record.clone();
+        db.call(move |db| {
+            // A real authorization-decode failure occurs before any HTTP; a
+            // separate injected write failure prevents its diagnostic pause.
+            db.execute("INSERT INTO app_meta(key,value)VALUES(?1,'{\"state\":\"pending\"}')",[record])?;
+            db.execute_batch("CREATE TRIGGER refuse_index_pause BEFORE INSERT ON app_meta WHEN NEW.key LIKE 'index.pause.%' BEGIN SELECT RAISE(ABORT,'synthetic diagnostic write failure'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        assert!(service.process_one(CancellationToken::new()).await.is_err());
+        assert!(service.storage_diagnostic_failed.load(Ordering::Acquire));
+        let error = service.search("synthetic query", 10).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(
+            error
+                .message
+                .contains("Index workers stopped after a storage failure")
+        );
+        assert!(!error.message.contains("owner stopped"));
+        assert!(error.hint.unwrap().contains("restart the owner"));
+        db.call(move |db| {
+            db.execute_batch("DROP TRIGGER refuse_index_pause")?;
+            db.execute("DELETE FROM app_meta WHERE key=?1", [saved_record])?;
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key LIKE 'index.pause.%'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let status = service.status(IndexArgs::default()).await.unwrap();
+        assert!(status.paused);
+        assert!(
+            status
+                .reason
+                .unwrap()
+                .contains("diagnostic pause could not be saved")
+        );
+        // Removing the trigger does not silently restart stopped workers.
+        assert!(
+            service
+                .search("synthetic query", 10)
+                .await
+                .unwrap_err()
+                .message
+                .contains("storage failure")
+        );
         db.shutdown().await.unwrap();
     }
     #[tokio::test]

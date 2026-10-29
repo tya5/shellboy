@@ -66,6 +66,7 @@ pub enum RagCommand {
     Search {
         #[arg(long)]
         query: String,
+        /// Repeat docs, history, history:THREAD, or source:ID/name.
         #[arg(long)]
         scope: Vec<String>,
         #[arg(long, value_enum, default_value = "keyword")]
