@@ -506,7 +506,6 @@ dependencies = [
  "derive_more",
  "document-features",
  "filedescriptor",
- "futures-core",
  "mio",
  "parking_lot",
  "rustix",

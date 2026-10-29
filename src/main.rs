@@ -298,6 +298,8 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         cwd,
     } = prepared;
     termination.bind_diagnostics(owner.diagnostics.clone());
+    termination.bind_shell(control.shell_shutdown_handle());
+    termination.configure_shutdown(&owner.loaded.config);
     let config = owner.loaded.config.clone();
     runtime.spawn(control.clone().serve(rpc_receive));
     let (actions_send, actions_receive) = shellboy::ui::actions::channel(128);
@@ -320,6 +322,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     );
     drop(session);
     if matches!(&terminal_result, Ok(shellboy::ui::UiExitReason::Forced)) {
+        termination.force_cleanup();
         eprintln!(
             "Forced exit: conversation saving and owned process cleanup may be incomplete. Restart to inspect interrupted work."
         );

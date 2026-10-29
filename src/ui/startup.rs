@@ -206,6 +206,7 @@ fn wait_inner<T>(
             continue;
         }
         let rendered = (|| -> io::Result<bool> {
+            super::termination::check_terminal()?;
             let stage = *stages.borrow();
             let tick = if screen.error.is_some() {
                 0

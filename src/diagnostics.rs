@@ -125,6 +125,8 @@ pub(crate) struct ShutdownTrace {
     stage: ShutdownStage,
     boundary: ShutdownBoundary,
     elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<crate::protocol::ErrorCode>,
 }
 #[derive(Serialize)]
 struct Entry {
@@ -451,6 +453,31 @@ impl Diagnostics {
                 stage,
                 boundary,
                 elapsed_ms,
+                error_code: None,
+            }),
+        );
+    }
+    /// Fixed product classification only; never queue the underlying DB/OS
+    /// error message, path, or provider text after terminal presentation is lost.
+    pub(crate) fn record_shutdown_result(
+        &self,
+        scope: ShutdownScope,
+        stage: ShutdownStage,
+        elapsed_ms: u64,
+        error_code: Option<crate::protocol::ErrorCode>,
+    ) {
+        self.enqueue_with_details(
+            DiagnosticEvent::Shutdown,
+            DiagnosticIds::default(),
+            None,
+            None,
+            None,
+            Some(ShutdownTrace {
+                scope,
+                stage,
+                boundary: ShutdownBoundary::End,
+                elapsed_ms,
+                error_code,
             }),
         );
     }
@@ -620,5 +647,35 @@ mod tool_repair_tests {
         assert!(entry["tool_repair"]["group_id"].as_str().unwrap().len() <= 128);
         assert!(entry.get("body").is_none());
         assert!(entry.get("message").is_none());
+    }
+}
+
+#[cfg(test)]
+mod shutdown_result_tests {
+    use super::*;
+    #[tokio::test]
+    async fn failed_control_drain_keeps_fixed_error_code_after_writer_close() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(
+            root.path().to_owned(),
+            Logging {
+                file_bytes: 8192,
+                files: 2,
+            },
+        );
+        diagnostics.record_shutdown_result(
+            ShutdownScope::Frontend,
+            ShutdownStage::Control,
+            42,
+            Some(crate::protocol::ErrorCode::SaveFailed),
+        );
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let record: serde_json::Value = serde_json::from_str(body.trim()).unwrap();
+        assert_eq!(record["shutdown"]["error_code"], "save_failed");
+        assert_eq!(record["shutdown"]["boundary"], "end");
+        assert_eq!(record["shutdown"]["elapsed_ms"], 42);
+        assert!(record.get("message").is_none());
+        assert!(record.get("path").is_none());
     }
 }

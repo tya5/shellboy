@@ -1023,6 +1023,10 @@ impl Control {
     pub(crate) fn tool_start_gate(&self) -> Arc<std::sync::atomic::AtomicBool> {
         self.shell.start_gate()
     }
+    /// Owner lifecycle handle for final native cleanup before forced exit.
+    pub fn shell_shutdown_handle(&self) -> crate::shell::ShellSupervisor {
+        self.shell.clone()
+    }
     pub(crate) fn close_tool_start_admission(&self) {
         self.shell.close_start_admission();
     }

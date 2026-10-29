@@ -4346,6 +4346,7 @@ fn run_session(
             continue;
         }
         let rendered = (|| -> io::Result<()> {
+            termination::check_terminal()?;
             state.bell.flush(terminal.backend_mut(), Instant::now())?;
             for bytes in state.take_terminal_requests() {
                 use std::io::Write;

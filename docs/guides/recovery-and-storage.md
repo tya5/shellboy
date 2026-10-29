@@ -8,8 +8,14 @@ When responses stop, inspect saved acceptance, Turn, and Run state before repeat
 
 Delivered SIGTERM/SIGHUP request the same draft-preserving shutdown as Ctrl+Q.
 Losing the terminal stops further drawing/input and leaves shutdown running.
-A second delivered termination signal forces exit; cleanup also has a fixed
-five-second Unix / four-second Windows budget. OS deadlines, SIGKILL and power
+Repeated HUP/session-loss notifications do not force exit. A second explicit
+SIGTERM can force exit. Unix cleanup uses the configured native stop/drain and
+shutdown grace (9.25 seconds with defaults; five seconds before configuration
+is ready). Windows console close retains a four-second OS callback cap. Known
+owned Unix process groups receive a best-effort KILL before forced process exit;
+that does not prove saving or reaping completed. If blocked terminal output
+prevents restoration, Unix raw mode can be restored with `stty sane`.
+OS deadlines, SIGKILL and power
 loss can still interrupt saving: inspect the previous shutdown record after
 restart. A signal is a request to stop, not proof that every effect was saved.
 

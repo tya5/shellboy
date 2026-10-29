@@ -4,13 +4,41 @@ use std::{
     io,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
 use tokio::{sync::Notify, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
+
+/// Detect terminal EOF even when no controlling-session HUP is delivered.
+/// This is a readiness/health probe only: Crossterm still owns input parsing.
+pub(crate) fn check_terminal() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut descriptor = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
+        if result < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        } else if descriptor.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal input closed",
+            ));
+        }
+    }
+    Ok(())
+}
 const LOST: u32 = 4;
+const TERM_SEEN: u32 = 8;
+const EXPLICIT_FORCE: u32 = 16;
 #[cfg(windows)]
 const GRACE: Duration = Duration::from_secs(4);
 #[cfg(not(windows))]
@@ -54,6 +82,8 @@ struct Shared {
     notify: Notify,
     done: CancellationToken,
     diagnostics: OnceLock<Diagnostics>,
+    shell: OnceLock<crate::shell::ShellSupervisor>,
+    grace_ms: AtomicU64,
     started: Instant,
 }
 impl Shared {
@@ -65,6 +95,8 @@ impl Shared {
             notify: Notify::new(),
             done: CancellationToken::new(),
             diagnostics: OnceLock::new(),
+            shell: OnceLock::new(),
+            grace_ms: AtomicU64::new(GRACE.as_millis() as u64),
             started: Instant::now(),
         }
     }
@@ -73,13 +105,22 @@ impl Shared {
             .state
             .try_update(Ordering::AcqRel, Ordering::Acquire, |old| {
                 let count = old & 3;
-                Some(if count == 0 {
+                let mut next = if count == 0 {
                     (old & !3) | 1 | ((source as u32) << 8)
                 } else if count == 1 {
                     (old & !3) | 2 | ((source as u32) << 16)
                 } else {
                     old
-                })
+                };
+                // One terminal close can deliver HUP from both the kernel and
+                // its parent shell. Only repeated explicit TERM escalates.
+                if matches!(source, Source::Term) {
+                    if old & TERM_SEEN != 0 {
+                        next |= EXPLICIT_FORCE;
+                    }
+                    next |= TERM_SEEN;
+                }
+                Some(next)
             });
         self.notify.notify_one();
     }
@@ -129,9 +170,15 @@ impl Shared {
                 ShutdownStage::SignalForce
             },
         );
+        self.kill_native_groups();
         self.forced.store(true, Ordering::Release);
         self.notify.notify_waiters();
-        tokio::select! {biased;_=self.done.cancelled()=>{},_=tokio::time::sleep(Duration::from_millis(100))=>std::process::exit(1)}
+        tokio::select! {biased;_=self.done.cancelled()=>{},_=tokio::time::sleep(Duration::from_millis(100))=>{self.kill_native_groups();std::process::exit(1)}}
+    }
+    fn kill_native_groups(&self) {
+        if let Some(shell) = self.shell.get() {
+            shell.force_kill_live();
+        }
     }
 }
 #[cfg(unix)]
@@ -178,14 +225,25 @@ impl Termination {
         windows::install(shared.clone())?;
         let observed = shared.clone();
         let task=runtime.spawn(async move {
-            let mut deadline=None;
+            let mut shutdown_started=None;
             loop {
                 observed.flush();
-                if observed.state.load(Ordering::Acquire)&3>=2 {observed.force(false).await;break;}
-                if deadline.is_none() && observed.requested() {deadline=Some(tokio::time::Instant::now()+GRACE);}
+                if observed.state.load(Ordering::Acquire)&EXPLICIT_FORCE!=0 {observed.force(false).await;break;}
+                if shutdown_started.is_none() && observed.requested() {shutdown_started=Some(tokio::time::Instant::now());}
                 tokio::select! {biased;
                     _=observed.done.cancelled()=>break,
-                    _=async {if let Some(at)=deadline {tokio::time::sleep_until(at).await}else{std::future::pending::<()>().await}}=>{observed.force(true).await;break;},
+                    _=async {
+                        if let Some(start)=shutdown_started {
+                            loop {
+                                let grace=Duration::from_millis(observed.grace_ms.load(Ordering::Acquire));
+                                let remaining=grace.saturating_sub(start.elapsed());
+                                if remaining.is_zero(){break;}
+                                // Finite chunks avoid Instant overflow for very
+                                // large valid configured durations.
+                                tokio::time::sleep(remaining.min(Duration::from_secs(3600))).await;
+                            }
+                        } else {std::future::pending::<()>().await}
+                    }=>{observed.force(true).await;break;},
                     source=os.recv()=>observed.signal(source),
                     _=observed.notify.notified()=>{},
                 }
@@ -205,6 +263,31 @@ impl Termination {
     pub fn bind_diagnostics(&self, diagnostics: Diagnostics) {
         let _ = self.shared.diagnostics.set(diagnostics);
         self.shared.notify.notify_one();
+    }
+    pub fn bind_shell(&self, shell: crate::shell::ShellSupervisor) {
+        let _ = self.shared.shell.set(shell);
+    }
+    pub fn configure_shutdown(&self, config: &crate::config::Config) {
+        #[cfg(unix)]
+        {
+            // Native TERM grace, bounded direct reap and pipe drain, plus the
+            // existing shutdown grace for collection/persistence. Group probes
+            // add at most250ms. Do not truncate a configured native stop grace.
+            let millis = config
+                .io
+                .term_grace_ms
+                .saturating_add(config.io.drain_timeout_ms.saturating_mul(2))
+                .saturating_add(config.io.shutdown_grace_ms)
+                .saturating_add(250)
+                .max(GRACE.as_millis() as u64);
+            self.shared.grace_ms.store(millis, Ordering::Release);
+            self.shared.notify.notify_one();
+        }
+        #[cfg(not(unix))]
+        let _ = config; // Native Windows close callbacks retain their OS4s cap.
+    }
+    pub fn force_cleanup(&self) {
+        self.shared.kill_native_groups();
     }
     pub fn complete(&self) {
         self.shared.done.cancel();
@@ -301,5 +384,8 @@ mod tests {
             state.signal(Source::Hup);
         }
         assert_eq!(state.state.load(Ordering::Acquire) & 3, 2);
+        assert_eq!(state.state.load(Ordering::Acquire) & EXPLICIT_FORCE, 0);
+        state.signal(Source::Term);
+        assert_ne!(state.state.load(Ordering::Acquire) & EXPLICIT_FORCE, 0);
     }
 }

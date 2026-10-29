@@ -2895,7 +2895,12 @@ async fn run_with_delivery(
         trace(Stage::Images, Edge::End);
         trace(Stage::Control, Edge::Begin);
         let control_result = control.shutdown().await;
-        trace(Stage::Control, Edge::End);
+        shutdown_diagnostics.record_shutdown_result(
+            ShutdownScope::Frontend,
+            Stage::Control,
+            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            control_result.as_ref().err().map(|error| error.code),
+        );
         trace(Stage::Workers, Edge::Begin);
         while workers.join_next().await.is_some() {}
         trace(Stage::Workers, Edge::End);

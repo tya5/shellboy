@@ -162,12 +162,20 @@ pub struct ShellSupervisor {
     config: Config,
     // One-way owner-lifecycle fact, shared with the existing Quit mailbox.
     starts_closed: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(unix)]
+    native_groups: Arc<StdMutex<std::collections::BTreeSet<i32>>>,
+    #[cfg(unix)]
+    force_requested: Arc<std::sync::atomic::AtomicBool>,
 }
 impl ShellSupervisor {
     pub fn new(config: &Config) -> Self {
         Self {
             config: config.clone(),
             starts_closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(unix)]
+            native_groups: Arc::new(StdMutex::new(std::collections::BTreeSet::new())),
+            #[cfg(unix)]
+            force_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
     pub(crate) fn start_gate(&self) -> Arc<std::sync::atomic::AtomicBool> {
@@ -176,6 +184,30 @@ impl ShellSupervisor {
     pub(crate) fn close_start_admission(&self) {
         self.starts_closed
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// Final best effort before process::exit; only this live supervisor's
+    /// groups are eligible, never identifiers restored from saved metadata.
+    pub fn force_kill_live(&self) {
+        self.close_start_admission();
+        #[cfg(unix)]
+        {
+            self.force_requested
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            // A native spawn may own this lock. Forced exit must never wait
+            // behind it on either the UI or the independent deadline observer.
+            let groups = match self.native_groups.try_lock() {
+                Ok(groups) => Some(groups),
+                Err(std::sync::TryLockError::Poisoned(error)) => Some(error.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => None,
+            };
+            if let Some(groups) = groups {
+                for group in groups.iter() {
+                    let _ = signal_group(*group, libc::SIGKILL);
+                }
+            }
+        }
+        // Windows kernel Job handles already use kill-on-close; process exit
+        // closes those owned handles even though Rust destructors do not run.
     }
     pub(crate) fn starts_closed(&self) -> bool {
         self.starts_closed.load(std::sync::atomic::Ordering::SeqCst)
@@ -274,6 +306,9 @@ impl ShellSupervisor {
             .kill_on_drop(true)
             .process_group(0);
         let spawned_at = Instant::now();
+        // Serialize native publication with emergency force cleanup. No await
+        // or DB/file work occurs while this short native ownership lock is held.
+        let mut groups = self.native_groups.lock().unwrap_or_else(|e| e.into_inner());
         self.admit_start()?;
         let mut child = command.spawn().map_err(|error| {
             ApiError::new(ErrorCode::IoFailed, format!("shell spawn failed: {error}"))
@@ -281,6 +316,15 @@ impl ShellSupervisor {
         let pgid = child.id().ok_or_else(|| {
             ApiError::new(ErrorCode::IoFailed, "spawned shell has no process handle")
         })? as i32;
+        groups.insert(pgid);
+        if self
+            .force_requested
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            let _ = signal_group(pgid, libc::SIGKILL);
+        }
+        drop(groups);
+        let owned_group = unix_group::OwnedGroup::new(self.native_groups.clone(), pgid);
         let stdin = Arc::new(Mutex::new(child.stdin.take().map(ShellStdin::Unix)));
         let stdout = child.stdout.take().expect("stdout configured as piped");
         let stderr = child.stderr.take().expect("stderr configured as piped");
@@ -329,6 +373,7 @@ impl ShellSupervisor {
             }
             let (group_confirmed, group_forced) =
                 cleanup_group(pgid, kill_at, term_grace, drain_timeout).await;
+            owned_group.complete(group_confirmed);
             forced |= group_forced;
             let (state, reason, output_complete) =
                 io.finish(drain_timeout, stopped_before_exit).await;

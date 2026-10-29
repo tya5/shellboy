@@ -1,6 +1,42 @@
 //! Unix group signaling and finite cleanup, owned by the live supervisor.
 use super::{Duration, Instant};
 
+/// At most one entry per live native supervisor task. Removal on task completion
+/// or abort bounds lifetime; group ids never come from persistent state.
+pub(super) struct OwnedGroup {
+    groups: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<i32>>>,
+    pgid: i32,
+    confirmed_gone: bool,
+}
+impl OwnedGroup {
+    pub(super) fn new(
+        groups: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<i32>>>,
+        pgid: i32,
+    ) -> Self {
+        Self {
+            groups,
+            pgid,
+            confirmed_gone: false,
+        }
+    }
+    pub(super) fn complete(mut self, confirmed_gone: bool) {
+        self.confirmed_gone = confirmed_gone;
+        // Drop now, before output drain awaits: do not retain a stale PGID
+        // after disappearance or defer the last unconfirmed KILL until later.
+    }
+}
+impl Drop for OwnedGroup {
+    fn drop(&mut self) {
+        if !self.confirmed_gone {
+            let _ = signal_group(self.pgid, libc::SIGKILL);
+        }
+        self.groups
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.pgid);
+    }
+}
+
 pub(super) fn signal_group(pgid: i32, signal: i32) -> std::io::Result<()> {
     // Only the group number spawned by this live supervisor reaches here.
     // It is never restored from storage; probe/signal is not an atomic identity check.
