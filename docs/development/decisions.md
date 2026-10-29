@@ -1031,3 +1031,19 @@ Keep the five/four-second cleanup budgets and actual successful PTY-loss
 assertions. Re-evaluate this feature choice on Crossterm upgrades against the
 source behavior and the same physical PTY regression. Source inspection is not
 a substitute for running that regression or native Windows verification.
+
+## Issues #44/#45: read projections without new lifecycle state (2026-10-29 UTC)
+
+Status: adopted. The list retains native state and adds typed activity through
+one shared pure classifier. Running-only hints are gated so completed-answer
+background pages avoid historical tool-group scans. Existing indexed ownership
+EXISTS predicates distinguish shell/child work from finalization. No new schema
+is needed. Revisit and app-exit facts remain separate.
+
+Live shell elapsed_ms is explicitly a read-time wall-clock observation, not
+the terminal supervisor's monotonic duration. Highest retained output sequence
+provides last_output_at; reclaimed or absent output is null. Dynamic timing is
+added only to the bounded status page after fingerprint/cursor derivation.
+Revisit this choice if a future contract requires output-driven ordering or
+monotonic live timing; that would require a separate persistence/ownership
+design, not an implicit change to the present read projection.

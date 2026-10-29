@@ -9,7 +9,12 @@ null. Status fingerprint, cursor and sort keys exclude the new observations.
 Focused work-status tests pass (13 tests before the bulk-shell fixture was
 added), including output retention, read-only status, stable fingerprint and
 get/status agreement. Primary-key query-plan and clock-boundary tests pass.
-The combined standard check is in progress; native CI remains pending.
+Combined macOS standard check passes 86 groups / 1,451 passed / 0 failed /
+28 ignored. CI 40951871499 at 68f4f5d succeeds on Linux/macOS/Windows;
+Tests-step passed totals are 1,452/1,451/1,340 respectively. The 1,001-shell
+bounded status fixture also passes. See the [single-conversation trial
+record](issue-44-45-solo-trial.md) for request/token accounting and limitations.
+Later documentation changes require their own exact-SHA CI confirmation.
 
 ## Issue #44: unified saved activity
 
@@ -19,7 +24,9 @@ and used for list labels, colors and details. The query keeps one latest-Run
 seek and uses the existing shell/child ownership indexes. Focused list/footer
 fixtures, query-plan assertions and browser tests pass; 2,000 synthetic
 background Threads across 40 pages took 279 ms in the macOS debug fixture.
-Full-suite and native CI validation for the combined #44/#45 task is pending.
+Combined full-suite and three-OS CI validation is successful at 68f4f5d;
+see the #45 entry and acceptance record. Later documentation commits are not
+covered by that earlier exact-SHA CI.
 
 ## Issue #40: remaining low-severity fixes
 

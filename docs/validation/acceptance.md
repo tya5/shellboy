@@ -9,7 +9,16 @@ observe live duration increasing, preserve terminal duration, return null after
 output reclamation, and keep status fingerprint/order unchanged by output and
 time. Library timing tests verify future-start clamping, sequence rather than
 wall-clock ordering, unknown terminal duration and primary-key output lookup
-without a sort. Full combined-task standard check and 3 OS CI remain pending.
+without a sort. The final focused work_status suite passes 14 tests, including the
+1,001-shell bounded-page case (first 50-row page 62 ms, debug fixture).
+`sh scripts/check.sh` succeeds: 86 groups / 1,451 passed / 0 failed /
+28 ignored, 247,940 ms. Format/strict all-target Clippy and focused checks
+were repeated successfully at 68f4f5d. CI 40951871499 at exact head
+68f4f5dfaec20b120ea2eaa70f97002aa03be091 succeeds on all three OS jobs:
+Linux 86 groups / 1,452 passed / 0 failed / 27 ignored, macOS 86 /
+1,451 / 0 / 28, Windows 86 / 1,340 / 0 / 20. These are Tests-step totals;
+extra observation steps are not double-counted. Later documentation changes
+are not covered by this earlier exact-SHA CI.
 Physical terminals and real providers have not been exercised.
 
 ## Issue #44: saved activity projection
@@ -24,8 +33,9 @@ finalization without owned work, terminal Runs, idle Threads and current versus
 stale retry generations. Pure classifier and UI label/color tests also pass
 in the library run (632 passed / 0 failed / 10 ignored before the bulk fixture
 was added). Existing exit-marker and Revisit regressions remain covered.
-Full combined-task standard checks/CI and physical terminal use are not yet
-claimed here. No installed owner, real provider or user data was modified.
+Combined-task standard checks and native CI pass at 68f4f5d as recorded
+above. The final list rerun observed 267 ms for the same 2,000-Thread fixture.
+Physical terminal use is not claimed here. No installed owner, real provider or user data was modified.
 
 ## Issue #40: focused validation
 

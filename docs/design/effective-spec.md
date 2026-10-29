@@ -160,3 +160,10 @@ pool generation is retired for future requests, without claiming immediate
 closure of existing concurrent HTTP/2 requests. Repeated known-incomplete body
 sources stop automatic retries. No new persistent state, table, worker, queue
 or dependency is introduced.
+
+Issues #44/#45 share the saved activity classifier between the paged Thread
+list and conversation footer, and expose read-time live-shell duration plus
+latest retained output time on shell get/status. Native lifecycle state and
+terminal monotonic duration are unchanged. See [Thread browser](thread-browser.md),
+[shell](shell.md) and [work observability](work-observability.md). No table,
+worker, poller or migration is added.

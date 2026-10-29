@@ -140,7 +140,7 @@ detail appends `Interrupted by app exit` to the ordinary state rather than
 replacing it. Interrupted snapshot stop_reason follows the same COALESCE rule as
 startup terminalization: explicit_stop is retained.
 
-## Unified saved activity (Issues #44/#45)
+## Unified saved activity (Issue #44)
 
 Thread list retains its native `state` field and adds a separate snake_case
 `activity` projection. One pure classifier is shared with the conversation
