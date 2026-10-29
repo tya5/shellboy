@@ -1223,15 +1223,19 @@ async fn adopted_trim_allows_one_resumed_request_then_failure_enters_recovery() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn no_unprotected_groups_recover_without_ordinary_retries_or_mutation() {
-    no_candidates_after_failure(false).await;
-    no_candidates_after_failure(true).await;
+async fn no_unprotected_groups_follow_ordinary_retries_without_replacement() {
+    for path_shrinks_after_post in [false, true] {
+        for succeeds in [false, true] {
+            no_candidates_after_failure(path_shrinks_after_post, succeeds, 3).await;
+        }
+        no_candidates_after_failure(path_shrinks_after_post, false, 0).await;
+    }
 }
 
-async fn no_candidates_after_failure(path_shrinks_after_post: bool) {
+async fn no_candidates_after_failure(path_shrinks_after_post: bool, succeeds: bool, retries: u32) {
     let protected_request = "protected current request ".repeat(20_000);
     let mut fixture = Fixture::with_history(
-        8,
+        retries,
         10,
         5_000,
         true,
@@ -1282,9 +1286,40 @@ async fn no_candidates_after_failure(path_shrinks_after_post: bool) {
         .await
         .unwrap();
     pending.reply.send(Reply::error(503, "")).ok().unwrap();
-    assert_eq!(fixture.settled().await, "recovery_wait");
+    for retry in 0..retries {
+        let next = fixture.incoming().await;
+        next.reply
+            .send(if succeeds && retry + 1 == retries {
+                Reply::success()
+            } else {
+                Reply::error(503, "")
+            })
+            .ok()
+            .unwrap();
+    }
+    assert_eq!(
+        fixture.settled().await,
+        if succeeds {
+            "completed"
+        } else {
+            "recovery_wait"
+        }
+    );
     let attempts = fixture.attempts().await;
-    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts.len(), retries as usize + 1);
+    let failed_count = if succeeds { retries } else { retries + 1 };
+    for (number, (_, body)) in attempts.iter().take(failed_count as usize).enumerate() {
+        let body = body.as_ref().unwrap();
+        if !path_shrinks_after_post || number == 0 {
+            assert_eq!(
+                body["automatic_trim_attempt"]["outcome"],
+                "no_safe_reduction"
+            );
+        }
+        if number < retries as usize {
+            assert_eq!(body["automatic_retry"]["number"], number + 1);
+        }
+    }
     let saved = attempts[0].1.as_ref().unwrap();
     assert_eq!(
         saved["automatic_trim_attempt"]["outcome"],
@@ -1307,20 +1342,22 @@ async fn no_candidates_after_failure(path_shrinks_after_post: bool) {
     }
     assert!(saved["automatic_trim_attempt"]["result"]["target_tokens"].is_null());
     let target = fixture.accepted.thread_id.clone();
-    timeout(Duration::from_secs(2), async {
-        loop {
-            if let shellboy::control::EngineEvent::Changed {
-                thread_id,
-                recovery: true,
-            } = events.recv().await.unwrap()
-                && thread_id == target
-            {
-                break;
+    if !succeeds {
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if let shellboy::control::EngineEvent::Changed {
+                    thread_id,
+                    recovery: true,
+                } = events.recv().await.unwrap()
+                    && thread_id == target
+                {
+                    break;
+                }
             }
-        }
-    })
-    .await
-    .expect("committed recovery must notify the frontend");
+        })
+        .await
+        .expect("committed recovery must notify the frontend");
+    }
     fixture
         .control
         .store
@@ -1330,10 +1367,12 @@ async fn no_candidates_after_failure(path_shrinks_after_post: bool) {
                 .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")?
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            assert_eq!(
-                actual, protected_path,
-                "the failing no-candidate trim must not alter the prepared path"
-            );
+            if !succeeds {
+                assert_eq!(
+                    actual, protected_path,
+                    "the failing no-candidate trim must not alter the prepared path"
+                );
+            }
             assert_eq!(
                 db.query_row("SELECT count(*) FROM replacement", [], |row| row
                     .get::<_, i64>(0))?,

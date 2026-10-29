@@ -179,7 +179,6 @@ pub(super) async fn retry_or_recover(
         &failure.facts,
         connection.response_retry_partial,
     );
-    let mut no_candidates = false;
     // A previously rejected edit leaves the one-time trim right available,
     // but cannot override the second partial-upload failure's spending cap.
     if !repeated_upload_failure
@@ -218,15 +217,14 @@ pub(super) async fn retry_or_recover(
                     }
                     return Ok(());
                 }
-                trim::Outcome::NoCandidates => no_candidates = true,
-                trim::Outcome::Rejected => {}
+                trim::Outcome::NoCandidates | trim::Outcome::Rejected => {}
             }
             if slot.stop.is_cancelled() {
                 return Ok(());
             }
         }
     }
-    if budget.trim_resume_pending || no_candidates {
+    if budget.trim_resume_pending {
         // Only a failure of the first resumed POST is guarded. A successfully
         // adopted response clears this guard but never renews the trim right.
         policy = RetryPolicy::Ineligible;
@@ -248,12 +246,15 @@ pub(super) async fn retry_or_recover(
                 partial_output: true
             }
         );
-        let body = json!({"error":failure.error,"partial_text":failure.partial_text,
+        let mut body = json!({"error":failure.error,"partial_text":failure.partial_text,
             "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
             "raw_response":failure.raw_response,"attempt_id":attempt,
             "automatic_retry":{"number":budget.used+1,"limit":limit,
                 "delay_ms":delay.as_millis() as u64,"partial_response_discarded":partial,
                 "possible_duplicate_charge":true}});
+        if let Some(observation) = trim_not_applied {
+            body["automatic_trim_attempt"] = observation;
+        }
         let saved_attempt = attempt.clone();
         let turn = snapshot.turn.clone();
         let transition = control

@@ -150,9 +150,11 @@ finite bits in the existing per-Turn retry budget. An adopted reduction spends
 the right for this Turn/generation and guards its first resumed POST. If that
 POST fails, recover. Once a response is durably adopted, clear only the guard:
 later ordinary retries and explicit-overflow compaction retain their normal
-policy, while the reduction right remains spent. A no-candidate failure recovers
-without changing history. A rejected/stale optional preflight or failure-time
-reduction does not spend the right; cancellation returns to normal owner stop,
+policy, while the reduction right remains spent. A no-candidate failure leaves
+history unchanged, does not spend the reduction right, and follows ordinary
+retry eligibility and its finite budget. Its no-safe-reduction observation is
+preserved on the failed attempt, including when ordinary retries recover.
+A rejected/stale optional preflight or failure-time reduction does not spend the right; cancellation returns to normal owner stop,
 ordinary rejections proceed to normal admission/retry, and only storage failure
 stops the owner.
 

@@ -1,5 +1,28 @@
 # Validation record
 
+## Issue #40: focused validation
+
+Environment: macOS arm64, pinned Rust/Cargo 1.99.1, isolated issue worktree based
+on `91f92c2`. Synthetic temporary SQLite stores and loopback mocks only; no
+installed owner replacement, real provider traffic or user-data changes.
+
+- `CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 cargo test --locked --test response_retries`:
+  22 passed, 0 failed, 1 intentionally ignored (the existing 61-second outage).
+  No-candidate coverage includes both an initially all-protected large request
+  and a path shortened after POST: three retries followed by success or budget
+  exhaustion, plus zero retries. It verifies no replacements, unchanged failed
+  paths, recovery notification and saved no-safe-reduction diagnostics. Repeated
+  no-candidate observations on still-large requests also show the reduction
+  allowance remains available. Existing partial-output, Retry-After, stop,
+  adopted-reduction and overflow checks pass in the same suite.
+- The initial command could not find `cargo` on PATH and did not run tests;
+  exporting `$HOME/.cargo/bin` corrected the environment without changing the
+  toolchain or dependencies.
+
+Full standard checks, native Linux/Windows execution and three-OS CI are not
+established by these focused results.
+
+
 ## Review follow-up #36–#39 verification (2026-10-30)
 
 Source `9e4f8ea` includes separate #36/#37/#39/#38 commits listed in the

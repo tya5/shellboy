@@ -1,5 +1,14 @@
 # Development status
 
+## Issue #40: remaining low-severity fixes
+
+No-safe-reduction failures now retain ordinary retry eligibility and finite
+budgets without spending the reduction allowance. Failed attempts preserve the
+structured reduction diagnosis even when an ordinary retry recovers. The
+loopback Responses regression suite passes (22 passed, 1 intentionally ignored);
+full-suite and independent-review evidence will be recorded separately in
+[acceptance](../validation/acceptance.md).
+
 ## Issues #36–#39 review follow-up (2026-10-30)
 
 Review fixes are committed separately by issue: #36 `ce2f101`, #37 `b1979b6`,
