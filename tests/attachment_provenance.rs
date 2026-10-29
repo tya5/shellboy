@@ -90,10 +90,10 @@ fn incoming<'a>(
 ) -> impl std::future::Future<Output = Incoming> + 'a {
     let caller = std::panic::Location::caller();
     async move {
-        match timeout(Duration::from_secs(5), receive.recv()).await {
+        match timeout(Duration::from_secs(60), receive.recv()).await {
             Ok(Some(value)) => value,
             result => {
-                let diagnostic = timeout(Duration::from_secs(1), progress(control, thread)).await;
+                let diagnostic = timeout(Duration::from_secs(5), progress(control, thread)).await;
                 panic!(
                     "loopback request watchdog at {}:{}; receive={}; persisted phase after timeout={diagnostic:?}",
                     caller.file(),

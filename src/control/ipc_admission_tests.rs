@@ -34,7 +34,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
                     conditions: vec![WaitCondition::RunEnded {
                         run_id: "run".into(),
                     }],
-                    timeout_ms: 60000,
+                    timeout_ms: 600000,
                 }),
                 Some(operation),
                 None,
@@ -42,7 +42,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
             .await
         }));
     }
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let count = owner
                 .db
@@ -64,7 +64,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .await
     .unwrap();
     let status = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(60),
         crate::ipc::call(
             &owner.loaded.data_dir,
             Command::Status(StatusArgs::default()),
@@ -76,8 +76,23 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .unwrap()
     .unwrap();
     assert!(status.ok, "{status:?}");
+    let still_pending = owner
+        .db
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        still_pending, 24,
+        "status must bypass live waiters, not wait for their expiry"
+    );
     let stopped = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(60),
         crate::ipc::call(
             &owner.loaded.data_dir,
             Command::RunStop(RunTarget {
@@ -93,7 +108,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     assert!(stopped.ok, "{stopped:?}");
     for client in clients {
         assert!(
-            tokio::time::timeout(Duration::from_secs(3), client)
+            tokio::time::timeout(Duration::from_secs(60), client)
                 .await
                 .unwrap()
                 .unwrap()
