@@ -804,3 +804,30 @@ fn current_output_and_history_results_require_observation_fields() {
         );
     }
 }
+
+#[test]
+fn revisit_wire_rejects_blank_and_oversized_utf8_instructions() {
+    for (text, expected) in [
+        (" \n\t".into(), Some(ErrorCode::InvalidArgument)),
+        ("é".repeat(MAX_REVISIT_TEXT_BYTES / 2), None),
+        (
+            format!("{}x", "é".repeat(MAX_REVISIT_TEXT_BYTES / 2)),
+            Some(ErrorCode::InputLimit),
+        ),
+    ] {
+        let command = Command::RevisitSet(RevisitSetArgs { run_id: None, text });
+        assert_eq!(command.validate().err().map(|error| error.code), expected);
+        let value = serde_json::to_value(&command).unwrap();
+        assert_eq!(value["command"], "revisit.set");
+        assert_eq!(serde_json::from_value::<Command>(value).unwrap(), command);
+    }
+    assert!(
+        Command::RevisitGet(RevisitArgs {
+            run_id: Some(" ".into())
+        })
+        .validate()
+        .is_err()
+    );
+    assert!(Command::RevisitGet(RevisitArgs { run_id: None }).is_read_only());
+    assert!(!Command::RevisitCancel(RevisitArgs { run_id: None }).is_read_only());
+}

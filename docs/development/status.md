@@ -1,5 +1,31 @@
 # Development status
 
+## Revisit, resilient exit and interrupted-conversation visibility (2026-10-30)
+
+Issues #36/#38/#39 and the #37 review are implemented locally. Revisit reserves
+one bounded instruction per live Run, delivers it through ordinary developer
+events at normal completion, and exposes count/pending facts in Run/status,
+Thread list and the activity footer. Stop/shutdown/restart do not resume it;
+interrupted reservations remain inspectable. The optional per-Run limit defaults
+to unlimited. See [Revisit](../design/revisit.md).
+
+Delivered TERM/HUP, terminal loss and Windows console-close notifications use
+bounded existing shutdown; second signals/deadlines force exit. The latest Run's
+saved app-exit reason marks interrupted Threads without a new state or automatic
+resumption. See [OS termination](../design/os-signal-shutdown.md) and
+[Thread browser](../design/thread-browser.md).
+
+The #37 review now isolates structural group/cursor failures while other Threads
+remain usable, keeps SQL/global metadata errors fatal with context, and repairs
+against post-startup stopped shell facts. No live collector is guessed complete.
+Conversation schema 12 extends derived metadata byte accounting; protocol 2 is
+unchanged. The macOS standard check passes format, strict all-target Clippy and all tests:
+86 groups / 1,430 passed / 0 failed / 28 ignored. Actual Unix PTY termination
+checks also pass separately with two test threads. [Acceptance](../validation/acceptance.md) separates final results
+from remaining native-platform and real-model evaluation limits. Changes remain
+local; no push, release or installed-binary replacement has been performed.
+
+
 ## Issue #37: interrupted tool-group recovery (2026-10-29)
 
 Startup now completes missing current-format tool results, including groups

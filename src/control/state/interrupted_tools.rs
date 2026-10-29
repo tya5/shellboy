@@ -4,15 +4,56 @@ use super::*;
 const PAGE: usize = 32;
 const REASON: &str = "previous_instance_interrupted";
 
+#[derive(Default, Debug)]
+pub(crate) struct RepairReport {
+    pub repaired_groups: u64,
+    pub unresolved_groups: u64,
+    pub retired_groups: u64,
+    pub failures: Vec<crate::diagnostics::ToolRepairFailure>,
+}
+#[derive(Debug)]
+enum RepairError {
+    Structural(crate::diagnostics::ToolRepairReason),
+    Storage(StorageError),
+}
+impl From<rusqlite::Error> for RepairError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Storage(error.into())
+    }
+}
+impl From<StorageError> for RepairError {
+    fn from(error: StorageError) -> Self {
+        Self::Storage(error)
+    }
+}
+type RepairResult<T> = Result<T, RepairError>;
+use crate::diagnostics::ToolRepairReason;
+
+fn bounded_id(value: &str) -> String {
+    value.chars().take(128).collect()
+}
+fn fatal(error: StorageError, thread: &str, group: &str) -> StorageError {
+    let mut error = error.into_api_error();
+    error.message = format!(
+        "Interrupted tool repair failed for Thread {} group {}: {}",
+        bounded_id(thread),
+        bounded_id(group),
+        error.message
+    );
+    error.details = Some(json!({"thread_id":bounded_id(thread),"group_id":bounded_id(group)}));
+    error.into()
+}
+
 pub(crate) fn repair_interrupted_tool_groups(
     tx: &rusqlite::Transaction<'_>,
     at: &str,
-) -> Result<(), StorageError> {
+) -> Result<RepairReport, StorageError> {
+    let mut report = RepairReport::default();
     let mut after: Option<String> = None;
     loop {
         let comparison = if after.is_some() { ">" } else { ">=" };
         let sql = format!(
-            "SELECT g.id,g.attempt_id,g.turn_id,g.state FROM tool_group g WHERE g.id {comparison} ?1 AND (g.state<>'completed' OR EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state IN ('pending','running') OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) ORDER BY g.id LIMIT {PAGE}"
+            "SELECT g.id,g.attempt_id,g.turn_id,g.state,u.thread_id FROM tool_group g JOIN turn u ON u.id=g.turn_id WHERE g.id {comparison} ?1 AND (g.state<>'completed' OR EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state IN ('pending','running') OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) ORDER BY g.id LIMIT {PAGE}"
         );
         let groups = tx
             .prepare_cached(&sql)?
@@ -22,34 +63,62 @@ pub(crate) fn repair_interrupted_tool_groups(
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         if groups.is_empty() {
             break;
         }
-        for (group, attempt, turn, state) in groups {
-            crate::control::attachment_delivery::cancel_interrupted_group_tx(tx, &group, at)
-                .map_err(StorageError::from)?;
-            if collected_source_group(tx, &attempt, &turn)? {
-                after = Some(group);
-                continue;
+        for (group, attempt, turn, state, thread) in groups {
+            tx.execute_batch("SAVEPOINT startup_tool_group")?;
+            let repair = (|| -> RepairResult<bool> {
+                crate::control::attachment_delivery::cancel_interrupted_group_tx(tx, &group, at)
+                    .map_err(StorageError::from)?;
+                if collected_source_group(tx, &attempt, &turn)? {
+                    return Ok(false);
+                }
+                if !matches!(state.as_str(), "running" | "completed") {
+                    return Err(RepairError::Structural(ToolRepairReason::UnknownGroupState));
+                }
+                let bad_cursor: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.node_id=o.node_id JOIN thread t ON t.id=p.thread_id WHERE o.attempt_id=?1 AND o.item_type='function_call' AND t.deleted_at IS NULL AND t.cursor_node_id IS NOT (SELECT tail.node_id FROM thread_path tail WHERE tail.thread_id=t.id ORDER BY tail.ordinal DESC LIMIT 1))", [&attempt], |r|r.get(0))?;
+                if bad_cursor {
+                    return Err(RepairError::Structural(ToolRepairReason::CursorMismatch));
+                }
+                repair_calls(tx, &group, &attempt, &turn, at)?;
+                splice_results(tx, &group, &attempt, at)?;
+                tx.execute(
+                    "UPDATE tool_group SET state='completed' WHERE id=?1",
+                    [&group],
+                )?;
+                Ok(true)
+            })();
+            match repair {
+                Ok(repaired) => {
+                    tx.execute_batch("RELEASE startup_tool_group")?;
+                    if repaired {
+                        report.repaired_groups += 1;
+                    } else {
+                        report.retired_groups += 1;
+                    }
+                }
+                Err(RepairError::Structural(reason)) => {
+                    tx.execute_batch("ROLLBACK TO startup_tool_group; RELEASE startup_tool_group")?;
+                    report.unresolved_groups += 1;
+                    if report.failures.len() < 32 {
+                        report.failures.push(crate::diagnostics::ToolRepairFailure {
+                            thread_id: bounded_id(&thread),
+                            group_id: Some(bounded_id(&group)),
+                            reason,
+                        });
+                    }
+                }
+                Err(RepairError::Storage(error)) => return Err(fatal(error, &thread, &group)),
             }
-            if !matches!(state.as_str(), "running" | "completed") {
-                return Err(StorageError::Schema(
-                    "Interrupted tool group has an unknown state".into(),
-                ));
-            }
-            repair_calls(tx, &group, &attempt, &turn, at)?;
-            splice_results(tx, &group, &attempt, at)?;
-            tx.execute(
-                "UPDATE tool_group SET state='completed' WHERE id=?1",
-                [&group],
-            )?;
             after = Some(group);
         }
     }
-    Ok(())
+    Ok(report)
 }
 
 /// GC leaves call metadata after deliberately collecting deleted-owner payloads.
@@ -81,7 +150,7 @@ fn repair_calls(
     attempt: &str,
     turn: &str,
     at: &str,
-) -> Result<(), StorageError> {
+) -> RepairResult<()> {
     let mut after = -1i64;
     loop {
         let calls = tx.prepare_cached("SELECT c.call_id,c.ordinal,c.state,c.operation_id,r.node_id FROM tool_call c LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id WHERE c.group_id=?1 AND c.ordinal>?2 ORDER BY c.ordinal LIMIT 32")?
@@ -93,16 +162,12 @@ fn repair_calls(
         for (call, ordinal, state, execution, saved_result) in calls {
             after = ordinal;
             if !matches!(state.as_str(), "pending" | "running" | "completed") {
-                return Err(StorageError::Schema(
-                    "Interrupted tool call has an unknown state".into(),
-                ));
+                return Err(RepairError::Structural(ToolRepairReason::UnknownCallState));
             }
             if saved_result.is_none() {
                 let source: Option<String> = tx.query_row("SELECT node_id FROM output_item WHERE attempt_id=?1 AND item_type='function_call' AND json_extract(payload_json,'$.call_id')=?2", params![attempt,call], |r|r.get::<_,Option<String>>(0)).optional()?.flatten();
                 if source.is_none() {
-                    return Err(StorageError::Schema(
-                        "Interrupted tool call has no adopted function_call source".into(),
-                    ));
+                    return Err(RepairError::Structural(ToolRepairReason::MissingCallSource));
                 }
                 let not_started = state == "pending" && execution.is_none();
                 let mut result = json!({"status":if not_started {"not_started"} else {"interrupted"},
@@ -112,8 +177,8 @@ fn repair_calls(
                     let saved: Option<(String,Option<i64>,Option<bool>,String)> = tx.query_row("SELECT state,exit_code,output_complete,turn_id FROM shell_execution WHERE id=?1", [execution], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
                     if let Some((state, exit, complete, execution_turn)) = saved {
                         if execution_turn != turn {
-                            return Err(StorageError::Schema(
-                                "Interrupted tool execution belongs to another Turn".into(),
+                            return Err(RepairError::Structural(
+                                ToolRepairReason::ExecutionTurnMismatch,
                             ));
                         }
                         result["saved_execution"] =
@@ -152,15 +217,15 @@ fn splice_results(
     group: &str,
     attempt: &str,
     at: &str,
-) -> Result<(), StorageError> {
+) -> RepairResult<()> {
     let any_new: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_result r JOIN node n ON n.id=r.node_id WHERE r.group_id=?1 AND n.created_at=?2 AND json_extract(n.payload_json,'$.startup_repair')=1)", params![group,at], |r|r.get(0))?;
     if !any_new {
         return Ok(());
     }
     let sources = tx.prepare_cached("SELECT DISTINCT node_id FROM output_item WHERE attempt_id=?1 AND item_type='function_call' AND node_id IS NOT NULL LIMIT 2")?.query_map([attempt], |r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let [source] = sources.as_slice() else {
-        return Err(StorageError::Schema(
-            "Interrupted group has no unique adopted call-source node".into(),
+        return Err(RepairError::Structural(
+            ToolRepairReason::AmbiguousCallSource,
         ));
     };
     let mut after: Option<String> = None;
@@ -192,7 +257,7 @@ fn splice_thread(
     source: &str,
     thread: &str,
     at: &str,
-) -> Result<(), StorageError> {
+) -> RepairResult<()> {
     let cursor: Option<String> = tx.query_row(
         "SELECT cursor_node_id FROM thread WHERE id=?1",
         [thread],
@@ -206,9 +271,7 @@ fn splice_thread(
         )
         .optional()?;
     if cursor != tail {
-        return Err(StorageError::Schema(
-            "Interrupted result destination cursor does not match its selected path".into(),
-        ));
+        return Err(RepairError::Structural(ToolRepairReason::CursorMismatch));
     }
     let count_sql = format!("SELECT count(*) FROM ({NEW_RESULTS})");
     let count: i64 = tx.query_row(&count_sql, params![group, at, thread], |r| r.get(0))?;
@@ -234,18 +297,16 @@ fn splice_thread(
     let shift = maximum
         .checked_add(count)
         .and_then(|n| n.checked_add(1))
-        .ok_or_else(|| {
-            StorageError::Schema("Interrupted result ordinal exceeds storage range".into())
-        })?;
-    let threshold = anchor_ordinal.checked_add(1).ok_or_else(|| {
-        StorageError::Schema("Interrupted result ordinal exceeds storage range".into())
-    })?;
-    maximum.checked_add(shift).ok_or_else(|| {
-        StorageError::Schema("Interrupted result ordinal exceeds storage range".into())
-    })?;
-    let shifted_threshold = threshold.checked_add(shift).ok_or_else(|| {
-        StorageError::Schema("Interrupted result ordinal exceeds storage range".into())
-    })?;
+        .ok_or(RepairError::Structural(ToolRepairReason::OrdinalOverflow))?;
+    let threshold = anchor_ordinal
+        .checked_add(1)
+        .ok_or(RepairError::Structural(ToolRepairReason::OrdinalOverflow))?;
+    maximum
+        .checked_add(shift)
+        .ok_or(RepairError::Structural(ToolRepairReason::OrdinalOverflow))?;
+    let shifted_threshold = threshold
+        .checked_add(shift)
+        .ok_or(RepairError::Structural(ToolRepairReason::OrdinalOverflow))?;
     tx.execute(
         "UPDATE thread_path SET ordinal=ordinal+?3 WHERE thread_id=?1 AND ordinal>=?2",
         params![thread, threshold, shift],
@@ -264,9 +325,9 @@ fn splice_thread(
         [],
     )? != 1
     {
-        return Err(StorageError::Schema(
-            "Interrupted result root revision is missing".into(),
-        ));
+        return Err(
+            StorageError::Schema("Interrupted result root revision is missing".into()).into(),
+        );
     }
     Ok(())
 }
@@ -346,6 +407,191 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap()
     }
+    #[test]
+    fn bad_group_rolls_back_only_itself_and_other_thread_repairs_continue() {
+        let mut db = fixture();
+        db.execute_batch(r#"
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('bad-thread','/','/','p','m','old');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('bad-run','bad-thread','stopped','old');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('bad-turn','bad-thread','bad-run','stopped','old');
+            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('bad-attempt','bad-turn',0,0,'p','m',0,'completed','{}','old');
+            INSERT INTO tool_group VALUES('aaa-bad','bad-attempt','bad-turn','running','old');
+            INSERT INTO tool_call VALUES('aaa-bad','first',0,'shell','{}','running','bad-exec');
+            INSERT INTO tool_call VALUES('aaa-bad','missing',1,'shell','{}','pending',NULL);
+            INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('bad-exec','bad-run','bad-turn','bad-exec','stopped','/','{}','UTF-8','UTF-8','closed','old');
+        "#).unwrap();
+        {
+            let tx = db.transaction().unwrap();
+            let output = json!([{"type":"function_call","call_id":"first","name":"shell","arguments":"{}"},{"type":"function_call","call_id":"missing","name":"shell","arguments":"{}"}]);
+            crate::history::append_node(
+                &tx,
+                "bad-thread",
+                "bad-source",
+                Some("bad-turn"),
+                "assistant_response",
+                &json!({"output":output,"group_id":"aaa-bad"}),
+                "old",
+            )
+            .unwrap();
+            tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id) VALUES('bad-attempt',0,'function_call','completed',?1,'bad-source')",[output[0].to_string()]).unwrap();
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('bad-attachment','attachment_source','old','{}')",[]).unwrap();
+            tx.execute("INSERT INTO attachment_delivery(node_id,thread_id,status,operation_id,origin_json,created_at) VALUES('bad-attachment','t','held','bad-op',?1,'old')",[json!({"kind":"shell","execution_id":"bad-exec","run_id":"bad-run"}).to_string()]).unwrap();
+            tx.commit().unwrap();
+        }
+        let before: i64 = db
+            .query_row(
+                "SELECT selection_revision FROM thread WHERE id='bad-thread'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        let report = repair_interrupted_tool_groups(&tx, "startup").unwrap();
+        assert_eq!(report.repaired_groups, 1);
+        assert_eq!(report.unresolved_groups, 1);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].thread_id, "bad-thread");
+        assert_eq!(report.failures[0].group_id.as_deref(), Some("aaa-bad"));
+        assert!(matches!(
+            report.failures[0].reason,
+            ToolRepairReason::MissingCallSource
+        ));
+        assert_eq!(
+            tx.query_row(
+                "SELECT count(*) FROM tool_result WHERE group_id='aaa-bad'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT count(*) FROM node WHERE turn_id='bad-turn'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT count(*) FROM thread_path WHERE thread_id='bad-thread'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT selection_revision FROM thread WHERE id='bad-thread'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            before
+        );
+        assert_eq!(
+            tx.query_row("SELECT state FROM tool_group WHERE id='aaa-bad'", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "running"
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT state FROM tool_call WHERE group_id='aaa-bad' AND call_id='first'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "running"
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT status FROM attachment_delivery WHERE node_id='bad-attachment'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "held"
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT count(*) FROM tool_result WHERE group_id='group'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3
+        );
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn unresolved_group_diagnostic_previews_are_bounded() {
+        let mut db = fixture();
+        for i in 0..40 {
+            db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES(?1,'attempt','turn','unknown','old')",[format!("bad-{i:02}")]).unwrap();
+        }
+        let tx = db.transaction().unwrap();
+        let report = repair_interrupted_tool_groups(&tx, "startup").unwrap();
+        assert_eq!(report.unresolved_groups, 40);
+        assert_eq!(report.failures.len(), 32);
+        assert_eq!(report.repaired_groups, 1);
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn bad_cursor_is_reported_even_when_every_real_result_already_exists() {
+        let mut db = fixture();
+        {
+            let tx = db.transaction().unwrap();
+            repair_interrupted_tool_groups(&tx, "first-startup").unwrap();
+            tx.commit().unwrap();
+        }
+        db.execute_batch("UPDATE tool_group SET state='running' WHERE id='group'; UPDATE thread SET cursor_node_id='source' WHERE id='t';").unwrap();
+        let before = path(&db);
+        let tx = db.transaction().unwrap();
+        let report = repair_interrupted_tool_groups(&tx, "second-startup").unwrap();
+        assert_eq!(report.unresolved_groups, 1);
+        assert_eq!(report.repaired_groups, 0);
+        assert!(matches!(
+            report.failures[0].reason,
+            ToolRepairReason::CursorMismatch
+        ));
+        assert_eq!(
+            tx.query_row("SELECT state FROM tool_group WHERE id='group'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "running"
+        );
+        tx.commit().unwrap();
+        assert_eq!(path(&db), before);
+    }
+
+    #[test]
+    fn missing_global_root_revision_remains_fatal_with_group_context() {
+        let mut db = fixture();
+        db.execute("DELETE FROM app_meta WHERE key='root_revision'", [])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        let error = repair_interrupted_tool_groups(&tx, "startup")
+            .unwrap_err()
+            .into_api_error();
+        assert_eq!(error.code, ErrorCode::SaveFailed);
+        assert_eq!(error.details.unwrap()["group_id"], "group");
+        assert!(error.message.contains("root revision"));
+        tx.rollback().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM tool_result", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
     #[test]
     fn terminal_turn_repairs_partial_group_without_moving_or_rewriting_real_results() {
         let mut db = fixture();
@@ -466,7 +712,12 @@ mod tests {
         db.execute_batch("CREATE TRIGGER reject_final_repair BEFORE INSERT ON tool_result WHEN NEW.call_id='c' BEGIN SELECT RAISE(ABORT,'synthetic result save failure'); END;").unwrap();
         {
             let tx = db.transaction().unwrap();
-            assert!(repair_interrupted_tool_groups(&tx, "startup").is_err());
+            let error = repair_interrupted_tool_groups(&tx, "startup")
+                .unwrap_err()
+                .into_api_error();
+            assert_eq!(error.code, ErrorCode::SaveFailed);
+            assert_eq!(error.details.as_ref().unwrap()["thread_id"], "t");
+            assert_eq!(error.details.as_ref().unwrap()["group_id"], "group");
         }
         assert_eq!(
             (
@@ -654,10 +905,36 @@ mod tests {
                 _ => unreachable!(),
             }
             let tx = db.transaction().unwrap();
-            let error = repair_interrupted_tool_groups(&tx, "startup").unwrap_err();
+            let report = repair_interrupted_tool_groups(&tx, "startup").unwrap();
+            assert_eq!(
+                report.retired_groups, 0,
+                "{consumer}: retained source cannot be treated as collected"
+            );
+            assert_eq!(report.repaired_groups, 0, "{consumer}");
+            assert_eq!(report.unresolved_groups, 1, "{consumer}");
+            assert_eq!(report.failures.len(), 1, "{consumer}");
             assert!(
-                error.to_string().contains("adopted function_call source"),
-                "{consumer}: {error}"
+                matches!(
+                    report.failures[0].reason,
+                    ToolRepairReason::MissingCallSource
+                ),
+                "{consumer}"
+            );
+            assert_eq!(
+                tx.query_row("SELECT state FROM tool_group WHERE id='group'", [], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap(),
+                "running"
+            );
+            assert_eq!(
+                tx.query_row(
+                    "SELECT count(*) FROM tool_result WHERE group_id='group'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
             );
         }
     }

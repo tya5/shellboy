@@ -4,7 +4,7 @@ Start with the [effective specification](effective-spec.md). Use ordinary Cargo
 layout: modules in `src/`, integration tests in `tests/`, versioned SQL in
 `migrations/`, and subdirectories only for modules that need them.
 
-- Architecture: [implementation](implementation.md), [runtime](runtime.md), [Control](control.md), [interrupted tool groups](tool-group-recovery.md), [state boundaries](control-boundary-map.md)
+- Architecture: [implementation](implementation.md), [runtime](runtime.md), [OS termination](os-signal-shutdown.md), [Control](control.md), [Revisit](revisit.md), [interrupted tool groups](tool-group-recovery.md), [state boundaries](control-boundary-map.md)
 - Public contracts: [protocol](protocol.md), [CLI](cli.md), [configuration](config.md)
 - Persistence and history: [storage](storage.md), [history](history.md), [compaction](compaction.md), [GC](gc.md), [index](index.md), [history adoption and hot queries](history-adoption-performance.md)
 - External execution: [model HTTP](model-http.md), [shell](shell.md), [output](output.md), [wait](wait.md), [attachments](attachments.md), [attachment provenance](attachment-provenance.md)

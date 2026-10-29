@@ -315,8 +315,8 @@ within each scope after the existing writer has drained.
 
 Startup's existing transaction first captures pre-terminal interruption facts,
 including bounded tool-call facts separately from actual OS shell executions.
-Then it closes unresolved current-format tool groups before terminalizing old
-Turns, executions, Runs and receipts. Selection is based on incomplete group /
+Then it terminalizes old Turns and shell executions, and closes repairable
+current-format tool groups before terminalizing old Runs and receipts. Selection is based on incomplete group /
 call / missing-result invariants, even when the Turn is already terminal; it is
 not release-version migration or an old-format compatibility reader.
 
@@ -329,7 +329,12 @@ inspection, command replay, success inference or raw-output reconstruction is
 performed. Persist result, complete call/group, splice new nodes into live paths,
 and advance selection/root revisions atomically. Only new result nodes are
 inserted; existing DAG nodes/edges/results are not moved or rewritten. Repeating
-startup creates no duplicates. Failure rolls back the whole recovery transaction.
+startup creates no duplicates. A fixed group-local structural inconsistency rolls
+back only that group through a savepoint, leaves it unresolved for the replay
+guard, and records bounded Thread/group/reason diagnostics after commit. Other
+groups continue. Actual SQL/storage failures, missing global root_revision,
+snapshot/savepoint failures and later startup failures still roll back the whole
+recovery transaction; fatal repair errors identify Thread/group.
 Cancel unadopted shell-origin attachments from those groups before completion;
 applied sources and file contents remain governed by their existing lifetimes.
 No table, schema version, worker, queue, or engine event is added.
@@ -344,3 +349,12 @@ and never pull unselected results from the database. Validate complete unique
 call/output pairs before HTTP; malformed paths fail locally without fabricated
 results or a paid provider rejection. All transient ordering structures are
 bounded by the existing lease's frames/items and released with that request.
+
+## Preserving explicit stop at lifecycle boundaries (Issue #39)
+
+Startup interruption, drained Run shutdown, and final drained shutdown preserve an already recorded Run stop reason with COALESCE. A crash while an explicit stop is draining must retain `explicit_stop`; only an unclassified live/stopping Run receives the application-exit reason. Thread-list markers derive from the latest Run rather than a new persistent state.
+
+
+OS SIGTERM/SIGHUP and terminal loss use the existing shutdown path under the
+[bounded termination contract](os-signal-shutdown.md); a second signal or OS
+cleanup budget expiry is a forced-exit boundary, not successful drain.

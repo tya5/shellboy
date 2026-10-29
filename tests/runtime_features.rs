@@ -1680,6 +1680,27 @@ async fn accepted_quit_prevents_tools_from_a_late_model_response_without_cancell
     actions.close_tool_starts_on_quit(&control);
     send(&control, &thread, "response will arrive after Quit").await;
     let pending = incoming(&mut receive).await;
+    let target = thread.clone();
+    let run: String = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT id FROM run WHERE thread_id=?1 AND state='live'",
+                [target],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    request(
+        &control,
+        Command::RevisitSet(RevisitSetArgs {
+            run_id: Some(run.clone()),
+            text: "Do not fire after Quit admission".into(),
+        }),
+    )
+    .await;
     actions.try_send(shellboy::ui::UiAction::Quit).unwrap();
     let marker = root.path().join("forbidden-after-quit");
     let command = format!("printf forbidden > '{}'", marker.display());
@@ -1696,6 +1717,35 @@ async fn accepted_quit_prevents_tools_from_a_late_model_response_without_cancell
         .unwrap();
     settled(&control, &thread).await;
     assert!(!marker.exists());
+    let reservation = request(
+        &control,
+        Command::RevisitGet(RevisitArgs {
+            run_id: Some(run.clone()),
+        }),
+    )
+    .await;
+    assert!(
+        reservation["pending"].is_object(),
+        "Quit admission preserves the reservation until shutdown captures it"
+    );
+    assert_eq!(
+        reservation["consumed_count"], 0,
+        "Quit admission must not fire Revisit"
+    );
+    let target = run.clone();
+    assert_eq!(
+        control
+            .store
+            .database
+            .call(move |db| Ok(db.query_row(
+                "SELECT count(*) FROM event WHERE kind='revisit' AND target_run_id=?1",
+                [target],
+                |r| r.get::<_, i64>(0)
+            )?))
+            .await
+            .unwrap(),
+        0
+    );
     owner
         .db
         .call(|db| {

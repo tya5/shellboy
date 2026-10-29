@@ -5,6 +5,7 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_VERSION: u32 = 2;
+pub const MAX_REVISIT_TEXT_BYTES: usize = 8192;
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
 pub const MAX_LIST_LIMIT: u32 = 200;
@@ -48,6 +49,7 @@ states!(ErrorCode {
     OperationExpired,
     OperationNotFound,
     InvalidState,
+    RevisitLimitReached,
     WaitCycle,
     CursorExpired,
     CursorEncodingMismatch,
@@ -153,6 +155,7 @@ impl ApiError {
             ErrorCode::OperationConflict => "Query the existing receipt with shellboy operation get --operation OPERATION_ID; do not change the ID to repeat the same side effect",
             ErrorCode::OperationExpired | ErrorCode::OperationNotFound => "Inspect saved target state and history; an unavailable receipt does not prove the mutation was never applied",
             ErrorCode::InvalidState => "Inspect the target with its get command; read shellboy docs get --id shellboy/recovery-and-storage before choosing retry or stop",
+            ErrorCode::RevisitLimitReached => "Inspect revisit get and the configured per-Run limit; continue or stop this Run explicitly rather than retrying registration",
             ErrorCode::WaitCycle => "Inspect Run ownership and wait dependencies; correct the wait direction instead of polling around the cycle",
             ErrorCode::CursorExpired => "Restart the same list/read with its original target and filters, without the old cursor; previously returned items or bytes may repeat",
             ErrorCode::CursorEncodingMismatch => "Restart shell read without the old cursor and specify the desired encoding; previously read bytes may be returned again",
@@ -406,6 +409,8 @@ args!(OperationTarget {
     operation_id: String
 });
 args!(RunTarget { run_id: String });
+args!(RevisitArgs { run_id: Option<String> });
+args!(RevisitSetArgs { run_id: Option<String>, text: String });
 args!(TurnTarget { turn_id: String });
 args!(ExecutionTarget {
     execution_id: String
@@ -556,6 +561,12 @@ pub enum Command {
     RunRetry(RunTarget),
     #[serde(rename = "run.stop")]
     RunStop(RunTarget),
+    #[serde(rename = "revisit.set")]
+    RevisitSet(RevisitSetArgs),
+    #[serde(rename = "revisit.get")]
+    RevisitGet(RevisitArgs),
+    #[serde(rename = "revisit.cancel")]
+    RevisitCancel(RevisitArgs),
     #[serde(rename = "turn.get")]
     TurnGet(TurnTarget),
     #[serde(rename = "wait")]
@@ -780,10 +791,11 @@ fn frame_io(error: std::io::Error) -> ApiError {
 }
 
 // Core result records deliberately retain provider-specific bodies as JSON payloads.
-args!(ThreadSummary { thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, updated_at: String, excerpt: String });
+args!(RevisitSummary { pending: bool, consumed_count: u64, last_fired_at: Option<String> });
+args!(ThreadSummary { thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, excerpt: String });
 args!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String> });
 args!(MessageDetails { context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String> });
-args!(RunDetails { context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] owner_run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>, owned_run_ids: Vec<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
+args!(RunDetails { context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] owner_run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>, owned_run_ids: Vec<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
 args!(TurnDetails { context: crate::context::ExecutionContext, turn_id: String, run_id: String, thread_id: String, state: TurnState, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
 // Optional shell fields describe unknown/live lifecycle facts and the internal
 // output-reader snapshot, which deliberately does not load command ownership.

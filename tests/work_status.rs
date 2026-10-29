@@ -650,3 +650,54 @@ async fn maximal_valid_escaped_filters_still_produce_reusable_bounded_cursors() 
     assert_ne!(first.items[0].id, next.items[0].id);
     f.close().await;
 }
+
+#[tokio::test]
+async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_footer() {
+    let f = Fixture::new().await;
+    let before = f.status(StatusArgs::default()).await.unwrap();
+    f.db.call(|db| {
+        db.execute("INSERT INTO app_meta(key,value) VALUES('revisit.root',?1)",[json!({"pending":{"text":"PRIVATE_INSTRUCTION","set_by":{"kind":"human"},"operation_id":"fixture:reserve","set_at":"2026-10-25T08:00:00Z"},"consumed_count":5,"last_fired_at":"2026-10-25T07:59:00Z"}).to_string()])?;
+        let activity = shellboy::frontend::activity::project(db,"a")?;
+        assert_eq!(activity.snapshot.revisit.as_deref(),Some("Revisit 5 · next reserved"));
+        Ok(())
+    }).await.unwrap();
+    let after = f.status(StatusArgs::default()).await.unwrap();
+    assert_ne!(before.fingerprint, after.fingerprint);
+    let run = after
+        .items
+        .iter()
+        .find(|i| i.kind == "run" && i.id == "root")
+        .unwrap();
+    let summary = run.revisit.as_ref().unwrap();
+    assert!(summary.pending);
+    assert_eq!(summary.consumed_count, 5);
+    assert_eq!(
+        summary.last_fired_at.as_deref(),
+        Some("2026-10-25T07:59:00Z")
+    );
+    assert!(
+        after
+            .items
+            .iter()
+            .filter(|i| i.kind != "run")
+            .all(|i| i.revisit.is_none())
+    );
+    assert!(
+        !serde_json::to_string(&after)
+            .unwrap()
+            .contains("PRIVATE_INSTRUCTION")
+    );
+    f.db.call(|db| {
+        db.execute("UPDATE run SET state='completed' WHERE id='root'", [])?;
+        assert!(
+            shellboy::frontend::activity::project(db, "a")?
+                .snapshot
+                .revisit
+                .is_none()
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.close().await;
+}

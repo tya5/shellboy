@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Agent Guide](agent-guide.md) · [Configuration](configuration.md)
 
-Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments starts the TUI owner in an interactive terminal. The owner tables below describe the current 37 operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `docs` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
+Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments starts the TUI owner in an interactive terminal. The owner tables below describe the current 40 operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `docs` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
 
 ## Standalone commands
 
@@ -71,7 +71,7 @@ For important changes, explicitly retain an ID in the already known same-instanc
 
 `operation get` `state/outcome` is the saved acceptance-operation result. `replay_policy=return_saved_outcome` returns the original result; `do_not_reexecute` means pending effects are not restarted. `result_uncertain=true` is not evidence of nonexecution. `targets` includes only IDs in the saved result; `downstream` shows compaction processing or current message delivery. Otherwise follow targets to get commands; inspect indexing per space with `index status`. The query itself creates no receipt and rereads current values under one query ID. `result_expired=true` / `replay_policy=operation_expired` means the original outcome body was collected and that mutation ID will not execute again.
 
-## Operation dictionary (37 operations)
+## Operation dictionary (40 operations)
 
 Brackets mean optional; `|` means alternatives. Add common global flags and `--help` to the operation-specific flags listed here.
 
@@ -134,6 +134,25 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | `run retry --run RUN` | Recovery Run/Turn references; explicitly reprepare a recovery_wait Turn in a live Run, reusing the Turn/original message without blindly rerunning executed shells. Human or direct parent decides |
 | `run stop --run RUN` | Confirmed stopping/Run state; stops own Run and owned descendants without affecting independent Runs. Models limited to ownership, humans may explicitly target. Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/answer_node_id/recovery_hint. Background owned work may keep the Run live after answering |
+
+### Revisit (3 operations)
+
+| Operation and all specific flags | Main result and conditions |
+|---|---|
+| `revisit set [--run RUN] (--text TEXT \| --text-stdin)` | Replace one pending completion instruction, 1..8192 UTF-8 bytes, nonblank. Returns pending/setter/count/time, `replaced_other` and `previous_text_preview` |
+| `revisit get [--run RUN]` | Read pending instruction/setter, consumed_count, last_fired_at and optional limit; no operation receipt |
+| `revisit cancel [--run RUN]` | Remove pending instruction; returns `cancelled`, false when nothing was pending. Does not stop the Run |
+
+Humans must supply `--run`. Authenticated models may omit it for their own live
+Run or name a directly owned child's live Run; unrelated Runs and non-direct
+descendants are denied. All operations reject non-live Runs. Revisit is delivered
+as a developer event at normal Run completion, after owned shells and children
+finish; it never fires during recovery wait, stop or restart. One reservation is
+consumed once, while ordinary request/recovery and external-effect semantics
+remain unchanged. Re-registration is unlimited unless the owner configures
+`limits.revisit_max_per_run`. Cancel or rewrite before ending with a question
+that requires the user. Re-query `get` after uncertain mutations, using the same
+operation ID to replay the saved outcome.
 
 ### Wait (1 operation)
 
@@ -246,6 +265,7 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 | `operation_conflict` | ID reused for different content; inspect original receipt |
 | `operation_expired` | Mutation replay with an unsaved old-instance ID or an expired outcome, including a collected current-instance result; inspect retained operation metadata and target state before deciding on duplicate execution |
 | `operation_not_found` | Receipt missing; after disconnect also inspect target state |
+| `revisit_limit_reached` | Configured per-Run consumption cap reached; inspect `revisit get` and owner configuration |
 | `invalid_state` | Current state/ownership disallows it; inspect details/hint/get |
 | `wait_cycle` | Cycle through self/ownership/other waits; split waits or report |
 | `cursor_expired` | Restart paging the same target from the beginning |

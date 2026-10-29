@@ -39,3 +39,7 @@ cursor v2はversion/instance/scope/正規化filterのSHA-256/最後のSortKey/�
 並び順はactivity_at降順、kindとID昇順。activity_atは既存4時刻の最大値で、source生成時刻とは分ける。更新で状態filterや並び順が変わる場合の重複/見逃しを許容し、last項目の削除・状態変化・順序移動だけでは失効しない。新規項目を見る場合はcursorなしで更新する。状態変更のたびに全ページの再取得を強いない。
 
 内部ではcheck_scope/decode_cursor/work_item/encode_cursorを分離し、WorkKindとSortKeyはprivate型にする。公開kindは同じ文字列を維持する。kind別のterminal/target判定を網羅し、activity_at・execution/message/attempt ID・targetsは同じrow投影で一度だけ導出する。cursor比較のために公開WorkItemを複製しない。Turn所属などの保存不整合はinvalid_stateで返し、推測参照やpanicを作らない。1transaction内の走査と最大201候補の保持、新state/table/workerなしという責務は維持する。
+
+## Revisit observation (Issue #36)
+
+Run WorkItems include the optional typed Revisit summary (pending, consumed_count, last_fired_at) in the same owner read transaction and status fingerprint. Other work kinds do not duplicate Run reservation facts. Existing human work rows append the bounded `Revisit N · next reserved` label; full summary values remain in details. The active conversation footer reads the same facts through the existing activity projection, with no new poller. Conversation event presentation names the Revisit continuation, shows a bounded instruction preview, and retains original event/Run/set-operation provenance in raw details. Interrupted reservations use their own bounded interruption section and an English label.

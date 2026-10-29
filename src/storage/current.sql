@@ -341,7 +341,7 @@ CREATE INDEX gc_bytes_operation_receipt ON operation_receipt(octet_length(origin
 
 CREATE INDEX gc_bytes_tool_call ON tool_call(octet_length(arguments_json));
 
-CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%';
+CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%';
 
 CREATE INDEX gc_bytes_output_chunk ON output_chunk(length(bytes));
 
@@ -379,4 +379,5 @@ INSERT INTO schema_migration(version,name) VALUES(8,'0008_receipt_accounting_com
 INSERT INTO schema_migration(version,name) VALUES(9,'0009_compaction_turn_indexes');
 INSERT INTO schema_migration(version,name) VALUES(10,'0010_hot_query_indexes');
 INSERT INTO schema_migration(version,name) VALUES(11,'0011_current_index_metadata');
-PRAGMA user_version=11;
+INSERT INTO schema_migration(version,name) VALUES(12,'0012_revisit_metadata');
+PRAGMA user_version=12;

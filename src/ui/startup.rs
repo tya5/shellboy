@@ -142,6 +142,25 @@ pub fn wait<T>(
     result: &Receiver<Result<Option<T>, ApiError>>,
     cancel: &CancellationToken,
 ) -> io::Result<Result<Option<T>, ApiError>> {
+    wait_inner(session, stages, result, cancel, None)
+}
+pub fn wait_with_termination<T>(
+    session: &mut TerminalSession,
+    stages: &watch::Receiver<StartupStage>,
+    result: &Receiver<Result<Option<T>, ApiError>>,
+    cancel: &CancellationToken,
+    termination: &super::termination::Termination,
+) -> io::Result<Result<Option<T>, ApiError>> {
+    wait_inner(session, stages, result, cancel, Some(termination))
+}
+fn wait_inner<T>(
+    session: &mut TerminalSession,
+    stages: &watch::Receiver<StartupStage>,
+    result: &Receiver<Result<Option<T>, ApiError>>,
+    cancel: &CancellationToken,
+    termination: Option<&super::termination::Termination>,
+) -> io::Result<Result<Option<T>, ApiError>> {
+    let mut detached = false;
     let mut screen = Screen {
         stopping: cancel.is_cancelled(),
         ..Default::default()
@@ -149,6 +168,18 @@ pub fn wait<T>(
     let start = Instant::now();
     let mut drawn = None;
     loop {
+        if let Some(termination) = termination {
+            if termination.forced() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "forced OS termination",
+                ));
+            }
+            if termination.requested() {
+                cancel.cancel();
+                screen.stopping = true;
+            }
+        }
         if screen.error.is_none() {
             match result.try_recv() {
                 Ok(Ok(value)) => return Ok(Ok(value)),
@@ -162,33 +193,62 @@ pub fn wait<T>(
                 Err(TryRecvError::Empty) => {}
             }
         }
-        let stage = *stages.borrow();
-        let tick = if screen.error.is_some() {
-            0
-        } else {
-            (start.elapsed().as_millis() / 150) as usize
-        };
-        let signature = (
-            stage,
-            tick,
-            screen.stopping,
-            screen.ignored_input,
-            screen.error.is_some(),
-        );
-        if drawn != Some(signature) {
-            let snapshot = &session.link_snapshot;
-            session
-                .terminal
-                .draw(|frame| render(frame, &screen, stage, tick, snapshot))?;
-            drawn = Some(signature);
+        if termination.is_some_and(super::termination::Termination::requested)
+            && screen.error.is_some()
+        {
+            return Ok(Err(screen.error.take().unwrap()));
         }
-        if event::poll(Duration::from_millis(25))? {
-            let event = event::read()?;
-            if matches!(event, Event::Resize(..)) {
-                drawn = None;
+        if detached {
+            if screen.error.is_some() {
+                return Ok(Err(screen.error.take().unwrap()));
             }
-            if screen.event(event, cancel) {
-                return Ok(Err(screen.error.take().expect("failure acknowledgement")));
+            std::thread::sleep(Duration::from_millis(25));
+            continue;
+        }
+        let rendered = (|| -> io::Result<bool> {
+            let stage = *stages.borrow();
+            let tick = if screen.error.is_some() {
+                0
+            } else {
+                (start.elapsed().as_millis() / 150) as usize
+            };
+            let signature = (
+                stage,
+                tick,
+                screen.stopping,
+                screen.ignored_input,
+                screen.error.is_some(),
+            );
+            if drawn != Some(signature) {
+                let snapshot = &session.link_snapshot;
+                session
+                    .terminal
+                    .draw(|frame| render(frame, &screen, stage, tick, snapshot))?;
+                drawn = Some(signature);
+            }
+            if event::poll(Duration::from_millis(25))? {
+                let event = event::read()?;
+                if matches!(event, Event::Resize(..)) {
+                    drawn = None;
+                }
+                if screen.event(event, cancel) {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })();
+        match rendered {
+            Ok(true) => return Ok(Err(screen.error.take().expect("failure acknowledgement"))),
+            Ok(false) => {}
+            Err(error) => {
+                if let Some(termination) = termination {
+                    termination.terminal_lost();
+                    cancel.cancel();
+                    screen.stopping = true;
+                    detached = true;
+                } else {
+                    return Err(error);
+                }
             }
         }
     }

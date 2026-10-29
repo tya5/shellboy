@@ -279,12 +279,13 @@ impl ThreadBrowser {
             KeyCode::F(1) => {
                 if let Some(thread) = self.items.get(self.selected) {
                     return ThreadOutcome::Info(format!(
-                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
+                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
                         thread.thread_id,
                         thread.title,
                         thread.cwd,
                         thread.parent_id.as_deref().unwrap_or("root"),
                         thread.state,
+                        thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
                         thread.updated_at,
                         thread.excerpt
                     ));
@@ -735,12 +736,35 @@ impl ThreadBrowser {
         if row.cycle {
             label.push_str("[循環] ");
         }
+        if interrupted_by_app_exit(thread) {
+            label.push_str("[exit] ");
+        }
         let title = one_line(&thread.title);
         label.push_str(if title.width() == 0 {
             "名称未設定"
         } else {
             &title
         });
+        if let Some(summary) = thread.revisit.as_ref()
+            && let Some(revisit) = crate::presentation::revisit_label(summary)
+        {
+            // Keep the continuation visible even when the title is long.
+            let revisit = if width < 45 {
+                format!(
+                    "Revisit {}{}",
+                    summary.consumed_count,
+                    if summary.pending { "+" } else { "" }
+                )
+            } else {
+                revisit
+            };
+            let reserve = revisit.width().saturating_add(3);
+            if width > reserve + 4 && (!interrupted_by_app_exit(thread) || width >= 32) {
+                label = fit(&label, width - reserve);
+                label.push_str(" · ");
+                label.push_str(&revisit);
+            }
+        }
         fit(&label, width)
     }
 
@@ -757,14 +781,24 @@ impl ThreadBrowser {
             Line::from(fit(&format!("cwd {}", one_line(&thread.cwd)), width)),
             Line::from(fit(
                 &format!(
-                    "ID {} · 親 {} · {}",
+                    "{}ID {} · 親 {} · {}",
+                    thread
+                        .revisit
+                        .as_ref()
+                        .and_then(crate::presentation::revisit_label)
+                        .map(|label| format!("{label} · "))
+                        .unwrap_or_default(),
                     one_line(&thread.thread_id),
                     thread
                         .parent_id
                         .as_deref()
                         .map(one_line)
                         .unwrap_or_else(|| "なし".into()),
-                    one_line(state(&thread.state))
+                    if interrupted_by_app_exit(thread) {
+                        "Interrupted by app exit".into()
+                    } else {
+                        one_line(state(&thread.state))
+                    }
                 ),
                 width,
             )),
@@ -775,6 +809,13 @@ impl ThreadBrowser {
         ];
         frame.render_widget(Paragraph::new(lines), inner);
     }
+}
+
+fn interrupted_by_app_exit(thread: &ThreadSummary) -> bool {
+    matches!(
+        thread.latest_run_stop_reason.as_deref(),
+        Some("previous_instance_interrupted" | "app_shutdown")
+    )
 }
 
 fn one_line(text: &str) -> String {
@@ -1134,6 +1175,8 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
+            latest_run_stop_reason: None,
+            revisit: None,
             thread_id: id.into(),
             parent_id: parent.map(Into::into),
             title: format!("会話 {id}"),
@@ -1142,6 +1185,106 @@ mod tests {
             updated_at: "2026-10-25T09:30:00Z".into(),
             excerpt: "**選択した会話の抜粋**".into(),
         }
+    }
+
+    #[test]
+    fn app_exit_marker_uses_only_latest_reason_and_refresh_clears_it() {
+        use ratatui::{Terminal, backend::TestBackend};
+        for reason in [
+            Some("previous_instance_interrupted"),
+            Some("app_shutdown"),
+            Some("explicit_stop"),
+            None,
+        ] {
+            let mut item = thread("t", None);
+            item.title = "Work".into();
+            item.state = if reason.is_some() {
+                "stopped"
+            } else {
+                "completed"
+            }
+            .into();
+            item.latest_run_stop_reason = reason.map(str::to_owned);
+            let marked = matches!(
+                reason,
+                Some("previous_instance_interrupted" | "app_shutdown")
+            );
+            let mut browser = ThreadBrowser::default();
+            browser.open(String::new(), vec![], Some("t".into()));
+            assert!(browser.apply(
+                browser.generation(),
+                None,
+                vec![item.clone()],
+                vec![],
+                None,
+                vec![],
+                None
+            ));
+            for width in [120, 24] {
+                let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
+                terminal
+                    .draw(|frame| browser.draw(frame, frame.area(), None, true))
+                    .unwrap();
+                let shown = text(terminal.backend().buffer());
+                assert_eq!(
+                    shown.contains("[exit]"),
+                    marked,
+                    "{reason:?}, width={width}"
+                );
+                if width == 120 {
+                    assert_eq!(shown.contains("Interrupted by app exit"), marked);
+                }
+            }
+            item.latest_run_stop_reason = None;
+            item.state = "running".into();
+            assert!(browser.apply(
+                browser.generation(),
+                None,
+                vec![item],
+                vec![],
+                None,
+                vec![],
+                None
+            ));
+            let row = browser.rows().remove(0);
+            assert!(
+                !browser
+                    .label(&row, &browser.items[0], true, false, 80)
+                    .contains("[exit]")
+            );
+        }
+    }
+
+    #[test]
+    fn revisit_row_reserves_space_and_clears_on_new_run() {
+        let mut item = thread("t", None);
+        item.title = "Long title ".repeat(20);
+        item.revisit = Some(crate::protocol::RevisitSummary {
+            pending: true,
+            consumed_count: 5,
+            last_fired_at: None,
+        });
+        let browser = ThreadBrowser {
+            items: vec![item.clone()],
+            ..Default::default()
+        };
+        let row = browser.rows().remove(0);
+        assert!(
+            browser
+                .label(&row, &item, true, false, 90)
+                .contains("Revisit 5 · next reserved")
+        );
+        assert!(
+            browser
+                .label(&row, &item, true, false, 24)
+                .contains("Revisit 5+")
+        );
+        item.revisit = None;
+        assert!(
+            !browser
+                .label(&row, &item, true, false, 90)
+                .contains("Revisit")
+        );
     }
 
     #[test]
@@ -1394,6 +1537,8 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
+            latest_run_stop_reason: None,
+            revisit: None,
             thread_id: "blank-title".into(),
             title: String::new(),
             cwd: "/synthetic".into(),

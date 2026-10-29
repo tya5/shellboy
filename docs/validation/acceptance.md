@@ -1,5 +1,77 @@
 # Validation record
 
+## Integrated #36–#39 lifecycle verification (2026-10-30)
+
+Source based on local commit `1d56487`, macOS ARM64 / pinned Rust 1.99.1.
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+passes against the integrated source: format, strict all-target Clippy and
+**86 groups / 1,430 passed / 0 failed / 28 ignored**. All fixtures use temporary data, loopback
+HTTP and synthetic text; no paid API or default datastore is used.
+
+New mechanical coverage includes:
+
+- Revisit: real Control and HTTP, sixteen unlimited cycles and configured zero/two
+  caps, one-shot ordinary developer-event delivery, recovery and held-request stop,
+  native owned-shell completion before firing, actual model shell→CLI→LocalServer
+  authenticated self registration, direct-parent authority/replacement/receipt
+  replay, and rejection of unrelated/non-direct or forged callers. The child
+  scenario routes real session headers rather than assuming cross-Thread HTTP
+  arrival order, and requires child Revisit completion before child_run_ended and
+  parent Revisit. Controlled completion/set races accept only their valid serial
+  outcomes; queued input and cancellation keep the same Run without premature
+  firing. Restart capture/drop, next actual-Turn observation and deletion are
+  separate durable checks.
+- Revisit source protection and capacity: current event source is protected by
+  summary/trim, real revisit.* rows are included in derived byte totals, migration
+  12 replaces the existing v11 covering index without rewriting metadata, and
+  supported migration paths converge with a fresh current schema.
+- OS exit: four substantive real Unix-process tests pass in a separate parallel
+  invocation (two test threads). Actual TUI/PTY TERM and HUP preserve tool results and terminal
+  Run/shell state; real PTY master loss still drains; a second signal forces
+  exit while DB cleanup is held. The deadline test uses the production observer
+  in an isolated subprocess with a stalled main thread; it is not a full TUI
+  owner. Its ignored child entry is invoked by the non-ignored parent test.
+- Exit visibility: latest app_shutdown/previous_instance_interrupted reasons
+  mark the Thread list; explicit_stop and completed Runs do not. A new Run clears
+  the marker. Query plans retain indexed latest-Run lookups. UI rows preserve
+  narrow-width markers and display pending/count Revisit facts without treating
+  them as proof of progress. Run/status, activity and event presentations expose
+  the same recorded facts and retain original detail/provenance.
+- #37 review: structural group repair rolls back within its savepoint, preserves
+  uncertain original data/attachments and continues good groups. SQL failures and
+  missing global metadata remain fatal with bounded context. The startup capture
+  guard handles bad selected cursors before append; an actual reopened DataOwner,
+  real CLI list/delete and a good-Thread loopback response verify isolation. Saved
+  execution facts after actual SIGKILL are stopped, matching the committed DB.
+  Diagnostics contain bounded IDs and fixed reasons only, with at most 32 previews.
+
+Earlier integration attempts exposed fixture/schema issues rather than a reason
+to weaken admission: platform-specific PTY FFI types, obsolete downgrade-ledger
+fixtures and exact migration SQL formatting were corrected. The owned-shell and
+child tests were changed to process legitimate completion/progress events before
+expecting Revisit; their ordering assertions were retained. The full check also exposed a real regression: using the closed tool-start gate
+to stop all request preparation prevented existing cancelled-tool result followup.
+The guard now applies at idle Revisit firing; ordinary result persistence keeps
+its previous path. Both existing Quit regressions pass, with added assertions
+that the pending reservation is not consumed before shutdown capture. Final
+A parallel PTY-loss run also exposed a real pinned-Crossterm EOF/EIO busy loop:
+only HUP and deadline diagnostics appeared while persisted work stayed live.
+Switching to that same version's existing use-dev-tty backend fixes the unbounded
+inner read loop without changing input routing/parser or the cleanup deadline.
+filedescriptor 0.8.3 was already locked; only its dependency edge is added. The
+four process checks pass with two test threads after this change. The final passing standard check above supersedes these intermediate failures.
+
+Not performed: native Windows/Linux execution, three-OS CI (source remains local),
+physical Windows console close/logoff/shutdown, actual power loss, or the separate
+real-model longitudinal task-quality evaluation. Windows console notifications
+are best effort where the OS delivers them; GUI-library suppression is documented
+in the adopted design. Mechanical delivery tests do not establish that a model
+remembers every requirement, avoids question false triggers, or judges completion
+correctly. The existing live non-storage tool-conflict path remains unreproduced;
+no possibly live collector is synthetically completed. No release or installed
+binary replacement is included in this work.
+
+
 ## Issue #37: interrupted tool groups (2026-10-29)
 
 macOS ARM64 / pinned Rust 1.99.1, working tree based on `02d94e3`:

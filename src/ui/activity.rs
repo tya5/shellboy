@@ -113,6 +113,8 @@ impl AutomaticRetrySnapshot {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivitySnapshot {
+    /// Saved live-Run Revisit count/reservation, projected by the reader.
+    pub revisit: Option<String>,
     /// Saved automatic-trim facts for this Turn/generation, if observed.
     pub context_reduction: Option<String>,
     pub automatic_retry: Option<AutomaticRetrySnapshot>,

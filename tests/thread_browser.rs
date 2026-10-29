@@ -3,6 +3,8 @@ use shellboy::{config::Config, protocol::ThreadSummary, ui::*};
 
 fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
     ThreadSummary {
+        latest_run_stop_reason: None,
+        revisit: None,
         thread_id: id.into(),
         title: format!("Title {id}"),
         cwd: "/synthetic/project".into(),

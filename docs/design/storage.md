@@ -2,7 +2,7 @@
 
 ## Current-only contract (Issue #33, 0.2.0)
 
-Current conversation schema is v11. Fresh databases are created directly from `src/storage/current.sql`, with the complete current ledger. Existing older-schema upgrades run only through the isolated startup migration runner; ordinary runtime readers require the current schema. The historic v6 receipt-accounting repair and attachment-origin reconstruction are not runtime compatibility mechanisms.
+Current conversation schema is v12. Migration 12 extends the existing logical-history byte index to include bounded Revisit metadata; it adds no state table. Fresh databases are created directly from `src/storage/current.sql`, with the complete current ledger. Existing older-schema upgrades run only through the isolated startup migration runner; ordinary runtime readers require the current schema. The historic v6 receipt-accounting repair and attachment-origin reconstruction are not runtime compatibility mechanisms.
 
 Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
 

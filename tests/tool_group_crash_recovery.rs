@@ -561,6 +561,8 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
     assert_eq!(output["status"], "interrupted");
     assert_eq!(output["result_uncertain"], true);
     assert_eq!(output["output_complete"], false);
+    assert_eq!(output["saved_execution"]["state"], "stopped");
+    assert_eq!(output["saved_execution"]["output_complete"], false);
     let control = Control::new(&owner, root.path().into());
     send_and_complete(&control, &thread, "AFTER_SIGKILL").await;
     assert_pairs(&proxy.next().await, &["call-crash"], "AFTER_SIGKILL");

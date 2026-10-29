@@ -111,3 +111,15 @@ The existing deletion worker catches unwinding panics at the operation-future bo
 Deletion execution is serialized at the UI boundary (one in-flight deletion, including after closing its dialog). This prevents overlapping parent/descendant requests without traversing the DAG or trusting incomplete paginated ancestry. The existing request ID map remains the owner; no persistent state or worker is added. Independent deletions can be submitted after the first result.
 
 A browser notice is consumed for reopening only after its header has actually been drawn and the browser is the top input overlay. A header hidden by a small viewport or covered by another overlay does not consume the notice. Outcomes arriving while the browser is closed survive its next open; after display, another open starts without the old notice. This state is UI-local and is not saved to the database.
+
+## Application-exit interruption marker (Issue #39)
+
+`thread list` returns `latest_run_stop_reason` from the latest Run ordered by created_at DESC, id DESC, matching the existing latest-state projection. No Run or no recorded reason returns null. The existing run_thread_created index serves the lookup; do not scan every Run or add a table.
+
+A latest reason of `previous_instance_interrupted` or `app_shutdown` adds `[exit]` to the one-line title and `Interrupted by app exit` to the selected detail. Preserve the ordinary state and title, tree/current markers, and existing colors. Explicit stop and normal completion receive no marker. A new Run immediately removes it through the existing list refresh, without acknowledging or mutating the old interruption record. No auto-resume, prompt, worker or event is added.
+
+## Revisit facts (Issue #36)
+
+The latest Run's optional typed Revisit summary supplies consumed count and pending reservation to the existing row and selected detail. Use `Revisit N` and append `next reserved` only for a saved pending instruction. This is independent of app-exit marking and ordinary Run/Turn state; a new Run starts with its own facts. The activity footer shows the same summary while the Run is live/stopping, observed at the existing reactive progress cadence. No instruction body or setter is copied into list/status rows.
+
+Reserve row width for the Revisit label so a long title does not hide it. Narrow rows use `Revisit N+` (`+` means a pending next reservation); the selected detail retains `next reserved`. At extremely narrow widths the existing title/tree remains primary, with full values reachable in details.

@@ -5,7 +5,7 @@ use shellboy::{
 };
 
 async fn projection(db: &DbWorker) -> Projection {
-    db.call(|db| Ok(activity::project(db, "t")?)).await.unwrap()
+    db.call(|db| activity::project(db, "t")).await.unwrap()
 }
 
 #[tokio::test]

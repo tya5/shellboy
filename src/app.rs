@@ -174,10 +174,11 @@ impl DataOwner {
         progress(StartupStage::InterruptedWork);
         let recovery = db.call(move |connection| {
             let tx=connection.transaction()?;
-            crate::control::interruption::capture_interrupted_context(
-                &tx, &now, "previous_instance_interrupted", "startup",
-            )?;
-            crate::control::state::interrupt_previous_work(&tx, &now)?;
+            let capture_failures = crate::control::interruption::capture_startup_interrupted_context(&tx,&now)?;
+            let mut report = crate::control::state::interrupt_previous_work(&tx, &now)?;
+            let repair_failures = std::mem::take(&mut report.failures);
+            report.failures = capture_failures;
+            report.failures.extend(repair_failures.into_iter().take(32-report.failures.len()));
             let queued=tx.prepare("SELECT value FROM app_meta WHERE key LIKE 'compact.pending.%' OR key LIKE 'compact.inflight.%'")?.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
             let cancelled=serde_json::json!({"kind":"compact","state":"failed","result_uncertain":true,"ended_at":now,"outcome":{"error":ApiError::new(ErrorCode::InvalidState,"Previous instance ended; compaction was cancelled without replay")}}).to_string();
             for body in queued{if let Ok(ids)=serde_json::from_str::<Vec<String>>(&body){for operation in ids{tx.execute("INSERT OR REPLACE INTO app_meta(key,value) VALUES(?1,?2)",rusqlite::params![crate::compaction::CompactionKeys::result(&operation),cancelled])?;}}}
@@ -185,17 +186,23 @@ impl DataOwner {
             tx.execute("DELETE FROM app_meta WHERE key LIKE 'wait.pending.%'",[])?;
             tx.execute("DELETE FROM runtime_pin",[])?;
             tx.commit()?;
-            Ok(())
+            Ok(report)
         }).await;
-        if let Err(error) = recovery {
-            progress(StartupStage::Closing);
-            let _ = db.shutdown().await;
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_millis(loaded.config.io.shutdown_grace_ms),
-                diagnostics.shutdown(),
-            )
-            .await;
-            return Err(storage_error(error));
+        let report = match recovery {
+            Ok(report) => report,
+            Err(error) => {
+                progress(StartupStage::Closing);
+                let _ = db.shutdown().await;
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_millis(loaded.config.io.shutdown_grace_ms),
+                    diagnostics.shutdown(),
+                )
+                .await;
+                return Err(storage_error(error));
+            }
+        };
+        for failure in report.failures {
+            diagnostics.record_tool_repair_failure(failure);
         }
         Ok(Self {
             instance_id: uuid::Uuid::new_v4().to_string(),

@@ -26,6 +26,9 @@ impl Command {
             Self::RunGet(_) => ("run.get", CommandRoute::Database),
             Self::RunRetry(_) => ("run.retry", CommandRoute::Database),
             Self::RunStop(_) => ("run.stop", CommandRoute::Database),
+            Self::RevisitSet(_) => ("revisit.set", CommandRoute::Database),
+            Self::RevisitGet(_) => ("revisit.get", CommandRoute::Database),
+            Self::RevisitCancel(_) => ("revisit.cancel", CommandRoute::Database),
             Self::TurnGet(_) => ("turn.get", CommandRoute::Database),
             Self::Wait(_) => ("wait", CommandRoute::Runtime),
             Self::HistoryList(_) => ("history.list", CommandRoute::Database),
@@ -87,8 +90,11 @@ impl Command {
             | Self::MessageSend(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
+            | Self::RevisitGet(_)
             | Self::RunGet(_)
             | Self::RunRetry(_)
+            | Self::RevisitSet(_)
+            | Self::RevisitCancel(_)
             | Self::RunStop(_)
             | Self::TurnGet(_)
             | Self::Wait(_)
@@ -122,8 +128,11 @@ impl Command {
             | Self::MessageSend(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
+            | Self::RevisitGet(_)
             | Self::RunGet(_)
             | Self::RunRetry(_)
+            | Self::RevisitSet(_)
+            | Self::RevisitCancel(_)
             | Self::RunStop(_)
             | Self::TurnGet(_)
             | Self::Wait(_)
@@ -157,6 +166,8 @@ impl Command {
             | Self::ThreadSet(_)
             | Self::MessageSend(_)
             | Self::RunRetry(_)
+            | Self::RevisitSet(_)
+            | Self::RevisitCancel(_)
             | Self::RunStop(_)
             | Self::AttachmentAdd(_)
             | Self::AttachmentRemove(_)
@@ -169,6 +180,7 @@ impl Command {
             | Self::ThreadDeletePreview(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
+            | Self::RevisitGet(_)
             | Self::RunGet(_)
             | Self::TurnGet(_)
             | Self::Wait(_)
@@ -201,6 +213,7 @@ impl Command {
             | Self::ThreadDeletePreview(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
+            | Self::RevisitGet(_)
             | Self::RunGet(_)
             | Self::TurnGet(_)
             | Self::HistoryList(_)
@@ -219,6 +232,8 @@ impl Command {
             | Self::ThreadSet(_)
             | Self::MessageSend(_)
             | Self::RunRetry(_)
+            | Self::RevisitSet(_)
+            | Self::RevisitCancel(_)
             | Self::RunStop(_)
             | Self::Wait(_)
             | Self::ShellWrite(_)
@@ -233,5 +248,32 @@ impl Command {
             | Self::IndexRebuild(_)
             | Self::StorageCollect(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{RevisitArgs, RevisitSetArgs};
+
+    #[test]
+    fn revisit_mutations_participate_in_receipts_and_shutdown_capture() {
+        for command in [
+            Command::RevisitSet(RevisitSetArgs {
+                run_id: None,
+                text: "Review".into(),
+            }),
+            Command::RevisitCancel(RevisitArgs { run_id: None }),
+        ] {
+            assert_eq!(command.route(), CommandRoute::Database);
+            assert!(command.requires_receipt());
+            assert!(command.changes_context());
+            assert!(!command.runtime_cancellable());
+            assert!(!command.runtime_allowed_while_stopping());
+        }
+        let get = Command::RevisitGet(RevisitArgs { run_id: None });
+        assert_eq!(get.route(), CommandRoute::Database);
+        assert!(!get.requires_receipt());
+        assert!(!get.changes_context());
     }
 }

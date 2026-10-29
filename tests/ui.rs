@@ -2700,6 +2700,8 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
         next_cursor: None,
         threads: (0..30)
             .map(|i| shellboy::protocol::ThreadSummary {
+                latest_run_stop_reason: None,
+                revisit: None,
                 thread_id: format!("thread-{i:02}"),
                 title: format!("TITLE{i:02}"),
                 cwd: "/synthetic/project".into(),

@@ -57,16 +57,46 @@ pub struct MessageSendTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_id: Option<String>,
 }
+/// Fixed structural reasons only; no source/tool text enters diagnostics.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ToolRepairReason {
+    UnknownGroupState,
+    UnknownCallState,
+    MissingCallSource,
+    ExecutionTurnMismatch,
+    AmbiguousCallSource,
+    CursorMismatch,
+    CaptureCursorMismatch,
+    OrdinalOverflow,
+}
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ToolRepairFailure {
+    pub thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    pub reason: ToolRepairReason,
+}
+
 /// Fixed shutdown observations on the existing best-effort diagnostic queue.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ShutdownScope {
+    Signal,
     Frontend,
     Owner,
 }
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ShutdownStage {
+    SignalTerm,
+    SignalHup,
+    ConsoleClose,
+    ConsoleLogoff,
+    ConsoleShutdown,
+    TerminalLost,
+    SignalForce,
+    SignalDeadline,
     Listener,
     DraftEnqueue,
     AcceptedSends,
@@ -109,6 +139,8 @@ struct Entry {
     send: Option<MessageSendTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     shutdown: Option<ShutdownTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_repair: Option<ToolRepairFailure>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -183,6 +215,7 @@ struct Record {
     stream_difference: Option<ModelFailureDetails>,
     send: Option<MessageSendTrace>,
     shutdown: Option<ShutdownTrace>,
+    tool_repair: Option<ToolRepairFailure>,
 }
 struct Health {
     failed: AtomicBool,
@@ -218,6 +251,7 @@ impl Diagnostics {
                     stream_difference,
                     send,
                     shutdown,
+                    tool_repair,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -230,6 +264,7 @@ impl Diagnostics {
                         stream_difference,
                         send,
                         shutdown,
+                        tool_repair,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -380,6 +415,22 @@ impl Diagnostics {
             None,
         );
     }
+    pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
+        failure.thread_id = sanitize_id(&failure.thread_id);
+        failure.group_id = failure.group_id.as_deref().map(sanitize_id);
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::DatabaseFailure,
+            ids: DiagnosticIds {
+                thread_id: Some(failure.thread_id.clone()),
+                ..Default::default()
+            },
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: Some(failure),
+        });
+    }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
     pub(crate) fn record_shutdown(
         &self,
@@ -414,12 +465,32 @@ impl Diagnostics {
     fn enqueue_with_details(
         &self,
         event: DiagnosticEvent,
-        mut ids: DiagnosticIds,
+        ids: DiagnosticIds,
         failure: Option<ModelFailureDetails>,
         stream_difference: Option<ModelFailureDetails>,
         send: Option<MessageSendTrace>,
         shutdown: Option<ShutdownTrace>,
     ) {
+        self.enqueue_record(Record {
+            event,
+            ids,
+            failure,
+            stream_difference,
+            send,
+            shutdown,
+            tool_repair: None,
+        });
+    }
+    fn enqueue_record(&self, record: Record) {
+        let Record {
+            event,
+            mut ids,
+            failure,
+            stream_difference,
+            send,
+            shutdown,
+            tool_repair,
+        } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
             &mut ids.thread_id,
@@ -445,6 +516,7 @@ impl Diagnostics {
                     stream_difference,
                     send,
                     shutdown,
+                    tool_repair,
                 })
                 .is_err()
         }) {
@@ -512,4 +584,40 @@ fn sanitize_id(id: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || "-_:".contains(*c))
         .take(128)
         .collect()
+}
+
+#[cfg(test)]
+mod tool_repair_tests {
+    use super::*;
+    #[tokio::test]
+    async fn skipped_tool_repair_records_only_bounded_ids_and_fixed_reason() {
+        let root = tempfile::tempdir().unwrap();
+        let logs = root.path().join("logs");
+        let diagnostics = Diagnostics::start(
+            logs.clone(),
+            Logging {
+                file_bytes: 8192,
+                files: 2,
+            },
+        );
+        diagnostics.record_tool_repair_failure(ToolRepairFailure {
+            thread_id: "t".repeat(1000),
+            group_id: Some("g".repeat(1000)),
+            reason: ToolRepairReason::MissingCallSource,
+        });
+        diagnostics.shutdown().await;
+        assert!(!diagnostics.has_failed());
+        let paths = std::fs::read_dir(logs)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(paths.len(), 1);
+        let body = std::fs::read_to_string(&paths[0]).unwrap();
+        let entry: serde_json::Value = serde_json::from_str(body.trim()).unwrap();
+        assert_eq!(entry["tool_repair"]["reason"], "missing_call_source");
+        assert!(entry["tool_repair"]["thread_id"].as_str().unwrap().len() <= 128);
+        assert!(entry["tool_repair"]["group_id"].as_str().unwrap().len() <= 128);
+        assert!(entry.get("body").is_none());
+        assert!(entry.get("message").is_none());
+    }
 }

@@ -1032,7 +1032,7 @@ async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
     let writer = DbWorker::open(&path).await.unwrap();
     writer.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DELETE FROM schema_migration WHERE version=11; PRAGMA user_version=10;").unwrap();
+    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10;").unwrap();
     for (name, value) in [
         ("integer", "0"),
         ("invalid", "not json"),
@@ -1081,5 +1081,27 @@ async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
         })
         .await
         .unwrap();
+    writer.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn schema_twelve_extends_revisit_byte_accounting_without_rewriting_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("revisit.sqlite");
+    let writer = DbWorker::open(&path).await.unwrap();
+    writer.shutdown().await.unwrap();
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("DELETE FROM schema_migration WHERE version=12; PRAGMA user_version=11; DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%'; INSERT INTO app_meta(key,value)VALUES('revisit.fixture','preserve bounded metadata');").unwrap();
+    db.close().unwrap();
+    let writer = DbWorker::open(&path).await.unwrap();
+    writer.call(|db| {
+        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,SCHEMA_VERSION);
+        assert_eq!(db.query_row("SELECT value FROM app_meta WHERE key='revisit.fixture'",[],|r|r.get::<_,String>(0))?,"preserve bounded metadata");
+        let index:String=db.query_row("SELECT sql FROM sqlite_schema WHERE name='gc_bytes_app_meta_history'",[],|r|r.get(0))?;
+        assert!(index.contains("revisit.%"));
+        let size:i64=db.query_row("SELECT sum(octet_length(value)) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",[],|r|r.get(0))?;
+        assert_eq!(size,"preserve bounded metadata".len() as i64);
+        Ok(())
+    }).await.unwrap();
     writer.shutdown().await.unwrap();
 }

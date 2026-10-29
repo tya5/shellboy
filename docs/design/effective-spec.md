@@ -24,6 +24,15 @@ the database is unnecessary; slash normalization already shipped in 0.1.6.
 Do not add fallback lookup or identity migration for those keys. This records the
 Issue #20 clarification; it does not trigger deletion or conversion of user data.
 
+## Revisit and application-exit visibility (#36, #38, #39)
+
+Adopt [Revisit](revisit.md) as one bounded self-instruction at normal Run
+completion, using existing event/delivery and explicit stop/shutdown precedence.
+Protocol remains v2 with additive operations and optional factual summaries;
+conversation schema v12 extends derived metadata byte accounting. Existing
+shutdown and [Thread browser](thread-browser.md) projections expose interrupted
+latest Runs without adding a lifecycle state or automatically resuming work.
+
 ## Interrupted tool groups (#37)
 
 Adopt [tool-group recovery](tool-group-recovery.md): startup records original

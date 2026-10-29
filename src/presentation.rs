@@ -18,6 +18,18 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::mem::size_of;
 
+/// Human-readable recorded Revisit facts shared by existing displays.
+pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String> {
+    if summary.consumed_count == 0 && !summary.pending {
+        return None;
+    }
+    let mut label = format!("Revisit {}", summary.consumed_count);
+    if summary.pending {
+        label.push_str(" · next reserved");
+    }
+    Some(label)
+}
+
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_FIELDS: usize = 128;
 pub(crate) const CONTEXT_TRIM_TITLE: &str = "入力範囲を縮小（原文は保持）";

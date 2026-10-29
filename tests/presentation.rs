@@ -1267,3 +1267,47 @@ fn interrupted_tool_results_show_uncertainty_without_fabricated_success() {
         assert_eq!(payload, original);
     }
 }
+
+#[test]
+fn revisit_event_names_the_continuation_and_shows_instruction_without_changing_source() {
+    let event = json!({"event_id":"event-revisit","kind":"revisit","payload":{"run_id":"run","instruction":"Check original request A.\nCompare evidence B.","set_operation_id":"instance:reserve","consumed_count":5}});
+    let payload = json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {event}")}],"event_id":"event-revisit"});
+    let original = payload.clone();
+    let text = text_of_payload(&payload);
+    let projected = project("event", &payload, &text, 0);
+    assert_eq!(projected.title, "Revisit resumed · 5");
+    assert_eq!(projected.event_class, EventClass::Change);
+    assert!(
+        projected
+            .blocks
+            .iter()
+            .any(|b| b.text.contains("Check original request A."))
+    );
+    assert!(
+        projected
+            .fields
+            .iter()
+            .any(|f| f.value == "instance:reserve")
+    );
+    assert_eq!(payload, original);
+    let interruption = json!({"kind":"previous_instance_interrupted","change":{"revisits":{"count":1,"detail_node_ids":["revisit-details"]}}});
+    let payload = json!({"text":interruption.to_string()});
+    let projected = project(
+        "interruption_context",
+        &payload,
+        &text_of_payload(&payload),
+        0,
+    );
+    assert!(
+        projected
+            .blocks
+            .iter()
+            .any(|b| b.text.contains("Interrupted Revisit reservations 1"))
+    );
+    assert!(
+        projected
+            .fields
+            .iter()
+            .any(|f| f.key == "/change/revisits/detail_node_ids/0" && f.value == "revisit-details")
+    );
+}

@@ -192,6 +192,16 @@ fn work_report(safe: Value, budget: usize) -> Report {
             };
             let id = text(item, "id");
             let short: String = id.chars().take(8).collect();
+            let revisit = item
+                .get("revisit")
+                .cloned()
+                .and_then(|value| {
+                    serde_json::from_value::<crate::protocol::RevisitSummary>(value).ok()
+                })
+                .as_ref()
+                .and_then(presentation::revisit_label)
+                .map(|label| format!(" · {label}"))
+                .unwrap_or_default();
             let marker = match text(item, "state").as_str() {
                 "failed" | "incomplete" => "×",
                 "completed" | "exited" | "applied" => "✓",
@@ -216,7 +226,7 @@ fn work_report(safe: Value, budget: usize) -> Report {
                     presentation::fields::state_label(&text(item, "state"))
                 ),
                 value: format!(
-                    "{title} · {short} · {}",
+                    "{title} · {short} · {}{revisit}",
                     presentation::fields::local_time(&text(item, "activity_at"))
                         .unwrap_or_else(|| text(item, "activity_at"))
                 ),
@@ -509,6 +519,18 @@ mod tests {
         assert!(!report.fields[0].value.contains("T00:00:00Z"));
         assert_eq!(report.detail, Some(value));
     }
+    #[test]
+    fn work_rows_show_revisit_count_and_pending_without_instruction_text() {
+        let value = serde_json::json!({"filters":{},"items":[{"kind":"run","state":"live","thread_title":"Work","id":"run","activity_at":"2026-10-25T00:00:00Z","revisit":{"pending":true,"consumed_count":5,"last_fired_at":null}}]});
+        let projected = report(value.clone(), MAX_FRAME_BYTES);
+        assert!(
+            projected.fields[0]
+                .value
+                .contains("Revisit 5 · next reserved")
+        );
+        assert_eq!(projected.detail, Some(value));
+    }
+
     #[test]
     fn work_rows_keep_full_details_and_resolve_only_read_targets() {
         let args = StatusArgs {

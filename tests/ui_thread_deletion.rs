@@ -24,6 +24,8 @@ fn list(ui: &mut UiState, ids: &[&str]) {
         threads: ids
             .iter()
             .map(|id| ThreadSummary {
+                latest_run_stop_reason: None,
+                revisit: None,
                 thread_id: (*id).into(),
                 title: format!("title {id}"),
                 cwd: "/synthetic".into(),
@@ -165,6 +167,8 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
         generation: old,
         requested_cursor: None,
         threads: vec![ThreadSummary {
+            latest_run_stop_reason: None,
+            revisit: None,
             thread_id: args.thread_id,
             title: "stale deleted row".into(),
             cwd: "/".into(),

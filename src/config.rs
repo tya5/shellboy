@@ -251,7 +251,10 @@ macro_rules! section {
     // All-numeric sections whose fields are all strictly positive need no
     // second parallel field list. Mixed/zero-allowed sections stay explicit.
     (positive $key:literal, $name:ident { $($field:ident : $ty:ty = $default:expr),* $(,)? }) => {
-        section!($name { $($field: $ty = $default),* });
+        section!(positive $key, $name { $($field: $ty = $default),* } optional {});
+    };
+    (positive $key:literal, $name:ident { $($field:ident : $ty:ty = $default:expr),* $(,)? } optional { $($optional:ident : $optional_ty:ty = $optional_default:expr),* $(,)? }) => {
+        section!($name { $($field: $ty = $default,)* $($optional: $optional_ty = $optional_default),* });
         impl $name {
             fn validate_positive(&self) -> Result<(), ConfigError> {
                 $(if self.$field == 0 { return Err(invalid(concat!($key, ".", stringify!($field)), "must be a positive integer")); })*
@@ -281,6 +284,8 @@ section!(positive "limits", Limits {
     draft_bytes: u64 = MIB,
     data_warning_bytes: u64 = 8 * GIB,
     data_max_bytes: u64 = 10 * GIB
+} optional {
+    revisit_max_per_run: Option<u64> = None
 });
 section!(Cache {
     body_bytes: u64 = 32 * MIB,

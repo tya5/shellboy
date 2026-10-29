@@ -34,6 +34,8 @@ pub struct WorkItem {
     pub attempt_connection: Option<String>,
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revisit: Option<RevisitSummary>,
     pub targets: Vec<Command>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -377,6 +379,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         execution_id: (kind == WorkKind::Shell).then_some(id.clone()),
         message_id: (kind == WorkKind::Message).then_some(id.clone()),
         attempt_id: (kind == WorkKind::Attempt).then_some(id.clone()),
+        revisit: None,
         targets: Vec::new(),
     };
     item.targets = links(kind, &item)?;
@@ -426,7 +429,10 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         {
             continue;
         }
-        let projected = work_item(row, kind, state)?;
+        let mut projected = work_item(row, kind, state)?;
+        if kind == WorkKind::Run {
+            projected.item.revisit = crate::control::revisit::summary(db, &projected.item.id)?;
+        }
         let item = &projected.item;
         if scope
             .since

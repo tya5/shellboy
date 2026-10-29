@@ -896,3 +896,103 @@ worker, queue, dependency, schema or protocol bump is needed. Revisit if a new
 source format changes grouping, attachment eligibility, or GC ownership rules.
 See [design](../design/tool-group-recovery.md) and
 [validation](../validation/acceptance.md) for executed tests and remaining limits.
+
+## Revisit at normal completion (#36, 2026-10-29)
+
+Adopt [Revisit](../design/revisit.md) after #37: reserve one bounded instruction
+per live Run and consume it at the existing transactional completion decision.
+The same event/delivery and ordinary Turn path handles the instruction. It is a
+developer event, not a synthetic human message. Re-registration is deliberately
+unlimited by default; an optional per-Run cap, visible count/pending facts and
+existing stopping/recovery controls bound operation without a goal engine.
+Direct-parent authority follows retry's one-Run mutation scope; cancellation
+still propagates through descendants under the existing stop contract.
+
+Use one existing app_meta row per registered Run. Schema 12 extends the existing
+history-byte covering index to include that prefix, so reservation/count metadata
+is not hidden from logical capacity. Repeated firings overwrite that state;
+ordinary events/history account for their own growth. No table, scheduler, worker
+or dependency is added. Protocol 2 gains additive operations and genuinely
+optional summaries (Runs without registration have none). Historical conversion
+remains isolated in startup migrations.
+
+Explicit stop clears pending state; shutdown/startup capture original text and
+setter/count before clearing it. Keep compaction protection on the current event
+source. Do not infer task success or classify questions in Core: the Agent Guide
+explains cancelling/rewriting while awaiting the user. Mechanical mock tests
+prove lifecycle/delivery behavior, not better real-model task judgement. Revisit
+that evaluation separately with original requests, changed constraints and
+question false triggers; no paid evaluation is silently added to routine checks.
+
+## Isolate unresolved tool repairs (#37 review, 2026-10-29)
+
+Adopt M1 isolation and L1 consistent saved execution facts. A current-format
+structural inconsistency rolls back only its tool group's savepoint, keeps the
+unresolved original history and continues other conversations. Preserve fatal
+handling of actual SQL/persistence failure and missing global root metadata.
+Bounded fixed-reason diagnostics identify affected Threads/groups; they contain
+no command, instruction or arbitrary source text. Startup capture must also
+avoid appending to a structurally inconsistent selected cursor before that
+isolation can run. A skipped snapshot/group is not successful repair.
+
+Original interruption observations precede terminalization; synthetic results
+then refer to the post-startup stopped execution state. Keep L2's existing live
+admission guard: completing a possibly live collector's call would risk racing
+real results or repeating effects. An unreproduced live conflict still requires
+inspection/restart; do not add speculative live repair. The candidate scan pages
+RAM but examines the tool_group PK range at startup; it is not proportional only
+to unfinished groups. Keep indexed per-group lookups and document that cost
+rather than adding a partial index which cannot cover all missing-result cases.
+
+## Bounded OS termination and exit markers (#38–#39, 2026-10-29)
+
+Route delivered TERM/HUP and Windows console-close events through the existing
+draft-preserving shutdown. One owner-lifetime async observer on the shared
+runtime holds bounded atomic facts; the OS callback never owns DB/UI work. A
+fixed cleanup deadline and second delivered signal force exit, relying on #37
+for durable repair when cleanup cannot finish. Terminal loss disables further
+render/input attempts and leaves backend drain alive. The existing windows-sys
+Console feature is enabled without a new crate or version change.
+
+Windows logoff/shutdown notification is best effort under OS delivery rules;
+user32/gdi32 can suppress those console events. A hidden-window message pump is
+not introduced for this change. Native Windows desktop/console behavior is a
+separate unverified boundary, not established by a mock. Revisit if actual
+Windows operation demonstrates the need for that extra lifecycle owner.
+
+Derive exit markers from the latest Run's saved stop_reason only; no new state
+or auto-resume. Preserve explicit_stop during interrupted startup as normal
+shutdown already does. A new Run naturally clears the marker. Bulk resumption is
+an explicit message operation with batching and existing ownership rules; the
+Guide adds no extra restriction on the model's judgement about uncertain effects.
+
+### Quit admission is not ordinary replay cancellation
+
+The Revisit shutdown guard applies only at the idle completion decision. Closing
+new tool starts must still allow already accepted tool groups to save cancelled
+results and follow existing request/drain behavior until real Control shutdown
+cancels them. An early blanket next() return regressed two existing Quit tests;
+it was removed rather than weakening those tests. A pending Revisit stays
+unconsumed so the shutdown snapshot can record it.
+
+### Select the bounded Crossterm Unix polling backend (#38, 2026-10-30)
+
+A real PTY-master-close test failed with exit 1 after 5.1 seconds: diagnostics
+contained the first HUP and force deadline, no frontend shutdown stage, and the
+persisted Run, tool group, call and shell remained active. Inspection of pinned
+Crossterm 0.29.0 `event/source/unix/mio.rs` found an inner readiness/read loop
+that neither exits on zero bytes nor propagates EIO; it cannot honor the caller's
+poll timeout while inside that loop. A pre-poll HUP check would retain a race,
+and moving the same backend to EventStream would retain the spinning reader.
+
+Enable the library's existing `use-dev-tty` feature instead of adding a parser,
+vendored library fork, emergency Quit path, or longer shutdown deadline. Its
+`tty.rs` source breaks the zero-byte read loop, propagates EIO and checks its
+outer poll deadline. Both sources call the same `tty_fd()` and retain the same
+terminal-stdin versus `/dev/tty` selection; Windows input is unchanged. The
+filedescriptor 0.8.3 package is already locked through termwiz; only the
+Crossterm dependency edge and existing Rustix process feature are activated.
+Keep the five/four-second cleanup budgets and actual successful PTY-loss
+assertions. Re-evaluate this feature choice on Crossterm upgrades against the
+source behavior and the same physical PTY regression. Source inspection is not
+a substitute for running that regression or native Windows verification.

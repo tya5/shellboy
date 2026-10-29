@@ -71,7 +71,8 @@ fn event(
             | "child_turn_completed"
             | "child_run_ended"
             | "shell_ended"
-            | "child_report" => EventClass::Change,
+            | "child_report"
+            | "revisit" => EventClass::Change,
             "index_state"
             | "thread_settings"
             | "settings_changed"
@@ -83,7 +84,14 @@ fn event(
             _ => EventClass::Unknown,
         };
         p.title = events::title(event_kind, event);
-        let (states, body) = event_description(fields);
+        let (states, body) = if event_kind == "revisit" {
+            (
+                Vec::new(),
+                events::revisit_preview(event).into_iter().collect(),
+            )
+        } else {
+            event_description(fields)
+        };
         let states = states
             .into_iter()
             .filter(|state| !p.title.contains(state))
@@ -107,6 +115,7 @@ fn prioritize_interruption_identity(p: &mut NodePresentation, value: &Value, kin
         "turns",
         "shells",
         "tool_calls",
+        "revisits",
         "owned_children",
         "unreflected_messages",
         "cancelled_waits",

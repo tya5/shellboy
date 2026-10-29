@@ -18,6 +18,8 @@ shellboy message send [--thread ID] (--text TEXT | --text-stdin)
 shellboy message get --message ID
 shellboy operation get --operation ID
 shellboy run (get|retry|stop) --run ID
+shellboy revisit set [--run ID] (--text TEXT | --text-stdin)
+shellboy revisit (get|cancel) [--run ID]
 shellboy turn get --turn ID
 shellboy wait --conditions-json JSON [--timeout-ms 30000]
 shellboy history list --thread ID [--limit 50] [--cursor TOKEN]
@@ -74,3 +76,13 @@ mainはstandalone JSON応答・owner RPC・TUI寿命を局所関数へ分ける�
 
 
 範囲編集は `shellboy compact --spill|--summary|--omit --from NODE --to NODE [--thread ID]`、先頭省略は `--trim --to NODE`、復元は `--restore [--from MARKER]` とする。モードは排他的。元の引数なしcompactを保持する。wireの`context.edit`は既存compactの受付/安全境界/receipt/downstreamへ接続する。[圧縮設計](compaction.md)を参照。
+
+## Revisit (#36)
+
+The three additive protocol-v2 commands use optional Run targets. Omission is
+resolved only by Control from authenticated shell Origin; humans must name the
+Run. Set/cancel use ordinary mutation receipts and serialized-command
+fingerprints; get is read-only and receipt-free. Set accepts nonblank text of
+at most 8192 UTF-8 bytes, checked in both CLI and wire validation. Its stdin
+reader consumes at most 8193 bytes and rejects overflow without truncation.
+See [Revisit](revisit.md) for ownership, lifecycle and replacement semantics.

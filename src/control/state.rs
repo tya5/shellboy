@@ -7,7 +7,7 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 mod interrupted_tools;
-pub(crate) use interrupted_tools::repair_interrupted_tool_groups;
+pub(crate) use interrupted_tools::{RepairReport, repair_interrupted_tool_groups};
 
 pub(super) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
@@ -412,15 +412,16 @@ pub(super) fn stop_drained_runs(
 pub(crate) fn interrupt_previous_work(
     tx: &rusqlite::Transaction<'_>,
     now: &str,
-) -> Result<(), StorageError> {
-    repair_interrupted_tool_groups(tx, now)?;
+) -> Result<RepairReport, StorageError> {
+    super::revisit::drop_all_pending(tx)?;
     tx.execute("UPDATE turn SET state='stopped',ended_at=?1,recovery_reason_json=?2 WHERE state IN ('preparing','running','waiting','recovery_wait')",rusqlite::params![now,r#"{"reason":"previous_instance_interrupted","result_uncertain":true}"#])?;
     tx.execute("UPDATE shell_execution SET state='stopped',ended_at=?1,end_reason='previous_instance_interrupted',output_complete=0 WHERE state IN ('starting','running','stopping')",[&now])?;
-    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason='previous_instance_interrupted' WHERE state IN ('live','stopping')",[&now])?;
+    let report = repair_interrupted_tool_groups(tx, now)?;
+    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping')",[&now])?;
     interrupt_previous_attempts(tx, now)?;
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
     tx.execute("UPDATE receipt SET state='held',hold_reason='previous_instance_interrupted',updated_at=?1 WHERE state IN ('accepted','held')",[&now])?;
-    Ok(())
+    Ok(report)
 }
 
 /// Final fallback after all Control workers and accepted requests have drained.
@@ -850,6 +851,57 @@ mod tests {
                 .unwrap(),
                 (state.into(), "original".into())
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod exit_reason_tests {
+    use super::*;
+    #[test]
+    fn startup_and_both_shutdown_paths_preserve_explicit_stop() {
+        for boundary in ["startup", "drained", "fallback"] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/','p','m','old'); INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('u','/','/','p','m','old'); INSERT INTO run(id,thread_id,state,created_at,stop_reason) VALUES('explicit','t','stopping','old','explicit_stop'); INSERT INTO run(id,thread_id,state,created_at) VALUES('unclassified','u','live','old');").unwrap();
+            let tx = db.transaction().unwrap();
+            match boundary {
+                "startup" => {
+                    interrupt_previous_work(&tx, "now").unwrap();
+                }
+                "drained" => stop_drained_runs(
+                    &tx,
+                    &[
+                        ("explicit".into(), "t".into()),
+                        ("unclassified".into(), "u".into()),
+                    ],
+                    true,
+                )
+                .unwrap(),
+                _ => finish_drained_shutdown(&tx).unwrap(),
+            }
+            assert_eq!(
+                tx.query_row("SELECT stop_reason FROM run WHERE id='explicit'", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                "explicit_stop",
+                "{boundary}"
+            );
+            assert_eq!(
+                tx.query_row(
+                    "SELECT stop_reason FROM run WHERE id='unclassified'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                if boundary == "startup" {
+                    "previous_instance_interrupted"
+                } else {
+                    "app_shutdown"
+                },
+                "{boundary}"
+            );
+            tx.commit().unwrap();
         }
     }
 }

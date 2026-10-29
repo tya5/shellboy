@@ -17,6 +17,7 @@ mod driver;
 pub mod output;
 pub(crate) mod receipt;
 pub mod replay;
+pub(crate) mod revisit;
 pub(crate) mod state;
 mod wait;
 
@@ -1000,6 +1001,7 @@ impl Control {
                             "app_shutdown",
                             "shutdown",
                         )?;
+                        revisit::drop_all_pending(&tx)?;
                         tx.commit()?;
                         Ok(())
                     })

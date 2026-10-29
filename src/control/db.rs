@@ -766,6 +766,26 @@ impl Store {
                 &args.operation_id,
                 &self.instance_id,
             )?),
+            Command::RevisitGet(args) => {
+                MutationResult::value(super::revisit::get(tx, args, caller, &self.config)?)
+            }
+            Command::RevisitSet(args) => {
+                let (thread, result) =
+                    super::revisit::set(tx, args, caller, operation_id, now, &self.config)?;
+                Ok(MutationResult {
+                    result,
+                    changed_threads: vec![thread],
+                    ..Default::default()
+                })
+            }
+            Command::RevisitCancel(args) => {
+                let (thread, result) = super::revisit::cancel(tx, args, caller, now, &self.config)?;
+                Ok(MutationResult {
+                    result,
+                    changed_threads: vec![thread],
+                    ..Default::default()
+                })
+            }
             Command::RunGet(args) => MutationResult::value(run_details(tx, &args.run_id)?),
             Command::TurnGet(args) => MutationResult::value(turn_details(tx, &args.turn_id)?),
             Command::RunStop(args) => stop_run(tx, &args.run_id, caller, now),
@@ -1347,7 +1367,7 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
     };
     // Filter against the same derived labels returned by ThreadGet/List. Keep
     // candidates as a cursor: a filtered miss scans without collecting history.
-    let mut statement=connection.prepare("SELECT id,title,cwd,parent_thread_id,updated_at,(SELECT COALESCE((SELECT state FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),r.state) FROM run r WHERE r.thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1) FROM thread t WHERE deleted_at IS NULL AND rowid<=?1 AND (?2='' OR updated_at<?2 OR (updated_at=?2 AND id<?3)) ORDER BY updated_at DESC,id DESC LIMIT ?4").map_err(sql_error)?;
+    let mut statement=connection.prepare("SELECT id,title,cwd,parent_thread_id,updated_at,(SELECT COALESCE((SELECT state FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),r.state) FROM run r WHERE r.thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1),(SELECT stop_reason FROM run r WHERE r.thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1),(SELECT id FROM run r WHERE r.thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1) FROM thread t WHERE deleted_at IS NULL AND rowid<=?1 AND (?2='' OR updated_at<?2 OR (updated_at=?2 AND id<?3)) ORDER BY updated_at DESC,id DESC LIMIT ?4").map_err(sql_error)?;
     let mut rows = statement
         .query(params![
             watermark,
@@ -1379,6 +1399,13 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
             title,
             cwd,
             parent_id: row.get(3).map_err(sql_error)?,
+            latest_run_stop_reason: row.get(6).map_err(sql_error)?,
+            revisit: row
+                .get::<_, Option<String>>(7)
+                .map_err(sql_error)?
+                .map(|run| super::revisit::summary(connection, &run))
+                .transpose()?
+                .flatten(),
             updated_at: row.get(4).map_err(sql_error)?,
             state: row
                 .get::<_, Option<String>>(5)
@@ -1474,6 +1501,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
             (Some(id), answer, reason)
         });
     Ok(RunDetails {
+        revisit: super::revisit::summary(connection, id)?,
         context: crate::context::for_run(connection, id)?,
         run_id: id.into(),
         thread_id: row.0,
@@ -1534,6 +1562,7 @@ fn stop_run(
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(sql_error)?;
         for run in &result.stop_runs {
+            super::revisit::drop_pending(tx, run)?;
             tx.execute("UPDATE run SET state='stopping',stop_reason='explicit_stop' WHERE id=?1 AND state='live'",[run]).map_err(sql_error)?;
             tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run]).map_err(sql_error)?;
             super::attachment_delivery::hold_run_tx(tx, run)?;
@@ -1643,6 +1672,7 @@ fn delete_thread(
         }
     }
     for id in &targets {
+        super::revisit::delete_thread(tx, id)?;
         tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
         // Retain the last path/replacement as ownership evidence until payload
         // GC. Deleted Threads are not roots or public selection targets. Removing

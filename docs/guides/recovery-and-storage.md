@@ -4,6 +4,27 @@
 
 When responses stop, inspect saved acceptance, Turn, and Run state before repeatedly sending the same request. Use the CLI in another terminal while the owner remains running. Examples below use Bash; replace IDs with values from actual responses.
 
+## Terminal closure and operating-system exit
+
+Delivered SIGTERM/SIGHUP request the same draft-preserving shutdown as Ctrl+Q.
+Losing the terminal stops further drawing/input and leaves shutdown running.
+A second delivered termination signal forces exit; cleanup also has a fixed
+five-second Unix / four-second Windows budget. OS deadlines, SIGKILL and power
+loss can still interrupt saving: inspect the previous shutdown record after
+restart. A signal is a request to stop, not proof that every effect was saved.
+
+Windows console close uses the same bounded path when the OS delivers its event.
+Logoff/shutdown delivery is best effort, particularly when GUI libraries suppress
+console notifications. Native Windows desktop behavior is not established by
+Unix tests. See the [OS termination design](../design/os-signal-shutdown.md) for
+these platform limits. Ctrl+C inside the interactive TUI keeps its Run-stop role.
+
+The Thread list marks the latest Run with `[exit]` / `Interrupted by app exit`
+when its saved reason is `app_shutdown` or `previous_instance_interrupted`.
+Explicit user stop and normal completion are unmarked. `thread list` exposes
+`latest_run_stop_reason`; starting a new Run clears that indication naturally.
+Opening an interrupted conversation and inspecting its record does not resume it.
+
 ## After an interrupted shell
 
 On startup, Shellboy pairs adopted tool calls that lack a committed result,

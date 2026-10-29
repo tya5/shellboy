@@ -276,7 +276,7 @@ impl Compactor {
             let stopping:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",[&thread],|r|r.get(0))?;
             if stopping{return Err(StorageError::from(invalid("Compaction cancelled: Run is stopping")));}
             let latest_complete_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
-            let protected=db.prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held')")?.query_map([&thread],|r|r.get::<_,String>(0))?.collect::<Result<HashSet<_>,_>>()?;
+            let protected=db.prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held') UNION SELECT n.id FROM node n JOIN event e ON e.id=json_extract(n.payload_json,'$.event_id') WHERE n.turn_id=?3 AND n.kind='event' AND e.kind='revisit' AND e.target_run_id=?2")?.query_map(params![thread,run_fence,current_turn],|r|r.get::<_,String>(0))?.collect::<Result<HashSet<_>,_>>()?;
             let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([&thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?)))?.collect::<Result<Vec<_>,_>>()?;
             let mut sources=Vec::new();
             let mut completed=HashSet::new();
@@ -1141,6 +1141,40 @@ mod tests {
             assert_eq!(db.query_row("SELECT COUNT(*) FROM replacement_source WHERE source_node_id IN ('audit','human')",[],|r|r.get::<_,i64>(0))?,2);
             Ok(())
         }).await.unwrap();
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn revisit_event_is_protected_as_the_current_request_for_trim_and_summary() {
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx=db.transaction()?;
+            tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('revisit-turn','t','r','preparing','now');")?;
+            history::append_node(&tx,"t","old",None,"user",&json!({"role":"user","content":"old request"}),"before")?;
+            tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at)VALUES('revisit-event','revisit','{}','t','r','{}','now')",[])?;
+            history::append_node(&tx,"t","event-revisit-event",Some("revisit-turn"),"event",&json!({"event_id":"revisit-event","role":"developer","content":"original Revisit instruction"}),"now")?;
+            history::append_node(&tx,"t","response",Some("revisit-turn"),"assistant_response",&json!({"role":"assistant","content":"work after Revisit"}),"now")?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let snapshot = compactor.snapshot("t", true).await.unwrap();
+        assert!(snapshot.protected.contains("event-revisit-event"));
+        let request = policy::turn_boundary(&snapshot, snapshot.current_turn.as_deref()).unwrap();
+        assert_eq!(
+            snapshot.groups[request].sources[0].id,
+            "event-revisit-event"
+        );
+        if let Some(range) = policy::summary_range(&snapshot, true) {
+            assert!(range.end <= request);
+        }
+        assert!(
+            range::validate(
+                &snapshot,
+                std::slice::from_ref(&(request..request + 1)),
+                range::RangeMode::Summary
+            )
+            .is_err()
+        );
         db.shutdown().await.unwrap();
     }
 

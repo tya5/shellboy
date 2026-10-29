@@ -317,6 +317,19 @@ impl Command {
             Self::MessageGet(a) => nonempty(&a.message_id, "message_id"),
             Self::OperationGet(a) => nonempty(&a.operation_id, "operation_id"),
             Self::RunGet(a) | Self::RunRetry(a) | Self::RunStop(a) => nonempty(&a.run_id, "run_id"),
+            Self::RevisitGet(a) | Self::RevisitCancel(a) => {
+                optional_nonempty(a.run_id.as_deref(), "run_id")
+            }
+            Self::RevisitSet(a) => {
+                optional_nonempty(a.run_id.as_deref(), "run_id")?;
+                if a.text.len() > MAX_REVISIT_TEXT_BYTES {
+                    return Err(ApiError::new(
+                        ErrorCode::InputLimit,
+                        "Revisit text exceeds 8192 UTF-8 bytes",
+                    ));
+                }
+                nonempty(&a.text, "text")
+            }
             Self::TurnGet(a) => nonempty(&a.turn_id, "turn_id"),
             Self::Wait(a) => a.validate(),
             Self::HistoryList(a) => a.validate(),

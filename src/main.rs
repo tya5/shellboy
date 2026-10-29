@@ -215,6 +215,13 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             None,
         );
     }
+    let termination = match shellboy::ui::termination::Termination::install(runtime.handle()) {
+        Ok(termination) => termination,
+        Err(error) => {
+            eprintln!("Cannot observe OS termination: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let mut session = match shellboy::ui::TerminalSession::enter() {
         Ok(session) => session,
         Err(error) => {
@@ -235,7 +242,13 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         shellboy::frontend::startup::deliver(result, send).await;
     });
     let prepared = loop {
-        match shellboy::ui::startup::wait(&mut session, &stages, &pending, &cancel) {
+        match shellboy::ui::startup::wait_with_termination(
+            &mut session,
+            &stages,
+            &pending,
+            &cancel,
+            &termination,
+        ) {
             Ok(Ok(Some(prepared))) if cancel.is_cancelled() => {
                 // Cancellation may race the single ready delivery. Never
                 // hand that owner to the conversation UI; keep drawing cleanup.
@@ -284,6 +297,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         requests: rpc_receive,
         cwd,
     } = prepared;
+    termination.bind_diagnostics(owner.diagnostics.clone());
     let config = owner.loaded.config.clone();
     runtime.spawn(control.clone().serve(rpc_receive));
     let (actions_send, actions_receive) = shellboy::ui::actions::channel(128);
@@ -297,8 +311,13 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         owner,
         server,
     ));
-    let terminal_result =
-        shellboy::ui::run_in_session(&mut session, &config, actions_send.clone(), updates_receive);
+    let terminal_result = shellboy::ui::run_in_session_with_termination(
+        &mut session,
+        &config,
+        actions_send.clone(),
+        updates_receive,
+        &termination,
+    );
     drop(session);
     if matches!(&terminal_result, Ok(shellboy::ui::UiExitReason::Forced)) {
         eprintln!(
@@ -310,6 +329,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         let _ = actions_send.try_send(shellboy::ui::UiAction::Quit);
     }
     let result = runtime.block_on(bridge);
+    termination.complete();
     if let Err(error) = terminal_result {
         eprintln!("Terminal error: {error}");
         runtime.shutdown_background();

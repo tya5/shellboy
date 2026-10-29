@@ -63,6 +63,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: RunCommand,
     },
+    /// Reserve, inspect, or cancel an instruction at normal Run completion.
+    Revisit {
+        #[command(subcommand)]
+        command: RevisitCommand,
+    },
     /// Inspect one answer interval and its saved answer node.
     Turn {
         #[command(subcommand)]
@@ -156,6 +161,29 @@ pub enum RunCommand {
     Retry(RunOptions),
     /// Request stopping this Run and its owned work; inspect state to confirm termination.
     Stop(RunOptions),
+}
+#[derive(Debug, Clone, Subcommand)]
+pub enum RevisitCommand {
+    /// Replace the pending instruction. Models may omit --run for their own Run.
+    Set(RevisitSetOptions),
+    /// Inspect pending instruction, setter, count and last firing time.
+    Get(RevisitOptions),
+    /// Remove the pending instruction without stopping the Run.
+    Cancel(RevisitOptions),
+}
+#[derive(Debug, Clone, Args)]
+pub struct RevisitOptions {
+    /// Required for humans; models may address their own Run or a directly owned child.
+    #[arg(long = "run")]
+    pub run_id: Option<String>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct RevisitSetOptions {
+    #[command(flatten)]
+    pub target: RevisitOptions,
+    /// Instruction of at most 8192 UTF-8 bytes; blank text is rejected.
+    #[command(flatten)]
+    pub text: TextOptions,
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum TurnCommand {
@@ -651,6 +679,16 @@ impl Cli {
                 RunCommand::Retry(a) => C::RunRetry(wire::RunTarget { run_id: a.run_id }),
                 RunCommand::Stop(a) => C::RunStop(wire::RunTarget { run_id: a.run_id }),
             },
+            CliCommand::Revisit { command } => match command {
+                RevisitCommand::Set(a) => C::RevisitSet(wire::RevisitSetArgs {
+                    run_id: a.target.run_id,
+                    text: read_text_limited(a.text, stdin, wire::MAX_REVISIT_TEXT_BYTES).await?,
+                }),
+                RevisitCommand::Get(a) => C::RevisitGet(wire::RevisitArgs { run_id: a.run_id }),
+                RevisitCommand::Cancel(a) => {
+                    C::RevisitCancel(wire::RevisitArgs { run_id: a.run_id })
+                }
+            },
             CliCommand::Turn {
                 command: TurnCommand::Get(a),
             } => C::TurnGet(wire::TurnTarget { turn_id: a.turn_id }),
@@ -782,9 +820,16 @@ async fn read_text<R: AsyncRead + Unpin>(
     options: TextOptions,
     reader: &mut R,
 ) -> Result<String, ApiError> {
+    read_text_limited(options, reader, MAX_STDIN_TEXT_BYTES).await
+}
+async fn read_text_limited<R: AsyncRead + Unpin>(
+    options: TextOptions,
+    reader: &mut R,
+    max_bytes: usize,
+) -> Result<String, ApiError> {
     match (options.text, options.text_stdin) {
         (Some(text), false) => {
-            if text.len() > MAX_STDIN_TEXT_BYTES {
+            if text.len() > max_bytes {
                 Err(ApiError::new(
                     ErrorCode::InputLimit,
                     "text exceeds the CLI byte limit",
@@ -796,11 +841,11 @@ async fn read_text<R: AsyncRead + Unpin>(
         (None, true) => {
             let mut bytes = Vec::new();
             reader
-                .take((MAX_STDIN_TEXT_BYTES + 1) as u64)
+                .take((max_bytes + 1) as u64)
                 .read_to_end(&mut bytes)
                 .await
                 .map_err(|_| ApiError::new(ErrorCode::IoFailed, "cannot read text from stdin"))?;
-            if bytes.len() > MAX_STDIN_TEXT_BYTES {
+            if bytes.len() > max_bytes {
                 return Err(ApiError::new(
                     ErrorCode::InputLimit,
                     "stdin text exceeds the CLI byte limit",

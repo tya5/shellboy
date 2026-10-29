@@ -26,6 +26,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (9, "0009_compaction_turn_indexes"),
     (10, "0010_hot_query_indexes"),
     (11, "0011_current_index_metadata"),
+    (12, "0012_revisit_metadata"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

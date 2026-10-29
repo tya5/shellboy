@@ -229,6 +229,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `limits` | `attachment_file_bytes=20971520`, `attachment_request_bytes=41943040` | 20MiB per attachment, 40MiB per request |
 | `limits` | `shell_raw_bytes=67108864`, `tool_excerpt_bytes=16384` | Shell raw 64MiB, result excerpt 16KiB; history body pages have a fixed 64KiB maximum, not a configuration key |
 | `limits` | `shell_stdin_bytes=1048576`, `draft_bytes=1048576` | Stdin and draft, 1MiB each |
+| `limits` | `revisit_max_per_run` omitted | Unlimited Revisit consumptions per Run; `0` disables registration, positive integers cap consumptions. Text has a fixed 8192-byte UTF-8 limit |
 | `limits` | `data_warning_bytes=8589934592`, `data_max_bytes=10737418240` | Logical usage warning at 8GiB, stop new work at 10GiB |
 | `cache` | `body_bytes=33554432`, `layout_bytes=16777216`, `history_bytes=33554432`, `attachment_base64_bytes=67108864` | Body 32MiB, layout 16MiB, send history 32MiB, attachment conversion 64MiB |
 | `io` | `file_prepare_timeout_ms=30000`, `shell_write_timeout_ms=10000` | File preparation and stdin-write deadlines |

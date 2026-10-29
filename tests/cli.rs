@@ -828,3 +828,61 @@ fn rag_conversion_backend_flags_are_no_longer_part_of_the_cli() {
         assert!(Cli::try_parse_from(["shellboy", "rag", "index", flag, "anything"]).is_err());
     }
 }
+
+#[tokio::test]
+async fn revisit_targets_and_bounded_stdin_map_to_shared_commands() {
+    use shellboy::protocol::{MAX_REVISIT_TEXT_BYTES, RevisitArgs, RevisitSetArgs};
+    assert_eq!(
+        convert(&["revisit", "get"]).await,
+        Command::RevisitGet(RevisitArgs { run_id: None })
+    );
+    assert_eq!(
+        convert(&["revisit", "cancel", "--run", "child"]).await,
+        Command::RevisitCancel(RevisitArgs {
+            run_id: Some("child".into())
+        })
+    );
+    assert_eq!(
+        convert(&["revisit", "set", "--text", "Review remaining requirements"]).await,
+        Command::RevisitSet(RevisitSetArgs {
+            run_id: None,
+            text: "Review remaining requirements".into()
+        })
+    );
+    for args in [
+        vec!["shellboy", "revisit", "set"],
+        vec!["shellboy", "revisit", "set", "--text", "x", "--text-stdin"],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+    let text = "é".repeat(MAX_REVISIT_TEXT_BYTES / 2);
+    let cli =
+        Cli::try_parse_from(["shellboy", "revisit", "set", "--run", "r", "--text-stdin"]).unwrap();
+    let result = cli
+        .into_command_with_stdin(cwd(), &mut text.as_bytes())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        result,
+        Command::RevisitSet(RevisitSetArgs {
+            run_id: Some("r".into()),
+            text
+        })
+    );
+    let bytes = vec![b'x'; MAX_REVISIT_TEXT_BYTES + 2];
+    let mut input = bytes.as_slice();
+    let cli = Cli::try_parse_from(["shellboy", "revisit", "set", "--text-stdin"]).unwrap();
+    assert_eq!(
+        cli.into_command_with_stdin(cwd(), &mut input)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InputLimit
+    );
+    assert_eq!(
+        input.len(),
+        1,
+        "stdin reads at most limit+1 bytes before rejecting"
+    );
+}

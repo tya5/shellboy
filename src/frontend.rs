@@ -338,6 +338,9 @@ fn command_title(command: &Command) -> String {
         Command::RunGet(_) => "作業の詳細",
         Command::RunRetry(_) => "同じ内容で再試行",
         Command::RunStop(_) => "作業を停止",
+        Command::RevisitSet(_) => "Set Revisit",
+        Command::RevisitGet(_) => "Inspect Revisit",
+        Command::RevisitCancel(_) => "Cancel Revisit",
         Command::TurnGet(_) => "応答処理の詳細",
         Command::Wait(_) => "条件の成立を待機",
         Command::HistoryList(_) => "履歴一覧",
@@ -3397,6 +3400,8 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
+                latest_run_stop_reason: None,
+                revisit: None,
                 thread_id: "valid".into(),
                 title: String::new(),
                 cwd: String::new(),
@@ -3406,6 +3411,8 @@ mod stream_tests {
                 excerpt: String::new(),
             },
             ThreadSummary {
+                latest_run_stop_reason: None,
+                revisit: None,
                 thread_id: "unknown".into(),
                 title: String::new(),
                 cwd: String::new(),

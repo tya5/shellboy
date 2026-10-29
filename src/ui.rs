@@ -35,6 +35,7 @@ mod presentation;
 mod redraw;
 pub mod startup;
 mod terminal_guard;
+pub mod termination;
 pub(crate) mod theme;
 use terminal_guard::TerminalGuard;
 mod thread_deletion;
@@ -2392,6 +2393,8 @@ impl UiState {
                         || !view.pending.is_empty())
             })
             .map(|(key, view)| ThreadSummary {
+                latest_run_stop_reason: None,
+                revisit: None,
                 thread_id: format!("draft:{key}"),
                 title: "未送信の下書き".into(),
                 cwd: view.cwd.to_string_lossy().into(),
@@ -3958,6 +3961,14 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         &view.status
     };
     let mut status_parts = vec![follow.to_owned()];
+    if let Some(label) = view
+        .activity
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.revisit.as_ref())
+    {
+        status_parts.insert(0, label.clone());
+    }
     if activity_phase.is_active()
         && let Some(summary) = view
             .activity
@@ -4274,7 +4285,24 @@ pub fn run_in_session(
     actions: impl Into<actions::ActionSender>,
     updates: Receiver<UiUpdate>,
 ) -> io::Result<UiExitReason> {
-    let actions = actions.into();
+    run_session(session, config, actions.into(), updates, None)
+}
+pub fn run_in_session_with_termination(
+    session: &mut TerminalSession,
+    config: &Config,
+    actions: impl Into<actions::ActionSender>,
+    updates: Receiver<UiUpdate>,
+    termination: &termination::Termination,
+) -> io::Result<UiExitReason> {
+    run_session(session, config, actions.into(), updates, Some(termination))
+}
+fn run_session(
+    session: &mut TerminalSession,
+    config: &Config,
+    actions: actions::ActionSender,
+    updates: Receiver<UiUpdate>,
+    termination: Option<&termination::Termination>,
+) -> io::Result<UiExitReason> {
     let terminal = &mut session.terminal;
     let link_snapshot = &session.link_snapshot;
     let mut state = UiState::new(config, PathBuf::new());
@@ -4283,55 +4311,87 @@ pub fn run_in_session(
     let mut last_draw = Instant::now() - frame_time;
     let mut selecting = false;
     let mut last_save = Instant::now();
+    let mut detached = false;
     loop {
+        if termination.is_some_and(termination::Termination::forced) {
+            return Ok(UiExitReason::Forced);
+        }
+        if termination.is_some_and(termination::Termination::requested)
+            && !state.is_quitting()
+            && !state.is_stopped()
+        {
+            let quit = state.event(Event::Key(KeyEvent::new(
+                KeyCode::Char('q'),
+                KeyModifiers::CONTROL,
+            )));
+            for error in actions.try_send_batch(quit) {
+                state.action_rejected(&error.into_inner());
+            }
+        }
         state.drain_updates(&updates);
         if state.is_stopped() {
             break;
         }
-        state.bell.flush(terminal.backend_mut(), Instant::now())?;
         for action in state.take_deferred_actions() {
             if let Err(error) = actions.try_send(action) {
                 state.deferred_actions.push(error.into_inner());
             }
         }
-        for bytes in state.take_terminal_requests() {
-            use std::io::Write;
-            terminal.backend_mut().write_all(&bytes)?;
-            terminal.backend_mut().flush()?;
-        }
         if state.autosave.pending() && last_save.elapsed() >= Duration::from_millis(250) {
             state.submit_saves(&actions);
             last_save = Instant::now();
         }
-        let mode_changed = selecting != state.selection_mode;
-        if mode_changed {
-            if state.selection_mode {
-                execute!(terminal.backend_mut(), DisableMouseCapture)?;
-            } else {
-                execute!(terminal.backend_mut(), EnableMouseCapture)?;
+        if detached {
+            std::thread::sleep(Duration::from_millis(25));
+            continue;
+        }
+        let rendered = (|| -> io::Result<()> {
+            state.bell.flush(terminal.backend_mut(), Instant::now())?;
+            for bytes in state.take_terminal_requests() {
+                use std::io::Write;
+                terminal.backend_mut().write_all(&bytes)?;
+                terminal.backend_mut().flush()?;
             }
-            selecting = state.selection_mode;
-        }
-        state.animation_tick(Instant::now());
-        if state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
-            redraw::draw_terminal(terminal, &mut state, link_snapshot)?;
-            last_draw = Instant::now();
-        }
-        let wait = if state.dirty && (!state.selection_mode || state.full_redraw_requested) {
-            frame_time
-                .saturating_sub(last_draw.elapsed())
-                .min(Duration::from_millis(25))
-        } else {
-            Duration::from_millis(25)
-        };
-        let wait = state
-            .thread_browser
-            .filter_wait(Instant::now())
-            .map_or(wait, |remaining| wait.min(remaining));
-        if event::poll(wait)? {
-            let actions_to_send = state.event(event::read()?);
-            for error in actions.try_send_batch(actions_to_send) {
-                state.action_rejected(&error.into_inner());
+            let mode_changed = selecting != state.selection_mode;
+            if mode_changed {
+                if state.selection_mode {
+                    execute!(terminal.backend_mut(), DisableMouseCapture)?;
+                } else {
+                    execute!(terminal.backend_mut(), EnableMouseCapture)?;
+                }
+                selecting = state.selection_mode;
+            }
+            state.animation_tick(Instant::now());
+            if state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
+                redraw::draw_terminal(terminal, &mut state, link_snapshot)?;
+                last_draw = Instant::now();
+            }
+            let wait = if state.dirty && (!state.selection_mode || state.full_redraw_requested) {
+                frame_time
+                    .saturating_sub(last_draw.elapsed())
+                    .min(Duration::from_millis(25))
+            } else {
+                Duration::from_millis(25)
+            };
+            let wait = state
+                .thread_browser
+                .filter_wait(Instant::now())
+                .map_or(wait, |remaining| wait.min(remaining));
+            if event::poll(wait)? {
+                let actions_to_send = state.event(event::read()?);
+                for error in actions.try_send_batch(actions_to_send) {
+                    state.action_rejected(&error.into_inner());
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = rendered {
+            if let Some(termination) = termination {
+                // Losing a PTY must not discard the owner shutdown future.
+                termination.terminal_lost();
+                detached = true;
+            } else {
+                return Err(error);
             }
         }
     }
@@ -4624,6 +4684,39 @@ mod layout_cache_tests {
     }
 
     #[test]
+    fn revisit_footer_shows_saved_continuation_and_clears_with_new_snapshot() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        for (epoch, label) in [(1, Some("Revisit 5 · next reserved".to_owned())), (2, None)] {
+            ui.apply(UiUpdate::Activity {
+                thread_id: "t".into(),
+                generation,
+                epoch,
+                observed_at: Instant::now(),
+                snapshot: activity::ActivitySnapshot {
+                    phase: activity::ActivityPhase::Running,
+                    revisit: label,
+                    ..Default::default()
+                },
+            });
+            let mut terminal = Terminal::new(TestBackend::new(160, 2)).unwrap();
+            terminal
+                .draw(|frame| draw_status(frame, frame.area(), &ui))
+                .unwrap();
+            let shown = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>();
+            assert_eq!(shown.contains("Revisit 5 · next reserved"), epoch == 1);
+        }
+    }
+
+    #[test]
     fn retry_footer_renders_saved_counts_and_clears_them_after_success() {
         use ratatui::{Terminal, backend::TestBackend};
         use unicode_width::UnicodeWidthStr;
@@ -4755,6 +4848,7 @@ mod layout_cache_tests {
         let revision = ui.view().history_revision();
         let generation = ui.view().generation;
         let snapshot = ActivitySnapshot {
+            revisit: None,
             context_reduction: None,
             automatic_retry: None,
             recovery: None,

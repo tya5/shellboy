@@ -1,5 +1,6 @@
 //! Bounded pre-terminal context captured by startup and shutdown transactions.
 use crate::storage::StorageError;
+use rusqlite::OptionalExtension;
 
 use serde_json::{Value, json};
 
@@ -28,6 +29,7 @@ AND (EXISTS (
             SELECT 1 FROM tool_call c WHERE c.group_id=g.id
             AND (c.state IN ('pending','running') OR NOT EXISTS (
                 SELECT 1 FROM tool_result z WHERE z.group_id=c.group_id AND z.call_id=c.call_id)))))
+    OR EXISTS (SELECT 1 FROM app_meta m JOIN run r ON m.key='revisit.'||r.id WHERE r.thread_id=t.id AND json_type(m.value,'$.pending')='object')
     OR EXISTS (
         SELECT 1
         FROM app_meta m
@@ -125,6 +127,11 @@ WHERE u.thread_id=?1 AND (g.state<>'completed' OR EXISTS (
     AND (pending.state IN ('pending','running') OR NOT EXISTS (
         SELECT 1 FROM tool_result saved WHERE saved.group_id=pending.group_id AND saved.call_id=pending.call_id))))
 ORDER BY g.created_at,g.id,c.ordinal";
+
+const REVISIT_SNAPSHOT: &str = r"SELECT json_set(m.value,'$.run_id',r.id)
+FROM run r JOIN app_meta m ON m.key='revisit.'||r.id
+WHERE r.thread_id=?1 AND json_type(m.value,'$.pending')='object'
+ORDER BY r.created_at,r.id";
 
 const OWNED_CHILDREN_SNAPSHOT: &str = r"SELECT json_object('run_id', c.id,
     'thread_id', c.thread_id,
@@ -352,107 +359,168 @@ pub(crate) fn capture_interrupted_context(
     reason: &'static str,
     source: &'static str,
 ) -> Result<(), StorageError> {
+    capture_context(tx, at, reason, source, false).map(|_| ())
+}
+
+pub(crate) fn capture_startup_interrupted_context(
+    tx: &rusqlite::Transaction<'_>,
+    at: &str,
+) -> Result<Vec<crate::diagnostics::ToolRepairFailure>, StorageError> {
+    let root_exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key='root_revision')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !root_exists {
+        let mut error = crate::protocol::ApiError::new(
+            crate::protocol::ErrorCode::SaveFailed,
+            "Global root revision metadata is missing at startup capture",
+        );
+        error.details = Some(json!({"stage":"startup_global_metadata"}));
+        return Err(error.into());
+    }
+    capture_context(tx, at, "previous_instance_interrupted", "startup", true)
+}
+
+fn capture_context(
+    tx: &rusqlite::Transaction<'_>,
+    at: &str,
+    reason: &'static str,
+    source: &'static str,
+    isolate_bad_cursor: bool,
+) -> Result<Vec<crate::diagnostics::ToolRepairFailure>, StorageError> {
+    let mut failures = Vec::new();
     let threads = tx
         .prepare(THREADS_WITH_INTERRUPTED_WORK)?
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     for thread in threads {
-        let runs = snapshot_section(tx, RUN_SNAPSHOT, &thread, at, "runs", reason)?;
-        let turns = snapshot_section(tx, TURN_SNAPSHOT, &thread, at, "turns", reason)?;
-        let shells = snapshot_section(tx, SHELL_SNAPSHOT, &thread, at, "shells", reason)?;
-        let tool_calls =
-            snapshot_section(tx, TOOL_CALL_SNAPSHOT, &thread, at, "tool_calls", reason)?;
-        let children = snapshot_section(
-            tx,
-            OWNED_CHILDREN_SNAPSHOT,
-            &thread,
-            at,
-            "owned_children",
-            reason,
-        )?;
-        let messages = snapshot_section(
-            tx,
-            MESSAGE_SNAPSHOT,
-            &thread,
-            at,
-            "unreflected_messages",
-            reason,
-        )?;
-        // Rebuild only the allowed fields; never copy Origin.token or credentials.
-        let wait_sql = WAIT_SNAPSHOT;
-        let mut references = std::collections::HashMap::new();
-        {
-            let mut statement = tx.prepare(wait_sql)?;
-            let mut query = statement.query([&thread])?;
-            while let Some(row) = query.next()? {
-                let body: String = row.get(0)?;
-                let original: Value =
-                    serde_json::from_str(&body).map_err(|e| StorageError::Schema(e.to_string()))?;
-                let node = uuid::Uuid::new_v4().to_string();
-                crate::history::append_node(
-                    tx,
-                    &thread,
-                    &node,
-                    None,
-                    "interrupted_wait",
-                    &json!({"text":body}),
-                    at,
-                )?;
-                if references.len() < DETAIL_REFERENCES
-                    && let Some(operation) = original["operation_id"].as_str()
-                {
-                    references.insert(operation.to_owned(), node);
+        if isolate_bad_cursor {
+            let valid: bool = tx.query_row("SELECT cursor_node_id IS (SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1) FROM thread WHERE id=?1",[&thread],|r|r.get(0))?;
+            if !valid {
+                if failures.len() < 32 {
+                    failures.push(crate::diagnostics::ToolRepairFailure {
+                        thread_id: thread.chars().take(128).collect(),
+                        group_id: None,
+                        reason: crate::diagnostics::ToolRepairReason::CaptureCursorMismatch,
+                    });
                 }
+                continue;
             }
         }
-        let mut waits = snapshot_section(tx, wait_sql, &thread, at, "cancelled_waits", reason)?;
-        waits["history_kind"] = json!("interrupted_wait");
-        if let Some(items) = waits["items"].as_array_mut() {
-            for item in items {
-                if let Some(node) = item["operation_id"]
-                    .as_str()
-                    .and_then(|id| references.get(id))
-                {
-                    item["node_id"] = json!(node);
+        let captured = (|| -> Result<(), StorageError> {
+            let runs = snapshot_section(tx, RUN_SNAPSHOT, &thread, at, "runs", reason)?;
+            let turns = snapshot_section(tx, TURN_SNAPSHOT, &thread, at, "turns", reason)?;
+            let shells = snapshot_section(tx, SHELL_SNAPSHOT, &thread, at, "shells", reason)?;
+            let tool_calls =
+                snapshot_section(tx, TOOL_CALL_SNAPSHOT, &thread, at, "tool_calls", reason)?;
+            let revisits = snapshot_section(tx, REVISIT_SNAPSHOT, &thread, at, "revisits", reason)?;
+            let children = snapshot_section(
+                tx,
+                OWNED_CHILDREN_SNAPSHOT,
+                &thread,
+                at,
+                "owned_children",
+                reason,
+            )?;
+            let messages = snapshot_section(
+                tx,
+                MESSAGE_SNAPSHOT,
+                &thread,
+                at,
+                "unreflected_messages",
+                reason,
+            )?;
+            // Rebuild only the allowed fields; never copy Origin.token or credentials.
+            let wait_sql = WAIT_SNAPSHOT;
+            let mut references = std::collections::HashMap::new();
+            {
+                let mut statement = tx.prepare(wait_sql)?;
+                let mut query = statement.query([&thread])?;
+                while let Some(row) = query.next()? {
+                    let body: String = row.get(0)?;
+                    let original: Value = serde_json::from_str(&body)
+                        .map_err(|e| StorageError::Schema(e.to_string()))?;
+                    let node = uuid::Uuid::new_v4().to_string();
+                    crate::history::append_node(
+                        tx,
+                        &thread,
+                        &node,
+                        None,
+                        "interrupted_wait",
+                        &json!({"text":body}),
+                        at,
+                    )?;
+                    if references.len() < DETAIL_REFERENCES
+                        && let Some(operation) = original["operation_id"].as_str()
+                    {
+                        references.insert(operation.to_owned(), node);
+                    }
                 }
-                if let Some(conditions) = item["conditions"].as_array_mut() {
-                    conditions.truncate(WAIT_PREVIEW_CONDITIONS);
-                }
-                item["conditions_are_preview"] = json!(true);
             }
+            let mut waits = snapshot_section(tx, wait_sql, &thread, at, "cancelled_waits", reason)?;
+            waits["history_kind"] = json!("interrupted_wait");
+            if let Some(items) = waits["items"].as_array_mut() {
+                for item in items {
+                    if let Some(node) = item["operation_id"]
+                        .as_str()
+                        .and_then(|id| references.get(id))
+                    {
+                        item["node_id"] = json!(node);
+                    }
+                    if let Some(conditions) = item["conditions"].as_array_mut() {
+                        conditions.truncate(WAIT_PREVIEW_CONDITIONS);
+                    }
+                    item["conditions_are_preview"] = json!(true);
+                }
+            }
+            let unknown = snapshot_section(
+                tx,
+                PENDING_UNKNOWN_SNAPSHOT,
+                &thread,
+                at,
+                "pending_operations_with_unknown_targets",
+                reason,
+            )?;
+            let actor = json!({"kind":"shellboy","source":source});
+            let snapshot_node = uuid::Uuid::new_v4().to_string();
+            let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"tool_calls":tool_calls,"revisits":revisits,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
+            crate::history::append_node(
+                tx,
+                &thread,
+                &snapshot_node,
+                None,
+                "interruption_context",
+                &json!({"text":payload.to_string()}),
+                at,
+            )?;
+            tx.execute(
+                APPEND_CONTEXT_EVENT,
+                rusqlite::params![
+                    uuid::Uuid::new_v4().to_string(),
+                    actor.to_string(),
+                    thread,
+                    payload.to_string(),
+                    at
+                ],
+            )?;
+            Ok(())
+        })();
+        if let Err(error) = captured {
+            let group = tx.query_row("SELECT g.id FROM tool_group g JOIN turn u ON u.id=g.turn_id WHERE u.thread_id=?1 ORDER BY g.id LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional().ok().flatten();
+            let mut error = error.into_api_error();
+            error.message = format!(
+                "Interrupted context capture failed for Thread {}: {}",
+                thread.chars().take(128).collect::<String>(),
+                error.message
+            );
+            error.details = Some(
+                json!({"thread_id":thread.chars().take(128).collect::<String>(),"group_id":group.map(|id|id.chars().take(128).collect::<String>())}),
+            );
+            return Err(error.into());
         }
-        let unknown = snapshot_section(
-            tx,
-            PENDING_UNKNOWN_SNAPSHOT,
-            &thread,
-            at,
-            "pending_operations_with_unknown_targets",
-            reason,
-        )?;
-        let actor = json!({"kind":"shellboy","source":source});
-        let snapshot_node = uuid::Uuid::new_v4().to_string();
-        let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"tool_calls":tool_calls,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
-        crate::history::append_node(
-            tx,
-            &thread,
-            &snapshot_node,
-            None,
-            "interruption_context",
-            &json!({"text":payload.to_string()}),
-            at,
-        )?;
-        tx.execute(
-            APPEND_CONTEXT_EVENT,
-            rusqlite::params![
-                uuid::Uuid::new_v4().to_string(),
-                actor.to_string(),
-                thread,
-                payload.to_string(),
-                at
-            ],
-        )?;
     }
-    Ok(())
+    Ok(failures)
 }
 
 #[cfg(test)]
@@ -505,6 +573,36 @@ mod tool_snapshot_tests {
                 .unwrap(),
             "running",
             "capture must not mutate repair state"
+        );
+        tx.rollback().unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM node WHERE kind='interruption_context'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        db.execute("DELETE FROM app_meta WHERE key='root_revision'", [])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        let error = capture_startup_interrupted_context(&tx, "fatal-startup")
+            .unwrap_err()
+            .into_api_error();
+        assert_eq!(error.code, crate::protocol::ErrorCode::SaveFailed);
+        let details = error.details.unwrap();
+        assert_eq!(details["stage"], "startup_global_metadata");
+        tx.rollback().unwrap();
+        db.execute("UPDATE thread SET cursor_node_id='result' WHERE id='t'", [])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        assert_eq!(
+            capture_startup_interrupted_context(&tx, "all-skipped-without-global-root")
+                .unwrap_err()
+                .into_api_error()
+                .code,
+            crate::protocol::ErrorCode::SaveFailed
         );
         tx.rollback().unwrap();
         assert_eq!(

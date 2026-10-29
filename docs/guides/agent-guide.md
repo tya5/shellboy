@@ -156,3 +156,67 @@ Before range editing, use `shellboy history list --thread THREAD_ID --excerpt-ch
 For a long `rag index`, pass a fixed index command to the shell tool with `background:true`, and retain the work execution ID returned by that tool. Wait with `shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000`, then retrieve the result with `shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes 65536`. Read the RAG JSON in `result.text` and inspect success/partial failure and failure_count/failures. Do not read a different execution that ran wait or message send. Continue partial/large output using the read cursor. For later per-source state, last scan/content-change times, and failures, use `rag status`; inspect a document with `rag inspect --id ID`. See [RAG](rag.md).
 
 A hybrid search with `ok:true` and `degraded:true` used only keyword search for some scopes. Follow `scope_status` reasons, missing counts, and `next.steps[].command`; inspect dry-run before explicitly running potentially charged indexing. Do not guess that real configuration, authentication, or communication errors merely mean “not ready.”
+
+## Resume conversations interrupted by application exit
+
+`thread list` exposes `latest_run_stop_reason`. Values `app_shutdown` and
+`previous_instance_interrupted` identify conversations whose latest Run stopped
+at an application lifecycle boundary; `explicit_stop` and normal completion do
+not. The thread browser marks these rows `[exit]`. A new Run clears the marker.
+
+When the user asks you to resume several conversations, inspect their saved
+interruption records and send the requested instructions with
+`shellboy message send --thread <thread-id> --text '<instruction>'`. Exclude your
+own Thread if it appears among the targets. Each destination starts an independent
+Run, so send a few at a time when many targets could exceed provider rate limits.
+
+A destination whose `parent_id` is your Thread becomes owned by your current
+Run: you can stop it, retry it, or register Revisit. An unrelated destination has
+an independent Run that you cannot stop; the human user can. The saved
+`result_uncertain: true` describes uncertain effects of the interrupted work.
+Use the saved evidence to decide how to continue rather than assuming the work
+completed or repeating side effects automatically. Interrupted Revisit reservations
+must be inspected and explicitly registered again when appropriate.
+
+## Reserve a Revisit before finishing
+
+A Revisit is one free-form self-instruction delivered when your live Run would
+otherwise complete normally. It creates an ordinary developer-event Turn in
+this conversation, after owned shells/children and pending input/events have
+been handled. It is not a new human request or an automatic judgement of success.
+
+```sh
+shellboy revisit set --text 'Before finishing, inspect the original request and later constraints using their saved node IDs. Continue missing work and report unverified results.'
+shellboy revisit get
+shellboy revisit cancel
+```
+
+Within an authenticated model shell, omit `--run` for your own Run. You may also
+specify a directly owned child Run; unrelated Runs and non-direct descendants
+are rejected. A human must specify `--run`. A reservation belongs to one live
+Run, is not inherited by children/forks and survives follow-up input until actual
+Run completion. Parent/human replacement is visible via setter identity,
+`replaced_other` and `previous_text_preview`; inspect get rather than assuming
+that your earlier text is still pending. Text is limited to 8192 UTF-8 bytes;
+`--text-stdin` accepts multiline instructions within that same bound.
+
+Consumption/delivery happens once. Retries do not guarantee exactly-once model
+execution or external effects. Finishing the resulting Turn does not repeat the
+consumed reservation. You may register another reservation during that Turn to
+continue again: cycles are unlimited by default, or capped by the optional
+`limits.revisit_max_per_run` setting. `revisit_limit_reached` means registration
+was refused; inspect get and decide how to proceed. Existing `/stop`, Ctrl+C and
+`run stop` end continuing work and drop pending reservations while keeping saved
+history. Run inspection, status and the Thread list expose count/pending facts;
+they do not establish progress or successful completion.
+
+Before asking the user a question and ending your Turn, cancel the reservation
+or rewrite it to notice that you are waiting for an answer. Core cannot identify
+questions. If a Revisit fires while waiting for the user, end briefly without
+starting extra work. A false trigger can cost an additional model request.
+
+Stop, shutdown and restart never automatically resume a reservation. The previous
+shutdown record retains interrupted text/setter/count and the next actual Turn
+receives those facts through the existing context event. Inspect uncertainty and
+saved effects before deciding whether to register a fresh reservation. Revisit
+get fails on a terminal Run; use `run get` and saved history for its final facts.

@@ -88,7 +88,7 @@ impl Projection {
 }
 /// Latest Run owns the selected Turn; an older Turn cannot revive a newer Run.
 /// A single DB worker closure observes IDs, phases, and counts together.
-pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Error> {
+pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::storage::StorageError> {
     let run: Option<(String, String, Option<String>)> = db
         .query_row(
             "SELECT id,state,stop_reason FROM run WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1",
@@ -107,7 +107,15 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, rusqlite::Er
     };
     let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY rowid DESC LIMIT 1",[&run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
     let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run_id],|r|r.get(0))?;
+    let revisit = if matches!(run_state.as_str(), "live" | "stopping") {
+        crate::control::revisit::summary(db, &run_id)?
+            .as_ref()
+            .and_then(crate::presentation::revisit_label)
+    } else {
+        None
+    };
     let mut snapshot = ActivitySnapshot {
+        revisit,
         run_id: Some(run_id),
         ..Default::default()
     };
@@ -256,7 +264,7 @@ pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiErro
     let result = control
         .store
         .database
-        .call(move |db| Ok(project(db, &target)?))
+        .call(move |db| project(db, &target))
         .await
         .map_err(super::storage_error);
     super::checked_storage(control, result).await

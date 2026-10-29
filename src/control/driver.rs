@@ -290,6 +290,8 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
     let run_id = run_target.clone();
     let index = control.index.clone();
     let replay = control.replay.clone();
+    let config = control.store.config.clone();
+    let shutting_down = control.shell.start_gate();
     let result = control.store.database.call(move|db|{
         let tx=db.transaction()?;
         let run:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND id=?2 AND state='live'",params![thread,run_id],|r|r.get(0)).optional()?;
@@ -305,12 +307,18 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         if attachment_blocked { return Ok(Next::Idle); }
         let events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND e.kind<>'context_changed' ORDER BY e.created_at,e.id")?.query_map([&run],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         if turn.is_none()&&(!events.is_empty()||attachment_count>0){turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);}
-        let Some(turn)=turn else{
-            let owned:i64=tx.query_row("SELECT (SELECT count(*) FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping'))+(SELECT count(*) FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
-            if owned>0{return Ok(Next::Idle);}
-            super::state::complete_idle_run(&tx, &thread, &run)?;
-            tx.commit()?;return Ok(Next::Done);
-        };
+        if turn.is_none() {
+            let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
+            if owned{return Ok(Next::Idle);}
+            if shutting_down.load(std::sync::atomic::Ordering::SeqCst) { return Ok(Next::Done); }
+            if super::revisit::fire(&tx,&thread,&run,&now(),&config)? {
+                turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);
+            } else {
+                super::state::complete_idle_run(&tx, &thread, &run)?;
+                tx.commit()?;return Ok(Next::Done);
+            }
+        }
+        let turn=turn.expect("an active or Revisit Turn was established");
         index.record_context_observations_tx(&tx,&thread,&now()).map_err(crate::storage::StorageError::from)?;
         // Context-only observations have no delivery until an actual Turn is
         // already runnable: settings never wake background/recovery waits.
