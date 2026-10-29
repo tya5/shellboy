@@ -1,6 +1,5 @@
 //! Bounded pre-terminal context captured by startup and shutdown transactions.
 use crate::storage::StorageError;
-use rusqlite::OptionalExtension;
 
 use serde_json::{Value, json};
 
@@ -29,7 +28,7 @@ AND (EXISTS (
             SELECT 1 FROM tool_call c WHERE c.group_id=g.id
             AND (c.state IN ('pending','running') OR NOT EXISTS (
                 SELECT 1 FROM tool_result z WHERE z.group_id=c.group_id AND z.call_id=c.call_id)))))
-    OR EXISTS (SELECT 1 FROM app_meta m JOIN run r ON m.key='revisit.'||r.id WHERE r.thread_id=t.id AND json_type(m.value,'$.pending')='object')
+    OR EXISTS (SELECT 1 FROM app_meta m JOIN run r ON m.key='revisit.'||r.id WHERE r.thread_id=t.id AND CASE WHEN json_valid(m.value) THEN json_type(m.value,'$.pending')='object' ELSE 1 END)
     OR EXISTS (
         SELECT 1
         FROM app_meta m
@@ -130,7 +129,7 @@ ORDER BY g.created_at,g.id,c.ordinal";
 
 const REVISIT_SNAPSHOT: &str = r"SELECT json_set(m.value,'$.run_id',r.id)
 FROM run r JOIN app_meta m ON m.key='revisit.'||r.id
-WHERE r.thread_id=?1 AND json_type(m.value,'$.pending')='object'
+WHERE r.thread_id=?1 AND CASE WHEN json_valid(m.value) THEN json_type(m.value,'$.pending')='object' ELSE 0 END
 ORDER BY r.created_at,r.id";
 
 const OWNED_CHILDREN_SNAPSHOT: &str = r"SELECT json_object('run_id', c.id,
@@ -397,12 +396,29 @@ fn capture_context(
     for thread in threads {
         if isolate_bad_cursor {
             let valid: bool = tx.query_row("SELECT cursor_node_id IS (SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1) FROM thread WHERE id=?1",[&thread],|r|r.get(0))?;
-            if !valid {
+            let mut malformed_revisit = false;
+            let mut statement = tx.prepare_cached("SELECT m.value FROM app_meta m JOIN run r ON m.key='revisit.'||r.id WHERE r.thread_id=?1")?;
+            let mut rows = statement.query([&thread])?;
+            while let Some(row) = rows.next()? {
+                let body: String = row.get(0)?;
+                if !super::revisit::capture_state_valid(&body) {
+                    malformed_revisit = true;
+                    break;
+                }
+            }
+            let issue = if !valid {
+                Some(crate::diagnostics::ToolRepairReason::CaptureCursorMismatch)
+            } else if malformed_revisit {
+                Some(crate::diagnostics::ToolRepairReason::CaptureRevisitMalformed)
+            } else {
+                None
+            };
+            if let Some(reason) = issue {
                 if failures.len() < 32 {
                     failures.push(crate::diagnostics::ToolRepairFailure {
                         thread_id: thread.chars().take(128).collect(),
                         group_id: None,
-                        reason: crate::diagnostics::ToolRepairReason::CaptureCursorMismatch,
+                        reason,
                     });
                 }
                 continue;
@@ -507,16 +523,13 @@ fn capture_context(
             Ok(())
         })();
         if let Err(error) = captured {
-            let group = tx.query_row("SELECT g.id FROM tool_group g JOIN turn u ON u.id=g.turn_id WHERE u.thread_id=?1 ORDER BY g.id LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional().ok().flatten();
             let mut error = error.into_api_error();
             error.message = format!(
                 "Interrupted context capture failed for Thread {}: {}",
                 thread.chars().take(128).collect::<String>(),
                 error.message
             );
-            error.details = Some(
-                json!({"thread_id":thread.chars().take(128).collect::<String>(),"group_id":group.map(|id|id.chars().take(128).collect::<String>())}),
-            );
+            error.details = Some(json!({"thread_id":thread.chars().take(128).collect::<String>()}));
             return Err(error.into());
         }
     }

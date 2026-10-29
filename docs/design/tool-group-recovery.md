@@ -87,3 +87,27 @@ actual group identity separately. Global root metadata is checked before any
 per-Thread isolation, even when every Thread would otherwise be skipped.
 The owner and read/delete commands remain available to remove the affected
 conversation; this is not an automatic path reconstruction mechanism.
+
+## Unresolved histories and malformed per-Thread capture data
+
+A group that startup cannot reconcile remains unresolved. Replay rejects it
+before HTTP with guidance to inspect the saved records, fork at an earlier
+complete boundary, or delete that Thread. Repeated restart cannot reconstruct
+missing or contradictory source bindings. A fork must end before the incomplete
+group, never at its unresolved call/result. The original Thread is unchanged
+until explicit deletion.
+
+Startup prevalidates the exact current Revisit state in schema-allowed app_meta
+records before writing that Thread's interruption details. Malformed Revisit
+records skip only that Thread's capture and emit a fixed diagnostic reason;
+healthy Threads still capture and start. Revisit selection SQL guards malformed
+JSON before evaluating JSON paths. Ordinary SQLite/I/O/global metadata failures
+remain fatal. A capture failure identifies only its Thread, without assigning
+an unrelated group ID. No malformed body is copied into diagnostics.
+
+The recovery_reason_json column has a JSON-validity CHECK. Invalid syntax there
+is a database integrity violation detected by the unchanged startup quick_check
+before capture. It remains fatal; per-Thread isolation does not bypass integrity,
+SQL or I/O failures. This partially adopts review L2: isolate schema-allowed
+metadata defects, but retain the existing global integrity boundary rather than
+pretending a CHECK-violating database is healthy.

@@ -30,6 +30,9 @@ fn key(run: &str) -> String {
 fn malformed_state() -> ApiError {
     invalid("Malformed Revisit state").hint("Revisit counters are unavailable. Stop this Run to discard unreadable reservation metadata, or restart the owner; do not assume a zero count")
 }
+pub(crate) fn capture_state_valid(body: &str) -> bool {
+    serde_json::from_str::<State>(body).is_ok()
+}
 fn load(db: &Connection, run: &str) -> Result<Option<State>> {
     let saved: Option<String> = db
         .query_row("SELECT value FROM app_meta WHERE key=?1", [key(run)], |r| {
@@ -301,6 +304,9 @@ mod tests {
             "{"
         );
         drop_all_pending(&db).unwrap();
+        assert!(!capture_state_valid("{}"));
+        assert!(!capture_state_valid("{"));
+        assert!(capture_state_valid(&valid));
     }
 
     #[test]

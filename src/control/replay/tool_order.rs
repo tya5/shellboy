@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 fn invalid() -> StorageError {
     ApiError::new(ErrorCode::InvalidState, "History contains an incomplete or inconsistent tool group")
-        .hint("Restart Shellboy to reconcile interrupted tools; inspect interrupted-work details before retrying side effects.")
+        .hint("Inspect saved history; fork at a complete node before the incomplete tool group, or delete the affected Thread. See shellboy docs get --id shellboy/recovery-and-storage.")
         .into()
 }
 fn kind(item: &Value) -> &str {

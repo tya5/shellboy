@@ -294,3 +294,32 @@ Use `shellboy rag search --scope history:THREAD --mode keyword --query TEXT` to 
 Argument-free TUI `/restore` or CLI `shellboy compact --restore --thread THREAD` restores the omitted range while retaining subsequent conversation and leaving attachments excluded. `/restore NUMBER` is the separate failed-draft restoration feature. See [input size and range editing](history-and-search.md#input-size-and-range-editing).
 
 If reduction was considered but not adopted, attempt `automatic_trim_attempt` distinguishes below-threshold input, absence of safe groups, and adoption rejection. Estimates use recent successful usage/input measurements when available; otherwise the character/4 fallback is an approximation and can underestimate some languages or attachments. Compare the latest successful request's measured usage.
+
+## When an interrupted tool group cannot be reconciled
+
+Startup normally supplies missing interrupted tool results without rerunning
+commands. If its saved source bindings or selected history are inconsistent,
+Shellboy leaves that group unresolved and blocks that conversation locally
+before contacting the model. Other conversations and the owner remain available.
+Repeated restart does not repair missing or contradictory records.
+
+Inspect the saved interruption/history records first. Continue from a known
+complete point **before** the incomplete tool group with
+`shellboy thread fork --thread THREAD --node EARLIER_NODE`, or remove the affected
+conversation explicitly with `shellboy thread delete --thread THREAD`. A fork
+inside an incomplete group is rejected; it cannot invent the missing results.
+Files and external command effects are not rolled back by either operation.
+Use `shellboy docs get --id shellboy/history-and-search` for history inspection
+and fork boundaries.
+
+Malformed Thread-local Revisit metadata can prevent an interruption snapshot
+for that Thread. Startup records its Thread ID and a fixed reason in
+diagnostics without logging its content, and continues with healthy conversations.
+Actual database/I/O failures still stop startup instead of being treated as a
+recoverable conversation defect.
+
+Per-conversation isolation does not bypass database integrity checks. For example,
+invalid JSON syntax in `turn.recovery_reason_json` violates its database CHECK
+and is rejected by startup `quick_check` before interruption capture. Preserve
+the database and inspect the reported storage/integrity failure; this case is
+not reported as a successfully isolated conversation defect.
