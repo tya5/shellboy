@@ -2,6 +2,26 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Measured CI test layout and failure bounds (#46)
+
+Use the [adopted performance design](../design/ci-test-performance.md) and
+[investigation record](issue-46-ci-performance.md). Historical Windows logs
+separate substantial repeated linking from native fixture execution; the first
+candidate reduces links and fixture-only commits without changing production
+behavior. Keep subprocess suites standalone and enforce complete registration
+and normalized identity/ignored-set equality. Retain two Windows test threads
+until the separate native contention experiment supplies evidence for a change.
+
+A short mock-arrival or waiter-completion watchdog is not a product latency
+contract. Raise deadlock guards, retain phase diagnostics and require all 24 IPC
+wait receipts to remain pending when status succeeds, before stop. Their expiry
+is longer than the watchdog, so expiration cannot make a blocked dispatcher pass.
+Do not blanket-convert native upload/termination tests to 1ms: those verify real
+phase/ownership wiring, whereas existing pure tests cover deadline and retry
+policy. Do not add test-only production clocks, new dependencies or filesystem
+security exclusions without evidence. Reconsider concurrency and further timer
+refactoring after native per-test measurements and failure names are available.
+
 ## Review follow-up: bounded lifecycle fixes (2026-10-30)
 
 Keep lifecycle fixes in the existing Control, capture and supervisor ownership

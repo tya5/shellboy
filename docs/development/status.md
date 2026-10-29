@@ -1,5 +1,23 @@
 # Development status
 
+## Issue #46: native test performance candidate
+
+Pulled `0469ca0` before work. The candidate is on local branch
+`issue-46/test-performance`, with separate measurement, layout, fixture and
+watchdog commits. Ordinary integration links fall from 82 to 3; the two native
+self-spawning suites retain their subprocess names. All 1,480 normalized test
+identities and 28 ignored identities match the original macOS inventory.
+
+The macOS standard check passes format, strict all-target Clippy and 7 harnesses /
+1,452 passed / 0 failed / 28 ignored. Five separate Python timing-gate self-checks
+pass. Local measurements, historical Windows timings, adopted choices and
+limits are tracked in the [investigation](issue-46-ci-performance.md) and
+[acceptance](../validation/acceptance.md). No Windows improvement is claimed yet.
+The prepared manual CI measures baseline/candidate at two threads plus a separate
+four-thread contention run. Native execution requires the requested permission
+to push the measurement branch; main is unchanged. No release or local-binary
+installation is part of this task.
+
 ## Issue #44 review follow-up: readable activity column
 
 The external review's Medium finding is addressed by 99982d7: a separate

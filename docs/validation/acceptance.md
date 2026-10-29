@@ -1,5 +1,39 @@
 # Validation record
 
+## Issue #46 local performance candidate
+
+Baseline source `0469ca0` was pulled first. Historical Windows run 40954267575
+(`a45f54e`) provides an independent measured baseline: 653s Tests, 290s build/link,
+359.83s summed harness execution and about 855s job. This earlier source is not
+current-source verification. See the [investigation](../development/issue-46-ci-performance.md).
+
+macOS ARM64 / pinned Rust 1.99.1:
+
+- Baseline all-target no-run build took 122s; aggregate candidate 28.11s in this
+  local incremental/cache state. These are local observations, not a Windows
+  speedup claim or clean-build benchmark.
+- The timing runner executed the aggregate candidate and retained its complete
+  inventory: all 1,480 test identities and 28 ignored identities equal the original
+  layout after normalizing only the module prefix. 7 harnesses replace 86; ordinary
+  integration suites link once, and the two self-spawning suites stay separate.
+- `CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+  passes format, strict all-target Clippy and **1,452 passed / 0 failed / 28 ignored**.
+  This includes the strengthened IPC pending-waiter assertion and attachment
+  watchdog change. The subsequent five Python runner self-checks pass separately;
+  no Rust source changed after the standard check.
+- Isolated-process profiles cover 23 storage, 50 index and 23 control_db tests
+  before/after. Storage sample totals 1.014→0.662s; index 5.171→5.320s and
+  control_db 1.417→1.510s. Do not infer a Windows benefit for index from this result.
+- Failure-gate self-checks reject lost counts, zero-test exact filters and unknown
+  profiling suites; actual failures retain names and do not skip later harnesses.
+  The timing runner uses no automatic retries.
+
+Three-OS CI, matched Windows before/after timings and the four-thread contention
+experiment are pending permission to push the measurement branch. The test set,
+ignore policy, production durability and native assertions are preserved;
+repeated diagnostics become manual options while their substantive cases remain
+in every ordinary native suite. No paid API or default user datastore was used.
+
 ## Issue #44 review follow-up: compact column labels
 
 macOS arm64 / Rust 1.99.1, isolated worktree based on a45f54e; self-review,
