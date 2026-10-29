@@ -656,3 +656,35 @@ flush, then explicitly flush after capacity is released for the remaining bulk
 transfer. Preserve the five-second deadlines, all IDs/counts, ordering and permit
 assertions. Dedicated producer wake/Notify regressions remain unchanged. No
 production queue, capacity, interval, dependency or global timer setting changes.
+
+
+## 2026-10-29: explicit standalone RAG writer lease release
+
+The third native run passed Linux and Windows, including the corrected FIFO
+fixtures, but found two RAG-selection failures on macOS. Local 14-way parallel
+reproduction confirmed source add/re-registration could return busy immediately
+after an awaited preceding command. Temporary probes established flock
+WouldBlock/errno 35, not Interrupted/EBADF. All prior File destructors had
+returned before API completion. A matching-inode FD scan and subsequent lsof
+found no other retained user FD/process; that does not establish the underlying
+kernel mechanism. This is distinct from the old loopback fault and from the
+first isolated attachment watchdog observation.
+
+Use a conventional private WriterLock(File) owner guard, one existing handle
+per write command. Its Drop explicitly unlocks before closing the handle; Store
+drops its SQLite connection before this last field. Thus logical lease release
+does not rely only on the lifetime of every reference to an open file
+description. No retries, sleeps, global mutex/registry, table, queue, worker or
+dependency are added. A deterministic regression retains a duplicate handle,
+checks live-writer exclusion, drops Store and reacquires while that duplicate
+remains open, then verifies closing the old duplicate cannot release the new
+owner's lease.
+
+Old uninstrumented parallel tests failed three of the first six rounds; after
+the explicit unlock, 20 rounds x14 cases passed without retries or relaxed
+assertions/deadlines. Initial registration and status fixtures now assert their
+prerequisite successes and report useful diagnostics instead of hiding a busy
+error behind a later null unwrap. All temporary logging, FD probes, lsof calls
+and diagnostic guard types are removed. Revisit with exact OS/unlock/holder
+evidence if contention recurs; do not label an unobserved descriptor leak or
+precise kernel cause as proven.

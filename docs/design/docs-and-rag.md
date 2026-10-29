@@ -170,3 +170,22 @@ actually upgraded an existing store; fresh creation and reopening a current
 store return null. Existing-source identities/counts remain unchanged and no
 indexing or model API is implied. The completion hint reports readiness before
 optional material-registration instructions.
+
+## Writer lock release at the owning command boundary
+
+A private `WriterLock(File)` owns the existing nonblocking exclusive RAG lock.
+It explicitly unlocks that file when the owner ends, then ordinary File drop
+closes the handle. The Store declares its database connection before the lock
+field, so the connection is dropped before lock release. Initialization likewise
+keeps its guard until its database connection has closed. This makes the command's
+release boundary independent of whether another handle still refers to the same
+open file description; no retry, sleep, global registry or replacement worker is
+introduced. Unlock failure still falls through to closing the owned handle.
+A genuinely live writer continues to reject another writer immediately.
+
+A temporary macOS investigation observed `WouldBlock` immediately after an earlier
+command's File destructor and API return. At inspection, only the failed attempt's
+handle was visible; it did not establish a leaked descriptor or the kernel's exact
+cause. The explicit release contract is supported by a deterministic duplicate-
+handle owner-lifetime regression, rather than attributing the failure to an
+unproven operating-system mechanism.

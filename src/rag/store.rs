@@ -33,7 +33,7 @@ pub(super) struct Store {
     pub db: Connection,
     pub uuid: String,
     migrated_from_schema: Option<i64>,
-    _lock: Option<File>,
+    _lock: Option<WriterLock>,
 }
 pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     if !path.is_file() {
@@ -103,7 +103,15 @@ fn validate_schema(db: &Connection) -> Result<()> {
     }
     Ok(())
 }
-fn writer_lock(path: &Path) -> Result<File> {
+/// Release the command's lock before closing its handle, even if a duplicate
+/// still refers to the same open file description. Store drops its DB first.
+struct WriterLock(File);
+impl Drop for WriterLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+fn writer_lock(path: &Path) -> Result<WriterLock> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -116,7 +124,7 @@ fn writer_lock(path: &Path) -> Result<File> {
             "Another retrieval writer is active; retry after it finishes",
         )
     })?;
-    Ok(file)
+    Ok(WriterLock(file))
 }
 fn prune_embeddings(db: &Connection) -> Result<()> {
     let spaces = {
@@ -684,4 +692,37 @@ pub(super) fn inspect(path: &Path, id: &str) -> Result<Value> {
         return Ok(value);
     }
     s.db.query_row("SELECT d.id,d.source_id,d.key,d.active_revision,d.status,d.error,r.provenance FROM documents d LEFT JOIN revisions r ON r.id=d.active_revision WHERE d.id=?1 OR d.key=?1",[id],|r|Ok(json!({"document_id":r.get::<_,String>(0)?,"source_id":r.get::<_,String>(1)?,"key":r.get::<_,String>(2)?,"revision":r.get::<_,Option<String>>(3)?,"state":r.get::<_,String>(4)?,"error":r.get::<_,Option<String>>(5)?,"provenance":r.get::<_,Option<String>>(6)?.and_then(|s|serde_json::from_str::<Value>(&s).ok())}))).optional()?.ok_or_else(||err("not_found","Source or document does not exist"))
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn writer_lease_ends_after_store_even_while_its_duplicate_handle_remains_open() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("knowledge.db");
+        initialize(&path).unwrap();
+        let store = open(&path, true).unwrap();
+        let duplicate = store._lock.as_ref().unwrap().0.try_clone().unwrap();
+        let error = open(&path, true)
+            .err()
+            .expect("a live Store must exclude another writer");
+        assert_eq!(error.code, "busy");
+        drop(store);
+        assert!(duplicate.metadata().is_ok(), "the duplicate is still live");
+        // Merely closing the original File leaves an OFD/flock lock held by
+        // its duplicate. The command lease must deliberately release it.
+        let next = open(&path, true).expect("Store completion must release its writer lease");
+        assert_eq!(open(&path, true).err().unwrap().code, "busy");
+        drop(duplicate);
+        assert_eq!(
+            open(&path, true).err().unwrap().code,
+            "busy",
+            "dropping a stale duplicate must not release the next owner's lock"
+        );
+        drop(next);
+        let reopened = open(&path, true).unwrap();
+        drop(reopened);
+    }
 }

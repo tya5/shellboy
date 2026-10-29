@@ -51,7 +51,7 @@ fn source(status: &Value) -> &Value {
         .unwrap()
         .iter()
         .find(|source| source["name"] == "materials")
-        .unwrap()
+        .unwrap_or_else(|| panic!("materials source missing from status: {status}"))
 }
 #[tokio::test]
 async fn persistent_globs_and_default_self_exclusions_do_not_block_removed_documents() {
@@ -518,7 +518,9 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     std::fs::create_dir(root.join("materials")).unwrap();
     std::fs::write(root.join("materials/a.md"), "migration source preserved").unwrap();
     init(root).await;
-    let original = add(root, "materials", &[], false).await["result"]["source_id"].clone();
+    let registered = add(root, "materials", &[], false).await;
+    assert_eq!(registered["ok"], true, "{registered}");
+    let original = registered["result"]["source_id"].clone();
     {
         let db = rusqlite::Connection::open(root.join("rag.db")).unwrap();
         db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; ALTER TABLE sources DROP COLUMN exclude_json; PRAGMA user_version=1; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
@@ -645,8 +647,10 @@ async fn status_uses_current_embedding_profile_and_bounds_saved_failures() {
     )
     .unwrap();
     init(root).await;
-    add(root, "materials", &[], false).await;
-    index(root, false, IndexMode::Keyword).await;
+    let registered = add(root, "materials", &[], false).await;
+    assert_eq!(registered["ok"], true, "{registered}");
+    let indexed = index(root, false, IndexMode::Keyword).await;
+    assert_eq!(indexed["ok"], true, "{indexed}");
     std::fs::write(root.join("missing-config.toml"), "[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[embedding]\nconnection='fixture'\nmodel='offline-profile'\n").unwrap();
     let status = call(root, RagCommand::Status).await;
     assert_eq!(
