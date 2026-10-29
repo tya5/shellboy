@@ -1128,8 +1128,8 @@ mod tests {
             assert_eq!(projected.len(),3);
             assert!(projected[0].get("id").is_none());
             assert_eq!(projected[0]["call_id"],"call");
-            assert_eq!(projected[1],json!({"role":"user","content":"PRESERVE-HUMAN"}));
-            assert_eq!(projected[2],output[2]);
+            assert_eq!(projected[1],output[2]);
+            assert_eq!(projected[2],json!({"role":"user","content":"PRESERVE-HUMAN"}));
             let unchanged:String=db.query_row("SELECT payload_json FROM node WHERE kind='spill'",[],|r|r.get(0))?;
             assert_eq!(unchanged,body,"sending must not rewrite saved spill JSON");
             for (id, expected) in [("call","chatcmpl-spilled-call"),("human","chatcmpl-spilled-human")] {

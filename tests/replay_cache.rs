@@ -308,7 +308,7 @@ async fn event_conversion_preserves_tool_items_and_keeps_internal_metadata_out_o
     f.append(
         "t",
         "call",
-        json!({"output":[call.clone()],"reasoning_epoch":0}),
+        json!({"output":[call.clone()],"reasoning_epoch":0,"group_id":"group"}),
     )
     .await;
     let result = json!({"type":"function_call_output","call_id":"call","output":"原文 result"});
@@ -396,6 +396,7 @@ async fn outbound_ids_are_removed_across_wrappers_and_stored_spill_without_rewri
         direct,
         json!({"item":message}),
         json!({"item":call}),
+        json!({"item":result}),
         json!({"output":[message,call,reasoning,result],"reasoning_epoch":0,"spill_version":1,"source_node_ids":["original"]}),
     ];
     for (i, payload) in payloads.iter().enumerate() {
@@ -411,10 +412,11 @@ async fn outbound_ids_are_removed_across_wrappers_and_stored_spill_without_rewri
         projected_direct,
         projected_message.clone(),
         projected_call.clone(),
+        result.clone(),
         projected_message,
         projected_call,
-        reasoning,
         result,
+        reasoning,
     ];
     let cache = ReplayCache::new(1_000_000);
     assert_eq!(f.load(&cache, "t").await.materialize(), expected);
@@ -432,5 +434,52 @@ async fn outbound_ids_are_removed_across_wrappers_and_stored_spill_without_rewri
     })
     .await
     .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn repaired_order_is_projection_only_on_cache_hits_and_appends() {
+    let f = Fixture::new().await;
+    f.thread("t").await;
+    f.append("t", "call", json!({"group_id":"g","output":[{"type":"function_call","call_id":"c","name":"shell","arguments":"{}"}]})).await;
+    f.append(
+        "t",
+        "audit",
+        json!({"role":"developer","content":"original audit"}),
+    )
+    .await;
+    f.append("t", "result", json!({"group_id":"g","item":{"type":"function_call_output","call_id":"c","output":"original result"}})).await;
+    let cache = ReplayCache::new(1_000_000);
+    for _ in 0..2 {
+        let lease = f.load(&cache, "t").await;
+        let items = lease.materialize();
+        assert_eq!(items[1]["output"], "original result");
+        assert_eq!(items[2]["content"], "original audit");
+    }
+    assert_eq!(cache.stats().parsed_nodes, 3);
+    assert_eq!(cache.stats().hits, 1);
+    f.append("t", "new", user("new input")).await;
+    let lease = f.load(&cache, "t").await;
+    assert_eq!(lease.materialize()[1]["output"], "original result");
+    assert_eq!(cache.stats().parsed_nodes, 4);
+    assert_eq!(cache.stats().append_hits, 1);
+    f.db.call(|db| {
+        let path = db
+            .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(path, ["call", "audit", "result", "new"]);
+        let edge: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM edge WHERE src='audit' AND dst='result')",
+            [],
+            |r| r.get(0),
+        )?;
+        assert!(edge);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    drop(lease);
+    assert_eq!(cache.stats().pinned_bytes, 0);
     f.db.shutdown().await.unwrap();
 }

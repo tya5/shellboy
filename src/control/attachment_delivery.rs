@@ -12,6 +12,35 @@ pub fn hold_run_tx(tx: &Transaction<'_>, run: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+// Match the authenticated execution and its owner, rather than trusting only
+// a group-like identifier in origin JSON.
+const INTERRUPTED_GROUP_DELIVERY: &str = "d.status IN ('accepted','held') AND json_extract(d.origin_json,'$.kind')='shell' AND EXISTS(SELECT 1 FROM shell_execution s JOIN tool_call c ON c.operation_id=s.id WHERE c.group_id=?1 AND s.id=json_extract(d.origin_json,'$.execution_id') AND s.owner_run_id=json_extract(d.origin_json,'$.run_id'))";
+
+/// A repaired group must not make previously unadopted side effects eligible.
+/// Source nodes/files and already-applied deliveries remain unchanged.
+pub(crate) fn cancel_interrupted_group_tx(
+    tx: &Transaction<'_>,
+    group: &str,
+    at: &str,
+) -> Result<usize, ApiError> {
+    tx.execute(
+        &format!("UPDATE thread SET revision=revision+1,selection_revision=selection_revision+1,updated_at=?2 WHERE id IN (SELECT d.thread_id FROM attachment_delivery d WHERE {INTERRUPTED_GROUP_DELIVERY})"),
+        params![group, at],
+    ).map_err(sql)?;
+    let changed = tx.execute(
+        &format!("UPDATE attachment_delivery AS d SET status='cancelled' WHERE {INTERRUPTED_GROUP_DELIVERY}"),
+        [group],
+    ).map_err(sql)?;
+    if changed > 0 {
+        tx.execute(
+            "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
+            [],
+        )
+        .map_err(sql)?;
+    }
+    Ok(changed)
+}
+
 pub fn has_pending_tx(tx: &Transaction<'_>, thread: &str) -> Result<bool, ApiError> {
     tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.thread_id=?1 AND {ELIGIBLE_PENDING})"),[thread],|r|r.get(0)).map_err(sql)
 }
@@ -118,4 +147,115 @@ fn append_selected(
 
 fn sql(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(error.to_string())
+}
+
+#[cfg(test)]
+mod interruption_tests {
+    use super::*;
+
+    #[test]
+    fn repair_cancels_only_unadopted_authenticated_group_sources_atomically() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(r#"
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/','p','m','before');
+            INSERT INTO run VALUES('r','t',NULL,'stopped','before','before',NULL);
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','stopped','before');
+            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','before');
+            INSERT INTO tool_group VALUES('g','a','u','running','before');
+            INSERT INTO tool_call VALUES('g','c',0,'shell','{}','completed','s');
+            INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('s','r','u','s','stopped','/','{}','UTF-8','UTF-8','closed','before');
+        "#).unwrap();
+        for (id, status, origin) in [
+            (
+                "accepted",
+                "accepted",
+                r#"{"kind":"shell","execution_id":"s","run_id":"r"}"#,
+            ),
+            (
+                "held",
+                "held",
+                r#"{"kind":"shell","execution_id":"s","run_id":"r"}"#,
+            ),
+            (
+                "applied",
+                "applied",
+                r#"{"kind":"shell","execution_id":"s","run_id":"r"}"#,
+            ),
+            ("external", "accepted", r#"{"kind":"external"}"#),
+            (
+                "foreign",
+                "held",
+                r#"{"kind":"shell","execution_id":"s","run_id":"other"}"#,
+            ),
+        ] {
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'attachment_source','before','{}')",[id]).unwrap();
+            db.execute("INSERT INTO attachment_delivery(node_id,thread_id,status,operation_id,origin_json,created_at) VALUES(?1,'t',?2,?1,?3,'before')",params![id,status,origin]).unwrap();
+        }
+        {
+            let tx = db.transaction().unwrap();
+            assert_eq!(cancel_interrupted_group_tx(&tx, "g", "after").unwrap(), 2);
+            // Transaction failure must preserve original eligibility and revision.
+            tx.rollback().unwrap();
+        }
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM attachment_delivery WHERE status='cancelled'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT selection_revision FROM thread WHERE id='t'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        let tx = db.transaction().unwrap();
+        assert_eq!(cancel_interrupted_group_tx(&tx, "g", "after").unwrap(), 2);
+        assert_eq!(cancel_interrupted_group_tx(&tx, "g", "again").unwrap(), 0);
+        assert_eq!(
+            tx.query_row(
+                "SELECT selection_revision FROM thread WHERE id='t'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT value FROM app_meta WHERE key='root_revision'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "1"
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT status FROM attachment_delivery WHERE node_id='applied'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "applied"
+        );
+        assert_eq!(tx.query_row("SELECT count(*) FROM attachment_delivery WHERE node_id IN ('external','foreign') AND status IN ('accepted','held')",[],|r|r.get::<_,i64>(0)).unwrap(),2);
+        assert_eq!(
+            tx.query_row(
+                "SELECT count(*) FROM node WHERE payload_json='{}'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            5
+        );
+        tx.commit().unwrap();
+    }
 }

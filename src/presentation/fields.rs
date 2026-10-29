@@ -311,6 +311,8 @@ pub(crate) fn state_label(value: &str) -> &str {
         "failed" => "失敗",
         "incomplete" => "未完了",
         "cancelled" => "取消済み",
+        "not_started" => "未開始",
+        "interrupted" => "中断・結果不確か",
         "exited" => "終了",
         "idle" => "待機中",
         "paused" => "一時停止",

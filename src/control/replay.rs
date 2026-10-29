@@ -11,7 +11,9 @@ use std::{
     },
 };
 
-const ADAPTER_VERSION: u32 = 2;
+mod tool_order;
+
+const ADAPTER_VERSION: u32 = 3;
 const TOOL_SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Context {
@@ -51,6 +53,7 @@ struct Ledger {
 struct Frame {
     stamp: Stamp,
     items: Vec<Value>,
+    group: Option<String>,
     bytes: usize,
     pins: AtomicUsize,
     ledger: Arc<Ledger>,
@@ -76,13 +79,14 @@ impl Drop for LeaseFrames {
 #[derive(Clone)]
 pub struct ReplayLease(Arc<LeaseFrames>);
 impl ReplayLease {
-    fn new(frames: Vec<Arc<Frame>>) -> Self {
+    fn new(frames: Vec<Arc<Frame>>) -> Result<Self, StorageError> {
+        let frames = tool_order::ordered(frames)?;
         for frame in &frames {
             if frame.pins.fetch_add(1, Ordering::AcqRel) == 0 {
                 frame.ledger.pinned.fetch_add(frame.bytes, Ordering::AcqRel);
             }
         }
-        Self(Arc::new(LeaseFrames { frames }))
+        Ok(Self(Arc::new(LeaseFrames { frames })))
     }
     pub fn items(&self) -> impl Iterator<Item = &Value> {
         self.0.frames.iter().flat_map(|frame| &frame.items)
@@ -254,24 +258,39 @@ impl ReplayCache {
                         StorageError::Schema("replay path changed within its DB snapshot".into())
                     })?
                     .clone();
-                let items = if stamp.tombstone {
-                    Vec::new()
+                let (group, items) = if stamp.tombstone {
+                    (None, Vec::new())
                 } else {
                     let body: String = row.get(1)?;
                     let value: Value = serde_json::from_str(&body)
                         .map_err(|error| StorageError::Schema(error.to_string()))?;
                     state.parsed_nodes += 1;
-                    convert(value, context.epoch)
+                    let group = value
+                        .get("group_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    let spill = value.get("spill_version").is_some();
+                    let items = convert(value, context.epoch);
+                    (
+                        group,
+                        if spill {
+                            tool_order::inline_spill(items)?
+                        } else {
+                            items
+                        },
+                    )
                 };
                 let bytes = size_of::<Frame>()
                     + 2 * size_of::<usize>()
                     + stamp.id.capacity()
+                    + group.as_ref().map_or(0, String::capacity)
                     + items.capacity() * size_of::<Value>()
                     + items.iter().map(heap_bytes).sum::<usize>();
                 self.ledger.live.fetch_add(bytes, Ordering::AcqRel);
                 frames.push(Arc::new(Frame {
                     stamp,
                     items,
+                    group,
                     bytes,
                     pins: AtomicUsize::new(0),
                     ledger: self.ledger.clone(),
@@ -287,7 +306,7 @@ impl ReplayCache {
         let overhead =
             context.bytes() + frames.capacity() * size_of::<Arc<Frame>>() + thread.len() * 2;
         let bytes = overhead.saturating_add(frames.iter().map(|frame| frame.bytes).sum::<usize>());
-        let lease = ReplayLease::new(frames.clone());
+        let lease = ReplayLease::new(frames.clone())?;
         drop(previous);
         if self.budget > 0 && bytes <= self.budget {
             state.retained = state.retained.saturating_add(bytes);

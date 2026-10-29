@@ -23,6 +23,12 @@ AND (EXISTS (
         WHERE u.thread_id = t.id
         AND u.state IN ('preparing', 'running', 'waiting', 'recovery_wait'))
     OR EXISTS (
+        SELECT 1 FROM tool_group g JOIN turn u ON u.id=g.turn_id
+        WHERE u.thread_id=t.id AND (g.state<>'completed' OR EXISTS (
+            SELECT 1 FROM tool_call c WHERE c.group_id=g.id
+            AND (c.state IN ('pending','running') OR NOT EXISTS (
+                SELECT 1 FROM tool_result z WHERE z.group_id=c.group_id AND z.call_id=c.call_id)))))
+    OR EXISTS (
         SELECT 1
         FROM app_meta m
         WHERE m.key LIKE 'wait.pending.%'
@@ -101,6 +107,24 @@ JOIN run r ON r.id = s.owner_run_id
 WHERE r.thread_id = ?1
 AND s.state IN ('starting', 'running', 'stopping')
 ORDER BY s.id";
+
+const TOOL_CALL_SNAPSHOT: &str = r"SELECT json_object(
+    'group_id', g.id, 'call_id', c.call_id,
+    'run_id', u.run_id, 'turn_id', u.id,
+    'previous_state', c.state, 'previous_group_state', g.state,
+    'execution_id', s.id,
+    'result_saved', json(CASE WHEN z.node_id IS NULL THEN 'false' ELSE 'true' END),
+    'repair_outcome', CASE WHEN z.node_id IS NOT NULL THEN 'preserved_result'
+        WHEN c.state='pending' AND c.operation_id IS NULL THEN 'not_started' ELSE 'result_uncertain' END)
+FROM tool_group g JOIN turn u ON u.id=g.turn_id
+JOIN tool_call c ON c.group_id=g.id
+LEFT JOIN tool_result z ON z.group_id=c.group_id AND z.call_id=c.call_id
+LEFT JOIN shell_execution s ON s.id=c.operation_id AND s.owner_run_id=u.run_id
+WHERE u.thread_id=?1 AND (g.state<>'completed' OR EXISTS (
+    SELECT 1 FROM tool_call pending WHERE pending.group_id=g.id
+    AND (pending.state IN ('pending','running') OR NOT EXISTS (
+        SELECT 1 FROM tool_result saved WHERE saved.group_id=pending.group_id AND saved.call_id=pending.call_id))))
+ORDER BY g.created_at,g.id,c.ordinal";
 
 const OWNED_CHILDREN_SNAPSHOT: &str = r"SELECT json_object('run_id', c.id,
     'thread_id', c.thread_id,
@@ -336,6 +360,8 @@ pub(crate) fn capture_interrupted_context(
         let runs = snapshot_section(tx, RUN_SNAPSHOT, &thread, at, "runs", reason)?;
         let turns = snapshot_section(tx, TURN_SNAPSHOT, &thread, at, "turns", reason)?;
         let shells = snapshot_section(tx, SHELL_SNAPSHOT, &thread, at, "shells", reason)?;
+        let tool_calls =
+            snapshot_section(tx, TOOL_CALL_SNAPSHOT, &thread, at, "tool_calls", reason)?;
         let children = snapshot_section(
             tx,
             OWNED_CHILDREN_SNAPSHOT,
@@ -405,7 +431,7 @@ pub(crate) fn capture_interrupted_context(
         )?;
         let actor = json!({"kind":"shellboy","source":source});
         let snapshot_node = uuid::Uuid::new_v4().to_string();
-        let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
+        let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"tool_calls":tool_calls,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
         crate::history::append_node(
             tx,
             &thread,
@@ -427,4 +453,68 @@ pub(crate) fn capture_interrupted_context(
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tool_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_turn_pending_calls_are_recorded_separately_from_actual_shells() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(r#"
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/','p','m','before');
+            INSERT INTO run VALUES('r','t',NULL,'stopped','before','before',NULL);
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','stopped','before');
+            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','before');
+            INSERT INTO tool_group VALUES('g','a','u','running','before');
+            INSERT INTO tool_call VALUES('g','not-started',0,'shell','{"command":"private command"}','pending',NULL);
+            INSERT INTO tool_call VALUES('g','uncertain',1,'shell','{}','running','s');
+            INSERT INTO tool_call VALUES('g','saved',2,'shell','{}','completed',NULL);
+            INSERT INTO tool_call VALUES('g','missing-execution',3,'shell','{}','running','absent');
+            INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('s','r','u','s','stopped','/','{}','UTF-8','UTF-8','closed','before');
+            INSERT INTO node(id,kind,created_at,payload_json) VALUES('result','tool_result','before','{}');
+            INSERT INTO tool_result VALUES('g','saved','result','completed');
+        "#).unwrap();
+        let tx = db.transaction().unwrap();
+        capture_interrupted_context(&tx, "after", "previous_instance_interrupted", "startup")
+            .unwrap();
+        let text:String = tx.query_row("SELECT json_extract(payload_json,'$.text') FROM node WHERE kind='interruption_context'",[],|r|r.get(0)).unwrap();
+        let snapshot: Value = serde_json::from_str(&text).unwrap();
+        let change = &snapshot["change"];
+        assert_eq!(change["runs"]["count"], 0);
+        assert_eq!(
+            change["shells"]["count"], 0,
+            "stopped execution is not an active OS shell"
+        );
+        assert_eq!(change["tool_calls"]["count"], 4);
+        let items = change["tool_calls"]["items"].as_array().unwrap();
+        assert_eq!(items[0]["repair_outcome"], "not_started");
+        assert!(items[0]["execution_id"].is_null());
+        assert_eq!(items[1]["repair_outcome"], "result_uncertain");
+        assert_eq!(items[1]["execution_id"], "s");
+        assert_eq!(items[2]["repair_outcome"], "preserved_result");
+        assert_eq!(items[2]["result_saved"], true);
+        assert_eq!(items[3]["repair_outcome"], "result_uncertain");
+        assert!(items[3]["execution_id"].is_null());
+        assert!(!text.contains("private command"));
+        assert_eq!(
+            tx.query_row("SELECT state FROM tool_group WHERE id='g'", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "running",
+            "capture must not mutate repair state"
+        );
+        tx.rollback().unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM node WHERE kind='interruption_context'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
 }

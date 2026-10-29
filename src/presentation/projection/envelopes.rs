@@ -106,6 +106,7 @@ fn prioritize_interruption_identity(p: &mut NodePresentation, value: &Value, kin
         "runs",
         "turns",
         "shells",
+        "tool_calls",
         "owned_children",
         "unreflected_messages",
         "cancelled_waits",
@@ -289,7 +290,11 @@ fn result(
         }
     }
     if streams.is_empty() {
-        b.text = "実行結果 · 詳細".into();
+        b.text = match value.get("status").and_then(Value::as_str) {
+            Some("not_started") => "前回の終了時点では未開始でした。自動再実行はしていません。",
+            Some("interrupted") => "前回の終了により結果は不確かです。再実行前に保存済みの出力と副作用を確認してください。",
+            _ => "実行結果 · 詳細",
+        }.into();
         b.stream = None;
     } else {
         let (stream, text) = streams.remove(0);

@@ -24,6 +24,16 @@ the database is unnecessary; slash normalization already shipped in 0.1.6.
 Do not add fallback lookup or identity migration for those keys. This records the
 Issue #20 clarification; it does not trigger deletion or conversion of user data.
 
+## Interrupted tool groups (#37)
+
+Adopt [tool-group recovery](tool-group-recovery.md): startup records original
+interruption facts, repairs missing current-format results atomically (including
+already-terminal Turns), and cancels unapplied shell-origin deliveries before
+completing groups. It never repeats OS side effects. Saved real results and DAG
+edges remain immutable; only the model replay projection places outputs next
+to their calls and validates complete pairs before HTTP. No schema/protocol
+version, worker, queue or dependency is added.
+
 ## 変えない責務
 
 Rust / Ratatui / Crossterm / Tokio / bundled SQLite / sqlite-vec を使い、依存版は固定する。

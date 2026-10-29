@@ -226,7 +226,10 @@ impl ToolPresentation {
     }
     pub fn requires_attention(&self) -> bool {
         tool_failed(&self.status, self.exit_code)
-            || matches!(self.status.as_str(), "cancelled" | "stopped")
+            || matches!(
+                self.status.as_str(),
+                "cancelled" | "stopped" | "interrupted" | "not_started"
+            )
             || self.current_state.as_deref().is_some_and(|state| {
                 tool_failed(state, self.current_exit_code)
                     || matches!(state, "cancelled" | "stopped")
@@ -266,6 +269,8 @@ fn tool_state_heading(state: &str, exit_code: Option<i64>) -> (&'static str, &'s
         },
         "failed" | "error" => ("✗", "失敗"),
         "cancelled" => ("⊘", "未実行・取消"),
+        "not_started" => ("⊘", "未開始"),
+        "interrupted" => ("!", "中断・結果不確か"),
         "stopped" => ("⊘", "停止"),
         _ => ("·", "状態は詳細参照"),
     }

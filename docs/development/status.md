@@ -1,5 +1,24 @@
 # Development status
 
+## Issue #37: interrupted tool-group recovery (2026-10-29)
+
+Startup now completes missing current-format tool results, including groups
+whose Turn was already terminalized. Original results and DAG edges are retained;
+new results distinguish no admission from uncertain side effects and never
+repeat OS work. Replay normalizes output adjacency without rewriting saved
+history, including current spills. Unapplied authenticated shell-origin
+attachments are cancelled before group completion, while applied refs/files
+are preserved. See [design](../design/tool-group-recovery.md) and
+[verification](../validation/acceptance.md).
+
+Tests use synthetic temporary data and loopback HTTP. Actual Unix SIGKILL,
+restored storage-write failure, pending/partial/old terminal/child groups,
+restart idempotence, GC tombstones and cross-Thread attachment policy are covered.
+The macOS standard check passes: format, strict all-target Clippy and all tests
+(82 groups / 1395 passed / 0 failed / 27 ignored). Windows/Linux native
+execution and physical TUI force-quit are not claimed. SIGTERM/SIGHUP shutdown handling remains #38.
+Current work is local; no release or installed binary update is part of #37.
+
 ## v0.2.0 published; #32–#34 review follow-up completed (2026-10-29)
 
 [Shellboy v0.2.0](https://github.com/tya5/shellboy/releases/tag/v0.2.0) is published

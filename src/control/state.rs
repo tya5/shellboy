@@ -6,6 +6,8 @@ use crate::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
+mod interrupted_tools;
+pub(crate) use interrupted_tools::repair_interrupted_tool_groups;
 
 pub(super) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
@@ -411,6 +413,7 @@ pub(crate) fn interrupt_previous_work(
     tx: &rusqlite::Transaction<'_>,
     now: &str,
 ) -> Result<(), StorageError> {
+    repair_interrupted_tool_groups(tx, now)?;
     tx.execute("UPDATE turn SET state='stopped',ended_at=?1,recovery_reason_json=?2 WHERE state IN ('preparing','running','waiting','recovery_wait')",rusqlite::params![now,r#"{"reason":"previous_instance_interrupted","result_uncertain":true}"#])?;
     tx.execute("UPDATE shell_execution SET state='stopped',ended_at=?1,end_reason='previous_instance_interrupted',output_complete=0 WHERE state IN ('starting','running','stopping')",[&now])?;
     tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason='previous_instance_interrupted' WHERE state IN ('live','stopping')",[&now])?;

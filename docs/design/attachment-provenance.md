@@ -14,6 +14,12 @@ CLI nodeは受付時に採用経路へ割り込ませない。専用delivery台�
 
 受付時の `target_run_id` を固定し、heldを再採用できるのは同じ生存Runの明示retry後だけとする。停止済みRunの保留は新Runへ移動せず、新しい指示を待たせない。起動元が別Threadの場合も元tool groupの完了を待ち、受け付けの遅い操作が追い越さない。起動元が停止し元groupが未完なら保留を維持し、新しい要求を阻害するpendingから除外する。起動復旧・通常終了でも割当を保持する。元Runが記録されていないlegacy参照へ架空のRunを割り当てない。
 
+## 起動時の未完tool groupの修復（Issue #37）
+
+起動時に未完groupを完了扱いへ修復しても、そのgroupのshellから受け付けた未採用添付を自動採用してはならない。修復transaction内で、shell executionとowner Runによって所属を照合したaccepted/held deliveryを、group完了より前にcancelledへ移す。既にappliedの添付、外部CLI、人間送信、他groupは変更しない。source本文・参照・ファイル・受付結果は保持し、取消は外部副作用の巻き戻しを意味しない。必要なら利用者が状態を確認して明示的に再添付する。
+
+非applied deliveryは既存の準備対象外規則で除外し、別の利用者除外状態は作らない。採用可否が変わる宛先Threadのrevisionとselection revision、およびroot revisionを同じtransactionで進める。修復・取消・中断snapshotの保存が失敗した場合は一括rollbackする。表・状態・workerを追加しない。
+
 ## API入力と版
 
 本文変換キャッシュはsource IDと未展開attachment_refを保持し、毎回最新のファイル読取り結果を元の要素位置へ展開する。新しい要求へ古い画像bytesを再利用しない。APIにはローカルmarkerや独自fieldを渡さない。CLI補助messageは画像／fileを受け付けるuser roleを使用し、Shellboy操作であることと追加元を本文内メタデータで明記する。

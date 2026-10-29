@@ -41,3 +41,21 @@ Driver の受理済み receipt 採用は全 thread_path の読取り・contains�
 | RAG orphan 12500行 | 19219565.50 | 5656.00 | 相関 chunks 全件 scan → hash covering seek |
 
 app_meta の現 SQL は scan を維持する。比較用 json_valid 条件付き SQL は既存 index を使えたが未採用。実機 Windows/Linux や利用者データは測定していない。これらの SQL 時間を製品全体の応答時間と同一視しない。
+
+
+## Tool-result replay order after interrupted ownership (#37)
+
+Cache frames retain source-path order and source stamps. Each decoded frame also
+retains its optional existing group_id (capacity included in retained/live byte
+accounting). A request lease may move Arc result frames next to the matching
+selected response without copying their JSON or changing the cache/DAG. Original
+source IDs continue through attachment binding and API-item manifest positions.
+The one-pass grouped ordering/validation uses only the current lease, no extra
+query per node, persistent cache, table or worker. Missing, duplicate or orphan
+pairs fail before acquiring lease pins/starting HTTP. Saved results remain
+immutable even if an earlier audit node was their original parent.
+
+A current spill contains one complete tool group plus interleaved context in a
+single node. Normalize its converted Values once before caching, moving its
+outputs after its last call without cloning JSON or rewriting stored spill
+payload/source links. Preserve the relative order of all non-result items.

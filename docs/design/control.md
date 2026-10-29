@@ -305,3 +305,42 @@ existing best-effort overflow/drop accounting; missing stages alone are not proo
 of a hang. In a non-overloaded synthetic shutdown, the IPC frontend regression
 checks complete expected stage records, no drops and nondecreasing elapsed time
 within each scope after the existing writer has drained.
+
+## 起動中断snapshotのツール件数（Issue #37）
+
+中断snapshotは修復前の状態を保存する。Run/Turnが既に終端でも、未完groupまたは未完call・欠落resultがあるThreadを対象に含める。`shells`は実在する未終端shell executionだけを数え、実行開始前のcallを架空のshellとして数えない。別の`tool_calls`節に修復対象groupのcall ID・group ID・Run/Turn ID・前状態・保存済result有無・実execution IDを保存し、保存済結果の維持、未開始、結果不確定を区別する。引数・command・資格情報は複製しない。既存と同じpreview/detail上限を使い、表示・原文のsection導線も同じ分類を使う。
+
+
+## Interrupted tool-group reconciliation (#37)
+
+Startup's existing transaction first captures pre-terminal interruption facts,
+including bounded tool-call facts separately from actual OS shell executions.
+Then it closes unresolved current-format tool groups before terminalizing old
+Turns, executions, Runs and receipts. Selection is based on incomplete group /
+call / missing-result invariants, even when the Turn is already terminal; it is
+not release-version migration or an old-format compatibility reader.
+
+Preserve every saved result node/ID/payload. Missing pending calls with no
+admitted operation are `not_started`; admitted/running calls have an
+`interrupted` result with result_uncertain=true. Synthetic results have
+output_complete=false for the missing canonical tool result, while separately
+reported saved_execution facts may show a known exit/raw-output state. No OS
+inspection, command replay, success inference or raw-output reconstruction is
+performed. Persist result, complete call/group, splice new nodes into live paths,
+and advance selection/root revisions atomically. Only new result nodes are
+inserted; existing DAG nodes/edges/results are not moved or rewritten. Repeating
+startup creates no duplicates. Failure rolls back the whole recovery transaction.
+Cancel unadopted shell-origin attachments from those groups before completion;
+applied sources and file contents remain governed by their existing lifetimes.
+No table, schema version, worker, queue, or engine event is added.
+
+The model replay adapter emits a managed group's saved outputs immediately after
+its saved response, using existing payload group_id metadata and immutable Arc
+frames. This also handles results recorded after shutdown audit nodes: API order
+may normalize these frames while selected history/DAG order remains unchanged.
+Keep cache entries in source-path order for prefix reuse, account for group
+metadata in frame bytes, preserve source IDs and non-result relative ordering,
+and never pull unselected results from the database. Validate complete unique
+call/output pairs before HTTP; malformed paths fail locally without fabricated
+results or a paid provider rejection. All transient ordering structures are
+bounded by the existing lease's frames/items and released with that request.

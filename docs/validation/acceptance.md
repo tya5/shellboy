@@ -1,5 +1,50 @@
 # Validation record
 
+## Issue #37: interrupted tool groups (2026-10-29)
+
+macOS ARM64 / pinned Rust 1.99.1, working tree based on `02d94e3`:
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+passes format, strict all-target Clippy and **82 groups / 1395 passed / 0 failed /
+27 ignored**. The ignored subprocess entry for the crash regression is invoked
+by its non-ignored parent test; opt-in live API tests remain ignored.
+
+New checks cover:
+
+- Actual Unix owner process-group SIGKILL while a native shell is running;
+  restart and the first loopback HTTP request contain complete adjacent pairs,
+  and no second execution is created. The test explicitly cleans up its own
+  native process group; production startup does not inspect/kill old PIDs.
+- Actual tool-result INSERT failure, storage-failure shutdown, restored storage
+  and successful same-Thread continuation after restart.
+- Durable pending/no admission, partially saved multi-call, already-terminal
+  Turn and child-Thread fixtures; immutable existing result IDs/payloads/edges,
+  second-startup idempotence, acyclic DAG and transaction rollback on write error.
+- Real DataOwner restart with accepted/held same-/cross-Thread shell attachments:
+  a trigger checks cancellation before group completion; no pending source is
+  adopted, while applied sources, refs and external synthetic files remain.
+- Original interruption facts distinguish tool calls from actual active shells,
+  including an admitted call whose execution record is missing. Uncertainty and
+  unstarted results have explicit presentation labels and no fabricated exit.
+- Replay cache hits/appends, repeated provider call IDs across groups, source
+  identity, no pin acquisition for malformed pairs, and current spill projection
+  with interleaved context while persisted JSON and source links remain intact.
+- Deleted/unreachable exact GC tombstones do not block unrelated startup repair;
+  retained/live/fork/summary inconsistencies are not silently skipped.
+
+An initial focused run exposed missing required `started_at` values in three new
+unit fixtures, plus the existing spill projection's interleaved input. Fixtures
+were corrected to the current schema and spill output order is normalized before
+caching; pair validation was not weakened. The final standard check above passes.
+
+All data is synthetic and temporary; HTTP is loopback only. No paid API, default
+store mutation, or installed binary update is performed. Native Windows/Linux,
+physical TUI F→Y, SIGTERM/SIGHUP, power loss and OS restart are unexecuted here;
+their interrupted durable shapes are covered without claiming native process or
+terminal verification. Signal handling itself belongs to #38. A normal live
+admission-conflict exit is not reproduced; preserve its existing transition
+guard and fail incomplete replay locally rather than inventing a tool result.
+
+
 ## Final RAG lease correction and local verification (2026-10-29)
 
 Source `f659197`, macOS ARM64 / Rust 1.99.1: format, strict all-target Clippy

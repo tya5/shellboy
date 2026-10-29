@@ -664,7 +664,7 @@ fn human_events_keep_important_differences_and_unknown_kinds_in_details_only() {
 
 #[test]
 fn interruption_metadata_uses_recorded_counts_without_inventing_restore_or_process_results() {
-    let value = json!({"kind":"previous_instance_interrupted","snapshot_node_id":"complete-snapshot-node","change":{"runs":{"count":2,"items":[{"run_id":"complete-run-id"}]},"shells":{"count":1},"unreflected_messages":{"count":3},"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false}});
+    let value = json!({"kind":"previous_instance_interrupted","snapshot_node_id":"complete-snapshot-node","change":{"runs":{"count":2,"items":[{"run_id":"complete-run-id"}]},"shells":{"count":1},"tool_calls":{"count":2,"detail_node_ids":["tool-call-details"]},"unreflected_messages":{"count":3},"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false}});
     let payload = json!({"text":value.to_string()});
     let text = text_of_payload(&payload);
     let p = project("interruption_context", &payload, &text, 0);
@@ -679,6 +679,7 @@ fn interruption_metadata_uses_recorded_counts_without_inventing_restore_or_proce
     for expected in [
         "作業 2件",
         "コマンド 1件",
+        "中断時のツール 2件",
         "未反映の依頼 3件",
         "実行結果は未確認",
         "自動での再実行はしません",
@@ -691,6 +692,12 @@ fn interruption_metadata_uses_recorded_counts_without_inventing_restore_or_proce
         p.fields
             .iter()
             .any(|field| field.value == "complete-run-id")
+    );
+    assert!(
+        p.fields
+            .iter()
+            .any(|field| field.key == "/change/tool_calls/detail_node_ids/0"
+                && field.value == "tool-call-details")
     );
     assert_eq!(text_of_payload(&payload), text);
 }
@@ -1239,4 +1246,24 @@ fn terminal_tools_plain_code_and_index_readiness_avoid_internal_noise() {
         "a different selected index is not routine readiness"
     );
     assert!(changed.fields.iter().any(|field| field.value == "selected"));
+}
+
+#[test]
+fn interrupted_tool_results_show_uncertainty_without_fabricated_success() {
+    for (status, label, text) in [
+        ("interrupted", "中断・結果不確か", "再実行前"),
+        ("not_started", "未開始", "未開始でした"),
+    ] {
+        let output = json!({"status":status,"reason":"previous_instance_interrupted","result_uncertain":status=="interrupted","output_complete":false});
+        let payload = json!({"group_id":"g","item":{"type":"function_call_output","call_id":"c","output":output.to_string()}});
+        let original = payload.clone();
+        let projected = project("tool_result", &payload, &text_of_payload(&payload), 0);
+        let result = projected.blocks.iter().find(|b| b.tool.is_some()).unwrap();
+        let tool = result.tool.as_ref().unwrap();
+        assert!(tool.heading().contains(label));
+        assert!(tool.requires_attention());
+        assert!(result.text.contains(text));
+        assert_eq!(tool.exit_code, None);
+        assert_eq!(payload, original);
+    }
 }

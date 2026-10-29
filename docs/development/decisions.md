@@ -862,3 +862,37 @@ closed loopback endpoints fail immediately on Windows or label a pre-body timeou
 as a proven OS connection-refused exception. A dedicated native CI execution
 prints these facts; it is a repeated observation of an existing case, not a new
 distinct test. The old exact delay cause remains unproven until observed.
+
+## Complete interrupted current-format tools without replay (#37, 2026-10-29)
+
+Startup must restore the call/result invariant even when a previous owner has
+already terminalized its Turn. This is repair of the current format, not a
+compatibility reader or migration. Keep the existing startup transaction and
+original interruption snapshot ordering. Distinguish pending/no admission
+(`not_started`) from an uncommitted result with possible side effects
+(`interrupted`). Preserve actual result nodes and report saved execution facts
+separately; never repeat a shell automatically or infer success from lost output.
+
+Cancel unapplied authenticated shell-origin attachments before completing the
+source group; completing a group must not release uncertain side effects into
+another Thread. Retain applied sources, refs and external files. Keep existing
+DAG edges immutable, splice only newly created repair nodes, and normalize model
+input using source-preserving replay frames. Current spills need their converted
+items normalized once before caching because interleaved context and results
+can share one source node. Cache entries retain canonical path order for reuse;
+validate complete pairs before pin acquisition and before HTTP.
+
+Only explicitly collected, unreachable GC tombstones belonging to a deleted
+Thread are skipped, without restoring payloads or fabricating completion.
+Retained inconsistent source bindings remain errors. Normal live admission
+conflicts keep their existing guard: do not globally repair groups while the
+current owner may still be collecting a shell. Missing pairs instead fail input
+preparation locally; startup repairs the interrupted durable state.
+
+The DB worker owns repair; keyset pages hold at most 32 groups/calls/Threads,
+while SQL splices selected paths. Temporary replay maps are bounded by the
+existing input frames/items and released during request preparation. No table,
+worker, queue, dependency, schema or protocol bump is needed. Revisit if a new
+source format changes grouping, attachment eligibility, or GC ownership rules.
+See [design](../design/tool-group-recovery.md) and
+[validation](../validation/acceptance.md) for executed tests and remaining limits.

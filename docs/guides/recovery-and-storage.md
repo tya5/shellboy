@@ -4,6 +4,22 @@
 
 When responses stop, inspect saved acceptance, Turn, and Run state before repeatedly sending the same request. Use the CLI in another terminal while the owner remains running. Examples below use Bash; replace IDs with values from actual responses.
 
+## After an interrupted shell
+
+On startup, Shellboy pairs adopted tool calls that lack a committed result,
+including calls left in an already stopped Turn. `not_started` means the call
+was still pending with no saved execution admission. `interrupted` means its
+result is uncertain; it does not mean the command had no effects. Saved real
+results are preserved. No command is automatically replayed.
+
+Read the previous shutdown record and, when an execution ID is available, use
+`shellboy shell get --execution EXECUTION_ID` and
+`shellboy shell read --execution EXECUTION_ID` to inspect retained state/output.
+Confirm external side effects before requesting another execution. Unapplied
+shell-origin attachment deliveries from an interrupted group are cancelled;
+already applied attachments and source files are preserved. You can send a new
+instruction in the same Thread after restart.
+
 ## Distinguish acceptance from completion
 
 ```sh
