@@ -66,6 +66,9 @@ def main():
         result_path.write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
 
     try:
+        record['source_sha'] = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'], check=True, text=True, capture_output=True
+        ).stdout.strip()
         artifacts = args.artifacts or args.output / 'cargo-artifacts.jsonl'
         if args.artifacts is None:
             command = ['cargo', 'test', '--locked', '--all-targets', '--no-run', '--message-format=json']

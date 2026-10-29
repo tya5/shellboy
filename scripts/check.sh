@@ -2,6 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 python3 scripts/check-test-layout.py
+python3 -m unittest discover -s scripts/tests
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
