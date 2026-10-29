@@ -82,11 +82,31 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
 fn answer(text: &str) -> Value {
     json!({"id":uuid::Uuid::new_v4().to_string(),"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text}]}]})
 }
-async fn incoming(receive: &mut mpsc::Receiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), receive.recv())
-        .await
-        .expect("loopback model request must arrive within the fixture watchdog")
-        .expect("loopback fixture must retain its incoming request sender")
+#[track_caller]
+fn incoming<'a>(
+    control: &'a Control,
+    thread: &'a str,
+    receive: &'a mut mpsc::Receiver<Incoming>,
+) -> impl std::future::Future<Output = Incoming> + 'a {
+    let caller = std::panic::Location::caller();
+    async move {
+        match timeout(Duration::from_secs(5), receive.recv()).await {
+            Ok(Some(value)) => value,
+            result => {
+                let diagnostic = timeout(Duration::from_secs(1), progress(control, thread)).await;
+                panic!(
+                    "loopback request watchdog at {}:{}; receive={}; persisted phase after timeout={diagnostic:?}",
+                    caller.file(),
+                    caller.line(),
+                    if result.is_err() {
+                        "timeout"
+                    } else {
+                        "sender closed"
+                    }
+                );
+            }
+        }
+    }
 }
 // Capture state only after a watchdog failure. The polling cadence observes a
 // persisted condition; it does not establish the test's concurrency ordering.
@@ -95,8 +115,9 @@ async fn progress(control: &Control, thread: &str) -> Value {
     control.store.database.call(move |db| {
         let mut state = serde_json::Map::new();
         for (name, query) in [
-            ("turns", "SELECT json_object('id',id,'state',state,'generation',generation,'reason_present',recovery_reason_json IS NOT NULL) FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 8"),
-            ("attempts", "SELECT json_object('id',a.id,'state',a.state,'error_present',a.error_json IS NOT NULL) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 ORDER BY a.rowid DESC LIMIT 8"),
+            ("runs", "SELECT json_object('id',id,'state',state,'stop_reason',substr(stop_reason,1,512)) FROM run WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 8"),
+            ("turns", "SELECT json_object('id',id,'state',state,'generation',generation,'instruction_snapshot_present',instruction_snapshot_id IS NOT NULL,'reason',substr(recovery_reason_json,1,2048)) FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 8"),
+            ("attempts", "SELECT json_object('id',a.id,'state',a.state,'reason',substr(a.error_json,1,2048)) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 ORDER BY a.rowid DESC LIMIT 8"),
             ("shells", "SELECT json_object('id',s.id,'state',s.state,'exit',s.exit_code,'complete',s.output_complete) FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1 ORDER BY s.rowid DESC LIMIT 8"),
         ] {
             let rows = db.prepare(query)?.query_map([&thread], |row| row.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -231,7 +252,47 @@ async fn ordered_draft(
         .await
         .unwrap();
     let thread = accepted["thread_id"].as_str().unwrap().to_owned();
-    settled(control, &thread).await;
+    let turn = accepted["turn_id"].as_str().unwrap().to_owned();
+    // Observe this accepted Turn's actual preparation rejection, rather than
+    // treating an absence of active Turns as proof that the intended pause ran.
+    let paused = timeout(Duration::from_secs(5), async {
+        loop {
+            let target = turn.clone();
+            let state = control.store.database.call(move |db| {
+                db.query_row("SELECT state,recovery_reason_json,instruction_snapshot_id,(SELECT count(*) FROM model_attempt WHERE turn_id=turn.id) FROM turn WHERE id=?1", [target],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, i64>(3)?)))
+                    .map_err(Into::into)
+            }).await.unwrap();
+            if state.0 == "recovery_wait" { break state; }
+            assert!(matches!(state.0.as_str(), "preparing" | "running" | "waiting"), "unexpected ordered-fixture preparation phase: {state:?}");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await;
+    let (_, reason, snapshot, attempts) = match paused {
+        Ok(state) => state,
+        Err(_) => {
+            let diagnostic = timeout(Duration::from_secs(1), progress(control, &thread)).await;
+            panic!(
+                "ordered fixture did not reach its explicit invalid-AGENTS preparation pause within the watchdog; observed={diagnostic:?}"
+            );
+        }
+    };
+    let reason: Value = serde_json::from_str(reason.as_deref().unwrap()).unwrap();
+    assert!(
+        reason["message"]
+            .as_str()
+            .unwrap()
+            .contains("AGENTS.md must contain UTF-8 text"),
+        "preparation failed for an unintended reason: {reason}"
+    );
+    assert!(
+        snapshot.is_none(),
+        "invalid instructions cannot create a reusable snapshot"
+    );
+    assert_eq!(
+        attempts, 0,
+        "preparation pause must precede attempt admission"
+    );
     assert!(
         receive.try_recv().is_err(),
         "fixture preparation pause precedes HTTP"
@@ -269,7 +330,7 @@ async fn original_order_survives_multiple_turns_and_manifest_matches_real_http_p
     let owner = owner(root.path(), &url).await;
     let control = Control::new(&owner, root.path().into());
     let (thread, accepted) = ordered_draft(&control, root.path(), &mut receive).await;
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &thread, &mut receive).await;
     let initial = manifest(&control, &thread).await;
     let a = &attachments(&initial)[0];
     assert_eq!(a["source_node_id"], accepted["message_id"]);
@@ -279,7 +340,7 @@ async fn original_order_survives_multiple_turns_and_manifest_matches_real_http_p
     finish(&control, &thread, first).await;
     for text in ["next without attachment", "another without attachment"] {
         send(&control, &thread, text).await;
-        let next = incoming(&mut receive).await;
+        let next = incoming(&control, &thread, &mut receive).await;
         let current = manifest(&control, &thread).await;
         let replay = &attachments(&current)[0];
         assert_eq!(replay["attachment_id"], a["attachment_id"]);
@@ -315,7 +376,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
     let first_owner = owner(root.path(), &url).await;
     let control = Control::new(&first_owner, root.path().into());
     let (thread, _) = ordered_draft(&control, root.path(), &mut receive).await;
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &thread, &mut receive).await;
     finish(&control, &thread, first).await;
     let second = control
         .send_draft(
@@ -330,7 +391,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
         )
         .await
         .unwrap();
-    let next = incoming(&mut receive).await;
+    let next = incoming(&control, &thread, &mut receive).await;
     let both = manifest(&control, &thread).await;
     assert_eq!(attachments(&both).len(), 2);
     assert_ne!(
@@ -373,7 +434,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
     )
     .await;
     send(&control, &thread, "model changed").await;
-    let next = incoming(&mut receive).await;
+    let next = incoming(&control, &thread, &mut receive).await;
     assert_eq!(next.body["model"], "other-model");
     let changed = manifest(&control, &thread).await;
     assert_eq!(
@@ -413,7 +474,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
         .unwrap()
         .to_owned();
     send(&control, &fork, "fork replay").await;
-    let next = incoming(&mut receive).await;
+    let next = incoming(&control, &fork, &mut receive).await;
     let forked = manifest(&control, &fork).await;
     assert_eq!(attachments(&forked).len(), 2);
     for (actual, expected) in attachments(&forked).iter().zip(attachments(&both)) {
@@ -429,7 +490,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
     let restarted = owner(root.path(), &url).await;
     let control = Control::new(&restarted, root.path().into());
     send(&control, &fork, "restart replay").await;
-    let next = incoming(&mut receive).await;
+    let next = incoming(&control, &fork, &mut receive).await;
     let rebuilt = manifest(&control, &fork).await;
     for (actual, expected) in attachments(&rebuilt).iter().zip(attachments(&both)) {
         assert_eq!(actual["source_node_id"], expected["source_node_id"]);
@@ -474,7 +535,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     let initial_owner = owner(root.path(), &url).await;
     let control = Control::new(&initial_owner, root.path().into());
     let (thread, _) = ordered_draft(&control, root.path(), &mut receive).await;
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &thread, &mut receive).await;
     let original = manifest(&control, &thread).await;
     assert!(
         updates(&first.body).is_empty(),
@@ -494,7 +555,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         }),
     )
     .await;
-    let changed = incoming(&mut receive).await;
+    let changed = incoming(&control, &thread, &mut receive).await;
     let changed_manifest = manifest(&control, &thread).await;
     let entry = &attachments(&changed_manifest)[0];
     assert_eq!(entry["changed"], true);
@@ -528,7 +589,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         }),
     )
     .await;
-    let retry = incoming(&mut receive).await;
+    let retry = incoming(&control, &thread, &mut receive).await;
     assert_eq!(
         updates(&retry.body),
         notification,
@@ -571,7 +632,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         "completion only adds transport observations; the sent request/attachment evidence is immutable"
     );
     send(&control, &thread, "same new version again").await;
-    let next = incoming(&mut receive).await;
+    let next = incoming(&control, &thread, &mut receive).await;
     assert!(
         updates(&next.body).is_empty(),
         "normal completion acknowledges the update"
@@ -609,7 +670,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     );
     assert_eq!(attachments(&saved)[0]["changed"], true);
     send(&control, &thread, "same version after restart").await;
-    let replay = incoming(&mut receive).await;
+    let replay = incoming(&control, &thread, &mut receive).await;
     assert!(updates(&replay.body).is_empty());
     let replayed = manifest(&control, &thread).await;
     assert_eq!(attachments(&replayed)[0]["changed"], false);
@@ -634,12 +695,12 @@ async fn missing_and_excluded_states_stay_at_their_original_source_without_stale
     let owner = owner(root.path(), &url).await;
     let control = Control::new(&owner, root.path().into());
     let (thread, _) = ordered_draft(&control, root.path(), &mut receive).await;
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &thread, &mut receive).await;
     let original = manifest(&control, &thread).await;
     finish(&control, &thread, first).await;
     std::fs::remove_file(root.path().join("image-a.png")).unwrap();
     send(&control, &thread, "file is missing").await;
-    let missing = incoming(&mut receive).await;
+    let missing = incoming(&control, &thread, &mut receive).await;
     let missing_manifest = manifest(&control, &thread).await;
     let entry = &attachments(&missing_manifest)[0];
     assert_eq!(entry["state"], "unavailable");
@@ -665,7 +726,7 @@ async fn missing_and_excluded_states_stay_at_their_original_source_without_stale
     )
     .await;
     send(&control, &thread, "file excluded").await;
-    let excluded = incoming(&mut receive).await;
+    let excluded = incoming(&control, &thread, &mut receive).await;
     let excluded_manifest = manifest(&control, &thread).await;
     let entry = &attachments(&excluded_manifest)[0];
     assert_eq!(entry["state"], "excluded");
@@ -691,7 +752,7 @@ async fn corrupt_attachment_source_or_duplicate_reference_fails_before_any_http_
         let owner = owner(root.path(), &url).await;
         let control = Control::new(&owner, root.path().into());
         let (thread, accepted) = ordered_draft(&control, root.path(), &mut receive).await;
-        let first = incoming(&mut receive).await;
+        let first = incoming(&control, &thread, &mut receive).await;
         finish(&control, &thread, first).await;
         let source = accepted["message_id"].as_str().unwrap().to_owned();
         control.store.database.call(move|db|{
@@ -746,7 +807,7 @@ async fn authenticated_shell_attachment_is_replayed_once_after_every_result_in_i
     let file = root.path().join("tool-image.png");
     std::fs::write(&file, b"synthetic-tool-image").unwrap();
     send(&control, &thread, "human request without an attachment").await;
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &thread, &mut receive).await;
     let op = operation(&control);
     let command = format!(
         "'{}' --operation-id '{}' attachment add --path '{}' --kind image",
@@ -861,11 +922,11 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
     let owner = owner(root.path(), &url).await;
     let control = Control::new(&owner, root.path().into());
     let (thread, accepted) = ordered_draft(&control, root.path(), &mut receive).await;
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &thread, &mut receive).await;
     finish(&control, &thread, first).await;
     for text in ["newer completed turn", "retain latest completed turn"] {
         send(&control, &thread, text).await;
-        let next = incoming(&mut receive).await;
+        let next = incoming(&control, &thread, &mut receive).await;
         finish(&control, &thread, next).await;
     }
     let selected = thread.clone();
@@ -913,7 +974,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
         }),
     )
     .await;
-    let summary = incoming(&mut receive).await;
+    let summary = incoming(&control, &thread, &mut receive).await;
     assert_eq!(summary.body["tools"], json!([]));
     summary
         .reply
@@ -953,7 +1014,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
         }),
     )
     .await;
-    let next = incoming(&mut receive).await;
+    let next = incoming(&control, &thread, &mut receive).await;
     assert!(!next.body.to_string().contains("input_image"));
     assert!(!next.body.to_string().contains("attachment_ref"));
     assert!(next.body.to_string().contains("context_replacement"));
@@ -977,19 +1038,19 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
         }),
     )
     .await;
-    let retry = incoming(&mut receive).await;
+    let retry = incoming(&control, &thread, &mut receive).await;
     assert!(
         retry.body.to_string().contains("context_replacement"),
         "failed request does not consume the notice"
     );
     finish(&control, &thread, retry).await;
     send(&control, &thread, "notice already consumed").await;
-    let once = incoming(&mut receive).await;
+    let once = incoming(&control, &thread, &mut receive).await;
     assert!(!once.body.to_string().contains("context_replacement"));
     assert!(attachments(&manifest(&control, &thread).await).is_empty());
     finish(&control, &thread, once).await;
     send(&control, &fork, "fork retained its active attachment").await;
-    let forked = incoming(&mut receive).await;
+    let forked = incoming(&control, &fork, &mut receive).await;
     assert!(forked.body.to_string().contains("input_image"));
     assert_eq!(
         attachments(&manifest(&control, &fork).await)[0]["state"],
@@ -1020,7 +1081,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
         .await
         .unwrap();
     send(&control, &thread, "explicit original path selection").await;
-    let restored = incoming(&mut receive).await;
+    let restored = incoming(&control, &thread, &mut receive).await;
     assert!(
         !restored.body.to_string().contains("input_image"),
         "path selection does not reactivate excluded binaries"
@@ -1081,7 +1142,7 @@ async fn unavailable_new_attachment_is_consumed_by_success_without_a_fabricated_
         .await
         .unwrap();
     let thread = accepted["thread_id"].as_str().unwrap().to_owned();
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &thread, &mut receive).await;
     let failed_manifest = manifest(&control, &thread).await;
     assert_eq!(attachments(&failed_manifest)[0]["state"], "unavailable");
     assert!(attachments(&failed_manifest)[0]["content_hash"].is_null());
@@ -1115,7 +1176,7 @@ async fn unavailable_new_attachment_is_consumed_by_success_without_a_fabricated_
         }),
     )
     .await;
-    let retry = incoming(&mut receive).await;
+    let retry = incoming(&control, &thread, &mut receive).await;
     assert!(retry.body.to_string().contains("Attachment unavailable"));
     finish(&control, &thread, retry).await;
     control.store.database.call(move|db|{

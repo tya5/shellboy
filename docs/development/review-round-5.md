@@ -3,7 +3,8 @@
 Baseline: `6c577c8`; review comments #32/6484080681 and #33/6484081072.
 The prior four #32 findings and #33 Medium/eight Low findings are confirmed
 resolved. This follow-up is integrated alongside issue #34, with separate local
-commits and verification records planned; nothing is pushed or closed.
+commits and verification records. The implementation is pushed; issue closure
+awaits the native verification gate.
 
 | Finding | Disposition |
 | --- | --- |
@@ -47,3 +48,10 @@ macOS RAG registration busy result, now diagnosed and fixed in f659197 by
 explicit writer-lease release. See decisions for evidence and unproven OS
 details. Final local gates pass 80 groups / 1,366 tests / 0 failed / 25 ignored
 and 280 parallel RAG cases. A new native three-OS gate remains pending.
+
+
+Run [40802346281](https://github.com/tya5/shellboy/actions/runs/40802346281)
+passes Linux and macOS, including the RAG writer-lease fix. Windows passes the
+FIFO and RAG cases but exposes an owner-cleanup watchdog mismatch and two
+unlocalized attachment incoming-request watchdogs. These are separately
+tracked in acceptance; there is no final three-OS success yet.

@@ -966,3 +966,41 @@ G7の可視性判定は本番と同じsearchable SQL・bundled SQLite・専用DB
 文書commit `dcdbab3` でも `sh scripts/check.sh` を実行し、fmt・全target strict Clippy・68群 1,058 passed / 0 failed / 15 ignoredを確認しました。先行する `f488196` の結果と同数ですが別の実行です。この後のバージョン更新・再レビュー修正の成功へ読み替えません。
 
 最初の準備commit `2cec582` の [native CI](https://github.com/tya5/shellboy/actions/runs/40406278067) はmacOS/Linuxが成功、WindowsはUnix専用テスト補助関数のcfg漏れによるstrict Clippy失敗でした。Windowsテストは未実行であり、成功に含めません。テスト側cfg修正と受信表示・raw検証・起動診断の追加修正は、後続commitの検証結果を別途記録します。
+
+
+## Native CI follow-up after explicit RAG lease release (2026-10-29)
+
+Run [40802346281](https://github.com/tya5/shellboy/actions/runs/40802346281),
+source `bfdf7f5` (same Rust source as `f659197`), passed Linux
+(**80 groups / 1,367 passed / 0 failed / 24 ignored**) and macOS
+(**80 groups / 1,366 passed / 0 failed / 25 ignored**). All RAG registration,
+selection and migration cases passed on both. Windows failed one IPC frontend
+cleanup fixture and two attachment-provenance incoming-request watchdogs; the
+new RAG lease and earlier FIFO fixtures passed there. This run is not an
+all-OS success.
+
+The IPC fixture completed its bounded listener notification, local DB mutation
+and Quit submission, then exceeded a two-second whole-owner join. The fixture
+now separates that notification bound from eventual owner cleanup using the
+existing 15/30-second cleanup watchdog, drains UI delivery, retains duplicate
+notice/error checks and additionally verifies the DB is closed. Production
+lifecycle and timeout settings are unchanged. The focused macOS test passes.
+The individual slow Windows cleanup step was not measured.
+
+The attachment failures only identified the shared `incoming()` watchdog, not
+which request or saved failure. A further bounded local probe of the unchanged
+binary ran six complete eight-case suites (two concurrent processes, eight test
+threads per process): **48 passed / 0 failed**. This does not establish Windows
+health or explain the failure. Subsequent diagnostic/barrier changes and native
+results are recorded separately below.
+
+The follow-up attachment fixture keeps its five-second bounds, captures the
+actual incoming call site and bounded saved run/turn/attempt diagnostics after
+failure, and checks the exact accepted Turn's intended invalid-UTF-8 recovery
+condition before editing synthetic history. No production change or proven
+explanation for the original native timeout is claimed.
+
+Focused macOS checks of this test-only follow-up pass: IPC server 11 cases and
+attachment provenance 8 cases. Format, strict all-target Clippy and diff checks
+pass. The production Rust source is unchanged from `f659197`; the earlier
+whole-suite result is not counted as a new run of these modified fixtures.

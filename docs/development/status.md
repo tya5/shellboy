@@ -15,8 +15,10 @@ but exposed an intermittent macOS RAG writer-lock contention. `f659197` ends
 that existing lease explicitly before File close, after SQLite closes; a new
 ownership regression and 280 parallel cases pass. No retry, global registry or
 new worker is introduced. All temporary FD diagnostics are removed. Its new
-native three-OS CI is the remaining push gate; no release or installed-binary
-update is requested.
+native CI passes Linux and macOS. Windows passes the RAG and FIFO cases but
+fails a whole-owner cleanup watchdog and two attachment incoming-request
+watchdogs. Follow-up is in progress; there is no final three-OS success yet.
+The implementation is pushed; no release or installed-binary update is requested.
 
 The exact old baseline `6c577c8` passes 1,343 tests and original ten-chat HTTP+PTY
 after restart, identifying the prior loopback fault independently of the new

@@ -688,3 +688,46 @@ error behind a later null unwrap. All temporary logging, FD probes, lsof calls
 and diagnostic guard types are removed. Revisit with exact OS/unlock/holder
 evidence if contention recurs; do not label an unobserved descriptor leak or
 precise kernel cause as proven.
+
+
+## 2026-10-29: IPC failure notification versus owner-cleanup watchdog
+
+Windows CI run 40802346281, job 123213135953, failed the permanent-listener
+frontend fixture only at its final two-second bridge join. Its earlier
+two-second failure-notice check, local database mutation and Quit submission
+completed. LocalServer publishes the failure watch after listener termination
+and endpoint cleanup, so that notice establishes the listener task has already
+finished; the final join additionally drains Control and closes SQLite, diagnostic
+logging and owner filesystem resources. DataOwner's diagnostic shutdown may
+legitimately wait the default five-second grace by itself. A two-second whole-owner
+cleanup bound is therefore not the IPC-notification contract being tested.
+
+Keep the two-second notification deadline and original liveness/error assertions.
+Use the existing frontend fixture's 15-second (30 on Windows) owner-cleanup
+watchdog only for the final join, drain bounded updates as a real UI does, retain
+a duplicate-notice count across that drain and report last shutdown progress if
+the watchdog expires. Also assert the database worker is actually closed before
+return. No product timeout, grace, lifecycle ordering or native Windows success
+is inferred or changed. This diagnosis does not identify which individual
+Windows cleanup operation exceeded two seconds; revisit with the recorded
+shutdown progress if the lifecycle-sized watchdog also fails.
+
+
+## 2026-10-29: attachment fixture preconditions and native watchdog diagnostics
+
+Two attachment cases in Windows run 40802346281 exceeded the shared incoming
+request watchdog. The old panic identifies neither the caller nor whether the
+Driver is preparing, recovering or awaiting HTTP. No production transport,
+retry or attachment cause is established. Keep the five-second watchdog and
+all semantic assertions; do not add retries or alter product code on that
+evidence alone.
+
+The synthetic ordered-content setup now confirms the exact accepted Turn
+entered recovery for the intended invalid-UTF-8 AGENTS error, with no saved
+instruction snapshot or model attempt, before editing synthetic source content
+and issuing RunRetry. Generic absence of active Turns is insufficient evidence
+for that particular setup condition. Each incoming watchdog now captures its
+real caller and, only after failure, obtains a separately bounded one-second
+saved-state diagnostic including synthetic recovery/attempt errors. No success
+path wait or product logging is added. If native failure recurs, use that phase
+evidence before deciding whether a production fix or fixture change is needed.

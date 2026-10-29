@@ -604,13 +604,57 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
         .await
         .unwrap();
     actions.send(UiAction::Quit).await.unwrap();
-    let error = tokio::time::timeout(Duration::from_secs(2), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap_err();
+    // The 2-second bound above covers the listener-failure notification. The
+    // notification is published only after LocalServer's endpoint cleanup, so
+    // the listener task is already done here. Joining the frontend additionally
+    // drains Control, closes SQLite and shuts down diagnostics (whose default
+    // grace alone is 5 seconds). This is an eventual owner-cleanup assertion,
+    // not another IPC response deadline. Match the existing frontend fixture's
+    // cleanup watchdog while consuming updates like the real UI.
+    let cleanup_seconds = if cfg!(windows) { 30 } else { 15 };
+    let mut bridge = bridge;
+    let mut duplicates = 0;
+    let mut last_progress = None;
+    let joined = tokio::time::timeout(Duration::from_secs(cleanup_seconds), async {
+        let mut tick = tokio::time::interval(Duration::from_millis(5));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            while let Ok(update) = received.try_recv() {
+                match update {
+                    UiUpdate::Status { text, .. } if text.contains("CLI受付が停止しました") =>
+                    {
+                        duplicates += 1;
+                    }
+                    UiUpdate::ShutdownProgress {
+                        elapsed_ms,
+                        detail,
+                        force_available,
+                    } => {
+                        last_progress = Some((elapsed_ms, detail, force_available));
+                    }
+                    _ => {}
+                }
+            }
+            tokio::select! {
+                result = &mut bridge => return result,
+                _ = tick.tick() => {},
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("frontend owner-cleanup watchdog expired; last progress: {last_progress:?}")
+    });
+    let error = joined.unwrap().unwrap_err();
     assert_eq!(error.code, ErrorCode::IoFailed);
-    let duplicates = received.try_iter().filter(|update| matches!(update, UiUpdate::Status { text, .. } if text.contains("CLI受付が停止しました"))).count();
+    assert!(
+        matches!(
+            database.call(|_| Ok(())).await.unwrap_err(),
+            crate::storage::StorageError::Closed
+        ),
+        "the owner must actually close its database before the bridge returns"
+    );
+    duplicates += received.try_iter().filter(|update| matches!(update, UiUpdate::Status { text, .. } if text.contains("CLI受付が停止しました"))).count();
     assert_eq!(
         duplicates, 0,
         "the closed watch must not produce repeated UI notices"
