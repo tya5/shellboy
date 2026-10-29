@@ -22,6 +22,29 @@ pub enum ActivityPhase {
     Completed,
 }
 impl ActivityPhase {
+    /// Bounded table label; full descriptions remain available in details.
+    pub fn column_label(self) -> &'static str {
+        match self {
+            Self::Idle => "未実行",
+            Self::Sending => "送信中",
+            Self::Reflecting => "反映待ち",
+            Self::Preparing => "準備中",
+            Self::AwaitingModel => "応答待ち",
+            Self::Retrying => "再試行",
+            Self::Receiving => "受信中",
+            Self::Tools => "ツール中",
+            Self::Running => "処理中",
+            Self::Waiting => "待機中",
+            Self::Background => "背景処理",
+            Self::Continuing => "継続中",
+            Self::Stopping => "停止中",
+            Self::Recovery => "復旧待ち",
+            Self::Failed => "異常終了",
+            Self::Stopped => "中断済み",
+            Self::Completed => "完了",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Idle => "入力できます",

@@ -157,3 +157,19 @@ Running-attempt/tool refinements are short-circuited for terminal Runs and
 non-running Turns, and tool-group checks are skipped while an attempt is
 inflight. Background/finalization pages therefore do not scan historical
 tool groups merely to return a completed-answer activity.
+
+## Compact activity column (Issue #44 review follow-up)
+
+The state column uses a distinct ActivityPhase column_label, at most eight
+terminal cells (four full-width Japanese characters). All layouts that show
+the state column reserve eight cells, including inner widths 20 through 43;
+narrower layouts still omit the column. Background is shown as background work,
+not a truncated answered label; idle is explicitly not-yet-run. Selected details,
+F1 information and the conversation footer retain the full descriptive label.
+The classification, activity JSON, native state, exit marker and Revisit facts
+are unchanged. Future localization must preserve the display-cell bound rather
+than assume a character count.
+
+The review's low-priority timestamp observation is retained: latest Turn
+selection uses created_at/id, so wall-clock rollback can affect chronology.
+No ordering/schema change is part of this label-only follow-up.

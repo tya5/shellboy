@@ -642,7 +642,7 @@ impl ThreadBrowser {
         } else if width >= 44 {
             (0, 8, 5)
         } else if width >= 20 {
-            (0, 6, 0)
+            (0, 8, 0)
         } else {
             (0, 0, 0)
         };
@@ -676,7 +676,7 @@ impl ThreadBrowser {
             }
             if state_width > 0 {
                 cells.push(
-                    Cell::from(fit(&one_line(activity_label(thread)), state_width))
+                    Cell::from(fit(&one_line(activity_column_label(thread)), state_width))
                         .style(status_style),
                 );
             }
@@ -870,6 +870,13 @@ fn tail_path(path: &str, width: usize) -> String {
     format!("…{}", suffix.into_iter().rev().collect::<String>())
 }
 
+fn activity_column_label(thread: &ThreadSummary) -> &str {
+    if thread.thread_id.starts_with("draft:") {
+        &thread.state
+    } else {
+        thread.activity.column_label()
+    }
+}
 fn activity_label(thread: &ThreadSummary) -> &str {
     if thread.thread_id.starts_with("draft:") {
         &thread.state
@@ -1190,6 +1197,78 @@ mod tests {
             updated_at: "2026-10-25T09:30:00Z".into(),
             excerpt: "**選択した会話の抜粋**".into(),
         }
+    }
+
+    #[test]
+    fn every_activity_fits_the_actual_state_column_without_using_selected_details() {
+        use crate::activity::ActivityPhase::*;
+        let phases = [
+            Idle,
+            Sending,
+            Reflecting,
+            Preparing,
+            AwaitingModel,
+            Retrying,
+            Receiving,
+            Tools,
+            Running,
+            Waiting,
+            Background,
+            Continuing,
+            Stopping,
+            Recovery,
+            Failed,
+            Stopped,
+            Completed,
+        ];
+        for phase in phases {
+            assert!(phase.column_label().width() <= 8, "{phase:?}");
+            let mut item = thread("row44", None);
+            item.title = "Fixture".into();
+            item.activity = phase;
+            // Native state intentionally differs: the column must use activity.
+            item.state = "completed".into();
+            for width in [
+                28, 29, 35, 43, 44, 47, 48, 51, 52, 64, 67, 68, 71, 72, 90, 93, 94, 97, 98, 120,
+            ] {
+                for height in [10, 20] {
+                    let buffer = capture(&[item.clone()], 0, width, height, None);
+                    let (x, y) = (0..buffer.area.height)
+                        .find_map(|y| {
+                            (0..buffer.area.width.saturating_sub(2)).find_map(|x| {
+                                (buffer[(x, y)].symbol() == "状"
+                                    && buffer[(x + 2, y)].symbol() == "態")
+                                    .then_some((x, y))
+                            })
+                        })
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "state header missing {phase:?} {width}x{height}\n{}",
+                                text(&buffer)
+                            )
+                        });
+                    // Read only eight cells in the first data row below the
+                    // header, never the selected detail/footer text.
+                    let mut shown = String::new();
+                    let mut col = x;
+                    while col < x + 8 {
+                        let symbol = buffer[(col, y + 1)].symbol();
+                        shown.push_str(symbol);
+                        col += symbol.width().max(1) as u16;
+                    }
+                    assert_eq!(
+                        shown.trim_end(),
+                        phase.column_label(),
+                        "{phase:?} {width}x{height}"
+                    );
+                    assert!(!shown.contains('…'));
+                }
+            }
+        }
+        assert_eq!(Background.column_label(), "背景処理");
+        assert_eq!(Idle.column_label(), "未実行");
+        assert_eq!(Background.label(), "回答済み背景処理中");
+        assert_eq!(Idle.label(), "入力できます");
     }
 
     #[test]
