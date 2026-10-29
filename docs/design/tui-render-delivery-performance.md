@@ -197,3 +197,12 @@ carries one local notification bit: warn each affected Thread once, including
 Threads first edited after closure, without repeating for newer revisions of
 the same retained entry. Backlog limits and normal-shutdown failure remain.
 No notification queue, extra worker or unbounded per-Thread registry is added.
+
+### Rejected autosave diagnostics (#40)
+
+When the 64-Thread backlog rejects a new Thread, the frontend distinguishes a
+closed worker receiver (including before the next pump observes closure) from
+transient capacity pressure. Neither notification promises automatic retries
+for a snapshot that was not retained in the backlog. Existing retained snapshots
+keep their coalescing and one-warning semantics. Closing snapshots and updates
+to an already retained Thread keep their existing admission rules.

@@ -7,7 +7,10 @@ budgets without spending the reduction allowance. Failed attempts preserve the
 structured reduction diagnosis even when an ordinary retry recovers. The
 loopback Responses regression suite passes (22 passed, 1 intentionally ignored);
 Index storage-stop reasons now use the same snake_case codes as search details;
-the library suite passes. Full-suite and independent-review evidence belongs in
+the library suite passes (627 passed, 10 ignored). Draft backlog rejection now
+distinguishes a stopped worker from transient pressure, without promising an
+automatic retry for a rejected snapshot. Admission/coalescing and shutdown
+ownership are unchanged. Full-suite and independent-review evidence belongs in
 [acceptance](../validation/acceptance.md).
 
 ## Issues #36–#39 review follow-up (2026-10-30)

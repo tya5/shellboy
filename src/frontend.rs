@@ -1982,8 +1982,7 @@ async fn run_with_delivery(
                                 &updates,
                                 UiUpdate::DraftSaveFailed {
                                     thread_id,
-                                    message: "下書き保存キューが満杯です。本文を保持し再試行します"
-                                        .into(),
+                                    message: draft_saver.rejected_message().into(),
                                 },
                             )
                             .await;

@@ -16,9 +16,15 @@ installed owner replacement, real provider traffic or user-data changes.
   allowance remains available. Existing partial-output, Retry-After, stop,
   adopted-reduction and overflow checks pass in the same suite.
 - `CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 cargo test --locked --lib`:
-  the library suite passes, including the injected unsaved index-pause test.
+  627 passed, 0 failed, 10 intentionally ignored, including the injected
+  unsaved index-pause test.
   Both processing and pause codes in readable status match search wire details;
   the durable pause prefix survives and stopped workers do not silently restart.
+- The same library run covers draft backlog rejection at 64/65 Threads with a
+  live receiver and a stopped worker before/after pump detection. Existing-Thread
+  revisions, closing admission and one warning per retained Thread are preserved.
+  Exact Japanese failure messages are asserted; the frontend projects the tested
+  message directly. This is not a claim of physical-terminal evaluation.
 - The initial command could not find `cargo` on PATH and did not run tests;
   exporting `$HOME/.cargo/bin` corrected the environment without changing the
   toolchain or dependencies.

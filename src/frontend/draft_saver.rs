@@ -64,6 +64,13 @@ impl DraftSaver {
             false
         }
     }
+    pub(super) fn rejected_message(&self) -> &'static str {
+        if self.closed || self.sender.is_closed() {
+            "下書き保存workerが停止し、保存待ちも満杯です。本文を保持しています。保存は再試行されません。終了前に本文を控えてください"
+        } else {
+            "下書き保存キューが満杯です。本文を保持しています。空きができてから再操作してください"
+        }
+    }
     pub(super) fn pump(&mut self) -> Option<String> {
         if self.closed {
             return self.backlog.iter_mut().find_map(|(thread, save)| {
@@ -165,6 +172,83 @@ impl DraftSaver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn full_backlog_distinguishes_stopped_worker_before_and_after_pump() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (results, _incoming) = mpsc::channel(1);
+        let mut saver = DraftSaver::new(control.clone(), results);
+        for number in 0..64 {
+            assert!(saver.enqueue(
+                format!("thread-{number}"),
+                DraftSnapshot::default(),
+                ViewAnchor::default(),
+                true,
+                false,
+            ));
+        }
+        assert!(!saver.enqueue(
+            "rejected".into(),
+            DraftSnapshot::default(),
+            ViewAnchor::default(),
+            true,
+            false,
+        ));
+        assert_eq!(saver.backlog.len(), 64);
+        assert!(!saver.backlog.contains_key("rejected"));
+        assert_eq!(
+            saver.rejected_message(),
+            "下書き保存キューが満杯です。本文を保持しています。空きができてから再操作してください"
+        );
+        saver.worker.abort();
+        saver.sender.closed().await;
+        assert!(!saver.closed, "pump has not observed closure yet");
+        let stopped_message = saver.rejected_message();
+        assert_eq!(
+            stopped_message,
+            "下書き保存workerが停止し、保存待ちも満杯です。本文を保持しています。保存は再試行されません。終了前に本文を控えてください"
+        );
+        let mut warned = HashSet::new();
+        while let Some(thread) = saver.pump() {
+            assert!(
+                warned.insert(thread),
+                "retained Threads must be warned once"
+            );
+        }
+        assert_eq!(warned.len(), 64);
+        assert_eq!(saver.rejected_message(), stopped_message);
+        assert!(!saver.enqueue(
+            "rejected".into(),
+            DraftSnapshot::default(),
+            ViewAnchor::default(),
+            true,
+            false,
+        ));
+        assert!(saver.enqueue(
+            "thread-0".into(),
+            DraftSnapshot {
+                text: "new revision".into(),
+                ..Default::default()
+            },
+            ViewAnchor::default(),
+            true,
+            false,
+        ));
+        assert_eq!(saver.backlog["thread-0"].draft.text, "new revision");
+        assert!(saver.pump().is_none(), "revisions must not repeat warnings");
+        assert!(saver.enqueue(
+            "closing".into(),
+            DraftSnapshot::default(),
+            ViewAnchor::default(),
+            true,
+            true,
+        ));
+        assert_eq!(saver.pump(), Some("closing".into()));
+        assert!(saver.pump().is_none());
+        assert!(saver.finish().await.await.unwrap_err().is_cancelled());
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
     #[tokio::test]
     async fn pumping_persists_backlog_while_ui_outbox_has_no_main_capacity() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
