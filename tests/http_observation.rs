@@ -29,7 +29,7 @@ async fn read_body(stream: &mut TcpStream) {
                         .strip_prefix("content-length:")
                         .map(|v| v.trim().parse::<usize>().unwrap())
                 })
-                .unwrap();
+                .unwrap_or(0);
             if bytes.len() >= at + 4 + len {
                 return;
             }
@@ -248,5 +248,149 @@ async fn failed_attempt_retires_keepalive_pool_and_retry_uses_fresh_generation()
     let next = response.http_observation.unwrap();
     assert_eq!(next.pool_generation, 1);
     assert_eq!(next.connection_reuse, ConnectionReuse::FreshPool);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn connection_refused_is_before_body_source_and_not_a_partial_upload() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = client(&listener, 1000, 1000);
+    drop(listener);
+    for _ in 0..3 {
+        let failure = timeout(
+            Duration::from_secs(3),
+            client.response(request(), CancellationToken::new(), None),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        let observed = failure.error.http_observation.as_deref().unwrap();
+        assert_eq!(observed.phase, HttpPhase::BeforeBodySource);
+        assert_eq!(observed.body_source_bytes_consumed, 0);
+        assert!(!observed.is_known_upload_incomplete());
+        assert!(
+            failure
+                .error
+                .message
+                .contains("no partial upload was observed")
+        );
+    }
+}
+#[tokio::test]
+async fn completed_unauthorized_response_does_not_retire_a_reusable_pool() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = client(&listener, 2000, 2000);
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        stream.set_nodelay(true).unwrap();
+        read_body(&mut stream).await;
+        let body = r#"{"error":{"code":"unauthorized","message":"fixture"}}"#;
+        stream
+            .write_all(format!("{}{body}", head(401, body.len(), true)).as_bytes())
+            .await
+            .unwrap();
+        read_body(&mut stream).await;
+        let body = answer();
+        stream
+            .write_all(format!("{}{body}", head(200, body.len(), false)).as_bytes())
+            .await
+            .unwrap();
+    });
+    let failure = client
+        .response(request(), CancellationToken::new(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(failure.error.status, Some(401));
+    let response = timeout(
+        Duration::from_secs(3),
+        client.response(request(), CancellationToken::new(), None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let obs = response.http_observation.unwrap();
+    assert_eq!(obs.pool_generation, 0);
+    assert_eq!(obs.connection_reuse, ConnectionReuse::Unknown);
+    server.await.unwrap();
+}
+#[tokio::test]
+async fn model_list_and_embedding_transport_errors_do_not_retire_responses_pool() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = client(&listener, 2000, 2000);
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_body(&mut stream).await;
+            drop(stream);
+        }
+        let (mut stream, _) = listener.accept().await.unwrap();
+        stream.set_nodelay(true).unwrap();
+        read_body(&mut stream).await;
+        let body = answer();
+        stream
+            .write_all(format!("{}{body}", head(200, body.len(), false)).as_bytes())
+            .await
+            .unwrap();
+    });
+    assert!(client.models(CancellationToken::new()).await.is_err());
+    assert!(
+        client
+            .embeddings(
+                "fixture",
+                &["synthetic".into()],
+                None,
+                CancellationToken::new()
+            )
+            .await
+            .is_err()
+    );
+    let response = timeout(
+        Duration::from_secs(3),
+        client.response(request(), CancellationToken::new(), None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let obs = response.http_observation.unwrap();
+    assert_eq!(obs.pool_generation, 0);
+    assert_eq!(obs.connection_reuse, ConnectionReuse::Unknown);
+    server.await.unwrap();
+}
+#[tokio::test]
+async fn cancelling_a_responses_request_does_not_retire_its_profile_pool() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = client(&listener, 2000, 2000);
+    let (ready, received) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut first, _) = listener.accept().await.unwrap();
+        read_body(&mut first).await;
+        ready.send(()).unwrap();
+        let (mut next, _) = listener.accept().await.unwrap();
+        next.set_nodelay(true).unwrap();
+        read_body(&mut next).await;
+        let body = answer();
+        next.write_all(format!("{}{body}", head(200, body.len(), false)).as_bytes())
+            .await
+            .unwrap();
+    });
+    let cancel = CancellationToken::new();
+    let task = tokio::spawn({
+        let client = client.clone();
+        let cancel = cancel.clone();
+        async move { client.response(request(), cancel, None).await }
+    });
+    received.await.unwrap();
+    cancel.cancel();
+    assert_eq!(task.await.unwrap().unwrap_err().error.kind, "cancelled");
+    let response = timeout(
+        Duration::from_secs(3),
+        client.response(request(), CancellationToken::new(), None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let obs = response.http_observation.unwrap();
+    assert_eq!(obs.pool_generation, 0);
+    assert_eq!(obs.connection_reuse, ConnectionReuse::Unknown);
     server.await.unwrap();
 }

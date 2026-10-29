@@ -65,7 +65,7 @@ pub struct EmbeddingResponse {
     pub usage: Option<Value>,
 }
 struct ClientPool {
-    client: Result<Client, ModelError>,
+    client: Option<Client>,
     generation: u64,
     issued: u64,
 }
@@ -88,7 +88,7 @@ impl HttpModelClient {
         let client = Self::build_client(&connection)?;
         Ok(Self {
             pool: Arc::new(RwLock::new(ClientPool {
-                client: Ok(client),
+                client: Some(client),
                 generation: 0,
                 issued: 0,
             })),
@@ -106,7 +106,7 @@ impl HttpModelClient {
             .build()
             .map_err(|_| ModelError::new("transport", "Unable to initialize HTTP client"))
     }
-    fn snapshot_pool(&self) -> Result<(Client, u64, ConnectionReuse), ModelError> {
+    fn current_pool(&self) -> Option<(Client, u64, ConnectionReuse)> {
         let mut pool = self.pool.write().expect("HTTP pool lock poisoned");
         let client = pool.client.clone()?;
         let reuse = if pool.issued == 0 {
@@ -115,27 +115,60 @@ impl HttpModelClient {
             ConnectionReuse::Unknown
         };
         pool.issued = pool.issued.saturating_add(1);
-        Ok((client, pool.generation, reuse))
+        Some((client, pool.generation, reuse))
     }
-    fn retire_pool(&self, generation: u64) {
-        if self
-            .pool
-            .read()
-            .expect("HTTP pool lock poisoned")
-            .generation
-            != generation
-        {
-            return;
+    async fn snapshot_pool(&self) -> Result<(Client, u64, ConnectionReuse), ModelError> {
+        if let Some(current) = self.current_pool() {
+            return Ok(current);
         }
-        // Build outside the lock. Existing in-flight requests retain their
-        // original pool, while subsequent attempts use the replacement.
-        let replacement = Self::build_client(&self.connection);
+        let connection = self.connection.clone();
+        // Existing admitted requests own these finite construction tasks. Never
+        // build the TLS/proxy client synchronously on the async runtime or keep
+        // a failed build as a permanent error in the profile's shared pool.
+        let replacement = tokio::task::spawn_blocking(move || Self::build_client(&connection))
+            .await
+            .map_err(|_| ModelError::new("transport", "HTTP client reconstruction task failed"))?;
+        self.finish_pool_rebuild(replacement)
+    }
+    fn finish_pool_rebuild(
+        &self,
+        replacement: Result<Client, ModelError>,
+    ) -> Result<(Client, u64, ConnectionReuse), ModelError> {
+        self.install_pool(replacement?);
+        self.current_pool().ok_or_else(|| {
+            ModelError::new(
+                "transport",
+                "HTTP client pool retired before request admission; retry explicitly",
+            )
+        })
+    }
+    fn install_pool(&self, replacement: Client) {
         let mut pool = self.pool.write().expect("HTTP pool lock poisoned");
-        if pool.generation == generation {
-            pool.client = replacement;
+        if pool.client.is_none() {
+            pool.client = Some(replacement);
             pool.generation = pool.generation.saturating_add(1);
             pool.issued = 0;
         }
+    }
+    fn retire_pool(&self, generation: u64) {
+        let retired = {
+            let mut pool = self.pool.write().expect("HTTP pool lock poisoned");
+            if pool.generation == generation {
+                pool.client.take()
+            } else {
+                None
+            }
+        };
+        // Drop outside the lock; active request clones keep their own lifetime.
+        drop(retired);
+    }
+    fn retires_response_pool(error: &ModelError, terminal_received: bool) -> bool {
+        if error.kind == "cancelled" || matches!(error.status, Some(400..=499)) {
+            return false;
+        }
+        matches!(error.kind.as_str(), "transport" | "timeout")
+            || (error.kind == "incomplete" && !terminal_received)
+            || matches!(error.status, Some(500..=599))
     }
     fn headers(&self) -> Result<(HeaderMap, Vec<String>), ModelError> {
         let credentials = self
@@ -192,7 +225,7 @@ impl HttpModelClient {
             ApiEndpoint::Responses => "text/event-stream, application/json",
             ApiEndpoint::Embeddings | ApiEndpoint::Models => "application/json",
         };
-        let (client, generation, reuse) = self.snapshot_pool()?;
+        let (client, generation, reuse) = self.snapshot_pool().await?;
         let mut outgoing = client
             .request(method, endpoint)
             .headers(headers)
@@ -222,15 +255,21 @@ impl HttpModelClient {
                 .body(reqwest::Body::wrap_stream(stream));
         }
         let started = std::time::Instant::now();
+        let mut connection_failed = false;
         let outcome = deadline
             .wait_headers(cancel, outgoing.send())
             .await
             .and_then(|result| {
-                result.map_err(|error| transport_error(error, "before response headers"))
+                result.map_err(|error| {
+                    connection_failed = error.is_connect();
+                    transport_error(error, "before response headers")
+                })
             });
         let consumed_bytes = consumed.load(Ordering::Relaxed);
         let mut observation = HttpObservation {
-            phase: if consumed_bytes < body_len {
+            phase: if connection_failed || (body_len > 0 && consumed_bytes == 0) {
+                HttpPhase::BeforeBodySource
+            } else if consumed_bytes < body_len {
                 HttpPhase::UploadSourceIncomplete
             } else {
                 HttpPhase::AwaitingHeadersDeliveryUnknown
@@ -252,7 +291,11 @@ impl HttpModelClient {
                 error.message.push_str("; ");
                 error.message.push_str(observation.hint());
                 error.http_observation = Some(Box::new(observation));
-                self.retire_pool(generation);
+                if matches!(endpoint_kind, ApiEndpoint::Responses)
+                    && Self::retires_response_pool(&error, false)
+                {
+                    self.retire_pool(generation);
+                }
                 Err(error)
             }
         }
@@ -537,25 +580,36 @@ mod observation_tests {
 #[cfg(test)]
 mod pool_generation_tests {
     use super::*;
-    #[test]
-    fn late_old_failure_cannot_retire_new_pool_or_fabricate_reuse() {
+    #[tokio::test]
+    async fn late_old_failure_cannot_retire_new_pool_or_fabricate_reuse() {
         let client = HttpModelClient::new(Connection {
             base_url: "http://127.0.0.1:1/v1".into(),
             ..Default::default()
         })
         .unwrap();
-        let (_, old, first) = client.snapshot_pool().unwrap();
+        let (_, old, first) = client.snapshot_pool().await.unwrap();
         assert_eq!(old, 0);
         assert_eq!(first, ConnectionReuse::FreshPool);
-        let (_, same, other) = client.snapshot_pool().unwrap();
+        let (_, same, other) = client.snapshot_pool().await.unwrap();
         assert_eq!(same, old);
         assert_eq!(other, ConnectionReuse::Unknown);
         client.retire_pool(old);
-        let (_, new, fresh) = client.snapshot_pool().unwrap();
+        let rebuild_error = client
+            .finish_pool_rebuild(Err(ModelError::new(
+                "transport",
+                "synthetic client construction failure",
+            )))
+            .unwrap_err();
+        assert_eq!(rebuild_error.kind, "transport");
+        assert!(
+            client.pool.read().unwrap().client.is_none(),
+            "failed construction must not cache a permanent Err or restore a retired pool"
+        );
+        let (_, new, fresh) = client.snapshot_pool().await.unwrap();
         assert_eq!(new, 1);
         assert_eq!(fresh, ConnectionReuse::FreshPool);
         client.retire_pool(old);
-        let (_, still_new, unknown) = client.snapshot_pool().unwrap();
+        let (_, still_new, unknown) = client.snapshot_pool().await.unwrap();
         assert_eq!(still_new, new);
         assert_eq!(unknown, ConnectionReuse::Unknown);
     }

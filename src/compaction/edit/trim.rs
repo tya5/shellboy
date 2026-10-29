@@ -6,6 +6,7 @@ struct TrimPlan {
     omitted: HashSet<usize>,
     marker: Option<Value>,
     after: u64,
+    provenance_limited: bool,
 }
 
 fn protected_request(snapshot: &Snapshot) -> Option<usize> {
@@ -186,13 +187,31 @@ fn marker_item(
 fn disconnect_plan(snapshot: &Snapshot) -> TrimPlan {
     let latest_tool = snapshot.groups.iter().rposition(|g| g.complete && g.tool);
     let request = protected_request(snapshot);
-    let omitted = (0..snapshot.groups.len())
-        .filter(|index| {
-            Some(*index) != latest_tool
-                && !range::trim_group_protected(*index, snapshot.groups.len(), request)
-                && range::group_is_safe(snapshot, *index)
-        })
-        .collect::<HashSet<_>>();
+    let mut omitted = HashSet::new();
+    let mut first_offset = None;
+    let mut offset = 0usize;
+    let mut provenance_limited = false;
+    for (index, group) in snapshot.groups.iter().enumerate() {
+        let end = offset.saturating_add(group.sources.len());
+        let eligible = Some(index) != latest_tool
+            && !range::trim_group_protected(index, snapshot.groups.len(), request)
+            && range::group_is_safe(snapshot, index);
+        if eligible {
+            let start = first_offset.unwrap_or(offset);
+            if end.saturating_sub(start) <= TURN_BOUNDARY_IDS {
+                first_offset = Some(start);
+                omitted.insert(index);
+            } else {
+                provenance_limited = true;
+                // A single over-budget group cannot be split. If nothing is
+                // selected yet, keep looking for a later whole-group window.
+                if first_offset.is_some() {
+                    break;
+                }
+            }
+        }
+        offset = end;
+    }
     let before = estimated_tokens(snapshot);
     let marker = marker_payload(snapshot, &omitted, before, 0, "disconnect");
     let mut plan = TrimPlan {
@@ -200,6 +219,7 @@ fn disconnect_plan(snapshot: &Snapshot) -> TrimPlan {
         omitted,
         marker,
         after: before,
+        provenance_limited,
     };
     plan.after = estimated_tokens(&projected(snapshot, &plan));
     plan
@@ -259,6 +279,7 @@ impl Compactor {
             omitted,
             marker,
             after: 0,
+            provenance_limited: false,
         };
         plan.after = estimated_tokens(&projected(&snapshot, &plan));
         self.adopt_trim(snapshot, plan, before, Some(target), cancel, false)
@@ -342,7 +363,14 @@ impl Compactor {
                     original_ids.extend(group.sources.iter().map(|source| source.id.clone()));
                 } else { path.extend(group.sources.iter().map(|source| source.id.clone())); }
             }
-            let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_tokens: before, after_tokens: plan.after, target_tokens: target, omitted_nodes: sources.len(), marker_node_id: marker, cache_invalidated_tokens: cache_invalidated, warnings: if changed_attachments>0 {vec![format!("{changed_attachments} active attachment references were excluded by this context edit and will not be automatically reactivated by restore")]}else{Vec::new()} };
+            let mut warnings = Vec::new();
+            if changed_attachments > 0 {
+                warnings.push(format!("{changed_attachments} active attachment references were excluded by this context edit and will not be automatically reactivated by restore"));
+            }
+            if plan.provenance_limited {
+                warnings.push("Automatic omission retained additional candidates beyond the oldest whole-group window allowed by the 65536-node restore provenance budget".into());
+            }
+            let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_tokens: before, after_tokens: plan.after, target_tokens: target, omitted_nodes: sources.len(), marker_node_id: marker, cache_invalidated_tokens: cache_invalidated, warnings };
             history::select_path(&tx, &snapshot.thread, snapshot.revision, &path, &timestamp())?;
             if automatic && let Some((turn, generation)) = &snapshot.turn_fence {
                 // Make the reason durable with the path change, even if owner
@@ -352,5 +380,49 @@ impl Compactor {
             tx.commit()?;
             Ok(result)
         }).await.map_err(storage_error)
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    #[test]
+    fn oversized_automatic_history_uses_an_available_bounded_window_and_retains_anchors() {
+        let mut snapshot = crate::compaction::tests::staged_snapshot();
+        let mut prototype = snapshot.groups[0].clone();
+        prototype.sources[0].payload = json!({"role":"user","content":"small"});
+        prototype.sources[0].turn = None;
+        snapshot.current_turn = None;
+        snapshot.protected.clear();
+        snapshot.groups = (0..TURN_BOUNDARY_IDS + 16)
+            .map(|index| {
+                let mut group = prototype.clone();
+                group.sources[0].id = format!("node-{index}");
+                group
+            })
+            .collect();
+        snapshot.protected.insert("node-1".into());
+        let plan = disconnect_plan(&snapshot);
+        assert!(plan.provenance_limited);
+        assert_eq!(plan.omitted.len(), TURN_BOUNDARY_IDS - 1);
+        assert!(plan.omitted.contains(&0));
+        assert!(!plan.omitted.contains(&1));
+        assert!(!plan.omitted.contains(&TURN_BOUNDARY_IDS));
+        let marker = plan.marker.unwrap();
+        assert_eq!(
+            marker["context_trim"]["original_order"]
+                .as_array()
+                .unwrap()
+                .len(),
+            TURN_BOUNDARY_IDS
+        );
+        assert_eq!(
+            marker["context_trim"]["retained_node_ids"],
+            json!(["node-1"])
+        );
+        assert_eq!(
+            marker["source_node_ids"].as_array().unwrap().len(),
+            TURN_BOUNDARY_IDS - 1
+        );
     }
 }

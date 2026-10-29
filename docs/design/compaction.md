@@ -121,10 +121,13 @@ failure. Every 5xx is eligible for this separate reduction decision, while the
 ordinary retry status list remains unchanged. Partial-output opt-out, terminal
 responses and Retry-After above 600 seconds still forbid automatic resending;
 a permitted Retry-After is honored before the reduced request. Explicit provider context overflow retains its separate two-stage path.
-A known incomplete request-body source is not a reason to trim; a second
-consecutive incomplete-source failure enters recovery instead of repeatedly
-shrinking or resending. Successful adoption or a different failure resets that
-small counter in the existing per-Turn retry budget.
+A partially consumed request-body source can trigger the same one-time large-input
+reduction: the header deadline also includes upload time, so a slow uplink must
+not exclude the case where reduction is most useful. Before-body/connect failures
+remain ordinary retries. Two consecutive partial-source failures without an
+adopted reduction stop automatic retries; source consumption still does not
+establish peer delivery. Successful adoption or a different failure resets that
+counter in the existing per-Turn retry budget.
 
 A configured positive `compact_hint_tokens` is activation guidance only. It also
 allows proactive reduction before POST; absent that explicit hint, normal input
@@ -142,12 +145,33 @@ use the existing atomic path-adoption transaction. Automatic result
 `target_tokens` is null, because maximum omission has no numeric goal. Manual
 context edits retain their real numeric guidance where applicable.
 
-One adopted reduction allows exactly one resumed POST per Turn/generation. Any
-failure of that resumed request enters recovery; ordinary successful tool output
-does not replenish the trim allowance. A request below activation follows normal
-retry policy without consuming the allowance. No safe candidates means unchanged
-history and recovery on failure. Stop, selection/profile/generation changes still
-fence adoption. No new state table, event, worker, queue or dependency is added.
+The reduction right and the immediate-resumption failure guard are separate
+finite bits in the existing per-Turn retry budget. An adopted reduction spends
+the right for this Turn/generation and guards its first resumed POST. If that
+POST fails, recover. Once a response is durably adopted, clear only the guard:
+later ordinary retries and explicit-overflow compaction retain their normal
+policy, while the reduction right remains spent. A no-candidate failure recovers
+without changing history. A rejected/stale optional preflight or failure-time
+reduction does not spend the right; cancellation returns to normal owner stop,
+ordinary rejections proceed to normal admission/retry, and only storage failure
+stops the owner.
+
+Gate activation before loading a full compaction snapshot. The already prepared
+request supplies its actual serialized input character count, calibrated by the
+same bounded successful-usage lookup at preflight and failure. A small input
+neither queries per-node attachments nor adds a trim explanation to ordinary
+errors. After activation, load and fence the full snapshot; report the trigger
+estimate separately from the possibly changed selected-path before/after values.
+Classification is typed (below threshold, no candidates, rejection, adoption),
+not inferred by comparing those different estimates or inspecting JSON strings.
+
+An automatic plan exceeding the 65,536-node restore provenance budget adopts
+its oldest whole-group candidate window that fits the budget, counting retained
+anchors within that window. It retains later candidates and reports the cap;
+manual over-budget edits still reject. This finite bound may prevent omitting
+all otherwise eligible nodes at once, but must not discard an available bounded
+reduction. Stop, selection/profile/generation changes still fence adoption. No
+new state table, event, worker, queue or dependency is added.
 
 The context_trim developer notice records ranges/counts/estimates, the unchanged
 side effects and attachment-restore limits. It recommends bounded `history get`,
@@ -171,7 +195,13 @@ durable through the same marker/path adoption, before any attempt exists.
 
 復旧・動作中のTUI概要は、同じTurn/generationの直近256 attemptから縮小の数値だけを投影する。取得範囲外は「縮小なし」と断定せず概要を表示しない。markerの原文・元attemptの記録は別途参照できる。巨大なerror JSON全体をUIへ渡さず、新しい追跡tableやindexは追加しない。
 
-省略markerの原文と保持anchorは合計65,536 nodeまでとし、復元の有限provenance予算と一致させる。上限超過は無変更で拒否し、小さい範囲へ案内する。自動縮小の規則はDB/HTTPに触れない純粋な計画関数とし、各groupの送信projection文字数を一度数えて差分で縮小後を推定する。候補ごとに全履歴本文を複製しない。
+Omission sources and retained anchors together are bounded to 65,536 nodes,
+matching the restore provenance budget. Oversized manual edits are rejected
+without changes and suggest a smaller range; automatic edits adopt the bounded
+oldest whole-group window described above. The automatic planner is a pure
+function without DB/HTTP access, counts each group's projection once and
+estimates the remaining size by subtraction without cloning all history for
+each candidate.
 
 サイズ補正は同Thread・接続・モデルの直近64成功attemptを有限に調べ、有効なusageと入力文字数がある最新のものを使う。送信manifestの`history_characters`で固定指示・添付等の差を分離し、同selectionのinflight記録があればその差を優先する。過去の添付projection等を固定分として推定するため、省略による添付除外後の減少を保守的に見積もることがある。`context_usage`は補正元attempt ID・方法・測定できていない対象を返す。
 
@@ -185,3 +215,7 @@ durable through the same marker/path adoption, before any attempt exists.
 `--restore --from ID`は、選択中markerのIDを優先し、一致しなければ省略元の最初のnode IDを一意に解決する。通知はその元IDを指定した復元コマンドを示す。候補が複数なら曖昧な復元をせず拒否する。
 
 自動縮小が採用されなかった場合も、元の復旧遷移と同じ保存経路に`automatic_trim_attempt`を記録する。起動閾値未満と安全な縮小では目標に届かない状態、競合等による拒否を区別し、成功採用の`automatic_trim`やTUIの「縮小済み」と混同しない。
+
+Transport failures before any HTTP-phase observation (including client-pool
+construction failure) keep ordinary retry and do not activate size reduction.
+Missing observation is not evidence of a partial upload or an oversized request.

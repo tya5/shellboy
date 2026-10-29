@@ -484,15 +484,20 @@ async fn activation_measures_failed_request_not_later_appended_input() {
         .await;
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     assert!(estimated_tokens(&snapshot) > 75_000);
-    assert_eq!(snapshot.estimate.failed_input_tokens(), Some(1_000));
     let original = fixture.path().await;
-    let result = fixture
-        .compactor
-        .trim_disconnect("t", None, CancellationToken::new())
-        .await
-        .unwrap();
-    assert!(result.compact.no_target);
-    assert_eq!(fixture.path().await, original);
+    let prepared_characters = fixture.db.call(|db| {
+        Ok(db.query_row("SELECT json_extract(input_manifest_json,'$.input_characters') FROM model_attempt WHERE id='failed-request'", [], |row| row.get::<_, i64>(0))?)
+    }).await.unwrap();
+    assert_eq!(
+        fixture
+            .compactor
+            .input_tokens("t", "p", "m", prepared_characters.try_into().unwrap())
+            .await
+            .unwrap(),
+        1_000,
+        "the actual prepared request remains below activation even after a large input is appended later"
+    );
+    assert_eq!(fixture.path().await, original, "activation is read-only");
     fixture.close().await;
 }
 
@@ -818,7 +823,7 @@ async fn maximum_trim_adopts_a_small_safe_reduction_even_when_retained_suffix_ex
     fixture.text("latest", &"y".repeat(400_000)).await;
     let result = fixture
         .compactor
-        .trim_disconnect("t", None, CancellationToken::new())
+        .trim_activated("t", CancellationToken::new())
         .await
         .unwrap();
     assert!(!result.compact.no_target);
@@ -852,7 +857,7 @@ async fn no_unprotected_groups_leave_history_unchanged() {
     let before = fixture.path().await;
     let result = fixture
         .compactor
-        .trim_disconnect("t", None, CancellationToken::new())
+        .trim_activated("t", CancellationToken::new())
         .await
         .unwrap();
     assert!(result.compact.no_target);
@@ -900,5 +905,29 @@ async fn pending_protection_and_incomplete_groups_are_never_automatic_omission_c
     assert!(result.compact.no_target);
     assert_eq!(fixture.path().await, before);
     assert_eq!(fixture.replacement_count().await, 0);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn activation_uses_the_prepared_request_count_instead_of_resnapshotting_a_changed_path() {
+    let fixture = Fixture::new().await;
+    assert_eq!(
+        fixture
+            .compactor
+            .input_tokens("t", "p", "m", 400)
+            .await
+            .unwrap(),
+        100
+    );
+    fixture.text("later", &"x".repeat(400_000)).await;
+    assert_eq!(
+        fixture
+            .compactor
+            .input_tokens("t", "p", "m", 400)
+            .await
+            .unwrap(),
+        100,
+        "already prepared small requests must not use later selected history as activation input"
+    );
     fixture.close().await;
 }

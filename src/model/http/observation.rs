@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpPhase {
+    /// Connection setup failed or the body source was never consumed.
+    BeforeBodySource,
     UploadSourceIncomplete,
     AwaitingHeadersDeliveryUnknown,
     BodyReceive,
@@ -30,9 +32,14 @@ pub struct HttpObservation {
 impl HttpObservation {
     pub fn is_known_upload_incomplete(&self) -> bool {
         self.phase == HttpPhase::UploadSourceIncomplete
+            && self.body_source_bytes_consumed > 0
+            && self.body_source_bytes_consumed < self.request_body_bytes
     }
     pub(super) fn hint(&self) -> &'static str {
         match self.phase {
+            HttpPhase::BeforeBodySource => {
+                "Connection setup failed or no request-body source bytes were consumed; no partial upload was observed. Check endpoint connectivity, DNS and TLS; peer delivery and provider processing are unknown"
+            }
             HttpPhase::UploadSourceIncomplete => {
                 "The HTTP client has not consumed the complete request body; complete delivery cannot be established. Check the connection, forwarding proxy and local network; provider processing is unknown"
             }

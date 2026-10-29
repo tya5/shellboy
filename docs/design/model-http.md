@@ -123,8 +123,9 @@ local measurement and its limitations belong in the decision record.
 
 Observations contain bounded typed phase, serialized body length, source bytes
 consumed by the HTTP client, successful header elapsed milliseconds, pool
-generation and a connection-reuse fact. `upload_source_incomplete` means not all
-source bytes were consumed; `awaiting_headers_delivery_unknown` means the source
+generation and a connection-reuse fact. `before_body_source` means connection setup failed or no body-source bytes
+were consumed; it does not consume the partial-upload failure budget.
+`upload_source_incomplete` requires some but not all source bytes consumed; `awaiting_headers_delivery_unknown` means the source
 was consumed but peer delivery is unknown; `body_receive` means headers arrived.
 The reqwest public API does not expose socket-write completion, TCP acknowledgement
 or actual socket reuse. Never label source consumption as successful transmission
@@ -132,10 +133,12 @@ or blame/exclude provider processing from these observations. The first request
 issued by a newly built client records fresh_pool; all other socket reuse is
 unknown. No private URL, body, header or credential is copied into telemetry.
 
-The existing owner-scoped client now owns one bounded shared pool generation. A
+The existing owner-scoped client owns one bounded shared pool generation. A
 short std RwLock protects only cloning/replacing Client and two scalar counters;
-it is never held across await. Failure retires its generation so later requests
-do not select that pool; a late failure from an old generation cannot reset the
+it is never held across await. Only eligible Responses transport/timeout/nonterminal-EOF and server-5xx
+failures retire their generation so later requests do not select that pool.
+Caller cancellation, completed 4xx/provider/protocol errors, embedding and
+model-list failures do not retire the Responses pool; a late failure from an old generation cannot reset the
 new pool. Existing in-flight clones retain their old pool until dropped, so no
 immediate closure of a multiplexed HTTP/2 socket with other active requests is
 promised. A fresh pool is not a claim that a concurrent request necessarily uses
@@ -149,3 +152,24 @@ and [pool idle timeout](https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuil
 These APIs do not provide a per-request peer-delivery acknowledgement or exact
 socket-reuse fact; that absence is a documented diagnostic limitation, not a
 reason to infer those facts from body polling.
+
+### Review correction: connection setup and pool reconstruction
+
+No consumed request-source bytes, or reqwest is_connect(), is a pre-upload
+observation rather than proof that a body transfer stalled. Connection refused,
+DNS, TLS and connect timeout therefore retain the ordinary consecutive retry
+budget. Only a strictly partial source can consume the bounded upload-failure
+budget. Long/slow uploads may hit the header deadline because it includes upload;
+they are eligible for the same one-time large-input reduction rather than being
+excluded solely for partial consumption. It remains impossible to distinguish
+ongoing socket transmission from a network stall using source consumption alone.
+
+Retirement only removes the current generation's client reference; it does not
+synchronously construct a replacement on the async runtime. The next request
+constructs a fresh client via the existing Tokio blocking executor, then installs
+it under the short existing pool lock if a concurrent request has not already
+installed one. No new persistent worker, queue or dependency is introduced;
+construction tasks are scoped to existing admitted requests. A failed build
+returns an error for that call and leaves the pool empty/retryable, never a
+cached Err that poisons all later calls. Existing in-flight clones retain their
+previous generation. A late failure cannot retire a newer installed generation.

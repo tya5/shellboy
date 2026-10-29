@@ -2,6 +2,13 @@
 //! Compactor owns sizing, safe ranges, provenance and atomic path adoption.
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Outcome {
+    Adopted,
+    NoCandidates,
+    Rejected,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn try_trim(
     control: &Arc<Control>,
@@ -9,17 +16,17 @@ pub(super) async fn try_trim(
     slot: &DriverSlot,
     attempt: &str,
     failure: &mut model::http::AttemptFailure,
-    hint: Option<u64>,
+    trigger_tokens: u64,
     retries: u32,
     limit: u32,
     not_applied: &mut Option<Value>,
-) -> Result<bool, ApiError> {
+) -> Result<Outcome, ApiError> {
     if slot.stop.is_cancelled() {
-        return Ok(false);
+        return Ok(Outcome::Rejected);
     }
     let result = match control
         .compactor
-        .trim_disconnect(&snapshot.thread, hint, slot.stop.clone())
+        .trim_activated(&snapshot.thread, slot.stop.clone())
         .await
     {
         Ok(result) => result,
@@ -30,24 +37,17 @@ pub(super) async fn try_trim(
                 .error
                 .message
                 .push_str(&format!("; automatic context trim not adopted: {error}"));
-            return Ok(false);
+            return Ok(Outcome::Rejected);
         }
     };
     if result.compact.no_target {
-        let below_activation = result.before_tokens <= hint.unwrap_or(75_000);
-        let (outcome, explanation) = if below_activation {
-            (
-                "below_activation_threshold",
-                "estimated input does not exceed activation threshold",
-            )
-        } else {
-            ("no_safe_reduction", "no safe groups outside protected work")
-        };
-        *not_applied = Some(json!({"outcome":outcome,"result":result}));
-        failure.error.message.push_str(&format!(
-            "; automatic context trim not adopted: {explanation}"
-        ));
-        return Ok(false);
+        *not_applied = Some(
+            json!({"outcome":"no_safe_reduction","trigger_estimated_tokens":trigger_tokens,"result":result}),
+        );
+        failure.error.message.push_str(
+            "; automatic context trim not adopted: no safe groups outside protected work",
+        );
+        return Ok(Outcome::NoCandidates);
     }
     let body = json!({
         "error":failure.error,
@@ -56,7 +56,7 @@ pub(super) async fn try_trim(
         "completed_items":failure.completed_items,
         "raw_response":failure.raw_response,
         "attempt_id":attempt,
-        "automatic_trim_trigger":{"retries_used":retries,"retry_limit":limit,
+        "automatic_trim_trigger":{"estimated_input_tokens":trigger_tokens,"retries_used":retries,"retry_limit":limit,
             "retry_after_ms":failure.facts.retry_after.map(|delay| delay.as_millis().min(u64::MAX as u128) as u64)},
         "automatic_trim":result,
     });
@@ -79,38 +79,123 @@ pub(super) async fn try_trim(
         .map_err(storage_error)?;
     // Obsolete means stop/generation change won. Do not renew its budget.
     if transition != super::super::state::AttemptTransition::Applied {
-        return Ok(false);
+        return Ok(Outcome::Adopted);
     }
     control.changed(&snapshot.thread);
-    Ok(true)
+    Ok(Outcome::Adopted)
 }
 
-/// Explicit hint only: release the caller's replay before invoking this helper.
-/// The caller reloads the same turn snapshot when no path change was adopted.
+/// Called only after the already prepared request exceeds an explicit hint.
+/// Optional stale/rejected edits leave ordinary request admission in charge.
 pub(super) async fn before_post(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     slot: &DriverSlot,
     budget: &mut retry::RetryBudget,
 ) -> Result<bool, ApiError> {
-    let connection = &control.store.config.connections[&snapshot.profile];
-    let Some(hint) = connection.compact_hint_tokens else {
-        return Ok(false);
-    };
-    if !budget.trim_available(connection.auto_trim_on_disconnect) {
-        return Ok(false);
-    }
-    let result = control
+    let result = match control
         .compactor
-        .trim_disconnect(&snapshot.thread, Some(hint), slot.stop.clone())
-        .await?;
-    if result.before_tokens <= hint {
-        return Ok(false);
-    }
+        .trim_activated(&snapshot.thread, slot.stop.clone())
+        .await
+    {
+        Ok(result) => result,
+        Err(error) if error.is_storage_failure() => return Err(error),
+        Err(_) => return Ok(false),
+    };
     if result.compact.no_target {
         return Ok(false);
     }
     budget.consume_trim();
     control.changed(&snapshot.thread);
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn cancelled_optional_preflight_preserves_the_turn_and_reduction_right() {
+        let (root, owner, control, _requests, server) =
+            crate::control::shell_lifecycle_tests::fixture().await;
+        let thread = crate::control::shell_lifecycle_tests::rpc(
+            &control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                connection: None,
+                model: None,
+                effort: None,
+                cwd: None,
+                parent_id: None,
+            }),
+        )
+        .await["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let target = thread.clone();
+        control.store.database.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('preflight-run',?1,'live','now')", [&target])?;
+            tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('preflight-turn',?1,'preflight-run','preparing','now')", [&target])?;
+            history::append_node(&tx, &target, "old", None, "user", &json!({"role":"user","content":"old context"}), "now")?;
+            history::append_node(&tx, &target, "current", Some("preflight-turn"), "user", &json!({"role":"user","content":"current request"}), "now")?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let Next::Ready(mut snapshot) = next(&control, &thread, "preflight-run").await.unwrap()
+        else {
+            panic!("prepared fixture must be ready");
+        };
+        snapshot.input.take();
+        let slot = DriverSlot {
+            id: "fixture-slot".into(),
+            run_id: "preflight-run".into(),
+            stop: CancellationToken::new(),
+            nudge: Arc::new(Notify::new()),
+            foreground: Arc::new(ForegroundSlot::default()),
+        };
+        slot.stop.cancel();
+        let mut budget = retry::RetryBudget::default();
+        budget.observe("preflight-turn", 0);
+        assert!(
+            !before_post(&control, &snapshot, &slot, &mut budget)
+                .await
+                .unwrap()
+        );
+        assert!(
+            budget.trim_available(true),
+            "a rejected edit must not spend the reduction right"
+        );
+        control
+            .store
+            .database
+            .call(|db| {
+                let (state, reason): (String, Option<String>) = db.query_row(
+                    "SELECT state,recovery_reason_json FROM turn WHERE id='preflight-turn'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?;
+                assert_eq!(state, "preparing");
+                assert!(
+                    reason.is_none(),
+                    "optional cancellation cannot manufacture recovery"
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM replacement", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+        drop(root);
+    }
 }

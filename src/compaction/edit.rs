@@ -45,29 +45,29 @@ fn node_ids(value: &Value, field: &str) -> Result<Vec<String>, ApiError> {
         .ok_or_else(|| invalid("Context marker has invalid source ordering metadata"))
 }
 impl Compactor {
-    pub async fn trim_disconnect(
+    /// Activation uses prepared request counts and bounded usage calibration,
+    /// without materializing the selected path or querying node attachments.
+    pub(crate) async fn input_tokens(
         &self,
         thread: &str,
-        hint: Option<u64>,
+        profile: &str,
+        model: &str,
+        characters: u64,
+    ) -> Result<u64, ApiError> {
+        let (thread, profile, model) = (thread.to_owned(), profile.to_owned(), model.to_owned());
+        self.database
+            .call(move |db| {
+                Ok(TokenEstimate::calibration(db, &thread, &profile, &model)?.tokens(characters))
+            })
+            .await
+            .map_err(storage_error)
+    }
+    pub(crate) async fn trim_activated(
+        &self,
+        thread: &str,
         cancel: CancellationToken,
     ) -> Result<ContextEditResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
-        let before = snapshot
-            .estimate
-            .failed_input_tokens()
-            .unwrap_or_else(|| estimated_tokens(&snapshot));
-        let activation = hint.unwrap_or(75_000);
-        if before <= activation {
-            return Ok(ContextEditResult {
-                compact: CompactResult {
-                    no_target: true,
-                    ..Default::default()
-                },
-                before_tokens: before,
-                after_tokens: before,
-                ..Default::default()
-            });
-        }
         self.trim_maximal(snapshot, cancel).await
     }
     pub async fn edit(

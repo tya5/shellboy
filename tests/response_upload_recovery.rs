@@ -26,7 +26,16 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn repeated_incomplete_uploads_stop_after_two_attempts_without_trimming_history() {
+async fn repeated_incomplete_uploads_stop_after_two_attempts_when_trimming_is_disabled() {
+    upload_recovery(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_partial_large_upload_is_reduced_once_before_the_resumed_header_failure() {
+    upload_recovery(true).await;
+}
+
+async fn upload_recovery(auto_trim: bool) {
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -70,7 +79,7 @@ async fn repeated_incomplete_uploads_stop_after_two_attempts_without_trimming_hi
     std::fs::write(
         &config,
         format!(
-            "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_header_timeout_ms=3000\nstream_idle_timeout_ms=10000\nresponse_max_retries=8\nresponse_retry_max_delay_ms=1\nauto_trim_on_disconnect=true\n"
+            "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_header_timeout_ms=3000\nstream_idle_timeout_ms=10000\nresponse_max_retries=8\nresponse_retry_max_delay_ms=1\nauto_trim_on_disconnect={auto_trim}\n"
         ),
     )
     .unwrap();
@@ -157,23 +166,39 @@ async fn repeated_incomplete_uploads_stop_after_two_attempts_without_trimming_hi
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[0].0, "failed");
         assert_eq!(attempts[1].0, "incomplete");
-        for (_, body) in &attempts {
+        for (index, (_, body)) in attempts.iter().enumerate() {
             let saved: Value = serde_json::from_str(body).unwrap();
             let observation = &saved["error"]["http_observation"];
-            assert_eq!(observation["phase"], "upload_source_incomplete");
-            assert!(observation["request_body_bytes"].as_u64().unwrap() > 16 * 1024 * 1024);
-            assert!(observation["body_source_bytes_consumed"].as_u64().unwrap()
-                < observation["request_body_bytes"].as_u64().unwrap());
-            assert!(saved.get("automatic_trim").is_none());
+            if index == 0 || !auto_trim {
+                assert_eq!(observation["phase"], "upload_source_incomplete");
+                assert!(observation["request_body_bytes"].as_u64().unwrap() > 16 * 1024 * 1024);
+                assert!(observation["body_source_bytes_consumed"].as_u64().unwrap() > 0);
+                assert!(observation["body_source_bytes_consumed"].as_u64().unwrap()
+                    < observation["request_body_bytes"].as_u64().unwrap());
+            } else {
+                assert_eq!(observation["phase"], "awaiting_headers_delivery_unknown");
+                assert!(observation["request_body_bytes"].as_u64().unwrap() < 1024 * 1024,
+                    "the resumed upload must actually be reduced");
+                assert_eq!(observation["body_source_bytes_consumed"], observation["request_body_bytes"]);
+            }
+            assert_eq!(saved.get("automatic_trim").is_some(), auto_trim && index == 0);
         }
         let first: Value = serde_json::from_str(&attempts[0].1).unwrap();
         let last: Value = serde_json::from_str(&attempts[1].1).unwrap();
-        assert_eq!(first["automatic_retry"]["number"], 1);
+        if auto_trim {
+            assert!(first.get("automatic_retry").is_none());
+            assert!(first["automatic_trim"]["omitted_nodes"].as_u64().unwrap() > 0);
+        } else {
+            assert_eq!(first["automatic_retry"]["number"], 1);
+            assert!(last["error"]["message"].as_str().unwrap().contains("repeated incomplete request-body source"));
+        }
         assert!(last.get("automatic_retry").is_none());
-        assert!(last["error"]["message"].as_str().unwrap().contains("repeated incomplete request-body source"));
-        assert_eq!(db.query_row("SELECT count(*) FROM replacement", [], |r| r.get::<_, i64>(0))?, 0);
+        assert_eq!(db.query_row("SELECT count(*) FROM replacement", [], |r| r.get::<_, i64>(0))?, i64::from(auto_trim));
         assert!(db.query_row("SELECT length(CAST(payload_json AS BLOB)) FROM node WHERE id='large-upload-source'", [], |r| r.get::<_, i64>(0))? > 16 * 1024 * 1024);
-        assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path WHERE node_id='large-upload-source')", [], |r| r.get::<_, bool>(0))?);
+        assert_eq!(db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path WHERE node_id='large-upload-source')", [], |r| r.get::<_, bool>(0))?, !auto_trim);
+        if auto_trim {
+            assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM replacement_source WHERE source_node_id='large-upload-source')", [], |r| r.get::<_, bool>(0))?);
+        }
         Ok(())
     }).await.unwrap();
     timeout(Duration::from_secs(5), control.shutdown())
@@ -189,4 +214,165 @@ async fn repeated_incomplete_uploads_stop_after_two_attempts_without_trimming_hi
         .await
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens() {
+    use tokio::io::AsyncWriteExt;
+    let root = tempfile::tempdir().unwrap();
+    let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = reserved.local_addr().unwrap();
+    drop(reserved); // A closed endpoint produces genuine connection-refused errors.
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_max_retries=8\nresponse_retry_max_delay_ms=100\nresponse_header_timeout_ms=3000\n")).unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let thread = request(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let accepted: MessageAccepted = serde_json::from_value(
+        request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(thread),
+                text: "recover after actual proxy startup".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let turn = accepted.turn_id.unwrap();
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let turn = turn.clone();
+            let (failed, state): (i64, String) = control
+                .store
+                .database
+                .call(move |db| {
+                    let state =
+                        db.query_row("SELECT state FROM turn WHERE id=?1", [&turn], |r| r.get(0))?;
+                    let failed = db.query_row(
+                        "SELECT count(*) FROM model_attempt WHERE turn_id=?1 AND state='failed'",
+                        [turn],
+                        |r| r.get(0),
+                    )?;
+                    Ok((failed, state))
+                })
+                .await
+                .unwrap();
+            assert_ne!(
+                state, "recovery_wait",
+                "connect failures must not hit the partial-upload two-strike rule"
+            );
+            if failed >= 3 {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("at least three actual failed connections must be recorded");
+    let listener = TcpListener::bind(address).await.unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = timeout(Duration::from_secs(5), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        stream.set_nodelay(true).unwrap();
+        let mut bytes = Vec::new();
+        loop {
+            let mut buffer = [0; 8192];
+            let count = stream.read(&mut buffer).await.unwrap();
+            assert_ne!(count, 0);
+            bytes.extend_from_slice(&buffer[..count]);
+            if let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                let length = String::from_utf8_lossy(&bytes[..at])
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap();
+                if bytes.len() >= at + 4 + length {
+                    break;
+                }
+            }
+        }
+        let body = json!({"id":"proxy-restored","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"connection restored"}]}]}).to_string();
+        stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+    });
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let target = turn.clone();
+            let state: String = control
+                .store
+                .database
+                .call(move |db| {
+                    Ok(db.query_row("SELECT state FROM turn WHERE id=?1", [target], |r| r.get(0))?)
+                })
+                .await
+                .unwrap();
+            assert_ne!(state, "recovery_wait");
+            if state == "completed" {
+                break;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("Driver must automatically recover once the proxy listens");
+    control
+        .store
+        .database
+        .call(move |db| {
+            let rows = db
+                .prepare(
+                    "SELECT state,error_json FROM model_attempt WHERE turn_id=?1 ORDER BY rowid",
+                )?
+                .query_map([turn], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            assert!(rows.len() >= 4);
+            assert_eq!(rows.last().unwrap().0, "completed");
+            for (index, (state, body)) in rows[..rows.len() - 1].iter().enumerate() {
+                assert_eq!(state, "failed");
+                let saved: Value = serde_json::from_str(body.as_ref().unwrap()).unwrap();
+                assert_eq!(
+                    saved["error"]["http_observation"]["phase"],
+                    "before_body_source"
+                );
+                assert_eq!(saved["automatic_retry"]["number"], index + 1);
+                assert!(saved.get("automatic_trim").is_none());
+            }
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM replacement", [], |r| r
+                    .get::<_, i64>(0))?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    server.await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
 }

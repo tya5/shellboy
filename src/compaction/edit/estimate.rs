@@ -6,7 +6,6 @@ pub(in crate::compaction) struct TokenEstimate {
     ratio: Option<(u64, u64)>,
     overhead: u64,
     overhead_known: bool,
-    failed_input_characters: Option<u64>,
     pub(in crate::compaction) attempt_id: Option<String>,
 }
 fn manifest_counts(body: &str) -> Option<(u64, u64)> {
@@ -22,6 +21,23 @@ impl TokenEstimate {
         profile: &str,
         model: &str,
         selection: i64,
+    ) -> Result<Self, StorageError> {
+        let mut estimate = Self::calibration(db, thread, profile, model)?;
+        let current: Option<(i64, Option<String>)> = db.query_row("SELECT a.selection_revision,CASE WHEN length(CAST(a.input_manifest_json AS BLOB))<=65536 THEN a.input_manifest_json END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.profile_id=?2 AND a.model_id=?3 AND a.generation=u.generation AND a.state='inflight' AND u.state IN ('preparing','running','waiting') ORDER BY a.rowid DESC LIMIT 1", params![thread,profile,model], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
+        if let Some((attempt_selection, manifest)) = current
+            && let Some((input, history)) = manifest.as_deref().and_then(manifest_counts)
+            && attempt_selection == selection
+        {
+            estimate.overhead = input - history;
+            estimate.overhead_known = true;
+        }
+        Ok(estimate)
+    }
+    pub(in crate::compaction) fn calibration(
+        db: &Connection,
+        thread: &str,
+        profile: &str,
+        model: &str,
     ) -> Result<Self, StorageError> {
         let mut estimate = Self::default();
         // Cap both rows and document size. Legacy/missing measurements are
@@ -47,25 +63,11 @@ impl TokenEstimate {
             estimate.attempt_id = Some(attempt);
             break;
         }
-        let current: Option<(i64, Option<String>)> = db.query_row("SELECT a.selection_revision,CASE WHEN length(CAST(a.input_manifest_json AS BLOB))<=65536 THEN a.input_manifest_json END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.profile_id=?2 AND a.model_id=?3 AND a.generation=u.generation AND a.state='inflight' AND u.state IN ('preparing','running','waiting') ORDER BY a.rowid DESC LIMIT 1", params![thread,profile,model], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
-        if let Some((attempt_selection, manifest)) = current
-            && let Some((input, history)) = manifest.as_deref().and_then(manifest_counts)
-        {
-            estimate.failed_input_characters = Some(input);
-            if attempt_selection == selection {
-                estimate.overhead = input - history;
-                estimate.overhead_known = true;
-            }
-        }
         Ok(estimate)
     }
-    fn tokens(&self, characters: u64) -> u64 {
+    pub(in crate::compaction) fn tokens(&self, characters: u64) -> u64 {
         let (tokens, input) = self.ratio.unwrap_or((1, 4));
         ((characters as u128 * tokens as u128).div_ceil(input as u128)).min(u64::MAX as u128) as u64
-    }
-    pub(in crate::compaction) fn failed_input_tokens(&self) -> Option<u64> {
-        self.failed_input_characters
-            .map(|characters| self.tokens(characters))
     }
     pub(in crate::compaction) fn method(&self) -> &'static str {
         if self.ratio.is_some() {

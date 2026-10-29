@@ -1090,6 +1090,41 @@ async fn small_input_or_disabled_trim_keeps_ordinary_retries() {
                 .get("automatic_trim")
                 .is_none()
         );
+        let saved = attempts[0].1.as_ref().unwrap();
+        assert!(
+            !saved["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("automatic context trim"),
+            "small requests must not gain trim-noise in their ordinary error"
+        );
+        fixture
+            .control
+            .store
+            .database
+            .call(move |db| {
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM replacement", [], |row| row
+                        .get::<_, i64>(0))?,
+                    0,
+                    "ordinary retries must issue neither summary nor omission replacements"
+                );
+                assert!(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread_path WHERE node_id='old-large-context')",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )?);
+                let original: String = db.query_row(
+                    "SELECT payload_json FROM node WHERE id='old-large-context'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert!(original.contains("DENSE_OLD_CONTEXT"));
+                assert!(original.len() > chars);
+                Ok(())
+            })
+            .await
+            .unwrap();
         fixture.no_more_requests().await;
         fixture.close().await;
     }
@@ -1189,6 +1224,12 @@ async fn adopted_trim_allows_one_resumed_request_then_failure_enters_recovery() 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn no_unprotected_groups_recover_without_ordinary_retries_or_mutation() {
+    no_candidates_after_failure(false).await;
+    no_candidates_after_failure(true).await;
+}
+
+async fn no_candidates_after_failure(path_shrinks_after_post: bool) {
+    let protected_request = "protected current request ".repeat(20_000);
     let mut fixture = Fixture::with_history(
         8,
         10,
@@ -1196,8 +1237,12 @@ async fn no_unprotected_groups_recover_without_ordinary_retries_or_mutation() {
         true,
         None,
         true,
-        None,
-        &"protected current request ".repeat(20_000),
+        path_shrinks_after_post.then_some(400_000),
+        if path_shrinks_after_post {
+            "small protected current request"
+        } else {
+            &protected_request
+        },
     )
     .await;
     let mut events = fixture.control.subscribe();
@@ -1245,6 +1290,21 @@ async fn no_unprotected_groups_recover_without_ordinary_retries_or_mutation() {
         saved["automatic_trim_attempt"]["outcome"],
         "no_safe_reduction"
     );
+    assert!(
+        saved["automatic_trim_attempt"]["trigger_estimated_tokens"]
+            .as_u64()
+            .unwrap()
+            > 75_000
+    );
+    if path_shrinks_after_post {
+        assert!(
+            saved["automatic_trim_attempt"]["result"]["before_tokens"]
+                .as_u64()
+                .unwrap()
+                < 75_000,
+            "classification must use the failed request trigger, not this smaller current projection"
+        );
+    }
     assert!(saved["automatic_trim_attempt"]["result"]["target_tokens"].is_null());
     let target = fixture.accepted.thread_id.clone();
     timeout(Duration::from_secs(2), async {
@@ -1344,6 +1404,107 @@ async fn reduced_request_still_honors_a_permitted_retry_after() {
         attempts[0].1.as_ref().unwrap()["automatic_trim_trigger"]["retry_after_ms"],
         1_000
     );
+    fixture.no_more_requests().await;
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn successful_trim_resumption_restores_normal_retries_and_later_context_overflow() {
+    fn tool(call: &str) -> Reply {
+        Reply::http(
+            200,
+            "application/json",
+            &json!({"id":format!("response-{call}"),"status":"completed","output":[{
+                "type":"function_call","name":"shell","call_id":call,
+                "arguments":json!({"command":format!("echo {call}")}).to_string()
+            }]})
+            .to_string(),
+            "",
+        )
+    }
+    let mut fixture = Fixture::with_history(
+        2,
+        10,
+        5_000,
+        true,
+        Some(2_000),
+        true,
+        Some(80_000),
+        "test resumed tool conversation",
+    )
+    .await;
+    let first = fixture.incoming().await;
+    assert!(!first.body.to_string().contains("DENSE_OLD_CONTEXT"));
+    first.reply.send(tool("trim-first")).ok().unwrap();
+    fixture
+        .incoming_after_tool()
+        .await
+        .reply
+        .send(Reply::error(429, ""))
+        .ok()
+        .unwrap();
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(tool("trim-second"))
+        .ok()
+        .unwrap();
+    fixture.incoming_after_tool().await.reply.send(Reply::http(400, "application/json", &json!({"error":{"code":"context_length_exceeded","message":"explicit later overflow"}}).to_string(), "")).ok().unwrap();
+    let overflow_reduced = fixture.incoming().await;
+    assert!(overflow_reduced.body["input"].as_array().unwrap().iter().any(|item| {
+        item["type"] == "function_call_output" && item["call_id"] == "trim-first"
+            && serde_json::from_str::<Value>(item["output"].as_str().unwrap()).unwrap()["omitted"] == true
+    }));
+    overflow_reduced.reply.send(Reply::success()).ok().unwrap();
+    assert_eq!(fixture.settled().await, "completed");
+    let attempts = fixture.attempts().await;
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|(state, _)| state.as_str())
+            .collect::<Vec<_>>(),
+        ["completed", "failed", "completed", "failed", "completed"]
+    );
+    assert_eq!(
+        attempts[1].1.as_ref().unwrap()["automatic_retry"]["number"],
+        1
+    );
+    assert_eq!(
+        attempts[3].1.as_ref().unwrap()["error"]["provider_code"],
+        "context_length_exceeded"
+    );
+    fixture
+        .control
+        .store
+        .database
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM replacement WHERE format_version='context-trim-v1'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM replacement WHERE format_version='spill-v1'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM shell_execution", [], |r| r
+                    .get::<_, i64>(0))?,
+                2,
+                "already executed tools must not run again"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     fixture.no_more_requests().await;
     fixture.close().await;
 }

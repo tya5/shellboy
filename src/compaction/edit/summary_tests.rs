@@ -330,25 +330,6 @@ async fn explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_chara
 }
 
 #[tokio::test]
-async fn default_disconnect_trim_does_not_modify_a_small_context() {
-    let fixture = Fixture::new().await;
-    for id in ["old", "request", "latest"] {
-        fixture.text(id, id).await;
-    }
-    let before = fixture.path().await;
-    let result = fixture
-        .compactor
-        .trim_disconnect("t", None, CancellationToken::new())
-        .await
-        .unwrap();
-    assert!(result.compact.no_target);
-    assert_eq!(result.before_tokens, result.after_tokens);
-    assert_eq!(fixture.path().await, before);
-    assert_eq!(raw_parts(&fixture).await, 0);
-    fixture.close().await;
-}
-
-#[tokio::test]
 async fn stale_restore_selection_and_turn_generation_never_replace_the_current_path_or_originals() {
     let fixture = Fixture::new().await;
     let marker = omit_middle(&fixture).await;

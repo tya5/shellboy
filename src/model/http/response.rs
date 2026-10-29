@@ -136,7 +136,9 @@ impl HttpModelClient {
                     failure.error.http_observation = Some(Box::new(observation));
                 }
                 facts.http_observation = Some(observation);
-                self.retire_pool(observation.pool_generation);
+                if Self::retires_response_pool(&failure.error, facts.terminal_received) {
+                    self.retire_pool(observation.pool_generation);
+                }
             }
             failure.facts = facts;
             failure

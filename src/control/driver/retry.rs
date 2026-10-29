@@ -63,7 +63,7 @@ fn eligible_trim_failure(
             .is_some_and(|delay| delay > MAX_RETRY_AFTER)
         || facts
             .http_observation
-            .is_some_and(|http| http.is_known_upload_incomplete())
+            .is_some_and(|http| http.phase == model::http::HttpPhase::BeforeBodySource)
     {
         return false;
     }
@@ -74,9 +74,10 @@ fn eligible_trim_failure(
         "http" | "provider" => server_failure,
         "transport" | "incomplete" => {
             server_failure
-                || facts
-                    .status
-                    .is_none_or(|status| (200..300).contains(&status))
+                || (facts.http_observation.is_some()
+                    && facts
+                        .status
+                        .is_none_or(|status| (200..300).contains(&status)))
         }
         "timeout" => {
             server_failure
@@ -97,6 +98,7 @@ pub(super) struct RetryBudget {
     generation: i64,
     used: u32,
     trim_used: bool,
+    trim_resume_pending: bool,
     upload_failures: u8,
 }
 impl RetryBudget {
@@ -106,6 +108,7 @@ impl RetryBudget {
             self.generation = generation;
             self.used = 0;
             self.trim_used = false;
+            self.trim_resume_pending = false;
             self.upload_failures = 0;
         }
     }
@@ -113,6 +116,7 @@ impl RetryBudget {
     pub(super) fn succeeded(&mut self) {
         self.used = 0;
         self.upload_failures = 0;
+        self.trim_resume_pending = false;
     }
     /// One reduction/resumption allowance per Turn/generation; successful tool
     /// responses reset retries but never replenish this allowance.
@@ -121,6 +125,7 @@ impl RetryBudget {
     }
     pub(super) fn consume_trim(&mut self) {
         self.trim_used = true;
+        self.trim_resume_pending = true;
     }
     fn repeated_upload_failure(&mut self, incomplete: bool) -> bool {
         self.upload_failures = if incomplete {
@@ -145,6 +150,7 @@ pub(super) async fn retry_or_recover(
     slot: &DriverSlot,
     attempt: String,
     mut failure: model::http::AttemptFailure,
+    input_characters: u64,
     budget: &mut RetryBudget,
     overflow: &mut OverflowBudget,
     boundary_guard: tokio::sync::MutexGuard<'_, ()>,
@@ -161,7 +167,8 @@ pub(super) async fn retry_or_recover(
         .facts
         .http_observation
         .is_some_and(|http| http.is_known_upload_incomplete());
-    if budget.repeated_upload_failure(upload_incomplete) {
+    let repeated_upload_failure = budget.repeated_upload_failure(upload_incomplete);
+    if repeated_upload_failure {
         // A second incomplete body source is not evidence that reducing context
         // will fix the transport. Keep its observation and stop spending.
         policy = RetryPolicy::Ineligible;
@@ -172,37 +179,56 @@ pub(super) async fn retry_or_recover(
         &failure.facts,
         connection.response_retry_partial,
     );
-    if budget.trim_available(connection.auto_trim_on_disconnect) && eligible_trim_failure {
-        let adopted = trim::try_trim(
-            control,
-            snapshot,
-            slot,
-            &attempt,
-            &mut failure,
-            connection.compact_hint_tokens,
-            budget.used,
-            limit,
-            &mut trim_not_applied,
-        )
-        .await?;
-        let below_threshold = trim_not_applied
-            .as_ref()
-            .is_some_and(|value| value["outcome"] == "below_activation_threshold");
-        if !below_threshold {
-            budget.consume_trim();
-        }
-        if adopted {
-            control.changed(&snapshot.thread);
-            drop(boundary_guard);
-            if let Some(delay) = failure.facts.retry_after {
-                tokio::select! { biased; _ = slot.stop.cancelled() => {}, _ = tokio::time::sleep(delay) => {} }
+    let mut no_candidates = false;
+    // A previously rejected edit leaves the one-time trim right available,
+    // but cannot override the second partial-upload failure's spending cap.
+    if !repeated_upload_failure
+        && budget.trim_available(connection.auto_trim_on_disconnect)
+        && eligible_trim_failure
+    {
+        let trigger_tokens = control
+            .compactor
+            .input_tokens(
+                &snapshot.thread,
+                &snapshot.profile,
+                &snapshot.model,
+                input_characters,
+            )
+            .await?;
+        if trigger_tokens > connection.compact_hint_tokens.unwrap_or(75_000) {
+            match trim::try_trim(
+                control,
+                snapshot,
+                slot,
+                &attempt,
+                &mut failure,
+                trigger_tokens,
+                budget.used,
+                limit,
+                &mut trim_not_applied,
+            )
+            .await?
+            {
+                trim::Outcome::Adopted => {
+                    budget.consume_trim();
+                    control.changed(&snapshot.thread);
+                    drop(boundary_guard);
+                    if let Some(delay) = failure.facts.retry_after {
+                        tokio::select! { biased; _ = slot.stop.cancelled() => {}, _ = tokio::time::sleep(delay) => {} }
+                    }
+                    return Ok(());
+                }
+                trim::Outcome::NoCandidates => no_candidates = true,
+                trim::Outcome::Rejected => {}
             }
-            return Ok(());
+            if slot.stop.is_cancelled() {
+                return Ok(());
+            }
         }
     }
-    if budget.trim_used {
-        // Exactly one resumed POST: its failure must not begin another retry
-        // or the otherwise independent explicit-overflow compaction stages.
+    if budget.trim_resume_pending || no_candidates {
+        // Only a failure of the first resumed POST is guarded. A successfully
+        // adopted response clears this guard but never renews the trim right.
         policy = RetryPolicy::Ineligible;
         overflow.unlock_current();
     }
@@ -428,7 +454,12 @@ mod trim_budget_tests {
         assert!(!budget.trim_available(false));
         assert!(budget.trim_available(true));
         budget.consume_trim();
+        assert!(budget.trim_resume_pending);
         budget.succeeded();
+        assert!(
+            !budget.trim_resume_pending,
+            "adoption clears only the immediate resume guard"
+        );
         assert!(!budget.trim_available(true));
         budget.observe("turn", 1);
         assert!(!budget.trim_available(true));
@@ -498,11 +529,38 @@ mod trim_budget_tests {
             true
         ));
         facts.http_observation.as_mut().unwrap().phase = HttpPhase::UploadSourceIncomplete;
-        assert!(!eligible_trim_failure(
+        facts
+            .http_observation
+            .as_mut()
+            .unwrap()
+            .body_source_bytes_consumed = 50;
+        assert!(eligible_trim_failure(
             &model::ModelError::new("timeout", "upload incomplete"),
             &facts,
             true
         ));
+        facts.http_observation.as_mut().unwrap().phase = HttpPhase::BeforeBodySource;
+        facts
+            .http_observation
+            .as_mut()
+            .unwrap()
+            .body_source_bytes_consumed = 0;
+        assert!(!eligible_trim_failure(
+            &model::ModelError::new("transport", "connect failed"),
+            &facts,
+            true
+        ));
+        let setup = ResponseFacts::default();
+        let setup_error =
+            model::ModelError::new("transport", "client reconstruction failed before sending");
+        assert!(!eligible_trim_failure(&setup_error, &setup, true));
+        assert!(
+            matches!(
+                classify_retry(&setup_error, &setup, true),
+                RetryPolicy::Retry { .. }
+            ),
+            "failure before transport observation retains ordinary retry without spending trim"
+        );
         facts.http_observation.as_mut().unwrap().phase = HttpPhase::BodyReceive;
         facts.status = Some(503);
         facts.retry_after = Some(Duration::from_secs(601));
