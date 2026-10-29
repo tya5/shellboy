@@ -1039,3 +1039,39 @@ secret scans pass. Final evidence-only documentation commits do not change the
 Rust/configuration/guide source covered by this native run. Company Windows GUI,
 provider/proxy behavior and representative operational retry traces remain
 unmeasured; the documented provisional defaults/transport limits still apply.
+
+
+## #32–#34 additional reviews and v0.2.0 local gate (2026-10-29)
+
+The follow-up is tracked in [the disposition table](../development/issue-32-34-follow-up.md).
+This is new source after `37bbdb1`; the previous native success is baseline only.
+The working package is 0.2.0, protocol 2, conversation schema 11 and RAG schema 3.
+On macOS 26.3.1 / ARM64 / pinned Rust 1.99.1, with CARGO_BUILD_JOBS=2,
+CARGO_INCREMENTAL=0 and RUST_TEST_THREADS=2, `sh scripts/check.sh` passes format,
+strict locked all-target Clippy and **80 groups / 1,380 passed / 0 failed /
+26 ignored**. The fixture-only obsolete trim wrapper and its duplicate case
+were removed; real Driver tests retain original-path/content/no-replacement/noise
+checks. This complete result supersedes the earlier 599-pass library-only run.
+
+Focused HTTP/retry/upload/scoped-RAG/store cases pass **56 / 0 / 2 ignored**.
+They include durable trim success followed by a tool, 429 retry and later context
+overflow; actual connection refusal beyond two attempts before proxy startup;
+large partial upload with one reduction and disabled-trim two-strike recovery;
+overlapping scopes and Thread deletion during query embedding. All traffic is
+local fixture traffic. Shutdown stages use the existing diagnostic queue;
+IPC tests validate fixed fields, completed stages and per-scope monotonic times.
+
+The explicit ignored `keyword_thread_scope_thousands_of_nodes_measurement` case
+also passes: full keyword search is **105.670ms** for 1,000 original nodes,
+1,000 foreign nodes and eight replacement layers, and **717.309ms** for 5,000
+original nodes, 5,000 foreign nodes and 40 layers. Each result identifies exactly
+one omitted original with its Thread scope, with zero embedding calls. These
+are debug-build, local synthetic observations without cold-cache control or an
+old-code timing baseline. They do not establish a latency SLA or constant-time
+behavior for deep/shared DAGs or many unrelated Threads.
+
+Initial compilation found a fixture temporary borrow, a SQLite fixture numeric
+type and a collapsible condition; these were corrected before the complete gate.
+No semantic assertion/deadline was relaxed. The old recurring attachment
+watchdogs remain unexplained; repeated native observations, release builds,
+public-download verification and local installation are pending.

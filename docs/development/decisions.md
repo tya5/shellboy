@@ -731,3 +731,94 @@ real caller and, only after failure, obtains a separately bounded one-second
 saved-state diagnostic including synthetic recovery/attempt errors. No success
 path wait or product logging is added. If native failure recurs, use that phase
 evidence before deciding whether a production fix or fixture change is needed.
+
+
+## 2026-10-29: completed-pass identity, per-Thread save failure, index stop evidence
+
+Review #32/6486175965 identifies a completed receipt pass whose retained checked
+bits become indistinguishable from an actual partial pass after another send.
+Clear checked bits when continue_scan returns idle; retain repeat/fairness during
+actual partial scans. A completed scan plus a later accepted receipt/Changed is
+one fresh pass, not a partial pass and a duplicate full pass.
+
+The stopped autosave worker still has one lifetime closed bit, but its existing
+bounded backlog now stores one notification bit with each retained snapshot.
+Warn every affected Thread once, including a Thread edited after closure; newer
+revisions retain that bit. Do not add a separate Thread registry or notification
+queue. Backlog ownership/limits and final SaveFailed remain unchanged.
+
+Review #33/6486176260 requests more useful local stop evidence. Replace the
+boolean with a once-published pair of existing ErrorCode values for processing
+and diagnostic-pause failures, before cancelling workers. Two enums are bounded
+and contain no provider/SQL/user text. Preserve any existing durable reason
+verbatim and append local cause codes for readable status; search error details
+carry those codes. The once cell has the existing service lifetime; no durable
+state, queue or worker is introduced.
+
+## 2026-10-29: recurring attachment watchdogs are unresolved preparation evidence
+
+The same compacted-source and corrupt-source cases exceeded watchdogs on macOS
+and Windows in separate native runs. A shared Driver/preparation issue remains
+a credible hypothesis; successful local probes and one green native run do not
+resolve it. The original Windows incoming helper did not identify which POST
+was missing, so neither the precise common stage nor separate causes are proven.
+Earlier statements separating this from the old raw-loopback fault must not be
+read as establishing independent causes for the two attachment occurrences.
+
+Retain the five-second attachment watchdog and exact accepted-Turn preparation
+precondition from b8f1f84. Run multiple native gates on the current fixes, count
+them as observations, and inspect caller/state/reason/attempt evidence before
+changing production behavior on recurrence. Never retry until green and call
+that a fix. Bounded shutdown stage timestamps separately address the IPC cleanup
+measurement gap; a five-second configured diagnostic grace is an upper bound,
+not evidence that diagnostics caused the earlier two-second timeout.
+
+
+## 2026-10-29: retry and scope review boundaries for v0.2.0
+
+Review #34 separates the once-per-Turn/generation trim allowance from its
+immediate resumption guard. Spend the allowance only after an adopted edit;
+clear the guard after the first durable response adoption, preserving ordinary
+later retry and context-overflow recovery. An actual partial body source may
+trigger one safe reduction for large input; before-body/connect failures follow
+ordinary retries. A second known partial failure still stops without another
+trim, even if the first edit was rejected. Keep the pre-header deadline inclusive
+of upload time and explain this combination rather than imply a separate upload
+delivery guarantee.
+
+Optional proactive edits are not prerequisites for a valid request. Ignore
+non-storage cancellation/rejection and let stop and existing generation/profile/
+selection admission fences decide; preserve storage failures. Use actual prepared
+input counts with bounded calibration before planning, and retain typed planning
+outcomes so changed path estimates cannot rewrite the activation reason. Adopt a
+bounded oldest whole-group provenance window when the automatic restore metadata
+cap permits some reduction; never split a group or exceed protected boundaries.
+
+Scoped keyword membership now walks indexed reverse replacement consumers per
+candidate rather than rebuilding the full scope. It still scans candidate IDs
+up to the current global watermark and may traverse deep ancestor chains; do not
+claim constant-time or a latency SLA. There is no materialized ID cache, temp
+write, new index or persistent search state. Overlapping history scopes preserve
+all memberships but contribute the best single rank vote per retrieval method;
+keyword and semantic remain separate evidence. Revalidate live Thread existence
+after embedding before classifying a selection change.
+
+Only appropriate failed Responses requests retire their pool generation. Build
+the next client on the existing blocking executor, install under a short lock,
+and never cache a failed build as a permanent pool value. Existing request
+admission bounds concurrent rebuilds; a racing rebuild installs only into a
+still-retired pool, while generation checks reject stale failure retirement.
+Exact TCP delivery/reuse remains unknown. Shutdown observations reuse the
+existing bounded writer/event with fixed enum facts and per-scope elapsed time;
+keep that writer alive through endpoint cleanup, close it last, and preserve
+Control/DB/endpoint/owner-lock ordering and error precedence. The writer cannot
+log its own completed join; its last begin record is intentionally not an End.
+
+
+The former public trim_disconnect wrapper had only four unit-fixture callers
+and kept obsolete snapshot-before-threshold logic. Remove it and its dedicated
+failed-input estimate field rather than retain an unused Core compatibility
+path. Existing maximum/no-candidate fixtures use trim_activated; actual prepared
+input calibration is tested directly. The duplicate wrapper-only small-context
+case is covered by real Driver retry tests, which now assert unchanged original
+content/path, no replacement and no irrelevant trim error annotation.

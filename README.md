@@ -18,20 +18,20 @@ The [development status](docs/development/status.md) and [verification record](d
 
 ## Download
 
-[Releases](https://github.com/tya5/shellboy/releases) provide Windows x64, macOS Apple Silicon, and Linux x64 archives with `SHA256SUMS`. The current release is [v0.1.6](https://github.com/tya5/shellboy/releases/tag/v0.1.6).
+[Releases](https://github.com/tya5/shellboy/releases) provide Windows x64, macOS Apple Silicon, and Linux x64 archives with `SHA256SUMS`. The current release is [v0.2.0](https://github.com/tya5/shellboy/releases/tag/v0.2.0).
 
-On Windows, download and extract `shellboy-v0.1.6-x86_64-pc-windows-msvc.zip`. For example, in PowerShell:
+On Windows, download and extract `shellboy-v0.2.0-x86_64-pc-windows-msvc.zip`. For example, in PowerShell:
 
 ```powershell
-Expand-Archive .\shellboy-v0.1.6-x86_64-pc-windows-msvc.zip -DestinationPath .
-.\shellboy-v0.1.6-x86_64-pc-windows-msvc\shellboy.exe --help
+Expand-Archive .\shellboy-v0.2.0-x86_64-pc-windows-msvc.zip -DestinationPath .
+.\shellboy-v0.2.0-x86_64-pc-windows-msvc\shellboy.exe --help
 ```
 
 Set a connection and model as described in [configuration](docs/guides/configuration.md). Known receipt-budget, index-switching, and large raw-search limits are listed in [known limitations](docs/development/known-limitations.md).
 
-v0.1.6 improves adoption, search, and rendering of long histories, as well as delivery to a slow terminal. RAG adds persistent source exclusions, search-readiness guidance, and indexing-result visibility. The documentation language changes in the working source are not part of the already published v0.1.6 binaries.
+v0.2.0 improves long-conversation recovery with early safe context reduction, separate header deadlines and transport diagnostics. Keyword RAG can search one Thread and its omitted sources without embeddings. Delivery, autosave, index-stop diagnosis and overlapping search scopes include the latest review fixes. Bundled guides are English, with a Japanese User Guide also available.
 
-The conversation database advances to schema 10 and standalone RAG to schema 3. Existing data migrates on the first write-capable open; older binaries with a lower supported schema cannot reopen it afterward. Take a consistent backup before upgrading. To roll back, restore into a separate data directory following the [storage design](docs/design/storage.md). A running process uses the new executable only after restarting.
+This is a breaking release before 1.0: the local protocol is version 2, the conversation database advances to schema 11, and standalone RAG remains schema 3. Core accepts current formats only; unsupported legacy index metadata requires explicit rebuilding rather than automatic repair. Existing data migrates on the first write-capable open; older binaries with a lower supported schema cannot reopen it afterward. Take a consistent backup before upgrading. To roll back, restore into a separate data directory following the [storage design](docs/design/storage.md). A running process uses the new executable only after restarting.
 
 Built-in PDF/Office extraction and `--extractor` / `--adapter` have been removed. A complete scan marks old PDF/Office file-source entries as unsupported/removed. Convert externally, then register the text with provenance using `rag ingest`. See the [RAG guide](docs/guides/rag.md) for extracted text versus model interpretations.
 

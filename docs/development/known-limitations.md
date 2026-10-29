@@ -1,18 +1,53 @@
 # 既知の制限
 
-v0.1.1で残った問題と、v0.1.2での修正・残る制限を区別します。実行済みの範囲は [検証状況](../validation/acceptance.md) に記録します。
+Current limits for 0.2.0 are distinguished from historical release behavior below. Verified environments and untested cases are recorded in [acceptance](../validation/acceptance.md).
 
-## HTTP停滞と期限（Issue #8）
+## HTTP deadlines, retries and transport observations
 
-公開済みv0.1.2ではembeddingの接続後の期限がなく、上流が接続を保って止まると索引・検索が長く残る場合があります。未リリースsourceは接続別のHTTP期限を実装し、設定・挙動は [設定ガイド](../guides/configuration.md#http-timeouts) を参照します。会話の無受信600秒は、high effortの実proxy要求がHTTP400で拒否されたため実測による確定値ではなく、利用者が変えられる暫定既定値です。
+Responses use a positive `response_header_timeout_ms` (120 seconds by default)
+from request setup, including upload, until headers arrive. Post-header receive
+inactivity uses `stream_idle_timeout_ms` (600 seconds by default); zero disables
+only that body-idle limit. Embeddings have a 60-second total default deadline,
+model lists are capped at 20 seconds, and connection establishment has a fixed
+30-second timeout. These provisional defaults are configurable where documented;
+loopback measurements do not establish suitable limits for every provider or slow
+upload. A large upload can reach the header deadline before its source is fully
+consumed. See [configuration](../guides/configuration.md#http-timeouts).
 
-受信経過は画面で現在のattemptを観測した範囲だけです。UI通知を最大1回/秒へ制限するため、最終byteからの時間には1秒未満の観測差があり、上流の生成停止を断定しません。HTTPの期限自体は全chunkで更新します。未リリースsourceではIssue #7の未受信一時失敗だけに有限retryを追加しています。受信済みの失敗やtimeoutは自動再送せず、上流の重複課金は防げません。[復旧ガイド](../guides/recovery-and-storage.md#automatic-retries-for-temporary-model-communication-failures)を参照してください。
+Eligible conversation failures can retry even after partial output by default;
+`response_retry_partial=false` disables retry after output was observed. The
+ordinary consecutive budget remains eight additional attempts, resets after a
+validated response is durably adopted, and does not limit the total duration of a
+long tool conversation. Connection setup or zero-consumption failures retain that
+ordinary policy. Repeated strictly partial body-source failures are bounded;
+large-input failures may first use the one safe reduction allowance. The first
+request after an adopted reduction enters recovery if it fails. After that request
+succeeds, later ordinary failures retain normal retry/overflow behavior without
+replenishing the one-per-Turn/generation reduction allowance. An automatic reduction limited by
+the 65,536-node restore-provenance budget may retain later eligible history.
+Automatic retries can duplicate upstream generation charges; saved tools are not
+executed from a failed partial response. See [recovery](../guides/recovery-and-storage.md#automatic-retries-for-temporary-model-communication-failures).
+
+Transport facts distinguish pre-body setup, partially consumed request source,
+waiting for headers with delivery unknown, and response-body reception. Source
+consumption is not proof of socket-write completion, peer receipt or provider
+processing. Exact socket reuse is unavailable through the pinned HTTP client's
+public API: `fresh_pool` describes a client pool, and other reuse is `unknown`.
+Retiring an eligible failed Responses pool does not instantly close concurrent
+in-flight clones or multiplexed HTTP/2 streams. The 45-second pool-idle lifetime
+is not a maximum age for an active connection. These observations locate the
+transport stage; they do not establish a root cause or blame a provider.
+
+The UI's receive elapsed time is observed for the current attempt only. Its
+notification rate is capped at once per second, while HTTP inactivity tracking
+updates on every chunk. UI elapsed time cannot prove upstream generation has
+stopped, and there is no overall generation-duration limit.
 
 ## operation receipt予算と期限切れ
 
 v0.1.1では読取り結果も現在instanceのreceiptへ蓄積します。v0.1.2は観測のreceiptを作らず、同IDでも再観測します。変更/waitの終端結果は24時間経過後の保守又は圧迫時に結果だけを回収し、期限切れIDを残して同IDの変更再実行を拒否します。pendingと未反映参照は保護します。期限切れは未実行を意味しません。
 
-通常256MiB/outcome8MiB、停止専用固定余白と、期限切れIDのmetadataは同じ予算へ算入します。極端に多い変更や保護対象で満杯なら、明示owner再起動で旧terminalを回収する必要が残ります。`operation get` / `status` / `storage status` はreceiptを作らず、TUIのCtrl+C・`/stop` もreceipt不要です。未リリース0.2.0 sourceでは `status --operation` を削除しました。受付の照会には `operation get --operation ID` を使用してください。
+通常256MiB/outcome8MiB、停止専用固定余白と、期限切れIDのmetadataは同じ予算へ算入します。極端に多い変更や保護対象で満杯なら、明示owner再起動で旧terminalを回収する必要が残ります。`operation get` / `status` / `storage status` はreceiptを作らず、TUIのCtrl+C・`/stop` もreceipt不要です。0.2.0では `status --operation` を削除しました。受付の照会には `operation get --operation ID` を使用してください。
 
 目安として、1件0.7〜0.9KiBのID metadataを新IDで1秒に1回保存すると仮定すれば、1日約60〜80MiB、数日で通常予算を圧迫します。これはmetadata長・予約・保護量を省いた計算例で、現環境の実測値や稼働日数の保証ではありません。waitの既定30秒待機では増加速度が下がります。既に満たされた条件へのwaitを高速反復せず、現在値の確認にはreceipt不要のgetを使い、実際の使用量はstatusのreceipt_budgetを確認してください。
 

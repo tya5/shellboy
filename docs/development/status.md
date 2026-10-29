@@ -1,5 +1,18 @@
 # Development status
 
+## Additional #32–#34 reviews: local gate passed, v0.2.0 preparing (2026-10-29)
+
+The new reviews of b8f1f84 are tracked in [review follow-up](issue-32-34-follow-up.md).
+Prior native success below is the baseline, not verification of these changes.
+Post-trim resumption and later normal retries are separated; connection setup
+is distinct from partial uploads, and scoped keyword membership uses indexed
+reverse checks. Receipt boundaries, per-Thread save failure, index-stop causes,
+shutdown timing, RAG/preflight/pool findings are implemented. The standard local
+check passes 80 groups / 1,380 cases / 0 failed / 26 ignored, and scoped keyword
+measurement passes 1k/5k synthetic cases. Repeated native observations, release
+builds and public archive checks are pending. The user's active goal now includes v0.2.0 publication
+and a verified local binary update after review fixes and gates pass.
+
 ## Issue #34 and #32/#33 follow-up: pushed, three-OS CI passed (2026-10-29)
 
 Implementation and test follow-up `b8f1f84` are pushed to `main`.
