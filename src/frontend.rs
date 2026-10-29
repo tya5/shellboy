@@ -2965,10 +2965,7 @@ async fn finish_shutdown_updates(
         .into_iter()
         .chain(std::iter::once(UiUpdate::Shutdown));
     for mut value in terminal {
-        loop {
-            let Some(retained) = updates.defer(value) else {
-                break;
-            };
+        while let Some(retained) = updates.defer(value) {
             value = retained;
             updates.flush_pending();
             tokio::select! {
