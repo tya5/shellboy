@@ -631,3 +631,28 @@ headroom for that reported range while cutting the previous ten-minute header
 wait; no statistical optimum or provider capacity is inferred. Reassess this
 provisional default with representative deployed successful/failing header
 observations. An explicit longer positive value remains available.
+
+
+## 2026-10-29: native CI and portable bounded-delivery fixtures
+
+Initial run 40795744408 on df6aafb found Linux/Windows Clippy's while-let-loop
+lint; 6f19b89 applies the equivalent while-let form. Its local strict Clippy and
+14 delivery regressions pass. The first macOS job separately hit two five-second
+attachment preparation watchdogs; post-timeout state was recovery_wait with no
+model attempt. Local eight-way parallel reproduction (200 cases) did not fail,
+and the next native macOS run passed with deadlines/assertions unchanged. No
+cause is established for that isolated event; it is distinct from the earlier
+local raw-TCP loopback fault.
+
+Run 40796272377 on 6f19b89 passed Linux and macOS but found three Windows FIFO
+fixtures timing out. Each drains a synthetic one-slot raw channel over 512 items
+with a one-millisecond timer wait per iteration and a five-second watchdog. The
+pinned Tokio Sleep documentation explicitly permits resolution larger than one
+millisecond on Windows. Those timing assumptions are unnecessary to prove FIFO,
+capacity or permit ownership; the runner's exact timer quantum was not measured.
+Replace the three per-item sleeps with cooperative yields. For completed
+shutdown, require the first resumed critical transfer to occur without fixture
+flush, then explicitly flush after capacity is released for the remaining bulk
+transfer. Preserve the five-second deadlines, all IDs/counts, ordering and permit
+assertions. Dedicated producer wake/Notify regressions remain unchanged. No
+production queue, capacity, interval, dependency or global timer setting changes.

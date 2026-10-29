@@ -17,8 +17,12 @@ HTTP+PTY script now passes on current source, with ten durable header records.
 `2f8a198` removes the unnecessary `8368874` workaround. Historical failed runs
 below are retained and superseded by these verified observations.
 
-The user authorized push after completion. Push and native three-OS CI are the
-next gate; no release or installed-binary update is requested. Real-provider
+The user authorized push after completion; main is pushed through 6f19b89.
+Native run 40796272377 passes Linux and macOS, while three Windows-only FIFO
+fixture watchdogs require portable scheduling (five-second limits and all
+ordering/capacity/permit assertions retained). The test-only correction is
+locally verified; its next native CI remains pending. No release or installed-
+binary update is requested. Real-provider
 retry/default tuning remains explicitly unmeasured, with retry count eight
 retained provisionally rather than claimed empirically optimal.
 

@@ -566,6 +566,12 @@ mod tests {
         let mut count = 0;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
+                // The first resumed transfer must be made by shutdown itself.
+                // Thereafter release the synthetic one-slot channel explicitly;
+                // FIFO assertions must not require 512 OS timer wakeups in 5s.
+                if count > 0 {
+                    out.flush();
+                }
                 while let Ok(value) = rx.try_recv() {
                     match value {
                         UiUpdate::ThreadDeletion { request_id, .. } => {
@@ -579,7 +585,7 @@ mod tests {
                         _ => panic!("unexpected terminal update"),
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                tokio::task::yield_now().await;
             }
         })
         .await
@@ -645,7 +651,7 @@ mod tests {
                 if !batch.active() && !out.pending() && worker_finished {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                tokio::task::yield_now().await;
             }
         })
         .await
@@ -823,7 +829,7 @@ mod tests {
                         _ => panic!("unexpected UI update"),
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                tokio::task::yield_now().await;
             }
         })
         .await

@@ -48,7 +48,12 @@ not production provider performance. The provisional 120-second header default,
 retained retry count of eight and unmeasured operational reassessment are
 explained in decisions; exact socket reuse/peer receipt remain unknown.
 
-The user subsequently authorized push. Native three-OS CI is pending that push;
+The user subsequently authorized push; main is pushed through 6f19b89.
+Run 40796272377 passes Linux (80 groups / 1,366 passed / 0 failed / 24 ignored)
+and macOS (80 groups / 1,365 passed / 0 failed / 25 ignored). Windows passes
+all integration targets but fails three library FIFO fixture watchdogs. Their
+test-only portable correction keeps all deadlines/counts/FIFO/permit checks and
+is verified locally by 14 delivery tests; its new native CI remains pending;
 no release, installed-binary update, paid API or default-data modification is
 performed. Raw synthetic evidence remains ignored locally.
 
