@@ -167,3 +167,8 @@ latest retained output time on shell get/status. Native lifecycle state and
 terminal monotonic duration are unchanged. See [Thread browser](thread-browser.md),
 [shell](shell.md) and [work observability](work-observability.md). No table,
 worker, poller or migration is added.
+
+Issue #46 adopts [measured CI test performance](ci-test-performance.md): preserve
+all native test identities and assertions while reducing repeated integration
+linking and fixture-only commits. Keep native timing evidence distinct from
+policy tests and do not add product machinery for the test runner.

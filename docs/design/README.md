@@ -16,3 +16,6 @@ layout: modules in `src/`, integration tests in `tests/`, versioned SQL in
 Each design preserves responsibilities, invariants, limits, ownership and failure
 handling. A design document does not establish successful verification. Check the
 [current status](../development/status.md) and [acceptance](../validation/acceptance.md).
+
+- [Measured CI test performance](ci-test-performance.md): integration layout,
+  coverage inventories, native measurements and watchdog boundaries (#46).
