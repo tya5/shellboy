@@ -10,8 +10,12 @@ Index storage-stop reasons now use the same snake_case codes as search details;
 the library suite passes (627 passed, 10 ignored). Draft backlog rejection now
 distinguishes a stopped worker from transient pressure, without promising an
 automatic retry for a rejected snapshot. Admission/coalescing and shutdown
-ownership are unchanged. Full-suite and independent-review evidence belongs in
-[acceptance](../validation/acceptance.md).
+ownership are unchanged. The coder's macOS standard check passes: format,
+strict all-target Clippy, 86 test groups / 1,443 passed / 0 failed / 28 ignored.
+Independent review approves all three implementation commits with focused
+re-execution. Post-integration and three-OS CI results remain separate; see
+[acceptance](../validation/acceptance.md) and the
+[Shellboy trial record](issue-40-shellboy-trial.md).
 
 ## Issues #36–#39 review follow-up (2026-10-30)
 

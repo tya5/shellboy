@@ -29,8 +29,21 @@ installed owner replacement, real provider traffic or user-data changes.
   exporting `$HOME/.cargo/bin` corrected the environment without changing the
   toolchain or dependencies.
 
-Full standard checks, native Linux/Windows execution and three-OS CI are not
-established by these focused results.
+The coder's standard check at `e01d397` also passes:
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+completes format, strict all-target Clippy and all-target tests with exit 0:
+86 groups / 1,443 passed / 0 failed / 28 ignored. Its background shell completed
+in 324,536 ms (about 5 minutes 25 seconds) and `shellboy wait` observed completion;
+this is not a ten-minute run. Ignored real-provider tests were not enabled.
+
+Independent review approved `73c25c2`, `03d969b` and `e01d397` without findings.
+The reviewer independently ran Responses retries (22 passed, 1 ignored) and the
+final library suite (627 passed, 10 ignored), plus format/diff checks, in a
+separate macOS arm64 worktree. Post-integration full checks remain separate
+from the coder's standard check. Native Linux/Windows execution, physical
+terminal evaluation and three-OS CI are not established by these local results.
+See the [Shellboy development trial](../development/issue-40-shellboy-trial.md)
+for execution observations and pending aggregate measurements.
 
 
 ## Review follow-up #36–#39 verification (2026-10-30)
