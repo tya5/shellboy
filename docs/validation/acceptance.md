@@ -1075,3 +1075,32 @@ type and a collapsible condition; these were corrected before the complete gate.
 No semantic assertion/deadline was relaxed. The old recurring attachment
 watchdogs remain unexplained; repeated native observations, release builds,
 public-download verification and local installation are pending.
+
+
+### Portable fixture and fixed native observations
+
+Run [40809307248](https://github.com/tya5/shellboy/actions/runs/40809307248),
+source `1e9d9b2`, passes Linux (80 groups / 1,381 / 0 / 25 ignored) and macOS
+(80 groups / 1,380 / 0 / 26 ignored). Windows Clippy cannot compile the new
+optional-preflight unit fixture because it referenced a Unix-only shell fixture;
+Windows tests did not run. Replace that dependency with the test's own minimal
+portable temporary owner and direct ThreadCreate request. It needs no shell,
+HTTP listener or unrelated seeded Runs. The same cancellation/state/right
+assertions remain. No product code or test deadline changes.
+
+After this fixture fix, `sh scripts/check.sh` again passes format, strict
+all-target Clippy and **80 groups / 1,380 / 0 / 26 ignored** on macOS. CI YAML
+and its shell repeat-step syntax also parse. The next native gate runs the full
+suite then exactly two additional fresh attachment test processes per OS,
+stopping on any failure. Count these separately, not as distinct new cases or
+proof that the old symptom is resolved.
+
+The verified 0.2.0 debug executable for `1e9d9b2` has SHA-256
+`7f02a1385c15e9dc3b67b87f583a74e87a71c31715ca16783b8890142d0c399c`.
+It passes ten-conversation HTTP+PTY: early delta, exact ten canonical outputs,
+ordered/unique selected tokens and hidden Thread presence, all ten completed,
+with raw PTY drainage paused for 1,158ms. Offline docs33 (13 guides/3 categories/
+127 bundled links) and RAG CLI13 also pass, with zero external model requests.
+The subsequent fixture-only fix does not change production behavior; do not
+claim this hash is the optimized official release binary. Release download and
+installed-binary verification remain pending.

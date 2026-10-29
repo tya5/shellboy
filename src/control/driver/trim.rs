@@ -115,19 +115,31 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn cancelled_optional_preflight_preserves_the_turn_and_reduction_right() {
-        let (root, owner, control, _requests, server) =
-            crate::control::shell_lifecycle_tests::fixture().await;
-        let thread = crate::control::shell_lifecycle_tests::rpc(
-            &control,
-            Command::ThreadCreate(ThreadCreateArgs {
-                connection: None,
-                model: None,
-                effort: None,
-                cwd: None,
-                parent_id: None,
-            }),
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n").unwrap();
+        let owner = crate::app::DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
         )
-        .await["thread_id"]
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let response = control
+            .request(Request::new(
+                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                Command::ThreadCreate(ThreadCreateArgs {
+                    connection: None,
+                    model: None,
+                    effort: None,
+                    cwd: None,
+                    parent_id: None,
+                }),
+            ))
+            .await;
+        assert!(response.ok, "{:?}", response.error);
+        let thread = response.result.unwrap()["thread_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -195,7 +207,6 @@ mod tests {
             .unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
-        server.abort();
         drop(root);
     }
 }

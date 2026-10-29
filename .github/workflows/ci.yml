@@ -37,3 +37,11 @@ jobs:
         run: '"RUST_TEST_THREADS=2" >> $env:GITHUB_ENV'
       - name: Tests
         run: cargo test --locked --all-targets --no-fail-fast
+      - name: Repeat attachment preparation observations in fresh processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for observation in 1 2; do
+            echo "Attachment preparation observation ${observation}/2"
+            cargo test --locked --test attachment_provenance -- --nocapture
+          done

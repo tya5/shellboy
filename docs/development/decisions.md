@@ -822,3 +822,18 @@ path. Existing maximum/no-candidate fixtures use trim_activated; actual prepared
 input calibration is tested directly. The duplicate wrapper-only small-context
 case is covered by real Driver retry tests, which now assert unchanged original
 content/path, no replacement and no irrelevant trim error annotation.
+
+
+## 2026-10-29: bounded native repetition instead of repeating all-target builds
+
+For the unresolved #33 attachment symptom, run the full native gate and then
+exactly two additional attachment-provenance test processes on every native OS.
+Each process gets fresh temporary owners/stores; keep all cases, assertions and
+five-second watchdogs. A failure stops the step immediately, so this is fixed
+sampling, not retry-until-green. The existing three-job matrix/queue/production
+code is unchanged. This concentrates repetition on the actual recurring cases
+instead of spending another full all-target link/build cycle merely to repeat
+unrelated tests. Earlier/new full native jobs provide separate-run observations;
+repeat-process evidence within a runner is explicitly identified and does not
+prove the original cause or absence of a rare failure. Report standard totals
+separately from the repeated executions.

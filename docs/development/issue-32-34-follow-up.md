@@ -16,7 +16,7 @@ results separately.
 | #32 mock split-write note | No timing workaround without measured cause; keep semantic assertions. |
 | #33 L1: index stop loses causes and overwrites durable pause | Store one bounded pair of typed failure codes in service memory; preserve durable status reason and expose local stop evidence alongside it. |
 | #33 initialize lock handoff note | Keep the existing unlock/reopen boundary: another writer may legitimately return busy. A null migration result correctly means this call performed no migration; no compatibility or retry mechanism is added. |
-| #33 repeated attachment preparation watchdogs | Treat recurrence across macOS/Windows as a shared unresolved preparation symptom. Preserve watchdogs, add stage evidence if needed, run multiple native gates and diagnose any recurrence rather than infer resolution from one success. |
+| #33 repeated attachment preparation watchdogs | Treat recurrence across macOS/Windows as a shared unresolved preparation symptom. Preserve watchdogs, add stage evidence if needed, run a full native gate plus fixed fresh-process attachment repeats, and diagnose any recurrence rather than infer resolution from one success. |
 | #34 M1: trim_used disables later normal retry/overflow | Separate once-per-Turn trim right from first-resumed-request guard; successful adoption clears only the guard. |
 | #34 M2: connect failures become incomplete upload | Distinguish before-body/connect failure from a true partial source; retain ordinary connection retry. |
 | #34 M3: scoped keyword search repeatedly expands whole scope | Use indexed reverse membership and avoid rebuilding full scope per candidate/batch; measure thousands of synthetic nodes. |
@@ -35,7 +35,7 @@ Use synthetic histories, temporary stores and loopback HTTP only. Targeted
 regressions precede the standard format/strict Clippy/all-target checks; root
 owns Cargo/Git while subsystem owners edit separate files. Measure large scoped
 search without a flaky latency assertion. Push only after local gates; use
-multiple native CI runs to observe the known attachment symptom and inspect
+the complete native CI plus two fixed fresh-process attachment repetitions per OS to observe the known symptom and inspect
 its added phase/state diagnostics if it recurs. Track exact commands, sources,
 results and untested environments in acceptance and status.
 
