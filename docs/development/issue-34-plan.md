@@ -58,3 +58,17 @@ lease release in `f659197`. The final local check passes 80 groups / 1,366 tests
 (0 failed, 25 ignored), plus 280 parallel RAG cases and current manual/offline
 checks. A fresh three-OS gate remains pending; historical successful runs do
 not establish the final source's native gate.
+
+
+## Final pushed verification
+
+Implementation/test source `b8f1f84` passes the complete
+[three-OS gate](https://github.com/tya5/shellboy/actions/runs/40804700576):
+Linux 1,367, macOS 1,366 and Windows 1,263 passed, zero failed, 80 groups per
+OS. Windows also passes its separate single-case overflow diagnostic.
+The IPC and attachment fixture follow-up passes on all runners. Acceptance
+retains prior failures, exact source/job IDs and unproven attachment causes;
+there is no claim that a rerun alone diagnosed a production transport issue.
+The implementation and review fixes are pushed; no release/install is included.
+Representative operational retry tuning remains a recorded follow-up rather
+than a measured optimal default.

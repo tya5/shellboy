@@ -55,3 +55,17 @@ passes Linux and macOS, including the RAG writer-lease fix. Windows passes the
 FIFO and RAG cases but exposes an owner-cleanup watchdog mismatch and two
 unlocalized attachment incoming-request watchdogs. These are separately
 tracked in acceptance; there is no final three-OS success yet.
+
+
+## Final pushed verification
+
+Implementation/test source `b8f1f84` passes the complete
+[three-OS gate](https://github.com/tya5/shellboy/actions/runs/40804700576):
+Linux 1,367, macOS 1,366 and Windows 1,263 passed, zero failed, 80 groups per
+OS. Windows also passes its separate single-case overflow diagnostic.
+The IPC and attachment fixture follow-up passes on all runners. Acceptance
+retains prior failures, exact source/job IDs and unproven attachment causes;
+there is no claim that a rerun alone diagnosed a production transport issue.
+The implementation and review fixes are pushed; no release/install is included.
+Representative operational retry tuning remains a recorded follow-up rather
+than a measured optimal default.

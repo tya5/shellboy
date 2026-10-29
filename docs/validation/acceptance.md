@@ -1004,3 +1004,38 @@ Focused macOS checks of this test-only follow-up pass: IPC server 11 cases and
 attachment provenance 8 cases. Format, strict all-target Clippy and diff checks
 pass. The production Rust source is unchanged from `f659197`; the earlier
 whole-suite result is not counted as a new run of these modified fixtures.
+
+
+## Final pushed native gate for #34 and review follow-up (2026-10-29)
+
+[Run 40804700576](https://github.com/tya5/shellboy/actions/runs/40804700576),
+source **b8f1f84d0ed3e26cbeefabda058dab2451b15cfa**, completed successfully.
+Production Rust is unchanged from `f659197`; `b8f1f84` changes only test fixtures
+and records. Every OS passed format, strict locked all-target Clippy and locked
+all-target tests with no-fail-fast.
+
+| Native runner | Test groups | Passed | Failed | Ignored |
+| --- | --- | --- | --- | --- |
+| Linux, job 123220740977 | 80 | 1,367 | 0 | 24 |
+| macOS, job 123220741206 | 80 | 1,366 | 0 | 25 |
+| Windows, job 123220741249 | 80 | 1,263 | 0 | 19 |
+
+The dedicated Windows overflow-recovery step separately passed its one filtered
+case before the main test step; the table excludes that duplicate execution.
+Both attachment cases and the IPC listener-failure/owner-cleanup case pass on
+all native runners. The Windows Tests step also compiles/link targets (5m22s in
+this run), so its elapsed time is not pure test runtime.
+
+This final success does not prove the cause of the earlier attachment timeouts;
+the stronger exact-Turn precondition and bounded caller/state diagnostics remain
+for recurrence. RAG ownership, FIFO, receipt/autosave and index-stop regressions
+also pass. No retry-until-green loop, production timeout relaxation or weakened
+semantic assertion was added. The IPC fixture cleanup bound change is explained
+separately above and in decisions; its notification deadline is unchanged.
+
+Documentation audit passes 617 relative links, 38 heading fragments, four TOML
+blocks, 13 English guides and one Japanese User Guide, with zero errors. Staged
+secret scans pass. Final evidence-only documentation commits do not change the
+Rust/configuration/guide source covered by this native run. Company Windows GUI,
+provider/proxy behavior and representative operational retry traces remain
+unmeasured; the documented provisional defaults/transport limits still apply.

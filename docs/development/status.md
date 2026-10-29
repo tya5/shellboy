@@ -1,31 +1,40 @@
 # Development status
 
-## Issue #34 and #32/#33 follow-up: verified locally, native CI recheck (2026-10-29)
+## Issue #34 and #32/#33 follow-up: pushed, three-OS CI passed (2026-10-29)
 
-Final implementation source `f659197` passes format, strict all-target Clippy,
-and **80 groups / 1,366 passed / 0 failed / 25 ignored**. See
-[issue #34](issue-34-plan.md), [review round 5](review-round-5.md), and
-[acceptance](../validation/acceptance.md). Early maximum reduction, explicit
-pre-POST hint, shared Thread keyword/semantic scope, separate header deadline,
-truthful transport facts and bounded repeated-upload recovery are implemented.
-Additional autosave/receipt/index-stop/store-upgrade review findings are fixed.
+Implementation and test follow-up `b8f1f84` are pushed to `main`.
+[Native CI 40804700576](https://github.com/tya5/shellboy/actions/runs/40804700576)
+passes format, strict all-target Clippy and all-target tests on all three OSes:
+Linux **1,367 passed / 0 failed / 24 ignored**, macOS **1,366 / 0 / 25**,
+Windows **1,263 / 0 / 19**, each across 80 groups. The dedicated Windows
+overflow-recovery diagnostic also passes once separately; do not double-count
+it as an additional distinct regression. See [acceptance](../validation/acceptance.md).
 
-Native `b938c68` passed Linux and Windows (including portable FIFO fixtures),
-but exposed an intermittent macOS RAG writer-lock contention. `f659197` ends
-that existing lease explicitly before File close, after SQLite closes; a new
-ownership regression and 280 parallel cases pass. No retry, global registry or
-new worker is introduced. All temporary FD diagnostics are removed. Its new
-native CI passes Linux and macOS. Windows passes the RAG and FIFO cases but
-fails a whole-owner cleanup watchdog and two attachment incoming-request
-watchdogs. Follow-up is in progress; there is no final three-OS success yet.
-The implementation is pushed; no release or installed-binary update is requested.
+Early maximum safe reduction, explicit-hint pre-POST checks, shared Thread
+keyword/semantic scope, a separate header deadline and truthful transport
+facts are implemented. Repeated known-incomplete uploads stop in recovery.
+The #32 autosave/receipt and #33 index-stop/store-upgrade review findings are
+fixed. See [issue #34](issue-34-plan.md) and [review round 5](review-round-5.md).
 
-The exact old baseline `6c577c8` passes 1,343 tests and original ten-chat HTTP+PTY
-after restart, identifying the prior loopback fault independently of the new
-contention. `2f8a198` removes the unnecessary `8368874` workaround. The final
-`f659197` executable also passes ten-chat HTTP+PTY, docs33 and RAG CLI13.
-Representative production retry/default tuning remains explicitly unmeasured;
-retry count eight is retained provisionally rather than claimed optimal.
+Native findings are tracked rather than hidden: the explicit RAG writer lease
+release in `f659197` passes ownership tests and 280 local parallel cases;
+FIFO fixtures no longer depend on per-item timers. `b8f1f84` separates IPC
+notification and whole-owner cleanup bounds and strengthens synthetic attachment
+preconditions/diagnostics. All those cases pass the final native run. The exact
+cause of the earlier attachment watchdogs remains unproven; a green rerun is
+not evidence of a transport fix.
+
+The current production executable also passes ten-chat HTTP+PTY, docs33 and
+RAG CLI13. Local format/strict Clippy/full tests pass 1,366 cases; the later
+fixture-only changes additionally pass their focused 19 cases. No external
+model API or default user data is used. No release or installed-binary update
+is included.
+
+Representative operational retry/default tuning remains unmeasured; count
+eight and the two-minute header deadline are provisional with recorded revisit
+conditions. Source consumption does not prove peer delivery; exact socket reuse
+is unknown. Historical loopback failure and post-reboot baseline evidence remain
+separately attributed in acceptance and decisions.
 
 
 ## Review round 4: fixes committed, whole-suite gate unresolved (2026-10-29)
