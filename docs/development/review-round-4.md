@@ -76,3 +76,13 @@ Staged diffs and all three added commits passed gitleaks. Raw evidence remains
 ignored locally; the current blocker is verification, not an untracked review
 finding. Push, native three-OS CI, release and installed-binary update remain
 unperformed.
+
+## Post-restart correction
+
+The later #33 review supplied direct raw-TCP/reboot evidence for the earlier
+loopback transfer fault. An isolated exact `6c577c8` rerun now passes the full
+standard check (76 groups / 1,343 passed / 0 failed / 24 ignored) and the original
+ten-conversation HTTP+PTY script. See [review round 5](review-round-5.md) and
+[acceptance](../validation/acceptance.md) for attribution and the variant check.
+This supersedes the old-source unresolved gate above without rewriting the
+actual earlier failed attempts or claiming that new #34 changes are verified.

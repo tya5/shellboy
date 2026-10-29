@@ -536,8 +536,11 @@ before the migration/workers under test, with a small queued server response.
 Use TCP_NODELAY on accepted local mock sockets and write JSON response headers
 and body together in the index/shell fixtures. Apply TCP_NODELAY to the two
 summary fixtures as well. Keep assertions, deadlines and production HTTP clients
-unchanged. The index worker regressions pass with these fixture changes. High
-host load was observed, but is not established as the cause. Record unsuccessful
+unchanged. The index worker regressions pass with these fixture changes. The later #33 review supplied independent raw TCP tests proving a roughly
+16KB loopback transfer stall and recovery after Mac restart. Root repeated
+successful transfers up to 10MB after restart and the exact 6c577c8 standard
+check/HTTP-PTY now pass. The original packet-timing explanation for 8368874 is
+not established; compare the unchanged baseline without those fixture changes. Record unsuccessful
 whole-suite/manual attempts rather than treating earlier runs as evidence for
 the current source.
 
@@ -551,3 +554,80 @@ RAG migration assertions use the new actionable rag init hint and preserve the
 original source count (including built-in sources). Existing readers must still
 reject without modifying the old store. Both v1 and v2 writer-only migration
 regressions pass, without registering material sources or indexing.
+
+
+## 2026-10-29: early maximum reduction and truthful HTTP observations (#34)
+
+A failed large input is reduced at its first eligible failure rather than after
+eight more attempts. Reduction removes every eligible group outside existing
+protection, not an arbitrary half-size target. Keeping a particular token count
+has no established benefit; immutable originals, replacement provenance, scoped
+keyword search, selected summaries and explicit restore provide recovery paths.
+The latest completed tool group, current request, incomplete work and pending
+user instructions remain protected. One adopted reduction/restart belongs to a
+Turn/generation; another failure goes to recovery rather than consuming another
+paid retry cycle. Only an explicit compact_hint_tokens enables pre-POST reduction;
+it is trigger guidance, not capacity inference or a reduction target.
+
+Transport observations must distinguish facts from inference. A Body stream
+reports how much source reqwest consumed, not a TCP write acknowledgement or
+proof that the peer read/processed it. The public client API does not expose
+exact socket reuse. Record known incompleteness, unknown delivery while waiting
+for headers, and response-body reception separately. First use of a fresh pool
+is a pool fact, not a promise about every later connection. Replacing a failed
+pool generation prevents subsequent requests from borrowing its idle sockets;
+it cannot promise immediate closure of an HTTP/2 connection still used by other
+requests. Keep those limitations explicit rather than add another transport,
+dependency, worker or per-connection lifecycle engine.
+
+Issue #11 retry-count reassessment: retain the default of eight consecutive
+retries provisionally. The supplied incident demonstrates that retrying the same
+large input eight times before trimming is wrong; it does not establish the
+optimal retry count for smaller transient failures after this change. No
+representative successful production retry dataset is available in this task,
+and routine verification must not call paid APIs or inspect real conversation
+content. Loopback tests validate retry mechanics and bounded request counts, not
+provider recovery rates. Revisit with anonymized attempt number, phase, error
+category, header latency and elapsed waiting after these observations have been
+deployed. The production-data part of item 7 remains explicitly unmeasured.
+
+The maximum-omission rule is structural: omit all eligible groups, including
+when verbose provenance/notification overhead means a tiny removed prefix does
+not lower the estimated token count. Report the actual before/after estimates;
+do not claim a numeric reduction in that corner case or restore the removed
+content automatically. The once-only resumption bound still prevents a loop.
+Revisit marker size if measurements show its overhead defeats recovery on
+realistic large inputs; do not reintroduce an arbitrary target/all-or-nothing
+planner to address a synthetic tiny-prefix case.
+
+A failed shared HTTP pool generation gains only two bounded counters and its
+existing client owner; the lock is held for snapshot/replacement, never across
+await. Retired clients are retained only by already in-flight requests, bounded
+by existing request concurrency, not a new registry or background reaper. Proxy
+environment variables are read from the owner process when a pool is built or
+rebuilt. Editing a different shell's environment still cannot reconfigure a
+running owner; the documented practical procedure remains owner restart.
+
+Additional #32/#33 review decisions: stop pumping a known-closed draft worker
+after its first critical notice while retaining newest unsaved snapshots for
+shutdown failure reporting. Reset receipt repeat bits only at a fresh scan, not
+during an unfinished pass. Expose a bounded in-memory index storage-stop reason
+when the diagnostic itself cannot persist, and report actual RAG migration
+versions. Keep the already conservative uncertain reply-ID diagnostic and the
+existing historical-language sections; the reviewer marks both cosmetic points
+as optional. Same-Thread concurrent-send CAS rejection is not covered by the
+independent-Thread shutdown persistence claim and is outside this delivery fix.
+
+Header deadline decision: default response_header_timeout_ms is a positive
+120,000ms, separate from the 600,000ms body-idle deadline. The opt-in local
+HTTP/1.1 measurement sent eight 1,024-character requests and eight
+3,480,000-character requests successfully; the latter had p50 2ms / max 3ms
+from send initiation to headers. Full samples are retained only in ignored
+synthetic evidence. These loopback measurements establish instrumentation and
+large-body delivery after restart, not provider queue/prefill behavior. The
+issue reports successful generation around five seconds and possible header
+latencies of tens of seconds. Choose two minutes as conservative initial
+headroom for that reported range while cutting the previous ten-minute header
+wait; no statistical optimum or provider capacity is inferred. Reassess this
+provisional default with representative deployed successful/failing header
+observations. An explicit longer positive value remains available.

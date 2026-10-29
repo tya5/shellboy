@@ -1,5 +1,28 @@
 # Development status
 
+## Issue #34 and #32/#33 follow-up: verified locally, push authorized (2026-10-29)
+
+Implementation/test source `d84a06f` passes all standard gates: format, strict
+all-target Clippy and **80 groups / 1,365 passed / 0 failed / 25 ignored**.
+See [issue #34](issue-34-plan.md), [review round 5](review-round-5.md), and
+[acceptance](../validation/acceptance.md). Early maximum reduction, explicit
+pre-POST hint, shared Thread keyword/semantic scope, separate header deadline,
+truthful transport facts and bounded repeated-upload recovery are implemented.
+Additional autosave/receipt/index-stop/store-upgrade review findings are fixed.
+
+The exact old baseline `6c577c8` now passes 1,343 tests and the original ten-chat
+HTTP+PTY check after Mac restart; the reviewer-supplied raw TCP evidence and
+independent current 10MB probe identify the earlier loopback fault. The same
+HTTP+PTY script now passes on current source, with ten durable header records.
+`2f8a198` removes the unnecessary `8368874` workaround. Historical failed runs
+below are retained and superseded by these verified observations.
+
+The user authorized push after completion. Push and native three-OS CI are the
+next gate; no release or installed-binary update is requested. Real-provider
+retry/default tuning remains explicitly unmeasured, with retry count eight
+retained provisionally rather than claimed empirically optimal.
+
+
 ## Review round 4: fixes committed, whole-suite gate unresolved (2026-10-29)
 
 The reviews of `e977dfe` confirm #19/#20/#27/#30/#31 are resolved. #32's four

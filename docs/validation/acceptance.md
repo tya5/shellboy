@@ -1,5 +1,83 @@
 # Validation record
 
+## Issue #34 and additional #32/#33: verified locally (2026-10-29)
+
+Verified final implementation/test source: `d84a06f`, including `96669a5`
+(reduction and HTTP), `cf1e7f2` (shared search scope, store upgrade and index-stop
+diagnostics), `4c1d200` (autosave/receipt follow-up), and `2f8a198` (remove the
+unnecessary packet-timing workaround). macOS ARM64 / Rust 1.99.1.
+
+All standard gates passed with RUST_TEST_THREADS=2: `cargo fmt --all -- --check`,
+`cargo clippy --locked --all-targets -- -D warnings`, and
+`cargo test --locked --all-targets --no-fail-fast`: **80 groups / 1,365 passed /
+0 failed / 25 ignored**. The last command uses the same targets as the standard
+script, adding no-fail-fast to collect every target. Earlier script attempts
+found a renamed guide anchor, misleading transport text on complete provider
+errors, fixture assumptions about preparation nodes, and a pre-completion
+manifest compared with a completed manifest. These were corrected without
+relaxing production safety, deadlines or the immutable request evidence.
+
+Verified boundaries:
+
+- First large-input header timeout, 500/501/503 and disconnect reduce immediately;
+  explicit hint alone enables pre-POST reduction. Protected request/tool/unsafe
+  groups remain, partial safe omission applies without a numeric goal, and the
+  next failure after an adopted reduction recovers without another retry loop.
+- Thread-scoped keyword search retrieves omitted originals without embedding or
+  knowledge DB configuration; no foreign Thread or pending replacement leaks.
+  Actual semantic and keyword scope node sets match through one recursive CTE.
+- Header deadline and post-header body-idle are independent. HTTP observations
+  distinguish unconsumed source, headers with unknown delivery and body receive.
+  Complete provider error messages remain unchanged. Retired pool generation
+  and a fresh retry are verified with a real HTTP/1.1 keepalive fixture.
+- Real Driver + 16MiB old history + stopped request reader observes two actual
+  POST prefixes, then recovery, no third POST, no reduction, and intact originals.
+- Closed autosave projects one notice across 1,200 ticks while retaining the
+  newest snapshot; fresh receipt scans avoid redundant passes, partial scans
+  retain fairness. Index storage-stop and normal owner stop have distinct errors.
+  rag init reports actual v1/v2 upgrade and null for fresh/current stores.
+
+Manual/offline checks on the current executable also passed: bundled docs 33
+checks; RAG CLI 13 scenarios; original ten-conversation HTTP+PTY script with
+early delta, paused-terminal recovery, exact outputs and visible ordering. All
+ten completed attempts durably contain header latency/phase/source counts.
+There were ten local mock requests and zero external model requests.
+Opt-in header measurement: eight 1,024-character requests p50 0ms / max 1ms,
+eight 3,480,000-character requests p50 2ms / max 3ms. These are loopback samples,
+not production provider performance. The provisional 120-second header default,
+retained retry count of eight and unmeasured operational reassessment are
+explained in decisions; exact socket reuse/peer receipt remain unknown.
+
+The user subsequently authorized push. Native three-OS CI is pending that push;
+no release, installed-binary update, paid API or default-data modification is
+performed. Raw synthetic evidence remains ignored locally.
+
+## Post-restart baseline verification (2026-10-29)
+
+Exact source `6c577c8`, isolated source snapshot, macOS ARM64 / Rust 1.99.1.
+`RUST_TEST_THREADS=2 sh scripts/check.sh` passed format, locked strict all-target
+Clippy, compilation and **76 groups / 1,343 passed / 0 failed / 24 ignored**.
+The original ten-conversation HTTP+PTY script also passed: first delta before
+completion, ten exact canonical outputs, ordered unique visible text, hidden
+Threads in the tree, all ten Turns completed, ten local requests and zero
+external requests. This verifies the old source after restart; it does not
+validate the in-progress #34 or additional #32/#33 changes.
+
+Review #33/6484081072 supplied independent Python TCP evidence from the failure
+window: payloads over about 16KB stopped at 16,332 bytes on lo0; 1KB/4KB/16KB
+worked, while 100KB/1MB stalled. After Mac restart the same probe passed up to
+10MB. Root independently reproduced complete transfer at 1KB, 4KB, 16KB, 100KB,
+1MB and 10MB in the new environment (10MB about 4.53ms). Together with failures
+on unchanged `e977dfe`/public 0.1.6 and the successful unchanged-source rerun,
+this identifies the earlier loopback fault as the source of the previous large
+HTTP-fixture stalls. The original probe is reviewer-supplied evidence, not a
+measurement performed by this agent; high load alone is not the causal claim.
+
+The isolated variant without the three `8368874` mock changes also passed all
+library tests: 582 passed / 0 failed / 10 ignored. Commit `2f8a198` removes that
+unnecessary workaround from current source; it was not established as a fix for
+the loopback fault. Current #34/follow-up checks remain pending. Native Windows/Linux CI, push and release are not performed.
+
 ## Review round 4: local fixes and verification (2026-10-29)
 
 Product fixes: `7fb41d9` and `c6f2b39`; test-only mock stabilization: `8368874`.
@@ -41,8 +119,9 @@ Remaining failed cases:
 - Unfinished `compaction::tests::nested_summary_and_spills_preserve_current_turn_boundary`:
   still awaiting the mock; separate 30-second bounded run also failed to finish.
 
-TCP_NODELAY alone did not resolve the summary fixture stalls. Do not infer a
-production fix or an environmental cause from index mock stabilization alone.
+TCP_NODELAY alone did not resolve the summary fixture stalls. Index mock
+stabilization was not proof of a production fix; later independent raw TCP
+evidence and the post-restart exact-source rerun identify the loopback fault.
 The successful focused checks do not waive this whole-suite gate.
 
 Final document audit: 612 relative links / 38 heading fragments, four TOML blocks
@@ -65,8 +144,9 @@ out observing the first delta, before launching the other nine requests. The
 installed public 0.1.6 binary also failed this precondition. TCP_NODELAY and a
 fuller initial Responses lifecycle did not establish success. This does not
 validate concurrent HTTP streaming; cause and a controlled retest remain open.
-A prior run's successful manual result does not apply to this source. High host
-load was observed during tests, but causality is unproven.
+A prior run's successful manual result does not apply to this source. The later independent loopback/restart evidence and exact-source successful
+rerun above explain this failure window; high host load alone was not the cause
+established by those measurements.
 
 Raw synthetic captures/logs remain ignored locally. No default data, installed
 binary, external model API, push, release or native three-OS CI was changed/run.
