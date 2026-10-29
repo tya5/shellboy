@@ -189,3 +189,31 @@ handle was visible; it did not establish a leaked descriptor or the kernel's exa
 cause. The explicit release contract is supported by a deterministic duplicate-
 handle owner-lifetime regression, rather than attributing the failure to an
 unproven operating-system mechanism.
+
+## Thread-scoped search review: cost, overlap and deletion
+
+Keyword scans collect only bounded batches of node IDs through the initial rowid
+watermark. Each node's current read snapshot checks membership by walking backward
+from that candidate through completed replacement consumers to a selected Thread
+path. The shared reverse-membership helper uses the existing source/replacement
+and Thread-path indexes with `prepare_cached`; it does not rebuild the full Thread
+scope for every candidate or batch. Body loading and keyword scoring happen only
+after this check. Positive membership in a live Thread already proves a live
+visibility root in that snapshot, avoiding a second identical consumer walk;
+unscoped history keeps its existing deleted-owner visibility check. Semantic
+ranking still expands the same membership forward once
+for its filtered candidate set. Equality tests keep the two traversal directions
+aligned, including nested replacements, incomplete replacements, forks and cycles.
+No new index, membership cache, table or worker is added.
+
+Overlapping explicit history scopes are labels over the same retriever, not
+independent votes. A reference contributes its best RRF rank once per retrieval
+method across global/Thread/fork overlap. Independent keyword and semantic ranks
+may still contribute once each. All matching scope and Thread-membership labels
+remain attached to the fused reference. Scopes remain independent observations,
+not a global snapshot or an authorization boundary.
+
+After query embedding returns, recheck the selected Thread in the new history
+snapshot. A missing/deleted Thread returns `thread_not_found`; changing index
+identity or unavailable source witnesses still returns `history_changed`. Neither
+condition starts indexing or retries automatically.

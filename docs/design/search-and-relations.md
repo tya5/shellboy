@@ -99,3 +99,14 @@ Thread論理削除時は最後のthread_path/thread_replacementを所有証拠�
 ## Shared keyword Thread scope (Issue #34)
 
 Standalone `rag search --scope history:THREAD` reuses the semantic search scope: current Thread path and recursive sources of completed replacements (summary, spill, and omit). The SQL scope definition and current-path projection live in `history::search_scope` and are shared by semantic ranking, semantic result revalidation, and RAG keyword retrieval. A source hit may have `thread_scope.on_current_path=false`; this is membership through replacement provenance, not current adoption. Keyword retrieval does not require embedding or alter the history/index.
+
+### Thread-scope query cost
+
+The shared definition has two equivalent query directions: semantic ranking
+expands current-path nodes toward completed replacement sources once, while
+keyword candidate validation follows a source backward toward replacement outputs
+and tests the indexed Thread path. Reverse traversal uses the existing
+replacement_source_reverse and Thread-path indexes and cached prepared statements.
+Each keyword batch contains at most 32 node IDs; it does not reconstruct the full
+recursive scope. Per-node snapshot and current-path/provenance distinctions remain
+unchanged. Synthetic thousands-of-node timing is recorded separately from any SLA.

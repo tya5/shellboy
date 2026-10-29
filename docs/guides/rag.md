@@ -141,3 +141,10 @@ implied caller Thread. A missing or deleted Thread reports a scope failure.
 Use the returned reference with `rag get`, or the original node with `history
 get`, before deciding whether to summarize or restore a smaller range. Restoring
 a large range may recreate the failure that led to trimming.
+
+Overlapping selectors such as `--scope history --scope history:THREAD_ID`, or a
+parent and fork, retain all scope labels but do not multiply the same reference's
+rank vote. The best rank contributes once per retrieval method; keyword and
+semantic remain independent methods in hybrid search. If the selected Thread is
+deleted while a query embedding is in flight, the scope reports
+`thread_not_found`; this is not a transient index-change hint to retry.

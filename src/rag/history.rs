@@ -216,12 +216,10 @@ pub(super) fn keyword(path: &Path, query: &str, thread: Option<&str>) -> Result<
     let mut hits = Vec::new();
     loop {
         let rows = {
-            let sql = format!(
-                "{} SELECT rowid,id FROM node WHERE rowid>?1 AND rowid<=?2 AND payload_json IS NOT NULL AND deleted_reason IS NULL AND (?3 IS NULL OR id IN(SELECT id FROM scope)) ORDER BY rowid LIMIT 32",
-                crate::history::search_scope::cte("?3")
-            );
-            let mut q = db.connection.prepare(&sql)?;
-            q.query_map(params![after, watermark, thread], |r| {
+            // Collect only IDs here. Membership is checked using indexed reverse
+            // ancestry in each node snapshot, before loading/scoring its body.
+            let mut q = db.connection.prepare_cached("SELECT rowid,id FROM node WHERE rowid>?1 AND rowid<=?2 AND payload_json IS NOT NULL AND deleted_reason IS NULL ORDER BY rowid LIMIT 32")?;
+            q.query_map(params![after, watermark], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?
@@ -240,7 +238,10 @@ pub(super) fn keyword(path: &Path, query: &str, thread: Option<&str>) -> Result<
                 db.connection.execute_batch("ROLLBACK;BEGIN;")?;
                 continue;
             }
-            if !crate::history::reachability::searchable(&db.connection, &id)? {
+            // Scoped membership already reaches a live Thread path in this
+            // snapshot, which is a visibility root. Global reads still need
+            // the general deleted-owner test rather than a duplicate walk.
+            if thread.is_none() && !crate::history::reachability::searchable(&db.connection, &id)? {
                 db.connection.execute_batch("ROLLBACK;BEGIN;")?;
                 continue;
             }
@@ -351,6 +352,9 @@ pub(super) async fn semantic(
     let dimension = descriptor.dimension;
     let response = search::embed(&profile, &[query.into()], Some(dimension)).await?;
     let db = open(&context.history)?;
+    // Embedding releases the old snapshot. Deletion is a permanent scope
+    // failure, not an index witness change for which retry would help.
+    validate_thread(&db.connection, thread)?;
     let matches = crate::index::rag_hits(
         &db.connection,
         &descriptor,
@@ -358,11 +362,15 @@ pub(super) async fn semantic(
         100,
         thread,
     )
-    .map_err(|_| {
-        err(
-            "history_changed",
-            "History index changed or its witnesses expired; retry search",
-        )
+    .map_err(|error| {
+        if error.code == crate::protocol::ErrorCode::ThreadNotFound {
+            err("thread_not_found", "Search Thread does not exist")
+        } else {
+            err(
+                "history_changed",
+                "History index changed or its witnesses expired; retry search",
+            )
+        }
     })?;
     let mut hits = Vec::new();
     let mut raw_spans = Vec::new();

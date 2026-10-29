@@ -1796,3 +1796,67 @@ async fn previously_extracted_office_revision_becomes_removed_without_a_failure(
         json!([])
     );
 }
+
+#[tokio::test]
+async fn scoped_history_deleted_during_query_embedding_reports_thread_not_found() {
+    use shellboy::{config::Config, index::IndexService, storage::DbWorker};
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    let (gate, mut arrivals) = mpsc::channel(1);
+    let (requests, _, server) = proxy_with_gate(root, Some(gate)).await;
+    std::fs::create_dir(root.join("data")).unwrap();
+    let db = DbWorker::open(root.join("data/shellboy.db")).await.unwrap();
+    db.call(|db| {
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('selected','/','/a','fixture','synthetic','now');")?;
+        let payload = json!({"role":"user","content":[{"type":"input_text","text":"NEAR retained original"}]}).to_string();
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES('selected-node','user','now',?1,?2)",rusqlite::params![payload,payload.len() as i64])?;
+        db.execute_batch("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('selected',0,'selected-node');")?;
+        Ok(())
+    }).await.unwrap();
+    let config =
+        Config::parse(&std::fs::read_to_string(root.join("config.toml")).unwrap()).unwrap();
+    let index = IndexService::new(db.clone(), Arc::new(config));
+    index.enqueue_new(&["selected-node".into()]).await.unwrap();
+    while index
+        .process_one(tokio_util::sync::CancellationToken::new())
+        .await
+        .unwrap()
+    {}
+    let requests_before = requests.load(Ordering::SeqCst);
+    let directory = root.to_owned();
+    let pending = tokio::spawn(async move {
+        search(
+            &directory,
+            "history:selected",
+            "DELAY NEAR",
+            SearchMode::Semantic,
+        )
+        .await
+    });
+    let release = held_query(&mut arrivals).await;
+    db.call(|db| {
+        db.execute("UPDATE thread SET deleted_at='now' WHERE id='selected'", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    release.send(()).unwrap();
+    let found = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(found["ok"], false, "{found}");
+    assert_eq!(
+        found["result"]["scope_errors"][0]["code"], "thread_not_found",
+        "{found}"
+    );
+    assert_eq!(found["result"]["items"], json!([]));
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        requests_before + 1,
+        "deletion does not retry embedding"
+    );
+    db.shutdown().await.unwrap();
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+}

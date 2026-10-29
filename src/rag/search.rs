@@ -494,6 +494,59 @@ fn diagnose_preparation(
     )
 }
 
+// Scope selectors over the same history retriever are not independent votes.
+// Keep one best-rank contribution per reference and method, while retaining
+// every matching scope/membership projection. Each bounded entry has two slots.
+fn fuse(lists: Vec<Vec<Hit>>) -> Vec<Hit> {
+    let mut fused: BTreeMap<String, (Hit, [f64; 2])> = BTreeMap::new();
+    for list in lists {
+        let mut local = HashSet::new();
+        for (rank, mut hit) in list.into_iter().take(100).enumerate() {
+            let key = encode(&hit.reference);
+            if !local.insert(key.clone()) {
+                continue;
+            }
+            let method = match hit.method.as_str() {
+                "keyword" => 0,
+                "semantic" => 1,
+                _ => unreachable!("individual retrieval lists contain one method"),
+            };
+            let score = 1.0 / (60.0 + rank as f64 + 1.0);
+            if let Some((existing, scores)) = fused.get_mut(&key) {
+                scores[method] = scores[method].max(score);
+                existing.score = scores.iter().sum();
+                for scope in hit.scopes {
+                    if !existing.scopes.contains(&scope) {
+                        existing.scopes.push(scope);
+                    }
+                }
+                for membership in hit.thread_scopes {
+                    if !existing
+                        .thread_scopes
+                        .iter()
+                        .any(|item| item.thread_id == membership.thread_id)
+                    {
+                        existing.thread_scopes.push(membership);
+                    }
+                }
+                if scores.iter().all(|score| *score > 0.0) {
+                    existing.method = "hybrid".into();
+                }
+                if existing.distance.is_none() {
+                    existing.distance = hit.distance;
+                    existing.space = hit.space;
+                }
+            } else {
+                let mut scores = [0.0; 2];
+                scores[method] = score;
+                hit.score = score;
+                fused.insert(key, (hit, scores));
+            }
+        }
+    }
+    fused.into_values().map(|(hit, _)| hit).collect()
+}
+
 pub(super) async fn search(
     context: &Context,
     query: &str,
@@ -676,45 +729,7 @@ pub(super) async fn search(
         }
         statuses.push(status);
     }
-    let mut fused: BTreeMap<String, Hit> = BTreeMap::new();
-    for list in lists {
-        let mut local = HashSet::new();
-        for (rank, mut hit) in list.into_iter().take(100).enumerate() {
-            let key = encode(&hit.reference);
-            if !local.insert(key.clone()) {
-                continue;
-            }
-            let score = 1.0 / (60.0 + rank as f64 + 1.0);
-            if let Some(existing) = fused.get_mut(&key) {
-                existing.score += score;
-                for scope in hit.scopes {
-                    if !existing.scopes.contains(&scope) {
-                        existing.scopes.push(scope);
-                    }
-                }
-                for membership in hit.thread_scopes {
-                    if !existing
-                        .thread_scopes
-                        .iter()
-                        .any(|item| item.thread_id == membership.thread_id)
-                    {
-                        existing.thread_scopes.push(membership);
-                    }
-                }
-                if existing.method != hit.method {
-                    existing.method = "hybrid".into();
-                }
-                if existing.distance.is_none() {
-                    existing.distance = hit.distance;
-                    existing.space = hit.space;
-                }
-            } else {
-                hit.score = score;
-                fused.insert(key, hit);
-            }
-        }
-    }
-    let mut hits = fused.into_values().collect::<Vec<_>>();
+    let mut hits = fuse(lists);
     hits.sort_by(Hit::compare);
     hits.truncate(limit as usize);
     let mut result = json!({"items":hits.iter().map(Hit::value).collect::<Vec<_>>(),"scopes":scopes,"mode":match mode{SearchMode::Keyword=>"keyword",SearchMode::Semantic=>"semantic",SearchMode::Hybrid=>"hybrid"},"rank_fusion":"rrf_k60","snapshot":"independent_sources_history_watermark_per_node_witness","scope_errors":failures,"scope_status":statuses,"degraded":!warnings.is_empty(),"warnings":warnings.into_values().collect::<Vec<_>>()});
@@ -846,5 +861,61 @@ mod preparation_tests {
             preparation_reason(&original.code).unwrap().1,
             "index_incompatible"
         );
+    }
+}
+
+#[cfg(test)]
+mod fusion_tests {
+    use super::*;
+    fn hit(id: &str, method: &str, scope: &str, thread: Option<&str>) -> Hit {
+        Hit {
+            reference: Reference {
+                version: 1,
+                store: "history-fixture".into(),
+                kind: "history".into(),
+                id: id.into(),
+                revision: "0".into(),
+                hash: "fixture".into(),
+                witness: None,
+            },
+            title: id.into(),
+            excerpt: id.into(),
+            kind: "user".into(),
+            location: Value::Null,
+            provenance: Value::Null,
+            scopes: vec![scope.into()],
+            thread_scopes: thread
+                .map(|thread| crate::index::SearchThreadScope {
+                    thread_id: thread.into(),
+                    on_current_path: true,
+                })
+                .into_iter()
+                .collect(),
+            score: 0.0,
+            distance: (method == "semantic").then_some(0.1),
+            space: (method == "semantic").then(|| "fixture".into()),
+            method: method.into(),
+        }
+    }
+    #[test]
+    fn overlap_votes_once_at_best_rank_but_independent_methods_still_fuse() {
+        let hits = fuse(vec![
+            vec![
+                hit("other", "keyword", "history", None),
+                hit("shared", "keyword", "history", None),
+            ],
+            vec![hit("shared", "keyword", "history:one", Some("one"))],
+            vec![hit("shared", "keyword", "history:fork", Some("fork"))],
+            vec![hit("shared", "semantic", "history:one", Some("one"))],
+        ]);
+        let shared = hits
+            .iter()
+            .find(|hit| hit.reference.id == "shared")
+            .unwrap();
+        assert!((shared.score - 2.0 / 61.0).abs() < f64::EPSILON);
+        assert_eq!(shared.method, "hybrid");
+        assert_eq!(shared.scopes, ["history", "history:one", "history:fork"]);
+        assert_eq!(shared.thread_scopes.len(), 2);
+        assert_eq!(shared.distance, Some(0.1));
     }
 }

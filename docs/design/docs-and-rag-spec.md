@@ -110,3 +110,12 @@ explicit Threads retain `thread_scopes`. `provenance.current_thread_paths`
 remains a current-path-only projection. The same SQL scope helper is used for
 ranking, candidate filtering and snapshot revalidation. A deleted/missing Thread
 is a scope failure, not an implicit all-history search.
+
+### Overlapping retrieval scopes and deleted Threads
+
+Repeated/global/Thread/fork selectors over the same reference are not independent
+rank evidence. RRF keeps the best rank once per reference and method across those
+selectors, while retaining all matching scope labels. Keyword and semantic remain
+independent contributions. A selected Thread deleted during query embedding is a
+`thread_not_found` scope failure after the read snapshot is reopened, rather than
+a retryable index-change diagnostic.

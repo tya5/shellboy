@@ -157,3 +157,96 @@ async fn shared_reference_keeps_each_explicit_thread_membership_and_bad_scopes_f
         assert_eq!(failed["result"]["items"], json!([]));
     }
 }
+
+#[tokio::test]
+async fn overlapping_global_thread_and_fork_scopes_do_not_multiply_rrf_votes() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    fixture(root).await;
+    let global = search(root, &["history"]).await;
+    let one = search(root, &["history:one"]).await;
+    let fork = search(root, &["history:fork"]).await;
+    for (scopes, originals) in [
+        (vec!["history", "history:one"], vec![&global, &one]),
+        (vec!["history:one", "history:fork"], vec![&one, &fork]),
+    ] {
+        let combined = search(root, &scopes).await;
+        assert_eq!(combined["ok"], true, "{combined}");
+        for hit in combined["result"]["items"].as_array().unwrap() {
+            let expected = originals
+                .iter()
+                .flat_map(|original| original["result"]["items"].as_array().unwrap())
+                .filter(|original| original["reference"] == hit["reference"])
+                .map(|original| original["score"].as_f64().unwrap())
+                .fold(0.0_f64, f64::max);
+            assert!(
+                (hit["score"].as_f64().unwrap() - expected).abs() < f64::EPSILON,
+                "overlapping selectors are one keyword retrieval vote: {hit}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "Synthetic 1k/5k-node Thread keyword timing; run explicitly with --nocapture"]
+async fn keyword_thread_scope_thousands_of_nodes_measurement() {
+    use std::time::Instant;
+    for count in [1000usize, 5000] {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("data");
+        std::fs::create_dir(&directory).unwrap();
+        let db = DbWorker::open(directory.join("shellboy.db")).await.unwrap();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('large','/','/a','p','m','now'),('foreign','/','/a','p','m','now');")?;
+            let mut previous = None;
+            let mut sources = Vec::new();
+            let mut groups = 0;
+            for index in 0..count {
+                let node = format!("original-{index}");
+                let text = if index+1 == count { "scope_needle last original".to_owned() } else { format!("synthetic retained original {index}") };
+                let payload = json!({"role":"user","content":[{"type":"input_text","text":text}]}).to_string();
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now',?2)",rusqlite::params![node,payload])?;
+                sources.push(node);
+                if sources.len() == 128 || index+1 == count {
+                    let marker = format!("marker-{groups}");
+                    let replacement = format!("replacement-{groups}");
+                    let payload = json!({"role":"developer","content":[{"type":"input_text","text":"synthetic omission marker"}]}).to_string();
+                    tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'event','now',?2)",rusqlite::params![marker,payload])?;
+                    tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,?2,?1,'1','1','completed','now')",rusqlite::params![replacement,marker])?;
+                    if let Some(previous) = previous.take() { sources.push(previous); }
+                    for (ordinal, source) in sources.drain(..).enumerate() {
+                        tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)VALUES(?1,?2,?3,0)",rusqlite::params![replacement,ordinal as i64,source])?;
+                    }
+                    tx.execute("INSERT INTO thread_replacement(thread_id,replacement_id)VALUES('large',?1)",[&replacement])?;
+                    previous = Some(marker);
+                    groups += 1;
+                }
+                let foreign = format!("foreign-{index}");
+                let payload = json!({"role":"user","content":[{"type":"input_text","text":"scope_needle foreign"}]}).to_string();
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now',?2)",rusqlite::params![foreign,payload])?;
+                tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('foreign',?1,?2)",rusqlite::params![index as i64,foreign])?;
+            }
+            tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('large',0,?1)",[previous.unwrap()])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        db.shutdown().await.unwrap();
+        let started = Instant::now();
+        let found = search(root.path(), &["history:large"]).await;
+        let elapsed = started.elapsed();
+        assert_eq!(found["ok"], true, "{found}");
+        assert_eq!(
+            ids(&found),
+            BTreeSet::from([format!("original-{}", count - 1)])
+        );
+        assert_eq!(
+            found["result"]["items"][0]["thread_scope"]["on_current_path"],
+            false
+        );
+        println!(
+            "THREAD_KEYWORD_MEASUREMENT {}",
+            json!({"original_nodes":count,"replacement_layers":count.div_ceil(128),"foreign_nodes":count,"elapsed_ms":elapsed.as_secs_f64()*1000.0,"result_count":1,"embedding_requests":0,"scope":"current_path_plus_recursive_completed_sources","measurement":"full_standalone_keyword_search_per_node_snapshots"})
+        );
+    }
+}
