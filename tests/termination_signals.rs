@@ -264,8 +264,24 @@ impl Fixture {
         timeout(Duration::from_secs(20), async {
             loop {
                 fixture.owner.drain();
+                // Locator publication precedes a usable request/reply round
+                // trip. Probe with a read-only command, never retry creation.
                 if fixture.root.path().join("data/endpoint.json").exists() {
-                    break;
+                    match ipc::call(
+                        &fixture.root.path().join("data"),
+                        Command::ThreadList(ThreadListArgs::default()),
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(response) => {
+                            assert!(response.ok, "readiness: {:?}", response.error);
+                            break;
+                        }
+                        Err(error) if error.code == ErrorCode::AppNotRunning => {}
+                        Err(error) => panic!("owner readiness: {error:?}"),
+                    }
                 }
                 assert!(
                     fixture.owner.child.try_wait().unwrap().is_none(),
