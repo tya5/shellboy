@@ -781,7 +781,7 @@ impl ThreadBrowser {
             Line::from(fit(&format!("cwd {}", one_line(&thread.cwd)), width)),
             Line::from(fit(
                 &format!(
-                    "{}ID {} · 親 {} · {}",
+                    "{}ID {} · 親 {} · {}{}",
                     thread
                         .revisit
                         .as_ref()
@@ -794,15 +794,12 @@ impl ThreadBrowser {
                         .as_deref()
                         .map(one_line)
                         .unwrap_or_else(|| "なし".into()),
-                    format!(
-                        "{}{}",
-                        one_line(state(&thread.state)),
-                        if interrupted_by_app_exit(thread) {
-                            " · Interrupted by app exit"
-                        } else {
-                            ""
-                        }
-                    )
+                    one_line(state(&thread.state)),
+                    if interrupted_by_app_exit(thread) {
+                        " · Interrupted by app exit"
+                    } else {
+                        ""
+                    }
                 ),
                 width,
             )),
