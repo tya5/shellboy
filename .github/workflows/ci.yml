@@ -37,6 +37,8 @@ jobs:
         run: '"RUST_TEST_THREADS=2" >> $env:GITHUB_ENV'
       - name: Tests
         run: cargo test --locked --all-targets --no-fail-fast
+      - name: Observe closed-proxy retry phases and timings
+        run: cargo test --locked --test response_upload_recovery refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens -- --exact --nocapture
       - name: Repeat attachment preparation observations in fresh processes
         shell: bash
         run: |

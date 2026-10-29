@@ -223,8 +223,20 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = reserved.local_addr().unwrap();
     drop(reserved); // A closed endpoint produces genuine connection-refused errors.
+    const REQUIRED_FAILURES: u64 = 3;
+    const HEADER_TIMEOUT_MS: u64 = 3_000;
+    const RETRY_DELAY_MS: u64 = 100;
+    // This observes three complete failed attempts, not a five-second SLA.
+    // Each may consume its own header/connect budget, plus capped retry delay.
+    // Keep a separate five-second fixture preparation allowance. In particular,
+    // loopback refusal must not be assumed instantaneous on every native OS.
+    let observation_budget =
+        Duration::from_millis(5_000 + REQUIRED_FAILURES * (HEADER_TIMEOUT_MS + RETRY_DELAY_MS));
+    // After listen starts, allow one already in-flight failed request and the
+    // next successful request, plus capped retry and fixture preparation.
+    let transition_budget = Duration::from_millis(5_000 + 2 * HEADER_TIMEOUT_MS + RETRY_DELAY_MS);
     let config = root.path().join("config.toml");
-    std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_max_retries=8\nresponse_retry_max_delay_ms=100\nresponse_header_timeout_ms=3000\n")).unwrap();
+    std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_max_retries=8\nresponse_retry_max_delay_ms={RETRY_DELAY_MS}\nresponse_header_timeout_ms={HEADER_TIMEOUT_MS}\n")).unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -259,7 +271,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     )
     .unwrap();
     let turn = accepted.turn_id.unwrap();
-    timeout(Duration::from_secs(5), async {
+    let observed = timeout(observation_budget, async {
         loop {
             let turn = turn.clone();
             let (failed, state): (i64, String) = control
@@ -281,17 +293,29 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
                 state, "recovery_wait",
                 "connect failures must not hit the partial-upload two-strike rule"
             );
-            if failed >= 3 {
+            if failed >= REQUIRED_FAILURES as i64 {
                 break;
             }
             sleep(Duration::from_millis(5)).await;
         }
     })
-    .await
-    .expect("at least three actual failed connections must be recorded");
+    .await;
+    if observed.is_err() {
+        let target = turn.clone();
+        let progress = timeout(Duration::from_secs(1), control.store.database.call(move |db| {
+        let state: String = db.query_row("SELECT state FROM turn WHERE id=?1", [&target], |r| r.get(0))?;
+        let attempts = db.prepare("SELECT json_object('state',state,'kind',json_extract(error_json,'$.error.kind'),'phase',json_extract(error_json,'$.error.http_observation.phase'),'source_bytes',json_extract(error_json,'$.error.http_observation.body_source_bytes_consumed'),'duration_ms',round((julianday(ended_at)-julianday(started_at))*86400000)) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid LIMIT 9")?
+            .query_map([target], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(json!({"turn_state":state,"attempts":attempts}))
+    })).await;
+        panic!(
+            "three failed connections exceeded derived {}ms observation budget; saved progress: {progress:?}",
+            observation_budget.as_millis()
+        );
+    }
     let listener = TcpListener::bind(address).await.unwrap();
     let server = tokio::spawn(async move {
-        let (mut stream, _) = timeout(Duration::from_secs(5), listener.accept())
+        let (mut stream, _) = timeout(transition_budget, listener.accept())
             .await
             .unwrap()
             .unwrap();
@@ -319,7 +343,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         let body = json!({"id":"proxy-restored","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"connection restored"}]}]}).to_string();
         stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
     });
-    timeout(Duration::from_secs(5), async {
+    timeout(transition_budget, async {
         loop {
             let target = turn.clone();
             let state: String = control
@@ -345,15 +369,16 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         .call(move |db| {
             let rows = db
                 .prepare(
-                    "SELECT state,error_json FROM model_attempt WHERE turn_id=?1 ORDER BY rowid",
+                    "SELECT state,error_json,round((julianday(ended_at)-julianday(started_at))*86400000) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid",
                 )?
                 .query_map([turn], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<f64>>(2)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             assert!(rows.len() >= 4);
             assert_eq!(rows.last().unwrap().0, "completed");
-            for (index, (state, body)) in rows[..rows.len() - 1].iter().enumerate() {
+            let mut observations = Vec::new();
+            for (index, (state, body, wall_ms)) in rows[..rows.len() - 1].iter().enumerate() {
                 assert_eq!(state, "failed");
                 let saved: Value = serde_json::from_str(body.as_ref().unwrap()).unwrap();
                 assert_eq!(
@@ -362,7 +387,9 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
                 );
                 assert_eq!(saved["automatic_retry"]["number"], index + 1);
                 assert!(saved.get("automatic_trim").is_none());
+                observations.push(json!({"kind":saved["error"]["kind"],"phase":saved["error"]["http_observation"]["phase"],"source_bytes":saved["error"]["http_observation"]["body_source_bytes_consumed"],"attempt_wall_ms":wall_ms}));
             }
+            eprintln!("CLOSED_PROXY_OBSERVATIONS {}", json!(observations));
             assert_eq!(
                 db.query_row("SELECT count(*) FROM replacement", [], |r| r
                     .get::<_, i64>(0))?,

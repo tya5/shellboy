@@ -1104,3 +1104,36 @@ with raw PTY drainage paused for 1,158ms. Offline docs33 (13 guides/3 categories
 The subsequent fixture-only fix does not change production behavior; do not
 claim this hash is the optimized official release binary. Release download and
 installed-binary verification remain pending.
+
+
+### Closed-endpoint observation budget correction
+
+Run [40810247300](https://github.com/tya5/shellboy/actions/runs/40810247300),
+source `895d76b`, passes Linux/macOS all-target tests (1,381 / 1,380 passed,
+zero failed) and their two extra fresh attachment processes (16 / 16 repeated
+executions). Windows compiles and runs the full suite: **80 groups / 1,276
+passed / 1 failed / 20 ignored**. Only the new three-failure closed-endpoint
+watchdog fails; both attachment cases and all other production/library/integration
+cases pass. Its extra observations are skipped after that failure.
+
+That fixture allows three-second requests but gave three failed attempts only
+five seconds total. Derive its aggregate observation budget from the configured
+requests/retry delays plus fixture preparation (14,300ms), and its listen-to-
+completion observation from one already in-flight failure plus success (11,100ms).
+Production/request deadlines and all semantic/count/recovery assertions stay
+unchanged. Add bounded saved-state diagnostics on failure and print per-attempt
+kind/phase/source/approximate wall time after successful recovery, with no extra
+await before binding the restored listener. Local macOS records three transport /
+before_body_source / zero-source-byte failures of about 1ms each; this is not
+proof of Windows refusal timing.
+
+The initial budget correction passes `sh scripts/check.sh` again (80 groups /
+1,380 passed / 0 failed / 26 ignored). The final fixture-only diagnostic/budget
+refinement passes its three integration cases; strict all-target Clippy is
+recorded separately. Native CI adds one explicit closed-endpoint diagnostic
+execution before the two fixed attachment repetitions, so standard totals and
+repeated observations must remain separate. No retry-until-green or suppressed
+recovery assertion is used.
+
+Final fixture refinement also passes locked strict all-target Clippy and format/
+diff checks. No non-test Rust code changed after the complete standard run.

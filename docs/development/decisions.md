@@ -837,3 +837,28 @@ unrelated tests. Earlier/new full native jobs provide separate-run observations;
 repeat-process evidence within a runner is explicitly identified and does not
 prove the original cause or absence of a rare failure. Report standard totals
 separately from the repeated executions.
+
+
+## 2026-10-29: a three-attempt connectivity fixture is not a five-second SLA
+
+Windows run 40810247300 passes all production/other test cases but times out
+while waiting for three saved closed-endpoint failures within five seconds.
+The fixture explicitly permits 3,000ms per request and 100ms retry delay, so
+three legal attempts alone can consume 9,300ms. The original aggregate watchdog
+cannot cover its own configured behavior. Keep all per-request/product deadlines,
+retry limits, immediate recovery-state rejection, minimum attempt count, retry
+numbers, no-trim and final-completion assertions. Derive observation time as
+5,000ms fixture preparation allowance plus three times (3,000+100ms), totaling
+14,300ms. After listen, allow one pre-existing failed attempt and the next
+successful request: 5,000+2*3,000+100 = 11,100ms for accept/completion observation.
+These are fixture observation budgets, not latency requirements or new product
+settings. No OS-specific timeout relaxation is introduced.
+
+Record at most nine saved states/classifications after watchdog failure, with a
+separate one-second diagnostic bound. On success, bind immediately without a
+new observation await that could consume retries; print bounded kind/phase/source
+consumption/approximate wall-duration facts only after recovery. Do not assume
+closed loopback endpoints fail immediately on Windows or label a pre-body timeout
+as a proven OS connection-refused exception. A dedicated native CI execution
+prints these facts; it is a repeated observation of an existing case, not a new
+distinct test. The old exact delay cause remains unproven until observed.
