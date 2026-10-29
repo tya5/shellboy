@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
+autotests = false
 description = "Shellboy native personal agent"
 license = "MIT"
 repository = "https://github.com/tya5/shellboy"
@@ -11,6 +12,19 @@ repository = "https://github.com/tya5/shellboy"
 [[bin]]
 name = "shellboy"
 path = "src/main.rs"
+
+# Ordinary suites share one link; subprocess suites retain their own child filters.
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+
+[[test]]
+name = "termination_signals"
+path = "tests/termination_signals.rs"
+
+[[test]]
+name = "tool_group_crash_recovery"
+path = "tests/tool_group_crash_recovery.rs"
 
 [dependencies]
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "io-std", "net", "signal"] }

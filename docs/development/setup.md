@@ -54,3 +54,36 @@ GitHub Actionsの定義はローカル成功とは別です。pushしていな�
 開発用dev profileでは固定版 `encoding_rs` のみ `opt-level=2` とし、testも継承します。stateful decoderの非最適化処理が大量raw出力の機能試験を支配するのを避ける設定です。製品のdecoder・依存版・機能試験の期限は変えません。cache予算をプロセスRSS上限と混同しません。
 
 通常試験は一時DBとloopback mockを使い、API資格情報を要求しません。ignoredの性能・実OS・実API試験は個別の明示実行であり、通常テスト成功に含めません。[端末fixture](../validation/manual-terminal.md) はAPIなしで操作を確認できます。実機がない項目は未実施と記録し、mockで代用合格にしません。
+
+## Integration layout and native timing (#46)
+
+Python 3.11 or newer is used by the layout/timing scripts (standard library
+only); it is not a product runtime dependency. Standard checks first run
+`python3 scripts/check-test-layout.py` (`python` on Windows). Register each new
+ordinary `tests/*.rs` file as a module in `tests/integration/main.rs`; the two
+self-spawning native suites remain explicit Cargo targets. The completeness
+check rejects missing or duplicate registrations.
+
+Run a complete profiled check with:
+
+```sh
+python3 scripts/test-timings.py --output .local/test-timings
+cargo test --locked --test integration storage::
+cargo test --locked --test integration attachment_provenance:: -- --nocapture
+```
+
+The timing script builds all targets and executes every discovered harness,
+records exit codes and inventories, and fails on any test failure or count
+mismatch. `--per-test storage,index,control_db` adds individual-process profiles;
+these timings include process startup and do not claim concurrent test durations.
+Use `--profile-only` to collect just inventories and the requested isolated
+profiles. `--compare /path/to/baseline/results.json` requires same-OS identity
+and ignored-set equality, allowing only the structural module prefix change.
+
+Normal three-OS CI uploads timings and failing test names. Repeated overflow,
+closed-proxy and attachment diagnostics are available through the Rust checks
+workflow's manual `diagnostics` input; their underlying cases still run normally.
+The Rust checks manual `performance` input profiles both the chosen baseline
+and candidate on Windows with two test threads, plus a separate four-thread
+contention comparison. Cache/runner conditions
+and build versus execution times must accompany any claimed improvement.
