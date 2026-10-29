@@ -553,6 +553,23 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         entry["attachment_id"]
     );
     finish(&control, &thread, retry).await;
+    let completed_manifest = manifest(&control, &thread).await;
+    let mut completed_request = completed_manifest.clone();
+    let transport = completed_request
+        .as_object_mut()
+        .unwrap()
+        .remove("http_observation")
+        .expect("successful attempt must retain header observations");
+    assert!(transport["header_elapsed_ms"].is_u64());
+    assert_eq!(transport["phase"], "body_receive");
+    assert_eq!(
+        transport["request_body_bytes"],
+        transport["body_source_bytes_consumed"]
+    );
+    assert_eq!(
+        completed_request, retried,
+        "completion only adds transport observations; the sent request/attachment evidence is immutable"
+    );
     send(&control, &thread, "same new version again").await;
     let next = incoming(&mut receive).await;
     assert!(
@@ -587,8 +604,8 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         .await
         .unwrap();
     assert_eq!(
-        saved, retried,
-        "the completed update evidence survives later requests and owner restart"
+        saved, completed_manifest,
+        "the completed update and transport evidence survives later requests and owner restart"
     );
     assert_eq!(attachments(&saved)[0]["changed"], true);
     send(&control, &thread, "same version after restart").await;
