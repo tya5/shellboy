@@ -17,7 +17,7 @@ Shellboyへの改名では旧名の実行名・環境変数・既定保存先へ
 
 Issue #33 adopts current-only formats: protocol version 2; required Message/Run/Turn/HistoryBody context, HistoryBody provenance and HistorySnippet provenance/context/selection; genuinely optional Thread/fork context; current index profile/query-marker validation; no expired status-operation alias, old-owner field defaults, legacy index fallback, attachment-origin repair, or duplicated RAG degradation warnings in `scope_errors`. Conversation schema advances to v11; standalone RAG schema remains v3. Isolated startup migration removes obsolete non-object index failure counters and the unused receipt-turn-source index; fresh conversation DBs use the complete current schema. Keep the general schema migration runner, ledger/user_version checks, and protocol-version rejection. Historical compatibility notes in adopted designs are superseded by their current-only sections.
 
-The next release targets 0.2.0 without a backward-compatibility promise for earlier releases. Historical schema upgrades remain isolated in startup migration modules; Core accepts only current formats. In particular, RAG does not preserve Windows
+Release 0.2.0 is published without a backward-compatibility promise for earlier releases. Historical schema upgrades remain isolated in startup migration modules; Core accepts only current formats. In particular, RAG does not preserve Windows
 backslash document keys: a complete synchronization indexes current slash keys
 with new identities and removes absent legacy keys from active search. Recreating
 the database is unnecessary; slash normalization already shipped in 0.1.6.

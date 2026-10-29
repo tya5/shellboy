@@ -1137,3 +1137,89 @@ recovery assertion is used.
 
 Final fixture refinement also passes locked strict all-target Clippy and format/
 diff checks. No non-test Rust code changed after the complete standard run.
+
+
+## v0.2.0 tagged-source native gate (2026-10-29)
+
+[Run 40812283328](https://github.com/tya5/shellboy/actions/runs/40812283328),
+source/tag target **4a5eb3ee90f324d3e905a2a6c3dff269fae4f05f**, succeeds on all
+three native runners. Format, strict locked all-target Clippy and all-target
+tests pass. Standard counts exclude repeated diagnostics:
+
+| Native runner / job | Groups | Passed | Failed | Ignored |
+| --- | --- | --- | --- | --- |
+| Linux / 123245173692 | 80 | 1,381 | 0 | 25 |
+| macOS / 123245173727 | 80 | 1,380 | 0 | 26 |
+| Windows / 123245173424 | 80 | 1,277 | 0 | 20 |
+
+Each OS separately passes the existing closed-proxy recovery case once with
+uncaptured diagnostics. Its failed-attempt approximate wall times are Linux
+3/20/21ms, macOS 1/3/2ms, Windows **2,024/2,023/2,029ms**. All report transport /
+before_body_source / zero source bytes consumed. Three Windows failures alone
+therefore exceed the earlier five-second aggregate assumption. This is direct
+native evidence for the fixture-budget correction; do not equate wall time with
+TCP delivery or provider prefill. The exact earlier failing run had no timing
+trace, so its individual delays are not reconstructed as measured facts.
+
+Two additional fresh attachment processes also succeed on each OS: Linux16,
+macOS16 and Windows14 repeated executions, zero failures. Together with the
+normal suite, tagged source has three successful attachment processes per OS.
+The dedicated Windows overflow diagnostic also succeeds once separately. These
+repeat observations are not distinct new test cases and do not establish the
+original intermittent preparation-watchdog cause. No such recurrence is observed
+in these samples; the preserved caller/state/reason diagnostics remain.
+
+Tag `v0.2.0` is pushed at the exact verified source, with no later product change.
+[Release workflow 40813637451](https://github.com/tya5/shellboy/actions/runs/40813637451)
+is building the three native optimized binaries. Public archive checks and local
+installation are recorded after they actually complete. The six new commits
+from `37bbdb1` through the tag pass history secret scanning (119,279 bytes,
+zero findings). No paid provider call or default-data migration is part of QA.
+
+
+## v0.2.0 publication, public downloads and local installation (2026-10-29)
+
+[Release v0.2.0](https://github.com/tya5/shellboy/releases/tag/v0.2.0) is published
+at **2026-10-29 03:51:11 UTC**, stable/latest and not a draft. Tag points to
+`4a5eb3ee90f324d3e905a2a6c3dff269fae4f05f`; no tested product code changed after
+the successful native gate. [Release run 40813637451](https://github.com/tya5/shellboy/actions/runs/40813637451)
+succeeds: macOS job123249520636, Windows123249520843, Linux123249520939 and
+publisher123252097808. Each native build prints the exact source and
+`shellboy 0.2.0`, passes help/version execution, and packages public docs/license.
+This establishes native executable smoke checks, not company-proxy or GUI use.
+
+All four public HTTPS assets are downloaded independently after publication.
+The three archive SHA-256 values match the published SHA256SUMS:
+
+| Archive | SHA-256 |
+| --- | --- |
+| shellboy-v0.2.0-aarch64-apple-darwin.tar.gz | `4f9d08cd9d327296177a4553ba45cff56c01edce708039418ed0750099010666` |
+| shellboy-v0.2.0-x86_64-pc-windows-msvc.zip | `5d95a0cb4c03aafb461afd0a623b6908c5bc89e01391e33a350041587389851d` |
+| shellboy-v0.2.0-x86_64-unknown-linux-gnu.tar.gz | `90668225a71dac37d3768e6d6af18f9f1e65de0b161b1fac681a2eaf60ef0722` |
+
+Windows ZIP passes CRC integrity checks and contains the expected AMD64 PE
+executable (machine 0x8664); Linux is ELF64/x86-64 and macOS is ARM64 Mach-O.
+Official release sizes are 10,723,096 bytes (Windows ZIP), 10,256,612 (macOS),
+11,081,943 (Linux), and 333 bytes (SHA256SUMS). These are real public downloads,
+not merely successful upload metadata.
+
+The macOS executable is extracted from that verified archive. Its binary hash is
+`756969dcc5758c7e9e76c3a782ad07c32a11c5633cf89e69dd89694e7443bb48`.
+It passes --version/--help, offline docs33 (13 English guides, three categories,
+127 bundled links) and RAG CLI13. After a read-only old-owner activity check,
+the existing 0.1.6 executable is backed up locally and the verified 0.2.0 is
+staged beside `~/.local/bin/shellboy`, chmod755 and atomically renamed. Installed
+hash exactly matches the official artifact and installed help/version succeed.
+No running user owner is stopped, no user configuration is edited and no default
+DB migration is performed. A previously running 0.1.6 owner still requires normal
+exit/restart; protocol2/schema11 upgrade notes are part of the release.
+
+The installed official optimized binary also passes the original ten-chat
+HTTP+PTY pressure check: initial delta visible, raw PTY drainage paused1,152ms,
+exact ten canonical outputs, selected tokens ordered/unique, hidden Threads
+visible, all ten completed, ten mock requests and zero external requests. Only
+fresh synthetic temporary stores are launched. This is separate from the earlier
+debug-binary result and does not claim physical terminal pixel/IME/clipboard,
+company Windows proxy or paid-model validation. Provider retry-count/prefill
+measurements and the original intermittent attachment cause remain the explicit
+follow-ups above.

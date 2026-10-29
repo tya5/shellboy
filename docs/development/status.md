@@ -1,17 +1,39 @@
 # Development status
 
-## Additional #32–#34 reviews: local gate passed, v0.2.0 preparing (2026-10-29)
+## v0.2.0 published; #32–#34 review follow-up completed (2026-10-29)
 
-The new reviews of b8f1f84 are tracked in [review follow-up](issue-32-34-follow-up.md).
-Prior native success below is the baseline, not verification of these changes.
-Post-trim resumption and later normal retries are separated; connection setup
-is distinct from partial uploads, and scoped keyword membership uses indexed
-reverse checks. Receipt boundaries, per-Thread save failure, index-stop causes,
-shutdown timing, RAG/preflight/pool findings are implemented. The standard local
-check passes 80 groups / 1,380 cases / 0 failed / 26 ignored, and scoped keyword
-measurement passes 1k/5k synthetic cases. Repeated native observations, release
-builds and public archive checks are pending. The user's active goal now includes v0.2.0 publication
-and a verified local binary update after review fixes and gates pass.
+[Shellboy v0.2.0](https://github.com/tya5/shellboy/releases/tag/v0.2.0) is published
+from verified tag/source `4a5eb3e`. Windows x64, macOS ARM64 and Linux x64 archives
+plus SHA256SUMS are publicly downloadable. All three optimized native builds,
+version/help smoke checks and the publisher succeeded in
+[release run 40813637451](https://github.com/tya5/shellboy/actions/runs/40813637451).
+
+The [18-item follow-up](issue-32-34-follow-up.md) covers #32–#34's new reviews.
+Retry/resumption/connection classification, optional bounded reduction, indexed
+scope membership, overlapping rank votes, deletion errors, receipt/save failure
+visibility and bounded stop/shutdown evidence are implemented. Local standard
+checks pass 80 groups / 1,380 / 0 / 26 ignored; final
+[native CI](https://github.com/tya5/shellboy/actions/runs/40812283328) passes Linux
+1,381 / macOS1,380 / Windows1,277, zero failed. Each OS also passes the separate
+closed-proxy diagnostic and two fresh attachment processes. Earlier fixture
+failures, measurement conditions and limits remain in [acceptance](../validation/acceptance.md).
+
+Public HTTPS downloads of all archives match their published SHA-256 hashes.
+Windows ZIP integrity and AMD64 PE, Linux ELF64 and macOS ARM64 are checked.
+The installed `~/.local/bin/shellboy` is the official macOS release binary,
+verified as 0.2.0 and byte-identical to the downloaded artifact. Its ten-chat
+HTTP+PTY, docs33 and RAG CLI13 checks also pass, using temporary data and local
+mocks. The previous binary is backed up locally; no default datastore migration
+or automatic restart of the previously running owner is performed. Exit the
+old owner normally and start the new version to adopt protocol2/schema11.
+
+The original intermittent attachment-watchdog cause remains unproven: no
+recurrence is observed in the tagged-source samples, not a claim that repetition
+fixed a product defect. Representative provider latency/retry tuning remains
+unmeasured; defaults eight/120 seconds are provisional with revisit conditions.
+Exact peer delivery/socket reuse and company-proxy/physical GUI behavior are
+not inferred from loopback or CLI checks.
+
 
 ## Issue #34 and #32/#33 follow-up: pushed, three-OS CI passed (2026-10-29)
 

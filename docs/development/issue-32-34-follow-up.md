@@ -49,3 +49,33 @@ zero embeddings). See acceptance for exact conditions, limits and earlier
 compile corrections. No native/release/public-download success is inferred from
 these local results. The user authorizes publication and local installation
 only after the review fixes and final gates, without an additional approval step.
+
+
+## Tagged-source native verification
+
+`v0.2.0` targets verified source `4a5eb3e`.
+[CI 40812283328](https://github.com/tya5/shellboy/actions/runs/40812283328)
+succeeds on Linux1,381 / macOS1,380 / Windows1,277 standard cases, each 80 groups
+and zero failed. The closed-proxy diagnostic and two fresh attachment processes
+per OS also succeed (separate repeated executions). Windows failed attempts
+measure about 2.02 seconds each, demonstrating why a three-attempt observation
+cannot assume five seconds total. Original product deadlines are unchanged.
+The earlier attachment symptom did not recur, but its original cause remains
+unproven. Source, previous failures, limits and counts are in acceptance.
+
+The release workflow is in progress. Publication, downloadable archive checks
+and installed-binary verification are not inferred from source CI.
+
+
+## Published outcome
+
+[Version 0.2.0](https://github.com/tya5/shellboy/releases/tag/v0.2.0) is published
+from the verified tag. All three native release builds and help/version smoke
+checks succeed. Four public assets download correctly; all three archive hashes
+match SHA256SUMS and the Windows ZIP/AMD64 executable validate. The official
+macOS binary is installed atomically, with its previous executable backed up,
+and verifies as 0.2.0 with matching artifact hash. Installed optimized HTTP+PTY10,
+docs33 and RAG CLI13 also pass with no external model calls or user-data migration.
+Acceptance contains exact sources/jobs/checksums and non-claims. The active user
+goal's implementation, push, release and local-file update are completed; an
+already-running older process adopts the update only after normal restart.
