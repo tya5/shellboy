@@ -152,3 +152,8 @@ is created_at then ID, descending, on both surfaces. No Run means idle.
 The paged list obtains these facts in its existing query, using indexed EXISTS
 for owned work; no per-row activity queries or lifecycle writes are added.
 Exit markers and Revisit remain separate saved facts.
+
+Running-attempt/tool refinements are short-circuited for terminal Runs and
+non-running Turns, and tool-group checks are skipped while an attempt is
+inflight. Background/finalization pages therefore do not scan historical
+tool groups merely to return a completed-answer activity.

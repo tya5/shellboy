@@ -1347,11 +1347,13 @@ const THREAD_LIST_SQL: &str = "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.up
       OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=latest.id AND state IN ('live','stopping')),
     a.state,CASE WHEN a.state='failed' AND a.generation=u.generation AND json_valid(a.error_json)
       THEN json_extract(a.error_json,'$.automatic_retry') END,
-    EXISTS(SELECT 1 FROM tool_group WHERE turn_id=u.id AND state='running')
+    CASE WHEN latest.state='live' AND u.state='running' AND COALESCE(a.state,'')<>'inflight'
+      THEN EXISTS(SELECT 1 FROM tool_group WHERE turn_id=u.id AND state='running') ELSE 0 END
 FROM thread t LEFT JOIN run latest ON latest.id=(
     SELECT r.id FROM run r WHERE r.thread_id=t.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
 LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=latest.id ORDER BY created_at DESC,id DESC LIMIT 1)
-LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id ORDER BY rowid DESC LIMIT 1)
+LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id
+    AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1)
 WHERE t.deleted_at IS NULL AND t.rowid<=?1
     AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
 ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
