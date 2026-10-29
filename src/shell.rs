@@ -26,6 +26,7 @@ mod unix_group;
 use unix_group::{cleanup_group, signal_group};
 
 mod io_session;
+pub(crate) mod timing;
 use io_session::IoSession;
 
 const READ_CHUNK: usize = 8192;

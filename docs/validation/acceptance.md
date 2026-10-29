@@ -1,5 +1,17 @@
 # Validation record
 
+## Issue #45: read-time shell timing
+
+Same isolated macOS arm64/Rust 1.99.1 environment as #44.
+The focused work_status suite passes 13 tests before the 1,001-shell bounded
+page fixture was added. Added checks compare get/status start and output facts,
+observe live duration increasing, preserve terminal duration, return null after
+output reclamation, and keep status fingerprint/order unchanged by output and
+time. Library timing tests verify future-start clamping, sequence rather than
+wall-clock ordering, unknown terminal duration and primary-key output lookup
+without a sort. Full combined-task standard check and 3 OS CI remain pending.
+Physical terminals and real providers have not been exercised.
+
 ## Issue #44: saved activity projection
 
 macOS arm64, pinned Rust 1.99.1, isolated worktree based on e194469.

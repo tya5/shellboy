@@ -802,6 +802,8 @@ args!(TurnDetails { context: crate::context::ExecutionContext, turn_id: String, 
 // They are not an older-owner protocol compatibility contract.
 args!(ShellDetails {
     execution_id: String, run_id: String, state: ShellState, output_complete: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")] started_at: Option<String>,
+    #[serde(default)] last_output_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] forced: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")] exit_signal: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")] group_cleanup_confirmed: Option<bool>,

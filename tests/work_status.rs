@@ -701,3 +701,95 @@ async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_foot
     .unwrap();
     f.close().await;
 }
+
+#[tokio::test]
+async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_order() {
+    use shellboy::control::output::ShellOutputReader;
+    let f = Fixture::new().await;
+    let reader = ShellOutputReader::new(f.db.clone(), "fixture");
+    let first = reader.get("exec").await.unwrap();
+    let before = f.status(StatusArgs::default()).await.unwrap();
+    let shell = before.items.iter().find(|i| i.id == "exec").unwrap();
+    assert_eq!(first.started_at, shell.started_at);
+    assert!(shell.elapsed_ms.unwrap() >= first.elapsed_ms.unwrap());
+    assert_eq!(first.last_output_at, None);
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    let next = reader.get("exec").await.unwrap();
+    assert!(next.elapsed_ms.unwrap() > first.elapsed_ms.unwrap());
+    let after = f.status(StatusArgs::default()).await.unwrap();
+    assert_eq!(before.fingerprint, after.fingerprint);
+    assert_eq!(
+        before.items.iter().map(|i| &i.id).collect::<Vec<_>>(),
+        after.items.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+    f.db.call(|db| {
+        db.execute_batch(
+            "INSERT INTO output_chunk VALUES('exec',1,'stdout',0,X'61','2026-10-25T07:06:00Z');",
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let with_output = reader.get("exec").await.unwrap();
+    let with_status = f.status(StatusArgs::default()).await.unwrap();
+    let shell = with_status.items.iter().find(|i| i.id == "exec").unwrap();
+    assert_eq!(
+        with_output.last_output_at.as_deref(),
+        Some("2026-10-25T07:06:00Z")
+    );
+    assert_eq!(with_output.last_output_at, shell.last_output_at);
+    assert_eq!(with_status.fingerprint, before.fingerprint);
+    assert_eq!(shell.activity_at, "2026-10-25T07:05:00Z");
+    f.db.call(|db| { db.execute_batch("DELETE FROM output_chunk; UPDATE shell_execution SET state='exited',shell_json=json_set(shell_json,'$.completion',json('{\"elapsed_ms\":123}')) WHERE id='exec';")?; Ok(()) }).await.unwrap();
+    let ended = reader.get("exec").await.unwrap();
+    assert_eq!(ended.elapsed_ms, Some(123));
+    assert_eq!(ended.last_output_at, None);
+    let status = f
+        .status(StatusArgs {
+            all: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let shell = status.items.iter().find(|i| i.id == "exec").unwrap();
+    assert_eq!(shell.elapsed_ms, Some(123));
+    assert_eq!(shell.last_output_at, None);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn many_shells_keep_last_output_projection_on_the_bounded_status_page() {
+    let f = Fixture::new().await;
+    f.db.call(|db| {
+        db.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
+          INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+          SELECT printf('bulk%04d',x),'root','turn-root',printf('bulk%04d',x),'running','/','{}','UTF-8','UTF-8','closed','2026-10-25T07:05:00Z' FROM n;
+          INSERT INTO output_chunk SELECT id,1,'stdout',0,X'61','2026-10-25T07:05:01Z' FROM shell_execution WHERE id LIKE 'bulk%';
+          INSERT INTO output_chunk SELECT id,2,'stderr',0,X'62','2026-10-25T07:05:02Z' FROM shell_execution WHERE id LIKE 'bulk%';")?;
+        Ok(())
+    }).await.unwrap();
+    let begin = std::time::Instant::now();
+    let page = f
+        .status(StatusArgs {
+            state: vec!["running".into()],
+            limit: 50,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 50);
+    assert!(page.next_cursor.is_some());
+    for item in page
+        .items
+        .iter()
+        .filter(|i| i.kind == "shell" && i.id.starts_with("bulk"))
+    {
+        assert_eq!(item.last_output_at.as_deref(), Some("2026-10-25T07:05:02Z"));
+        assert!(item.elapsed_ms.unwrap() > 0);
+    }
+    eprintln!(
+        "issue45: first 50-row page from 1001 shells: {:?}",
+        begin.elapsed()
+    );
+    f.close().await;
+}

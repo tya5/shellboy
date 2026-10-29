@@ -43,3 +43,17 @@ cursor v2はversion/instance/scope/正規化filterのSHA-256/最後のSortKey/�
 ## Revisit observation (Issue #36)
 
 Run WorkItems include the optional typed Revisit summary (pending, consumed_count, last_fired_at) in the same owner read transaction and status fingerprint. Other work kinds do not duplicate Run reservation facts. Existing human work rows append the bounded `Revisit N · next reserved` label; full summary values remain in details. The active conversation footer reads the same facts through the existing activity projection, with no new poller. Conversation event presentation names the Revisit continuation, shows a bounded instruction preview, and retains original event/Run/set-operation provenance in raw details. Interrupted reservations use their own bounded interruption section and an English label.
+
+## Read-time shell timing (Issue #45)
+
+`shell get` and shell `status` items expose saved `started_at`, read-time
+`elapsed_ms` for starting/running/stopping executions, and nullable
+`last_output_at`. Terminal elapsed time remains the saved completion value;
+unknown terminal duration is not synthesized. Live duration is clamped to zero
+for a future start. Last output is the received_at of the highest retained
+output_chunk sequence, using its (execution_id, sequence) primary key; no
+output or collected output gives null. These are database observations, not
+OS liveness guarantees. No table, worker, poller or migration is added.
+Status calculates timing only for returned shell items in the same read
+transaction, after paging/fingerprinting: elapsed time and output observation
+do not change activity_at, ordering, cursors or projection fingerprints.

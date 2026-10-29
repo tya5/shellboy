@@ -278,19 +278,25 @@ impl ShellOutputReader {
     pub async fn get(&self, execution_id: &str) -> Result<ShellDetails> {
         let execution = execution_id.to_owned();
         self.db(move |db| {
+            let tx = db.transaction().map_err(sql_error)?;
+            let db = &tx;
             let mut details = snapshot(db, &execution)?.details;
-            let (command, cwd, thread, turn, forced, signal, confirmed, elapsed) = db.query_row(
-                "SELECT json_extract(s.shell_json,'$.command'),s.cwd,r.thread_id,s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.elapsed_ms')='integer' AND json_extract(s.shell_json,'$.completion.elapsed_ms') BETWEEN 0 AND 9223372036854775807 THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1",
-                [&execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get::<_,Option<i64>>(7)?)),
+            let (command, cwd, thread, turn, forced, signal, confirmed) = db.query_row(
+                "SELECT json_extract(s.shell_json,'$.command'),s.cwd,r.thread_id,s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1",
+                [&execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
             ).map_err(sql_error)?;
             details.forced = forced;
             details.exit_signal = signal;
             details.group_cleanup_confirmed = confirmed;
-            details.elapsed_ms = elapsed.map(|value| value as u64);
+            let timing = crate::shell::timing::read(db, &execution, chrono::Utc::now()).map_err(sql_error)?;
+            details.started_at = Some(timing.started_at);
+            details.elapsed_ms = timing.elapsed_ms;
+            details.last_output_at = timing.last_output_at;
             details.command = command;
             details.cwd = Some(cwd);
             details.thread_id = Some(thread);
             details.turn_id = Some(turn);
+            tx.commit().map_err(sql_error)?;
             Ok(details)
         }).await
     }
@@ -636,6 +642,8 @@ fn snapshot(db: &Connection, execution: &str) -> Result<Snapshot> {
             exit_signal: None,
             group_cleanup_confirmed: None,
             elapsed_ms: None,
+            started_at: None,
+            last_output_at: None,
             command: None,
             cwd: None,
             thread_id: None,

@@ -128,8 +128,9 @@ completion生成後のDB保存待ちや後続のexcerpt読取り時間は含め�
 非負i64の範囲へ飽和させる。Unix/Windows adapterは同じ期間定義を使う。
 
 既存 `shell_json.completion` と `shell_ended` payloadへこの値を保存し、モデルのshell結果と
-`ShellDetails` はその同じ測定値を返す。公開追加はdefault/skip-noneのoptional field一つで、
-旧owner応答も新clientが読める。旧terminal・起動失敗・再起動で回収された未知の値を
+`ShellDetails` の終端値はその同じ測定値を返す。Issue #45 adds read-time wall-clock
+elapsed_ms for live executions only; terminal measurements are never replaced by it.
+旧terminal・起動失敗・再起動で回収された未知の値を
 wall clock差や0で補完しない。未知は省略し、既存のstarted_at/ended_atは別の時刻事実として残す。
 永続Instant・追加列・timer worker・実行状態は追加しない。Run/TurnのUI計時は別のF11範囲とする。
 
@@ -158,3 +159,16 @@ FailureKind/ShellFailuresは既存S4/S5の型付き失敗・独立truncation判�
 I/O終了が返すのはstate/reason/output_completeの3値で、exit code/signal/forced/group確認/単調時間はOS supervisorの実観測から従来どおり組み立てる。Windows Jobをterminal通知前に閉じる順、Unixの群停止/回収と残余TOCTOU、自然終了後のstopで状態を変えない境界を保つ。OSのwait/Job/PGIDの違いを二methodのtraitへ押し込む追加抽象は採らない。既存NativeChild/unix_groupで境界を保持でき、共通I/Oとは寿命が異なるためである。
 
 共通型は既存task/資源の一時所有であり、dropで未確認の再実行や新たな監視を開始しない。開始時はpublic handleを返す前にstdin guardを確保し、終了時はdrain期限→未完taskのabortと実join→finished→completionの順序を維持する。macOSの実shell回帰と利用可能なWindows targetの型検査を区別し、未保有Windows実機の成功は主張しない。
+
+## Read-time timing observations (Issue #45)
+
+`shell get` adds the saved `started_at` and nullable `last_output_at`. For
+starting/running/stopping shells, `elapsed_ms` is computed at read time from
+started_at and the current UTC clock, clamped at zero if the clock is before
+the start; malformed timestamps remain unknown. This is not the supervisor's
+monotonic completion duration and can reflect clock adjustments. Terminal
+shells return only the saved validated completion duration (or unknown).
+The last retained output sequence supplies received_at via the output_chunk
+primary key, with no output/collected output represented by null. `status`
+uses the same reader for returned shell items. Reads do not claim OS liveness.
+No new persistent facts, worker or polling cadence are introduced.

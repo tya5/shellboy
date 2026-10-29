@@ -173,3 +173,13 @@ Do not expect `$env:...` to expand normally after `--%`. This PowerShell example
 ## Shell elapsed time
 
 `elapsed_ms` measures supervision from immediately before OS process launch until completion is finalized after the direct child exits, descendant reclamation is confirmed, and output drains. It includes waiting while descendants hold pipes and output backpressure, but excludes later DB persistence waits and result reading. `started_at` / `ended_at` are separate stored timestamps. This field is absent before termination and when an execution is recovered after owner restart; no duration is invented.
+
+### Observing long-running shells (Issue #45)
+
+`shell get --execution ID` and shell entries in `status` expose saved
+`started_at`, nullable `last_output_at` (latest retained output sequence),
+and `elapsed_ms`. While starting/running/stopping, elapsed_ms is calculated
+at read time from the saved start and wall clock, not a process-liveness
+check or monotonic measurement. For terminal shells it is the saved completion
+duration, if known. No output or reclaimed output gives last_output_at: null.
+Status timing does not affect activity_at, sorting, cursor or fingerprint.

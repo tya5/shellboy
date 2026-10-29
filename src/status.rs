@@ -31,6 +31,9 @@ pub struct WorkItem {
     pub ended_at: Option<String>,
     pub updated_at: Option<String>,
     pub activity_at: String,
+    /// Read-time duration for live shells; saved duration for terminal shells.
+    pub elapsed_ms: Option<u64>,
+    pub last_output_at: Option<String>,
     pub attempt_connection: Option<String>,
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
@@ -379,6 +382,8 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         execution_id: (kind == WorkKind::Shell).then_some(id.clone()),
         message_id: (kind == WorkKind::Message).then_some(id.clone()),
         attempt_id: (kind == WorkKind::Attempt).then_some(id.clone()),
+        elapsed_ms: None,
+        last_output_at: None,
         revisit: None,
         targets: Vec::new(),
     };
@@ -485,11 +490,22 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     let mut filters = args.clone();
     filters.cursor = None;
     filters.state = scope.states;
+    // Enrich only the bounded result page. Dynamic observations never enter
+    // the durable fingerprint or cursor sort keys.
+    let observed = chrono::Utc::now();
+    for selected in &mut selected {
+        if selected.item.kind == "shell" {
+            let timing =
+                crate::shell::timing::read(db, &selected.item.id, observed).map_err(sql)?;
+            selected.item.elapsed_ms = timing.elapsed_ms;
+            selected.item.last_output_at = timing.last_output_at;
+        }
+    }
     Ok(StatusSnapshot {
         receipt_budget: crate::control::receipt::summary(db, instance)?,
         filters,
         instance_id: instance.into(),
-        observed_at: chrono::Utc::now().to_rfc3339(),
+        observed_at: observed.to_rfc3339(),
         scope: "durable_only".into(),
         consistency: "single_sqlite_read_transaction".into(),
         fingerprint,

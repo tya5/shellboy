@@ -1,5 +1,16 @@
 # Development status
 
+## Issue #45: read-time shell observations
+
+Shell get and bounded status pages now share the saved start/output timing
+reader. Live duration is a read-time wall-clock observation; terminal duration
+remains the saved monotonic completion measurement. Unknown/collected output is
+null. Status fingerprint, cursor and sort keys exclude the new observations.
+Focused work-status tests pass (13 tests before the bulk-shell fixture was
+added), including output retention, read-only status, stable fingerprint and
+get/status agreement. Primary-key query-plan and clock-boundary tests pass.
+The combined standard check is in progress; native CI remains pending.
+
 ## Issue #44: unified saved activity
 
 Thread list and conversation activity now share one pure classifier. Native
