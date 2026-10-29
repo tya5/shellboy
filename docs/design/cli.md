@@ -86,3 +86,10 @@ fingerprints; get is read-only and receipt-free. Set accepts nonblank text of
 at most 8192 UTF-8 bytes, checked in both CLI and wire validation. Its stdin
 reader consumes at most 8193 bytes and rejects overflow without truncation.
 See [Revisit](revisit.md) for ownership, lifecycle and replacement semantics.
+
+## Explicit instruction references (#51)
+
+The [per-Thread instruction reference contract](agents-reference.md) supersedes
+previous fixed-reference wording: explicit create/set/fork selection is allowed,
+while cwd changes alone never rediscover instructions and same-Turn retry
+continues using its durable snapshot.

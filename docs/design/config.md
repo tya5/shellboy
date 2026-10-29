@@ -85,3 +85,10 @@ consumptions per Run. Other Limits fields remain strictly positive. The small
 section declaration macro distinguishes optional fields from the existing
 positive numeric fields; it does not add a validation registry. See
 [Revisit](revisit.md) for the `revisit_limit_reached` rejection and counter.
+
+## Explicit instruction references (#51)
+
+The [per-Thread instruction reference contract](agents-reference.md) supersedes
+previous fixed-reference wording: explicit create/set/fork selection is allowed,
+while cwd changes alone never rediscover instructions and same-Turn retry
+continues using its durable snapshot.

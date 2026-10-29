@@ -1079,3 +1079,11 @@ added only to the bounded status page after fingerprint/cursor derivation.
 Revisit this choice if a future contract requires output-driven ordering or
 monotonic live timing; that would require a separate persistence/ownership
 design, not an implicit change to the present read projection.
+
+## #51: explicit AGENTS references (adopted)
+
+Explicit selection is strict and has no clearing operation. Relative paths use
+the effective target cwd, lexical normalization and revision-checked preflight.
+Only reference-change events defer to the next new Turn. This preserves existing
+settings authority and snapshots without adding a worker, queue or table.
+Revisit clearing/composition only under a separate user requirement.

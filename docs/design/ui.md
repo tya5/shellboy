@@ -118,3 +118,10 @@ frontendのstream tailは巨大deltaをtrimした後の余剰String capacityと�
 一覧の打鍵は即座にfilterと要求generationへ反映し、旧返答を失効させる。DB取得だけはUI-local単調時計による150msのtrailing deadlineへ集約し、連続入力の最終条件を一度送る。ThreadBrowserが保持する追加値は未送信deadline一件だけで、入力停止後の既存UI event loopで消費する。新しいDB poller、常駐task、Core stateは追加しない。150msは入力burstを集約する表示上の応答時間であり、DB timeoutや取得の完了保証ではない。
 
 open/明示Ctrl+R/後続pageは従来通り即時要求する。closeと新open/明示refreshは未送信deadlineを解除する。256文字上限や空Backspaceでfilterが変わらない場合は要求も増やさない。未送信の旧generationを既存deferred action再送から除き、queue満杯でも保持する一覧要求は最新一件に限る。受理済み旧要求の実行は取り消さず、既存generationで返答だけ拒否する。表示中の実Thread IDを選ぶ操作とcursor/page/2000件上限は変えない。試験は固定Instantで集約境界・旧返答・明示refresh・close・queue再送を確認し、待ちsleepを使わない。
+
+## Explicit instruction references (#51)
+
+The [per-Thread instruction reference contract](agents-reference.md) supersedes
+previous fixed-reference wording: explicit create/set/fork selection is allowed,
+while cwd changes alone never rediscover instructions and same-Turn retry
+continues using its durable snapshot.

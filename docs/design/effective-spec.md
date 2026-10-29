@@ -172,3 +172,7 @@ Issue #46 adopts [measured CI test performance](ci-test-performance.md): preserv
 all native test identities and assertions while reducing repeated integration
 linking and fixture-only commits. Keep native timing evidence distinct from
 policy tests and do not add product machinery for the test runner.
+
+Issue #51 adopts [explicit instruction references](agents-reference.md): one
+reference per Thread, strict explicit-path validation, atomic settings and
+next-new-Turn notification without altering same-Turn snapshots.

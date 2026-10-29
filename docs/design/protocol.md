@@ -245,3 +245,10 @@ at read time from the saved start and wall clock, not a process-liveness
 check or monotonic measurement. For terminal shells it is the saved completion
 duration, if known. No output or reclaimed output gives last_output_at: null.
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
+
+## Instruction references (#51)
+
+thread.create/set/fork accept optional `agents`; thread.get returns required
+`agents_path`. Existing protocol 2 is retained for this pre-1.0 additive change.
+See [the reference contract](agents-reference.md) for validation, relative paths,
+atomic mutation and context_changed/agents_reference delivery.

@@ -358,3 +358,10 @@ Startup interruption, drained Run shutdown, and final drained shutdown preserve 
 OS SIGTERM/SIGHUP and terminal loss use the existing shutdown path under the
 [bounded termination contract](os-signal-shutdown.md); a second signal or OS
 cleanup budget expiry is a forced-exit boundary, not successful drain.
+
+## Explicit instruction references (#51)
+
+The [per-Thread instruction reference contract](agents-reference.md) supersedes
+previous fixed-reference wording: explicit create/set/fork selection is allowed,
+while cwd changes alone never rediscover instructions and same-Turn retry
+continues using its durable snapshot.
