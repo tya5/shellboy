@@ -659,6 +659,74 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
         duplicates, 0,
         "the closed watch must not produce repeated UI notices"
     );
+    // The normal, low-volume fixture drains the existing diagnostic writer.
+    // Stage times are captured at callers, not delayed writer wall-clock times.
+    let log = std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
+    let records = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        records.iter().all(|record| record["dropped"] == 0),
+        "normal shutdown dropped diagnostics: {records:?}"
+    );
+    let expected_frontend = [
+        "listener",
+        "draft_enqueue",
+        "accepted_sends",
+        "draft_save",
+        "interrupt_capture",
+        "control_tasks",
+        "read_workers",
+        "images",
+        "control",
+        "workers",
+    ]
+    .into_iter()
+    .flat_map(|stage| [(stage, "begin"), (stage, "end")])
+    .chain(std::iter::once(("owner", "begin")))
+    .collect::<Vec<_>>();
+    let expected_owner = vec![
+        ("database", "begin"),
+        ("database", "end"),
+        ("endpoint", "begin"),
+        ("endpoint", "end"),
+        ("diagnostics", "begin"),
+    ];
+    for (scope, expected) in [("frontend", expected_frontend), ("owner", expected_owner)] {
+        let traces = records
+            .iter()
+            .filter(|record| record["event"] == "shutdown" && record["shutdown"]["scope"] == scope)
+            .map(|record| &record["shutdown"])
+            .collect::<Vec<_>>();
+        let stages = traces
+            .iter()
+            .map(|trace| {
+                (
+                    trace["stage"].as_str().unwrap(),
+                    trace["boundary"].as_str().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            stages, expected,
+            "missing fixed shutdown stages for {scope}"
+        );
+        let elapsed = traces
+            .iter()
+            .map(|trace| trace["elapsed_ms"].as_u64().unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            elapsed.windows(2).all(|pair| pair[0] <= pair[1]),
+            "non-monotonic caller elapsed time in {scope}: {elapsed:?}"
+        );
+        assert!(
+            traces
+                .iter()
+                .all(|trace| trace.as_object().unwrap().len() == 4),
+            "shutdown traces must contain only fixed scope/stage/boundary and elapsed time"
+        );
+    }
 }
 
 #[test]

@@ -57,6 +57,44 @@ pub struct MessageSendTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_id: Option<String>,
 }
+/// Fixed shutdown observations on the existing best-effort diagnostic queue.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ShutdownScope {
+    Frontend,
+    Owner,
+}
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ShutdownStage {
+    Listener,
+    DraftEnqueue,
+    AcceptedSends,
+    DraftSave,
+    InterruptCapture,
+    ControlTasks,
+    ReadWorkers,
+    Images,
+    Control,
+    Workers,
+    Owner,
+    Database,
+    Endpoint,
+    Diagnostics,
+}
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ShutdownBoundary {
+    Begin,
+    End,
+}
+#[derive(Debug, Clone, Copy, Serialize)]
+pub(crate) struct ShutdownTrace {
+    scope: ShutdownScope,
+    stage: ShutdownStage,
+    boundary: ShutdownBoundary,
+    elapsed_ms: u64,
+}
 #[derive(Serialize)]
 struct Entry {
     at: String,
@@ -69,6 +107,8 @@ struct Entry {
     stream_difference: Option<ModelFailureDetails>,
     #[serde(skip_serializing_if = "Option::is_none")]
     send: Option<MessageSendTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shutdown: Option<ShutdownTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -142,6 +182,7 @@ struct Record {
     failure: Option<ModelFailureDetails>,
     stream_difference: Option<ModelFailureDetails>,
     send: Option<MessageSendTrace>,
+    shutdown: Option<ShutdownTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -176,6 +217,7 @@ impl Diagnostics {
                     failure,
                     stream_difference,
                     send,
+                    shutdown,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -187,6 +229,7 @@ impl Diagnostics {
                         failure,
                         stream_difference,
                         send,
+                        shutdown,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -328,7 +371,36 @@ impl Diagnostics {
         send.draft_id = sanitize_id(&send.draft_id);
         send.operation_id = sanitize_id(&send.operation_id);
         send.message_id = send.message_id.as_deref().map(sanitize_id);
-        self.enqueue_with_send(DiagnosticEvent::MessageSend, ids, None, None, Some(send));
+        self.enqueue_with_details(
+            DiagnosticEvent::MessageSend,
+            ids,
+            None,
+            None,
+            Some(send),
+            None,
+        );
+    }
+    /// Caller supplies monotonic elapsed time; writer latency is not included.
+    pub(crate) fn record_shutdown(
+        &self,
+        scope: ShutdownScope,
+        stage: ShutdownStage,
+        boundary: ShutdownBoundary,
+        elapsed_ms: u64,
+    ) {
+        self.enqueue_with_details(
+            DiagnosticEvent::Shutdown,
+            DiagnosticIds::default(),
+            None,
+            None,
+            None,
+            Some(ShutdownTrace {
+                scope,
+                stage,
+                boundary,
+                elapsed_ms,
+            }),
+        );
     }
     fn enqueue(
         &self,
@@ -337,15 +409,16 @@ impl Diagnostics {
         failure: Option<ModelFailureDetails>,
         stream_difference: Option<ModelFailureDetails>,
     ) {
-        self.enqueue_with_send(event, ids, failure, stream_difference, None);
+        self.enqueue_with_details(event, ids, failure, stream_difference, None, None);
     }
-    fn enqueue_with_send(
+    fn enqueue_with_details(
         &self,
         event: DiagnosticEvent,
         mut ids: DiagnosticIds,
         failure: Option<ModelFailureDetails>,
         stream_difference: Option<ModelFailureDetails>,
         send: Option<MessageSendTrace>,
+        shutdown: Option<ShutdownTrace>,
     ) {
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -371,6 +444,7 @@ impl Diagnostics {
                     failure,
                     stream_difference,
                     send,
+                    shutdown,
                 })
                 .is_err()
         }) {

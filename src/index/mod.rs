@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -120,6 +120,11 @@ enum ClaimResult {
     Progress,
     Ready(Box<Claimed>),
 }
+#[derive(Clone, Copy, Serialize)]
+struct StorageDiagnosticStop {
+    processing_error_code: ErrorCode,
+    pause_error_code: ErrorCode,
+}
 pub struct IndexService {
     clients: Arc<crate::model::http::HttpClients>,
     database: DbWorker,
@@ -128,7 +133,7 @@ pub struct IndexService {
     profile_key: Option<String>,
     endpoint_family_key: Option<String>,
     started: AtomicBool,
-    storage_diagnostic_failed: AtomicBool,
+    storage_diagnostic_stop: OnceLock<StorageDiagnosticStop>,
     reader: ShellOutputReader,
     source_slots: Arc<Semaphore>,
     search_slots: Arc<Semaphore>,
@@ -173,7 +178,7 @@ impl IndexService {
             profile_key,
             endpoint_family_key,
             started: AtomicBool::new(false),
-            storage_diagnostic_failed: AtomicBool::new(false),
+            storage_diagnostic_stop: OnceLock::new(),
             stop: CancellationToken::new(),
         })
     }
@@ -211,12 +216,16 @@ impl IndexService {
         self.stop.cancel();
         self.notify.notify_waiters();
     }
-    fn storage_stop_reason(&self) -> Option<&'static str> {
-        self.storage_diagnostic_failed.load(Ordering::Acquire).then_some("Index workers stopped after a storage failure; the diagnostic pause could not be saved. Repair storage and restart the owner")
+    fn storage_stop_reason(&self) -> Option<String> {
+        self.storage_diagnostic_stop.get().map(|stop| format!(
+            "Index workers stopped after a storage failure; the diagnostic pause could not be saved (processing={:?}, pause={:?}). Repair storage and restart the owner",
+            stop.processing_error_code, stop.pause_error_code))
     }
     fn stopped_search_error(&self) -> ApiError {
         if let Some(reason) = self.storage_stop_reason() {
-            let mut error = err(ErrorCode::InvalidState, reason);
+            let mut error = err(ErrorCode::InvalidState, &reason);
+            error.details =
+                Some(json!({ "storage_diagnostic_stop": self.storage_diagnostic_stop.get() }));
             error.hint = Some(
                 "Repair storage and restart the owner before issuing another semantic search"
                     .into(),
@@ -719,11 +728,13 @@ impl IndexService {
                     Ok(())
                 })
                 .await;
-            if paused.is_err() {
+            if let Err(pause_error) = paused {
                 // Storage cannot preserve even the diagnostic. Stop spending;
                 // restart/repair is required rather than a hidden retry loop.
-                self.storage_diagnostic_failed
-                    .store(true, Ordering::Release);
+                let _ = self.storage_diagnostic_stop.set(StorageDiagnosticStop {
+                    processing_error_code: error.code,
+                    pause_error_code: db_error(pause_error).code,
+                });
                 self.stop.cancel();
             }
         }
@@ -915,8 +926,13 @@ mod idle_tests {
             db.execute_batch("CREATE TRIGGER refuse_index_pause BEFORE INSERT ON app_meta WHEN NEW.key LIKE 'index.pause.%' BEGIN SELECT RAISE(ABORT,'synthetic diagnostic write failure'); END;")?;
             Ok(())
         }).await.unwrap();
-        assert!(service.process_one(CancellationToken::new()).await.is_err());
-        assert!(service.storage_diagnostic_failed.load(Ordering::Acquire));
+        let processing_error = service
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap_err();
+        let stopped = service.storage_diagnostic_stop.get().unwrap();
+        assert_eq!(stopped.processing_error_code, processing_error.code);
+        assert_eq!(stopped.pause_error_code, ErrorCode::SaveFailed);
         let error = service.search("synthetic query", 10).await.unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidState);
         assert!(
@@ -925,6 +941,14 @@ mod idle_tests {
                 .contains("Index workers stopped after a storage failure")
         );
         assert!(!error.message.contains("owner stopped"));
+        assert_eq!(
+            error.details.as_ref().unwrap()["storage_diagnostic_stop"]["processing_error_code"],
+            json!(processing_error.code)
+        );
+        assert_eq!(
+            error.details.as_ref().unwrap()["storage_diagnostic_stop"]["pause_error_code"],
+            "save_failed"
+        );
         assert!(error.hint.unwrap().contains("restart the owner"));
         db.call(move |db| {
             db.execute_batch("DROP TRIGGER refuse_index_pause")?;
@@ -941,14 +965,25 @@ mod idle_tests {
         })
         .await
         .unwrap();
+        let pause_key = IndexKeys::new(service.profile_key.as_deref().unwrap()).pause();
+        let saved_pause = r#"{"kind":"provider_pause","evidence":"synthetic durable evidence"}"#;
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            set_meta(&tx, &pause_key, saved_pause)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
         let status = service.status(IndexArgs::default()).await.unwrap();
         assert!(status.paused);
+        let reason = status.reason.unwrap();
         assert!(
-            status
-                .reason
-                .unwrap()
-                .contains("diagnostic pause could not be saved")
+            reason.starts_with(saved_pause),
+            "durable reason must survive: {reason}"
         );
+        assert!(reason.contains("diagnostic pause could not be saved"));
+        assert!(reason.contains("pause=SaveFailed"));
         // Removing the trigger does not silently restart stopped workers.
         assert!(
             service

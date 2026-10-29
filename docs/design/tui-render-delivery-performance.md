@@ -172,9 +172,9 @@ a worker-limited handle; shutdown borrows the unique original main handle.
 ### Further #32 review: one closed-worker notice and fresh scan boundaries
 
 Once DraftSaver observes its worker receiver closed, one existing local boolean
-stops further pump attempts. The latest snapshots remain in the existing backlog;
-one failure projection may wait for UI capacity, but ticks and later edits do
-not enqueue the same critical notice repeatedly. The existing worker join still
+stops further worker pump attempts. The latest snapshots remain in the existing
+backlog; one failure projection per affected Thread may wait for UI capacity,
+but ticks and later revisions of the same retained entry do not repeat it. The existing worker join still
 reports its failed shutdown. No replacement worker or notification queue is
 created; owner restart is required to recreate the autosave worker.
 
@@ -183,3 +183,17 @@ checked, or when all were checked by the previous completed pass. Starting that
 pass clears both checked and repeat bits: changes observed before its query are
 already included. Mixed checked/unchecked state is a partial pass; its repeat
 bits survive so changes during the pass request exactly one fair further pass.
+
+
+### Completed receipt passes and stopped saver visibility (#32 follow-up)
+
+A completed receipt pass clears checked bits before returning idle, including
+when pending unconsumed receipts remain. Thus a later new receipt cannot make
+old completed work look like a partial pass. Changed during an actual partial
+pass still requests one fair full follow-up.
+
+A closed autosave worker is never pumped again. Each existing backlog entry
+carries one local notification bit: warn each affected Thread once, including
+Threads first edited after closure, without repeating for newer revisions of
+the same retained entry. Backlog limits and normal-shutdown failure remain.
+No notification queue, extra worker or unbounded per-Thread registry is added.

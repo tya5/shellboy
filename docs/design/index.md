@@ -227,11 +227,25 @@ already saved by failure adoption rather than replacing its provider evidence.
 
 If the fallback diagnostic pause cannot be saved, stop the existing index
 workers and reject query embedding through their existing cancellation token.
-One AtomicBool owned by the existing IndexService records that this stop was a
-storage-diagnostic failure rather than owner shutdown. Search then says index
+One once-initialized pair of typed error codes owned by the existing IndexService
+records this storage-diagnostic stop rather than owner shutdown. Search then says index
 workers stopped after a storage failure and advises repairing storage and
 restarting the owner. If the DB is still readable, status projects paused=true
-and this same in-memory reason; it is not presented as a durable pause. Normal
-owner shutdown keeps its existing owner-stopped message. The bit has exactly the
-service lifetime and is cleared only by constructing a new service, with no
+and this in-memory diagnosis alongside any preserved durable reason; the local
+stop is not presented as a durable pause. Normal owner shutdown keeps its
+existing owner-stopped message. The bounded record has exactly the service
+lifetime and is cleared only by constructing a new service, with no
 table, worker, queue, state machine or retry service added.
+
+
+## Bounded local index-stop evidence (#33 follow-up)
+
+The service-lifetime storage-diagnostic stop uses a once-initialized pair of
+ErrorCode values: processing failure and failure to persist its pause. It
+replaces the previous boolean, needs no writer/queue/table, retains no raw
+provider/SQL message and is published before cancellation. Search includes
+those typed codes in its existing error details. Readable status marks paused
+and appends the bounded local diagnosis while preserving any existing durable
+pause reason verbatim; do not overwrite capacity/provider evidence. Constructing
+a new service is still the only reset. This is diagnostic memory, not a new
+persistent state or recovery engine.

@@ -50,14 +50,12 @@ pub(super) fn continue_scan(pending: &mut HashMap<String, PendingReceipt>, threa
     if pending.values().any(|r| r.thread == thread && !r.checked) {
         return true;
     }
-    if !pending.values().any(|r| r.thread == thread && r.repeat) {
-        return false;
-    }
+    let repeat = pending.values().any(|r| r.thread == thread && r.repeat);
     for receipt in pending.values_mut().filter(|r| r.thread == thread) {
         receipt.checked = false;
         receipt.repeat = false;
     }
-    true
+    repeat
 }
 
 #[derive(Default)]
@@ -185,6 +183,39 @@ mod tests {
                 assert!(pending.values().all(|receipt| !receipt.repeat));
             }
         }
+    }
+    #[test]
+    fn send_after_completed_scan_does_not_create_a_false_partial_pass() {
+        let mut pending = HashMap::from([(
+            "old".into(),
+            PendingReceipt {
+                thread: "thread".into(),
+                draft: "old".into(),
+                revision: 1,
+                checked: false,
+                repeat: false,
+            },
+        )]);
+        assert_eq!(next_ids(&mut pending, "thread"), vec!["old"]);
+        assert!(!continue_scan(&mut pending, "thread"));
+        pending.insert(
+            "new".into(),
+            PendingReceipt {
+                thread: "thread".into(),
+                draft: "new".into(),
+                revision: 2,
+                checked: false,
+                repeat: false,
+            },
+        );
+        changed(&mut pending, "thread");
+        let ids = next_ids(&mut pending, "thread");
+        assert_eq!(ids.len(), 2);
+        assert!(
+            !continue_scan(&mut pending, "thread"),
+            "a completed pass plus later send must require only one query"
+        );
+        assert!(pending.values().all(|r| !r.checked && !r.repeat));
     }
     #[test]
     fn change_during_partial_scan_revisits_early_ids_after_fair_completion() {

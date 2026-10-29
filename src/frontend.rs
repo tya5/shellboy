@@ -2844,27 +2844,61 @@ async fn run_with_delivery(
     drop(background_rx);
     let grace = Duration::from_millis(control.store.config.io.shutdown_grace_ms);
     let shutdown_updates = &updates;
+    let shutdown_diagnostics = owner.diagnostics.clone();
     let shutdown = async move {
+        use crate::diagnostics::{ShutdownBoundary as Edge, ShutdownScope, ShutdownStage as Stage};
+        let started = std::time::Instant::now();
+        let trace = |stage, boundary| {
+            shutdown_diagnostics.record_shutdown(
+                ShutdownScope::Frontend,
+                stage,
+                boundary,
+                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            )
+        };
         // Durable work precedes presentation-only waits; the outer select still
         // flushes the bounded delivery and accepts explicit shutdown choices.
+        trace(Stage::Listener, Edge::Begin);
         let server_result = server.shutdown().await;
+        trace(Stage::Listener, Edge::End);
         // Coalesced autosaves retain the newest snapshot per Thread; FIFO
         // database admission within each Thread is preserved on shutdown too.
+        trace(Stage::DraftEnqueue, Edge::Begin);
         let save_worker = draft_saver.finish().await;
+        trace(Stage::DraftEnqueue, Edge::End);
         // Retain accepted-send workers until their durable commit/result closes.
+        trace(Stage::AcceptedSends, Edge::Begin);
         while send_workers.join_next().await.is_some() {}
+        trace(Stage::AcceptedSends, Edge::End);
+        trace(Stage::DraftSave, Edge::Begin);
         let save_result = save_worker
             .await
             .map_err(|_| ApiError::new(ErrorCode::SaveFailed, "Draft save worker failed"))
             .and_then(|result| result);
+        trace(Stage::DraftSave, Edge::End);
         // Preserve registered waits/owned work before cancellation erases them.
         // Failure is returned by Control::shutdown after drain still completes.
+        trace(Stage::InterruptCapture, Edge::Begin);
         let _ = control.prepare_shutdown().await;
+        trace(Stage::InterruptCapture, Edge::End);
+        trace(Stage::ControlTasks, Edge::Begin);
         while control_tasks.join_next().await.is_some() {}
+        trace(Stage::ControlTasks, Edge::End);
+        trace(Stage::ReadWorkers, Edge::Begin);
         while read_workers.join_next().await.is_some() {}
+        trace(Stage::ReadWorkers, Edge::End);
+        trace(Stage::Images, Edge::Begin);
         drop(images);
+        trace(Stage::Images, Edge::End);
+        trace(Stage::Control, Edge::Begin);
         let control_result = control.shutdown().await;
+        trace(Stage::Control, Edge::End);
+        trace(Stage::Workers, Edge::Begin);
         while workers.join_next().await.is_some() {}
+        trace(Stage::Workers, Edge::End);
+        // Owner closes the diagnostic writer last; its inner stages explain
+        // this final await, which cannot be logged after that close.
+        trace(Stage::Owner, Edge::Begin);
         let owner_result = owner.shutdown().await;
         if let Some(value) = initialize {
             update(shutdown_updates, value).await;

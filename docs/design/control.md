@@ -279,3 +279,29 @@ production TUIは起動前に既存action mailboxへownerのtool-start gateをbi
 ## 会話HTTPの有限再試行
 
 未受信の一時失敗は [model HTTP](model-http.md#会話の連続一時失敗の再試行issue-711) の条件に限り既存Driverで再試行する。failed attempt保存後にThread境界を解放して取消し可能な待機を行い、次の通常受付でgeneration/選択/容量/添付を再検証する。context超過が明示されている場合は圧縮を優先する。既存の復旧待ちを時間だけで再開しない。
+
+## Bounded shutdown-stage diagnostics (#32 review)
+
+Reuse the existing DiagnosticEvent::Shutdown and 256-record nonblocking writer
+queue. Each optional ShutdownTrace has fixed scope/stage/boundary enums and a
+u64 elapsed millisecond value computed from a monotonic clock at the caller,
+before enqueueing. It contains no path, raw error, message, provider text or
+other unbounded data. Frontend and owner use independent start instants; elapsed
+values are comparable only within their scope. Trace stage pairs bracket existing
+listener, draft enqueue/save, accepted-send joins, interruption capture, task/read
+joins, image cleanup, Control shutdown, worker joins, DB close and endpoint cleanup.
+Trace records are observations, not new Core states or completion guarantees.
+
+Keep the diagnostic writer alive until endpoint metadata cleanup has finished,
+then close it last within DataOwner::shutdown. Control drain still precedes DB
+close, DB close precedes endpoint cleanup, and owner-lock release remains after
+owned shutdown returns. Even a metadata worker error must still drain diagnostics.
+This changes only the placement of cosmetic diagnostic-writer close; UI priority,
+accepted-save ordering, shutdown grace and result precedence stay unchanged.
+Frontend owner-begin and owner diagnostics-begin intentionally have no after
+record: the writer is closed during that final await and cannot report its own
+completion. Never synthesize an end after the writer has closed. All records use
+existing best-effort overflow/drop accounting; missing stages alone are not proof
+of a hang. In a non-overloaded synthetic shutdown, the IPC frontend regression
+checks complete expected stage records, no drops and nondecreasing elapsed time
+within each scope after the existing writer has drained.

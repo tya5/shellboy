@@ -1,11 +1,17 @@
 //! Existing autosave queue, per-Thread coalescing and worker lifetime.
 use super::*;
 type Snapshot = (String, DraftSnapshot, ViewAnchor, bool);
+struct PendingSave {
+    draft: DraftSnapshot,
+    anchor: ViewAnchor,
+    follow: bool,
+    notified: bool,
+}
 pub(super) struct DraftSaver {
-    backlog: HashMap<String, (DraftSnapshot, ViewAnchor, bool)>,
+    backlog: HashMap<String, PendingSave>,
     sender: mpsc::Sender<Snapshot>,
     worker: tokio::task::JoinHandle<Result<(), ApiError>>,
-    // One failure projection per worker lifetime; snapshots stay in backlog.
+    // Stop pumping a dead worker; each retained Thread is warned once.
     closed: bool,
 }
 impl DraftSaver {
@@ -43,7 +49,16 @@ impl DraftSaver {
         closing: bool,
     ) -> bool {
         if closing || self.backlog.len() < 64 || self.backlog.contains_key(&thread) {
-            self.backlog.insert(thread, (draft, anchor, follow));
+            let notified = self.backlog.get(&thread).is_some_and(|save| save.notified);
+            self.backlog.insert(
+                thread,
+                PendingSave {
+                    draft,
+                    anchor,
+                    follow,
+                    notified,
+                },
+            );
             true
         } else {
             false
@@ -51,21 +66,48 @@ impl DraftSaver {
     }
     pub(super) fn pump(&mut self) -> Option<String> {
         if self.closed {
-            return None;
+            return self.backlog.iter_mut().find_map(|(thread, save)| {
+                if save.notified {
+                    return None;
+                }
+                save.notified = true;
+                Some(thread.clone())
+            });
         }
         while let Some(thread) = self.backlog.keys().next().cloned() {
-            let (draft, anchor, follow) = self.backlog.remove(&thread).unwrap();
+            let PendingSave {
+                draft,
+                anchor,
+                follow,
+                notified,
+            } = self.backlog.remove(&thread).unwrap();
             match self
                 .sender
                 .try_send((thread.clone(), draft, anchor, follow))
             {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full((_, draft, anchor, follow))) => {
-                    self.backlog.insert(thread, (draft, anchor, follow));
+                    self.backlog.insert(
+                        thread,
+                        PendingSave {
+                            draft,
+                            anchor,
+                            follow,
+                            notified,
+                        },
+                    );
                     break;
                 }
                 Err(mpsc::error::TrySendError::Closed((_, draft, anchor, follow))) => {
-                    self.backlog.insert(thread.clone(), (draft, anchor, follow));
+                    self.backlog.insert(
+                        thread.clone(),
+                        PendingSave {
+                            draft,
+                            anchor,
+                            follow,
+                            notified: true,
+                        },
+                    );
                     self.closed = true;
                     return Some(thread);
                 }
@@ -103,7 +145,16 @@ impl DraftSaver {
         self.backlog.retain(|thread, _| !deleted.contains(thread));
     }
     pub(super) async fn finish(self) -> tokio::task::JoinHandle<Result<(), ApiError>> {
-        for (thread, (draft, anchor, follow)) in self.backlog {
+        for (
+            thread,
+            PendingSave {
+                draft,
+                anchor,
+                follow,
+                ..
+            },
+        ) in self.backlog
+        {
             let _ = self.sender.send((thread, draft, anchor, follow)).await;
         }
         drop(self.sender);
@@ -209,7 +260,7 @@ mod tests {
             saver.pump_delivery(&mut failure, &updates);
         }
         assert!(saver.closed);
-        assert_eq!(saver.backlog["thread"].0.text, "first unsaved");
+        assert_eq!(saver.backlog["thread"].draft.text, "first unsaved");
         assert!(saver.enqueue(
             "thread".into(),
             DraftSnapshot {
@@ -224,8 +275,8 @@ mod tests {
         for _ in 0..600 {
             saver.pump_delivery(&mut failure, &updates);
         }
-        assert_eq!(saver.backlog["thread"].0.text, "newest unsaved");
-        assert_eq!(saver.backlog["thread"].0.revision, 6);
+        assert_eq!(saver.backlog["thread"].draft.text, "newest unsaved");
+        assert_eq!(saver.backlog["thread"].draft.revision, 6);
         assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
         let mut notices = 0;
         for _ in 0..600 {
@@ -240,6 +291,47 @@ mod tests {
             "closed worker must not fill the critical outbox on every tick"
         );
         assert!(failure.is_none());
+        assert!(saver.enqueue(
+            "later-thread".into(),
+            DraftSnapshot {
+                text: "another unsaved draft".into(),
+                revision: 1,
+                ..Default::default()
+            },
+            ViewAnchor::default(),
+            true,
+            false
+        ));
+        for _ in 0..600 {
+            saver.pump_delivery(&mut failure, &updates);
+        }
+        updates.flush_pending();
+        assert!(
+            matches!(rx.try_recv().unwrap(), UiUpdate::DraftSaveFailed { thread_id, .. } if thread_id == "later-thread")
+        );
+        assert!(saver.enqueue(
+            "later-thread".into(),
+            DraftSnapshot {
+                text: "latest other draft".into(),
+                revision: 2,
+                ..Default::default()
+            },
+            ViewAnchor::default(),
+            true,
+            false
+        ));
+        for _ in 0..600 {
+            saver.pump_delivery(&mut failure, &updates);
+            updates.flush_pending();
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "new revisions must not repeat the Thread warning"
+        );
+        assert_eq!(
+            saver.backlog["later-thread"].draft.text,
+            "latest other draft"
+        );
         let joined = saver.finish().await.await.unwrap_err();
         assert!(joined.is_cancelled());
         let saved: i64 = owner

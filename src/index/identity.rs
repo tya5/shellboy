@@ -156,7 +156,10 @@ impl IndexService {
             .map_err(db_error)?;
         if let Some(reason) = self.storage_stop_reason() {
             status.paused = true;
-            status.reason = Some(reason.into());
+            status.reason = Some(match status.reason.take() {
+                Some(saved) => format!("{saved}; {reason}"),
+                None => reason,
+            });
         }
         Ok(status)
     }

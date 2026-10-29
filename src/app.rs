@@ -253,16 +253,20 @@ impl DataOwner {
 
     /// Control must stop/reap all owned executions before calling this method.
     pub async fn shutdown(self) -> Result<(), ApiError> {
+        use crate::diagnostics::{ShutdownBoundary as Edge, ShutdownScope, ShutdownStage as Stage};
+        let started = std::time::Instant::now();
+        let trace = |stage, boundary| {
+            self.diagnostics.record_shutdown(
+                ShutdownScope::Owner,
+                stage,
+                boundary,
+                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            )
+        };
+        trace(Stage::Database, Edge::Begin);
         let database_result = self.db.shutdown().await.map_err(storage_error);
-        self.diagnostics.record(
-            crate::diagnostics::DiagnosticEvent::Shutdown,
-            Default::default(),
-        );
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_millis(self.loaded.config.io.shutdown_grace_ms),
-            self.diagnostics.shutdown(),
-        )
-        .await;
+        trace(Stage::Database, Edge::End);
+        trace(Stage::Endpoint, Edge::Begin);
         let path = self.loaded.data_dir.join("endpoint.json");
         let instance = self.instance_id.clone();
         let metadata_result = tokio::task::spawn_blocking(move || {
@@ -276,7 +280,17 @@ impl DataOwner {
             Ok(())
         })
         .await
-        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Shutdown metadata worker failed"))?;
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Shutdown metadata worker failed"));
+        trace(Stage::Endpoint, Edge::End);
+        // Keep the writer alive through DB/metadata cleanup, including errors.
+        // It cannot record its own completed join after closing its sender.
+        trace(Stage::Diagnostics, Edge::Begin);
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(self.loaded.config.io.shutdown_grace_ms),
+            self.diagnostics.shutdown(),
+        )
+        .await;
+        let metadata_result = metadata_result?;
         database_result.and(metadata_result)
     }
 }
