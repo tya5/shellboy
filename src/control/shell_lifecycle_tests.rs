@@ -23,7 +23,6 @@ pub(super) async fn fixture_with_settings(extra: &str) -> Fixture {
     let (send, receive) = mpsc::unbounded_channel();
     let serving = tokio::spawn(async move {
         while let Ok((mut stream, _)) = listener.accept().await {
-            stream.set_nodelay(true).unwrap();
             let send = send.clone();
             tokio::spawn(async move {
                 let mut bytes = Vec::new();
@@ -62,9 +61,9 @@ pub(super) async fn fixture_with_settings(extra: &str) -> Fixture {
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                         body.len()
                     );
-                    let mut response = header.into_bytes();
-                    response.extend_from_slice(body.as_bytes());
-                    let _ = stream.write_all(&response).await;
+                    if stream.write_all(header.as_bytes()).await.is_ok() {
+                        let _ = stream.write_all(body.as_bytes()).await;
+                    }
                 }
             });
         }

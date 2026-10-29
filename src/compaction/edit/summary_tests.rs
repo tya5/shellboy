@@ -30,7 +30,6 @@ async fn summary_server(
         let mut hold = Some(hold);
         for part in 0..parts {
             let (mut stream, _) = listener.accept().await.unwrap();
-            stream.set_nodelay(true).unwrap();
             let mut bytes = Vec::new();
             let mut chunk = [0; 8192];
             loop {
