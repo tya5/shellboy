@@ -37,3 +37,13 @@ HTTP+PTY also passes and independently confirms ten durable header observations.
 The #32 fixes are `4c1d200`; #33 store/index fixes are in `cf1e7f2`. The user
 subsequently authorized push; native three-OS CI remains pending. No release or
 installed-binary update is included.
+
+## Native findings and final local continuation
+
+Windows FIFO fixtures now progress on known capacity rather than 512 timed
+sleeps, retaining their five-second watchdog and all FIFO/count/permit checks.
+The native Windows job passes on b938c68. The same run exposed a separate
+macOS RAG registration busy result, now diagnosed and fixed in f659197 by
+explicit writer-lease release. See decisions for evidence and unproven OS
+details. Final local gates pass 80 groups / 1,366 tests / 0 failed / 25 ignored
+and 280 parallel RAG cases. A new native three-OS gate remains pending.

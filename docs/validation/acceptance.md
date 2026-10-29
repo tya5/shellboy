@@ -1,5 +1,29 @@
 # Validation record
 
+## Final RAG lease correction and local verification (2026-10-29)
+
+Source `f659197`, macOS ARM64 / Rust 1.99.1: format, strict all-target Clippy
+and `cargo test --locked --all-targets --no-fail-fast` pass **80 groups / 1,366
+passed / 0 failed / 25 ignored** with RUST_TEST_THREADS=2. Original HTTP+PTY
+10-conversation checks, offline docs33 and actual RAG CLI13 also pass on the
+new executable (SHA-256 `0e1707a325df96483c4267c9fa7bda6b5c38dd92a6debf21cd55b0e3613acfca`).
+
+Native run 40798359957 on `b938c68` passes Linux and Windows, including all
+new #34 integrations and the corrected FIFO fixtures, but macOS reports two
+RAG-selection failures. Local 14-way parallel tests reproduce real flock
+WouldBlock/errno35 after prior awaited commands. File destructors had returned;
+FD/lsof probes found no other visible owner at inspection. The exact kernel
+mechanism is not proven. This differs from the old local loopback incident and
+from the isolated initial attachment watchdogs.
+
+The writer guard now explicitly unlocks after DB close and before File close,
+without retries or deadline changes. Its deterministic duplicate-handle/live-
+writer exclusion regression passes; 20 x14 parallel RAG cases pass versus three
+failed rounds among the first six before the fix. New tests assert prerequisite
+registration/index success so unexpected busy cannot hide behind a null unwrap.
+All temporary probes/loggers are removed. A fresh native CI is pending the
+next authorized push; the previous two-OS success is not claimed for this source.
+
 ## Issue #34 and additional #32/#33: verified locally (2026-10-29)
 
 Verified final implementation/test source: `d84a06f`, including `96669a5`

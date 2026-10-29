@@ -1,30 +1,29 @@
 # Development status
 
-## Issue #34 and #32/#33 follow-up: verified locally, push authorized (2026-10-29)
+## Issue #34 and #32/#33 follow-up: verified locally, native CI recheck (2026-10-29)
 
-Implementation/test source `d84a06f` passes all standard gates: format, strict
-all-target Clippy and **80 groups / 1,365 passed / 0 failed / 25 ignored**.
-See [issue #34](issue-34-plan.md), [review round 5](review-round-5.md), and
+Final implementation source `f659197` passes format, strict all-target Clippy,
+and **80 groups / 1,366 passed / 0 failed / 25 ignored**. See
+[issue #34](issue-34-plan.md), [review round 5](review-round-5.md), and
 [acceptance](../validation/acceptance.md). Early maximum reduction, explicit
 pre-POST hint, shared Thread keyword/semantic scope, separate header deadline,
 truthful transport facts and bounded repeated-upload recovery are implemented.
 Additional autosave/receipt/index-stop/store-upgrade review findings are fixed.
 
-The exact old baseline `6c577c8` now passes 1,343 tests and the original ten-chat
-HTTP+PTY check after Mac restart; the reviewer-supplied raw TCP evidence and
-independent current 10MB probe identify the earlier loopback fault. The same
-HTTP+PTY script now passes on current source, with ten durable header records.
-`2f8a198` removes the unnecessary `8368874` workaround. Historical failed runs
-below are retained and superseded by these verified observations.
+Native `b938c68` passed Linux and Windows (including portable FIFO fixtures),
+but exposed an intermittent macOS RAG writer-lock contention. `f659197` ends
+that existing lease explicitly before File close, after SQLite closes; a new
+ownership regression and 280 parallel cases pass. No retry, global registry or
+new worker is introduced. All temporary FD diagnostics are removed. Its new
+native three-OS CI is the remaining push gate; no release or installed-binary
+update is requested.
 
-The user authorized push after completion; main is pushed through 6f19b89.
-Native run 40796272377 passes Linux and macOS, while three Windows-only FIFO
-fixture watchdogs require portable scheduling (five-second limits and all
-ordering/capacity/permit assertions retained). The test-only correction is
-locally verified; its next native CI remains pending. No release or installed-
-binary update is requested. Real-provider
-retry/default tuning remains explicitly unmeasured, with retry count eight
-retained provisionally rather than claimed empirically optimal.
+The exact old baseline `6c577c8` passes 1,343 tests and original ten-chat HTTP+PTY
+after restart, identifying the prior loopback fault independently of the new
+contention. `2f8a198` removes the unnecessary `8368874` workaround. The final
+`f659197` executable also passes ten-chat HTTP+PTY, docs33 and RAG CLI13.
+Representative production retry/default tuning remains explicitly unmeasured;
+retry count eight is retained provisionally rather than claimed optimal.
 
 
 ## Review round 4: fixes committed, whole-suite gate unresolved (2026-10-29)

@@ -47,3 +47,14 @@ be observed through the fixed public reqwest API and is reported unknown. These
 are explicit measurement/transport limits, not successful stubs.
 
 The user later authorized push. Three-OS CI remains the pending remote gate.
+
+## Native CI continuation
+
+`6f19b89` resolves the native Clippy loop lint, and `b938c68` makes three FIFO
+fixtures independent of per-item timer precision without weakening their
+deadlines/counts/ownership checks. Linux and Windows pass on that source. Native
+macOS exposed RAG writer contention, reproduced locally and fixed by explicit
+lease release in `f659197`. The final local check passes 80 groups / 1,366 tests
+(0 failed, 25 ignored), plus 280 parallel RAG cases and current manual/offline
+checks. A fresh three-OS gate remains pending; historical successful runs do
+not establish the final source's native gate.
