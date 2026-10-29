@@ -220,3 +220,21 @@ shutdown record retains interrupted text/setter/count and the next actual Turn
 receives those facts through the existing context event. Inspect uncertainty and
 saved effects before deciding whether to register a fresh reservation. Revisit
 get fails on a terminal Run; use `run get` and saved history for its final facts.
+
+### Revisit recovery and child completion
+
+If capacity prevents Revisit firing, its reservation remains pending and the
+Run enters `recovery_wait`. Fix capacity before `run retry`; retry can send one
+ordinary model request with no new input before completion attempts the reserved
+instruction again. Revisit does not replace existing recovery semantics.
+
+`child_turn_completed` is progress, not completion of a child Run. Revisit can
+produce several such notifications. When child work or reservations remain,
+wait for `child_run_ended` before treating the child as finished. A parent's
+Revisit instruction is delivered to the child as a developer-role event, with
+higher instruction priority than the parent's user-role `message send` text.
+
+If `revisit get` reports malformed metadata, its counter is unknown; do not infer
+zero or re-register blindly. Stop the Run or restart the owner to discard the
+unreadable reservation. Optional Run/list projections can omit its Revisit
+summary while other controls remain available.

@@ -27,6 +27,9 @@ fn invalid(message: &str) -> ApiError {
 fn key(run: &str) -> String {
     format!("revisit.{run}")
 }
+fn malformed_state() -> ApiError {
+    invalid("Malformed Revisit state").hint("Revisit counters are unavailable. Stop this Run to discard unreadable reservation metadata, or restart the owner; do not assume a zero count")
+}
 fn load(db: &Connection, run: &str) -> Result<Option<State>> {
     let saved: Option<String> = db
         .query_row("SELECT value FROM app_meta WHERE key=?1", [key(run)], |r| {
@@ -35,7 +38,7 @@ fn load(db: &Connection, run: &str) -> Result<Option<State>> {
         .optional()
         .map_err(sql)?;
     saved
-        .map(|body| serde_json::from_str(&body).map_err(|_| invalid("Malformed Revisit state")))
+        .map(|body| serde_json::from_str(&body).map_err(|_| malformed_state()))
         .transpose()
 }
 fn save(db: &Connection, run: &str, state: &State) -> Result<()> {
@@ -168,7 +171,12 @@ fn changed(db: &Connection, thread: &str, at: &str) -> Result<()> {
     Ok(())
 }
 pub(crate) fn summary(db: &Connection, run: &str) -> Result<Option<RevisitSummary>> {
-    Ok(load(db, run)?.map(|state| RevisitSummary {
+    let state = match load(db, run) {
+        Ok(state) => state,
+        Err(error) if error.code == ErrorCode::InvalidState => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(state.map(|state| RevisitSummary {
         pending: state.pending.is_some(),
         consumed_count: state.consumed_count,
         last_fired_at: state.last_fired_at,
@@ -206,8 +214,20 @@ pub(super) fn fire(
     changed(tx, thread, at)?;
     Ok(true)
 }
+pub(super) fn has_pending(db: &Connection, run: &str) -> Result<bool> {
+    Ok(load(db, run)?.is_some_and(|state| state.pending.is_some()))
+}
 pub(super) fn drop_pending(db: &Connection, run: &str) -> Result<()> {
-    if let Some(mut state) = load(db, run)?
+    let state = match load(db, run) {
+        Ok(state) => state,
+        Err(error) if error.code == ErrorCode::InvalidState => {
+            db.execute("DELETE FROM app_meta WHERE key=?1", [key(run)])
+                .map_err(sql)?;
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    if let Some(mut state) = state
         && state.pending.take().is_some()
     {
         save(db, run, &state)?;
@@ -215,7 +235,15 @@ pub(super) fn drop_pending(db: &Connection, run: &str) -> Result<()> {
     Ok(())
 }
 pub(super) fn drop_all_pending(db: &Connection) -> std::result::Result<(), StorageError> {
-    db.execute("UPDATE app_meta SET value=json_set(value,'$.pending',NULL) WHERE key GLOB 'revisit.*' AND json_type(value,'$.pending')='object'",[])?;
+    let mut statement = db.prepare("SELECT key FROM app_meta WHERE key GLOB 'revisit.*'")?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let saved_key: String = row.get(0)?;
+        let run = saved_key
+            .strip_prefix("revisit.")
+            .expect("matched Revisit prefix");
+        drop_pending(db, run).map_err(StorageError::from)?;
+    }
     Ok(())
 }
 pub(super) fn delete_thread(db: &Connection, thread: &str) -> Result<()> {
@@ -225,4 +253,59 @@ pub(super) fn delete_thread(db: &Connection, thread: &str) -> Result<()> {
     )
     .map_err(sql)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_clear_discards_unreadable_rows_and_retains_known_counters() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        let valid=json!({"pending":{"text":"Reserved","set_by":{"kind":"human"},"operation_id":"fixture:one","set_at":"now"},"consumed_count":11,"last_fired_at":"earlier"}).to_string();
+        for (key, value) in [
+            ("revisit.broken-json", "{"),
+            ("revisit.missing-fields", "{}"),
+            ("revisit.valid", valid.as_str()),
+            ("unrelated", "{"),
+        ] {
+            db.execute(
+                "INSERT INTO app_meta(key,value)VALUES(?1,?2)",
+                params![key, value],
+            )
+            .unwrap();
+        }
+        drop_all_pending(&db).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key GLOB 'revisit.*'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        let state = load(&db, "valid").unwrap().unwrap();
+        assert!(state.pending.is_none());
+        assert_eq!(state.consumed_count, 11);
+        assert_eq!(state.last_fired_at.as_deref(), Some("earlier"));
+        assert_eq!(
+            db.query_row(
+                "SELECT value FROM app_meta WHERE key='unrelated'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "{"
+        );
+        drop_all_pending(&db).unwrap();
+    }
+
+    #[test]
+    fn optional_summary_does_not_hide_database_failures() {
+        let db = Connection::open_in_memory().unwrap();
+        assert_eq!(summary(&db, "r").unwrap_err().code, ErrorCode::SaveFailed);
+    }
 }

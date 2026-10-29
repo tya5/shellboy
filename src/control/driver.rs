@@ -310,7 +310,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         if turn.is_none() {
             let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
             if owned{return Ok(Next::Idle);}
-            if shutting_down.load(std::sync::atomic::Ordering::SeqCst) { return Ok(Next::Done); }
+            if shutting_down.load(std::sync::atomic::Ordering::SeqCst) && super::revisit::has_pending(&tx,&run)? { return Ok(Next::Done); }
             if super::revisit::fire(&tx,&thread,&run,&now(),&config)? {
                 turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);
             } else {
@@ -837,3 +837,6 @@ mod overflow_tests;
 
 #[cfg(test)]
 mod recovery_notification_tests;
+
+#[cfg(test)]
+mod revisit_tests;

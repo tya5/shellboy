@@ -77,3 +77,30 @@ protection. Native signal behavior is tested separately under #38. A synthetic
 mechanical model does not demonstrate improved real-model completion judgment;
 that evaluation, including missed requirements and question false triggers,
 must be reported separately from delivery correctness.
+
+## Review refinements: completion, damaged metadata and capacity (#36)
+
+Closing the request-start gate prevents firing an existing reservation, while an
+idle Run without a reservation retains ordinary normal completion (including
+its normal child completion report). The shutdown check therefore applies only
+after a pending reservation is known to exist.
+
+Current-format State decoding stays strict; missing required counters are not
+interpreted as zero and no compatibility defaults are added. A malformed optional
+Revisit summary is omitted from Run/list/status observations; explicit `revisit
+get` reports an invalid-state error with a stop/restart hint. Stop and lifecycle
+clear paths discard unreadable metadata without reconstructing a counter. Valid
+metadata retains consumed counts when pending text is removed. Interrupted
+capture prevalidates each Thread before writing its snapshot; a malformed
+Thread is diagnosed and isolated rather than blocking startup or other Threads.
+
+If capacity blocks firing, the completion transaction rolls back: the pending
+instruction and consumed count remain unchanged. Existing preparation recovery
+makes the Run recovery_wait. After capacity is fixed, explicit retry may issue
+one ordinary request without a new input before normal completion retries the
+reservation. This reuses recovery ownership and avoids a second retry engine.
+
+`child_turn_completed` reports a Turn, including each Revisit Turn; only
+`child_run_ended` reports the child Run's terminal completion. A directly owning
+parent's Revisit instruction arrives as the same developer-role event as a
+self reservation, rather than the user-role instruction created by message send.

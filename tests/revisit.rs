@@ -1118,3 +1118,97 @@ async fn queued_user_input_and_cancel_keep_the_same_run_without_premature_revisi
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn malformed_optional_metadata_does_not_block_observation_or_stop_and_never_invents_counts() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path(), "http://127.0.0.1:9/v1", None).await;
+    let control = Control::new(&owner, root.path().into());
+    for (ordinal, broken) in [
+        "{",
+        "{}",
+        r#"{"pending":null,"consumed_count":"unknown","last_fired_at":null}"#,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let run = format!("broken-{ordinal}");
+        let thread = seed_run(&control, &run, None).await;
+        let key = format!("revisit.{run}");
+        let damaged = broken.to_owned();
+        control
+            .store
+            .database
+            .call(move |db| {
+                db.execute(
+                    "INSERT INTO app_meta(key,value)VALUES(?1,?2)",
+                    rusqlite::params![key, damaged],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let get = control
+            .request(invocation(
+                &control,
+                Command::RevisitGet(RevisitArgs {
+                    run_id: Some(run.clone()),
+                }),
+            ))
+            .await;
+        let error = get.error.unwrap();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(error.hint.unwrap().contains("Stop"));
+        let details = request(
+            &control,
+            Command::RunGet(RunTarget {
+                run_id: run.clone(),
+            }),
+        )
+        .await;
+        assert!(
+            details.get("revisit").is_none(),
+            "unreadable optional metadata must not become a fabricated zero counter"
+        );
+        let list = request(
+            &control,
+            Command::ThreadList(ThreadListArgs {
+                limit: MAX_LIST_LIMIT,
+                cursor: None,
+                query: None,
+            }),
+        )
+        .await;
+        let item = list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["thread_id"] == thread)
+            .unwrap();
+        assert!(item.get("revisit").is_none());
+        request(
+            &control,
+            Command::RunStop(RunTarget {
+                run_id: run.clone(),
+            }),
+        )
+        .await;
+        run_state(&control, &run, "stopped").await;
+        let key = format!("revisit.{run}");
+        assert_eq!(
+            control
+                .store
+                .database
+                .call(move |db| Ok(db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key=?1",
+                    [key],
+                    |r| r.get::<_, i64>(0)
+                )?))
+                .await
+                .unwrap(),
+            0
+        );
+    }
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
