@@ -168,3 +168,18 @@ receipts of that Thread. Complete the current scan fairly before clearing checke
 bits for one further pass; repeated changes coalesce. No per-Thread cursor cache,
 new channel or worker is introduced. Clone of a delivery handle always produces
 a worker-limited handle; shutdown borrows the unique original main handle.
+
+### Further #32 review: one closed-worker notice and fresh scan boundaries
+
+Once DraftSaver observes its worker receiver closed, one existing local boolean
+stops further pump attempts. The latest snapshots remain in the existing backlog;
+one failure projection may wait for UI capacity, but ticks and later edits do
+not enqueue the same critical notice repeatedly. The existing worker join still
+reports its failed shutdown. No replacement worker or notification queue is
+created; owner restart is required to recreate the autosave worker.
+
+A receipt pass starts fresh when none of the Thread's pending receipts has been
+checked, or when all were checked by the previous completed pass. Starting that
+pass clears both checked and repeat bits: changes observed before its query are
+already included. Mixed checked/unchecked state is a partial pass; its repeat
+bits survive so changes during the pass request exactly one fair further pass.

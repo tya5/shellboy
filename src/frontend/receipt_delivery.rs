@@ -12,15 +12,21 @@ pub(super) struct PendingReceipt {
     pub repeat: bool,
 }
 pub(super) fn next_ids(pending: &mut HashMap<String, PendingReceipt>, thread: &str) -> Vec<String> {
-    if !pending
+    let any_checked = pending
         .values()
-        .any(|receipt| receipt.thread == thread && !receipt.checked)
-    {
+        .any(|receipt| receipt.thread == thread && receipt.checked);
+    let any_unchecked = pending
+        .values()
+        .any(|receipt| receipt.thread == thread && !receipt.checked);
+    if !any_checked || !any_unchecked {
+        // A fresh query observes all changes so far. Only a mixed partial pass
+        // must retain a request to revisit already checked IDs.
         for receipt in pending
             .values_mut()
             .filter(|receipt| receipt.thread == thread)
         {
             receipt.checked = false;
+            receipt.repeat = false;
         }
     }
     pending
@@ -138,6 +144,48 @@ pub(super) struct Startup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn change_before_a_fresh_scan_is_observed_without_an_extra_pass() {
+        for count in [1, 128, 200] {
+            for previously_checked in [false, true] {
+                let mut pending = (0..count)
+                    .map(|n| {
+                        (
+                            n.to_string(),
+                            PendingReceipt {
+                                thread: "thread".into(),
+                                draft: "draft".into(),
+                                revision: n,
+                                checked: previously_checked,
+                                repeat: false,
+                            },
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+                changed(&mut pending, "thread");
+                let mut seen = HashSet::new();
+                let mut batches = 0;
+                loop {
+                    let ids = next_ids(&mut pending, "thread");
+                    assert!(!ids.is_empty());
+                    for id in ids {
+                        assert!(
+                            seen.insert(id),
+                            "a pre-scan change must not request a duplicate pass"
+                        );
+                    }
+                    batches += 1;
+                    if !continue_scan(&mut pending, "thread") {
+                        break;
+                    }
+                    assert!(batches < 3, "finite two-page fixture unexpectedly repeated");
+                }
+                assert_eq!(seen.len(), count as usize);
+                assert_eq!(batches, (count as usize).div_ceil(BATCH_LIMIT));
+                assert!(pending.values().all(|receipt| !receipt.repeat));
+            }
+        }
+    }
     #[test]
     fn change_during_partial_scan_revisits_early_ids_after_fair_completion() {
         let mut pending = (0..200)

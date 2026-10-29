@@ -5,6 +5,8 @@ pub(super) struct DraftSaver {
     backlog: HashMap<String, (DraftSnapshot, ViewAnchor, bool)>,
     sender: mpsc::Sender<Snapshot>,
     worker: tokio::task::JoinHandle<Result<(), ApiError>>,
+    // One failure projection per worker lifetime; snapshots stay in backlog.
+    closed: bool,
 }
 impl DraftSaver {
     pub(super) fn new(control: Arc<Control>, results: mpsc::Sender<BackgroundResult>) -> Self {
@@ -29,6 +31,7 @@ impl DraftSaver {
             backlog: HashMap::new(),
             sender,
             worker,
+            closed: false,
         }
     }
     pub(super) fn enqueue(
@@ -47,6 +50,9 @@ impl DraftSaver {
         }
     }
     pub(super) fn pump(&mut self) -> Option<String> {
+        if self.closed {
+            return None;
+        }
         while let Some(thread) = self.backlog.keys().next().cloned() {
             let (draft, anchor, follow) = self.backlog.remove(&thread).unwrap();
             match self
@@ -60,6 +66,7 @@ impl DraftSaver {
                 }
                 Err(mpsc::error::TrySendError::Closed((_, draft, anchor, follow))) => {
                     self.backlog.insert(thread.clone(), (draft, anchor, follow));
+                    self.closed = true;
                     return Some(thread);
                 }
             }
@@ -81,7 +88,7 @@ impl DraftSaver {
         {
             let rejected = updates.defer(UiUpdate::DraftSaveFailed {
                 thread_id,
-                message: "下書き保存workerが停止しました。本文を保持し再試行します".into(),
+                message: "下書き保存workerが停止しました。本文を保持しています。終了時に保存失敗として報告します".into(),
             });
             assert!(
                 rejected.is_none(),
@@ -170,6 +177,77 @@ mod tests {
         .unwrap();
         assert!(!updates.main_ready());
         saver.finish().await.await.unwrap().unwrap();
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn closed_worker_projects_one_failure_across_ticks_and_keeps_newest_snapshot() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (results, _incoming) = mpsc::channel(1);
+        let mut saver = DraftSaver::new(control.clone(), results);
+        saver.worker.abort();
+        tokio::time::timeout(Duration::from_secs(2), saver.sender.closed())
+            .await
+            .unwrap();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let updates = BufferedUpdates::new(tx);
+        assert!(saver.enqueue(
+            "thread".into(),
+            DraftSnapshot {
+                text: "first unsaved".into(),
+                revision: 5,
+                ..Default::default()
+            },
+            ViewAnchor::default(),
+            true,
+            false
+        ));
+        let mut failure = None;
+        for _ in 0..600 {
+            saver.pump_delivery(&mut failure, &updates);
+        }
+        assert!(saver.closed);
+        assert_eq!(saver.backlog["thread"].0.text, "first unsaved");
+        assert!(saver.enqueue(
+            "thread".into(),
+            DraftSnapshot {
+                text: "newest unsaved".into(),
+                revision: 6,
+                ..Default::default()
+            },
+            ViewAnchor::default(),
+            true,
+            false
+        ));
+        for _ in 0..600 {
+            saver.pump_delivery(&mut failure, &updates);
+        }
+        assert_eq!(saver.backlog["thread"].0.text, "newest unsaved");
+        assert_eq!(saver.backlog["thread"].0.revision, 6);
+        assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
+        let mut notices = 0;
+        for _ in 0..600 {
+            updates.flush_pending();
+            while let Ok(value) = rx.try_recv() {
+                assert!(matches!(value, UiUpdate::DraftSaveFailed { .. }));
+                notices += 1;
+            }
+        }
+        assert_eq!(
+            notices, 1,
+            "closed worker must not fill the critical outbox on every tick"
+        );
+        assert!(failure.is_none());
+        let joined = saver.finish().await.await.unwrap_err();
+        assert!(joined.is_cancelled());
+        let saved: i64 = owner
+            .db
+            .call(|db| Ok(db.query_row("SELECT count(*) FROM draft", [], |row| row.get(0))?))
+            .await
+            .unwrap();
+        assert_eq!(saved, 0);
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
