@@ -12,8 +12,10 @@ api_key_env = "SHELLBOY_API_KEY"
 # session_header = true
 # Optional Responses body key; enable only when supported by your provider.
 # prompt_cache_key = false
-# Maximum inactivity while waiting for stream headers or the next received chunk.
-# 0 disables this limit; active streams have no total-duration limit.
+# Positive Responses header wait, including request upload.
+# response_header_timeout_ms = 120000
+# Maximum receive inactivity after headers; 0 disables only this body limit.
+# Active streams have no total-duration limit.
 # stream_idle_timeout_ms = 600000
 # Total timeout for non-streaming requests (models, embeddings); minimum 1000.
 # request_timeout_ms = 60000
@@ -23,9 +25,10 @@ api_key_env = "SHELLBOY_API_KEY"
 # response_retry_max_delay_ms = 60000
 # Retry interrupted partial streams; false keeps partial failures for manual recovery.
 # response_retry_partial = true
-# After eligible retries are exhausted, trim large input deterministically once per Turn.
+# At the first eligible large-input failure, reduce maximally once per Turn/generation.
 # auto_trim_on_disconnect = true
-# Optional positive estimated-token threshold and target; default >75000, target half.
+# Optional positive trigger threshold; also enables pre-POST reduction.
+# Without a hint, the failure threshold is >75000 and no pre-POST reduction occurs.
 # compact_hint_tokens = 75000
 # default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
 

@@ -111,15 +111,50 @@ legacy/shared境界、正確な小予算/production65,536境界で、超過時�
 
 部品は、指定範囲のspill、summary、決定文への置換（omit）の3種類。prefixの省略も途中の省略も同じomit採用を使う。前後の経路を保持し、置換・出典・添付除外と`select_path`を既存の短いtransactionへまとめる。新しいtable・worker・queue・event・依存は追加しない。編集は既存Thread境界へ並べ、進行中の通信やtoolを遡って変更せず、次の要求から適用する。
 
-### 通信切断後の決定論的縮小
+### Early deterministic maximum reduction (Issue #34)
 
-対象の一時失敗で再試行を使い切ったとき、接続設定`auto_trim_on_disconnect=true`ならTurn/generationごとに一度だけ縮小を検討する。正常応答の採用で連続再試行回数は戻るが、この一度の枠は戻らない。context超過は既存2段階の処理を使う。
+When enabled by `auto_trim_on_disconnect`, a large input is reduced at its first
+eligible header timeout, 5xx or transport disconnect, before spending ordinary
+retry capacity. Input activation guidance defaults to 75,000 estimated tokens;
+429 and stream-idle timeout are ordinary retry cases, not evidence of large-input
+failure. Every 5xx is eligible for this separate reduction decision, while the
+ordinary retry status list remains unchanged. Partial-output opt-out, terminal
+responses and Retry-After above 600 seconds still forbid automatic resending;
+a permitted Retry-After is honored before the reduced request. Explicit provider context overflow retains its separate two-stage path.
+A known incomplete request-body source is not a reason to trim; a second
+consecutive incomplete-source failure enters recovery instead of repeatedly
+shrinking or resending. Successful adoption or a different failure resets that
+small counter in the existing per-Turn retry budget.
 
-`compact_hint_tokens`は正の整数で、明示時は起動の目安と縮小目標の両方に使う。未指定時は推定75,000 tokens超を起動目安とし、失敗時点の推定の半分を目標とする。モデルのcontext上限を意味しない。推定は同じ接続・モデルの直近成功attemptのinput_tokens/入力文字数比を使い、記録がなければUnicode文字数/4を使う。実送信前のmanifestへ入力JSONの文字数を保存し、旧attemptから値を捏造しない。固定指示・添付等との差があるため正確なtokenizerやproviderの受入保証ではない。
+A configured positive `compact_hint_tokens` is activation guidance only. It also
+allows proactive reduction before POST; absent that explicit hint, normal input
+is never proactively reduced. Estimates use recent same-Thread/connection/model
+successful usage calibration or Unicode characters/4; they are not a tokenizer,
+provider capacity catalogue or acceptance guarantee.
 
-古い完結tool groupをspillし、足りなければ古い安全なgroupから省略する。現在Turn最初の依頼を含むgroup、最新group、未完結・保護groupは残す。目標まで下がる計画ができたときだけ、spillとomitを一つのtransactionで採用する。この新しい自動縮小内の原子性は、既存手動compactのspill/summaryを別々に採用する契約を変更しない。目標へ到達できなければ、添付除外を含め何も変更せず通常の復旧待ちへ進む。
+Always omit every safe group outside protection: retain the current Turn's
+initial request, the latest group, the latest complete tool group, incomplete work
+and protected/unapplied instructions. Numeric reduction targets and all-or-nothing
+"reach half" decisions are removed. Apply any nonempty safe omission, even if the
+retained context is still large. No summary API is called; original nodes,
+replacement_source, thread_replacement, attachment exclusions and restore fences
+use the existing atomic path-adoption transaction. Automatic result
+`target_tokens` is null, because maximum omission has no numeric goal. Manual
+context edits retain their real numeric guidance where applicable.
 
-省略位置には`context_trim` metadataを持つdeveloper通知を置く。理由、元nodeの始終IDと件数、概算、spill件数、原文取得・範囲要約・復元方法、実行済み副作用は取り消していないこと、添付は自動復活しないことを伝える。元nodeは`replacement_source`、Threadとの関係は`thread_replacement`で保持する。縮小結果はattemptの`error_json.automatic_trim`にも保存し、次のattemptとの突合を可能にする。縮小が採用された場合だけ連続再試行予算を一度補充する。
+One adopted reduction allows exactly one resumed POST per Turn/generation. Any
+failure of that resumed request enters recovery; ordinary successful tool output
+does not replenish the trim allowance. A request below activation follows normal
+retry policy without consuming the allowance. No safe candidates means unchanged
+history and recovery on failure. Stop, selection/profile/generation changes still
+fence adoption. No new state table, event, worker, queue or dependency is added.
+
+The context_trim developer notice records ranges/counts/estimates, the unchanged
+side effects and attachment-restore limits. It recommends bounded `history get`,
+range summary and `rag search --scope history:THREAD --mode keyword`, available
+without embedding. It warns that restoring a large range may reproduce the same
+failure. Failed-attempt automatic_trim facts remain saved; proactive omission is
+durable through the same marker/path adoption, before any attempt exists.
 
 ### 明示編集と復元
 
@@ -136,7 +171,7 @@ legacy/shared境界、正確な小予算/production65,536境界で、超過時�
 
 復旧・動作中のTUI概要は、同じTurn/generationの直近256 attemptから縮小の数値だけを投影する。取得範囲外は「縮小なし」と断定せず概要を表示しない。markerの原文・元attemptの記録は別途参照できる。巨大なerror JSON全体をUIへ渡さず、新しい追跡tableやindexは追加しない。
 
-省略markerの原文と保持anchorは合計65,536 nodeまでとし、復元の有限provenance予算と一致させる。上限超過は無変更で拒否し、小さい範囲へ案内する。自動縮小の規則はDB/HTTPに触れない純粋な計画関数とし、各groupの送信projection文字数を一度数えて差分で目標判定する。候補ごとに全履歴本文を複製しない。
+省略markerの原文と保持anchorは合計65,536 nodeまでとし、復元の有限provenance予算と一致させる。上限超過は無変更で拒否し、小さい範囲へ案内する。自動縮小の規則はDB/HTTPに触れない純粋な計画関数とし、各groupの送信projection文字数を一度数えて差分で縮小後を推定する。候補ごとに全履歴本文を複製しない。
 
 サイズ補正は同Thread・接続・モデルの直近64成功attemptを有限に調べ、有効なusageと入力文字数がある最新のものを使う。送信manifestの`history_characters`で固定指示・添付等の差を分離し、同selectionのinflight記録があればその差を優先する。過去の添付projection等を固定分として推定するため、省略による添付除外後の減少を保守的に見積もることがある。`context_usage`は補正元attempt ID・方法・測定できていない対象を返す。
 

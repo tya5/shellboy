@@ -26,6 +26,7 @@ pub(super) struct Deadline {
     received: Instant,
     kind: DeadlineKind,
     setting: String,
+    header: Option<(Duration, String)>,
 }
 impl Deadline {
     pub(super) fn new(
@@ -68,12 +69,51 @@ impl Deadline {
                 format!("{setting} exceeds the monotonic clock range"),
             ));
         }
+        let header = matches!(endpoint, ApiEndpoint::Responses).then(|| {
+            (
+                Duration::from_millis(connection.response_header_timeout_ms),
+                format!("connections.{name}.response_header_timeout_ms"),
+            )
+        });
+        if header
+            .as_ref()
+            .is_some_and(|(limit, _)| now.checked_add(*limit).is_none())
+        {
+            return Err(ModelError::new(
+                "config_invalid",
+                "Response header deadline exceeds the monotonic clock range",
+            ));
+        }
         Ok(Self {
             started: now,
             received: now,
             kind,
             setting,
+            header,
         })
+    }
+    pub(super) async fn wait_headers<F: Future>(
+        &self,
+        cancel: &CancellationToken,
+        future: F,
+    ) -> Result<F::Output, ModelError> {
+        let Some((limit, setting)) = &self.header else {
+            return self
+                .wait(cancel, "waiting for response headers", future)
+                .await;
+        };
+        let at = self.started.checked_add(*limit).ok_or_else(|| {
+            ModelError::new(
+                "config_invalid",
+                "Response header deadline exceeds the monotonic clock range",
+            )
+        })?;
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(cancelled()),
+            _ = tokio::time::sleep_until(at) => Err(ModelError::new("timeout", format!("HTTP response-header wait timed out after {} ms (limit {} ms; {}); request delivery is not inferred from this deadline", self.started.elapsed().as_millis(), limit.as_millis(), setting))),
+            result = future => Ok(result),
+        }
     }
     pub(super) fn received(&mut self) {
         self.received = Instant::now();

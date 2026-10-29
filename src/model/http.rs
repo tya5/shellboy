@@ -5,6 +5,8 @@ mod body;
 mod clients;
 pub(crate) use clients::HttpClients;
 mod deadline;
+mod observation;
+pub use observation::{ConnectionReuse, HttpObservation, HttpPhase};
 mod response;
 use body::read_json;
 use deadline::{Deadline, transport_error};
@@ -16,6 +18,10 @@ pub use response::{AttemptFailure, ResponseFacts, ResponseReceived};
 #[cfg(test)]
 use response::{parse_retry_after, send_event};
 use serde_json::{Value, json};
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicUsize, Ordering},
+};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -58,9 +64,14 @@ pub struct EmbeddingResponse {
     pub dimension: usize,
     pub usage: Option<Value>,
 }
+struct ClientPool {
+    client: Result<Client, ModelError>,
+    generation: u64,
+    issued: u64,
+}
 #[derive(Clone)]
 pub struct HttpModelClient {
-    client: Client,
+    pool: Arc<RwLock<ClientPool>>,
     connection: Connection,
     connection_name: String,
 }
@@ -74,19 +85,57 @@ impl HttpModelClient {
         config
             .validate()
             .map_err(|e| ModelError::new("config_invalid", e.to_string()))?;
-        let client = Client::builder()
+        let client = Self::build_client(&connection)?;
+        Ok(Self {
+            pool: Arc::new(RwLock::new(ClientPool {
+                client: Ok(client),
+                generation: 0,
+                issued: 0,
+            })),
+            connection,
+            connection_name: name.into(),
+        })
+    }
+    fn build_client(connection: &Connection) -> Result<Client, ModelError> {
+        Client::builder()
             .tls_danger_accept_invalid_certs(!connection.ssl_verify)
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .connect_timeout(std::time::Duration::from_secs(30))
             .pool_idle_timeout(std::time::Duration::from_secs(45))
             .build()
-            .map_err(|_| ModelError::new("transport", "Unable to initialize HTTP client"))?;
-        Ok(Self {
-            client,
-            connection,
-            connection_name: name.into(),
-        })
+            .map_err(|_| ModelError::new("transport", "Unable to initialize HTTP client"))
+    }
+    fn snapshot_pool(&self) -> Result<(Client, u64, ConnectionReuse), ModelError> {
+        let mut pool = self.pool.write().expect("HTTP pool lock poisoned");
+        let client = pool.client.clone()?;
+        let reuse = if pool.issued == 0 {
+            ConnectionReuse::FreshPool
+        } else {
+            ConnectionReuse::Unknown
+        };
+        pool.issued = pool.issued.saturating_add(1);
+        Ok((client, pool.generation, reuse))
+    }
+    fn retire_pool(&self, generation: u64) {
+        if self
+            .pool
+            .read()
+            .expect("HTTP pool lock poisoned")
+            .generation
+            != generation
+        {
+            return;
+        }
+        // Build outside the lock. Existing in-flight requests retain their
+        // original pool, while subsequent attempts use the replacement.
+        let replacement = Self::build_client(&self.connection);
+        let mut pool = self.pool.write().expect("HTTP pool lock poisoned");
+        if pool.generation == generation {
+            pool.client = replacement;
+            pool.generation = pool.generation.saturating_add(1);
+            pool.issued = 0;
+        }
     }
     fn headers(&self) -> Result<(HeaderMap, Vec<String>), ModelError> {
         let credentials = self
@@ -121,7 +170,7 @@ impl HttpModelClient {
         cancel: &CancellationToken,
         deadline: &Deadline,
         session_header: Option<&HeaderValue>,
-    ) -> Result<(Response, Vec<String>), ModelError> {
+    ) -> Result<(Response, Vec<String>, HttpObservation), ModelError> {
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
@@ -143,20 +192,72 @@ impl HttpModelClient {
             ApiEndpoint::Responses => "text/event-stream, application/json",
             ApiEndpoint::Embeddings | ApiEndpoint::Models => "application/json",
         };
-        let mut outgoing = self
-            .client
+        let (client, generation, reuse) = self.snapshot_pool()?;
+        let mut outgoing = client
             .request(method, endpoint)
             .headers(headers)
             .header(reqwest::header::ACCEPT, accept);
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let mut body_len = 0;
         if let Some(body) = request {
-            outgoing = outgoing.json(body);
+            let bytes = serde_json::to_vec(body)
+                .map_err(|_| ModelError::new("input_invalid", "Cannot encode HTTP request"))?;
+            body_len = bytes.len();
+            let progress = consumed.clone();
+            let stream = futures_util::stream::unfold((bytes, 0), move |(bytes, offset)| {
+                let progress = progress.clone();
+                async move {
+                    if offset == bytes.len() {
+                        return None;
+                    }
+                    let end = (offset + 16 * 1024).min(bytes.len());
+                    let chunk = bytes[offset..end].to_vec();
+                    progress.store(end, Ordering::Relaxed);
+                    Some((Ok::<_, std::io::Error>(chunk), (bytes, end)))
+                }
+            });
+            outgoing = outgoing
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::CONTENT_LENGTH, body_len)
+                .body(reqwest::Body::wrap_stream(stream));
         }
-        deadline
-            .wait(cancel, "waiting for response headers", outgoing.send())
-            .await?
-            .map(|response| (response, secrets))
-            .map_err(|error| transport_error(error, "before response headers"))
+        let started = std::time::Instant::now();
+        let outcome = deadline
+            .wait_headers(cancel, outgoing.send())
+            .await
+            .and_then(|result| {
+                result.map_err(|error| transport_error(error, "before response headers"))
+            });
+        let consumed_bytes = consumed.load(Ordering::Relaxed);
+        let mut observation = HttpObservation {
+            phase: if consumed_bytes < body_len {
+                HttpPhase::UploadSourceIncomplete
+            } else {
+                HttpPhase::AwaitingHeadersDeliveryUnknown
+            },
+            request_body_bytes: body_len,
+            body_source_bytes_consumed: consumed_bytes,
+            header_elapsed_ms: None,
+            pool_generation: generation,
+            connection_reuse: reuse,
+        };
+        match outcome {
+            Ok(response) => {
+                observation.phase = HttpPhase::BodyReceive;
+                observation.header_elapsed_ms =
+                    Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+                Ok((response, secrets, observation))
+            }
+            Err(mut error) => {
+                error.message.push_str("; ");
+                error.message.push_str(observation.hint());
+                error.http_observation = Some(Box::new(observation));
+                self.retire_pool(generation);
+                Err(error)
+            }
+        }
     }
+
     /// Fetch the configured proxy's catalog without embedding a product-specific model list.
     /// The deadline includes both response headers and the complete bounded body.
     pub async fn models(&self, cancel: CancellationToken) -> Result<Vec<String>, ModelError> {
@@ -169,7 +270,7 @@ impl HttpModelClient {
         cancel: &CancellationToken,
         deadline: &mut Deadline,
     ) -> Result<Vec<String>, ModelError> {
-        let (response, secrets) = self
+        let (response, secrets, _observation) = self
             .send(
                 ApiEndpoint::Models,
                 reqwest::Method::GET,
@@ -242,7 +343,7 @@ impl HttpModelClient {
             &self.connection_name,
         )?;
         let request = json!({"model":model,"input":input,"encoding_format":"float"});
-        let (response, secrets) = self
+        let (response, secrets, _observation) = self
             .send(
                 ApiEndpoint::Embeddings,
                 reqwest::Method::POST,
@@ -430,5 +531,32 @@ mod observation_tests {
             server.abort();
             let _ = server.await;
         }).await.expect("error body receive observations or deadline stalled");
+    }
+}
+
+#[cfg(test)]
+mod pool_generation_tests {
+    use super::*;
+    #[test]
+    fn late_old_failure_cannot_retire_new_pool_or_fabricate_reuse() {
+        let client = HttpModelClient::new(Connection {
+            base_url: "http://127.0.0.1:1/v1".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let (_, old, first) = client.snapshot_pool().unwrap();
+        assert_eq!(old, 0);
+        assert_eq!(first, ConnectionReuse::FreshPool);
+        let (_, same, other) = client.snapshot_pool().unwrap();
+        assert_eq!(same, old);
+        assert_eq!(other, ConnectionReuse::Unknown);
+        client.retire_pool(old);
+        let (_, new, fresh) = client.snapshot_pool().unwrap();
+        assert_eq!(new, 1);
+        assert_eq!(fresh, ConnectionReuse::FreshPool);
+        client.retire_pool(old);
+        let (_, still_new, unknown) = client.snapshot_pool().unwrap();
+        assert_eq!(still_new, new);
+        assert_eq!(unknown, ConnectionReuse::Unknown);
     }
 }

@@ -124,6 +124,44 @@ pub(super) async fn drive(
         let Some(mut snapshot) = instructions.refresh(&control, snapshot, &slot).await? else {
             continue;
         };
+        let connection = &control.store.config.connections[&snapshot.profile];
+        if connection.compact_hint_tokens.is_some()
+            && retry_budget.trim_available(connection.auto_trim_on_disconnect)
+        {
+            // Compaction must not retain a replay pin for the path it replaces.
+            snapshot.input.take();
+            match trim::before_post(&control, &snapshot, &slot, &mut retry_budget).await {
+                Ok(true) => continue,
+                Ok(false) => {
+                    let current = match next(&control, &thread, &slot.run_id).await? {
+                        Next::Ready(current) => current,
+                        _ => continue,
+                    };
+                    // Re-evaluate preflight and the Turn's instruction snapshot
+                    // rather than pair an old body with a changed context.
+                    if (
+                        current.turn.as_str(),
+                        current.generation,
+                        current.run.as_str(),
+                        current.selection,
+                        current.profile_revision,
+                        current.epoch,
+                    ) != (
+                        snapshot.turn.as_str(),
+                        snapshot.generation,
+                        snapshot.run.as_str(),
+                        snapshot.selection,
+                        snapshot.profile_revision,
+                        snapshot.epoch,
+                    ) {
+                        continue;
+                    }
+                    snapshot = current;
+                }
+                Err(error) if error.is_storage_failure() => return Err(error),
+                Err(error) => return fail_turn(&control, &snapshot, error).await,
+            }
+        }
         let Some(AdmittedRequest {
             client,
             prepared,

@@ -22,6 +22,8 @@ pub struct ResponseFacts {
     /// A terminal SSE event or a fully parsed JSON response document arrived.
     /// Validation failure after that boundary is distinct from interrupted transport.
     pub terminal_received: bool,
+    /// Transport observations do not establish peer receipt or processing.
+    pub http_observation: Option<HttpObservation>,
 }
 impl ResponseFacts {
     fn observe_stream(&mut self, parsed: &ResponseStream) {
@@ -117,6 +119,25 @@ impl HttpModelClient {
         )
         .await
         .map_err(|mut failure| {
+            if let Some(observation) = facts
+                .http_observation
+                .or_else(|| failure.error.http_observation.as_deref().copied())
+            {
+                if failure.error.http_observation.is_none() {
+                    // A complete provider/protocol failure is not stalled
+                    // reception. Keep its original message while attaching
+                    // transport facts independently.
+                    if matches!(failure.error.kind.as_str(), "timeout" | "transport")
+                        || (failure.error.kind == "incomplete" && !facts.terminal_received)
+                    {
+                        failure.error.message.push_str("; ");
+                        failure.error.message.push_str(observation.hint());
+                    }
+                    failure.error.http_observation = Some(Box::new(observation));
+                }
+                facts.http_observation = Some(observation);
+                self.retire_pool(observation.pool_generation);
+            }
             failure.facts = facts;
             failure
         })
@@ -177,7 +198,7 @@ impl HttpModelClient {
             .get("tools")
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
-        let (response, secrets) = self
+        let (response, secrets, observation) = self
             .send(
                 ApiEndpoint::Responses,
                 reqwest::Method::POST,
@@ -187,6 +208,7 @@ impl HttpModelClient {
                 session_header.as_ref(),
             )
             .await?;
+        facts.http_observation = Some(observation);
         let mut context = RequestContext {
             cancel: context.cancel,
             deadline: context.deadline,
@@ -218,7 +240,7 @@ impl HttpModelClient {
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        match content_type.as_str() {
+        let outcome = match content_type.as_str() {
             "application/json" => response_json(response, &mut context, facts, tools_enabled).await,
             "text/event-stream" => response_sse(response, &mut context, facts, tools_enabled).await,
             _ => Err(ModelError::new(
@@ -226,7 +248,11 @@ impl HttpModelClient {
                 "Expected text/event-stream or application/json from Responses endpoint",
             )
             .into()),
-        }
+        };
+        outcome.map(|mut response| {
+            response.http_observation = Some(observation);
+            response
+        })
     }
 }
 #[allow(clippy::result_large_err)]

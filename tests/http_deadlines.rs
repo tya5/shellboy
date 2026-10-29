@@ -368,7 +368,7 @@ async fn inactivity_retry_facts_distinguish_headers_metadata_and_partial_json() 
             (metadata, false),
             (json_partial, true),
         ] {
-            let (client, _, server) = stalled(Connection { stream_idle_timeout_ms: 500, ..Default::default() }, initial).await;
+            let (client, _, server) = stalled(Connection { response_header_timeout_ms: 500, stream_idle_timeout_ms: 500, ..Default::default() }, initial).await;
             let failure = client.response(response_request("fixture", vec![], None, false), CancellationToken::new(), None).await.unwrap_err();
             assert_eq!(failure.error.kind, "timeout");
             assert_eq!(failure.facts.received == shellboy::model::http::ResponseReceived::Output, partial);

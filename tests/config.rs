@@ -424,6 +424,7 @@ fn tls_verification_rejects_non_boolean_values() {
 #[test]
 fn http_timeouts_have_defaults_and_independent_connection_overrides() {
     let defaults = Connection::default();
+    assert_eq!(defaults.response_header_timeout_ms, 120_000);
     assert_eq!(defaults.stream_idle_timeout_ms, 600_000);
     assert_eq!(defaults.request_timeout_ms, 60_000);
     let direct: Connection = toml::from_str("base_url='https://example.test/v1'").unwrap();
@@ -458,7 +459,11 @@ fn http_timeouts_have_defaults_and_independent_connection_overrides() {
 
 #[test]
 fn http_timeouts_reject_invalid_values_without_clamping() {
-    for key in ["stream_idle_timeout_ms", "request_timeout_ms"] {
+    for key in [
+        "response_header_timeout_ms",
+        "stream_idle_timeout_ms",
+        "request_timeout_ms",
+    ] {
         for value in [
             "-1",
             "'60000'",
@@ -657,5 +662,22 @@ fn disconnect_trim_settings_have_defaults_and_strict_connection_overrides() {
 fn obsolete_history_read_budget_is_rejected_instead_of_silently_ignored() {
     assert!(
         toml::from_str::<shellboy::config::Config>("[limits]\nhistory_read_bytes=65536\n").is_err()
+    );
+}
+
+#[test]
+fn response_header_timeout_is_independent_positive_and_debuggable() {
+    let config = Config::parse("[connections.proxy]\nbase_url='https://example.test/v1'\nresponse_header_timeout_ms=1234\nstream_idle_timeout_ms=0\n").unwrap();
+    assert_eq!(config.connections["proxy"].response_header_timeout_ms, 1234);
+    assert_eq!(config.connections["proxy"].stream_idle_timeout_ms, 0);
+    assert!(
+        format!("{:?}", config.connections["proxy"]).contains("response_header_timeout_ms: 1234")
+    );
+    let error = Config::parse(
+        "[connections.proxy]\nbase_url='https://example.test/v1'\nresponse_header_timeout_ms=0\n",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error,ConfigError::Invalid{key,..} if key=="connections.proxy.response_header_timeout_ms")
     );
 }

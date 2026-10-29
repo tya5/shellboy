@@ -228,7 +228,7 @@ async fn automatic_trim_keeps_current_request_between_omitted_ranges() {
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_to_target(snapshot, 1_000, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new())
         .await
         .unwrap();
     assert!(!result.compact.no_target);
@@ -254,7 +254,7 @@ async fn automatic_trim_keeps_current_request_between_omitted_ranges() {
 }
 
 #[tokio::test]
-async fn unreachable_target_rolls_back_spill_replacements_and_attachment_exclusion() {
+async fn maximum_omission_adopts_available_reduction_and_attachment_exclusion() {
     let fixture = Fixture::new().await;
     fixture.tools().await;
     fixture.attachment("g-old-result").await;
@@ -262,12 +262,14 @@ async fn unreachable_target_rolls_back_spill_replacements_and_attachment_exclusi
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_to_target(snapshot, 1, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new())
         .await
         .unwrap();
-    assert!(result.compact.no_target);
-    assert_eq!(fixture.path().await, before);
-    assert_eq!(fixture.replacement_count().await, 0);
+    assert!(!result.compact.no_target);
+    assert_ne!(fixture.path().await, before);
+    assert_eq!(result.omitted_nodes, 2);
+    assert!(result.target_tokens.is_none());
+    assert_eq!(fixture.replacement_count().await, 1);
     fixture
         .db
         .call(|db| {
@@ -276,7 +278,7 @@ async fn unreachable_target_rolls_back_spill_replacements_and_attachment_exclusi
                     .get::<_, String>(
                     0
                 ))?,
-                "active"
+                "excluded"
             );
             Ok(())
         })
@@ -286,20 +288,21 @@ async fn unreachable_target_rolls_back_spill_replacements_and_attachment_exclusi
 }
 
 #[tokio::test]
-async fn spill_alone_reaches_target_without_omission_marker() {
+async fn automatic_maximum_omits_old_tool_group_and_keeps_latest_complete_tool_group() {
     let fixture = Fixture::new().await;
     fixture.tools().await;
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_to_target(snapshot, 1_000, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new())
         .await
         .unwrap();
     assert!(!result.compact.no_target);
-    assert_eq!(result.compact.spilled_groups, 1);
-    assert_eq!(result.omitted_nodes, 0);
-    assert!(result.marker_node_id.is_none());
-    assert!(result.after_tokens <= 1_000);
+    assert_eq!(result.compact.spilled_groups, 0);
+    assert_eq!(result.omitted_nodes, 2);
+    assert!(result.marker_node_id.is_some());
+    assert!(result.target_tokens.is_none());
+    assert!(result.after_tokens < result.before_tokens);
     let path = fixture.path().await;
     assert_eq!(&path[1..], ["g-new-call", "g-new-result"]);
     fixture.close().await;
@@ -494,7 +497,7 @@ async fn activation_measures_failed_request_not_later_appended_input() {
 }
 
 #[tokio::test]
-async fn disconnect_plan_stops_after_first_sufficient_spill() {
+async fn maximum_plan_does_not_stop_after_the_first_old_tool_group() {
     let fixture = Fixture::new().await;
     fixture.tools().await;
     fixture.db.call(|db| {
@@ -513,12 +516,15 @@ async fn disconnect_plan_stops_after_first_sufficient_spill() {
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_to_target(snapshot, 8_000, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(result.compact.spilled_groups, 1);
-    assert_eq!(result.omitted_nodes, 0);
-    assert!(fixture.path().await.contains(&"g-new-result".to_owned()));
+    assert_eq!(result.compact.spilled_groups, 0);
+    assert_eq!(result.omitted_nodes, 4);
+    let path = fixture.path().await;
+    assert!(!path.contains(&"g-old-result".to_owned()));
+    assert!(!path.contains(&"g-new-result".to_owned()));
+    assert!(path.contains(&"g-last-result".to_owned()));
     fixture.close().await;
 }
 
@@ -611,7 +617,7 @@ async fn marker_explicitly_reports_current_turn_work_after_the_retained_request(
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_to_target(snapshot, 1_000, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new())
         .await
         .unwrap();
     assert!(result.warnings.is_empty());
@@ -637,6 +643,8 @@ async fn marker_explicitly_reports_current_turn_work_after_the_retained_request(
             && text.contains("Inspect the current state before repeating")
     );
     assert!(text.contains("compact --restore --from old"));
+    assert!(text.contains("rag search --scope history:t --mode keyword"));
+    assert!(text.contains("Restoring a large range may reproduce the same failure"));
     fixture.close().await;
 }
 
@@ -798,6 +806,98 @@ async fn changed_attachment_selection_aborts_without_a_false_exclusion_notice_or
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidState);
     assert!(error.message.contains("attachment selection changed"));
+    assert_eq!(fixture.path().await, before);
+    assert_eq!(fixture.replacement_count().await, 0);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn maximum_trim_adopts_a_small_safe_reduction_even_when_retained_suffix_exceeds_half() {
+    let fixture = Fixture::new().await;
+    fixture.text("old", &"x".repeat(20_000)).await;
+    fixture.text("latest", &"y".repeat(400_000)).await;
+    let result = fixture
+        .compactor
+        .trim_disconnect("t", None, CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(!result.compact.no_target);
+    assert_eq!(result.omitted_nodes, 1);
+    assert!(result.target_tokens.is_none());
+    assert!(result.after_tokens < result.before_tokens);
+    assert!(
+        result.after_tokens > result.before_tokens / 2,
+        "max omission must not require reaching half"
+    );
+    assert_eq!(fixture.path().await.last().unwrap(), "latest");
+    fixture
+        .db
+        .call(|db| {
+            assert!(db.query_row(
+                "SELECT payload_json IS NOT NULL FROM node WHERE id='old'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn no_unprotected_groups_leave_history_unchanged() {
+    let fixture = Fixture::new().await;
+    fixture.text("latest", &"y".repeat(400_000)).await;
+    let before = fixture.path().await;
+    let result = fixture
+        .compactor
+        .trim_disconnect("t", None, CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.compact.no_target);
+    assert_eq!(result.omitted_nodes, 0);
+    assert_eq!(fixture.path().await, before);
+    assert_eq!(fixture.replacement_count().await, 0);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn latest_complete_tool_group_survives_even_with_a_later_assistant_group() {
+    let fixture = Fixture::new().await;
+    fixture.tools().await;
+    fixture.text("latest-answer", "last answer").await;
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let result = fixture
+        .compactor
+        .trim_maximal(snapshot, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result.omitted_nodes, 2);
+    let path = fixture.path().await;
+    assert!(!path.contains(&"g-old-call".to_owned()));
+    assert!(path.contains(&"g-new-call".to_owned()));
+    assert!(path.contains(&"g-new-result".to_owned()));
+    assert_eq!(path.last().unwrap(), "latest-answer");
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn pending_protection_and_incomplete_groups_are_never_automatic_omission_candidates() {
+    let fixture = Fixture::new().await;
+    fixture.text("pending", &"p".repeat(20_000)).await;
+    fixture.text("incomplete", &"i".repeat(20_000)).await;
+    fixture.text("latest", "retain latest").await;
+    let before = fixture.path().await;
+    let mut snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    snapshot.protected.insert("pending".into());
+    snapshot.groups[1].complete = false;
+    let result = fixture
+        .compactor
+        .trim_maximal(snapshot, CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.compact.no_target);
     assert_eq!(fixture.path().await, before);
     assert_eq!(fixture.replacement_count().await, 0);
     fixture.close().await;

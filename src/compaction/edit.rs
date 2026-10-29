@@ -11,7 +11,7 @@ pub struct ContextEditResult {
     pub compact: CompactResult,
     pub before_tokens: u64,
     pub after_tokens: u64,
-    pub target_tokens: u64,
+    pub target_tokens: Option<u64>,
     pub omitted_nodes: usize,
     pub marker_node_id: Option<String>,
     pub cache_invalidated_tokens: u64,
@@ -20,7 +20,6 @@ pub struct ContextEditResult {
 mod estimate;
 pub(super) use estimate::{
     TokenEstimate, estimated_suffix_tokens, estimated_tokens, history_characters,
-    projection_characters, tokens_from_history_characters,
 };
 fn required_endpoint(value: Option<&str>) -> Result<&str, ApiError> {
     value.ok_or_else(|| edit_error("Context edit requires complete node endpoints"))
@@ -57,9 +56,8 @@ impl Compactor {
             .estimate
             .failed_input_tokens()
             .unwrap_or_else(|| estimated_tokens(&snapshot));
-        let target = hint.unwrap_or_else(|| before.div_ceil(2).max(1));
         let activation = hint.unwrap_or(75_000);
-        if before <= activation || before <= target {
+        if before <= activation {
             return Ok(ContextEditResult {
                 compact: CompactResult {
                     no_target: true,
@@ -67,11 +65,10 @@ impl Compactor {
                 },
                 before_tokens: before,
                 after_tokens: before,
-                target_tokens: target,
                 ..Default::default()
             });
         }
-        self.trim_to_target(snapshot, target, cancel).await
+        self.trim_maximal(snapshot, cancel).await
     }
     pub async fn edit(
         &self,
@@ -157,7 +154,7 @@ impl Compactor {
                     compact,
                     before_tokens: before,
                     after_tokens: after,
-                    target_tokens: target,
+                    target_tokens: Some(target),
                     cache_invalidated_tokens: invalidated,
                     ..Default::default()
                 })
@@ -278,7 +275,7 @@ impl Compactor {
                 compact,
                 before_tokens: before,
                 after_tokens: after,
-                target_tokens: target,
+                target_tokens: Some(target),
                 cache_invalidated_tokens: invalidated,
                 ..Default::default()
             });
@@ -486,7 +483,7 @@ impl Compactor {
             },
             before_tokens: before,
             after_tokens: after,
-            target_tokens: target,
+            target_tokens: Some(target),
             marker_node_id: Some(marker.id),
             cache_invalidated_tokens: invalidated,
             warnings,

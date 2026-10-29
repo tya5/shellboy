@@ -22,6 +22,7 @@ async fn summary_server(
     let connection = crate::config::Connection {
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         stream_idle_timeout_ms: 2_000,
+        response_header_timeout_ms: 2_000,
         ..Default::default()
     };
     let (send, received) = mpsc::channel(16);

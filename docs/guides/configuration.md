@@ -114,6 +114,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # ssl_verify = true
 # session_header = true
 # prompt_cache_key = false
+# response_header_timeout_ms = 120000
 # stream_idle_timeout_ms = 600000
 # request_timeout_ms = 60000
 # response_max_retries = 8
@@ -156,7 +157,9 @@ F6 details for a completed answer show saved `usage.input_tokens_details.cached_
 
 ## HTTP timeouts
 
-Per-connection `stream_idle_timeout_ms` defaults to 600,000ms (10 minutes). For conversation and summary streams, the request is interrupted if this time passes before response headers or between the last received chunk and the next. Conversations follow retry settings below; summaries wait for a recovery decision. Heartbeats count as received data. A response that keeps receiving data is not stopped simply because total elapsed time exceeds ten minutes. Increase the value for models with long silent periods. `0` disables this idle deadline; cancellation and disconnect detection remain active.
+Per-connection `response_header_timeout_ms` defaults to 120,000ms (two minutes) and must be positive. It bounds the interval from request start, including upload, until response headers arrive. It does not establish whether the peer received the complete request.
+
+`stream_idle_timeout_ms` defaults to 600,000ms (10 minutes). After response headers arrive, conversation and summary streams are interrupted if this time passes between the last received chunk and the next. Conversations follow retry settings below; summaries wait for a recovery decision. Heartbeats count as received data. A response that keeps receiving data is not stopped simply because total elapsed time exceeds ten minutes. Increase the value for models with long silent periods. `0` disables only this body-idle deadline; the positive header deadline, cancellation and disconnect detection remain active.
 
 `request_timeout_ms` is the total deadline for nonstreaming requests such as model lists and embeddings: default 60,000ms (one minute), minimum 1,000ms. Model lists use the shorter of this setting and 20,000ms, so the default is twenty seconds. Set either in the same `[connections.proxy]`, independently per connection. Restart to apply changes to the owner; standalone RAG uses settings read at invocation. Conversation idle timeouts follow the retry settings below. Summary timeouts do not automatically resend.
 
@@ -168,7 +171,7 @@ Per-connection `response_max_retries` defaults to 8 and accepts 0–20. Consecut
 
 `response_retry_partial` defaults to `true`. Temporary disconnection, EOF, or idle timeout retries even after part of the body or tool arguments arrived. Reasoning `response.output_item.added` events, including encrypted reasoning, also count as partial output, so with `false` even an empty text body does not permit automatic resend after such an event. `false` sends partial-output failures to recovery wait. Requests containing only metadata or heartbeats, without output, remain retryable even with `false`. Authentication, configuration, input-format, and explicit provider failures are not automatically resent.
 
-For example, if every request fails after 600 silent seconds with no Retry-After, the initial request plus eight retries take 600×9 seconds and delays of 1+2+4+8+16+32+60+60=183 seconds: about 5,583 seconds (93 minutes) until recovery wait. This is not a total deadline; received data or Retry-After can extend it further. Adjust `stream_idle_timeout_ms` and `response_max_retries` to shorten it. Stalled error-body reception on HTTP 429/500/502/503/504 is also retryable.
+For a small input whose body source is fully consumed, nine silent header waits at the default 120 seconds plus backoff delays of 1+2+4+8+16+32+60+60=183 seconds take up to about 1,263 seconds (21 minutes). If headers arrive but each body then stalls for 600 seconds, the same attempts can take about 5,583 seconds (93 minutes), plus header time. These are examples rather than total deadlines: received data or Retry-After can extend the wait. Large-input early reduction and repeated unconsumed-source failures can end these sequences earlier. Adjust `response_header_timeout_ms`, `stream_idle_timeout_ms` and `response_max_retries` to control each part. Stalled error-body reception on HTTP 429/500/502/503/504 is also retryable.
 
 This applies only to conversations and does not change summary, embedding, or model-list retry policy. Configuration changes apply after owner restart. Duplicate billing cannot be prevented when the upstream processed a request but its connection failed. Failures and retries are recorded in existing attempts, and partially received text is preserved. Tool calls are not executed before adoption of the final response.
 
@@ -217,8 +220,8 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | root | `data_dir` = OS default, `default_connection` / `default_model` = unset, `connections` = empty | Storage and new-conversation defaults |
 | `connections.<name>` | `ssl_verify=true`; URL/authentication/effort/headers described above | Per-connection TLS verification, enabled by default |
 | `connections.<name>` | `session_header=true`, `prompt_cache_key=false` | Thread identity header and optional cache identity body field for conversations/summaries |
-| `connections.<name>` | `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Stream idle deadline (0 disables) and nonstream total deadline (minimum 1000ms) |
-| `connections.<name>` | `auto_trim_on_disconnect=true`, `compact_hint_tokens` unset | Consider one deterministic reduction after exhausting retries for a large input |
+| `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
+| `connections.<name>` | `auto_trim_on_disconnect=true`, `compact_hint_tokens` unset | One maximum safe reduction at the first eligible large-input failure; explicit hint also permits pre-POST reduction |
 | `connections.<name>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | Consecutive temporary conversation failure retries (0–20, 0 disables), backoff cap (1–300000ms), and retry after partial reception |
 | `embedding` | `connection` / `model` = unset | Indexing and search API |
 | `shell` | `kind` = Unix `bash` / Windows `powershell`, `executable` = automatic, `env` = empty dictionary | Shell kind, executable, additional environment; not direct WSL startup |
@@ -250,6 +253,8 @@ Keys, defaults, validation, and OS paths are checked against [config.rs](../../s
 
 ### Reduction after disconnection
 
-`connections.<name>.auto_trim_on_disconnect` defaults to true. After a large conversation input exhausts consecutive retries, it considers API-free spill/omission once per Turn/generation. `false` disables it. Optional `compact_hint_tokens` must be a positive integer and supplies both trigger guidance and reduction target. Zero, negatives, fractions, and strings are rejected. If omitted, reduction is considered above an estimated 75,000 tokens and targets half the current estimate. This is not a context-limit setting. Changes apply after owner restart.
+`connections.<name>.auto_trim_on_disconnect` defaults to true. At the first eligible header-timeout, server-5xx or disconnect failure above the input threshold, it attempts maximum safe API-free spill/omission once per Turn/generation, without exhausting retries first. `false` disables automatic reduction. Optional positive `compact_hint_tokens` controls when to reduce, not how much: with an explicit hint, input above it may also be reduced before the first POST. Without it, the failure threshold is an estimated 75,000 tokens and there is no pre-POST reduction. Eligible history outside protected groups is omitted even when no numeric target could be reached; there is no half-size target. Zero, negatives, fractions and strings are rejected. This is not a provider context-limit estimate. Changes apply after owner restart.
 
-The estimate uses the latest saved successful usage and input character count, falling back to four characters/token. Exact tokens are unknown before sending, with attachment, language, and provider differences. See [reducing input after disconnect retries](recovery-and-storage.md#reducing-input-after-disconnect-retries) for behavior and restoration.
+Repeated failures before the HTTP client consumes the request source stop after two such failures rather than repeatedly trimming/retrying. Saved errors distinguish unconsumed source bytes, waiting for headers with peer delivery unknown, and post-header body reception. Successful attempts save header latency in the existing input manifest. Pool generation identifies failed-pool retirement; fresh_pool means first request issued from a new pool, while actual socket reuse is otherwise unknown. Source consumption is not proof of transmission or provider processing.
+
+The estimate uses the latest saved successful usage and input character count, falling back to four characters/token. Exact tokens are unknown before sending, with attachment, language, and provider differences. See [early reduction of large inputs](recovery-and-storage.md#early-reduction-of-large-inputs) for behavior and restoration.

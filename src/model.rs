@@ -64,6 +64,8 @@ pub struct ModelError {
     pub provider_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_observation: Option<Box<http::HttpObservation>>,
 }
 impl ModelError {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
@@ -72,6 +74,7 @@ impl ModelError {
             message: message.into(),
             provider_code: None,
             status: None,
+            http_observation: None,
         }
     }
     pub fn is_context_limit(&self) -> bool {
@@ -118,6 +121,7 @@ impl ModelError {
                 .collect(),
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
+            http_observation: None,
         }
     }
 }
@@ -168,6 +172,7 @@ pub struct ModelResponse {
     pub calls: Vec<ToolCall>,
     pub text: String,
     pub stream_observation: Option<StreamObservation>,
+    pub http_observation: Option<http::HttpObservation>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct StreamObservation {
@@ -290,6 +295,7 @@ impl ModelResponse {
             calls,
             text,
             stream_observation: None,
+            http_observation: None,
         })
     }
 }

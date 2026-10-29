@@ -32,7 +32,7 @@
 
 ## 接続ごとのHTTP待機期限
 
-`connections.<名前>.stream_idle_timeout_ms` は非負整数で既定600,000ms。会話・要約のストリーミングResponses要求で、応答header待機と各受信chunkの間の無通信時間を制限する。0は無通信期限を無効化する。受信が続く間の全体時間に上限を置かず、SSE heartbeatも受信として扱う。
+`connections.<名前>.stream_idle_timeout_ms` は非負整数で既定600,000ms。会話・要約のストリーミングResponses要求で、応答header受信後の各chunk間の無通信時間を制限する。0はbodyの無通信期限だけを無効化する。headerは別のresponse_header_timeout_msで制限する。受信が続く間の全体時間に上限を置かず、SSE heartbeatも受信として扱う。
 
 `connections.<名前>.request_timeout_ms` は1,000以上の整数で既定60,000ms。embeddingなど非ストリーミングHTTP要求の全体期限に使う。モデル一覧は同設定と20,000msの短い方を適用する。両設定は接続ごとに独立し、Rust DefaultとTOML省略時の値を揃える。負数・文字列・小数・範囲外整数は拒否する。設定変更はowner再起動後の要求へ適用する。期間の加算はHTTP側でchecked操作を行い、OSの時計で表現できない期限をpanicや即時timeoutへ変換しない。
 
@@ -67,4 +67,12 @@ TUIは一つの端末sessionを先に開き、設定/保存先・owner lock・DB
 取消単位は既存DataOwner初期化全体とし、途中futureをdropしない。既にこの単位へ入った場合、終了要求後もlock取得・migration・中断整理まで完了しうる。migration済みの変更を巻き戻したとは表示しない。その後のControl開始・接続口公開は次の取消検査で止める。これ以上細かい取消APIやCore状態を増やさず、実writerとlockの寿命を一貫させるための選択である。
 
 
-`connections.<名前>.auto_trim_on_disconnect` はbool/既定true。`compact_hint_tokens` はOption<u64>/既定None、指定0はConfigInvalidとする。詳細は[圧縮設計](compaction.md)の起動目安・目標・推定方式に従う。unknown field拒否・Rust DefaultとTOML省略値の一致を維持する。
+`connections.<名前>.auto_trim_on_disconnect` はbool/既定true。`compact_hint_tokens` はOption<u64>/既定None、指定0はConfigInvalidとする。hintは起動目安だけを指定し、縮小量は保護外の最大限とする。詳細は[圧縮設計](compaction.md)の起動・保護・推定方式に従う。unknown field拒否・Rust DefaultとTOML省略値の一致を維持する。
+
+## Responses header deadline (Issue #34)
+
+`connections.<name>.response_header_timeout_ms` is a positive integer, default
+120000. It bounds the request-start-to-response-headers interval, including upload,
+independently of post-header stream idle time. Zero is rejected; disabling body
+inactivity with stream_idle_timeout_ms=0 does not disable this deadline. Owner
+restart applies configuration changes. Embedding/catalog total limits do not change.

@@ -2,7 +2,7 @@
 
 API境界・接続契約・[adapter契約](adapters.md) を具体化する。HTTP要求は `src/model/http.rs`、Responses受信は `src/model/http/response.rs`、本文処理は `src/model/http/body.rs`、期限は `src/model/http/deadline.rs` に分ける。ローカルHTTP fixtureは `tests/model_http.rs`。初期のAPI・接続仕様資料は非同梱。
 
-`HttpModelClient::new(Connection)` でURL・headerの静的契約を検査し、接続profileを固定する。資格情報の環境変数は要求を始める直前に取得する。owner内では接続profileごとに構築した共有clientを使い、要求ごとにtransportやpoolを作り直さない。認証不足ならHTTPを開始しない。Responses要求は同API rootの `/responses` へ一回POSTし、`stream:true` / `store:false` を強制する。model/effort/input/tool指定は要求側が組み立てた値を維持する。redirect、HTTPクライアントのretry、別APIへのfallbackは無効。接続確立timeoutは固定30秒。生成全体の期限は付けず、接続別の受信停滞期限と利用者の取消しで中断可能とする。
+`HttpModelClient::new(Connection)` でURL・headerの静的契約を検査し、接続profileを固定する。資格情報の環境変数は要求を始める直前に取得する。owner内では接続profileごとに構築した共有clientを使い、正常な要求ごとにtransportやpoolを作り直さない。失敗したpool generationの退役はIssue #34の規則に従う。認証不足ならHTTPを開始しない。Responses要求は同API rootの `/responses` へ一回POSTし、`stream:true` / `store:false` を強制する。model/effort/input/tool指定は要求側が組み立てた値を維持する。redirect、HTTPクライアントのretry、別APIへのfallbackは無効。接続確立timeoutは固定30秒。生成全体の期限は付けず、接続別の受信停滞期限と利用者の取消しで中断可能とする。
 
 HTTP(S)プロキシはreqwestの既存環境変数 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` と `NO_PROXY` を利用する。接続別TOMLのproxyキーや独自の除外判定は追加しない。依存のdefault-features=falseを維持し、OS GUIのsystem-proxy取得やSOCKS featureは有効にしない。
 
@@ -36,7 +36,7 @@ F6は採用assistant nodeからindexed output_item.node_idを経由して正確�
 
 ControlのStoreがimmutableなHttpClients表を所有し、会話Driver・Compactor・索引worker・意味検索・モデル一覧へ同じArcを共有する。表は設定の接続名ごとに一つのHttpModelClient（又は初期化エラー）で、entry数は起動設定の接続数に固定する。通常のRust constructorを使い、runtimeの追加cache、mutex、worker、queue、永続表は持たない。独立テスト向けconstructorは独立の表を構築でき、独立RAGは従来どおりコマンド単位のProfileのclientを使う。
 
-URL/静的headerとclientの構築・検証はowner初期化時に行い、要求時は軽いcloneを取得する。使わない接続のclient初期化エラーは表に保持し、その接続の操作開始時に返す。動いている間のTOML変更を読み直さない。資格情報/環境変数headerは各HTTP要求の直前に解決し、clientへ秘密値を固定しない。HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXYはreqwestがclient構築時に読むため、変更はownerの再起動後に反映する。別processのshellの環境変更が既に動いているownerへ伝わるという意味ではない。
+URL/静的headerとclientの構築・検証はowner初期化時に行い、要求時は軽いcloneを取得する。使わない接続のclient初期化エラーは表に保持し、その接続の操作開始時に返す。動いている間のTOML変更を読み直さない。資格情報/環境変数headerは各HTTP要求の直前に解決し、clientへ秘密値を固定しない。HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXYはreqwestがclient構築時（初期化又は失敗poolの再構築）にowner processの環境から読む。通常の設定変更はownerの再起動で反映する。別processのshellの環境変更が既に動いているownerへ伝わるという意味ではない。
 
 reqwestのpool_idle_timeoutを45秒にする。提案範囲30〜60秒の中間を、proxyに閉じられた古いidle接続を長く残さない初期値として選ぶ。会社proxyの実測最適値や切断回避保証とはしない。新しい設定keyやpool_max_idle_per_hostの独自上限は加えない。接続別base_url/ssl_verify/期限は隔離し、redirect禁止・HTTP client自身のretry禁止を維持する。接続の失敗は会話Driverの通常の再試行判断へ渡す。
 
@@ -62,7 +62,7 @@ item doneとの差分があれば先頭16件までの固定分類とoutput_index
 
 ## 接続別のHTTP期限（Issue #8）
 
-HTTP層がApiEndpointごとに同じ期限を適用する。Responses（会話・要約）は最後に非空のbody byte又はheaderを受信してからの受信停滞期限 `stream_idle_timeout_ms`（既定600000ms、0で無効）。header待ちも開始時点から対象とし、長時間の生成全体へ固定期限は付けない。SSEコメントや未完frameも受信として扱う。embeddingは要求全体の `request_timeout_ms`（既定60000ms、最小1000）、モデル一覧は同設定と20000msの小さい方。HTTP失敗本文にも同じ期限を適用し、呼出し側のRAG90秒timeoutは撤去する。
+HTTP層がApiEndpointごとに同じ期限を適用する。Responses（会話・要約）は最後に非空のbody byte又はheaderを受信してからの受信停滞期限 `stream_idle_timeout_ms`（既定600000ms、0で無効）。header待ちは別のresponse_header_timeout_ms（既定120000ms・正整数）で開始時点から制限し、長時間の生成全体へ固定期限は付けない。SSEコメントや未完frameも受信として扱う。embeddingは要求全体の `request_timeout_ms`（既定60000ms、最小1000）、モデル一覧は同設定と20000msの小さい方。HTTP失敗本文にも同じ期限を適用し、呼出し側のRAG90秒timeoutは撤去する。
 
 取消しを優先して観測する。期限切れはModelError kind `timeout` とし、header/bodyの段階、観測経過、接続名を含む設定keyをローカルで生成する。provider本文やURLを期限切れ診断へ混ぜない。接続確立期限のreqwest errorもtimeoutへ分類する。SSEの部分本文・完了済みitem・raw responseは既存AttemptFailureで保全する。会話の停滞timeoutは以下の再試行条件で扱い、要約・索引・RAGの方針は変えない。
 
@@ -105,3 +105,47 @@ EOFのModelErrorには受信byte数、解析JSON event数、item done数、DONE 
 ## HTTP要求内の共通文脈（Issue #13レビュー）
 
 cancel・Deadline・有限event sender・redaction対象を局所RequestContextへまとめ、JSON/SSE/HTTP error本文へ借用する。response_json/response_sseはclient状態に依存しない関数とする。非2xxはhttp_errorを直接呼び、成功しないことをexpectで仮定しない。stream deltaの受信分類と固定診断分類は同じclassify_stream_eventから導出する。要求をまたぐ状態や再試行の判断は持ち込まない。
+
+## Issue #34: independent headers and bounded transport facts
+
+Responses header waiting has a separate positive per-connection
+`response_header_timeout_ms`, provisionally 120000ms. Its clock includes request
+upload and ends at received response headers; it cannot prove a peer read the
+request. `stream_idle_timeout_ms` remains the post-header receive inactivity
+budget (600000ms by default, zero disables only this body inactivity budget).
+Embedding/model-catalog total deadlines and the fixed 30-second connection
+establishment limit remain unchanged. Header latency measures outgoing.send to received headers; the deadline starts
+earlier during request setup and also includes local credential/encoding work.
+Latency is observed on successful Responses and saved under the existing attempt input manifest's http_observation;
+failures retain the observation in the existing ModelError. The default is a
+conservative initial choice, not a measured optimum for a particular provider;
+local measurement and its limitations belong in the decision record.
+
+Observations contain bounded typed phase, serialized body length, source bytes
+consumed by the HTTP client, successful header elapsed milliseconds, pool
+generation and a connection-reuse fact. `upload_source_incomplete` means not all
+source bytes were consumed; `awaiting_headers_delivery_unknown` means the source
+was consumed but peer delivery is unknown; `body_receive` means headers arrived.
+The reqwest public API does not expose socket-write completion, TCP acknowledgement
+or actual socket reuse. Never label source consumption as successful transmission
+or blame/exclude provider processing from these observations. The first request
+issued by a newly built client records fresh_pool; all other socket reuse is
+unknown. No private URL, body, header or credential is copied into telemetry.
+
+The existing owner-scoped client now owns one bounded shared pool generation. A
+short std RwLock protects only cloning/replacing Client and two scalar counters;
+it is never held across await. Failure retires its generation so later requests
+do not select that pool; a late failure from an old generation cannot reset the
+new pool. Existing in-flight clones retain their old pool until dropped, so no
+immediate closure of a multiplexed HTTP/2 socket with other active requests is
+promised. A fresh pool is not a claim that a concurrent request necessarily uses
+a fresh socket. The existing 45-second idle timeout is retained and is not an
+absolute connection-age guarantee. No table, worker, queue, dependency or Core
+operation is added.
+
+The fixed dependency's public contracts are [streaming request bodies](https://docs.rs/reqwest/0.13.5/reqwest/struct.Body.html#method.wrap_stream),
+[response remote address](https://docs.rs/reqwest/0.13.5/reqwest/struct.Response.html#method.remote_addr)
+and [pool idle timeout](https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuilder.html#method.pool_idle_timeout).
+These APIs do not provide a per-request peer-delivery acknowledgement or exact
+socket-reuse fact; that absence is a documented diagnostic limitation, not a
+reason to infer those facts from body polling.

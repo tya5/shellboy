@@ -1,4 +1,4 @@
-//! One deterministic reduction after exhausted disconnect retries. The
+//! One deterministic maximum reduction before POST or at the first large-input failure. The
 //! Compactor owns sizing, safe ranges, provenance and atomic path adoption.
 use super::*;
 
@@ -41,10 +41,7 @@ pub(super) async fn try_trim(
                 "estimated input does not exceed activation threshold",
             )
         } else {
-            (
-                "no_safe_reduction",
-                "no safe reduction can reach the target",
-            )
+            ("no_safe_reduction", "no safe groups outside protected work")
         };
         *not_applied = Some(json!({"outcome":outcome,"result":result}));
         failure.error.message.push_str(&format!(
@@ -59,7 +56,8 @@ pub(super) async fn try_trim(
         "completed_items":failure.completed_items,
         "raw_response":failure.raw_response,
         "attempt_id":attempt,
-        "automatic_retry_exhausted":{"retries":retries,"limit":limit},
+        "automatic_trim_trigger":{"retries_used":retries,"retry_limit":limit,
+            "retry_after_ms":failure.facts.retry_after.map(|delay| delay.as_millis().min(u64::MAX as u128) as u64)},
         "automatic_trim":result,
     });
     let partial = failure.facts.received == model::http::ResponseReceived::Output;
@@ -83,6 +81,36 @@ pub(super) async fn try_trim(
     if transition != super::super::state::AttemptTransition::Applied {
         return Ok(false);
     }
+    control.changed(&snapshot.thread);
+    Ok(true)
+}
+
+/// Explicit hint only: release the caller's replay before invoking this helper.
+/// The caller reloads the same turn snapshot when no path change was adopted.
+pub(super) async fn before_post(
+    control: &Arc<Control>,
+    snapshot: &Snapshot,
+    slot: &DriverSlot,
+    budget: &mut retry::RetryBudget,
+) -> Result<bool, ApiError> {
+    let connection = &control.store.config.connections[&snapshot.profile];
+    let Some(hint) = connection.compact_hint_tokens else {
+        return Ok(false);
+    };
+    if !budget.trim_available(connection.auto_trim_on_disconnect) {
+        return Ok(false);
+    }
+    let result = control
+        .compactor
+        .trim_disconnect(&snapshot.thread, Some(hint), slot.stop.clone())
+        .await?;
+    if result.before_tokens <= hint {
+        return Ok(false);
+    }
+    if result.compact.no_target {
+        return Ok(false);
+    }
+    budget.consume_trim();
     control.changed(&snapshot.thread);
     Ok(true)
 }

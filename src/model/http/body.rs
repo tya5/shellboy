@@ -123,6 +123,7 @@ pub(super) async fn http_error(response: Response, context: &mut RequestContext<
                 .collect(),
             provider_code: None,
             status: Some(status),
+            http_observation: None,
         },
     };
     if error.message.is_empty() {
