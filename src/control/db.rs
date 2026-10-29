@@ -1341,6 +1341,15 @@ fn thread_excerpt(connection: &Connection, thread: &str) -> Result<String> {
     Ok(String::new())
 }
 
+const THREAD_LIST_SQL: &str = "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
+    COALESCE((SELECT state FROM turn WHERE run_id=latest.id ORDER BY created_at DESC,id DESC LIMIT 1),latest.state),
+    latest.stop_reason,latest.id
+FROM thread t LEFT JOIN run latest ON latest.id=(
+    SELECT r.id FROM run r WHERE r.thread_id=t.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
+WHERE t.deleted_at IS NULL AND t.rowid<=?1
+    AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
+ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
+
 fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<ThreadSummary>> {
     let filter = args.query.as_deref().unwrap_or("");
     let needle = title_text(filter).to_lowercase();
@@ -1367,7 +1376,7 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
     };
     // Filter against the same derived labels returned by ThreadGet/List. Keep
     // candidates as a cursor: a filtered miss scans without collecting history.
-    let mut statement=connection.prepare("SELECT id,title,cwd,parent_thread_id,updated_at,(SELECT COALESCE((SELECT state FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),r.state) FROM run r WHERE r.thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1),(SELECT stop_reason FROM run r WHERE r.thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1),(SELECT id FROM run r WHERE r.thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1) FROM thread t WHERE deleted_at IS NULL AND rowid<=?1 AND (?2='' OR updated_at<?2 OR (updated_at=?2 AND id<?3)) ORDER BY updated_at DESC,id DESC LIMIT ?4").map_err(sql_error)?;
+    let mut statement = connection.prepare(THREAD_LIST_SQL).map_err(sql_error)?;
     let mut rows = statement
         .query(params![
             watermark,
@@ -1927,4 +1936,35 @@ fn saved_operation(
         };
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod thread_list_plan_tests {
+    use super::*;
+    #[test]
+    fn actual_correlated_thread_list_seeks_latest_run_once_without_per_run_sort() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        let plans: Vec<String> = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {THREAD_LIST_SQL}"))
+            .unwrap()
+            .query_map(params![100_i64, "", "", 50], |r| r.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let seeks: Vec<_> = plans
+            .iter()
+            .filter(|p| p.contains("run_thread_created"))
+            .collect();
+        assert_eq!(seeks.len(), 1, "{plans:?}");
+        assert!(
+            plans
+                .iter()
+                .any(|p| p.contains("SEARCH latest") && p.contains("INDEX")),
+            "{plans:?}"
+        );
+        assert!(!plans.iter().any(|p| p.contains("SCAN r")), "{plans:?}");
+        // The outer Thread pagination may sort; the scalar Run lookup must use
+        // its covering index instead of reading every Run in each Thread.
+    }
 }

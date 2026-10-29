@@ -263,9 +263,7 @@ impl<'a, 'db> SectionWriter<'a, 'db> {
         self.count += 1;
         let mut value: Value =
             serde_json::from_str(&body).map_err(|e| StorageError::Schema(e.to_string()))?;
-        if self.section == "runs"
-            && (self.reason != "app_shutdown" || value["stop_reason"].is_null())
-        {
+        if self.section == "runs" && value["stop_reason"].is_null() {
             value["stop_reason"] = json!(self.reason);
         }
         if self.reason == "app_shutdown"
@@ -627,5 +625,32 @@ mod tool_snapshot_tests {
             .unwrap(),
             0
         );
+    }
+}
+
+#[cfg(test)]
+mod stop_reason_review_tests {
+    use super::*;
+    #[test]
+    fn startup_and_shutdown_capture_preserve_explicit_stop_reason() {
+        for reason in ["previous_instance_interrupted", "app_shutdown"] {
+            let mut db = rusqlite::Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/','p','m','now'); INSERT INTO run(id,thread_id,state,created_at,stop_reason)VALUES('r','t','stopping','now','explicit_stop');").unwrap();
+            let tx = db.transaction().unwrap();
+            capture_interrupted_context(&tx, "later", reason, "test").unwrap();
+            let text:String=tx.query_row("SELECT json_extract(payload_json,'$.text') FROM node WHERE kind='interruption_context'",[],|r|r.get(0)).unwrap();
+            let snapshot: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(
+                snapshot["change"]["runs"]["items"][0]["stop_reason"],
+                "explicit_stop"
+            );
+            assert_eq!(
+                tx.query_row("SELECT stop_reason FROM run WHERE id='r'", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                "explicit_stop"
+            );
+        }
     }
 }

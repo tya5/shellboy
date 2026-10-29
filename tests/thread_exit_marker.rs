@@ -71,5 +71,33 @@ async fn thread_list_exposes_latest_stop_reason_and_new_run_clears_it() {
             .latest_run_stop_reason
             .is_none()
     );
+    store.database.call(|db| {
+        // An older timestamp inserted last must not select a different Run in
+        // activity than in the browser's adopted timestamp/ID ordering.
+        db.execute("INSERT INTO run(id,thread_id,state,created_at,stop_reason)VALUES('backdated','crash','stopped','earlier','app_shutdown')",[])?;
+        Ok(())
+    }).await.unwrap();
+    let activity = store
+        .database
+        .call(|db| shellboy::frontend::activity::project(db, "crash"))
+        .await
+        .unwrap();
+    assert_eq!(activity.snapshot.run_id.as_deref(), Some("z-new"));
+    let same: Page<ThreadSummary> = serde_json::from_value(
+        store
+            .execute(list("same-order"), None)
+            .await
+            .unwrap()
+            .result,
+    )
+    .unwrap();
+    assert!(
+        same.items
+            .iter()
+            .find(|t| t.thread_id == "crash")
+            .unwrap()
+            .latest_run_stop_reason
+            .is_none()
+    );
     store.database.shutdown().await.unwrap();
 }

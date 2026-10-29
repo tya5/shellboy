@@ -93,7 +93,7 @@ Connection precedence: explicit `--connection` > explicit Thread > authenticated
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `thread list [--limit N] [--cursor C] [--query TEXT]` | `items` (thread_id/title/cwd/parent_id/state/updated_at/excerpt), optional `next_cursor`; default 50, range 1–200. Query filters ID/title/cwd |
+| `thread list [--limit N] [--cursor C] [--query TEXT]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/updated_at/excerpt), optional `next_cursor`; default 50, range 1–200. Query filters ID/title/cwd |
 | `thread get [--thread THREAD]` | thread_id/title/cwd/connection/model/effort/parent_id, current run_id/turn_id, children_count/shells_count, recovery_reason |
 | `thread create [--cwd PATH] [--connection NAME] [--model ID] [--effort VALUE] [--parent THREAD]` | New Thread details, without starting instructions or a Run. Parent establishes ancestry; execution ownership is assigned when the parent Run sends. Normally inherits parent settings |
 | `thread fork --thread THREAD --node NODE [--cwd PATH]` | New Thread sharing the selected path through NODE inclusive, without changing the original; invalid boundaries such as incomplete tool groups rejected |

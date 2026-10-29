@@ -91,7 +91,7 @@ impl Projection {
 pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::storage::StorageError> {
     let run: Option<(String, String, Option<String>)> = db
         .query_row(
-            "SELECT id,state,stop_reason FROM run WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1",
+            "SELECT id,state,stop_reason FROM run WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
             [thread],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )

@@ -794,11 +794,15 @@ impl ThreadBrowser {
                         .as_deref()
                         .map(one_line)
                         .unwrap_or_else(|| "なし".into()),
-                    if interrupted_by_app_exit(thread) {
-                        "Interrupted by app exit".into()
-                    } else {
-                        one_line(state(&thread.state))
-                    }
+                    format!(
+                        "{}{}",
+                        one_line(state(&thread.state)),
+                        if interrupted_by_app_exit(thread) {
+                            " · Interrupted by app exit"
+                        } else {
+                            ""
+                        }
+                    )
                 ),
                 width,
             )),
@@ -1233,6 +1237,10 @@ mod tests {
                 );
                 if width == 120 {
                     assert_eq!(shown.contains("Interrupted by app exit"), marked);
+                    assert!(
+                        shown.contains(state(&item.state)),
+                        "ordinary state must remain visible: {shown}"
+                    );
                 }
             }
             item.latest_run_stop_reason = None;

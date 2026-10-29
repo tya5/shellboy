@@ -123,3 +123,19 @@ A latest reason of `previous_instance_interrupted` or `app_shutdown` adds `[exit
 The latest Run's optional typed Revisit summary supplies consumed count and pending reservation to the existing row and selected detail. Use `Revisit N` and append `next reserved` only for a saved pending instruction. This is independent of app-exit marking and ordinary Run/Turn state; a new Run starts with its own facts. The activity footer shows the same summary while the Run is live/stopping, observed at the existing reactive progress cadence. No instruction body or setter is copied into list/status rows.
 
 Reserve row width for the Revisit label so a long title does not hide it. Narrow rows use `Revisit N+` (`+` means a pending next reservation); the selected detail retains `next reserved`. At extremely narrow widths the existing title/tree remains primary, with full values reachable in details.
+
+## Review alignment: latest Run and detail state (#39)
+
+Use the same persisted `created_at DESC, id DESC` ordering in the browser and
+activity projection. This preserves the adopted stable ordering and uses the
+existing run_thread_created index; row insertion order must not select a
+different Run in the footer. This ordering describes saved timestamps, not a
+new monotonic creation sequence. A wall-clock rollback remains a timestamp
+limitation; no sequence column/table/migration is introduced for this display fix.
+
+The list query resolves the latest Run once with a correlated indexed ID seek,
+then reads its state/reason/Revisit identity from the joined row. Test EXPLAIN
+against that actual statement, including outer Thread pagination. The selected
+detail appends `Interrupted by app exit` to the ordinary state rather than
+replacing it. Interrupted snapshot stop_reason follows the same COALESCE rule as
+startup terminalization: explicit_stop is retained.
