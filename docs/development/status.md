@@ -1,5 +1,25 @@
 # Development status
 
+## Issues #36–#39 review follow-up (2026-10-30)
+
+Review fixes are committed separately by issue: #36 `ce2f101`, #37 `b1979b6`,
+#39 `f5769f0` plus formatting-only `0288bc1`, and #38 `d245d5c` plus IPC-readiness fixture `9e4f8ea`. The
+[follow-up record](issue-36-39-follow-up.md) tracks every review finding,
+partial adoption and deferred wording/UI work. Strict current-format state and
+SQLite integrity checks remain in force; no new table or recovery engine was
+added.
+
+The reviewer-provided interactive zsh PTY reproduction confirms duplicate HUP
+as the premature-force cause. Baseline exits in about 0.1 seconds with unfinished
+Run/shell state; current bash and zsh finish in about 2.1 seconds with stopped
+Run/shell state and no orphan matches. The reviewer withdrew M2 after correcting
+its process-wait script; it is not claimed as a newly fixed normal-close defect.
+
+The macOS standard check passes format, strict all-target Clippy and all tests:
+86 groups / 1,442 passed / 0 failed / 28 ignored. Platform limits are recorded in
+[acceptance](../validation/acceptance.md). Work remains local; no installed
+binary replacement, push or release is part of this review round.
+
 ## Revisit, resilient exit and interrupted-conversation visibility (2026-10-30)
 
 Issues #36/#38/#39 and the #37 review are implemented locally. Revisit reserves

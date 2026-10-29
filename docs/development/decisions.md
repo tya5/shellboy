@@ -2,6 +2,41 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Review follow-up: bounded lifecycle fixes (2026-10-30)
+
+Keep lifecycle fixes in the existing Control, capture and supervisor ownership
+boundaries; no new persistent table, worker, queue, generic recovery engine or
+compatibility route is needed. Findings and commit mapping are tracked in the
+[follow-up record](issue-36-39-follow-up.md).
+
+- Revisit remains a strict current-format state. Optional projection may omit
+  malformed state and stop/startup may discard it; explicit reads report the
+  error. Defaulting absent counts would manufacture facts. SQL failures still
+  propagate. Revisit capacity recovery keeps the existing retry behavior,
+  including its possible empty-input model Turn.
+- Thread-local malformed capture metadata can be isolated, but a recovery JSON
+  value violating the schema CHECK is database-integrity corruption. Do not
+  weaken startup quick_check to make a synthetic corrupt database look usable.
+- Latest Run retains the adopted created_at/id order and existing covering
+  index. Activity and list must agree. No migration/sequence is justified by
+  this review; wall-clock rollback remains a timestamp-order limitation.
+- HUP is a terminal/session-loss notification and cannot reliably express a
+  second human request. Make it idempotent; repeated explicit TERM retains force.
+  The reviewer's normal-close orphan finding was withdrawn after its process-wait
+  script was corrected. Exact baseline/current zsh comparison confirms the
+  duplicate-HUP defect, not a new bash cleanup defect.
+- Forced exit best-effort signals only groups owned by live supervisor tasks.
+  One set entry per active native task is removed on confirmed disappearance or
+  task destruction. UI access uses try_lock and a racing spawn sees an atomic
+  force flag. No persisted numeric process identity is trusted. A stalled spawn,
+  OS process-group reuse, blocked terminal restoration and Windows callback
+  deadlines remain explicit limits rather than durable-success promises.
+
+Reconsider these choices if current-format state evolves, native OS evidence
+contradicts the bounds, or product requirements require non-timestamp Run order.
+See [acceptance](../validation/acceptance.md) for executed checks and remaining
+platform limits.
+
 ## Shellboyへの改名と公開構成（2026-10-26）
 
 利用者の指示により製品名、Cargo package、実行名、環境変数、既定保存先をShellboyへ統一する。旧名の互換は不要とし、別名launcherや旧保存先の自動探索・移行は追加しない。旧データの移動も行わない。影響は起動名・設定参照・新しい既定保存先であり、旧環境を変更しない。保存先と検証は [setup](setup.md)、[検証状況](../validation/acceptance.md) を参照する。

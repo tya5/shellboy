@@ -1,5 +1,67 @@
 # Validation record
 
+## Review follow-up #36–#39 verification (2026-10-30)
+
+Source `9e4f8ea` includes separate #36/#37/#39/#38 commits listed in the
+[follow-up record](../development/issue-36-39-follow-up.md). Environment:
+macOS ARM64 / pinned Rust 1.99.1. All new fixtures use temporary synthetic stores
+and loopback HTTP, not paid APIs or the default datastore.
+
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+passes format, strict all-target Clippy and all tests: **86 groups / 1,442 passed /
+0 failed / 28 ignored**.
+
+Current focused checks also passed: 625 library tests, 11 Revisit integration
+tests, three real-owner isolation tests, the Thread exit-marker integration test,
+and the corrected interactive bash/zsh PTY-close regression. The first focused
+run exposed a fixture's assumption about CHECK-violating JSON and interactive
+shell startup; those fixtures were corrected before the final standard run.
+The first standard attempt rejected nested formatting under strict Clippy;
+`0288bc1` fixes the formatting without changing display behavior. The next run
+failed before terminal closure because the fixture treated endpoint.json
+publication as IPC readiness. `9e4f8ea` waits for a successful read-only request;
+creation is never retried, and all shutdown assertions remain intact. The
+separate native signal suite then passed seven tests with one subprocess entry
+ignored (invoked by its parent).
+
+Specific evidence:
+
+- Revisit ordinary completion survives a closed start gate when no reservation
+  is pending, including child Run completion. Malformed current-format Revisit
+  values do not block stop/list/startup; explicit reads still report errors.
+- Real DataOwner/CLI tests cover malformed typed Revisit capture, bad cursor,
+  healthy HTTP conversation, blocked bad history before HTTP, fork before an
+  incomplete group, and deletion. A separate CHECK-violating recovery JSON case
+  correctly fails startup quick_check; integrity corruption is not relabeled as
+  a recoverable Thread-local condition.
+- Snapshot tests preserve explicit_stop during both startup and shutdown.
+  Detail keeps ordinary state next to the exit marker. Actual correlated list
+  query plan resolves the latest Run once using existing indexes; activity and
+  list agree for a backdated last-inserted Run.
+- Native Unix process tests cover direct TERM/HUP, actual PTY loss through
+  interactive bash/zsh with TERM-ignoring shell, EOF without controlling HUP,
+  mixed TERM/duplicate HUP with a 5.5-second configured TERM grace, repeated TERM
+  while DB cleanup is blocked, and independent deadline enforcement with a
+  deliberately stalled main thread. The ignored subprocess entry is invoked by
+  its substantive non-ignored parent test.
+- The exact reviewer-provided `winclose2.py` was additionally run against a
+  separately built baseline `546102d` and current debug binary with fresh data.
+  Baseline zsh: about 0.1 seconds, signal_force, Run stopping, shell running.
+  Current zsh and bash: about 2.1 seconds, no signal_force, Run stopped with
+  app_shutdown, shell stopped, no orphan matches. Duplicate HUP is still observed
+  with current zsh. The reviewer's M2 normal-close orphan report was withdrawn
+  after correcting pgrep option parsing; baseline bash already cleaned up.
+
+Documentation audit passes: 645 relative links, 38 heading fragments and four
+TOML blocks, with 13 English guides and one Japanese User Guide. Gitleaks finds
+no leaks in the six review-fix commits or the staged verification record.
+
+Native Windows/Linux execution, Windows console close/logoff/shutdown, physical
+terminal force restoration and three-OS CI are untested in this round. Windows
+callback limits, blocked terminal restoration, macOS select descriptor ceiling,
+and best-effort process-group cleanup remain documented limits. No push,
+release or installed-binary replacement was performed.
+
 ## Integrated #36–#39 lifecycle verification (2026-10-30)
 
 Source based on local commit `1d56487`, macOS ARM64 / pinned Rust 1.99.1.
