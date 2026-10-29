@@ -1,5 +1,27 @@
 # Validation record
 
+## Issue #44 review follow-up: compact column labels
+
+macOS arm64 / Rust 1.99.1, isolated worktree based on a45f54e; self-review,
+without child threads. Fix 99982d7 addresses the public review's Medium label
+truncation; the Low wall-clock latest-Turn observation remains a limitation.
+
+- `cargo test --lib every_activity_fits_the_actual_state_column -- --nocapture`:
+  1 passed. All 17 phases are rendered at 20 widths (28 through 120 columns,
+  including responsive breakpoints) and heights 10/20. The assertion reads
+  exactly eight cells directly below the state header, not the details. Labels
+  must equal the compact label and contain no ellipsis. Full labels remain
+  unchanged. Outer widths too small to expose the column were removed from the
+  initial test matrix after a fixture failure; product column visibility is
+  unchanged below 20 inner cells.
+- `sh scripts/check.sh`: exit 0; format/strict all-target Clippy, 86 test groups /
+  1,452 passed / 0 failed / 28 ignored. No warnings. Background shell completion
+  was observed with shellboy wait. Synthetic TestBackend rendering is not
+  physical-terminal verification.
+- Exact-SHA native CI is observed after push and reported in the completion
+  message; it is not inferred from the prior #44/#45 CI. No provider, real data,
+  installed owner or binary was changed for this follow-up.
+
 ## Issue #45: read-time shell timing
 
 Same isolated macOS arm64/Rust 1.99.1 environment as #44.

@@ -1,5 +1,18 @@
 # Development status
 
+## Issue #44 review follow-up: readable activity column
+
+The external review's Medium finding is addressed by 99982d7: a separate
+column label (at most eight display cells) and an eight-cell reservation even
+in narrow layouts. Background is explicitly background work, idle is not-yet-run;
+full detail/footer labels and JSON classification remain unchanged. The actual
+state cells, not selected details, are checked for all 17 phases at 20 terminal
+widths and two heights. macOS standard checks pass: 86 groups / 1,452 passed /
+0 failed / 28 ignored. Exact-SHA native CI for this follow-up is confirmed
+separately after push. The Low wall-clock ordering limitation is recorded and
+unchanged. Issue closure and installed-binary replacement are not part of this
+follow-up.
+
 ## Issue #45: read-time shell observations
 
 Shell get and bounded status pages now share the saved start/output timing

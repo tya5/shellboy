@@ -96,3 +96,15 @@ is not evidence of universally lower cost or equal defect-detection quality.
   unavailable OS environments are not represented by local mock success.
   Three-OS CI is distinct from physical-terminal testing. The installed owner
   and real user data were not changed. No PR, release or issue close is implied.
+
+## Post-cutoff external review of #44
+
+The public review subsequently found one Medium issue: long activity labels
+were clipped in the narrow table column, making background work ambiguous.
+This was missed by the original self-review/tests, which could see full labels
+in selected details. Fix 99982d7 adds bounded column labels and directly tests
+the actual state-column cells for every phase at responsive widths; see the
+review follow-up in acceptance. One Low timestamp-ordering observation is
+recorded without a change, as requested by the reviewer. This follow-up is
+outside the fixed request/token/time accounting above and demonstrates why
+passing tests alone did not establish independent-review-equivalent quality.
