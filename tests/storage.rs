@@ -458,10 +458,13 @@ async fn version_one_upgrade_preserves_data_and_adds_gc_reverse_indexes() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("v1.db");
     let connection = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    connection.execute_batch("BEGIN IMMEDIATE").unwrap();
     connection
         .execute_batch(include_str!("../migrations/0001_initial.sql"))
         .unwrap();
     connection.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('saved','/tmp','/tmp/AGENTS.md','fixture','fixture','now')",[]).unwrap();
+    connection.execute_batch("COMMIT").unwrap();
     connection.close().unwrap();
     let database = DbWorker::open(&path).await.unwrap();
     database.call(|db|{
@@ -477,6 +480,8 @@ async fn version_two_upgrade_preserves_context_and_indexes_only_unconsumed_obser
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("v2.db");
     let connection = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    connection.execute_batch("BEGIN IMMEDIATE").unwrap();
     connection
         .execute_batch(include_str!("../migrations/0001_initial.sql"))
         .unwrap();
@@ -484,6 +489,7 @@ async fn version_two_upgrade_preserves_context_and_indexes_only_unconsumed_obser
         .execute_batch(include_str!("../migrations/0002_gc_indexes.sql"))
         .unwrap();
     connection.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('saved','/tmp','/tmp/AGENTS.md','fixture','fixture','now'); INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES('pending','context_changed','{}','saved','{}','now');").unwrap();
+    connection.execute_batch("COMMIT").unwrap();
     connection.close().unwrap();
     let database = DbWorker::open(&path).await.unwrap();
     database.call(|db|{
@@ -501,6 +507,8 @@ async fn version_three_attachment_backfill_preserves_known_source_and_quarantine
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("v3.db");
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch(include_str!("../migrations/0001_initial.sql"))
         .unwrap();
     db.execute_batch(include_str!("../migrations/0002_gc_indexes.sql"))
@@ -509,6 +517,7 @@ async fn version_three_attachment_backfill_preserves_known_source_and_quarantine
         .unwrap();
     db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/tmp','/tmp/AGENTS.md','p','m','now');INSERT INTO node(id,kind,created_at,payload_json)VALUES('human','user','now','{\"role\":\"user\",\"content\":\"original\"}');INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',0,'human');INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('known','human','/tmp/a','file','external','now'),('unknown',NULL,'/tmp/b','file','external','now');INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order)VALUES('t','known','active','now',0),('t','unknown','active','now',1);").unwrap();
     db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('fork','/tmp','/tmp/AGENTS.md','p','m','now');INSERT INTO node(id,kind,created_at,payload_json)VALUES('old-assistant','assistant','now','{\"type\":\"function_call\",\"name\":\"shell\",\"call_id\":\"call\",\"arguments\":\"{}\"}');INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('assistant-origin','old-assistant','/tmp/c','file','external','now');INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order)VALUES('fork','unknown','active','now',0),('t','assistant-origin','active','now',2),('fork','assistant-origin','active','now',1);").unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     let db = DbWorker::open(&path).await.unwrap();
     db.call(|db|{
@@ -553,6 +562,8 @@ async fn version_three_compacted_attachment_tombstones_do_not_create_pending_rep
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("v3-compacted.db");
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch(include_str!("../migrations/0001_initial.sql"))
         .unwrap();
     db.execute_batch(include_str!("../migrations/0002_gc_indexes.sql"))
@@ -560,6 +571,7 @@ async fn version_three_compacted_attachment_tombstones_do_not_create_pending_rep
     db.execute_batch(include_str!("../migrations/0003_context_indexes.sql"))
         .unwrap();
     db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('compacted','/tmp','/tmp/AGENTS.md','p','m','now'),('shared','/tmp','/tmp/AGENTS.md','p','m','now');INSERT INTO node(id,kind,created_at,payload_json,deleted_reason)VALUES('retired','user','now',NULL,'compacted');INSERT INTO node(id,kind,created_at,payload_json)VALUES('summary','summary','now','{\"role\":\"developer\",\"content\":[{\"type\":\"input_text\",\"text\":\"Retained summary without attachment binaries\"}]}');INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('compacted',0,'summary');INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('retired-ref','retired','/unavailable/a','file','external','now'),('unknown-ref',NULL,'/unavailable/b','file','external','now');INSERT INTO attachment_selection(thread_id,attachment_id,state,reason,selected_at,selected_order)VALUES('compacted','retired-ref','excluded','context_replacement','now',0),('compacted','unknown-ref','excluded','context_replacement','now',1),('shared','unknown-ref','active',NULL,'now',0);").unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     let db = DbWorker::open(&path).await.unwrap();
     db.call(|db|{
@@ -682,6 +694,8 @@ async fn version_four_removes_only_origin_credentials_preserving_results_raw_and
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("v4.db");
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     for migration in [
         include_str!("../migrations/0001_initial.sql"),
         include_str!("../migrations/0002_gc_indexes.sql"),
@@ -702,6 +716,7 @@ async fn version_four_removes_only_origin_credentials_preserving_results_raw_and
     INSERT INTO attachment_delivery(node_id,thread_id,status,operation_id,origin_json,created_at)VALUES('message','thread','held','attach','{"kind":"shell","execution_id":"shell","token":"private"}','now');
     INSERT INTO app_meta VALUES('wait.pending.valid','{"caller":{"execution_id":"shell","token":"private"},"conditions":[]}'),('wait.pending.invalid','malformed'),('unrelated','{"caller":{"token":"user-content"}}');
     "#).unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     for _ in 0..2 {
         let worker = DbWorker::open(&path).await.unwrap();
@@ -732,6 +747,8 @@ async fn version_six_byte_and_source_indexes_are_atomic_and_preserve_legacy_payl
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("legacy-six.sqlite");
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     for migration in [
         include_str!("../migrations/0001_initial.sql"),
         include_str!("../migrations/0002_gc_indexes.sql"),
@@ -745,6 +762,7 @@ async fn version_six_byte_and_source_indexes_are_atomic_and_preserve_legacy_payl
     db.execute_batch(r#"INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES('old','message','now','{"text":"日本語🌿"}',0);
 INSERT INTO app_meta(key,value)VALUES('index.bootstrap.invalid','not JSON'),('index.auto.invalid','not JSON'),('foreign.invalid','not JSON'),('index.bootstrap.valid','{"witness":{"node_id":"old"}}');
 CREATE TABLE index_auto_source(blocker INTEGER);"#).unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     // Fail after the other indexes were created; none may escape migration rollback.
     assert!(matches!(
@@ -781,6 +799,8 @@ async fn intermediate_and_final_v6_and_v7_upgrade_receipt_accounting_without_rep
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("receipt-compat.sqlite");
         let db = Connection::open(&path).unwrap();
+        // Batch historical fixture setup; the production upgrade below still commits normally.
+        db.execute_batch("BEGIN IMMEDIATE").unwrap();
         for migration in [
             include_str!("../migrations/0001_initial.sql"),
             include_str!("../migrations/0002_gc_indexes.sql"),
@@ -802,6 +822,7 @@ async fn intermediate_and_final_v6_and_v7_upgrade_receipt_accounting_without_rep
             ))
             .unwrap();
         }
+        db.execute_batch("COMMIT").unwrap();
         db.close().unwrap();
         for reopen in 0..2 {
             let worker = DbWorker::open(&path).await.unwrap();
@@ -841,7 +862,10 @@ async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
     let worker = DbWorker::open(&path).await.unwrap();
     worker.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch("DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     assert!(matches!(
         DbWorker::open(&path).await,
@@ -891,12 +915,15 @@ async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without
     // Recreate the exact previous schema, then collide with the second index
     // name so the first CREATE INDEX must also roll back with version/ledger.
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch(
         "DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source;
         DELETE FROM schema_migration WHERE version>=9; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=8;
         CREATE TABLE receipt_turn_source(blocker INTEGER);",
     )
     .unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     assert!(matches!(
         DbWorker::open(&path).await,
@@ -990,11 +1017,14 @@ async fn public_schema_versions_converge_to_fresh_schema_without_data_loss() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("upgrade.sqlite");
         let db = Connection::open(&path).unwrap();
+        // Historical fixture creation is setup, not an upgrade under test.
+        db.execute_batch("BEGIN IMMEDIATE").unwrap();
         for sql in &migrations[..version] {
             db.execute_batch(sql).unwrap();
         }
         seed_thread(&db, "keep").unwrap();
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES('keep-node','user','now','{\"text\":\"preserved\"}',20,'preserved-hash')", []).unwrap();
+        db.execute_batch("COMMIT").unwrap();
         db.close().unwrap();
         for _ in 0..2 {
             let writer = DbWorker::open(&path).await.unwrap();
@@ -1032,6 +1062,8 @@ async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
     let writer = DbWorker::open(&path).await.unwrap();
     writer.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10;").unwrap();
     for (name, value) in [
         ("integer", "0"),
@@ -1054,6 +1086,7 @@ async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
         [],
     )
     .unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     let writer = DbWorker::open(&path).await.unwrap();
     writer.call(|db| {
@@ -1091,7 +1124,10 @@ async fn schema_twelve_extends_revisit_byte_accounting_without_rewriting_metadat
     let writer = DbWorker::open(&path).await.unwrap();
     writer.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
+    // Batch historical fixture setup; the production upgrade below still commits normally.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch("DELETE FROM schema_migration WHERE version=12; PRAGMA user_version=11; DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%'; INSERT INTO app_meta(key,value)VALUES('revisit.fixture','preserve bounded metadata');").unwrap();
+    db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     let writer = DbWorker::open(&path).await.unwrap();
     writer.call(|db| {

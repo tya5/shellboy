@@ -1542,12 +1542,28 @@ fn search_args(query: &str, limit: u32) -> shellboy::protocol::HistorySearchArgs
 #[tokio::test]
 async fn search_filters_precede_knn_even_beyond_four_hundred_nearer_chunks() {
     let f = Fixture::new(Config::default()).await;
-    let mut ids = Vec::new();
-    for i in 0..405 {
-        let id = format!("near-{i:03}");
-        f.node(&id, "cat nearby but excluded").await;
-        ids.push(id);
-    }
+    // Preserve every source while keeping fixture-only seed commits out of
+    // the measured search behavior.
+    let mut ids = f
+        .db
+        .call(|db| {
+            let tx = db.transaction()?;
+            let body = json!({"role":"user","content":[{"type":"input_text","text":"cat nearby but excluded"}]}).to_string();
+            let hash = Sha256::digest(body.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            let mut ids = Vec::new();
+            for i in 0..405 {
+                let id = format!("near-{i:03}");
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,'user','2026-01-01T00:00:00Z',?2,?3,?4)",params![id,body,body.len()as i64,hash])?;
+                ids.push(id);
+            }
+            tx.commit()?;
+            Ok(ids)
+        })
+        .await
+        .unwrap();
     f.payload("far", "assistant_response", json!({"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"dog valid distant result"}]}]})).await;
     ids.push("far".into());
     f.service.enqueue_new(&ids).await.unwrap();
