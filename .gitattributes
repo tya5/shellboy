@@ -6,3 +6,5 @@
 *.sh text eol=lf
 *.ps1 text eol=lf
 *.yml text eol=lf
+# The final blank line delimits an SSE terminal frame; preserve exact fixture bytes.
+tests/fixtures/chat/*.sse text eol=lf whitespace=-blank-at-eof
