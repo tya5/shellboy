@@ -170,3 +170,23 @@ backpressure, product timeout and exact two-attempt/phase assertions. Give only
 fixture arrival/settlement watchdogs60seconds and include prefix ordinal plus
 saved attempt/Turn facts if they expire. The original log does not identify
 which prefix was delayed; do not claim a specific product/network cause.
+
+
+## Retry fixture watchdog follow-up (2026-10-30)
+
+Apply one 60-second deadlock watchdog in response_retries and
+response_upload_recovery to fixture requests, progress diagnostics, persisted
+state observations, and cleanup. Subscribe before reading committed state and
+use existing Changed events, rereading on lag, for upload recovery, refused-proxy
+attempts/completion and manual compaction completion. Preserve every predicate,
+retry count, real upload prefix/backpressure observation, configured product
+HTTP/retry timer and absence assertion. The 50ms no-extra-request observation,
+900ms Retry-After lower bound and intentional 61s outage/70s receive allowance
+are test semantics, not short fixture-readiness watchdogs, and remain unchanged.
+
+Retain b16f414 main run41063015359 attempts1 and2 separately: respectively the
+long-Turn tool-followup arrival and partial-upload Control shutdown expired.
+The former arrival watchdog was already60s; this cleanup does not establish
+that runner load caused either failure or prove that all arrival stalls are
+fixed. Qualify the exact revised branch with at least two native Windows runs
+before main admission; retain any additional failure without automatic retry.

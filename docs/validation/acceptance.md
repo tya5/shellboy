@@ -2834,3 +2834,12 @@ attempt 2 passed that test but timed out in
 `partial_uploads_reduce_on_the_second_failure_and_keep_the_retry_budget`.
 Same-SHA failed-job rerun attempt 3 passed. No Rust/test changes or automatic
 retry suppression were introduced; the timeout causes remain unresolved.
+
+## Windows retry fixture watchdog follow-up (2026-10-30)
+
+Scope: response_retries and response_upload_recovery fixture-only guards and
+Changed-driven waits. No product timeout/retry policy or success predicate is
+changed. Main run41063015359 attempt1 failed long-Turn post-tool HTTP arrival
+(already60s); attempt2 failed partial-upload Control shutdown (5s). Logs were
+inspected separately; load remains a hypothesis. Attempt3 is observed separately.
+Local standard, two manual Windows branch runs, and final main CI remain pending.

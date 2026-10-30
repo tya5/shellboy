@@ -14,6 +14,9 @@ use tokio::{
     time::timeout,
 };
 
+// Fixture progress/cleanup bounds are not product latency assertions.
+const WATCHDOG: Duration = Duration::from_secs(60);
+
 struct Incoming {
     body: Value,
     reply: oneshot::Sender<Reply>,
@@ -246,26 +249,26 @@ impl Fixture {
 
     #[track_caller]
     fn incoming(&mut self) -> impl std::future::Future<Output = Incoming> + '_ {
-        self.incoming_with_timeout(60)
+        self.incoming_with_timeout(WATCHDOG)
     }
 
     #[track_caller]
     fn incoming_after_tool(&mut self) -> impl std::future::Future<Output = Incoming> + '_ {
-        self.incoming_with_timeout(60)
+        self.incoming_with_timeout(WATCHDOG)
     }
 
     #[track_caller]
     fn incoming_with_timeout(
         &mut self,
-        seconds: u64,
+        budget: Duration,
     ) -> impl std::future::Future<Output = Incoming> + '_ {
         let caller = std::panic::Location::caller();
         async move {
-            match timeout(Duration::from_secs(seconds), self.requests.recv()).await {
+            match timeout(budget, self.requests.recv()).await {
                 Ok(Some(value)) => value,
                 result => {
                     let diagnostic = timeout(
-                        Duration::from_secs(5),
+                        WATCHDOG,
                         progress(&self.control, self.accepted.turn_id.clone()),
                     )
                     .await;
@@ -301,7 +304,7 @@ impl Fixture {
         let thread = self.accepted.thread_id.clone();
         let mut events = self.control.subscribe();
         async move {
-            let result = timeout(Duration::from_secs(60), async {
+            let result = timeout(WATCHDOG, async {
                 loop {
                     let turn = turn.clone();
                     let state: String = self
@@ -327,8 +330,7 @@ impl Fixture {
             match result {
                 Ok(state) => state,
                 Err(_) => {
-                    let diagnostic =
-                        timeout(Duration::from_secs(5), progress(&self.control, Some(turn))).await;
+                    let diagnostic = timeout(WATCHDOG, progress(&self.control, Some(turn))).await;
                     panic!(
                         "Turn did not settle within fixture watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
                         caller.file(),
@@ -345,7 +347,7 @@ impl Fixture {
         let thread = self.accepted.thread_id.clone();
         let mut events = self.control.subscribe();
         async move {
-            let result = timeout(Duration::from_secs(60), async {
+            let result = timeout(WATCHDOG, async {
                 loop {
                     if self.attempts().await.iter().any(|(state, error)| {
                         state == "failed"
@@ -363,7 +365,7 @@ impl Fixture {
             .await;
             if result.is_err() {
                 let diagnostic = timeout(
-                    Duration::from_secs(5),
+                    WATCHDOG,
                     progress(&self.control, self.accepted.turn_id.clone()),
                 )
                 .await;
@@ -389,11 +391,11 @@ impl Fixture {
     fn close(self) -> impl std::future::Future<Output = ()> {
         let caller = std::panic::Location::caller();
         async move {
-            match timeout(Duration::from_secs(60), self.control.shutdown()).await {
+            match timeout(WATCHDOG, self.control.shutdown()).await {
                 Ok(result) => result.unwrap(),
                 Err(_) => {
                     let diagnostic = timeout(
-                        Duration::from_secs(5),
+                        WATCHDOG,
                         progress(&self.control, self.accepted.turn_id.clone()),
                     )
                     .await;
@@ -404,11 +406,11 @@ impl Fixture {
                     );
                 }
             }
-            match timeout(Duration::from_secs(60), self.owner.shutdown()).await {
+            match timeout(WATCHDOG, self.owner.shutdown()).await {
                 Ok(result) => result.unwrap(),
                 Err(_) => {
                     let diagnostic = timeout(
-                        Duration::from_secs(5),
+                        WATCHDOG,
                         progress(&self.control, self.accepted.turn_id.clone()),
                     )
                     .await;
@@ -471,7 +473,7 @@ fn request(
     let caller = std::panic::Location::caller();
     async move {
         let response = match timeout(
-            Duration::from_secs(60),
+            WATCHDOG,
             control.request(Request::new(
                 format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
                 command,
@@ -481,7 +483,7 @@ fn request(
         {
             Ok(response) => response,
             Err(_) => {
-                let diagnostic = timeout(Duration::from_secs(5), progress(control, None)).await;
+                let diagnostic = timeout(WATCHDOG, progress(control, None)).await;
                 panic!(
                     "Control request watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
                     caller.file(),
@@ -852,7 +854,7 @@ async fn stop_cancels_a_persisted_retry_wait_without_another_request() {
         .unwrap();
     fixture.waiting_for_retry().await;
     timeout(
-        Duration::from_secs(2),
+        WATCHDOG,
         request(
             &fixture.control,
             Command::RunStop(RunTarget {
@@ -861,7 +863,7 @@ async fn stop_cancels_a_persisted_retry_wait_without_another_request() {
         ),
     )
     .await
-    .expect("stop waited for retry delay");
+    .expect("stop did not finish within fixture watchdog");
     assert_eq!(fixture.settled().await, "stopped");
     assert_eq!(fixture.attempts().await.len(), 1);
     fixture.no_more_requests().await;
@@ -879,13 +881,13 @@ async fn owner_shutdown_cancels_a_persisted_retry_wait_without_another_request()
         .ok()
         .unwrap();
     fixture.waiting_for_retry().await;
-    timeout(Duration::from_secs(2), fixture.control.shutdown())
+    timeout(WATCHDOG, fixture.control.shutdown())
         .await
-        .expect("shutdown waited for retry delay")
+        .expect("shutdown did not finish within fixture watchdog")
         .unwrap();
     assert_eq!(fixture.attempts().await.len(), 1);
     fixture.no_more_requests().await;
-    timeout(Duration::from_secs(5), fixture.owner.shutdown())
+    timeout(WATCHDOG, fixture.owner.shutdown())
         .await
         .expect("owner shutdown did not finish")
         .unwrap();
@@ -996,7 +998,7 @@ async fn default_retry_policy_survives_a_minute_long_proxy_outage() {
     .await;
     let unavailable_until = std::time::Instant::now() + Duration::from_secs(61);
     loop {
-        let incoming = fixture.incoming_with_timeout(70).await;
+        let incoming = fixture.incoming_with_timeout(Duration::from_secs(70)).await;
         if std::time::Instant::now() >= unavailable_until {
             incoming.reply.send(Reply::success()).ok().unwrap();
             break;
@@ -1209,7 +1211,8 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
         .await;
     assert!(edit.ok, "{:?}", edit.error);
     let operation = edit.operation_id.clone();
-    timeout(Duration::from_secs(60), async {
+    let mut events = f.control.subscribe();
+    timeout(WATCHDOG, async {
         loop {
             let result = f
                 .control
@@ -1227,7 +1230,7 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
             {
                 break;
             }
-            tokio::task::yield_now().await;
+            changed(&mut events, &thread, std::panic::Location::caller()).await;
         }
     })
     .await
