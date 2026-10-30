@@ -236,6 +236,14 @@ impl UiState {
             }
             Event::Mouse(mouse)
                 if self.history_mouse_active()
+                    && self.top_overlay().is_none()
+                    && mouse.kind == MouseEventKind::Down(event::MouseButton::Left)
+                    && self.live_work_click(mouse.column, mouse.row) =>
+            {
+                vec![]
+            }
+            Event::Mouse(mouse)
+                if self.history_mouse_active()
                     && self.view().scroll.area.is_none_or(|area| {
                         area.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
                     }) =>
@@ -250,10 +258,18 @@ impl UiState {
                         })
                     }
                     MouseEventKind::Down(event::MouseButton::Left) => {
+                        self.active_view_mut().live_work.active = false;
                         self.history_click(mouse.column, mouse.row)
                     }
                     _ => vec![],
                 }
+            }
+            Event::Mouse(mouse)
+                if self.top_overlay().is_none()
+                    && mouse.kind == MouseEventKind::Down(event::MouseButton::Left) =>
+            {
+                self.active_view_mut().live_work.active = false;
+                vec![]
             }
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 self.dirty = true;
@@ -281,6 +297,9 @@ impl UiState {
         ) = self.top_overlay()
         {
             return self.overlay_key(owner, key);
+        }
+        if let Some(actions) = self.live_work_key(key) {
+            return actions;
         }
         if key.code == KeyCode::F(6) {
             return self.open_history_details(false, false);
@@ -328,6 +347,7 @@ impl UiState {
                 KeyCode::End => {
                     let view = self.active_view_mut();
                     view.items.active = false;
+                    view.live_work.active = false;
                     view.cancel_navigation();
                     view.follow = true;
                     view.unseen = false;

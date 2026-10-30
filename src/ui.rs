@@ -19,6 +19,7 @@ mod bell;
 mod chrome;
 mod composer;
 mod details;
+pub mod live_work;
 pub use details::{DetailSourceFacts, DetailSourceSnapshot};
 pub(crate) mod draft;
 mod help;
@@ -443,6 +444,13 @@ pub struct ToolObservation {
 }
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    ObserveLiveWork {
+        thread_id: String,
+        generation: u64,
+        revision: u64,
+        executions: Vec<String>,
+        open: Option<String>,
+    },
     SelectAgents {
         request_id: String,
         draft_id: String,
@@ -688,6 +696,19 @@ pub struct DraftRecoveryTarget {
 }
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    LiveWorkObserved {
+        thread_id: String,
+        generation: u64,
+        revision: u64,
+        markers: Vec<(String, Instant)>,
+    },
+    LiveWorkPreview {
+        thread_id: String,
+        generation: u64,
+        revision: u64,
+        execution_id: String,
+        result: Result<live_work::LiveOutputPreview, String>,
+    },
     CurrentView {
         generation: u64,
         details: ThreadDetails,
@@ -1605,6 +1626,14 @@ impl UiState {
             .get_mut(&self.active)
             .expect("active view exists")
     }
+    // Display-only live work never changes draft/viewport save responsibility.
+    fn live_work_mut(&mut self) -> &mut live_work::LiveWorkView {
+        &mut self
+            .views
+            .get_mut(&self.active)
+            .expect("active view exists")
+            .live_work
+    }
     #[cfg(test)]
     fn prepare_render_width(&mut self, width: u16) {
         let view = self.view();
@@ -1766,6 +1795,13 @@ impl UiState {
         }
         if let Some(action) = self.active_view_mut().request_tool_refresh() {
             self.deferred_actions.push(action);
+        }
+        if let Some(thread) = self.view().thread_id.clone() {
+            let generation = self.view().generation;
+            let visible = self.composer_active() && self.top_overlay().is_none();
+            if let Some(action) = self.live_work_mut().observe(thread, generation, visible) {
+                self.deferred_actions.push(action);
+            }
         }
         std::mem::take(&mut self.deferred_actions)
     }
@@ -2086,6 +2122,12 @@ impl UiState {
             }
             let previous_phase = view.activity.phase();
             let changed = view.activity.accept_at(epoch, snapshot, observed_at);
+            let live = view
+                .activity
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.live_work.clone());
+            let changed = view.live_work.accept(live, Instant::now()) || changed;
             let phase = view.activity.phase();
             if changed || phase != previous_phase {
                 let run = view
@@ -2243,6 +2285,33 @@ impl UiState {
             }
             UiUpdate::DetailSourcesChanged { .. } => {
                 unreachable!("handled before selected-view updates")
+            }
+            UiUpdate::LiveWorkObserved {
+                thread_id,
+                generation,
+                revision,
+                markers,
+            } => {
+                if self.view().matches(&thread_id, generation) && self.composer_active() {
+                    let changed =
+                        self.live_work_mut()
+                            .accept_markers(revision, markers, Instant::now());
+                    self.dirty |= changed;
+                }
+            }
+            UiUpdate::LiveWorkPreview {
+                thread_id,
+                generation,
+                revision,
+                execution_id,
+                result,
+            } => {
+                if self.view().matches(&thread_id, generation) && self.composer_active() {
+                    let changed =
+                        self.live_work_mut()
+                            .accept_preview(revision, &execution_id, result);
+                    self.dirty |= changed;
+                }
             }
             UiUpdate::ToolPreview {
                 thread_id,
@@ -3311,6 +3380,12 @@ impl UiState {
         self.invalidate_management();
         self.models = None;
         self.cancel_input_recall();
+        if let Some(thread) = self.view().thread_id.clone() {
+            let generation = self.view().generation;
+            if let Some(action) = self.live_work_mut().deactivate(thread, generation) {
+                self.deferred_actions.push(action);
+            }
+        }
         if let Some(action) = self.active_view_mut().clear_tool_observation() {
             self.deferred_actions.push(action);
         }
@@ -3365,6 +3440,7 @@ impl UiState {
         let view = self.active_view_mut();
         view.generation = generation;
         view.activity = Default::default();
+        view.live_work.accept(None, Instant::now());
         view.scroll.request = None;
         view.scroll.pending = 0;
         view.loading = true;
@@ -3384,6 +3460,12 @@ impl UiState {
         self.invalidate_management();
         self.models = None;
         self.cancel_input_recall();
+        if let Some(thread) = self.view().thread_id.clone() {
+            let generation = self.view().generation;
+            if let Some(action) = self.live_work_mut().deactivate(thread, generation) {
+                self.deferred_actions.push(action);
+            }
+        }
         if let Some(action) = self.active_view_mut().clear_tool_observation() {
             self.deferred_actions.push(action);
         }
@@ -3415,7 +3497,10 @@ impl UiState {
             .expect("active view exists")
             .activity
             .advance_clock(now);
-        let visible = self.composer_active();
+        let visible = self.composer_active() && self.top_overlay().is_none();
+        if visible && self.live_work_mut().advance(now) {
+            self.dirty = true;
+        }
         let phase = self.view().footer_phase();
         if self
             .animation
@@ -5067,6 +5152,11 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     {
         *line = Line::from("↑↓ 項目 · Space 開閉 · o 原文 · c コピー · Esc 入力");
     }
+    if view.live_work.active
+        && let Some(line) = lines.get_mut(1)
+    {
+        *line = Line::from("↑↓ 作業 · Space 出力 · F6 詳細 · o 子へ · Esc 入力");
+    }
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -5126,11 +5216,18 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         state.view(),
         layout[1].height.saturating_sub(recovery_height),
     );
+    let live_height = state.view().live_work.height(
+        layout[1]
+            .height
+            .saturating_sub(recovery_height)
+            .saturating_sub(queue_height),
+    );
     let body_area = Rect {
         height: layout[1]
             .height
             .saturating_sub(recovery_height)
-            .saturating_sub(queue_height),
+            .saturating_sub(queue_height)
+            .saturating_sub(live_height),
         ..layout[1]
     };
     let queue_area = Rect::new(
@@ -5139,6 +5236,13 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         layout[1].width,
         queue_height,
     );
+    let live_area = Rect::new(
+        layout[1].x,
+        queue_area.bottom(),
+        layout[1].width,
+        live_height,
+    );
+    state.live_work_mut().set_area(live_area);
     let recovery_area = Rect {
         y: body_area.bottom(),
         height: recovery_height,
@@ -5216,6 +5320,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         draw_recovery(frame, recovery_area, snapshot);
     }
     message_queue::draw_compact(frame, queue_area, view);
+    live_work::draw(frame, live_area, &view.live_work, state.palette);
     let input_area = layout[2];
     let input_body_height = input_area.height.saturating_sub(2);
     let cursor = draw_input(frame, input_area, state, &input, &input_metrics);
@@ -5908,6 +6013,7 @@ mod layout_cache_tests {
         let revision = ui.view().history_revision();
         let generation = ui.view().generation;
         let snapshot = ActivitySnapshot {
+            live_work: None,
             revisit: None,
             context_reduction: None,
             automatic_retry: None,

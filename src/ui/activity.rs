@@ -17,11 +17,7 @@ impl ActivityPhase {
             | Self::Receiving
             | Self::Tools
             | Self::Running => Motion::Shimmer,
-            Self::Retrying
-            | Self::Waiting
-            | Self::Background
-            | Self::Continuing
-            | Self::Stopping => Motion::Pulse,
+            Self::Retrying | Self::Waiting | Self::Stopping => Motion::Pulse,
             _ => Motion::Still,
         }
     }
@@ -83,6 +79,7 @@ pub struct ActivitySnapshot {
     pub attempt_id: Option<String>,
     pub phase: ActivityPhase,
     pub turn_in_progress: bool,
+    pub live_work: Option<super::live_work::LiveWorkSnapshot>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Motion {
