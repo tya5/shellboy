@@ -1468,3 +1468,14 @@ Defer OS sandbox command/profile examples until each platform is actually tested
 list tools only and note owner-mediated access. WezTerm Shift+click is a reported
 macOS observation from issue61, not new developer/other-terminal qualification.
 Only documentation changes; no new runtime policy, schema, worker or dependency.
+
+## #62: validate release candidates without publishing
+
+Prepare 0.3.0 on a fixed, green main SHA. Add optional candidate_ref to the existing
+release workflow: candidate builds check out that exact SHA, build the three native
+archives, extract and launch them, and assemble SHA256SUMS as Actions artifacts.
+Build/assembly have read-only repository permission; publish is skipped whenever
+candidate_ref is supplied. release_tag is only a package/version label in this
+mode, not a Git tag creation. Do not use tag/publication mode without fresh user
+approval. No installed binary, user DB, tag or GitHub Release is changed here.
+Keep a release-specific notes draft separate from the version-independent README.

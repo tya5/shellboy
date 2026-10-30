@@ -49,3 +49,25 @@ that gate. Retain an unrelated intermittent Windows failure and any explicit
 same-SHA failed-job rerun as separate records; rerun success does not erase the
 failure or prove its cause. Existing user authorization requirements for push
 and release still apply. See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57).
+
+## v0.3.0 preparation only (#62)
+
+No v0.3.0 tag or GitHub Release is authorized yet. The version-independent README
+links to releases/latest; version-specific changes and upgrade warnings are in
+[the notes draft](release-v0.3.0-draft.md) and issue62 for review.
+
+The existing release workflow accepts optional `candidate_ref` (an exact main SHA).
+For preparation, supply **both** that SHA and `release_tag=v0.3.0`, after the same
+main SHA's ordinary three-OS CI is green. The tag input is an archive label, not a
+created ref. Native build jobs verify checkout/package version/host, package and
+extract the archive, then run --version, --help and docs list from the extracted
+binary. Assembly uploads candidate-assets (three archives plus SHA256SUMS) for
+30 days. Candidate mode skips the write-permission publish job. Omitting
+candidate_ref uses real tag/publication mode and requires separate approval.
+
+Keep the downloaded candidates and checksums outside Git. Final SHA, run links,
+archive hashes and results are recorded in issue62/the preparation report rather
+than making recursive metadata-only commits that change the chosen SHA. A later
+rebuild can produce different archive bytes; never substitute it for qualified
+assets without checking that new set. Tags/publication, unauthenticated v0.3.0
+asset download, installed-binary updates and release completion remain later gates.
