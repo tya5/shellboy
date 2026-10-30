@@ -223,7 +223,18 @@ and warning-trigger conversion. Pending design validation must cover only saved
 aggregate reads for arbitrary boundaries, the common 4,096+sentinel budget, linear
 fine-instant storage, existing-limit admission/terminal rollback, scope deletion,
 separate attempt/client-request counts and completion-observer CAS. No #47 schema
-or implementation result is claimed. #50 remains queued separately.
+or implementation result is claimed. The adopted unknown-finish policy adds
+required regressions for observed epoch0/negative versus SQL NULL Unknown,
+all-time-only exact-once restart/abort distribution, retained known tokens,
+unknown duration/invocation, no period assignment with time_unattributable partial,
+coverage-phase page deltas versus cumulative state, overflow and deleted/missing
+callback fencing. UTC seconds must not inherit quantity nonnegative checks.
+The updated design-only SQLite smoke also passes ledger pending/observed/unknown
+CHECK shapes, epoch0 and negative known finish versus NULL Unknown, generated-byte
+changes, duplicate settlement fencing and a pure coverage keyset page model
+(deltas2/1/0, cumulative3). It is not a production aggregate/parallel-race test;
+those remain required after implementation. The draft negative-day assertion was
+corrected to multiply the floor quotient by day width before comparison. #50 remains queued separately.
 
 
 

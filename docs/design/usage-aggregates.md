@@ -77,6 +77,7 @@ Concrete payload column families for the DDL review (not JSON blobs):
 ```text
 attempt_count, client_request_count, client_request_unknown_count,
 pre_request_failure_count: nullable INTEGER; count_overflow: INTEGER boolean
+terminal_time_unknown_count: nullable INTEGER; terminal_time_unknown_overflow: INTEGER boolean
 input_sum, cached_sum, output_sum, reasoning_sum, total_sum: nullable INTEGER
 input_unknown, cached_unknown, output_unknown, reasoning_unknown, total_unknown: INTEGER
 input_overflow, cached_overflow, output_overflow, reasoning_overflow, total_overflow: INTEGER boolean
@@ -97,8 +98,11 @@ stored TEXT payloads including keys/identifiers/timestamps. Treat booleans only
 once, not also as integers. These named fields plus the ownership/key fields
 fully define that expression; physical indexes/pages are not in this logical sum.
 
-Each scalar is a nonnegative signed-64-bit SQL value with CHECK constraints;
-Rust uses checked arithmetic. Overflow publishes null plus overflow, never a
+Quantity/count/byte/duration scalars are nonnegative signed-64-bit SQL values
+with CHECK constraints. UTC start/terminal whole seconds are signed i64 and may
+be negative; never apply a quantity >=0 CHECK to epoch seconds. Fraction text
+orders the fractional part of its signed floor second. Rust uses checked
+arithmetic. Overflow publishes null plus overflow, never a
 clamped exact number. Unknowns are field-specific; do not infer cached, reasoning
 or total tokens. Empty-but-complete scopes may report known empty request counts;
 initializing or excluded scope/categories cannot masquerade as complete zero.
@@ -145,16 +149,23 @@ CREATE TABLE usage_summary_attempt (
  purpose TEXT NOT NULL CHECK(purpose IN ('summary_manual','summary_automatic')),
  started_sec INTEGER NOT NULL, started_fraction TEXT NOT NULL,
  first_terminal_sec INTEGER, first_terminal_fraction TEXT,
+ terminal_time_kind TEXT NOT NULL DEFAULT 'pending'
+   CHECK(terminal_time_kind IN ('pending','observed','unknown')),
  state TEXT NOT NULL CHECK(state IN ('active','settled')),
  logical_payload_bytes INTEGER GENERATED ALWAYS AS (
    octet_length(id)+octet_length(thread_id)
    +coalesce(octet_length(run_id),0)+coalesce(octet_length(turn_id),0)
    +octet_length(purpose)+octet_length(started_fraction)+octet_length(state)
+   +octet_length(terminal_time_kind)
    +coalesce(octet_length(first_terminal_fraction),0)
    +8*(1+(first_terminal_sec IS NOT NULL))
  ) VIRTUAL,
- CHECK((state='active' AND first_terminal_sec IS NULL AND first_terminal_fraction IS NULL)
-    OR (state='settled' AND first_terminal_sec IS NOT NULL AND first_terminal_fraction IS NOT NULL)),
+ CHECK((state='active' AND terminal_time_kind='pending'
+         AND first_terminal_sec IS NULL AND first_terminal_fraction IS NULL)
+    OR (state='settled' AND terminal_time_kind='observed'
+         AND first_terminal_sec IS NOT NULL AND first_terminal_fraction IS NOT NULL)
+    OR (state='settled' AND terminal_time_kind='unknown'
+         AND first_terminal_sec IS NULL AND first_terminal_fraction IS NULL)),
  CHECK(turn_id IS NULL OR run_id IS NOT NULL),
  FOREIGN KEY(run_id,thread_id) REFERENCES run(id,thread_id) ON DELETE CASCADE,
  FOREIGN KEY(turn_id,run_id,thread_id) REFERENCES turn(id,run_id,thread_id) ON DELETE CASCADE
@@ -172,7 +183,7 @@ are not soft-deleted. The new tuple index scans only ownership metadata once
 when migration builds it; schema-only migration is not a claim of O(1) index
 construction on old data. No usage JSON or aggregate backfill runs in migration.
 There are no boolean payload fields in this ledger, and the generated field does
-not count itself. Fraction/state/purpose/ids are TEXT bytes, start is one INTEGER,
+not count itself. Fraction/state/time-kind/purpose/ids are TEXT bytes, start is one INTEGER,
 nullable terminal second contributes 8 only when present. No nested/usage JSON.
 
 Create `gc_bytes_usage_aggregate(logical_payload_bytes)` for the first table using
@@ -226,7 +237,8 @@ Finalization table (implementation is reviewed alongside #53/#56):
 | duplicate finish or obsolete/missing source | no additions; no row recreation |
 | restart before client invocation/usage is established | invocation/usage unknown, never inferred zero |
 
-first_terminal_at is fixed by that observation, not a later trim/adoption delay.
+An Observed first_terminal_at is fixed by its actual client-finish observation,
+not a later trim/adoption delay. Unknown has no first_terminal_at at all.
 Retries are new ids; cross-success/non_success correction is outside current
 source semantics and is not added. Do not subtract from overflowed sums and guess
 an exact replacement. Observer-pending live work is excluded from initialization
@@ -239,6 +251,37 @@ including stop-before-spawn, bulk cancellation, shutdown fallback and restart.
 Unknown restarted shell elapsed is unknown; never synthesize monotonic duration
 from wall clock. Turn.run_ms is null/not_applicable with reason; its own lifetime
 is separately labeled. Run lifetime is counted once at Run/Thread, not per Turn.
+
+### Known Finish Versus Unattributable Terminal Time
+
+Use `TerminalTime::Observed(UtcInstant) | Unknown` in the typed writer. The active
+ledger's pending time-kind is not a fabricated third timestamp. Observed finish
+at Unix epoch zero or a negative epoch is known, unlike Unknown with SQL NULLs.
+Only Observed is immutable; cleanup/startup/adoption/GC time cannot fill Unknown.
+
+An unknown-finish observation settles the same source/summary CAS exactly once
+into all_time aggregates only. Keep any retained known token values there;
+duration and client-invocation evidence remain independently unknown unless
+actually established. An explicit not-invoked witness remains known client count
+zero, not an inferred invocation. No day/instant aggregate is written for Unknown;
+coarse/instant rows require terminal_time_unknown_count=0 and no such overflow.
+The all_time key's zero/empty grain sentinel is not rendered as a finish time.
+
+Increment all_time terminal_time_unknown_count: it counts scope observations
+that cannot be attributed to periods, NOT failures or requests proven to occur
+inside the requested window. Its checked overflow publishes null/overflow and
+unknown coverage, not a saturated exact number. An all-time amount remains honest
+with time coverage unknown; any period query with these observations reports
+`time_unattributable` partial. Never add their tokens/requests to that period or
+call its amount known-zero/complete by assuming they occurred elsewhere. This
+conservative uncertainty can remain for unrelated periods too; do not invent a
+window-membership optimization or assign cleanup time to make it disappear.
+
+Restart/hard-abort recovery with no finish follows this rule, even if it has known
+start/cleanup timestamps. Known-finish callback, duplicate finish, initialization
+and GC all share one guard; missing/deleted sources cannot be re-created. Keep
+unattributable state until scope deletion; do not hide it behind successful
+normal-source initialization or a known-zero child aggregate.
 
 ### Function-Level Hooks And Cancellation Races
 
@@ -325,6 +368,8 @@ decimal fraction (remove trailing zeros; zero is empty). Keep full accepted
 fractional precision in boundary comparisons, not an unconditional millisecond
 cast. Scope/time index comparisons must be equivalent for offset spellings and
 same-instant fractions; explicit parse/ordering tests precede implementation.
+Negative seconds use mathematical floor for UTC-day starts, not truncation toward
+zero: second -1 with fraction .25 belongs to day start -86400, not epoch day 0.
 
 Read fully contained UTC-day aggregate rows and instant aggregates for the at-most
 two partially included days. An interval within one day reads that interval once.
@@ -349,8 +394,9 @@ All-time reads use fixed aggregate category rows, independent of event history.
 
 Enumerate selected scopes deterministically by bounded lineage traversal with
 children ordered by id; recompute that at-most-100 list on continuation and bind
-its hash. Within each scope process phases in order: left partial-day instant
-rows, fully-contained day rows, right partial-day instant rows. Empty segments
+its hash. Within each scope process phases in order: phase0 all_time coverage rows (read
+only their unattributable counters), phase1 left partial-day instant rows, phase2
+fully-contained day rows, phase3 right partial-day instant rows. Empty segments
 are omitted. If both bounds fall in one day, use exactly one instant segment
 [S,E), not overlapping left/right scans. Aligned midnight bounds make the adjacent
 instant segment empty. A complete day never contributes both day and instant rows.
@@ -374,13 +420,28 @@ SELECT /* typed aggregate columns and full key */
 ```
 
 Production SQL uses separate at-start/keyset statements so an OR cannot defeat
-the seek index. The outer scope and phase ranges are fixed from requested bounds,
+the seek index. Phase0 has its own all_time-grain full-key seek with no window time predicate;
+its amounts are never added to period page_totals. Phases1-3 use the shown window
+query. All four phases consume the same shared row budget, not 4,096 each.
+The outer scope and phase ranges are fixed from requested bounds,
 never inferred from the last observed timestamp. Read at most remaining+1, consume
 only remaining, and stop on the first unconsumed sentinel. Carry the last consumed
 full key, not an advanced timestamp. If a phase is exhausted, move to the next
 phase/scope with at_start. With zero remaining, seek LIMIT1 through empty phases
 until one sentinel or the end; no further nonempty rows are read. Across the whole
 page this consumes <=4,096 rows and at most one unconsumed aggregate sentinel.
+
+Phase0 uses the full `(sec,fraction,purpose,outcome)` key even though the
+all_time instant is a sentinel. Cursor state carries the at-most-100 scopes'
+checked unattributable counter/overflow and whether their coverage phase finished.
+Each consumed coverage row advances its full seek key once. Responses expose
+`page_unattributable_delta` for only the newly read coverage rows, and separately
+`scope_unattributable_state` as cumulative cursor-chain state: replace that state,
+never add it again. If phase0 is split at a page boundary, its incomplete state is
+unknown/partial, not known zero. Later phases keep the time_unattributable reason
+without re-reading/re-counting phase0. Revision invalidation discards all cursor
+accumulators. No numeric contribution from this scope-wide state is described as
+an amount in the requested interval. Count overflow remains explicit unknown.
 
 Responses distinguish `page_totals` and exact `page_key_ranges` from
 `cursor_chain_coverage`. The latter reports each selected scope's fully completed
@@ -389,7 +450,10 @@ empty prefix [S,S), not the watermark of the already visited child. Never claim
 one global covered interval from the furthest visited child. A derived all-selected
 prefix is their intersection; descendant-limit/initialization incompleteness stays
 separate. `complete=true` requires all selected scopes/phases and the requested
-bounded lineage coverage to be complete, not merely a full page.
+bounded lineage coverage to be complete, with no initializing/time_unattributable
+uncertainty, not merely a full page. Exhausting saved rows can give
+scan_complete=true, coverage_complete=false, next_cursor=null: another page cannot
+resolve an unknown finish. Do not loop on partial coverage after key exhaustion.
 
 If the sentinel shares terminal instant t with the last consumed row but differs
 in purpose/outcome, the complete-time prefix stops strictly before t. Return
@@ -397,6 +461,13 @@ in purpose/outcome, the complete-time prefix stops strictly before t. Return
 contributions are not described as the full instant or full period. Later pages
 resume the rest of t's categories. A valid cursor chain can complete that instant,
 but each page still returns page totals, not an invented cumulative total.
+
+Coverage-phase example: all_time rows normal/non_success and summary_manual/
+non_success have unattributable counts 2 and 1. With one slot left, page A returns
+delta=2 and incomplete cumulative state=2; page B resumes the second full key and
+returns delta=1, complete cumulative state=3. Page C in temporal phases returns
+coverage delta=0 and still exposes cumulative state=3/time_unattributable. It does
+not add those three requests/tokens to the requested window or add 3 again.
 
 Example: at instant t the ordered rows are normal/non_success, normal/success,
 summary_manual/success. With one remaining slot the first is consumed; the cursor

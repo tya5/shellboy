@@ -2,6 +2,26 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Unobserved Finish Distribution (#47, 2026-10-30, Active)
+
+The leader adopts TerminalTime Observed/Unknown. Pending/observed/unknown ledger
+shape separates NULL finish from known epoch0/negative finish; cleanup/startup
+clock must never be invented as HTTP finish. Only observed finish is immutable.
+One idempotent unknown settlement contributes all-time only, retaining known token
+fields with independently unknown duration/invocation evidence. No day/instant
+row is assigned. A checked all-time terminal_time_unknown_count means scope-wide
+unattributable observations, not failures known inside the queried period.
+
+Period queries use a bounded all-time coverage phase within the same 4,096-row
+budget. They disclose time_unattributable/partial and add no guessed amounts to
+any window. Phase/full-key cursor progress and per-scope accumulator state prevent
+coverage rows being counted again across pages; page deltas and cumulative state
+are distinct. This conservative uncertainty can affect other periods indefinitely
+until scope deletion. Do not silently infer membership or optimize it away.
+Quantity counters/bytes/durations are nonnegative; UTC epoch seconds are signed
+i64 and may be negative. Independent design P2 recheck still precedes implementation.
+
+
 ## Adopted Aggregate Accounting And Observation (#47, 2026-10-30, Active)
 
 Adopt the [B specification](../design/usage-aggregates.md), subject to independent
