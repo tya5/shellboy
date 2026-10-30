@@ -1,30 +1,32 @@
 # Development status
 
-## Pending Message Work (#53, #56, Then #52)
+## Pending Message Publication (#52)
 
-#53 and #56 are locally implemented in separate design/implementation commits
-through `68568bf`. On macOS arm64 / Rust 1.99.1, the standard check passes
-**1,496 / 0 failed / 29 ignored**, layout84, Python6, format and strict all-target
-Clippy. Gitleaks finds no leaks in the four new commits. Regressions include
-actual owner-process death, explicit recovery ordering/authority, immutable
-assignments, the TUI attachment-revision boundary and factual saved cancellation
-results/replay. Applied input is distinct from a completed answer in the TUI.
-Earlier candidate checks failed on stale expectations and one Clippy finding;
-those failures are not successful evidence.
+#53/#56 are published on main `b686ec1`, with successful exact-SHA native CI
+41005281669 (Linux1,527 / macOS1,526 / Windows1,411 passed, zero failures).
+Both issues are closed after review. The installed optimized local binary is
+that main53/56 source, SHA-256
+`7bbc7a0264ffe993fa8a66741c311f6adf2f2d6c4ee5351de6bc66cca55fc3b9`;
+help/version/offline-guide checks pass. It does not contain #52.
 
-The verified index main `343c2d6` is now merged locally as `b6621bf`, retaining
-both sets of presentation tests. That merged source has not yet received its
-combined standard check. #52 is adopted in pending-messages.md and next for
-implementation; queue UI, cancellation, durable restore, send-now and Turn-only
-interruption are not yet implemented or verified. No #53/#56 push, native CI,
-installed-binary update or paid API is claimed.
+#52 implementation `74592a9` and native-scenario tests `47e6751` pass the local
+macOS arm64 / Rust1.99.1 standard check: layout88, Python6, format, strict
+all-target Clippy and **1,571 passed / 0 failed / 29 ignored**. Schema14 uses
+one nullable Turn-intent scalar and two indexes on existing drafts; no new table,
+worker, poller or queue. Pending UI, per-ID cancellation/durable restore, frozen
+send correlation, explicit immediate delivery and human-only Turn interruption
+are implemented. An additional compaction fix preserves absent owner fences
+without invalidating ordinary queued input or adding a counter.
 
-#42/#43/#55 are published on main `343c2d6`, with successful exact-SHA three-OS
-CI run [41001556952](https://github.com/tya5/shellboy/actions/runs/41001556952):
-Linux1,505 / macOS1,504 / Windows1,392 passed, zero failures; Windows threads4.
-All three tickets contain the review disposition/validation comments and are
-closed. This does not validate the later local message-control work.
+The new source is still on the separate issue52 branch. Manual native Windows
+CI is REQUIRED BEFORE main admission and is not yet verified at this checkpoint.
+Fetch latest main, retain source separation, scan secrets and publish the branch
+for that manual check; only then admit/push it to main. Main CI remains a further
+exact-source check. No #52 release or installed-binary update is claimed.
 
+#42/#43/#55 remain published on main343c2d6, with successful exact-SHA CI
+41001556952 and review-result comments; all three are closed. Those results do
+not validate #52's new native behavior.
 
 ## Reviewed index integration into main5350fc8
 

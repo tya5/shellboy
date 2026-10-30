@@ -1,5 +1,71 @@
 # Validation record
 
+## Pending Messages And Human Turn Interruption (#52, Local)
+
+The unchanged product/test tree committed as `74592a9` / `47e6751` passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+on macOS arm64 / pinned Rust1.99.1: layout88, Python6, format, strict all-target
+Clippy and Rust **1,571 passed / 0 failed / 29 ignored** (lib700, aggregated
+integration861, isolated signal7 and child3). Logs are private under .local.
+This is not a Windows/Linux result for #52; a manual native Windows CI run must
+succeed before main admission, followed by exact-source main CI.
+
+Temporary stores, synthetic files and loopback HTTP exercise typed cancel
+outcomes/authority/replay/rollback, explicit now versus ordinary quiet delivery,
+frozen submission and newer editable draft survival, prior-owner/file-deleted
+replay, raw-text versus serialized-metadata budgets, managed-file GC and unknown
+historical input list/cancel/restore across restart. Schema14 fresh creation and
+migrations1..14 have exactly matching99 sqlite_schema objects in Python
+SQLite3.53.0; EXPLAIN uses the two new draft indexes for current bindings and
+submission watermarks. That query-only observation is separate from Rust/native
+runtime validation.
+
+UI tests cover paired read ordering, both pre-ACK notification orders, stale
+headers/generations/read epochs, post-reconciliation ACKs, fixed confirmation IDs,
+restore cursor/folds/attachment positions and CAS, deleted archives, escaped
+controls and bounded4MiB accepting previews. Ratatui TestBackend establishes
+rendering/state behavior, not physical Windows terminal compatibility.
+
+Six real local HTTP/shell scenarios cover interrupted partial retention without
+retry, completed-tool then interrupted-stream provenance, exact/stale/recovery
+Turn targeting, foreground/background survival and same-Run queued handoff,
+actual shell_ended after interruption leading to a new Turn and Run completion,
+and ordinary queued input allowing both serial calls to finish with exactly two
+model attempts. The owned-child liveness record is explicitly synthetic; no new
+native child process is claimed by that scenario. Native gate and binding tests
+fence both Turn replacement and driver publication, including a reserved call
+whose OS side effect must not occur. Their Windows command variants await the
+required native Windows CI; macOS success does not substitute for it.
+
+Candidate checks exposed typed ACK/internal-assignment projection mismatches,
+validation-order regressions, an absent-owner compaction fence and stale legacy
+UI/wake/selection/autosave assumptions. They were corrected before the final
+passing check. Queued input does not invent selected-path adoption; compaction
+uses existing Run/Turn absence fences rather than a broad metadata counter.
+No paid API, default user data, existing owner process or #52 installed binary
+was used or changed by these checks.
+
+
+## Installed Main Binary After #53/#56
+
+Main `b686ec1835a23ebfbbe0d3b297c2f2593bc489ea` passes native CI
+[41005281669](https://github.com/tya5/shellboy/actions/runs/41005281669): Linux
+1,527 / macOS1,526 / Windows1,411 passed, zero failures (Windows threads4).
+Artifact source SHAs match main. #52 is absent from that source.
+
+The same main source was built on macOS arm64 with
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 cargo build --release --locked --bin shellboy`
+in an isolated worktree, sharing only the target cache. The optimized build
+finished in4m37s. After help/version and an offline `docs get --id
+shellboy/agent-guide` check against a temporary unused data path, the installed
+`~/.local/bin/shellboy` was backed up outside Git and atomically replaced.
+Installed/source SHA-256 matches:
+`7bbc7a0264ffe993fa8a66741c311f6adf2f2d6c4ee5351de6bc66cca55fc3b9`.
+Installed help/version pass (`shellboy 0.2.0`); the release version number is
+unchanged. Existing processes and user settings/data were not changed; the new
+program applies on the next launch. This installation contains #53/#56 only.
+
+
 ## Interrupted Input And Tool Cancellation (#53, #56)
 
 On macOS arm64 / pinned Rust 1.99.1, source through `68568bf` passes
