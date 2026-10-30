@@ -4,11 +4,38 @@
 
 The current UI calls a Thread `会話` (conversation), a Run `作業` (work), and a Turn `応答処理` (response processing). CLI names, identifier keys, and source text retain their original spelling. Japanese captions quoted below identify the unchanged current UI.
 
-The top shows the conversation, connection, and model; the center shows history; the bottom holds the draft and activity status. History distinguishes messages, commands, execution results, state changes, and summaries. Answers, summaries, and expanded visible reasoning use Markdown; requests and command output use source text. Consecutive routine notifications are grouped by count and kind, with individual contents available in details.
+The top shows the conversation, connection, and model; the center shows history; the bottom holds the draft and activity status. History distinguishes messages, commands, execution results, state changes, and summaries. Answers, summaries, and expanded visible reasoning use Markdown; requests and command output use source text. Routine observations appear as concise facts at the end of their conversation section; actionable failures remain visible, with individual source facts available in details.
 
 A new conversation without history shows send/newline keys and working directory. `AGENTS.md: 未確認` means the screen has not received an observation of the file's presence, not that it is absent.
 
 Simplified display does not delete saved source. Details and typed action forms provide full IDs, before/after values, remaining source, provenance, and complete URLs. Use `/cwd` or `/model` to inspect current settings as well.
+
+## Read times, refresh and frozen display
+
+Bounded output previews and original pages show their read time in UTC. That
+time is captured once when the read succeeds, not advanced by drawing or the
+animation clock. It identifies the display observation, separately from a saved
+message's creation time. A completed preview is a snapshot: close and reopen its
+row to read again. This only rereads retained output; it does not rerun the shell.
+In F6's original page, O rereads the selected source, N requests the next page,
+and P requests the first page. Each accepted page has its own read time.
+
+Mutable fields and links for the visible selected-history F6/F7 item update after
+relevant saved changes, including CLI changes from another terminal. Changes
+coalesce for 500 ms; the target in an unloaded local environment is visibility
+within 1 second. This is not an API/network or busy-database freshness guarantee. A failed
+refresh labels retained facts stale/unavailable instead of silently presenting
+them as current. Source identity and selection remain distinct from refresh.
+This does not promise that every other popup is already reactive: management
+usage/reference behavior is described separately below, and browser/watch/live
+work/form improvements belong to subsequent increments.
+
+F2 records a UTC **freeze-entry time** once and stops automatic repainting.
+F2/Esc resumes normal updates. Ctrl+L redraws currently available UI data once
+while remaining frozen; it neither performs a DB refresh nor changes the entry
+time. Therefore the freeze-entry label is not the read time of every value on
+the repainted screen. The compact banner may shorten the timestamp or omit it
+when the terminal is too narrow; the full-width banner includes the UTC date.
 
 ## Saved usage details
 
@@ -27,7 +54,7 @@ operation or conversation selection stops that refresh; stale generations cannot
 replace another view. A refreshed result changes its detail identity, so links
 selected from an older result must be selected again. F6 field pages inspect the
 cached response, not a new query. Reference navigation from a result
-(`FollowManagement`) performs one query and opens an immutable snapshot; it does
+(`FollowManagement`) performs one query and opens a one-shot snapshot; it does
 not subscribe to Changed or inherit the previous form's refresh. To obtain newer
 values, explicitly submit the F8 usage/get form again or follow the reference
 again from a current result. F6 paging alone does not refresh that snapshot.
@@ -54,7 +81,7 @@ The header orders state, conversation name, model, and working directory. Long n
 
 Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought or the target behind `待機中` (waiting), are not guessed. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
 
-Animations affect only the status line, never history text or scroll position. Animation redraws stop during selection/copy mode or overlays. Selection mode shows `表示固定` (display frozen) and exit keys at the top; F2/Esc resumes updates. The conversation list is a snapshot and has no running-state animation.
+Animations affect only the status line, never history text or scroll position. Animation redraws stop during selection/copy mode or overlays. Selection mode shows `表示固定` (display frozen), its UTC freeze-entry time when space permits, and exit keys at the top; F2/Esc resumes updates. The conversation list is a snapshot and has no running-state animation.
 
 `観測経過` (observed elapsed time) uses a monotonic clock for the period during which this screen observed Turn activity. It excludes time before selection, before restart, and while state was unavailable; it stops at recovery wait or Turn termination. It differs from a tool header's saved execution duration.
 
@@ -105,7 +132,7 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 
 Use Ctrl+L if stale characters or old link regions remain. It works in lists, details, popups, and frozen selection; repeated presses are coalesced within the render-rate cap. If it conflicts with send/newline bindings, redraw is disabled and F1 explains why. It does not repair underlying terminal character-width disagreement.
 
-In selection/copy mode, Ctrl+L redraws the latest state once, including responses received after freezing; a following viewport may advance. Selection mode remains active and automatic redraw stops again afterward. This does not restore a snapshot of the screen at freeze time.
+In selection/copy mode, Ctrl+L redraws the latest state once, including responses received after freezing; a following viewport may advance. Selection mode remains active and automatic redraw stops again afterward. This does not restore a snapshot of the screen at freeze time, request a new DB read, or change the recorded freeze-entry time.
 
 Each Thread retains its draft, source-character anchor, and follow state. Movement is measured in display rows. At the end, history aligns to the last screen and follows; reading upward stops following. Wheels do not move the conversation behind help/details overlays. Offscreen bodies/layouts may be evicted from cache without deleting source history. `本文未キャッシュ` (body not cached) is fetched again according to scroll position.
 
@@ -198,7 +225,7 @@ Ordinary lists, detail fields, and forms use Up/Down for selection and PgUp/PgDn
 | Conversation list | Text/Backspace filter; Up/Down select; Left/Right collapse/expand/navigate parents and children; Home/End first/last; Enter switches; PgDn adds next page; Ctrl+R refreshes; F1 information; Delete/Ctrl+D deletion confirmation; Esc returns |
 | Management/search results | Tab / Shift+Tab select fields; Up/Down/PgUp/PgDn scroll; Enter field details; C copies value; A action form; W cancels explicit-wait observation; Esc returns |
 | Conversation details (F6) | Up/Down select item, Enter opens fields; Up/Down select fields; V concise/internal view; O source; F7/L links; C copies value; A source-fetch form; Esc closes |
-| Source | PgUp/PgDn scroll current page; N next page; P first page; C copies current page source |
+| Source | PgUp/PgDn scroll current page; O refreshes selected source; N next page; P first page; C copies current page source |
 | Link list | Up/Down select; C copies full URL; recognition/display alone never connects |
 | Action list (F8) | Type/paste to filter; Backspace removes; Ctrl+U clears; Up/Down/PgUp/PgDn/Home/End select; Enter opens form; Esc clears filter then closes; F8 closes |
 | Action form | Tab/Up/Down fields; Shift+Tab previous; Left/Right/Space choose; type/paste; Backspace deletes at end; Ctrl+U clears field; Ctrl+J newline in multiline bodies; Enter submits; Esc returns to list |
@@ -235,10 +262,10 @@ F6 `会話の詳細` (conversation details) selects by item number, kind, and ex
 
 1. In F6 (`/details`), select a history item and Enter its fields: node ID, tool arguments, state, before/after values, and more. Full IDs remain here rather than repeating in ordinary conversation rows.
 2. Select fields with Up/Down and C to copy. A shortened value marked `[詳細は原文参照]` is not copied; proceed to source. Enter on Run/Turn/execution references opens the corresponding query form; node references open source. Use F8 `履歴 · 原文` for neighboring/source node IDs.
-3. O fetches the first source page; N next, P first. C copies **only the current source page**. This never loads all history or raw output at once. Pages are at most 64KiB, with continuation, neighboring, and source references. For full shell raw output, use F8 `shell · 原文` with execution, cursor, and encoding.
+3. O refreshes the selected source; N requests the next source page and P the first. C copies **only the current source page**. This never loads all history or raw output at once. Pages are at most 64KiB, with continuation, neighboring, and source references. For full shell raw output, use F8 `shell · 原文` with execution, cursor, and encoding.
 4. F7 (`/links`) or lowercase l in details selects HTTP(S) links for the current item. C copies the complete URL regardless of wrapping/short labels. Display does not connect or launch a browser. An empty link set for the current body window is stated explicitly.
 
-Ordinary shell results separate stdout/stderr blocks only when verified from retained raw output; words such as “error” do not determine the stream. This is a bounded leading display excerpt; `出力の表示範囲` (output display range) in details reports remaining/uncollected portions. When streams cannot be identified because raw was reclaimed, execution reference is unknown, or display preparation exceeded its deadline, saved combined excerpts and the reason remain. This visual distinction never rewrites saved source from O or body copies.
+Ordinary shell results separate stdout/stderr blocks only when verified from retained raw output; words such as “error” do not determine the stream. This is a bounded tail display preview; `出力の表示範囲` (output display range) in details reports remaining/uncollected portions. When streams cannot be identified because raw was reclaimed, execution reference is unknown, or display preparation exceeded its deadline, saved combined excerpts and the reason remain. This visual distinction never rewrites saved source from O or body copies.
 
 F6 returns to the item list; Esc closes details without changing draft or original reading anchor. Reclaimed source shows a reason rather than an empty successful body.
 

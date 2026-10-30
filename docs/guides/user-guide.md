@@ -98,6 +98,19 @@ still recalls sent messages. Opening details does not submit a new request.
 Copies and originals refer to saved source content, which may contain more than
 the visible preview. F6's original-text page also retains its own copy controls.
 
+Output previews and original pages show a UTC read time captured once per
+successful read. Close/reopen a tool row to reread its output without rerunning
+it. In F6's original page, O refreshes the selected source, N reads the next page
+and P the first. Mutable facts and links in the visible selected-history F6/F7
+item follow relevant saved changes automatically, coalesced for 500 ms with a
+1-second target in an unloaded local environment. Refresh failures show stale/unavailable information; the
+target is not a network/API or busy-database guarantee.
+
+F2 freezes automatic repainting and records its UTC entry time. F2/Esc resumes
+updates. Ctrl+L redraws available UI data once, while keeping F2 active and its
+entry time unchanged; it does not request a fresh DB read. The displayed entry
+time is therefore distinct from each preview's read time.
+
 Routine observations appear as quiet facts at the end of the message section;
 failures and recovery decisions remain prominent. The bottom rows show current
 activity, pending input and concrete notices with a short help hint. Successful
