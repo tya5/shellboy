@@ -116,3 +116,36 @@ return 1, never success. Keep inventories, ignored policy, concurrency and timer
 unchanged. A child-runner self-check starts with ascii:strict output, exercises
 Unicode logs and test names with native exit 101, and verifies complete logs,
 visible failure names and no secondary encoding failure.
+
+## CI execution and publication policy (#57)
+
+Automatic Rust checks run only for pushes to `main`. Branch pushes and pull
+requests do not start this workflow. Keep `workflow_dispatch`, its existing
+inputs and native OS matrices available unchanged for explicit branch checks,
+platform diagnosis and performance comparisons. This changes when checks run,
+not test coverage, assertions, failure gates or the Windows thread setting.
+
+Run the complete local standard check (`sh scripts/check.sh` or
+`./scripts/check.ps1`) successfully on the exact proposed tree before pushing.
+A focused test or an earlier SHA's success is insufficient. When main CI is
+red, investigate and restore it before landing other main work. Use an explicit
+manual branch run before main integration when native-OS concerns warrant it;
+local success does not establish another platform's result.
+
+Create release tags and publish releases only from an exact main SHA whose
+ordinary three-OS Rust checks have passed. A green older commit, a focused
+Windows-only experiment or a successful distribution build does not establish
+that release candidate's full CI result. Push/release authorization remains
+separate from this validation policy.
+
+An unrelated intermittent Windows failure may be investigated by explicitly
+rerunning its failed job at the same SHA. Retain the original failed run/job,
+failed test, diagnostics and the rerun outcome as separate evidence. A rerun
+does not erase a failure or establish its cause; fix reproducible product or
+fixture failures rather than adding automatic retries or weakening assertions.
+
+GitHub's [workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore)
+confirms that a branches-only push filter excludes tag events.
+[Manual runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow?tool=cli)
+can select a branch with `--ref`; the workflow must remain available on the
+default branch. Preserve that existing entry point.

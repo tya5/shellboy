@@ -33,3 +33,19 @@ Cargo package、実行ファイル、Rustの参照、CLI使用例、環境変数
 公式releaseのchecksumを照合したgitleaks v8.30.1で、公開用Gitの全ref・全履歴を検査しました。既定ルールを使い、allowコメントによる除外を無効にし、結果は0件でした。結果文書を含む最終commit後にも同じ検査を実施しています。実行例は `gitleaks git . --log-opts=--all --redact=100 --ignore-gitleaks-allow` です。生成した詳細reportやlogはGit管理外に置きます。
 
 名前の確認では、[GitHubの公開先](https://github.com/tya5/shellboy) は利用者が作成済みです。[別所有者の同名repository](https://github.com/c1982/shellboy) も存在します。今回の公開先は所有者名で区別できるため変更しません。[crates.io API](https://crates.io/api/v1/crates/shellboy) は確認時点で404（未登録）でした。名前の予約は行っておらず、Cargoの `publish = false` は維持しています。
+
+## Release validation gates (#57)
+
+Run the full local standard check (`sh scripts/check.sh` or
+`./scripts/check.ps1`) successfully on the proposed tree before pushing. Rust
+checks automatically run only for main pushes; branch pushes and pull requests
+do not trigger them. Use explicit manual branch checks for native-OS concerns.
+If main CI is red, investigate and restore it before landing other main work.
+
+Create tags and publish releases only from an exact main SHA whose ordinary
+three-OS Rust checks are green. Older-SHA checks, Windows-only experiments and
+successful release artifact builds are separate evidence and cannot replace
+that gate. Retain an unrelated intermittent Windows failure and any explicit
+same-SHA failed-job rerun as separate records; rerun success does not erase the
+failure or prove its cause. Existing user authorization requirements for push
+and release still apply. See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57).

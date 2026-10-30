@@ -93,8 +93,25 @@ and build versus execution times must accompany any claimed improvement.
 
 For a four-thread Windows check without rerunning the baseline profiling matrix,
 use the manual `windows_test_threads=4` input with `performance=false`. This
-additional stress run selects Windows only; ordinary pushes always execute the
-full three-OS matrix. Ordinary pushes use four Windows test threads. The manual
+additional stress run selects Windows only; automatic pushes to `main` execute
+the full three-OS matrix with four Windows test threads. The manual
 `default` choice also preserves all three OSes; `windows_test_threads=2` provides
 a two-thread diagnosis. Experimental failures are retained and never
 automatically retried into success.
+
+## CI execution policy (#57)
+
+Before pushing any proposed tree, finish the full local standard check with
+`sh scripts/check.sh` or `./scripts/check.ps1`. Record its exact source and
+result; focused checks do not replace this gate. Rust checks automatically run
+only on pushes to `main`, not branch pushes or pull requests. For branch-level
+native-OS concerns, explicitly dispatch Rust checks on that branch; the manual
+inputs and matrices described above remain available.
+
+If main CI is red, investigate and restore it before landing other main work.
+Release tags/releases require successful ordinary three-OS checks on their exact
+main SHA. An unrelated intermittent Windows failure can receive an explicit
+same-SHA failed-job rerun for diagnosis, retaining both failure and rerun evidence;
+there is no automatic retry or assumption that the initial failure was harmless.
+See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57)
+and [publication gates](publication.md#release-validation-gates-57).
