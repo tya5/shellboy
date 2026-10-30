@@ -316,12 +316,14 @@ jobs:
         shell: [powershell, pwsh]
     runs-on: windows-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - name: Check public downloads, replacement, and failure paths
-        shell: ${{ matrix.shell }}
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetRandomFileName())
