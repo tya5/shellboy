@@ -1456,3 +1456,11 @@ unused speculative API fields and an unnecessary timing query on each completed
 preview. The adopted design describes that stage boundary. Raw byte and row
 limits remain checked in production, not only in tests. Revisit when D adds
 incremental live output; no protocol or saved format changes are involved.
+
+## #50 review: explicit overflow requires an adopted reduction
+
+An explicit capacity rejection must not spend remaining retries on the same
+input. If maximum omission has no target, try the existing final spill/summary
+stage immediately; if neither adopts a reduction, or stages are spent/rejected,
+recover without another POST. Keep ordinary transient/no-candidate retries.
+Expose the unavailable automatic-reduction fact without a cause recommendation.

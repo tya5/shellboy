@@ -15,6 +15,17 @@ from #58's earlier 1,614-test checkpoint. Main CI41041115046 at source75152eb pa
 issue58 is closed for this logging-only correction. #41 changes remain isolated on their work branch;
 the installed binary and user data are unchanged.
 
+## #50 review follow-up
+
+Explicit overflow now resends only after an adopted reduction. A no-target
+maximum edit immediately tries the existing final spill/summary stage; rejected,
+no-target or exhausted reduction enters recovery without an unchanged POST.
+The reason includes automatic_reduction_unavailable. Transient retry policy is
+unchanged. Review items 2-4 fix the sample configuration, remove obsolete Guide
+estimation advice and bound the manual-edit test's wait with a 60-second watchdog.
+Local standard check: 7 groups / 1,610 passed / 0 failed / 31 ignored, layout88,
+Python6, fmt/strict Clippy. Native manual Windows and final main CI are later gates.
+
 ## History retention and conversation redesign (#58 then #41)
 
 #58 runtime/tests at `7478074` (including post-result notification80de5f0)

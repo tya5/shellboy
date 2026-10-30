@@ -14,8 +14,11 @@ activation threshold, once-per-Turn reduction and first-resumption stop guard.
   receiving-body idle timeouts do not trigger reduction.
 - Explicit context-limit failures immediately use the same maximum reduction.
   A second explicit overflow may use the existing latest-spill/summary stage.
-  These sends also consume the same retry budget. No safe candidate means retry
-  unchanged, not a new charge outside the budget. Successfully adopted model
+  These sends also consume the same retry budget. If the first maximum edit has
+  no safe target, try the second stage immediately, without an unchanged resend.
+  An explicit overflow with no adopted reduction (no safe target, rejection or
+  spent stages) enters recovery immediately. Transient failures with no safe
+  target still retry unchanged within the ordinary budget. Successfully adopted model
   responses reset the consecutive budget and overflow stages, allowing a long
   Turn to reduce again. There is no independent once-per-Turn trim allowance.
 - Reuse existing protected ranges, provenance and atomic path adoption. Omitted

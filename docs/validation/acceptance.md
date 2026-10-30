@@ -20,6 +20,33 @@ Windows, Linux and macOS. Issue58 is closed with the result linked. Earlier actu
 belongs to the original retention source and was not repeated for this
 logging-only change. No paid API, user store or installed binary was touched.
 
+## #50 review items 1-4
+
+Single-conversation follow-up on c6397b1; macOS arm64, Rust1.99.1, no child
+conversations or production data. `sh scripts/check.sh`: exit0, Rust7groups /
+1,610 passed / 0 failed / 31 ignored, layout88, Python6, fmt/strict Clippy.
+Focused retries23pass1existingignore and runtime_features23pass.
+
+The new only-protected-input fixture proves recovery with one saved request,
+zero automatic resends, no queued next request and the factual unavailable flag.
+The fallback fixture keeps only the request and latest complete tool pair: the
+first no-target maximum edit goes directly to a summary request, not an unchanged
+conversation resend. The stage-exhaustion fixture retains retry limit8 but stops
+with stages spent rather than consuming the remaining6 slots. Existing transient
+no-candidate/budget, pair integrity, stop and duplicate-tool protection stay tested.
+An initial fallback test incorrectly assumed a maximum edit had no target; the
+fixture now explicitly selects the protected path rather than depending on size.
+
+Sample config comments and the Agent Guide no longer describe removed settings/
+estimates. Manual maximum's operation poll has a 60-second watchdog, not an
+unbounded yield loop. Native Windows pre-push and exact main CI are confirmed
+separately in the completion message. Real providers/physical terminals remain
+unverified. No release or installed-binary update is included.
+
+Release-note follow-up (#62, recorded only): remove compact_hint_tokens before
+upgrading, and explain the change from the old partial-upload two-strike stop to
+the normal finite retry budget. This review does not implement that release task.
+
 ## Reactive History Retention (#58)
 
 Runtime/test source747807450f09cf0f9935d5a8e04327256b7f5d94, including

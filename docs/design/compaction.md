@@ -133,7 +133,9 @@ failure retries unchanged, the second and later eligible failure may reduce;
 explicit context overflow reduces immediately. All resends share the configured
 consecutive retry budget (default eight), including after reduction. A successful
 response resets that budget and the explicit-overflow stages. Safe candidate
-absence retries unchanged; no independent reduction allowance is renewed or spent.
+absence retries unchanged for transient failures. Explicit capacity rejection
+with no adopted reduction recovers immediately; no independent reduction
+allowance is renewed or spent.
 
 Maximum omission retains the current user request, latest group, latest complete
 tool group, incomplete work and protected/unapplied instructions. Existing bounded
