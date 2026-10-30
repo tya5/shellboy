@@ -60,6 +60,11 @@ impl ContextEditArgs {
             }
         }
         match self.action {
+            ContextEditAction::Maximal => {
+                if self.from_node_id.is_some() || self.to_node_id.is_some() {
+                    return Err(invalid("maximal accepts no node endpoints"));
+                }
+            }
             ContextEditAction::Spill | ContextEditAction::Summary | ContextEditAction::Omit => {
                 if self.from_node_id.is_none() || self.to_node_id.is_none() {
                     return Err(invalid(

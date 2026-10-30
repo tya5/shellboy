@@ -386,7 +386,8 @@ states!(ContextEditAction {
     Summary,
     Trim,
     Omit,
-    Restore
+    Restore,
+    Maximal
 });
 args!(ContextEditArgs {
     #[serde(default)] thread_id: Option<String>,

@@ -7,24 +7,24 @@ use rusqlite::{Connection, OptionalExtension};
 const SUMMARY: &str = "WITH recent AS (
  SELECT generation,CASE WHEN generation=?2 THEN CASE WHEN json_valid(error_json) THEN
   CASE WHEN json_type(error_json,'$.automatic_trim')='object'
-   AND json_type(error_json,'$.automatic_trim.before_tokens')='integer'
-   AND json_type(error_json,'$.automatic_trim.after_tokens')='integer'
+   AND json_type(error_json,'$.automatic_trim.before_characters')='integer'
+   AND json_type(error_json,'$.automatic_trim.after_characters')='integer'
    AND json_type(error_json,'$.automatic_trim.compact.spilled_groups')='integer'
    AND json_type(error_json,'$.automatic_trim.omitted_nodes')='integer'
-   AND typeof(json_extract(error_json,'$.automatic_trim.before_tokens'))='integer'
-   AND typeof(json_extract(error_json,'$.automatic_trim.after_tokens'))='integer'
+   AND typeof(json_extract(error_json,'$.automatic_trim.before_characters'))='integer'
+   AND typeof(json_extract(error_json,'$.automatic_trim.after_characters'))='integer'
    AND typeof(json_extract(error_json,'$.automatic_trim.compact.spilled_groups'))='integer'
    AND typeof(json_extract(error_json,'$.automatic_trim.omitted_nodes'))='integer'
-   AND json_extract(error_json,'$.automatic_trim.before_tokens')>0
-   AND json_extract(error_json,'$.automatic_trim.after_tokens')>=0
-   AND json_extract(error_json,'$.automatic_trim.after_tokens')<json_extract(error_json,'$.automatic_trim.before_tokens')
+   AND json_extract(error_json,'$.automatic_trim.before_characters')>0
+   AND json_extract(error_json,'$.automatic_trim.after_characters')>=0
+   AND json_extract(error_json,'$.automatic_trim.after_characters')<json_extract(error_json,'$.automatic_trim.before_characters')
    AND json_extract(error_json,'$.automatic_trim.compact.spilled_groups')>=0
    AND json_extract(error_json,'$.automatic_trim.omitted_nodes')>=0
    AND (json_extract(error_json,'$.automatic_trim.compact.spilled_groups')>0 OR json_extract(error_json,'$.automatic_trim.omitted_nodes')>0)
    AND json_extract(error_json,'$.automatic_trim.compact.no_target') IS NOT 1
   THEN json_array(
-   json_extract(error_json,'$.automatic_trim.before_tokens'),
-   json_extract(error_json,'$.automatic_trim.after_tokens'),
+   json_extract(error_json,'$.automatic_trim.before_characters'),
+   json_extract(error_json,'$.automatic_trim.after_characters'),
    json_extract(error_json,'$.automatic_trim.compact.spilled_groups'),
    json_extract(error_json,'$.automatic_trim.omitted_nodes')) END END END AS facts
  FROM model_attempt INDEXED BY attempts_by_turn WHERE turn_id=?1
@@ -44,8 +44,6 @@ pub(super) fn summary(
     Ok(facts
         .and_then(|body| serde_json::from_str::<[u64; 4]>(&body).ok())
         .map(|[before, after, spilled, omitted]| {
-            format!(
-                "自動縮小済み · spill {spilled}組 · 省略 {omitted}件 · 約{before}→{after} tokens"
-            )
+            format!("自動縮小済み · spill {spilled}組 · 省略 {omitted}件 · {before}→{after} chars")
         }))
 }

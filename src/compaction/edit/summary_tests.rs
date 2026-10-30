@@ -118,7 +118,7 @@ async fn omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and
     let (fixture, mut requests, _release, server) = configured_fixture(1, false).await;
     let marker = omit_middle(&fixture).await;
     let snapshot_before = fixture.compactor.snapshot("t", false).await.unwrap();
-    let expected_invalidated = estimated_suffix_tokens(&snapshot_before, 1);
+    let expected_invalidated = suffix_characters(&snapshot_before, 1);
     let result = fixture
         .compactor
         .edit(
@@ -129,7 +129,7 @@ async fn omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and
         .await
         .unwrap();
     assert_eq!(
-        result.cache_invalidated_tokens, expected_invalidated,
+        result.changed_suffix_characters, expected_invalidated,
         "cache suffix is measured on the currently selected marker path, not its hidden originals"
     );
     let summary = result.compact.summary_node_id.unwrap();

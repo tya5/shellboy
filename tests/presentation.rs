@@ -5,7 +5,7 @@ use shellboy::{history::text_of_payload, presentation::*};
 fn trim_markers_remain_visible_replacement_notices_with_immutable_source_text() {
     let notice = "Input prefix removed: first..last. Files and shell effects are unchanged. Use shellboy history get --node first to inspect only needed context.";
     let payload = json!({
-        "context_trim":{"version":1,"omitted_nodes":2,"first_node_id":"first","last_node_id":"last","estimated_tokens":1000},
+        "context_trim":{"version":1,"omitted_nodes":2,"first_node_id":"first","last_node_id":"last","history_characters":1000},
         "source_node_ids":["first","last"],
         "item":{"role":"developer","content":[{"type":"input_text","text":notice}]},
     });

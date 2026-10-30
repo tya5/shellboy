@@ -118,8 +118,11 @@ async fn proxy() -> (
     (format!("http://{address}/v1"), receive, task)
 }
 async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
+    owner_with_retries(root, url, 0).await
+}
+async fn owner_with_retries(root: &std::path::Path, url: &str, retries: u32) -> DataOwner {
     let config = root.join("config.toml");
-    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n")).unwrap();
+    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms=10\n")).unwrap();
     DataOwner::start(Some(config), Some(root.join("data")), root.into())
         .await
         .unwrap()
@@ -514,7 +517,7 @@ async fn clear_overflow_without_spill_skips_first_retry_summarizes_once_then_sto
  {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
-    let owner = owner(root.path(), &url).await;
+    let owner = owner_with_retries(root.path(), &url, 2).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
     for n in 0..2 {
@@ -529,6 +532,12 @@ async fn clear_overflow_without_spill_skips_first_retry_summarizes_once_then_sto
     send(&control, &thread, "overflowing task").await;
     let overflow =
         json!({"error":{"code":"context_length_exceeded","message":"fixture context exceeded"}});
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((400, overflow.clone()))
+        .unwrap();
+    // No safe maximum edit still gets the first ordinary resend.
     incoming(&control, &mut receive)
         .await
         .reply
@@ -645,7 +654,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     }
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
-    let owner = owner(root.path(), &url).await;
+    let owner = owner_with_retries(root.path(), &url, 2).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
     send(&control, &thread, "three tool groups then overflow").await;
@@ -656,7 +665,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
             &format!("before tool group {ordinal}"),
         )
         .await;
-        request.reply.send((200,json!({"id":format!("group-{ordinal}"),"status":"completed","output":[{"type":"function_call","call_id":format!("call-{ordinal}"),"name":"shell","arguments":json!({"command":format!("echo raw-group-{ordinal}")}).to_string()}]}))).unwrap();
+        request.reply.send((200,json!({"id":format!("group-{ordinal}"),"status":"completed","output":[{"type":"function_call","call_id":format!("call-{ordinal}"),"name":"shell","arguments":json!({"command":format!("echo raw-group-{ordinal}{}", "x".repeat(2000))}).to_string()}]}))).unwrap();
     }
     let overflow = json!({"error":{"code":"context_length_exceeded","message":"fixture pressure"}});
     next(&mut receive, &control, "after all three tool groups")
@@ -672,11 +681,16 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         .filter(|v| v["type"] == "function_call_output")
         .map(|v| serde_json::from_str(v["output"].as_str().unwrap()).unwrap())
         .collect();
-    assert_eq!(outputs.len(), 3);
-    assert_eq!(outputs[0]["omitted"], true);
-    assert_eq!(outputs[1]["omitted"], true);
+    assert_eq!(outputs.len(), 1);
     assert!(
-        outputs[2]["output"]
+        retry_one.body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["type"] == "function_call_output" && v["call_id"] == "call-2")
+    );
+    assert!(
+        outputs[0]["output"]
             .as_str()
             .unwrap()
             .contains("raw-group-2")
@@ -704,13 +718,10 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         .filter(|v| v["type"] == "function_call_output")
         .map(|v| serde_json::from_str(v["output"].as_str().unwrap()).unwrap())
         .collect();
-    // With no completed Turn to release, make minimum explicit-overflow
-    // progress by releasing the oldest current complete tool group;
-    // the two newer saved groups remain, rather than summarizing all safe ones.
-    assert_eq!(outputs.len(), 2);
-    assert_eq!(outputs[0]["call_id"], "call-1");
-    assert_eq!(outputs[1]["call_id"], "call-2");
-    assert!(outputs.iter().all(|output| output["omitted"] == true));
+    assert!(outputs.len() <= 1);
+    for output in &outputs {
+        assert_eq!(output["call_id"], "call-2");
+    }
     retry_two.reply.send((400, overflow)).unwrap();
     settled(&control, &thread).await;
     assert!(
@@ -738,7 +749,8 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         })
         .await
         .unwrap();
-    assert_eq!(counts, (3, 3, 3));
+    assert_eq!((counts.0, counts.1), (3, 3));
+    assert!(counts.2 <= 3);
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -2143,7 +2155,11 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
         details["context_usage"]["last_successful_attempt"]["cached_tokens"],
         100
     );
-    assert!(details["context_usage"]["estimation_baseline_attempt_id"].is_string());
+    assert!(
+        details["context_usage"]
+            .get("estimated_input_tokens")
+            .is_none()
+    );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

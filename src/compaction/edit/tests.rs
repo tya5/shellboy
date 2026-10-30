@@ -228,7 +228,7 @@ async fn automatic_trim_keeps_current_request_between_omitted_ranges() {
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_maximal(snapshot, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
         .await
         .unwrap();
     assert!(!result.compact.no_target);
@@ -262,13 +262,12 @@ async fn maximum_omission_adopts_available_reduction_and_attachment_exclusion() 
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_maximal(snapshot, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
         .await
         .unwrap();
     assert!(!result.compact.no_target);
     assert_ne!(fixture.path().await, before);
     assert_eq!(result.omitted_nodes, 2);
-    assert!(result.target_tokens.is_none());
     assert_eq!(fixture.replacement_count().await, 1);
     fixture
         .db
@@ -294,15 +293,14 @@ async fn automatic_maximum_omits_old_tool_group_and_keeps_latest_complete_tool_g
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_maximal(snapshot, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
         .await
         .unwrap();
     assert!(!result.compact.no_target);
     assert_eq!(result.compact.spilled_groups, 0);
     assert_eq!(result.omitted_nodes, 2);
     assert!(result.marker_node_id.is_some());
-    assert!(result.target_tokens.is_none());
-    assert!(result.after_tokens < result.before_tokens);
+    assert!(result.after_characters < result.before_characters);
     let path = fixture.path().await;
     assert_eq!(&path[1..], ["g-new-call", "g-new-result"]);
     fixture.close().await;
@@ -400,50 +398,8 @@ async fn estimates_use_replay_unicode_and_same_model_usage_with_current_fixed_ov
         characters,
         "audit metadata and old-epoch reasoning must not count as input"
     );
-    assert_eq!(snapshot.estimate.attempt_id.as_deref(), Some("baseline"));
-    assert_eq!(snapshot.estimate.overhead(), Some(100));
-    assert_eq!(estimated_tokens(&snapshot), (characters + 100).div_ceil(2));
-    assert_eq!(
-        estimated_suffix_tokens(&snapshot, 0),
-        (characters - 1).div_ceil(2),
-        "cache suffix excludes fixed system overhead"
-    );
-    let mut reduced = snapshot.clone();
-    reduced.groups.truncate(1);
-    assert_eq!(
-        estimated_tokens(&reduced),
-        estimated_tokens(&snapshot),
-        "planning clones share the calibrated baseline"
-    );
-    fixture
-        .db
-        .call(|db| {
-            db.execute(
-                "UPDATE model_attempt SET state='failed' WHERE id='inflight'",
-                [],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let snapshot = fixture.compactor.snapshot("t", false).await.unwrap();
-    assert_eq!(snapshot.estimate.overhead(), Some(20));
-    assert_eq!(estimated_tokens(&snapshot), (characters + 20).div_ceil(2));
-    fixture
-        .db
-        .call(|db| {
-            db.execute(
-                "UPDATE model_attempt SET usage_json='{}' WHERE id='baseline'",
-                [],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let snapshot = fixture.compactor.snapshot("t", false).await.unwrap();
-    assert_eq!(snapshot.estimate.attempt_id, None);
-    assert_eq!(snapshot.estimate.overhead(), None);
-    assert_eq!(estimated_tokens(&snapshot), characters.div_ceil(4));
+    assert_eq!(suffix_characters(&snapshot, 0), characters - 1);
+    assert_eq!(history_characters(&snapshot), characters);
     fixture.close().await;
 }
 
@@ -483,21 +439,17 @@ async fn activation_measures_failed_request_not_later_appended_input() {
         .text("new-pending-input", &"x".repeat(400_000))
         .await;
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
-    assert!(estimated_tokens(&snapshot) > 75_000);
+    assert!(history_characters(&snapshot) > 300_000);
     let original = fixture.path().await;
     let prepared_characters = fixture.db.call(|db| {
         Ok(db.query_row("SELECT json_extract(input_manifest_json,'$.input_characters') FROM model_attempt WHERE id='failed-request'", [], |row| row.get::<_, i64>(0))?)
     }).await.unwrap();
+    assert_eq!(prepared_characters, 4000);
     assert_eq!(
-        fixture
-            .compactor
-            .input_tokens("t", "p", "m", prepared_characters.try_into().unwrap())
-            .await
-            .unwrap(),
-        1_000,
-        "the actual prepared request remains below activation even after a large input is appended later"
+        fixture.path().await,
+        original,
+        "measurement never changes the selected path"
     );
-    assert_eq!(fixture.path().await, original, "activation is read-only");
     fixture.close().await;
 }
 
@@ -521,7 +473,7 @@ async fn maximum_plan_does_not_stop_after_the_first_old_tool_group() {
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_maximal(snapshot, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
         .await
         .unwrap();
     assert_eq!(result.compact.spilled_groups, 0);
@@ -622,7 +574,7 @@ async fn marker_explicitly_reports_current_turn_work_after_the_retained_request(
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_maximal(snapshot, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
         .await
         .unwrap();
     assert!(result.warnings.is_empty());
@@ -828,10 +780,9 @@ async fn maximum_trim_adopts_a_small_safe_reduction_even_when_retained_suffix_ex
         .unwrap();
     assert!(!result.compact.no_target);
     assert_eq!(result.omitted_nodes, 1);
-    assert!(result.target_tokens.is_none());
-    assert!(result.after_tokens < result.before_tokens);
+    assert!(result.after_characters < result.before_characters);
     assert!(
-        result.after_tokens > result.before_tokens / 2,
+        result.after_characters > result.before_characters / 2,
         "max omission must not require reaching half"
     );
     assert_eq!(fixture.path().await.last().unwrap(), "latest");
@@ -875,7 +826,7 @@ async fn latest_complete_tool_group_survives_even_with_a_later_assistant_group()
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
     let result = fixture
         .compactor
-        .trim_maximal(snapshot, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
         .await
         .unwrap();
     assert_eq!(result.omitted_nodes, 2);
@@ -899,36 +850,12 @@ async fn pending_protection_and_incomplete_groups_are_never_automatic_omission_c
     snapshot.groups[1].complete = false;
     let result = fixture
         .compactor
-        .trim_maximal(snapshot, CancellationToken::new())
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
         .await
         .unwrap();
     assert!(result.compact.no_target);
     assert_eq!(fixture.path().await, before);
     assert_eq!(fixture.replacement_count().await, 0);
-    fixture.close().await;
-}
-
-#[tokio::test]
-async fn activation_uses_the_prepared_request_count_instead_of_resnapshotting_a_changed_path() {
-    let fixture = Fixture::new().await;
-    assert_eq!(
-        fixture
-            .compactor
-            .input_tokens("t", "p", "m", 400)
-            .await
-            .unwrap(),
-        100
-    );
-    fixture.text("later", &"x".repeat(400_000)).await;
-    assert_eq!(
-        fixture
-            .compactor
-            .input_tokens("t", "p", "m", 400)
-            .await
-            .unwrap(),
-        100,
-        "already prepared small requests must not use later selected history as activation input"
-    );
     fixture.close().await;
 }
 
@@ -946,9 +873,8 @@ async fn legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows() 
     let metrics = fixture.compactor.context_metrics("t").await.unwrap();
     assert_eq!(metrics["last_successful_attempt"]["input_tokens"], 50);
     assert_eq!(metrics["last_successful_attempt"]["cached_tokens"], 12);
-    assert_eq!(metrics["estimation_baseline_attempt_id"], "large");
-    let snapshot = fixture.compactor.snapshot("t", false).await.unwrap();
-    assert_eq!(snapshot.estimate.tokens(100), 50);
+    assert!(metrics.get("estimated_input_tokens").is_none());
+    assert!(metrics.get("estimation_baseline_attempt_id").is_none());
     fixture
         .db
         .call(move |db| {

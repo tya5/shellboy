@@ -84,6 +84,20 @@ pub(super) fn overflow_prefix(s: &Snapshot, completed: usize) -> usize {
     }
     count
 }
+pub(super) fn request_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize> {
+    let id = turn?;
+    // A marker authored during this Turn must not displace its selected user request.
+    if let Some(index) = s.groups.iter().position(|g| {
+        g.sources.iter().any(|n| {
+            n.turn.as_deref() == Some(id)
+                && (n.payload["role"] == "user"
+                    || n.payload.pointer("/item/role").is_some_and(|r| r == "user"))
+        })
+    }) {
+        return Some(index);
+    }
+    turn_boundary(s, turn)
+}
 pub(super) fn turn_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize> {
     let turn = turn?;
     let boundary = s.turn_boundaries.get(turn);
@@ -113,6 +127,19 @@ pub(super) fn safe_prefix(s: &Snapshot) -> usize {
 mod tests {
     use super::*;
     use crate::compaction::tests::staged_snapshot;
+
+    #[test]
+    fn a_same_turn_marker_cannot_replace_the_selected_user_request_fence() {
+        let mut s = staged_snapshot();
+        s.groups[0].sources[0].turn = Some("current".into());
+        s.groups[0].sources[0].payload =
+            serde_json::json!({"item":{"role":"developer","content":[]}});
+        s.groups[1].sources[0].turn = Some("current".into());
+        s.groups[1].sources[0].payload = serde_json::json!({"role":"user","content":"protected"});
+        s.turn_boundaries
+            .insert("current".into(), s.groups[0].sources[0].id.clone());
+        assert_eq!(request_boundary(&s, Some("current")), Some(1));
+    }
 
     #[test]
     fn manual_and_overflow_policy_tables_keep_existing_group_ranges() {

@@ -345,3 +345,12 @@ input_limit. No reference clearing is provided. Default/inherited missing files
 remain allowed. `thread get` returns the absolute `agents_path`. Changes are
 atomic with other settings, auditable, and apply to the next new Turn, not a
 same-Turn retry. Other-Thread changes retain existing thread.set authority.
+
+### Failure-driven context editing (#50)
+
+`compact --maximal` selects ContextEdit action maximal with no from/to nodes;
+`/compact-max` is its TUI counterpart. It calls no summary API and does not
+resume a Run. Edit results replace token estimates with before_characters,
+after_characters and changed_suffix_characters (replay JSON Unicode scalars).
+No target_tokens field remains. thread get context_usage reports only the last
+successful measured usage, start/end time and next_request_pending after an edit.

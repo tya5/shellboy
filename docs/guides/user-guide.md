@@ -130,3 +130,10 @@ Exit with Ctrl+Q or `/quit`. Shellboy waits for persistence and for owned work t
 Next, explore [Attachments](attachments.md), [History and search](history-and-search.md), and the [CLI reference](cli-reference.md).
 
 Before deleting, use F8's “会話 · 削除影響” (deletion impact) to inspect live Runs, descendants, sharing, provenance, and attachment references. Preview does not delete anything; reclaimable-capacity estimates are unsupported. If you lose an acceptance or compaction result, query its operation using F8's “操作 · 受付結果” (operation receipt), then check downstream state. See [Recovery and storage](recovery-and-storage.md).
+
+### Recovery without token guesses
+
+After a failure, inspect Run/Turn context in F8. `/compact-max` reduces safe
+context without a summary API; `/retry` separately resends and may charge again.
+`/restore` can recover omitted text. Core no longer estimates tokens or uses a
+75k threshold. Last successful measured usage and its time are in thread get.

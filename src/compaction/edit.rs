@@ -9,18 +9,15 @@ mod trim;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContextEditResult {
     pub compact: CompactResult,
-    pub before_tokens: u64,
-    pub after_tokens: u64,
-    pub target_tokens: Option<u64>,
+    pub before_characters: u64,
+    pub after_characters: u64,
     pub omitted_nodes: usize,
     pub marker_node_id: Option<String>,
-    pub cache_invalidated_tokens: u64,
+    pub changed_suffix_characters: u64,
     pub warnings: Vec<String>,
 }
-mod estimate;
-pub(super) use estimate::{
-    TokenEstimate, estimated_suffix_tokens, estimated_tokens, history_characters,
-};
+mod measure;
+pub(super) use measure::{history_characters, suffix_characters};
 fn required_endpoint(value: Option<&str>) -> Result<&str, ApiError> {
     value.ok_or_else(|| edit_error("Context edit requires complete node endpoints"))
 }
@@ -45,30 +42,13 @@ fn node_ids(value: &Value, field: &str) -> Result<Vec<String>, ApiError> {
         .ok_or_else(|| invalid("Context marker has invalid source ordering metadata"))
 }
 impl Compactor {
-    /// Activation uses prepared request counts and bounded usage calibration,
-    /// without materializing the selected path or querying node attachments.
-    pub(crate) async fn input_tokens(
-        &self,
-        thread: &str,
-        profile: &str,
-        model: &str,
-        characters: u64,
-    ) -> Result<u64, ApiError> {
-        let (thread, profile, model) = (thread.to_owned(), profile.to_owned(), model.to_owned());
-        self.database
-            .call(move |db| {
-                Ok(TokenEstimate::calibration(db, &thread, &profile, &model)?.tokens(characters))
-            })
-            .await
-            .map_err(storage_error)
-    }
     pub(crate) async fn trim_activated(
         &self,
         thread: &str,
         cancel: CancellationToken,
     ) -> Result<ContextEditResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
-        self.trim_maximal(snapshot, cancel).await
+        self.trim_maximal(snapshot, cancel, "failure").await
     }
     pub async fn edit(
         &self,
@@ -82,18 +62,15 @@ impl Compactor {
                 thread,
                 matches!(
                     args.action,
-                    ContextEditAction::Trim | ContextEditAction::Omit
+                    ContextEditAction::Trim | ContextEditAction::Omit | ContextEditAction::Maximal
                 ),
             )
             .await?;
-        let before = estimated_tokens(&snapshot);
-        let target = self
-            .config
-            .connections
-            .get(&snapshot.profile)
-            .and_then(|connection| connection.compact_hint_tokens)
-            .unwrap_or(75_000);
+        let before = history_characters(&snapshot);
         match args.action {
+            ContextEditAction::Maximal => {
+                self.trim_maximal(snapshot, cancel, "manual_maximal").await
+            }
             ContextEditAction::Trim => {
                 self.trim_before(
                     snapshot,
@@ -142,42 +119,44 @@ impl Compactor {
                         )
                         .await;
                 }
-                let invalidated = estimated_suffix_tokens(&snapshot, selected.start);
+                let invalidated = suffix_characters(&snapshot, selected.start);
                 let compact = if matches!(args.action, ContextEditAction::Spill) {
                     self.spill_snapshot(snapshot, vec![selected], cancel)
                         .await?
                 } else {
                     self.summarize_snapshot(snapshot, selected, cancel).await?
                 };
-                let after = estimated_tokens(&self.snapshot(thread, false).await?);
+                let after = history_characters(&self.snapshot(thread, false).await?);
                 Ok(ContextEditResult {
                     compact,
-                    before_tokens: before,
-                    after_tokens: after,
-                    target_tokens: Some(target),
-                    cache_invalidated_tokens: invalidated,
+                    before_characters: before,
+                    after_characters: after,
+                    changed_suffix_characters: invalidated,
                     ..Default::default()
                 })
             }
         }
     }
     pub async fn context_metrics(&self, thread: &str) -> Result<Value, ApiError> {
-        let snapshot = self.snapshot(thread, false).await?;
-        let estimate = estimated_tokens(&snapshot);
         let thread = thread.to_owned();
-        let profile = snapshot.profile.clone();
-        let model = snapshot.model.clone();
-        let latest=self.database.call(move|db| {
-            let sql = format!("SELECT a.id,{},CASE WHEN length(CAST(a.input_manifest_json AS BLOB))<=65536 THEN a.input_manifest_json END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND a.profile_id=?2 AND a.model_id=?3 ORDER BY a.rowid DESC LIMIT 1",crate::usage::sql_projection("a.usage_json"));
-            let result=db.query_row(&sql,params![thread,profile,model],|row|Ok((row.get::<_,String>(0)?,crate::usage::StandardUsage::read(row,1)?,row.get::<_,Option<String>>(6)?))).optional()?;
-            Ok(result.map(|(attempt,usage,manifest)| {
-                let manifest=manifest.and_then(|body|serde_json::from_str::<Value>(&body).ok()).unwrap_or(Value::Null);
-                json!({"attempt_id":attempt,"input_tokens":usage.input_tokens,"cached_tokens":usage.cached_tokens,"input_characters":manifest.get("input_characters").and_then(Value::as_u64)})
-            }))
-        }).await.map_err(storage_error)?;
-        Ok(
-            json!({"estimated_input_tokens":estimate,"compact_hint_tokens":self.config.connections.get(&snapshot.profile).and_then(|connection|connection.compact_hint_tokens),"effective_activation_tokens":self.config.connections.get(&snapshot.profile).and_then(|connection|connection.compact_hint_tokens).unwrap_or(75_000),"last_successful_attempt":latest,"estimation_method":snapshot.estimate.method(),"estimation_baseline_attempt_id":snapshot.estimate.attempt_id,"estimated_history_characters":history_characters(&snapshot),"estimated_overhead_characters":snapshot.estimate.overhead(),"estimate_excludes":if snapshot.estimate.overhead().is_some(){Vec::<&str>::new()}else{vec!["unmeasured_system_instructions","unmeasured_attachment_binary_projection"]}}),
-        )
+        self.database.call(move |db| {
+            let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)", [&thread], |r|r.get(0))?;
+            if !exists { return Err(StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable"))); }
+            let sql = format!("SELECT a.id,{},a.started_at,a.ended_at,
+                EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
+                  WHERE tr.thread_id=t.id AND r.created_at>a.started_at)
+                FROM thread t JOIN turn u ON u.thread_id=t.id JOIN model_attempt a ON a.turn_id=u.id
+                WHERE t.id=?1 AND a.state='completed' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
+                ORDER BY a.rowid DESC LIMIT 1",crate::usage::sql_projection("a.usage_json"));
+            let latest=db.query_row(&sql,[thread],|row| Ok(json!({
+                "attempt_id":row.get::<_,String>(0)?,
+                "input_tokens":crate::usage::StandardUsage::read(row,1)?.input_tokens,
+                "cached_tokens":crate::usage::StandardUsage::read(row,1)?.cached_tokens,
+                "started_at":row.get::<_,String>(6)?, "ended_at":row.get::<_,Option<String>>(7)?,
+                "next_request_pending":row.get::<_,bool>(8)?
+            }))).optional()?;
+            Ok(json!({"last_successful_attempt":latest}))
+        }).await.map_err(storage_error)
     }
     async fn replacement_sources(
         &self,
@@ -212,13 +191,7 @@ impl Compactor {
         cancel: CancellationToken,
         original_error: ApiError,
     ) -> Result<ContextEditResult, ApiError> {
-        let before = estimated_tokens(&snapshot);
-        let target = self
-            .config
-            .connections
-            .get(&snapshot.profile)
-            .and_then(|connection| connection.compact_hint_tokens)
-            .unwrap_or(75_000);
+        let before = history_characters(&snapshot);
         let markers = snapshot
             .groups
             .iter()
@@ -263,20 +236,19 @@ impl Compactor {
             }
             let groups = source_groups(sources, &completed);
             let count = groups.len();
-            let invalidated = estimated_suffix_tokens(&snapshot, index);
+            let invalidated = suffix_characters(&snapshot, index);
             snapshot.extra_sources.push(marker);
             snapshot.groups.splice(index..index + 1, groups);
             let thread = snapshot.thread.clone();
             let compact = self
                 .summarize_snapshot(snapshot, index..index + count, cancel)
                 .await?;
-            let after = estimated_tokens(&self.snapshot(&thread, false).await?);
+            let after = history_characters(&self.snapshot(&thread, false).await?);
             return Ok(ContextEditResult {
                 compact,
-                before_tokens: before,
-                after_tokens: after,
-                target_tokens: Some(target),
-                cache_invalidated_tokens: invalidated,
+                before_characters: before,
+                after_characters: after,
+                changed_suffix_characters: invalidated,
                 ..Default::default()
             });
         }
@@ -292,13 +264,7 @@ impl Compactor {
         marker_id: Option<&str>,
         cancel: CancellationToken,
     ) -> Result<ContextEditResult, ApiError> {
-        let before = estimated_tokens(&snapshot);
-        let target = self
-            .config
-            .connections
-            .get(&snapshot.profile)
-            .and_then(|connection| connection.compact_hint_tokens)
-            .unwrap_or(75_000);
+        let before = history_characters(&snapshot);
         // "Latest" means the most recently created selected edit, not the
         // marker nearest the end of the conversation. An earlier range may
         // have been omitted after a later one.
@@ -442,7 +408,7 @@ impl Compactor {
                 .filter(|source| !retained.contains(&source.id))
                 .map(|source| source.id.clone()),
         );
-        let invalidated = estimated_suffix_tokens(&snapshot, index);
+        let invalidated = suffix_characters(&snapshot, index);
         let mut after_snapshot = snapshot.clone();
         let suffix = snapshot.groups[index + 1..]
             .iter()
@@ -461,15 +427,10 @@ impl Compactor {
         all.extend(expanded);
         all.extend(suffix);
         after_snapshot.groups = source_groups(all, &completed);
-        let after = estimated_tokens(&after_snapshot);
+        let after = history_characters(&after_snapshot);
         let mut warnings = Vec::new();
         if excluded_attachments > 0 {
             warnings.push(format!("Restored text only: {excluded_attachments} excluded attachment references remain excluded; attach again with new IDs if needed"));
-        }
-        if target > 0 && after > target {
-            warnings.push(
-                "Restored context exceeds compact_hint_tokens; consider a focused summary".into(),
-            );
         }
         let result = ContextEditResult {
             compact: CompactResult {
@@ -481,11 +442,10 @@ impl Compactor {
                 original_node_ids: original_order,
                 ..Default::default()
             },
-            before_tokens: before,
-            after_tokens: after,
-            target_tokens: Some(target),
+            before_characters: before,
+            after_characters: after,
             marker_node_id: Some(marker.id),
-            cache_invalidated_tokens: invalidated,
+            changed_suffix_characters: invalidated,
             warnings,
             ..Default::default()
         };

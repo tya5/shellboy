@@ -195,6 +195,10 @@ impl Page {
             "/edit [依頼の項目ID]",
             "以前の依頼を編集し、送信時に別の会話へ分岐する",
         );
+        page.entry(
+            "/compact-max",
+            "APIなしで保護外を最大縮小（再試行は別操作）",
+        );
         page.entry("/compact", "会話の要約・圧縮を依頼する");
         page.entry(
             "/restore（引数なし）",

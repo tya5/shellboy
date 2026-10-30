@@ -10,7 +10,7 @@ struct TrimPlan {
 }
 
 fn protected_request(snapshot: &Snapshot) -> Option<usize> {
-    policy::turn_boundary(snapshot, snapshot.current_turn.as_deref())
+    policy::request_boundary(snapshot, snapshot.current_turn.as_deref())
 }
 fn omission_ranges(omitted: &HashSet<usize>, count: usize) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
@@ -156,8 +156,8 @@ fn marker_item(
     } else {
         "a middle range of the selected history"
     };
-    let reason = if details.reason == "disconnect" {
-        "a large-input connection failure or configured pre-POST activation"
+    let reason = if details.reason == "failure" {
+        "a recorded model-request failure or explicit maximum reduction"
     } else {
         "an explicit context edit request"
     };
@@ -178,13 +178,13 @@ fn marker_item(
         String::new()
     };
     let notice = format!(
-        "Shellboy context notice: {location} was omitted after {reason}. {count} source nodes ({first_id} through {last_id}); input estimate before reduction: {before} tokens; {spilled} tool groups spilled. The active Turn's initial user request (if any) and the latest group remain.{work} Executed actions, file changes, and command side effects have NOT been undone. Inspect the current state before repeating any earlier operation. Original data is retained: use shellboy history get --node <source_node_id> with a bounded limit, use shellboy compact --summary --from {first_id} --to {last_id} to summarize this omitted range without reading raw data into the conversation, or shellboy compact --restore --from {first_id} to restore this specific omitted range. Restoring a large range may reproduce the same failure; first use shellboy rag search --scope history:{} --mode keyword --query TEXT or a range summary.{attachment}",
+        "Shellboy context notice: {location} was omitted after {reason}. {count} source nodes ({first_id} through {last_id}); projected input before reduction: {before} characters; {spilled} tool groups spilled. The active Turn's initial user request (if any) and the latest group remain.{work} Executed actions, file changes, and command side effects have NOT been undone. Inspect the current state before repeating any earlier operation. Original data is retained: use shellboy history get --node <source_node_id> with a bounded limit, use shellboy compact --summary --from {first_id} --to {last_id} to summarize this omitted range without reading raw data into the conversation, or shellboy compact --restore --from {first_id} to restore this specific omitted range. Restoring a large range may reproduce the same failure; first use shellboy rag search --scope history:{} --mode keyword --query TEXT or a range summary.{attachment}",
         details.thread
     );
-    json!({"item":{"role":"developer","content":[{"type":"input_text","text":notice}]},"context_trim":{"version":1,"omitted_nodes":count,"estimated_tokens":before,"spilled_groups":spilled,"reason":details.reason,"first_node_id":first_id,"last_node_id":last_id,"after_current_request_nodes":details.after_request_nodes,"excluded_attachment_refs":details.excluded_attachment_refs}})
+    json!({"item":{"role":"developer","content":[{"type":"input_text","text":notice}]},"context_trim":{"version":1,"omitted_nodes":count,"history_characters":before,"spilled_groups":spilled,"reason":details.reason,"first_node_id":first_id,"last_node_id":last_id,"after_current_request_nodes":details.after_request_nodes,"excluded_attachment_refs":details.excluded_attachment_refs}})
 }
 /// Pure maximum-omission policy: calculate each retained projection once.
-fn disconnect_plan(snapshot: &Snapshot) -> TrimPlan {
+fn disconnect_plan(snapshot: &Snapshot, reason: &str) -> TrimPlan {
     let latest_tool = snapshot.groups.iter().rposition(|g| g.complete && g.tool);
     let request = protected_request(snapshot);
     let mut omitted = HashSet::new();
@@ -212,8 +212,8 @@ fn disconnect_plan(snapshot: &Snapshot) -> TrimPlan {
         }
         offset = end;
     }
-    let before = estimated_tokens(snapshot);
-    let marker = marker_payload(snapshot, &omitted, before, 0, "disconnect");
+    let before = history_characters(snapshot);
+    let marker = marker_payload(snapshot, &omitted, before, 0, reason);
     let mut plan = TrimPlan {
         spills: Vec::new(),
         omitted,
@@ -221,7 +221,7 @@ fn disconnect_plan(snapshot: &Snapshot) -> TrimPlan {
         after: before,
         provenance_limited,
     };
-    plan.after = estimated_tokens(&projected(snapshot, &plan));
+    plan.after = history_characters(&projected(snapshot, &plan));
     plan
 }
 
@@ -230,19 +230,19 @@ impl Compactor {
         &self,
         snapshot: Snapshot,
         cancel: CancellationToken,
+        reason: &str,
     ) -> Result<ContextEditResult, ApiError> {
-        let before = estimated_tokens(&snapshot);
-        let plan = disconnect_plan(&snapshot);
-        if plan.omitted.is_empty() {
+        let before = history_characters(&snapshot);
+        let plan = disconnect_plan(&snapshot, reason);
+        if plan.omitted.is_empty() || plan.after >= before {
             return Ok(ContextEditResult {
                 compact: CompactResult { no_target: true, ..Default::default() },
-                before_tokens: before, after_tokens: before,
+                before_characters: before, after_characters: before,
                 warnings: vec!["No safe groups outside the current request, latest complete tool group and protected work".into()],
                 ..Default::default()
             });
         }
-        self.adopt_trim(snapshot, plan, before, None, cancel, true)
-            .await
+        self.adopt_trim(snapshot, plan, before, cancel, true).await
     }
     pub(super) async fn trim_before(
         &self,
@@ -266,14 +266,8 @@ impl Compactor {
             range::RangeMode::Trim,
         )?;
         let omitted: HashSet<_> = selected.collect();
-        let before = estimated_tokens(&snapshot);
+        let before = history_characters(&snapshot);
         let marker = marker_payload(&snapshot, &omitted, before, 0, "manual");
-        let target = self
-            .config
-            .connections
-            .get(&snapshot.profile)
-            .and_then(|connection| connection.compact_hint_tokens)
-            .unwrap_or(75_000);
         let mut plan = TrimPlan {
             spills: Vec::new(),
             omitted,
@@ -281,16 +275,14 @@ impl Compactor {
             after: 0,
             provenance_limited: false,
         };
-        plan.after = estimated_tokens(&projected(&snapshot, &plan));
-        self.adopt_trim(snapshot, plan, before, Some(target), cancel, false)
-            .await
+        plan.after = history_characters(&projected(&snapshot, &plan));
+        self.adopt_trim(snapshot, plan, before, cancel, false).await
     }
     async fn adopt_trim(
         &self,
         snapshot: Snapshot,
         plan: TrimPlan,
         before: u64,
-        target: Option<u64>,
         cancel: CancellationToken,
         automatic: bool,
     ) -> Result<ContextEditResult, ApiError> {
@@ -310,7 +302,7 @@ impl Compactor {
             .chain(plan.spills.iter().map(|(index, _)| *index))
             .min()
             .unwrap_or(0);
-        let cache_invalidated = estimated_suffix_tokens(&snapshot, first_changed);
+        let cache_invalidated = suffix_characters(&snapshot, first_changed);
         let source_count: usize = snapshot
             .groups
             .iter()
@@ -370,7 +362,7 @@ impl Compactor {
             if plan.provenance_limited {
                 warnings.push("Automatic omission retained additional candidates beyond the oldest whole-group window allowed by the 65536-node restore provenance budget".into());
             }
-            let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_tokens: before, after_tokens: plan.after, target_tokens: target, omitted_nodes: sources.len(), marker_node_id: marker, cache_invalidated_tokens: cache_invalidated, warnings };
+            let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_characters: before, after_characters: plan.after,  omitted_nodes: sources.len(), marker_node_id: marker, changed_suffix_characters: cache_invalidated, warnings };
             history::select_path(&tx, &snapshot.thread, snapshot.revision, &path, &timestamp())?;
             if automatic && let Some((turn, generation)) = &snapshot.turn_fence {
                 // Make the reason durable with the path change, even if owner
@@ -380,6 +372,64 @@ impl Compactor {
             tx.commit()?;
             Ok(result)
         }).await.map_err(storage_error)
+    }
+}
+
+impl Compactor {
+    /// Saved/projection facts only. No estimate, diagnosis or automatic action.
+    pub(crate) async fn recovery_facts(&self, thread: &str) -> Result<Value, ApiError> {
+        let snapshot = self.snapshot(thread, true).await?;
+        let request = protected_request(&snapshot);
+        let tool = snapshot.groups.iter().rposition(|g| g.complete && g.tool);
+        let sizes = |index: Option<usize>| {
+            let mut chars = 0u64;
+            let mut bytes = 0u64;
+            if let Some(group) = index.and_then(|i| snapshot.groups.get(i)) {
+                for source in &group.sources {
+                    for item in
+                        crate::control::replay::convert(source.payload.clone(), snapshot.epoch)
+                    {
+                        let body = item.to_string();
+                        chars = chars.saturating_add(body.chars().count() as u64);
+                        bytes = bytes.saturating_add(body.len() as u64);
+                    }
+                }
+            }
+            json!({"characters":chars,"bytes":bytes})
+        };
+        let plan = disconnect_plan(&snapshot, "manual_maximal");
+        let reducible = !plan.omitted.is_empty() && plan.after < history_characters(&snapshot);
+        let restored = snapshot
+            .groups
+            .iter()
+            .any(|g| g.sources.iter().any(|s| marker_metadata(s).is_some()));
+        let thread = thread.to_owned();
+        let attachments = self.database.call(move |db| {
+            let mut stmt = db.prepare("SELECT a.id,(SELECT raw_size FROM attachment_send WHERE attachment_id=a.id ORDER BY rowid DESC LIMIT 1)
+              FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id
+              WHERE s.thread_id=?1 AND s.state='active' ORDER BY s.selected_order LIMIT 201")?;
+            let rows=stmt.query_map([thread],|r| Ok(json!({"id":r.get::<_,String>(0)?,"bytes":r.get::<_,Option<i64>>(1)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        }).await.map_err(storage_error)?;
+        let mut actions = vec!["/retry", "/edit", "/stop"];
+        if reducible {
+            actions.push("/compact-max");
+        }
+        if !attachments.is_empty() {
+            actions.push("/detach");
+        }
+        if restored {
+            actions.push("/restore");
+        }
+        // /model opens the existing selection screen, not a Core recommendation.
+        if self.config.connections.len() > 1 {
+            actions.push("/model");
+        }
+        Ok(
+            json!({"protected_request":sizes(request),"protected_latest_tool":sizes(tool),
+            "attachments":attachments,"attachments_partial":attachments.len()>200,
+            "maximum_reduction_available":reducible,"actions":actions}),
+        )
     }
 }
 
@@ -402,7 +452,7 @@ mod budget_tests {
             })
             .collect();
         snapshot.protected.insert("node-1".into());
-        let plan = disconnect_plan(&snapshot);
+        let plan = disconnect_plan(&snapshot, "manual_maximal");
         assert!(plan.provenance_limited);
         assert_eq!(plan.omitted.len(), TURN_BOUNDARY_IDS - 1);
         assert!(plan.omitted.contains(&0));

@@ -19,10 +19,24 @@ fn classify_retry(
     facts: &ResponseFacts,
     retry_partial: bool,
 ) -> RetryPolicy {
-    if facts.terminal_received || error.is_context_limit() {
+    if facts.terminal_received && !error.is_context_limit() {
         return RetryPolicy::Ineligible;
     }
-    let transient_status = matches!(facts.status, Some(429 | 500 | 502 | 503 | 504));
+    if error.is_context_limit() {
+        if let Some(delay) = facts.retry_after
+            && delay > MAX_RETRY_AFTER
+        {
+            return RetryPolicy::Deferred(delay);
+        }
+        return if facts.received == ResponseReceived::Output && !retry_partial {
+            RetryPolicy::Ineligible
+        } else {
+            RetryPolicy::Retry {
+                partial_output: facts.received == ResponseReceived::Output,
+            }
+        };
+    }
+    let transient_status = matches!(facts.status, Some(429 | 500..=599));
     let eligible = match error.kind.as_str() {
         "http" | "provider" => transient_status,
         // An unfinished error body may fail before it can be decoded. Its
@@ -97,9 +111,6 @@ pub(super) struct RetryBudget {
     turn: String,
     generation: i64,
     used: u32,
-    trim_used: bool,
-    trim_resume_pending: bool,
-    upload_failures: u8,
 }
 impl RetryBudget {
     pub(super) fn observe(&mut self, turn: &str, generation: i64) {
@@ -107,33 +118,11 @@ impl RetryBudget {
             self.turn = turn.into();
             self.generation = generation;
             self.used = 0;
-            self.trim_used = false;
-            self.trim_resume_pending = false;
-            self.upload_failures = 0;
         }
     }
     /// Reset only after the completed response has been durably adopted.
     pub(super) fn succeeded(&mut self) {
         self.used = 0;
-        self.upload_failures = 0;
-        self.trim_resume_pending = false;
-    }
-    /// One reduction/resumption allowance per Turn/generation; successful tool
-    /// responses reset retries but never replenish this allowance.
-    pub(super) fn trim_available(&self, enabled: bool) -> bool {
-        enabled && !self.trim_used
-    }
-    pub(super) fn consume_trim(&mut self) {
-        self.trim_used = true;
-        self.trim_resume_pending = true;
-    }
-    fn repeated_upload_failure(&mut self, incomplete: bool) -> bool {
-        self.upload_failures = if incomplete {
-            self.upload_failures.saturating_add(1)
-        } else {
-            0
-        };
-        self.upload_failures >= 2
     }
     fn delay(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Option<Duration> {
         (self.used < limit).then(|| {
@@ -150,86 +139,17 @@ pub(super) async fn retry_or_recover(
     slot: &DriverSlot,
     attempt: String,
     mut failure: model::http::AttemptFailure,
-    input_characters: u64,
     budget: &mut RetryBudget,
     overflow: &mut OverflowBudget,
     boundary_guard: tokio::sync::MutexGuard<'_, ()>,
 ) -> Result<(), ApiError> {
     let connection = &control.store.config.connections[&snapshot.profile];
     let limit = connection.response_max_retries;
-    let mut policy = classify_retry(
+    let policy = classify_retry(
         &failure.error,
         &failure.facts,
         connection.response_retry_partial,
     );
-    let mut trim_not_applied = None;
-    let upload_incomplete = failure
-        .facts
-        .http_observation
-        .is_some_and(|http| http.is_known_upload_incomplete());
-    let repeated_upload_failure = budget.repeated_upload_failure(upload_incomplete);
-    if repeated_upload_failure {
-        // A second incomplete body source is not evidence that reducing context
-        // will fix the transport. Keep its observation and stop spending.
-        policy = RetryPolicy::Ineligible;
-        failure.error.message.push_str("; repeated incomplete request-body source; inspect the connection or local network before explicitly retrying");
-    }
-    let eligible_trim_failure = eligible_trim_failure(
-        &failure.error,
-        &failure.facts,
-        connection.response_retry_partial,
-    );
-    // A previously rejected edit leaves the one-time trim right available,
-    // but cannot override the second partial-upload failure's spending cap.
-    if !repeated_upload_failure
-        && budget.trim_available(connection.auto_trim_on_disconnect)
-        && eligible_trim_failure
-    {
-        let trigger_tokens = control
-            .compactor
-            .input_tokens(
-                &snapshot.thread,
-                &snapshot.profile,
-                &snapshot.model,
-                input_characters,
-            )
-            .await?;
-        if trigger_tokens > connection.compact_hint_tokens.unwrap_or(75_000) {
-            match trim::try_trim(
-                control,
-                snapshot,
-                slot,
-                &attempt,
-                &mut failure,
-                trigger_tokens,
-                budget.used,
-                limit,
-                &mut trim_not_applied,
-            )
-            .await?
-            {
-                trim::Outcome::Adopted => {
-                    budget.consume_trim();
-                    control.changed(&snapshot.thread);
-                    drop(boundary_guard);
-                    if let Some(delay) = failure.facts.retry_after {
-                        tokio::select! { biased; _ = slot.stop.cancelled() => {}, _ = tokio::time::sleep(delay) => {} }
-                    }
-                    return Ok(());
-                }
-                trim::Outcome::NoCandidates | trim::Outcome::Rejected => {}
-            }
-            if slot.stop.is_cancelled() {
-                return Ok(());
-            }
-        }
-    }
-    if budget.trim_resume_pending {
-        // Only a failure of the first resumed POST is guarded. A successfully
-        // adopted response clears this guard but never renews the trim right.
-        policy = RetryPolicy::Ineligible;
-        overflow.unlock_current();
-    }
     let delay = if matches!(policy, RetryPolicy::Retry { .. }) {
         budget.delay(
             limit,
@@ -239,6 +159,43 @@ pub(super) async fn retry_or_recover(
     } else {
         None
     };
+    let mut trim_not_applied = None;
+    if delay.is_some() {
+        if failure.error.is_context_limit() && overflow.available() {
+            if overflow.begin() == Some(overflow::Reduction::OldGroups) {
+                trim_not_applied = Some(trim::reduce(control, snapshot, slot, &mut failure).await?);
+            } else {
+                trim_not_applied = Some(
+                    match spill_and_summarize(
+                        &control.compactor,
+                        &snapshot.thread,
+                        slot.stop.clone(),
+                    )
+                    .await
+                    {
+                        Ok(result) => {
+                            json!({"outcome":if result.no_target {"no_safe_reduction"} else {"adopted"},"summary":result})
+                        }
+                        Err(error) if error.is_storage_failure() => return Err(error),
+                        Err(error) => json!({"outcome":"rejected","error":error}),
+                    },
+                );
+                control.changed(&snapshot.thread);
+            }
+        } else if budget.used >= 1
+            && connection.auto_trim_on_disconnect
+            && eligible_trim_failure(
+                &failure.error,
+                &failure.facts,
+                connection.response_retry_partial,
+            )
+        {
+            trim_not_applied = Some(trim::reduce(control, snapshot, slot, &mut failure).await?);
+        }
+    }
+    if slot.stop.is_cancelled() {
+        return Ok(());
+    }
     if let Some(delay) = delay {
         let partial = matches!(
             policy,
@@ -253,6 +210,9 @@ pub(super) async fn retry_or_recover(
                 "delay_ms":delay.as_millis() as u64,"partial_response_discarded":partial,
                 "possible_duplicate_charge":true}});
         if let Some(observation) = trim_not_applied {
+            if observation["outcome"] == "adopted" && observation.get("result").is_some() {
+                body["automatic_trim"] = observation["result"].clone();
+            }
             body["automatic_trim_attempt"] = observation;
         }
         let saved_attempt = attempt.clone();
@@ -299,7 +259,6 @@ pub(super) async fn retry_or_recover(
         slot,
         attempt,
         failure,
-        overflow,
         budget.used,
         limit,
         policy,
@@ -393,12 +352,12 @@ mod tests {
                                 && (received != Output || partial_enabled)
                                 && match kind {
                                     "http" | "provider" => {
-                                        matches!(status, Some(429 | 500 | 502 | 503 | 504))
+                                        matches!(status, Some(429 | 500..=599))
                                     }
                                     "transport" | "timeout" | "incomplete" => {
                                         status.is_none()
                                             || status == Some(200)
-                                            || matches!(status, Some(429 | 500 | 502 | 503 | 504))
+                                            || matches!(status, Some(429 | 500..=599))
                                     }
                                     _ => false,
                                 };
@@ -426,7 +385,9 @@ mod tests {
         };
         assert_eq!(
             classify_retry(&error, &facts, true),
-            RetryPolicy::Ineligible
+            RetryPolicy::Retry {
+                partial_output: false
+            }
         );
         error.provider_code = None;
         for seconds in [0, 600, 601] {
@@ -449,39 +410,30 @@ mod tests {
 mod trim_budget_tests {
     use super::*;
     #[test]
-    fn trim_is_available_before_retries_and_not_replenished_by_success() {
-        let mut budget = RetryBudget::default();
-        budget.observe("turn", 1);
-        assert!(!budget.trim_available(false));
-        assert!(budget.trim_available(true));
-        budget.consume_trim();
-        assert!(budget.trim_resume_pending);
-        budget.succeeded();
-        assert!(
-            !budget.trim_resume_pending,
-            "adoption clears only the immediate resume guard"
+    fn context_overflow_uses_the_normal_finite_budget() {
+        let mut e = model::ModelError::new("provider", "fixture");
+        e.provider_code = Some("context_length_exceeded".into());
+        let mut facts = ResponseFacts::default();
+        assert_eq!(
+            classify_retry(&e, &facts, true),
+            RetryPolicy::Retry {
+                partial_output: false
+            }
         );
-        assert!(!budget.trim_available(true));
-        budget.observe("turn", 1);
-        assert!(!budget.trim_available(true));
-        budget.observe("turn", 2);
-        assert!(budget.trim_available(true));
-        budget.consume_trim();
-        budget.observe("other", 2);
-        assert!(budget.trim_available(true));
-    }
-    #[test]
-    fn repeated_incomplete_body_sources_stop_after_two_and_reset_on_other_failure_or_success() {
-        let mut budget = RetryBudget::default();
-        budget.observe("turn", 0);
-        assert!(!budget.repeated_upload_failure(true));
-        assert!(!budget.repeated_upload_failure(false));
-        assert!(!budget.repeated_upload_failure(true));
-        assert!(budget.repeated_upload_failure(true));
-        budget.succeeded();
-        assert!(!budget.repeated_upload_failure(true));
-        budget.observe("turn", 1);
-        assert!(!budget.repeated_upload_failure(true));
+        facts.retry_after = Some(Duration::from_secs(601));
+        assert_eq!(
+            classify_retry(&e, &facts, true),
+            RetryPolicy::Deferred(Duration::from_secs(601))
+        );
+        facts.retry_after = None;
+        facts.received = ResponseReceived::Output;
+        assert_eq!(classify_retry(&e, &facts, false), RetryPolicy::Ineligible);
+        let mut b = RetryBudget::default();
+        b.observe("t", 0);
+        b.used = 8;
+        assert_eq!(b.delay(8, Duration::from_secs(1), None), None);
+        b.succeeded();
+        assert_eq!(b.used, 0);
     }
     #[test]
     fn early_trim_separates_all_server_failures_and_header_timeouts_from_idle_or_upload_failures() {

@@ -139,14 +139,8 @@ pub(super) async fn drive(
         let Some(mut snapshot) = refreshed? else {
             continue;
         };
-        let admitted = prepare_attempt(
-            &control,
-            &mut snapshot,
-            &request_slot,
-            instructions.body(),
-            &mut retry_budget,
-        )
-        .await;
+        let admitted =
+            prepare_attempt(&control, &mut snapshot, &request_slot, instructions.body()).await;
         if turn_binding.cancel.is_cancelled() {
             continue;
         }
@@ -155,7 +149,7 @@ pub(super) async fn drive(
             prepared,
             request,
             attempt,
-            input_characters,
+            ..
         }) = admitted?
         else {
             continue;
@@ -250,7 +244,6 @@ pub(super) async fn drive(
                     &request_slot,
                     attempt,
                     failure,
-                    input_characters,
                     &mut retry_budget,
                     &mut overflow,
                     boundary_guard,
@@ -297,6 +290,7 @@ pub(super) async fn drive(
             continue;
         }
         retry_budget.succeeded();
+        overflow.succeeded();
         drop(prepared);
         let Some(group) = group else {
             continue;

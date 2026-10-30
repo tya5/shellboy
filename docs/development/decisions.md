@@ -1436,3 +1436,12 @@ canonical node, which emitted no later notification. Frontend dirty/refresh
 coalescing retains later Changed correctly. Add that missing postcommit Changed,
 not periodic history reloads or a new event. Require deterministic commit/rollback
 notification tests and repeat both native PTY widths against the final binary.
+
+## #50: remove inferred input-size policy (2026-10-30)
+
+Adopt [failure-driven reduction](../design/failure-driven-reduction.md). Delete
+compact_hint_tokens rather than preserve an optional override; use saved usage
+and character/byte counts for facts only. Retain the existing finite retry budget
+and compaction safety machinery, not a new recovery engine. Choose /compact-max
+for the API-free action instead of a new dialog. Minimal recovery text precedes
+#41/#58 UI work. The old 75k provisional activation decision is superseded.
