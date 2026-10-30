@@ -88,6 +88,8 @@ struct DriverSlot {
 struct LiveShell {
     run_id: String,
     handle: ShellHandle,
+    // In-process observation of a successfully committed output batch only.
+    last_committed_output: Option<std::time::Instant>,
 }
 
 pub struct Control {
@@ -1459,6 +1461,7 @@ mod failure_tests {
             LiveShell {
                 run_id: "fixture-run-without-driver".into(),
                 handle: shell.handle.clone(),
+                last_committed_output: None,
             },
         );
         // Model a recovery-wait background shell: no driver remains to stop it.
@@ -1572,3 +1575,21 @@ mod shell_lifecycle_tests;
 
 #[cfg(all(test, unix))]
 mod progress_tests;
+
+impl Control {
+    pub(crate) fn shell_output_notification(&self) -> &Notify {
+        &self.shell_output_changed
+    }
+    pub(crate) async fn committed_output_markers(
+        &self,
+        executions: &[String],
+    ) -> Result<Vec<(String, std::time::Instant)>, ApiError> {
+        if executions.len() > 3 {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                "Visible output observation exceeds3 executions",
+            ));
+        }
+        Ok(self.live.output_markers(executions).await)
+    }
+}

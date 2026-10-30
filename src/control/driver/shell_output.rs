@@ -66,6 +66,7 @@ pub(super) async fn collect_shell(
             continue;
         }
         let execution = execution.to_owned();
+        let marker_execution = execution.clone();
         let (mut next_stdout, mut next_stderr) = (stdout, stderr);
         // The owned chunks, including their byte-budget permits, stay in this
         // DB closure until the entire ordered batch commits or rolls back.
@@ -101,6 +102,10 @@ pub(super) async fn collect_shell(
                         samples.push(save_started.elapsed().as_micros());
                     }
                 }
+                control
+                    .live
+                    .record_output_commit(&marker_execution, std::time::Instant::now())
+                    .await;
                 control.shell_output_changed.notify_waiters();
             }
             Err(error) => {
@@ -298,3 +303,6 @@ mod duration_tests;
 
 #[cfg(all(test, unix))]
 mod performance_tests;
+
+#[cfg(all(test, unix))]
+mod live_marker_tests;

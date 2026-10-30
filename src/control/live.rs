@@ -99,6 +99,30 @@ impl LiveRegistry {
         self.shells.lock().await.insert(execution, shell);
     }
 
+    pub(super) async fn record_output_commit(&self, execution: &str, at: std::time::Instant) {
+        if let Some(shell) = self.shells.lock().await.get_mut(execution) {
+            shell.last_committed_output = Some(at);
+        }
+    }
+    pub(super) async fn output_markers(
+        &self,
+        executions: &[String],
+    ) -> Vec<(String, std::time::Instant)> {
+        if executions.is_empty() {
+            return Vec::new();
+        }
+        let shells = self.shells.lock().await;
+        executions
+            .iter()
+            .filter_map(|id| {
+                shells
+                    .get(id)
+                    .and_then(|shell| shell.last_committed_output)
+                    .map(|at| (id.clone(), at))
+            })
+            .collect()
+    }
+
     pub(super) async fn remove_shell(&self, execution: &str) {
         self.shells.lock().await.remove(execution);
     }

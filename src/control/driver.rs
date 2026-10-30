@@ -812,6 +812,7 @@ async fn run_shell(
             LiveShell {
                 run_id: snapshot.run.clone(),
                 handle: handle.clone(),
+                last_committed_output: None,
             },
         )
         .await;
