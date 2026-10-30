@@ -17,7 +17,10 @@ and four threads with identical test/ignored sets. Harness sums 350.876s versus
 workflow and retain explicit two-thread diagnosis. Its first normal verification
 found three response_retries 5s fixture guard failures; repair those with existing
 notifications and bounded saved-phase diagnosis, preserving the failed run and
-all actual product timeout/retry/absence/responsiveness assertions. These independent-runner
+all actual product timeout/retry/absence/responsiveness assertions. The repaired
+ordinary four-thread source `03ceac1` then passes all three OSes: Windows Tests/job
+285/379s versus 640 / 888s at `0469ca0`. Keep the measured four-thread default, while
+preserving source-specific failures and runner/cache variability in the evidence. These independent-runner
 samples are not a latency guarantee. Discard the 405-source index rewrite:
 isolated measurements did not support it, unlike historical-DDL seed batching.
 

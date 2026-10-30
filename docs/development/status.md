@@ -1,28 +1,28 @@
 # Development status
 
-## Issue #46: measured native test performance
+## Issue #46: measured native test performance completed
 
-The measurement branch `issue-46/test-performance` contains separate layout,
-fixture, watchdog and evidence commits; main remains unchanged. Ordinary
-integration links fall from 82 to 3, with both self-spawning suites retained.
-Same-OS inventories are identical: macOS 1,480 / 28 ignored and Windows 1,361 / 20.
-Historical raw-schema fixture setup is batched; the unproven index seed rewrite
-was discarded. No product state, durability setting or Rust dependency changes.
+The reviewed measurement branch `issue-46/test-performance` is pushed; main is
+unchanged. Ordinary integration links fall from 82 to 3; registration, normalized
+identity and ignored-set checks retain every original test. Historical schema
+fixture setup is batched, while unproven index seed batching was discarded.
+Shared runtime/retry fixture guards now use bounded phase diagnostics and
+existing change notifications. Product behavior, durability and dependencies
+are unchanged.
 
-Native source `8fa0429` passes the normal three-OS CI (Linux 1,453 / macOS 1,452 /
-Windows 1,341 passed, zero failed) and the separate Windows four-thread check.
-The earlier eight four-thread runtime_features failures are retained in the
-[investigation](issue-46-ci-performance.md); shared helper guards/notifications
-were repaired rather than retrying that sample into success. Its measured
-Windows harness sums 350.876s at two threads and 237.908s at four support adopting
-a bounded four-thread CI candidate. Its first normal verification exposed
-three additional response_retries fixture guards; they received the same
-notification/diagnostic repair while product assertions remain unchanged.
-The normal three-OS workflow verifies the repaired configuration; source-specific results remain separate from earlier successes.
+Exact source `03ceac1` succeeds in
+[three-OS CI 40980978976](https://github.com/tya5/shellboy/actions/runs/40980978976):
+Linux 1,453 / macOS 1,452 / Windows 1,341 passed, zero failed. Windows uses four test
+threads. Its Tests/job timing is 285 / 379s, compared with 640 / 888s at the pulled
+baseline `0469ca0`. All same-OS inventories and ignored sets match. Earlier failed
+four-thread candidates and their fixture repairs remain in the
+[investigation](issue-46-ci-performance.md); successful retries do not overwrite
+failed evidence.
 
-Before/after conditions and limits are in [acceptance](../validation/acceptance.md).
-No release or installed-binary update is part of this task; the branch is for
-review and has not been merged to main.
+The [acceptance record](../validation/acceptance.md) records exact sources,
+runner/measurement limits and the final benchmark. The evidence update is docs
+only; subsequent workflow results must be identified by their own SHA. No main
+merge, release or installed-binary update is part of this task.
 
 ## Issue #44 review follow-up: readable activity column
 

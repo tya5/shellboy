@@ -1,5 +1,38 @@
 # Validation record
 
+## Issue #46 completed native benchmark: source `03ceac1`
+
+[Run 40980978976](https://github.com/tya5/shellboy/actions/runs/40980978976)
+succeeds on all three OSes at exact source
+`03ceac1e8a62b576fc24cc3b0438f7493830504c`. Format, strict all-target Clippy,
+layout completeness and five Python failure-gate checks pass. The substantive
+Rust results and native timing artifacts are:
+
+| OS | Passed / failed / ignored | Job / Tests (s) | Build / harness sum (s) |
+| --- | --- | ---: | ---: |
+| Linux |1,453 /0 /27|234 /178|77.708 /100.217|
+| macOS |1,452 /0 /28|319 /227|140.084 /86.205|
+| Windows |1,341 /0 /20|379 /285|102.390 /181.937|
+
+Windows actually uses four test threads. Against the pulled successful baseline
+`0469ca0` in run 40973071843, Windows Tests 640→285s (55.5% shorter), job 888→379s
+(57.3% shorter). These are first successful runs of different source revisions,
+not repeated attempts selected for a favorable time. Earlier failed concurrency
+candidates remain recorded below. Independent runner/cache variation limits
+latency claims; this is not a future duration guarantee.
+
+The downloaded final inventories match the baseline/source-specific records
+exactly, including ignored identities: Windows 1,361 / 20, macOS 1,480 / 28,
+Linux 1,480 / 27. No test or assertion was dropped. Both self-spawning suites and
+all ordinary native cases remain included. The final code keeps product timers,
+retry counts, negative and explicit responsiveness checks. Existing real native
+HTTP deadline/upload checks remain; removing every wall-time test was not part
+of this optimization. No paid API or default datastore is used.
+
+This final evidence update changes documentation only; executable/configuration
+source remains identical to `03ceac1`. Later CI results must still be attributed to
+their own SHA, rather than silently relabeling this benchmark.
+
 ## Issue #46 repeated four-thread guard findings
 
 The adopted four-thread configuration's first ordinary verification at

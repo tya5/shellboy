@@ -199,3 +199,24 @@ all 808 integration cases at four threads (zero failed, 16 ignored). The five
 Python failure-gate checks also pass. Its native source-specific verification
 is the next ordinary three-OS run on the measurement branch; no product source
 or test membership changed, and no old failed run is rerun into success.
+
+## Completed native benchmark
+
+[Run 40980978976](https://github.com/tya5/shellboy/actions/runs/40980978976) at
+`03ceac1` succeeds on all three OSes without an automatic rerun. Linux/macOS/
+Windows passed counts are 1,453 / 1,452 / 1,341, with zero failures and 27 / 28 / 20 ignored.
+All normalized test and ignored identities match their same-OS baseline records.
+
+Final ordinary Windows four-thread job/Tests is 379 / 285s, versus 888 / 640s at the
+pulled baseline `0469ca0`: 57.3% / 55.5% shorter. Build 102.390s plus harness 181.937s
+accounts for the Tests step within wrapper overhead. Linux job/Tests 234 / 178s;
+macOS 319 / 227s. This is measured native evidence, not a guarantee about future
+runner duration. The two earlier failed four-thread samples remain above;
+no failed old SHA was rerun until green.
+
+Retain four Windows threads, combined integration linking and historical-DDL
+batching. Keep both native subprocess suites standalone, use only existing
+notifications for state observation, and do not weaken actual product timing
+assertions. No index seed rewrite, Defender exclusion, nightly toolchain,
+nextest dependency, product test clock or new Core resource was adopted. The
+final evidence update itself is documentation-only; main remains unchanged.
