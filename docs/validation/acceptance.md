@@ -2972,3 +2972,13 @@ copies remain forever. Their replacements retain canonical-text/trace/edit/zero-
 shell assertions, assert receipt binding and admission, and require copy retention
 when admission is still uncertain. Final exact main CI remains pending. No
 physical-terminal crash or real-provider qualification; receipt watermark scan scalability is unmeasured.
+
+
+Combined with #69 base bd75c9a, exact #60 source7d34cbe passes the full standard
+check1698/0/32, layout90, Python6, fmt and strict all-target Clippy on native macOS
+arm64/Rust1.99.1 with RUST_TEST_THREADS=2. The first combined full run failed the
+existing tui_process unpaused-index repaint at tests/tui_process.rs:137; the
+same-SHA/same-environment full rerun passed without Rust/test changes. Preserve
+that failure independently; no timeout/assertion is weakened or failure cause
+claimed fixed. Only appended documentation conflicts arose during rebase and
+both #69 and #60 histories are retained; runtime patches are unchanged.

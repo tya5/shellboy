@@ -10,7 +10,7 @@ facts after the copy is gone. Ordinary history/all GC backfills at most128 old
 eligible copies per pass. No schema/table/column/worker/queue/setting is added.
 
 Native macOS arm64/Rust1.99.1 full standard checks pass **1688 passed / 0 failed /
-32 ignored**, layout89, Python6, fmt and strict all-target Clippy, with
+32 ignored** before integration, layout89, Python6, fmt and strict all-target Clippy, with
 RUST_TEST_THREADS=2. Eight new regressions cover bounded body-free markers,
 admission/deletion rollback, known/unknown retention,16 repeated sends with
 logical storage drops, exact receipt replay after copy disposal, durable DB reopen,
@@ -18,7 +18,10 @@ logical storage drops, exact receipt replay after copy disposal, durable DB reop
 after GC. Initial full validation found two old frontend tests that required
 permanent copies; they now check retained receipt facts, positive admission,
 canonical text, independent edits and known-versus-uncertain copy lifetime.
-Native main CI remains pending.
+After integration with #69 base bd75c9a, exact source7d34cbe passes **1698/0/32**,
+layout90, Python6, fmt and strict all-target Clippy. Its first full run failed the
+unchanged PTY unpaused-index repaint; the same-SHA/same-environment full rerun
+passes. That failure is retained, not claimed fixed. Native main CI is pending.
 Source-draft watermark checks may scan receipt JSON; no O(1) lookup or physical
 SQLite shrink is promised. Real user data and physical terminal are untested.
 
