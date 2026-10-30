@@ -66,3 +66,18 @@ expiry is longer than the deadlock watchdog, so waiter expiry cannot silently
 free admission and make a blocked dispatcher appear responsive. Attachment
 mock-arrival watchdogs retain saved-phase diagnostics. These guards are not
 product response-time SLAs.
+
+The first native four-thread experiment failed eight runtime_features cases in
+shared five-second mock-arrival/settled guards, while the ordinary two-thread
+suite passed. Fix that fixture boundary with a generous deadlock watchdog and
+bounded saved-state diagnostics. Its settled helper subscribes before reading
+state, waits on existing Changed notifications and reinspects on lag. Preserve
+the exact no-live-Turn predicate; do not treat a timer expiry as successful
+settlement or claim an unproven database/port collision. Keep default Windows
+concurrency at two while separately checking the repaired four-thread fixture.
+
+The isolated native Windows profiles support historical-DDL batching
+(storage28.687→4.719s), but do not support the405-node source-seed candidate
+(index20.298→24.953s overall, that case7.812→8.937s). Discard that source-seed
+change rather than retain duplicated setup SQL without demonstrated benefit.
+Keep the original per-node helper and all405-source/embedding assertions.
