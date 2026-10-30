@@ -67,7 +67,6 @@ TUIは一つの端末sessionを先に開き、設定/保存先・owner lock・DB
 取消単位は既存DataOwner初期化全体とし、途中futureをdropしない。既にこの単位へ入った場合、終了要求後もlock取得・migration・中断整理まで完了しうる。migration済みの変更を巻き戻したとは表示しない。その後のControl開始・接続口公開は次の取消検査で止める。これ以上細かい取消APIやCore状態を増やさず、実writerとlockの寿命を一貫させるための選択である。
 
 
-`connections.<名前>.auto_trim_on_disconnect` はbool/既定true。`compact_hint_tokens` はOption<u64>/既定None、指定0はConfigInvalidとする。hintは起動目安だけを指定し、縮小量は保護外の最大限とする。詳細は[圧縮設計](compaction.md)の起動・保護・推定方式に従う。unknown field拒否・Rust DefaultとTOML省略値の一致を維持する。
 
 ## Responses header deadline (Issue #34)
 
@@ -104,3 +103,7 @@ The [per-Thread instruction reference contract](agents-reference.md) supersedes
 previous fixed-reference wording: explicit create/set/fork selection is allowed,
 while cwd changes alone never rediscover instructions and same-Turn retry
 continues using its durable snapshot.
+
+#50 removes compact_hint_tokens (unknown-field rejection, no alias). Existing
+auto_trim_on_disconnect gates failure-driven reduction, never pre-POST policy.
+See failure-driven-reduction.md.

@@ -29,7 +29,6 @@ api_key_env = "SHELLBOY_API_KEY"
 # auto_trim_on_disconnect = true
 # Optional positive trigger threshold; also enables pre-POST reduction.
 # Without a hint, the failure threshold is >75000 and no pre-POST reduction occurs.
-# compact_hint_tokens = 75000
 # default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
 
 # Embeddings are optional. Enabling them indexes newly finalized conversation

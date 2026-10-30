@@ -42,7 +42,11 @@ impl OverflowBudget {
             Reduction::CurrentSuffix
         })
     }
-    pub(super) fn unlock_current(&mut self) {
+    pub(super) fn succeeded(&mut self) {
+        self.stage = 0;
+    }
+    #[cfg(test)]
+    fn unlock_current(&mut self) {
         self.stage = 2;
     }
 }
@@ -50,57 +54,16 @@ impl OverflowBudget {
 pub(super) async fn retry_or_recover(
     control: &std::sync::Arc<super::Control>,
     snapshot: &super::Snapshot,
-    slot: &super::DriverSlot,
+    _slot: &super::DriverSlot,
     attempt: String,
     failure: super::model::http::AttemptFailure,
-    overflow: &mut OverflowBudget,
     automatic_retries: u32,
     retry_limit: u32,
     retry_policy: super::retry::RetryPolicy,
     trim_not_applied: Option<serde_json::Value>,
 ) -> Result<(), super::ApiError> {
     use super::*;
-    let thread = &snapshot.thread;
 
-    if failure.error.is_context_limit() && overflow.available() {
-        let attempt_id = attempt.clone();
-        let body = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
-        let transition = control
-            .store
-            .database
-            .call(move |db| crate::control::state::fail_attempt(db, &attempt_id, &body, &now()))
-            .await
-            .map_err(storage_error)?;
-        if transition == crate::control::state::AttemptTransition::Obsolete {
-            return Ok(());
-        }
-        let reduction =
-            if overflow.begin().expect("available overflow budget") == Reduction::OldGroups {
-                let spill = control
-                    .compactor
-                    .spill_cancellable(thread, false, slot.stop.clone())
-                    .await;
-                match spill {
-                    Ok(ref result) if result.no_target => {
-                        overflow.unlock_current();
-                        spill_and_summarize(&control.compactor, thread, slot.stop.clone()).await
-                    }
-                    other => other,
-                }
-            } else {
-                spill_and_summarize(&control.compactor, thread, slot.stop.clone()).await
-            };
-        match reduction {
-            Ok(result) if !result.no_target => {
-                control.changed(thread);
-                return Ok(());
-            }
-            Ok(_) => {}
-            Err(error) => {
-                return fail_turn(control, snapshot, error).await;
-            }
-        }
-    }
     let deferred = if let super::retry::RetryPolicy::Deferred(delay) = retry_policy {
         Some(delay)
     } else {
@@ -117,7 +80,11 @@ pub(super) async fn retry_or_recover(
     } else {
         failure.error.to_string()
     };
-    let error=ApiError::new(ErrorCode::IoFailed,message).hint("Inspect the incomplete response and explicitly retry this Run; tools already saved are not re-executed");
+    let facts = control.compactor.recovery_facts(&snapshot.thread).await?;
+    let error=ApiError::new(ErrorCode::IoFailed,message)
+        .hint("Choose an available action; retry may charge again. Saved tools are not re-executed.")
+        .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
+            "last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
     let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
     if let Some(observation) = trim_not_applied {
         saved["automatic_trim_attempt"] = observation;

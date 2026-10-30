@@ -304,8 +304,11 @@ pub struct ThreadOptions {
     pub thread_id: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
-#[command(group(clap::ArgGroup::new("edit_action").args(["spill", "summary", "trim", "omit", "restore"]).multiple(false)))]
+#[command(group(clap::ArgGroup::new("edit_action").args(["spill", "summary", "trim", "omit", "restore", "maximal"]).multiple(false)))]
 pub struct CompactOptions {
+    /// Maximum API-free reduction outside protected work; no node IDs.
+    #[arg(long)]
+    pub maximal: bool,
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
     /// Spill completed tool groups in the exact inclusive node range; no model request.
@@ -850,7 +853,9 @@ impl Cli {
                 kind: a.kind,
             }),
             CliCommand::Compact(a) => {
-                let action = if a.spill {
+                let action = if a.maximal {
+                    Some(wire::ContextEditAction::Maximal)
+                } else if a.spill {
                     Some(wire::ContextEditAction::Spill)
                 } else if a.summary {
                     Some(wire::ContextEditAction::Summary)

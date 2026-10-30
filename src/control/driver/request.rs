@@ -42,14 +42,12 @@ pub(super) struct AdmittedRequest {
     pub(super) prepared: Arc<crate::attachments::PreparedAttachments>,
     pub(super) request: Value,
     pub(super) attempt: String,
-    pub(super) input_characters: u64,
 }
 pub(super) async fn prepare_attempt(
     control: &Arc<Control>,
     snapshot: &mut Snapshot,
     slot: &DriverSlot,
     instruction_body: Option<&Arc<str>>,
-    retry_budget: &mut retry::RetryBudget,
 ) -> Result<Option<AdmittedRequest>, ApiError> {
     let client = match model_client(control, snapshot) {
         Ok(client) => client,
@@ -77,36 +75,12 @@ pub(super) async fn prepare_attempt(
     };
     // Count the actual serialized input, including system/developer instructions
     // and attachment projections. This is a Unicode scalar count, not UTF-8
-    // bytes or a tokenizer claim; the successful usage supplies calibration.
+    // bytes or a tokenizer claim.
     let input_characters = request["input"].to_string().chars().count() as u64;
-    // Calibrate selected history separately from fixed instructions and file
-    // projections, so a future reduction keeps that overhead in its estimate.
+    // Record selected replay size separately from fixed instructions and files.
     let history_characters = snapshot.input.as_ref().map_or(2, |replay| {
         json!(replay.materialize()).to_string().chars().count() as u64
     });
-    let connection = &control.store.config.connections[&snapshot.profile];
-    if let Some(hint) = connection.compact_hint_tokens
-        && retry_budget.trim_available(connection.auto_trim_on_disconnect)
-        && control
-            .compactor
-            .input_tokens(
-                &snapshot.thread,
-                &snapshot.profile,
-                &snapshot.model,
-                input_characters,
-            )
-            .await?
-            > hint
-    {
-        snapshot.input.take();
-        // Prepared attachment pins protect GC lifetime; they hold no DB or
-        // compaction lock. Retain this prepared request for an optional rejected
-        // edit, with normal admission CAS fencing any concurrent path change.
-        // An adopted edit returns None and drops request/pins before reloading.
-        if trim::before_post(control, snapshot, slot, retry_budget).await? {
-            return Ok(None);
-        }
-    }
     if slot.stop.is_cancelled() {
         return Ok(None);
     }
@@ -134,7 +108,6 @@ pub(super) async fn prepare_attempt(
         prepared,
         request,
         attempt,
-        input_characters,
     }))
 }
 pub(super) fn model_client(

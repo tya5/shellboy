@@ -26,12 +26,12 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn repeated_incomplete_uploads_stop_after_two_attempts_when_trimming_is_disabled() {
+async fn incomplete_uploads_without_trimming_use_the_configured_finite_budget() {
     upload_recovery(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_partial_large_upload_is_reduced_once_before_the_resumed_header_failure() {
+async fn partial_uploads_reduce_on_the_second_failure_and_keep_the_retry_budget() {
     upload_recovery(true).await;
 }
 
@@ -84,7 +84,7 @@ async fn upload_recovery(auto_trim: bool) {
     std::fs::write(
         &config,
         format!(
-            "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_header_timeout_ms=3000\nstream_idle_timeout_ms=10000\nresponse_max_retries=8\nresponse_retry_max_delay_ms=1\nauto_trim_on_disconnect={auto_trim}\n"
+            "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_header_timeout_ms=3000\nstream_idle_timeout_ms=10000\nresponse_max_retries=2\nresponse_retry_max_delay_ms=1\nauto_trim_on_disconnect={auto_trim}\n"
         ),
     )
     .unwrap();
@@ -134,11 +134,11 @@ async fn upload_recovery(auto_trim: bool) {
     )
     .unwrap();
     let turn = accepted.turn_id.unwrap();
-    for ordinal in 1..=2 {
+    for ordinal in 1..=3 {
         match timeout(OBSERVATION_BUDGET, received.recv()).await {
             Ok(Some(())) => {}
             result => panic!(
-                "request prefix {ordinal}/2 was not actually read (auto_trim={auto_trim}, result={result:?}); saved upload facts: {}",
+                "request prefix {ordinal}/3 was not actually read (auto_trim={auto_trim}, result={result:?}); saved upload facts: {}",
                 upload_facts(&control, &turn).await,
             ),
         }
@@ -164,26 +164,21 @@ async fn upload_recovery(auto_trim: bool) {
     .await;
     assert!(
         recovery.is_ok(),
-        "second incomplete source must enter recovery (auto_trim={auto_trim}); saved upload facts: {}",
+        "finite upload retry budget must enter recovery (auto_trim={auto_trim}); saved upload facts: {}",
         upload_facts(&control, &turn).await,
-    );
-    assert!(
-        timeout(Duration::from_millis(300), received.recv())
-            .await
-            .is_err(),
-        "a third request reached the server despite upload recovery"
     );
     control.store.database.call(move |db| {
         let attempts = db.prepare("SELECT state,error_json FROM model_attempt WHERE turn_id=?1 ORDER BY rowid")?
             .query_map([turn], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts.len(), 3);
         assert_eq!(attempts[0].0, "failed");
-        assert_eq!(attempts[1].0, "incomplete");
+        assert_eq!(attempts[1].0, "failed");
+        assert_eq!(attempts[2].0, "incomplete");
         for (index, (_, body)) in attempts.iter().enumerate() {
             let saved: Value = serde_json::from_str(body).unwrap();
             let observation = &saved["error"]["http_observation"];
-            if index == 0 || !auto_trim {
+            if index < 2 || !auto_trim {
                 assert_eq!(observation["phase"], "upload_source_incomplete");
                 assert!(observation["request_body_bytes"].as_u64().unwrap() > 16 * 1024 * 1024);
                 assert!(observation["body_source_bytes_consumed"].as_u64().unwrap() > 0);
@@ -195,17 +190,12 @@ async fn upload_recovery(auto_trim: bool) {
                     "the resumed upload must actually be reduced");
                 assert_eq!(observation["body_source_bytes_consumed"], observation["request_body_bytes"]);
             }
-            assert_eq!(saved.get("automatic_trim").is_some(), auto_trim && index == 0);
+            assert_eq!(saved.get("automatic_trim").is_some(), auto_trim && index == 1);
         }
         let first: Value = serde_json::from_str(&attempts[0].1).unwrap();
-        let last: Value = serde_json::from_str(&attempts[1].1).unwrap();
-        if auto_trim {
-            assert!(first.get("automatic_retry").is_none());
-            assert!(first["automatic_trim"]["omitted_nodes"].as_u64().unwrap() > 0);
-        } else {
-            assert_eq!(first["automatic_retry"]["number"], 1);
-            assert!(last["error"]["message"].as_str().unwrap().contains("repeated incomplete request-body source"));
-        }
+        let last: Value = serde_json::from_str(&attempts[2].1).unwrap();
+        assert_eq!(first["automatic_retry"]["number"],1);
+        assert_eq!(last["automatic_retry_exhausted"],json!({"retries":2,"limit":2}));
         assert!(last.get("automatic_retry").is_none());
         assert_eq!(db.query_row("SELECT count(*) FROM replacement", [], |r| r.get::<_, i64>(0))?, i64::from(auto_trim));
         assert!(db.query_row("SELECT length(CAST(payload_json AS BLOB)) FROM node WHERE id='large-upload-source'", [], |r| r.get::<_, i64>(0))? > 16 * 1024 * 1024);

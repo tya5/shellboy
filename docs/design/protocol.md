@@ -291,3 +291,12 @@ relaxing public DTO unknown-field rejection or losing the immutable assignment.
 Human Turn interruption is deliberately an in-process TUI operation, not a new
 model wire command. Exact Turn targeting, durable intent, Run-stop priority and
 model notification follow the adopted design; existing lifecycle enums remain.
+
+### Failure-driven context editing (#50)
+
+`compact --maximal` selects ContextEdit action maximal with no from/to nodes;
+`/compact-max` is its TUI counterpart. It calls no summary API and does not
+resume a Run. Edit results replace token estimates with before_characters,
+after_characters and changed_suffix_characters (replay JSON Unicode scalars).
+No target_tokens field remains. thread get context_usage reports only the last
+successful measured usage, start/end time and next_request_pending after an edit.

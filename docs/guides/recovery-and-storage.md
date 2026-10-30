@@ -138,7 +138,7 @@ An external human CLI or the direct owning parent decides recovery. Merely being
 
 For conversations that received HTTP 400 because histories mixed endpoint-specific item IDs, update, restart the owner, and send a new request in the same conversation. `/retry` cannot target the old Run stopped by restart. Saved history passes through new conversion on send, removing only endpoint-specific message/function_call IDs. Source remains intact; this does not guarantee resolution of other provider constraints such as reasoning items.
 
-Explicit context-capacity overflow triggers automatic compaction and up to two retry stages. Communication failures are not guessed to be context overflow. At the first eligible large-input failure, deterministic reduction may instead run once as described below. For manual `/compact`, see [history and search](history-and-search.md).
+Explicit context-capacity overflow triggers automatic compaction and up to two retry stages. Communication failures are not guessed to be context overflow. Failure-driven reduction follows the consecutive retry budget as described below. For manual `/compact`, see [history and search](history-and-search.md).
 
 ## Interrupting and quitting
 
@@ -274,7 +274,7 @@ Processes detached outside the owned group with `setsid` or similar can survive 
 
 After at least thirty seconds without observed reception for the same model request, conversation activity adds receiving-wait or elapsed-since-last-reception information. Receive notifications occur at most once per second, introducing less than a second of display difference. This does not assert that generation/reasoning stopped. Ctrl+C or `run stop` can stop it.
 
-Responses use separate per-connection `response_header_timeout_ms` and `stream_idle_timeout_ms` deadlines. The first bounds waiting for response headers; after headers arrive, only the stream idle deadline applies to silent reception. Summary requests share these separate deadlines but remain outside conversation retry policy. At a conversation timeout, received text is preserved and retry/partial-output settings choose early large-input reduction, ordinary retry or recovery wait. Inspect the saved transport phase, elapsed milliseconds and configuration key. `stream_idle_timeout_ms` defaults to 600000; raise it for models with long post-header silence or use 0 to disable that idle deadline. It does not disable the header deadline. The fixed thirty-second connection deadline and manual cancellation remain. Unknown failures are not automatically resent. A before-body connection failure follows normal retry policy. A partially consumed large body may use the one available reduction to help a slow uplink; the header deadline includes upload time. Without an adopted reduction, a second consecutive partial-body-source failure enters recovery instead of repeated shrinking or retries. Source consumption is not proof of peer delivery.
+Responses use separate per-connection `response_header_timeout_ms` and `stream_idle_timeout_ms` deadlines. The first bounds waiting for response headers; after headers arrive, only the stream idle deadline applies to silent reception. Summary requests share these separate deadlines but remain outside conversation retry policy. At a conversation timeout, received text is preserved and retry/partial-output settings choose early large-input reduction, ordinary retry or recovery wait. Inspect the saved transport phase, elapsed milliseconds and configuration key. `stream_idle_timeout_ms` defaults to 600000; raise it for models with long post-header silence or use 0 to disable that idle deadline. It does not disable the header deadline. The fixed thirty-second connection deadline and manual cancellation remain. Unknown failures are not automatically resent. A before-body connection failure follows normal retry policy. The header deadline includes upload time. Eligible repeated failures use the same finite retry budget; reduction does not add a separate request allowance. Source consumption is not proof of peer delivery.
 
 Embeddings, semantic search, and RAG use per-connection `request_timeout_ms` (default 60000, minimum 1000) as the total request deadline. Model lists use its minimum with 20000ms. Index-worker timeout follows existing bounded retries; repeated failures pause the space. Read the status reason, repair connection/settings, then explicitly retry. Owner changes require restart. Search CLI disconnection or owner shutdown also cancels remaining search HTTP requests.
 
@@ -286,21 +286,27 @@ EOF failures save diagnostic fields in their reasons. These fields include `rece
 
 `last_event=untyped` means JSON lacked a string type; `done_markers` counts `[DONE]` markers. Neither proves a completed response. Nonzero bytes with zero parsed events can mean comments only, so avoid inferring a cause. Events lacking their final blank line remain incomplete and are not automatically committed as answers or tool execution.
 
-## Early reduction of large inputs
+## Failure-driven reduction (#50)
 
-Connection `auto_trim_on_disconnect` defaults to true. Above an estimated 75,000 input tokens, the first header timeout, 5xx or connection/EOF failure considers API-free maximum safe omission before ordinary retries are spent. A smaller input follows normal retry policy. `auto_trim_on_disconnect=false` disables this reduction; `response_max_retries=0` disables ordinary retries but does not disable the separate reduction allowance. Partial-output opt-out, terminal failures and an excessive Retry-After still prevent automatic resending.
+There is no pre-POST size policy or token estimate. With
+`auto_trim_on_disconnect=true`, a first eligible transport/header/5xx failure
+retries unchanged; from the second consecutive failure it attempts API-free
+maximum safe omission. 429 and stream-idle reception timeouts retry without
+that trigger. Explicit context-limit errors immediately reduce, with the
+existing latest-spill/summary stage as a last resort on another overflow.
+Every resend counts against response_max_retries (default eight), even after
+reduction; zero disables automatic resends. No candidates retries unchanged.
+Successful responses reset the consecutive budget, so a long Turn can reduce
+again after growing. Partial-output opt-out, stop and Retry-After safety remain.
 
-Optional positive-integer `compact_hint_tokens` changes activation guidance only and also permits reduction before the first POST when the estimate exceeds that hint. Without the hint, no pre-POST reduction occurs. It does not specify how much context remains or a provider capacity limit.
-
-Maximum omission removes all safe groups outside the current request, latest group, latest complete tool group, unfinished work and protected/unapplied instructions. Any available safe omission is adopted; there is no half-size target or requirement to reach a numeric goal. Automatic result `target_tokens` is null. If candidates exceed the restore provenance budget, the oldest whole-group window of at most 65,536 sources and retained anchors is omitted and later candidates remain, with a warning. Original nodes and effects are preserved. If no safe group exists, history stays unchanged and the reduction allowance remains available; the failing request follows normal retry eligibility and limits, entering recovery only when those rules require it. A rejected optional preflight edit leaves normal request admission in charge; it does not fail the Turn or spend the reduction right.
-
-One adopted reduction allows one resumed POST per Turn/generation. If that first resumed request fails, recovery follows. Once its response is successfully adopted, later temporary failures and explicit context overflow use their normal retry/compaction policies. The reduction right remains spent for the Turn; successful tool responses do not allow another automatic omission. A configured proactive reduction consumes the same allowance. A fixed context notice retains original ranges/counts, estimates and restoration guidance. No summary API is called automatically.
-
-Use `shellboy rag search --scope history:THREAD --mode keyword --query TEXT` to retrieve omitted sources without an embedding model. Bounded `history get` and a selected range summary also remain available. Restoring a large range may reproduce the same failure; search or summarize the needed portion first. Executed commands, file changes and side effects are not undone; inspect current state before repeating earlier actions.
-
-Argument-free TUI `/restore` or CLI `shellboy compact --restore --thread THREAD` restores the omitted range while retaining subsequent conversation and leaving attachments excluded. `/restore NUMBER` is the separate failed-draft restoration feature. See [input size and range editing](history-and-search.md#input-size-and-range-editing).
-
-If reduction was considered but not adopted, attempt `automatic_trim_attempt` distinguishes below-threshold input, absence of safe groups, and adoption rejection. Estimates use recent successful usage/input measurements when available; otherwise the character/4 fallback is an approximation and can underestimate some languages or attachments. Compare the latest successful request's measured usage.
+Recovery shows the saved failure, retry count, last-failure time and transport
+stage, plus protected request/latest-tool character/byte counts, known attachment
+sizes and available actions in error details. Unknown sizes remain null. These
+are facts, not a cause diagnosis or ranked recommendation. /compact-max needs
+safe reducible context; /detach requires attachments; /restore requires an
+omission marker. /retry, /edit, /model (selection) and /stop retain their existing
+semantics. Inspect the facts in F8 if the minimal recovery line is clipped.
+Settings reload still requires owner restart and is outside this change.
 
 ## When an interrupted tool group cannot be reconciled
 

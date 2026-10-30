@@ -121,7 +121,6 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # response_retry_max_delay_ms = 60000
 # response_retry_partial = true
 # auto_trim_on_disconnect = true
-# compact_hint_tokens = 75000
 
 # Optional. Specify both fields if enabled.
 # [embedding]
@@ -234,7 +233,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `connections.<name>` | `ssl_verify=true`; URL/authentication/effort/headers described above | Per-connection TLS verification, enabled by default |
 | `connections.<name>` | `session_header=true`, `prompt_cache_key=false` | Thread identity header and optional cache identity body field for conversations/summaries |
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
-| `connections.<name>` | `auto_trim_on_disconnect=true`, `compact_hint_tokens` unset | One maximum safe reduction at the first eligible large-input failure; explicit hint also permits pre-POST reduction |
+| `connections.<name>` | `auto_trim_on_disconnect=true` | API-free maximum reduction from the second eligible consecutive failure; no preflight |
 | `connections.<name>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | Consecutive temporary conversation failure retries (0–20, 0 disables), backoff cap (1–300000ms), and retry after partial reception |
 | `embedding` | `connection` / `model` = unset; `batch_max_inputs=1`, `batch_max_chars=64000` | Indexing and search API; bounded synchronous history batches |
 | `shell` | `kind` = Unix `bash` / Windows `powershell`, `executable` = automatic, `env` = empty dictionary | Shell kind, executable, additional environment; not direct WSL startup |
@@ -265,10 +264,11 @@ Raw/managed retention is separate from conversation retention. Conversations, re
 
 Keys, defaults, validation, and OS paths are checked against [config.rs](../../src/config.rs), stored Thread settings against [DB operations](../../src/control/db.rs), AGENTS reading against [instructions.rs](../../src/instructions.rs), and send boundaries against [driver.rs](../../src/control/driver.rs). See the [configuration design](../design/config.md) for the contract.
 
-### Reduction after disconnection
+### Failure-driven reduction
 
-`connections.<name>.auto_trim_on_disconnect` defaults to true. At the first eligible header-timeout, server-5xx or disconnect failure above the input threshold, it attempts maximum safe API-free spill/omission once per Turn/generation, without exhausting retries first. `false` disables automatic reduction. Optional positive `compact_hint_tokens` controls when to reduce, not how much: with an explicit hint, input above it may also be reduced before the first POST. Without it, the failure threshold is an estimated 75,000 tokens and there is no pre-POST reduction. Eligible history outside protected groups is omitted even when no numeric target could be reached; there is no half-size target. Zero, negatives, fractions and strings are rejected. This is not a provider context-limit estimate. Changes apply after owner restart.
-
-Connection-setup failures or zero consumed body-source bytes use the normal retry budget; they are not partial uploads. Repeated failures after some but not all body-source bytes are consumed use the bounded partial-upload rule, with one eligible large-input reduction permitted before recovery rather than repeated trimming. Saved errors distinguish connection/pre-body-source failures, partially consumed source bytes, waiting for headers with peer delivery unknown, and post-header body reception. Successful attempts save header latency in the existing input manifest. Pool generation identifies failed-pool retirement; fresh_pool means first request issued from a new pool, while actual socket reuse is otherwise unknown. Source consumption is not proof of transmission or provider processing.
-
-The estimate uses the latest saved successful usage and input character count, falling back to four characters/token. Exact tokens are unknown before sending, with attachment, language, and provider differences. See [early reduction of large inputs](recovery-and-storage.md#early-reduction-of-large-inputs) for behavior and restoration.
+`auto_trim_on_disconnect` defaults to true and enables maximum safe omission
+from the second eligible consecutive failure; false leaves ordinary retries.
+`response_max_retries` (default eight) bounds every automatic resend including
+a reduced request. `compact_hint_tokens` is removed and rejected as an unknown
+field; remove it from configuration before restarting. There is no pre-POST
+activation or token estimate. See [failure-driven reduction](recovery-and-storage.md#failure-driven-reduction-50).

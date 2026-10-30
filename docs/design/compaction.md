@@ -125,76 +125,29 @@ legacy/shared境界、正確な小予算/production65,536境界で、超過時�
 
 部品は、指定範囲のspill、summary、決定文への置換（omit）の3種類。prefixの省略も途中の省略も同じomit採用を使う。前後の経路を保持し、置換・出典・添付除外と`select_path`を既存の短いtransactionへまとめる。新しいtable・worker・queue・event・依存は追加しない。編集は既存Thread境界へ並べ、進行中の通信やtoolを遡って変更せず、次の要求から適用する。
 
-### Early deterministic maximum reduction (Issue #34)
+### Failure-driven maximum reduction (#50)
 
-When enabled by `auto_trim_on_disconnect`, a large input is reduced at its first
-eligible header timeout, 5xx or transport disconnect, before spending ordinary
-retry capacity. Input activation guidance defaults to 75,000 estimated tokens;
-429 and stream-idle timeout are ordinary retry cases, not evidence of large-input
-failure. Every 5xx is eligible for this separate reduction decision, while the
-ordinary retry status list remains unchanged. Partial-output opt-out, terminal
-responses and Retry-After above 600 seconds still forbid automatic resending;
-a permitted Retry-After is honored before the reduced request. Explicit provider context overflow retains its separate two-stage path.
-A partially consumed request-body source can trigger the same one-time large-input
-reduction: the header deadline also includes upload time, so a slow uplink must
-not exclude the case where reduction is most useful. Before-body/connect failures
-remain ordinary retries. Two consecutive partial-source failures without an
-adopted reduction stop automatic retries; source consumption still does not
-establish peer delivery. Successful adoption or a different failure resets that
-counter in the existing per-Turn retry budget.
+Adopt [failure-driven reduction](failure-driven-reduction.md). No token estimate,
+75k activation or compact_hint_tokens remains. The first eligible transient
+failure retries unchanged, the second and later eligible failure may reduce;
+explicit context overflow reduces immediately. All resends share the configured
+consecutive retry budget (default eight), including after reduction. A successful
+response resets that budget and the explicit-overflow stages. Safe candidate
+absence retries unchanged; no independent reduction allowance is renewed or spent.
 
-A configured positive `compact_hint_tokens` is activation guidance only. It also
-allows proactive reduction before POST; absent that explicit hint, normal input
-is never proactively reduced. Estimates use recent same-Thread/connection/model
-successful usage calibration or Unicode characters/4; they are not a tokenizer,
-provider capacity catalogue or acceptance guarantee.
+Maximum omission retains the current user request, latest group, latest complete
+tool group, incomplete work and protected/unapplied instructions. Existing bounded
+provenance, atomic adoption and attachment exclusions/restore rules remain. An
+edit that cannot reduce projected characters is a no-target result. It never
+resends tools or calls a summary API. Only the existing second explicit-overflow
+stage may spill the latest group and summarize. /compact-max and compact --maximal
+expose the API-free action without node IDs, independently of retry.
 
-Always omit every safe group outside protection: retain the current Turn's
-initial request, the latest group, the latest complete tool group, incomplete work
-and protected/unapplied instructions. Numeric reduction targets and all-or-nothing
-"reach half" decisions are removed. Apply any nonempty safe omission, even if the
-retained context is still large. No summary API is called; original nodes,
-replacement_source, thread_replacement, attachment exclusions and restore fences
-use the existing atomic path-adoption transaction. Automatic result
-`target_tokens` is null, because maximum omission has no numeric goal. Manual
-context edits retain their real numeric guidance where applicable.
-
-The reduction right and the immediate-resumption failure guard are separate
-finite bits in the existing per-Turn retry budget. An adopted reduction spends
-the right for this Turn/generation and guards its first resumed POST. If that
-POST fails, recover. Once a response is durably adopted, clear only the guard:
-later ordinary retries and explicit-overflow compaction retain their normal
-policy, while the reduction right remains spent. A no-candidate failure leaves
-history unchanged, does not spend the reduction right, and follows ordinary
-retry eligibility and its finite budget. Its no-safe-reduction observation is
-preserved on the failed attempt, including when ordinary retries recover.
-A rejected/stale optional preflight or failure-time reduction does not spend the right; cancellation returns to normal owner stop,
-ordinary rejections proceed to normal admission/retry, and only storage failure
-stops the owner.
-
-Gate activation before loading a full compaction snapshot. The already prepared
-request supplies its actual serialized input character count, calibrated by the
-same bounded successful-usage lookup at preflight and failure. A small input
-neither queries per-node attachments nor adds a trim explanation to ordinary
-errors. After activation, load and fence the full snapshot; report the trigger
-estimate separately from the possibly changed selected-path before/after values.
-Classification is typed (below threshold, no candidates, rejection, adoption),
-not inferred by comparing those different estimates or inspecting JSON strings.
-
-An automatic plan exceeding the 65,536-node restore provenance budget adopts
-its oldest whole-group candidate window that fits the budget, counting retained
-anchors within that window. It retains later candidates and reports the cap;
-manual over-budget edits still reject. This finite bound may prevent omitting
-all otherwise eligible nodes at once, but must not discard an available bounded
-reduction. Stop, selection/profile/generation changes still fence adoption. No
-new state table, event, worker, queue or dependency is added.
-
-The context_trim developer notice records ranges/counts/estimates, the unchanged
-side effects and attachment-restore limits. It recommends bounded `history get`,
-range summary and `rag search --scope history:THREAD --mode keyword`, available
-without embedding. It warns that restoring a large range may reproduce the same
-failure. Failed-attempt automatic_trim facts remain saved; proactive omission is
-durable through the same marker/path adoption, before any attempt exists.
+ContextEditResult reports before_characters, after_characters and
+changed_suffix_characters: exact Unicode scalar counts of replay JSON, not token
+or cache-hit estimates. Original sources and side effects remain; restore can
+return omitted text without reactivating excluded attachments. Size facts do not
+predict provider acceptance. Stop/selection/profile/generation fences are unchanged.
 
 ### 明示編集と復元
 

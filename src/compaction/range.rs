@@ -41,7 +41,7 @@ fn range_error(
     let start = around.unwrap_or(0).saturating_sub(8);
     let trimming = matches!(mode, Some(RangeMode::Trim));
     let current_request = if trimming {
-        policy::turn_boundary(snapshot, snapshot.current_turn.as_deref())
+        policy::request_boundary(snapshot, snapshot.current_turn.as_deref())
     } else {
         None
     };
@@ -73,7 +73,7 @@ pub(super) fn validate(
     ranges: &[Range<usize>],
     mode: RangeMode,
 ) -> Result<(), ApiError> {
-    let current_request = policy::turn_boundary(snapshot, snapshot.current_turn.as_deref());
+    let current_request = policy::request_boundary(snapshot, snapshot.current_turn.as_deref());
     let mut previous_end = 0;
     for (ordinal, range) in ranges.iter().enumerate() {
         if range.start >= range.end || range.end > snapshot.groups.len() {
@@ -184,7 +184,7 @@ pub(super) fn from_prefix_end(snapshot: &Snapshot, to: &str) -> Result<Range<usi
             Ok(selected)
         });
     selected.map_err(|mut error| {
-        let request = policy::turn_boundary(snapshot, snapshot.current_turn.as_deref());
+        let request = policy::request_boundary(snapshot, snapshot.current_turn.as_deref());
         let candidates = snapshot
             .groups
             .iter()

@@ -20,7 +20,7 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
     change(&db,"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES('u','t','r','recovery_wait',2,'now');").await;
     let original=json!({
         "raw_response":{"opaque":"x".repeat(1024*1024)},
-        "automatic_trim":{"before_tokens":90000,"after_tokens":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}},
+        "automatic_trim":{"before_characters":90000,"after_characters":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}},
     }).to_string();
     let saved = original.clone();
     let reason = serde_json::to_string(&ApiError::new(
