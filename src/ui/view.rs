@@ -43,6 +43,9 @@ pub struct ThreadView {
     pub(super) history_rebase_pending: bool,
     pub(super) tool_refresh: Option<u64>,
     pub(super) tool_refresh_dirty: bool,
+    pub(super) tool_observation_scope: Option<(u64, Vec<String>)>,
+    tool_observation_clock: u64,
+    tool_observation_checked: Option<(u64, u64)>,
     pub save_retry: bool,
     pub(super) draft_restore_pending: bool,
     pub run_id: Option<String>,
@@ -212,30 +215,96 @@ impl ThreadView {
         self.scroll.pending = 0;
         self.view_revision = self.view_revision.wrapping_add(1);
     }
+    pub(super) fn clear_tool_observation(&mut self) -> Option<UiAction> {
+        let existed = self.tool_observation_scope.take().is_some();
+        self.tool_refresh = None;
+        self.tool_refresh_dirty = false;
+        self.tool_observation_checked = None;
+        existed.then(|| UiAction::ClearToolObservation {
+            thread_id: self.thread_id.clone().expect("observed view has Thread"),
+            generation: self.generation,
+        })
+    }
     pub(super) fn request_tool_refresh(&mut self) -> Option<UiAction> {
-        if !self.tool_refresh_dirty || self.tool_refresh.is_some() {
+        if self.follow {
+            return self.clear_tool_observation();
+        }
+        let thread_id = self.thread_id.clone()?;
+        let checked = (self.view_revision, self.history_revision);
+        if !self.tool_refresh_dirty && self.tool_observation_checked == Some(checked) {
             return None;
         }
-        self.tool_refresh_dirty = false;
-        let thread_id = self.thread_id.clone()?;
+        self.tool_observation_checked = Some(checked);
         let focus = projection_node_index(self);
         let start = focus.saturating_sub(64);
         let end = (start + 128).min(self.nodes.len());
+        let ids = self.nodes[start..end]
+            .iter()
+            .filter(|node| {
+                node.presentation
+                    .blocks
+                    .iter()
+                    .any(|block| block.tool.is_some())
+            })
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        let scope = (self.view_revision, ids);
+        let changed = self.tool_observation_scope.as_ref() != Some(&scope);
+        if self.tool_refresh.is_some() {
+            self.tool_refresh_dirty |= changed;
+            return None;
+        }
+        if !changed && !self.tool_refresh_dirty {
+            return None;
+        }
+        self.tool_refresh_dirty = false;
+        if scope.1.is_empty() {
+            return self.clear_tool_observation();
+        }
         let nodes = self.nodes[start..end]
             .iter()
             .filter_map(UiNode::tool_stub)
-            .collect::<Vec<_>>();
-        if nodes.is_empty() {
-            return None;
-        }
-        let revision = self.history_revision;
+            .collect();
+        self.tool_observation_clock = self.tool_observation_clock.wrapping_add(1);
+        let revision = self.tool_observation_clock;
+        self.tool_observation_scope = Some(scope);
         self.tool_refresh = Some(revision);
         Some(UiAction::RefreshTools {
             thread_id,
             generation: self.generation,
             revision,
+            view_revision: self.view_revision,
             nodes,
         })
+    }
+    pub(super) fn apply_tool_observation(
+        &mut self,
+        observation: ToolObservation,
+        read_revision: u64,
+    ) {
+        if self.tool_refresh == Some(observation.revision) {
+            self.tool_refresh = None;
+        }
+        if observation.revision != self.tool_observation_clock {
+            return;
+        }
+        let mut changed = false;
+        if !self.follow && observation.view_revision == self.view_revision {
+            for node in observation.nodes {
+                if let Some(existing) = self
+                    .nodes
+                    .iter_mut()
+                    .find(|old| old.node_id == node.node_id)
+                    && read_revision >= existing.presentation.read_revision
+                {
+                    changed |= existing.refresh_tools(&node);
+                    existing.presentation.read_revision = read_revision;
+                }
+            }
+        }
+        if changed {
+            self.mark_source_changed();
+        }
     }
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
         Self {
@@ -280,6 +349,9 @@ impl ThreadView {
             history_rebase_pending: false,
             tool_refresh: None,
             tool_refresh_dirty: false,
+            tool_observation_scope: None,
+            tool_observation_clock: 0,
+            tool_observation_checked: None,
             save_retry: false,
             draft_restore_pending: false,
             run_id: None,

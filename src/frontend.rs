@@ -570,18 +570,34 @@ async fn stream_commits(
         .await;
     }
 }
+fn receipt_states_tx(
+    db: &rusqlite::Connection,
+    ids: &[String],
+) -> Result<Vec<(String, ReceiptStatus)>, crate::storage::StorageError> {
+    use rusqlite::OptionalExtension;
+    let mut result = Vec::new();
+    for id in ids {
+        let state:Option<(String,Option<String>)>=db.query_row(
+            "SELECT r.state,u.state FROM receipt r LEFT JOIN turn u ON u.id=r.turn_id WHERE r.message_node_id=?1",
+            [id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+        if let Some((receipt, turn)) = state
+            && let Some(status) = receipt_delivery::project_state(&receipt, turn.as_deref())
+        {
+            result.push((id.clone(), status));
+        }
+    }
+    Ok(result)
+}
 async fn receipt_states(
     control: &Control,
     ids: Vec<String>,
 ) -> Result<Vec<(String, ReceiptStatus)>, ApiError> {
-    let result = async {
-    control.store.database.call(move|db|{use rusqlite::OptionalExtension;let mut result=Vec::new();for id in ids{
-        let state:Option<(String,Option<String>)>=db.query_row("SELECT r.state,u.state FROM receipt r LEFT JOIN turn u ON u.id=r.turn_id WHERE r.message_node_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if let Some((receipt,turn))=state
-            && let Some(status)=receipt_delivery::project_state(&receipt,turn.as_deref()) { result.push((id,status)); }
-    }Ok(result)}).await.map_err(storage_error)
-
-    }.await;
+    let result = control
+        .store
+        .database
+        .call(move |db| receipt_states_tx(db, &ids))
+        .await
+        .map_err(storage_error);
     checked_storage(control, result).await
 }
 async fn restore_snapshot(
@@ -764,7 +780,10 @@ async fn run_with_delivery(
         while !updates.backpressured() {
             let Some(thread) = dirty_threads
                 .iter()
-                .find(|thread| !refreshing.contains(*thread))
+                .find(|thread| {
+                    !refreshing.contains(*thread)
+                        && selection.refresh_ready(thread, tokio::time::Instant::now())
+                })
                 .cloned()
             else {
                 break;
@@ -780,6 +799,8 @@ async fn run_with_delivery(
                 continue;
             }
             refreshing.insert(thread.clone());
+            selection.refresh_started(&thread, tokio::time::Instant::now());
+            let tool_scope = visible.then(|| selection.tool_scope.clone()).flatten();
             #[cfg(test)]
             stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             read_workers.spawn(refresh::run(
@@ -790,6 +811,7 @@ async fn run_with_delivery(
                     visible,
                     epoch: selection.progress_epoch,
                     render_width,
+                    tool_scope,
                 },
                 control.clone(),
                 updates.worker(),
@@ -804,7 +826,10 @@ async fn run_with_delivery(
         }
         ui_subscription.select(selection.active_thread.as_deref());
         actions.enable_cancel(control_tasks.is_empty());
+        let refresh_deadline = selection.refresh_deadline(&dirty_threads, &refreshing);
         tokio::select! {
+            _=tokio::time::sleep_until(refresh_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
+                if refresh_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{},
             _=control.gc.availability_changed()=> {
                 if let Some(thread)=selection.active_thread.as_ref()
                     && let Some(generation)=selection.generations.get(thread).copied()
@@ -1826,52 +1851,16 @@ async fn run_with_delivery(
                         }
                     }
                     UiAction::RefreshTools {
-                        thread_id,
-                        generation,
-                        revision,
-                        mut nodes,
+                        thread_id,generation,revision,view_revision,nodes,
                     } => {
-                        let control = control.clone();
-                        let sender = updates.worker();
-                        let target = thread_id.clone();
-                        if !spawn_read(
-                            &mut read_workers,
-                            &read_slots,
-                            &selection.cancel,
-                            async move {
-                                let result = checked_storage(
-                                    &control,
-                                    async {
-                                        tools::enrich(&control, &mut nodes).await?;
-                                        streams::enrich_previews(&control, &mut nodes, render_width).await
-                                    }.await,
-                                )
-                                .await
-                                .map(|_| nodes)
-                                .map_err(|error| error.to_string());
-                                update(
-                                    &sender,
-                                    UiUpdate::ToolFacts {
-                                        thread_id: target,
-                                        generation,
-                                        revision,
-                                        result,
-                                    },
-                                )
-                                .await;
-                            },
-                        ) {
-                            update(
-                                &updates,
-                                UiUpdate::ToolFacts {
-                                    thread_id,
-                                    generation,
-                                    revision,
-                                    result: Err("tool state read queue is full".into()),
-                                },
-                            )
-                            .await;
+                        match selection.observe_tools(&thread_id,generation,ToolObservation {revision,view_revision,nodes}) {
+                            Ok(true)=>{dirty_threads.insert(thread_id);},
+                            Ok(false)=>{},
+                            Err(error)=>update(&updates,UiUpdate::ToolFacts {thread_id,generation,revision,result:Err(error.to_string())}).await,
                         }
+                    }
+                    UiAction::ClearToolObservation {thread_id,generation} => {
+                        selection.clear_tools(&thread_id,generation);
                     }
                     UiAction::RebaseStream(request) => {
                         let control = control.clone();

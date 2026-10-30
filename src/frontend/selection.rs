@@ -1,5 +1,6 @@
 //! Frontend observation context, separate from UI views and durable Thread state.
 use super::{ApiError, UiUpdate, UpdateTarget, activity, status, update};
+use crate::ui::ToolObservation;
 use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
 #[derive(Default)]
@@ -10,13 +11,80 @@ pub(super) struct Selection {
     pub(super) progress_running: bool,
     pub(super) progress_epoch: u64,
     pub(super) cancel: CancellationToken,
+    pub(super) tool_scope: Option<ToolObservation>,
+    refresh_not_before: Option<tokio::time::Instant>,
 }
 impl Selection {
+    pub(super) fn refresh_ready(&self, thread: &str, now: tokio::time::Instant) -> bool {
+        self.active_thread.as_deref() != Some(thread)
+            || self.refresh_not_before.is_none_or(|due| now >= due)
+    }
+    pub(super) fn refresh_started(&mut self, thread: &str, now: tokio::time::Instant) {
+        if self.active_thread.as_deref() == Some(thread) {
+            self.refresh_not_before = Some(now + std::time::Duration::from_millis(500));
+        }
+    }
+    pub(super) fn refresh_deadline(
+        &self,
+        dirty: &std::collections::HashSet<String>,
+        refreshing: &std::collections::HashSet<String>,
+    ) -> Option<tokio::time::Instant> {
+        let thread = self.active_thread.as_ref()?;
+        if !dirty.contains(thread) || refreshing.contains(thread) {
+            return None;
+        }
+        self.refresh_not_before
+    }
+    pub(super) fn observe_tools(
+        &mut self,
+        thread: &str,
+        generation: u64,
+        mut scope: ToolObservation,
+    ) -> Result<bool, ApiError> {
+        if self.active_thread.as_deref() != Some(thread)
+            || self.generations.get(thread) != Some(&generation)
+        {
+            return Ok(false);
+        }
+        if scope.nodes.len() > 128
+            || scope
+                .nodes
+                .iter()
+                .any(|node| node.node_id.is_empty() || node.node_id.len() > 256)
+        {
+            return Err(ApiError::new(
+                crate::protocol::ErrorCode::InputLimit,
+                "Paused tool scope exceeds its bounded source allowance",
+            ));
+        }
+        if self.tool_scope.as_ref().is_some_and(|old| {
+            old.revision > scope.revision
+                || (old.revision == scope.revision && old.view_revision == scope.view_revision)
+        }) {
+            return Ok(false);
+        }
+        scope.nodes = scope
+            .nodes
+            .iter()
+            .filter_map(crate::ui::UiNode::tool_stub)
+            .collect();
+        self.tool_scope = Some(scope);
+        Ok(true)
+    }
+    pub(super) fn clear_tools(&mut self, thread: &str, generation: u64) {
+        if self.active_thread.as_deref() == Some(thread)
+            && self.generations.get(thread) == Some(&generation)
+        {
+            self.tool_scope = None;
+        }
+    }
     fn refresh(&mut self) {
         self.progress_epoch = self.progress_epoch.wrapping_add(1);
         self.progress_running = true;
     }
     fn replace_token(&mut self) {
+        self.tool_scope = None;
+        self.refresh_not_before = None;
         self.cancel.cancel();
         self.cancel = CancellationToken::new();
     }
@@ -86,5 +154,97 @@ impl Selection {
                 status(updates, Some(thread), error).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod refresh_scope_tests {
+    use super::*;
+    use crate::{
+        presentation::{BlockKind, PresentationBlock, ToolPresentation},
+        ui::UiNode,
+    };
+    fn scope(revision: u64, view_revision: u64) -> ToolObservation {
+        ToolObservation {
+            revision,
+            view_revision,
+            nodes: vec![UiNode {
+                node_id: "call".into(),
+                role: "assistant".into(),
+                text: "BODY_MUST_NOT_BE_RETAINED".into(),
+                total_chars: 25,
+                presentation: crate::presentation::NodePresentation {
+                    blocks: vec![PresentationBlock {
+                        kind: BlockKind::ToolCall,
+                        text: "raw block".into(),
+                        tool: Some(ToolPresentation {
+                            call_id: "saved-call".into(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            }],
+        }
+    }
+    #[test]
+    fn changed_bursts_share_one_start_deadline_and_switch_resets_it() {
+        let mut selected = Selection::default();
+        selected.select_thread("t".into(), 1);
+        let start = tokio::time::Instant::now();
+        assert!(selected.refresh_ready("t", start));
+        selected.refresh_started("t", start);
+        for _ in 0..100 {
+            selected.changed("t");
+        }
+        let dirty = std::collections::HashSet::from(["t".into()]);
+        assert_eq!(
+            selected.refresh_deadline(&dirty, &Default::default()),
+            Some(start + std::time::Duration::from_millis(500))
+        );
+        assert!(!selected.refresh_ready("t", start + std::time::Duration::from_millis(499)));
+        assert!(selected.refresh_ready("t", start + std::time::Duration::from_millis(500)));
+        assert!(selected.refresh_ready("hidden", start));
+        assert!(
+            selected
+                .refresh_deadline(&dirty, &std::collections::HashSet::from(["t".into()]))
+                .is_none()
+        );
+        selected.select_thread("new".into(), 2);
+        assert!(selected.refresh_ready("new", start));
+        assert!(
+            selected
+                .refresh_deadline(&dirty, &Default::default())
+                .is_none()
+        );
+    }
+    #[test]
+    fn tool_scope_is_bounded_metadata_only_and_old_or_foreign_registrations_do_not_replace_it() {
+        let mut selected = Selection::default();
+        selected.select_thread("t".into(), 1);
+        assert!(selected.observe_tools("t", 1, scope(5, 3)).unwrap());
+        let saved = &selected.tool_scope.as_ref().unwrap().nodes[0];
+        assert!(saved.text.is_empty() && saved.presentation.blocks[0].text.is_empty());
+        assert_eq!(
+            saved.presentation.blocks[0].tool.as_ref().unwrap().call_id,
+            "saved-call"
+        );
+        assert!(!selected.observe_tools("t", 1, scope(4, 3)).unwrap());
+        assert!(!selected.observe_tools("t", 1, scope(5, 3)).unwrap());
+        assert!(!selected.observe_tools("other", 1, scope(6, 4)).unwrap());
+        assert!(!selected.observe_tools("t", 2, scope(6, 4)).unwrap());
+        let mut huge = scope(6, 4);
+        huge.nodes = vec![huge.nodes[0].clone(); 129];
+        assert!(selected.observe_tools("t", 1, huge).is_err());
+        assert_eq!(selected.tool_scope.as_ref().unwrap().revision, 5);
+        selected.clear_tools("other", 1);
+        assert!(selected.tool_scope.is_some());
+        selected.clear_tools("t", 1);
+        assert!(selected.tool_scope.is_none());
+        selected.observe_tools("t", 1, scope(7, 4)).unwrap();
+        selected.activate_draft("draft".into());
+        assert!(selected.tool_scope.is_none());
     }
 }

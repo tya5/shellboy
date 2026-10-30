@@ -6,7 +6,8 @@ impl UiUpdate {
     pub(super) fn needs_retention(&self) -> bool {
         // Exhaustive: new update kinds must choose their cache responsibility.
         match self {
-            Self::ToolPreview { .. }
+            Self::CurrentView { .. }
+            | Self::ToolPreview { .. }
             | Self::ToolFacts { .. }
             | Self::HistoryWindow { .. }
             | Self::History { .. }

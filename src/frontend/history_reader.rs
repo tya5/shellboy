@@ -120,9 +120,33 @@ pub(super) struct RawHistory {
 }
 impl RawHistory {
     /// Borrow only the identities in this bounded page, without cloning payloads.
-    #[cfg(test)]
     pub(super) fn source_ids(&self) -> impl Iterator<Item = &str> {
         self.rows.iter().map(|row| row.node.id.as_str())
+    }
+
+    pub(super) fn info(&self) -> &HistoryInfo {
+        &self.info
+    }
+    pub(super) fn set_read_revision(&mut self, read_revision: u64) {
+        self.info.read_revision = read_revision;
+    }
+
+    pub(super) fn assistant_requests(&self) -> Vec<(usize, String)> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| matches!(row.node.kind.as_str(), "assistant_response" | "assistant"))
+            .map(|(index, row)| (index, row.node.id.clone()))
+            .collect()
+    }
+
+    pub(super) fn event_requests(&self) -> Vec<(usize, String)> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.node.kind == "event")
+            .map(|(index, row)| (index, row.node.id.clone()))
+            .collect()
     }
 
     /// Project on the existing finite presentation worker, never the DB worker.
@@ -677,6 +701,25 @@ pub(super) fn query_page_tx(
     before: Option<String>,
     anchor: Option<ViewAnchor>,
 ) -> Result<(RawHistory, Result<Option<String>, ApiError>), StorageError> {
+    let (mut raw, cursor) = query_page_unstamped_tx(db, thread, before, anchor)?;
+    raw.set_read_revision(message_queue::read_revision());
+    Ok((raw, cursor))
+}
+
+/// The combined current-view transaction stamps once after every fact read.
+pub(super) fn query_current_tx(
+    db: &Connection,
+    thread: &str,
+) -> Result<(RawHistory, Result<Option<String>, ApiError>), StorageError> {
+    query_page_unstamped_tx(db, thread, None, None)
+}
+
+fn query_page_unstamped_tx(
+    db: &Connection,
+    thread: &str,
+    before: Option<String>,
+    anchor: Option<ViewAnchor>,
+) -> Result<(RawHistory, Result<Option<String>, ApiError>), StorageError> {
     let revision = live_thread_revision(db, thread)?;
     let total = history_total(db, thread)?;
     let upper = if let Some(cursor) = before {
@@ -724,7 +767,7 @@ pub(super) fn query_page_tx(
                 total: total as u64,
                 committed,
                 pending: message_queue::query(db, thread)?,
-                read_revision: message_queue::read_revision(),
+                read_revision: 0,
             },
         },
         cursor,

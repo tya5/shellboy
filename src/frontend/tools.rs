@@ -76,11 +76,9 @@ pub(super) struct ToolFacts {
     truncated_nodes: Vec<String>,
 }
 impl ToolFacts {
-    #[cfg(test)]
     pub(super) fn sources(&self) -> &[CallSource] {
         &self.sources
     }
-    #[cfg(test)]
     pub(super) fn append(&mut self, other: Self) {
         let mut seen = self
             .sources
@@ -176,7 +174,6 @@ pub(super) fn read_tx(
 
 // Scalar selectors only; direct per-output-item nodes never expand to all
 // calls in the group. Whole-response arrays qualify only with a real call.
-#[cfg(test)]
 const MODERN_SOURCE_SQL: &str = r"
 SELECT n.kind,
  CASE WHEN json_valid(n.payload_json) THEN CASE WHEN json_type(n.payload_json,'$.group_id')='text' THEN json_extract(n.payload_json,'$.group_id') END END,
@@ -189,7 +186,6 @@ SELECT n.kind,
  ELSE 0 END
 FROM node n WHERE n.id=?1";
 
-#[cfg(test)]
 pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts, StorageError> {
     if ids.len() > MAX_NODES {
         return Err(ApiError::new(

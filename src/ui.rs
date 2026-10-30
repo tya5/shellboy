@@ -152,7 +152,7 @@ pub struct UiNode {
     pub presentation: NodePresentation,
 }
 impl UiNode {
-    fn tool_stub(&self) -> Option<Self> {
+    pub(crate) fn tool_stub(&self) -> Option<Self> {
         let blocks = self
             .presentation
             .blocks
@@ -436,6 +436,12 @@ impl CopyScope {
     }
 }
 #[derive(Clone, Debug)]
+pub struct ToolObservation {
+    pub revision: u64,
+    pub view_revision: u64,
+    pub nodes: Vec<UiNode>,
+}
+#[derive(Clone, Debug)]
 pub enum UiAction {
     SelectAgents {
         request_id: String,
@@ -457,7 +463,12 @@ pub enum UiAction {
         thread_id: String,
         generation: u64,
         revision: u64,
+        view_revision: u64,
         nodes: Vec<UiNode>,
+    },
+    ClearToolObservation {
+        thread_id: String,
+        generation: u64,
     },
     SubmittedCommand {
         submission: CommandSubmission,
@@ -677,6 +688,14 @@ pub struct DraftRecoveryTarget {
 }
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    CurrentView {
+        generation: u64,
+        details: ThreadDetails,
+        history: Box<UiUpdate>,
+        received: Option<Box<UiUpdate>>,
+        tool_facts: Option<ToolObservation>,
+        committed: Vec<(String, String)>,
+    },
     SendOperation {
         draft_id: String,
         revision: u64,
@@ -1745,12 +1764,29 @@ impl UiState {
                 self.details = Some(details);
             }
         }
+        if let Some(action) = self.active_view_mut().request_tool_refresh() {
+            self.deferred_actions.push(action);
+        }
         std::mem::take(&mut self.deferred_actions)
     }
     pub fn take_terminal_requests(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut self.terminal_requests)
     }
     pub fn apply(&mut self, update: UiUpdate) {
+        if let UiUpdate::CurrentView {
+            generation,
+            details,
+            history,
+            received,
+            tool_facts,
+            committed,
+        } = update
+        {
+            self.apply_current_view(
+                generation, details, *history, received, tool_facts, committed,
+            );
+            return;
+        }
         if let UiUpdate::DetailSourcesChanged {
             thread_id,
             generation,
@@ -1812,7 +1848,20 @@ impl UiState {
             return;
         }
 
-        let history_trace = match &update {
+        let history_trace = self.history_trace_before(&update);
+        let retains = update.needs_retention();
+        self.apply_inner(update);
+        self.record_history_trace(history_trace);
+        self.retention_pending |= retains;
+        if !self.batching_updates {
+            self.finish_retention();
+        }
+    }
+    fn history_trace_before(
+        &self,
+        update: &UiUpdate,
+    ) -> Option<(String, crate::diagnostics::UiHistoryTrace)> {
+        let (thread, generation, read_revision) = match update {
             UiUpdate::History {
                 thread_id,
                 generation,
@@ -1824,63 +1873,137 @@ impl UiState {
                 generation,
                 read_revision,
                 ..
-            } => self
+            } => (thread_id, *generation, *read_revision),
+            _ => return None,
+        };
+        let view = self
+            .views
+            .values()
+            .find(|view| view.matches(thread, generation))?;
+        Some((
+            thread.clone(),
+            crate::diagnostics::UiHistoryTrace {
+                reason: if read_revision < view.delivery_read_revision {
+                    crate::diagnostics::UiHistoryReason::StaleWindow
+                } else {
+                    crate::diagnostics::UiHistoryReason::WindowApplied
+                },
+                generation,
+                view_revision: view.view_revision,
+                read_revision,
+                before_nodes: view.nodes().len() as u64,
+                follow_before: view.follow,
+                ..Default::default()
+            },
+        ))
+    }
+    fn record_history_trace(&self, trace: Option<(String, crate::diagnostics::UiHistoryTrace)>) {
+        if let Some((thread, mut trace)) = trace
+            && let Some(view) = self
                 .views
                 .values()
-                .find(|v| v.matches(thread_id, *generation))
-                .map(|v| {
-                    (
-                        thread_id.clone(),
-                        *generation,
-                        *read_revision,
-                        v.view_revision,
-                        v.follow,
-                        v.nodes().len(),
-                        v.delivery_read_revision,
-                    )
-                }),
-            _ => None,
-        };
-        let retains = update.needs_retention();
-        self.apply_inner(update);
-        if let Some((
-            thread,
-            generation,
-            read_revision,
-            view_revision,
-            follow_before,
-            before_nodes,
-            previous_read,
-        )) = history_trace
-            && let Some(view) = self.views.values().find(|v| v.matches(&thread, generation))
+                .find(|view| view.matches(&thread, trace.generation))
             && let Some(diagnostics) = &self.diagnostics
         {
+            trace.after_nodes = view.nodes().len() as u64;
+            trace.follow_after = view.follow;
             diagnostics.record_ui_history(
-                crate::diagnostics::UiHistoryTrace {
-                    reason: if read_revision < previous_read {
-                        crate::diagnostics::UiHistoryReason::StaleWindow
-                    } else {
-                        crate::diagnostics::UiHistoryReason::WindowApplied
-                    },
-                    generation,
-                    view_revision,
-                    read_revision,
-                    before_nodes: before_nodes as u64,
-                    after_nodes: view.nodes().len() as u64,
-                    follow_before,
-                    follow_after: view.follow,
-                    ..Default::default()
-                },
+                trace,
                 crate::diagnostics::DiagnosticIds {
                     thread_id: Some(thread),
                     ..Default::default()
                 },
             );
         }
-        self.retention_pending |= retains;
+    }
+    fn apply_current_view(
+        &mut self,
+        generation: u64,
+        details: ThreadDetails,
+        history: UiUpdate,
+        received: Option<Box<UiUpdate>>,
+        tool_facts: Option<ToolObservation>,
+        committed: Vec<(String, String)>,
+    ) {
+        let thread = details.thread_id.clone();
+        let UiUpdate::History {
+            thread_id,
+            generation: child_generation,
+            read_revision,
+            selection_revision,
+            ..
+        } = &history
+        else {
+            return;
+        };
+        if thread_id != &thread || *child_generation != generation {
+            return;
+        }
+        let Some(view) = self
+            .views
+            .values()
+            .find(|view| view.matches(&thread, generation))
+        else {
+            return;
+        };
+        let history_trace = self.history_trace_before(&history);
+        if *read_revision < view.delivery_read_revision
+            || *selection_revision < view.selection_revision
+        {
+            if let Some(facts) = tool_facts
+                && let Some(view) = self.view_for(&thread, generation)
+                && view.tool_refresh == Some(facts.revision)
+            {
+                view.tool_refresh = None;
+                view.tool_refresh_dirty = true;
+            }
+            self.record_history_trace(history_trace);
+            return;
+        }
+        if let Some(received) = &received
+            && !matches!(received.as_ref(),UiUpdate::IncompleteResponses {thread_id,generation:g,selection_revision:s,view_revision,..}
+                if thread_id==&thread && *g==generation && s==selection_revision
+                && view_revision.is_none_or(|r|view.received_window_revision==Some(r)))
+        {
+            return;
+        }
+        if tool_facts
+            .as_ref()
+            .is_some_and(|facts| facts.nodes.len() > 128)
+        {
+            return;
+        }
+        let read_revision = *read_revision;
+        // Children have all been checked before any mutation. Retain paid stream
+        // bindings before the canonical page and trim once after the whole frame.
+        self.apply_inner(UiUpdate::Thread {
+            generation,
+            details,
+            draft: None,
+        });
+        for (attempt_id, node_id) in committed {
+            self.apply_inner(UiUpdate::StreamCommitted {
+                thread_id: thread.clone(),
+                generation,
+                attempt_id,
+                node_id,
+            });
+        }
+        self.apply_inner(history);
+        if let Some(received) = received {
+            self.apply_inner(*received);
+        }
+        if let Some(observation) = tool_facts
+            && let Some(view) = self.view_for(&thread, generation)
+        {
+            view.apply_tool_observation(observation, read_revision);
+        }
+        self.record_history_trace(history_trace);
+        self.retention_pending = true;
         if !self.batching_updates {
             self.finish_retention();
         }
+        self.dirty = true;
     }
     fn apply_inner(&mut self, update: UiUpdate) {
         if matches!(update, UiUpdate::RecoveryBell) {
@@ -2107,6 +2230,7 @@ impl UiState {
                 result,
             } => self.apply_thread_deletion(request_id, args, execute, result),
             UiUpdate::SavedMessage { .. } => unreachable!("handled as atomic saved projection"),
+            UiUpdate::CurrentView { .. } => unreachable!("handled as atomic current view"),
             UiUpdate::RecoveryBell => unreachable!("handled before selected-view updates"),
             UiUpdate::ScopedManagement { .. } => {
                 unreachable!("scoped result handled before normal updates")
@@ -2303,7 +2427,6 @@ impl UiState {
                 total_nodes,
             } => {
                 self.bind_saved_history(&thread_id, generation, &pending);
-                let is_active = self.view().thread_id.as_deref() == Some(&thread_id);
                 let Some(view) = self.view_for(&thread_id, generation) else {
                     return;
                 };
@@ -2323,12 +2446,6 @@ impl UiState {
                 view.delivery_read_revision = read_revision;
                 view.pending_messages = pending;
                 view.reconcile_saved_inputs();
-                if !view.follow && is_active {
-                    view.tool_refresh_dirty = true;
-                    if let Some(action) = view.request_tool_refresh() {
-                        self.deferred_actions.push(action);
-                    }
-                }
             }
             UiUpdate::StreamCommitted {
                 thread_id,
@@ -3194,6 +3311,9 @@ impl UiState {
         self.invalidate_management();
         self.models = None;
         self.cancel_input_recall();
+        if let Some(action) = self.active_view_mut().clear_tool_observation() {
+            self.deferred_actions.push(action);
+        }
         self.active_view_mut().cancel_navigation();
         if let Some(key) = thread_id
             .strip_prefix("draft:")
@@ -3264,6 +3384,9 @@ impl UiState {
         self.invalidate_management();
         self.models = None;
         self.cancel_input_recall();
+        if let Some(action) = self.active_view_mut().clear_tool_observation() {
+            self.deferred_actions.push(action);
+        }
         self.active_view_mut().cancel_navigation();
         let mut actions = self.persist_active();
         let mut view = ThreadView::new(&self.config, self.startup_cwd.clone());
@@ -6394,6 +6517,233 @@ mod tool_refresh_tests {
             total_nodes: 60,
         });
     }
+    fn details() -> ThreadDetails {
+        ThreadDetails {
+            thread_id: "t".into(),
+            title: "paired header".into(),
+            cwd: "/".into(),
+            agents_path: "/AGENTS.md".into(),
+            connection: "p".into(),
+            model: "m".into(),
+            effort: None,
+            parent_id: None,
+            run_id: None,
+            turn_id: None,
+            children_count: 0,
+            shells_count: 0,
+            recovery_reason: None,
+            context: None,
+            context_usage: None,
+            usage_totals: None,
+        }
+    }
+    fn frame(ui: &UiState, read_revision: u64, facts: Option<ToolObservation>) -> UiUpdate {
+        UiUpdate::CurrentView {
+            generation: ui.view().generation,
+            details: details(),
+            history: Box::new(UiUpdate::History {
+                thread_id: "t".into(),
+                generation: ui.view().generation,
+                nodes: vec![],
+                pending: Default::default(),
+                read_revision,
+                before_cursor: None,
+                append: false,
+                first_ordinal: 50,
+                selection_revision: 0,
+                total_nodes: 60,
+            }),
+            received: None,
+            tool_facts: facts,
+            committed: vec![],
+        }
+    }
+    fn paused() -> UiState {
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        ui.select_thread("t".into());
+        *ui.view_mut().nodes_mut_for_test() = vec![tool("running_current")];
+        ui.view_mut().follow = false;
+        ui.view_mut().anchor = ViewAnchor {
+            node_id: Some("call-node".into()),
+            char_offset: 505,
+        };
+        ui
+    }
+    fn observation(ui: &mut UiState) -> ToolObservation {
+        let actions = ui.take_deferred_actions();
+        let [
+            UiAction::RefreshTools {
+                revision,
+                view_revision,
+                nodes,
+                ..
+            },
+        ] = actions.as_slice()
+        else {
+            panic!("{actions:?}")
+        };
+        ToolObservation {
+            revision: *revision,
+            view_revision: *view_revision,
+            nodes: nodes.clone(),
+        }
+    }
+    #[test]
+    fn paired_paused_facts_converge_without_secondary_read_and_keep_source_window() {
+        let mut ui = paused();
+        let mut observed = observation(&mut ui);
+        observed.nodes = vec![tool("exited")];
+        let anchor = ui.view().anchor.clone();
+        let original = ui.view().nodes()[0].clone();
+        ui.apply(frame(&ui, 10, Some(observed.clone())));
+        assert_eq!(ui.view().title, "paired header");
+        assert_eq!(ui.view().nodes()[0].text, original.text);
+        assert_eq!(ui.view().nodes()[0].base_char_offset, 500);
+        assert_eq!(
+            ui.view().nodes()[0].presentation.blocks[0].source_start,
+            500
+        );
+        assert_eq!(ui.view().anchor, anchor);
+        assert_eq!(
+            ui.view().nodes()[0].presentation.blocks[0]
+                .tool
+                .as_ref()
+                .unwrap()
+                .current_state
+                .as_deref(),
+            Some("exited")
+        );
+        assert!(ui.view().tool_refresh.is_none());
+        for _ in 0..5 {
+            assert!(ui.take_deferred_actions().is_empty());
+            ui.apply(frame(&ui, 10, Some(observed.clone())));
+        }
+        assert!(ui.take_deferred_actions().is_empty());
+    }
+    #[tokio::test]
+    async fn paired_history_preserves_shrink_and_stale_diagnostics_with_one_retention_pass() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            root.path().into(),
+            crate::config::Logging::default(),
+        );
+        let mut ui = paused();
+        ui.view_mut().follow = true;
+        ui.set_diagnostics(diagnostics.clone());
+        let before = ui.retention_passes;
+        ui.apply(frame(&ui, 10, None));
+        assert!(ui.view().nodes().is_empty());
+        assert_eq!(ui.retention_passes, before + 1);
+        ui.apply(frame(&ui, 9, None));
+        assert_eq!(
+            ui.retention_passes,
+            before + 1,
+            "stale frame performs no retention"
+        );
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let records = body
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|record| record["event"] == "ui_history")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            records.len(),
+            2,
+            "one shrink and one stale observation: {body}"
+        );
+        assert_eq!(records[0]["ui_history"]["reason"], "window_applied");
+        assert_eq!(records[0]["ui_history"]["before_nodes"], 1);
+        assert_eq!(records[0]["ui_history"]["after_nodes"], 0);
+        assert_eq!(records[0]["ids"]["thread_id"], "t");
+        assert_eq!(records[1]["ui_history"]["reason"], "stale_window");
+        assert_eq!(records[1]["ui_history"]["read_revision"], 9);
+        assert!(
+            !body.contains("sleep 30"),
+            "source content must never enter history traces"
+        );
+    }
+    #[test]
+    fn paired_history_keeps_saved_sender_projection_with_header_update() {
+        let mut ui = paused();
+        let mut user = UiNode {
+            node_id: "saved-user".into(),
+            role: "user".into(),
+            text: "saved request".into(),
+            total_chars: 13,
+            ..Default::default()
+        };
+        user.presentation.kind = crate::presentation::PresentationKind::User;
+        user.presentation.input_source = crate::presentation::InputSource::OtherModel;
+        user.presentation.created_at = Some("2026-10-31T00:00:00Z".into());
+        user.presentation.read_revision = 12;
+        ui.view_mut().follow = true;
+        let mut update = frame(&ui, 12, None);
+        if let UiUpdate::CurrentView { history, .. } = &mut update
+            && let UiUpdate::History { nodes, .. } = history.as_mut()
+        {
+            *nodes = vec![user];
+        }
+        ui.apply(update);
+        assert_eq!(ui.view().title, "paired header");
+        let saved = &ui.view().nodes()[0];
+        assert_eq!(
+            saved.presentation.input_source,
+            crate::presentation::InputSource::OtherModel
+        );
+        assert_eq!(
+            saved.presentation.created_at.as_deref(),
+            Some("2026-10-31T00:00:00Z")
+        );
+        assert_eq!(saved.text, "saved request");
+    }
+    #[test]
+    fn stale_frame_retires_read_slot_and_cannot_regress_header_or_facts() {
+        let mut ui = paused();
+        let observed = observation(&mut ui);
+        ui.view_mut().delivery_read_revision = 20;
+        let title = ui.view().title.clone();
+        ui.apply(frame(&ui, 10, Some(observed)));
+        assert_eq!(ui.view().title, title);
+        assert!(ui.view().tool_refresh.is_none());
+        let next = observation(&mut ui);
+        assert!(next.revision > 1);
+        ui.apply(frame(&ui, 21, Some(next)));
+        assert!(ui.take_deferred_actions().is_empty());
+    }
+    #[test]
+    fn malformed_paired_child_does_not_partially_apply_header_or_history() {
+        let mut ui = paused();
+        let mut update = frame(&ui, 10, None);
+        if let UiUpdate::CurrentView { received, .. } = &mut update {
+            *received = Some(Box::new(UiUpdate::Status {
+                thread_id: None,
+                text: "wrong child".into(),
+            }));
+        }
+        let title = ui.view().title.clone();
+        ui.apply(update);
+        assert_eq!(ui.view().title, title);
+        assert_eq!(ui.view().delivery_read_revision, 0);
+    }
+    #[test]
+    fn follow_and_thread_switch_clear_saved_observation_once() {
+        let mut ui = paused();
+        let _ = observation(&mut ui);
+        ui.view_mut().follow = true;
+        assert!(
+            matches!(ui.take_deferred_actions().as_slice(),[UiAction::ClearToolObservation {thread_id,..}] if thread_id=="t")
+        );
+        assert!(ui.take_deferred_actions().is_empty());
+        ui.view_mut().follow = false;
+        let _ = observation(&mut ui);
+        ui.select_thread("other".into());
+        assert!(
+            matches!(ui.take_deferred_actions().as_slice(),[UiAction::ClearToolObservation {thread_id,..}] if thread_id=="t")
+        );
+        assert!(ui.take_deferred_actions().is_empty());
+    }
+
     #[test]
     fn pinned_tool_changes_only_metadata_and_refresh_requests_coalesce_without_source_loss() {
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
@@ -6437,6 +6787,8 @@ mod tool_refresh_tests {
         assert!(nodes[0].text.is_empty());
         assert!(nodes[0].presentation.fields.is_empty());
         history(&mut ui, vec![]);
+        assert!(ui.take_deferred_actions().is_empty());
+        ui.view_mut().view_revision += 1;
         assert!(ui.take_deferred_actions().is_empty());
         ui.apply(UiUpdate::ToolFacts {
             thread_id: "t".into(),

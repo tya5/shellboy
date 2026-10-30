@@ -404,3 +404,21 @@ them to ordinary bands is optional and is not required to change the existing
 band classification. The explicit initial user-source provenance read remains
 separate from notification-driven mutable-source refresh, without a new worker
 or Core sender inference.
+
+
+### D0 combined current-view read
+
+The existing refresh task collects receipt states and the visible Thread/page,
+paired pending input, sender/tool/recovery/usage facts, received audits and activity
+inside one short DB-worker transaction. SQL-only helpers return owned raw data;
+JSON/rendering/sanitization and clocks are prepared on the existing presentation
+worker after releasing that transaction. The page's paired read revision identifies
+the entire transaction snapshot. Failed raw tails reuse validated source/execution
+facts from this read and use the existing finite read-only output path, not another
+DB-worker correlation lookup. Closed successful output still performs no raw read.
+
+Domain view failures do not erase separately observed receipt states. Generation,
+selection/read revisions, paid stream-commit mappings and existing source-window
+acceptance remain authoritative. Current-view coalescing and paused-source feedback
+must be integrated before the one-job target is claimed or this D0 unit admitted.
+There is no new queue, worker, table or protocol operation.

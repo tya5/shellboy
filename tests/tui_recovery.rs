@@ -507,17 +507,17 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
             thread_id: thread.clone(),
             generation: ui.view().generation,
             revision: u64::MAX,
+            view_revision: ui.view().view_revision,
             nodes: early_nodes,
         }],
     );
     let early_enriched = timeout(Duration::from_secs(15), async {
         loop {
             match incoming.try_recv() {
-                Ok(UiUpdate::ToolFacts {
-                    revision: u64::MAX,
-                    result,
+                Ok(UiUpdate::CurrentView {
+                    tool_facts: Some(scope),
                     ..
-                }) => break result.unwrap(),
+                }) if scope.revision == u64::MAX => break scope.nodes,
                 Ok(update) => {
                     ui.apply(update);
                     deliver(&sender, ui.take_deferred_actions());
@@ -531,6 +531,15 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     })
     .await
     .unwrap();
+    // The controlled observation is a retained scope now, not a one-shot job.
+    // Clear this deliberately artificial maximum revision before UI observations resume.
+    deliver(
+        &sender,
+        vec![UiAction::ClearToolObservation {
+            thread_id: thread.clone(),
+            generation: ui.view().generation,
+        }],
+    );
     let early_facts = early_enriched
         .iter()
         .flat_map(|node| &node.presentation.blocks)

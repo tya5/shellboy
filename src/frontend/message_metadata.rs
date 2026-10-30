@@ -32,7 +32,6 @@ pub(super) struct SourceFacts {
 
 impl SourceFacts {
     /// Merge bounded sets captured in the same current-view transaction.
-    #[cfg(test)]
     pub(super) fn append(&mut self, other: Self) -> Result<(), StorageError> {
         if self.viewed != other.viewed || self.parent != other.parent {
             return Err(ApiError::new(
