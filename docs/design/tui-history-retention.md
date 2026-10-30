@@ -29,6 +29,12 @@ source window using the same existing read counter, and compare against that
 node's accepted source-window stamp. Do not advance queue read_revision from a
 node-only reply. Retain generation, navigation and membership validation.
 
+Saved audit previews with a still-visible canonical predecessor remain at that
+predecessor across window replacement while the separate audit projection is in
+flight. An accepted fresh audit snapshot may replace/remove them. Older-window
+snapshots remain fenced and cannot erase retained text. If the predecessor leaves
+the displayed canonical window, do not append its audit preview to another Turn.
+
 ## Finite working set and hydration
 
 Protect the last actually painted viewport IDs, capped by the existing128-node
@@ -44,7 +50,17 @@ distinguish evicted content from legitimately empty tool/event nodes. They are
 not serialized, persisted or included in semantic projection identity. Eviction
 releases payload while preserving the scalar source identity/order and eviction
 fact. Every evicted kind can request the existing bounded source reader; no
-Prose/Reasoning-only test may prevent hydration. Loading/unavailable content has
+Prose/Reasoning-only test may prevent hydration. An offscreen committed stream
+preview is different: its attempt ID is not a history node. Under pressure,
+discard that complete UI preview/binding only when outside the protected set;
+its saved canonical source remains reachable through normal ordered history.
+Never leave an evicted attempt-ID stub that asks the history reader for a
+nonexistent node. Protect the active uncommitted stream (at most one after the
+existing settle_other_streams boundary) until a saved source exists. Do not pin
+all committed previews or an entire Turn. If both canonical window edges are
+protected, stop metadata edge trimming until the next paint replaces the lease;
+do not remove a protected endpoint to force a cache accounting target.
+Loading/unavailable content has
 an explicit placeholder, rather than an empty successful row. Existing finite
 in-flight request limits still apply. A failed read does not erase a known body.
 
@@ -63,3 +79,13 @@ hydration, tiny shared budgets across multiple Threads, visible tool/event/prose
 retention and offscreen reload. Synthetic long history and loopback streams must
 retain current-Turn content between requests; paused/explicit navigation remains
 stable. Record native PTY observation separately from TestBackend checks.
+
+## Commit-to-refresh edge
+
+The native PTY gap test exposed a missing causal edge: shell collection publishes
+Changed before save_tool_result appends its node. A frontend read can finish in
+between, leaving the result invisible until a later model response. Publish the
+existing coalesced Thread Changed after the result transaction succeeds; never
+on rollback. This uses existing Control notification ownership, not a new event,
+poller, queue or lifecycle. Test a paused next HTTP response before its first
+byte, and verify the newly committed result is already visible.

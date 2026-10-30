@@ -1381,3 +1381,58 @@ header deadline, actual backpressure, partial consumption and exact attempt-coun
 assertions. Retain the failure and require fresh native Windows qualification.
 The reviewer-run unchanged-main second attempt succeeding is independent evidence,
 not proof of the cause of either failed attempt.
+
+
+## Finite visible history retention (#58, 2026-10-30)
+
+Retain actual painted node identities, capped by the existing128-node projection,
+plus the current finite source neighborhood. Do not pin every node of a Turn.
+An existing global body budget applies across views; zero budget still exempts
+this finite active working set. If a transient lease and current neighborhood
+protect both window endpoints, preserve them rather than trimming a protected
+edge; the next paint replaces the lease. No sparse ordinal cache is introduced.
+
+NodePresentation carries two nonserialized scalar facts: eviction and the existing
+serialized-DB read order. This avoids adding fields to every UiNode constructor
+or introducing an ID-indexed request engine. Semantic projection hashes exclude
+those cache facts. Per-node hydration order is independent of queue age; a stale
+matching navigation response is retried, not allowed to overwrite newer output.
+Rejected rebase snapshots retain ownership/pending wheel movement and use the
+existing rebase action again, avoiding a permanently true rebase-pending flag.
+
+An offscreen committed preview is evicted as a whole when pressure requires it:
+its attempt ID cannot be fetched by history.get, but its saved canonical node
+remains in the original DAG. Never keep a blank attempt-ID stub and ask the DB
+for that nonexistent source. Keep visible previews and the active uncommitted
+stream until a saved source exists. This avoids an unbounded all-preview exemption.
+Revisit if a concrete case creates more than one uncommitted current stream after
+the existing settle-other-streams boundary, or if measured metadata pressure
+requires a separate bounded lease snapshot; do not assume all prior paid text
+must remain resident forever.
+
+Audit received_response previews retain their applied-window/anchor scope and
+remain visible when the same saved predecessor is still in a new history window.
+Do not clear them merely while the separate audit read is in flight; a fresh
+accepted audit snapshot decides membership. Old-revision audit replies still
+cannot update metadata or remove retained text. Anchors outside the new window
+are not appended to an unrelated tail, and audit positions never become canonical
+ordinals. Current paid streaming text and committed preview bindings survive
+background rebases until actual canonical body adoption.
+Only move cached transient-failure preview blocks when adopting the replacement;
+a discarded or rebase-pending response must not consume the retained frame.
+
+Diagnostics reuse the current best-effort nonblocking writer. Fixed enums,
+counts/booleans and source owner IDs describe follow/window/eviction boundaries;
+body/title/command/path/provider text are not accepted by the trace type.
+
+
+## Tool result visibility before the next response (#58)
+
+The80-column native PTY candidate showed an exited shell result absent35seconds
+while request2 was held before its first response byte. DB ordinal10 existed but
+the last UI page contained10 nodes;140columns sometimes passed. Source tracing
+shows shell collection emits Changed before save_tool_result commits its new
+canonical node, which emitted no later notification. Frontend dirty/refresh
+coalescing retains later Changed correctly. Add that missing postcommit Changed,
+not periodic history reloads or a new event. Require deterministic commit/rollback
+notification tests and repeat both native PTY widths against the final binary.

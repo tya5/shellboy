@@ -409,3 +409,11 @@ Turn stays active until adopted tool/result pairs are complete, then ends throug
 normal next() completion with owned background work preserved. One existing
 context_changed marker describes interruption and bounded carried provenance
 before new input. No independent job engine, poller, worker or queue is added.
+
+### Tool-result publication (#58)
+
+Publish the existing coalesced Thread Changed only after a tool-result node,
+its tool_result relation and call completion transaction commit successfully.
+The earlier shell-collection notification cannot substitute for this edge:
+a concurrent frontend read may occur before the canonical result exists. No
+rollback publishes this notification, and no new business event/state is added.
