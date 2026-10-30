@@ -1479,3 +1479,15 @@ Defer OS sandbox command/profile examples until each platform is actually tested
 list tools only and note owner-mediated access. WezTerm Shift+click is a reported
 macOS observation from issue61, not new developer/other-terminal qualification.
 Only documentation changes; no new runtime policy, schema, worker or dependency.
+
+
+## #41 repeated quiet observations (2026-10-30)
+
+The large coalesced-event wheel regression exposed an information hierarchy bug:
+limiting source references by splitting every two event nodes produced hundreds
+of identical quiet rows. Group at most two distinct concrete facts instead,
+with exact repetition counts inside the finite loaded projection and latest
+representative source references. Preserve the full canonical frontier and all
+immutable original records; F6 DAG navigation reaches individual observations.
+Counts are displayed-window facts, not invented whole-Thread totals. Model text,
+received paid previews and actionable failures are not quiet observations.

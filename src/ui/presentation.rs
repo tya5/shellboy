@@ -1763,26 +1763,45 @@ fn quiet_section_tails(
         sources: &mut Vec<RowSource>,
         width: u16,
     ) {
-        let indices = pending.iter().copied().collect::<Vec<_>>();
-        for group in indices.chunks(2) {
-            let first = group[0];
-            let mut facts = Vec::new();
-            let mut ids = Vec::new();
-            for index in group {
-                let node = &view.nodes()[*index];
-                let fact = crate::presentation::sanitize_plain(label(node), 0).0;
-                if !facts.contains(&fact) {
-                    facts.push(fact);
-                }
-                ids.push(node.node_id.clone());
+        // One concrete observation may occur many times inside the bounded
+        // projection. Coalesce the fact, not every two underlying records.
+        let mut facts: Vec<(String, usize, usize)> = Vec::new();
+        for index in pending.iter().copied() {
+            let fact = crate::presentation::sanitize_plain(label(&view.nodes()[index]), 0).0;
+            if let Some((_, count, latest)) = facts.iter_mut().find(|(saved, _, _)| saved == &fact)
+            {
+                *count += 1;
+                *latest = index;
+            } else {
+                facts.push((fact, 1, index));
             }
+        }
+        let Some(last_pending) = pending.last().copied() else {
+            return;
+        };
+        for (group_index, group) in facts.chunks(2).enumerate() {
+            let first = group[0].2;
             let fallback = &view.nodes()[first];
             let anchor = sources.last().cloned().unwrap_or(RowSource {
-                node: first,
-                covered_end: first + 1,
+                node: pending.first().copied().unwrap(),
+                covered_end: pending.first().copied().unwrap() + 1,
                 offset: fallback.base_char_offset,
                 item: None,
             });
+            let ids = group
+                .iter()
+                .map(|(_, _, latest)| view.nodes()[*latest].node_id.clone())
+                .collect();
+            let labels = group
+                .iter()
+                .map(|(fact, count, _)| {
+                    if *count > 1 {
+                        format!("{fact} ×{count}")
+                    } else {
+                        fact.clone()
+                    }
+                })
+                .collect::<Vec<_>>();
             let region = Arc::new(ItemRegion {
                 key: ItemKey::Node(fallback.node_id.clone()),
                 source_node_ids: ids,
@@ -1792,10 +1811,16 @@ fn quiet_section_tails(
                 default_open: true,
                 outcome: String::new(),
             });
-            let covered_end = anchor.covered_end.max(group.last().copied().unwrap() + 1);
+            let covered_end = anchor
+                .covered_end
+                .max(if (group_index + 1) * 2 >= facts.len() {
+                    last_pending + 1
+                } else {
+                    group.iter().map(|(_, _, latest)| latest + 1).max().unwrap()
+                });
             for line in hanging_wrap(
                 vec![Line::from(Span::styled(
-                    format!("· {}", facts.join(" · ")),
+                    format!("· {}", labels.join(" · ")),
                     Style::default().fg(view.palette.muted()),
                 ))],
                 width.max(1),
@@ -3650,6 +3675,58 @@ mod conversation_item_tests {
         assert!(!shown.contains("CANONICAL_OUTPUT"));
         assert_eq!(shown.matches("printf synthetic").count(), 1);
         assert!(view.items.is_open(&key, false, &outcome));
+    }
+    #[test]
+    fn repeated_quiet_facts_coalesce_with_counts_and_latest_references_without_losing_answers() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut first = node("first", "FIRST USER", vec![]);
+        first.role = "user".into();
+        first.presentation.kind = PresentationKind::User;
+        let mut nodes = vec![first];
+        for index in 1..=120 {
+            let mut quiet = node(&format!("event-{index}"), "saved observation", vec![]);
+            quiet.role = "event".into();
+            quiet.presentation.kind = PresentationKind::Event;
+            quiet.presentation.title = if index % 2 == 0 {
+                "AGENTS.md none"
+            } else {
+                "index not configured"
+            }
+            .into();
+            nodes.push(quiet);
+        }
+        nodes.push(node("answer", "FINAL ANSWER", vec![]));
+        *view.nodes_mut_for_test() = nodes;
+        let (lines, _, sources) = history(&view, 100);
+        let shown = plain(&lines);
+        assert!(shown.contains("FIRST USER") && shown.contains("FINAL ANSWER"));
+        assert!(shown.contains("AGENTS.md none ×60") && shown.contains("index not configured ×60"));
+        let groups = sources
+            .iter()
+            .filter_map(|source| source.item.as_ref())
+            .filter(|item| item.primary_node_id.starts_with("event-"))
+            .map(|item| item.key.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            groups.len(),
+            1,
+            "two repeated facts produce one compact group, not sixty groups"
+        );
+        let group = sources
+            .iter()
+            .filter_map(|source| source.item.as_ref())
+            .find(|item| item.primary_node_id.starts_with("event-"))
+            .unwrap();
+        assert_eq!(group.source_node_ids, ["event-119", "event-120"]);
+        assert_eq!(group.source_node_ids.len(), 2);
+        assert_eq!(sources.first().unwrap().node, 0);
+        assert_eq!(sources.last().unwrap().covered_end, 122);
+        assert_eq!(
+            view.nodes().len(),
+            122,
+            "all immutable source records remain available through originals"
+        );
+        assert!(!shown.contains("状態変更") && !shown.contains("通常通知"));
     }
     #[test]
     fn repeated_call_ids_in_other_groups_are_not_collapsed_together() {
