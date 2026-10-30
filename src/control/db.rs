@@ -2290,7 +2290,8 @@ mod agents_reference_tests {
         let thread = first["thread_id"].as_str().unwrap();
         let expected = root
             .path()
-            .join("project/role.md")
+            .join("project")
+            .join("role.md")
             .to_str()
             .unwrap()
             .to_owned();

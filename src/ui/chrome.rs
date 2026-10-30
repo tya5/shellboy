@@ -160,14 +160,16 @@ mod tests {
         let mut config = Config::default();
         config.ui.send_key = "Ctrl+Enter".into();
         config.ui.newline_keys = vec!["Enter".into()];
-        let mut ui = UiState::new(&config, PathBuf::from("/synthetic/missing-workspace"));
+        let cwd = PathBuf::from("/synthetic/missing-workspace");
+        let expected_agents = format!("AGENTS: {}", cwd.join("AGENTS.md").display());
+        let mut ui = UiState::new(&config, cwd);
         let shown = frame_text(&mut ui, 100, 24);
         for expected in [
             "依頼を入力",
             "送信: Ctrl+Enter",
             "改行: Enter",
             "/synthetic/missing-workspace",
-            "AGENTS: /synthetic/missing-workspace/AGENTS.md",
+            expected_agents.as_str(),
         ] {
             assert!(shown.contains(expected), "{expected}: {shown}");
         }
