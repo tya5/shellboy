@@ -51,6 +51,9 @@ pub(super) fn read_tx(
     db: &rusqlite::Connection,
     requests: &[(usize, String)],
 ) -> Result<Vec<Observation>, crate::storage::StorageError> {
+    if requests.is_empty() {
+        return Ok(Vec::new());
+    }
     let ids = serde_json::to_string(&requests.iter().map(|(_, id)| id).collect::<Vec<_>>())
         .expect("string IDs serialize");
     let sql = SOURCE.replace(
