@@ -1,14 +1,26 @@
 # Validation record
 
-## Pending Messages And Human Turn Interruption (#52, Local)
+## Pending Messages And Human Turn Interruption (#52)
 
 The unchanged product/test tree committed as `74592a9` / `47e6751` passes
 `CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
 on macOS arm64 / pinned Rust1.99.1: layout88, Python6, format, strict all-target
 Clippy and Rust **1,571 passed / 0 failed / 29 ignored** (lib700, aggregated
 integration861, isolated signal7 and child3). Logs are private under .local.
-This is not a Windows/Linux result for #52; a manual native Windows CI run must
-succeed before main admission, followed by exact-source main CI.
+That local check is not a Windows/Linux result. The branch then merged main
+`b686ec1` as `33936cf5d6f074d01adb44028e6a58e2e31af7a6`; the merge changed only
+non-embedded development/validation records, leaving the checked product, tests,
+embedded guides and workflow identical.
+
+Before main admission, the required manually dispatched Windows-only CI
+[41015832578](https://github.com/tya5/shellboy/actions/runs/41015832578) passed on
+that exact33936cf source: **1,456 passed / 0 failed / 21 ignored**, four test
+threads. Downloaded timing artifacts identify the same source SHA and successful
+native harnesses. All six new Turn-interruption/quiet-delivery integration cases
+and the three native-gate/binding cases ran and passed; they were not skipped.
+Formatting, strict Clippy, layout and Python runner gates also passed. The next
+main push still requires its own three-OS CI; this manual Windows run does not
+establish Linux success or physical terminal UX.
 
 Temporary stores, synthetic files and loopback HTTP exercise typed cancel
 outcomes/authority/replay/rollback, explicit now versus ordinary quiet delivery,
@@ -34,8 +46,8 @@ and ordinary queued input allowing both serial calls to finish with exactly two
 model attempts. The owned-child liveness record is explicitly synthetic; no new
 native child process is claimed by that scenario. Native gate and binding tests
 fence both Turn replacement and driver publication, including a reserved call
-whose OS side effect must not occur. Their Windows command variants await the
-required native Windows CI; macOS success does not substitute for it.
+whose OS side effect must not occur. Their Windows command variants pass the required native Windows CI recorded
+above; physical Windows terminal interaction remains untested.
 
 Candidate checks exposed typed ACK/internal-assignment projection mismatches,
 validation-order regressions, an absent-owner compaction fence and stale legacy

@@ -18,11 +18,14 @@ send correlation, explicit immediate delivery and human-only Turn interruption
 are implemented. An additional compaction fix preserves absent owner fences
 without invalidating ordinary queued input or adding a counter.
 
-The new source is still on the separate issue52 branch. Manual native Windows
-CI is REQUIRED BEFORE main admission and is not yet verified at this checkpoint.
-Fetch latest main, retain source separation, scan secrets and publish the branch
-for that manual check; only then admit/push it to main. Main CI remains a further
-exact-source check. No #52 release or installed-binary update is claimed.
+The separate issue52 branch at `33936cf` passes the required manual native
+Windows qualification [41015832578](https://github.com/tya5/shellboy/actions/runs/41015832578):
+1,456 passed / 0 failed / 21 ignored, four test threads, artifact source SHA
+verified. All six new real HTTP/shell Turn-interruption/quiet-delivery scenarios
+and three native-gate/binding tests ran successfully on Windows. Final independent
+backend, UI and Core/native reviews found no concrete blocker. Main admission is
+now authorized and qualified; the subsequent main three-OS CI remains a separate
+exact-source gate. No #52 release or installed-binary update is claimed.
 
 #42/#43/#55 remain published on main343c2d6, with successful exact-SHA CI
 41001556952 and review-result comments; all three are closed. Those results do
