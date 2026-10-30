@@ -44,11 +44,13 @@ pub struct ItemRegion {
 pub struct Preview {
     pub blocks: Vec<PresentationBlock>,
     pub notice: Option<String>,
+    pub refresh_error: Option<String>,
 }
 impl Preview {
     fn bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.notice.as_ref().map_or(0, String::capacity)
+            + self.refresh_error.as_ref().map_or(0, String::capacity)
             + self.blocks.capacity() * std::mem::size_of::<PresentationBlock>()
             + self
                 .blocks
@@ -174,8 +176,16 @@ impl ItemState {
         let open = !self.is_open(&key, default_open, outcome);
         let entry = self.touch(&key, outcome);
         entry.explicit = Some(open);
-        if open && entry.preview_status == PreviewStatus::Failed {
+        if open
+            && matches!(
+                entry.preview_status,
+                PreviewStatus::Ready | PreviewStatus::Failed
+            )
+        {
+            // Explicit close/reopen is the advertised snapshot refresh action.
+            // It must not silently reuse an old timestamped read indefinitely.
             entry.preview_status = PreviewStatus::Absent;
+            entry.hydration_attempted_visible = false;
         }
         self.focus = Some(key);
         self.revision = self.revision.wrapping_add(1);
@@ -188,6 +198,9 @@ impl ItemState {
         let entry = self.entries.get_mut(key).expect("touched item");
         entry.request_revision = request;
         entry.preview_status = PreviewStatus::Loading;
+        if let Some(preview) = &mut entry.preview {
+            preview.refresh_error = None;
+        }
         entry.hydration_attempted_visible = true;
         self.revision = self.revision.wrapping_add(1);
         request
@@ -319,7 +332,7 @@ impl ItemState {
         self.clock = self.clock.wrapping_add(1);
         let entry = self.entries.get_mut(key).expect("validated request");
         let mut preview = entry.preview.take().unwrap_or_default();
-        preview.notice = Some(message);
+        preview.refresh_error = Some(message);
         if preview.bytes() > budget {
             preview.blocks = Vec::new();
         }
@@ -391,6 +404,47 @@ mod tests {
         assert!(!state.accept_preview(&key, new, Preview::default(), 1024));
     }
     #[test]
+    fn explicitly_reopening_ready_snapshot_requests_a_new_read_and_retires_old_reply() {
+        let mut state = ItemState::default();
+        let key = ItemKey::Node("snapshot".into());
+        assert!(state.toggle(key.clone(), false, "done"));
+        let old = state.request(&key, "done");
+        assert!(state.accept_preview(
+            &key,
+            old,
+            Preview {
+                notice: Some("old read time".into()),
+                ..Default::default()
+            },
+            4096
+        ));
+        assert!(!state.toggle(key.clone(), false, "done"));
+        assert!(
+            state.preview(&key).is_some(),
+            "closing may retain a reclaimable snapshot"
+        );
+        assert!(state.toggle(key.clone(), false, "done"));
+        assert!(state.preview(&key).is_some());
+        assert!(state.needs_preview(&key, "done"));
+        let new = state.request(&key, "done");
+        assert!(new > old);
+        assert!(!state.accept_preview(&key, old, Preview::default(), 4096));
+        assert!(state.accept_preview(
+            &key,
+            new,
+            Preview {
+                notice: Some("new read time".into()),
+                ..Default::default()
+            },
+            4096
+        ));
+        assert_eq!(
+            state.preview(&key).unwrap().notice.as_deref(),
+            Some("new read time")
+        );
+    }
+
+    #[test]
     fn preview_eviction_invalidates_item_cache_and_clear_keeps_tokens_monotonic() {
         let mut state = ItemState::default();
         let key = ItemKey::Node("source".into());
@@ -416,6 +470,7 @@ mod tests {
                 ..Default::default()
             }],
             notice: None,
+            refresh_error: None,
         };
         let first = ItemKey::Node("0".into());
         let mut first_token = 0;
@@ -518,14 +573,27 @@ mod tests {
                 text: "KNOWN_PAID_OUTPUT".into(),
                 ..Default::default()
             }],
-            notice: None,
+            notice: Some("取得 OLD UTC · 閉じて開くと再取得".into()),
+            refresh_error: None,
         };
         assert!(state.accept_preview(&key, first, preview, 4096));
+        assert!(!state.toggle(key.clone(), false, "done"));
+        state.cancel_request(&key);
+        assert!(state.toggle(key.clone(), false, "done"));
+        assert!(state.needs_preview(&key, "done"));
+        assert_eq!(
+            state.preview_for(&key, "done").unwrap().blocks[0].text,
+            "KNOWN_PAID_OUTPUT"
+        );
         let repeat = state.request(&key, "done");
         assert!(state.accept_failed_preview(&key, repeat, "read failed".into(), 4096));
         let kept = state.preview_for(&key, "done").unwrap();
         assert_eq!(kept.blocks[0].text, "KNOWN_PAID_OUTPUT");
-        assert_eq!(kept.notice.as_deref(), Some("read failed"));
+        assert_eq!(
+            kept.notice.as_deref(),
+            Some("取得 OLD UTC · 閉じて開くと再取得")
+        );
+        assert_eq!(kept.refresh_error.as_deref(), Some("read failed"));
     }
     #[test]
     fn visible_cache_pressure_does_not_repeat_hydration_until_reentry_or_manual_reopen() {
@@ -543,6 +611,7 @@ mod tests {
                 ..Default::default()
             }],
             notice: None,
+            refresh_error: None,
         };
         let mut reads = 0;
         for _ in 0..100 {

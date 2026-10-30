@@ -2084,6 +2084,7 @@ fn derived_tool_excerpt_moves_by_visible_rows() {
                 ..Default::default()
             }],
             notice: None,
+            refresh_error: None,
         }),
     });
     assert!(ui.event(key(KeyCode::Esc)).is_empty());

@@ -3381,6 +3381,13 @@ fn thread_display_times(threads: &[ThreadSummary]) -> Vec<crate::ui::ThreadDispl
 }
 
 fn tool_preview(page: crate::control::output::preview::PreviewPage) -> ToolPreview {
+    tool_preview_at(page, chrono::Utc::now())
+}
+
+fn tool_preview_at(
+    page: crate::control::output::preview::PreviewPage,
+    observed_at: chrono::DateTime<chrono::Utc>,
+) -> ToolPreview {
     use crate::presentation::{BlockKind, OutputStream, PresentationBlock};
     let mut notices = Vec::new();
     if page.skipped {
@@ -3416,7 +3423,18 @@ fn tool_preview(page: crate::control::output::preview::PreviewPage) -> ToolPrevi
     .collect();
     ToolPreview {
         blocks,
-        notice: (!notices.is_empty()).then(|| notices.join("。")),
+        refresh_error: None,
+        // Store the observation label once in the existing budgeted payload.
+        // Paint/cache hits must not advance a snapshot's apparent read time.
+        notice: Some(format!(
+            "取得 {} UTC · 閉じて開くと再取得{}",
+            observed_at.format("%Y-%m-%d %H:%M:%S"),
+            if notices.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", notices.join("。"))
+            },
+        )),
     }
 }
 
@@ -3689,6 +3707,30 @@ mod tool_preview_tests {
     use crate::presentation::OutputStream;
 
     #[test]
+    fn complete_preview_still_identifies_observation_time_and_refresh() {
+        let preview = tool_preview_at(
+            PreviewPage {
+                stdout: "complete".into(),
+                stderr: String::new(),
+                raw_bytes: 8,
+                inspected_rows: 1,
+                skipped: false,
+                decode_uncertain: false,
+                decode_errors: false,
+                terminal: true,
+                output_complete: true,
+            },
+            chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+        assert_eq!(
+            preview.notice.as_deref(),
+            Some("取得 2026-10-30 04:05:06 UTC · 閉じて開くと再取得")
+        );
+    }
+
+    #[test]
     fn inline_tail_keeps_streams_distinct_and_discloses_only_known_limits() {
         let page = PreviewPage {
             stdout: "last stdout".into(),
@@ -3701,7 +3743,10 @@ mod tool_preview_tests {
             terminal: true,
             output_complete: false,
         };
-        let preview = tool_preview(page);
+        let observed_at = chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let preview = tool_preview_at(page, observed_at);
         assert_eq!(preview.blocks.len(), 2);
         assert_eq!(preview.blocks[0].stream, Some(OutputStream::Stdout));
         assert_eq!(preview.blocks[1].stream, Some(OutputStream::Stderr));
@@ -3713,6 +3758,8 @@ mod tool_preview_tests {
                 .all(|block| !block.source_exact && block.markdown.is_empty())
         );
         let notice = preview.notice.unwrap();
+        assert!(notice.contains("取得 2026-10-30 04:05:06 UTC"));
+        assert!(notice.contains("閉じて開くと再取得"));
         assert!(
             notice.contains("末尾抜粋") && notice.contains("不確実") && notice.contains("未回収")
         );

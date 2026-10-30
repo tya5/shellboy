@@ -1596,6 +1596,18 @@ fn typed_history(
                                     Style::default().fg(view.palette.muted()),
                                 )));
                             }
+                            if let Some(error) = &preview.refresh_error {
+                                let status = if preview.blocks.is_empty() {
+                                    "出力取得に失敗"
+                                } else {
+                                    "更新失敗 · 前回の取得内容を表示"
+                                };
+                                chunk.push(Line::from(format!(
+                                    "{status}: {error} · 閉じて開くと再試行"
+                                )));
+                            } else if view.items.preview_loading(&key, &region.outcome) {
+                                chunk.push(Line::from("再取得中 · 前回の取得内容を表示"));
+                            }
                         } else if view.items.preview_failed(&key, &region.outcome) {
                             chunk.push(Line::from("出力取得に失敗 · 閉じて開くと再試行 · F6 原文"));
                         } else if exact_body.source_exact {
@@ -3669,7 +3681,8 @@ mod conversation_item_tests {
                     text: "RAW_AFTER_REPLY".into(),
                     ..Default::default()
                 }],
-                notice: None
+                notice: None,
+                refresh_error: None,
             },
             64 * 1024
         ));
