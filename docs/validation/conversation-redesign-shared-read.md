@@ -58,10 +58,16 @@ feature. Both versions return all50 canonical tools and0 raw-preview blocks.
 | Before7aea088 |7/7/7/7 |3.345ms |3.675ms |
 | After2fd4197 |1/1/1/1 |3.809ms |3.940ms |
 
-The job-count goal is met for this selected current-view consumer. Worker time
+The one-job observation holds for this selected current-view consumer. Worker time
 in this sample increases by0.265ms at p95; this is not evidence of a SQL-time
 speedup. The combined raw-source projection validates identities before rendering;
-keep its bounded extra work visible in later combined E/F comparisons. Both runs
+keep its extra work visible in later combined E/F comparisons. Existing helpers
+still contain per-node SQL inside that worker job. Their actual SQL batching is
+unfinished, so a1-job count is not proof of the adopted all-surface batch-work
+requirement. The reused ThreadDetails helper can also derive an empty title by
+scanning/parsing saved user payloads on the DB worker. Extracting that UI title
+read/preparation is an explicit remaining D0/D1 boundary task; this local check
+does not establish SQL-only work for that path. Both runs
 are synthetic local observations, not end-to-end provider latency.
 
 One attempted after-run reused the before executable from a shared target cache;
@@ -81,3 +87,18 @@ all-surface planner consolidation. Live rows/output focus, silent-background P2,
 hidden-output P5, E patches, F Watch/descendants/P4 and G popups/P6 remain pending.
 Native Windows/Linux and physical terminal behavior have not been verified for
 this local increment. Prior B+C native CI and PTY evidence do not qualify it.
+
+
+## E prerequisite: external deletion notifications
+
+Commit161b4c9 returns exact successfully deleted Thread IDs in the existing
+mutation effects. Control emits existing Changed notifications after commit;
+saved-operation replay, domain rejection and SQLite rollback have no notification
+effects. No new event type/schema/lifecycle/queue is introduced. Two focused
+library tests pass, covering singleton/cascade targets and actual Control
+subscriptions, independently observed committed deletion, replay, rejection and
+partial-cascade rollback. The follow-up standard check at161b4c9 succeeds: **1,713 passed /0 failed /
+32 ignored** (library828, integration875, termination7, crash3), layout90,
+Python6, formatting and strict all-target Clippy, with the same native macOS and
+bounded build/test settings above. This
+fixes the producer gap only; browser patch consumers remain unfinished.

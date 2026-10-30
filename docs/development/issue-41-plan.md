@@ -233,3 +233,16 @@ D0 selected-view measurement:7aea088→2fd4197 has7→1 actual DB jobs on every
 improvement. Open-popup/list/watch/descendant combined measurements remain future
 P3 gates. A stale shared-target artifact was rejected, with source-witness and
 per-sample job assertions required on the final after-run.
+
+E producer prerequisite161b4c9 fixes the previously tracked external ThreadDelete
+notification gap using existing postcommit Changed effects. Focused Store/Control
+checks cover exact singleton/cascade IDs and effect-free replay/rejection/rollback;
+full follow-up standard at161b4c9 passes1713/0/32. The notification producer fix is
+not an implemented list patch consumer. Existing per-node SQL in D0 raw helpers
+also remains to be converted to real batched queries before global P3 completion.
+
+D0/D1 raw-helper audit: the reused control::db::thread_details still calls
+thread_display_title for an empty stored title, which scans/parses saved user
+payloads on the DB worker. Separate a bounded frontend title observation from
+off-worker preparation before claiming SQL-only/global batch completion, without
+silently changing CLI title fallback or adding Core compatibility policy.

@@ -1,6 +1,6 @@
 # Development status
 
-## #41 D0 shared current-view read (local qualification pending)
+## #41 D0 shared current-view read (locally qualified)
 
 Local foundation commits6d1e04a/54fd089/635cd9b/e6b1cfc extract connection reads
 and off-DB preparation. Commitf43f7dd consumes those helpers in one current-view
@@ -27,7 +27,11 @@ All4 real separate-CLI/GC reactivity tests pass in that final suite.
 
 Actual128-node/50-tool observation now verifies7→1 DB jobs per selected refresh;
 worker p95 is3.675→3.940ms, so no SQL-time speedup is claimed. Source identity is
-checked after rejecting one shared-cache artifact mix-up. See the qualification.
+checked after rejecting one shared-cache artifact mix-up. Existing per-node helper
+SQL still needs genuine batching; one worker job is not completion of that design
+requirement. Empty-title derivation inside the reused ThreadDetails helper also
+still scans/parses on the DB worker and needs separation before SQL-only final
+qualification. See the qualification.
 
 Next: D live-work/clock/output behavior,
 E/F list/watch/descendants,
@@ -35,6 +39,15 @@ and G catalogue/forms/general popups. Visible source-detail reads are still thei
 existing separate finite consumer; activity polling also remains until D's next
 unit. Do not claim every-surface1job/500ms or P2/P4/P5/P6 completion. These commits
 are local only; no installed update, release, paid API or default-data change.
+
+## #41 E prerequisite: external deletion notifications (local)
+
+Commit161b4c9 returns exact committed singleton/cascade deletion targets through
+existing Changed effects, with no effects on replay/rejection/rollback. Two real
+Store/Control regression tests pass. Follow-up standard check at161b4c9 succeeds:
+**1,713 passed /0 failed /32 ignored**, layout90/Python6/fmt/strict Clippy.
+E browser patch consumers and native Windows/Linux qualification remain unfinished. This adds no schema, event type,
+worker, queue or lifecycle policy.
 
 ## #59 review follow-up: legacy sender explanation (D-006)
 

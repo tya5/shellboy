@@ -1617,3 +1617,27 @@ loading and model-catalog HTTP bounds rather than add provider templates, login,
 interactive setup or billed chat probes. Keep AGENTS existence display deferred:
 it requires worker-fed filesystem observations and overlaps #41; this task only
 changes empty-state/notification text. Revisit after that UI work is stable.
+
+
+## #41 shared-read measurement and remaining SQL work (2026-10-31)
+
+A single DB-worker closure is necessary for the coherent current-view witness,
+but it is not evidence of one batched SQL plan. The actual128-node/50-tool fixture
+changes7→1 worker jobs; p95 worker time changes3.675→3.940ms. Preserve that slight
+increase rather than describing a SQL speedup. Existing per-node tool/source
+queries and empty-title fallback parsing on the DB worker are explicit remaining
+work before final SQL-only/global batching qualification. Start with exact modern
+node/tool PK batches; preserve bounded receipt collision/null evidence and sparse
+call ordinals rather than replacing row limits with assumed ordinal ranges.
+
+This keeps Core small: source/execution validation remains read-only frontend
+projection, without a new worker/table/queue or compatibility engine. Separate a
+bounded UI raw-title observation from off-worker preparation; do not silently
+change the CLI's existing title policy as a side effect. Revisit this choice if
+bounded witness exhaustion demonstrably hides essential labels, and record that
+case before changing the fallback contract.
+
+Private cross-worktree measurement reused a before binary once because of a shared
+Cargo target cache. Exclude that sample; force package compilation and require an
+explicit source witness plus per-sample expected job assertion in future private
+comparisons. Instrumentation stays ignored and must never enter shipped code.

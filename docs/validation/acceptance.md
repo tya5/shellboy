@@ -10,8 +10,12 @@ initial failures and distinguishes shared current-view/paused facts, atomic
 application/diagnostics, tree caching and viewport corrections from unfinished
 live-work, list patches/Watch and general popup work. Actual selected-view worker measurement is7→1 jobs, with worker p95
 3.675→3.940ms (no SQL-time speedup); full multi-consumer P3 and native
-Windows/Linux qualification remain pending. No paid API, real user
-data, installed executable or release is involved.
+Windows/Linux qualification remain pending. Follow-up161b4c9 additionally fixes
+external deletion notifications through existing postcommit effects. Its standard
+check passes **1,713/0/32** (library828, integration875, termination7, crash3),
+including exact singleton/cascade targets and effect-free replay/rejection/rollback.
+Browser patch consumers are still pending. No paid API, real user data, installed
+executable or release is involved.
 
 ## #59 sender inspection and labels
 
