@@ -1206,3 +1206,20 @@ policies remain unchanged. Incomplete calls and missing both identities are not
 repaired. Four separate synthetic traces and negative/replay/persistence checks
 pass locally; standard local validation and final native CI are separate gates.
 No real-provider test, installed binary or user configuration is changed.
+
+## OSC7501 terminal status (#54, 2026-10-31)
+
+Default-on ui.program_status publishes generic root and at most32 nonidle Thread
+records through the existing terminal writer between frames. Existing
+activity::classify remains the only lifecycle classifier; no conversation/status
+row rendering, worker/process/poller/queue/table/dependency is added. Aggregate
+counts include overflow; done/seen handling is ephemeral and acknowledges actual
+selected UI snapshots. Historical completion is not invented as new unseen work.
+
+Local unit/transport and native disposable-PTY checks cover grammar/base64/UTF-8,
+controls/bidi/format removal and all byte/id limits, all phase mappings/priority,
+counts beyond32, diff suppression, eviction/idle/root clear, strict off mode,
+selection acknowledgment and model-shell OSC isolation. tmux3.6a isolated-parser
+smoke ignores a valid OSC report without corrupting printable text. This does
+not qualify receiver GUI behavior: kitty/cmux/herdr, Terminal.app and WezTerm
+visual acceptance remain unverified. Standard/rebased native gates are separate.

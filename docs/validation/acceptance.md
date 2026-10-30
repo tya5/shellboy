@@ -3166,3 +3166,46 @@ RUST_TEST_THREADS=2 sh scripts/check.sh passes1726/0/32, layout92, Python7, fmt 
 strict all-target Clippy. Native main CI remains a separate pending gate.
 This is a portable simulated legacy rejection, not an installed0.3.0
 owner or real-provider run. User data and installed binaries are unchanged.
+
+## OSC7501 program status (#54 / D-011)
+
+2026-10-31, native macOS ARM64, Rust1.99.1. Source initially based on main4e2b71c,
+then rebased onto d5f38d9's restored Validation record before appending this entry.
+The erroneous status-as-acceptance file is not restored or reused. Rebase to this
+point has no code conflict; terminal_links.rs, conversation draw/status-row code
+and activity::classify are unchanged.
+
+Eight focused library tests pass: standard-base64 and decoded UTF-8 bounds,
+whole4096/title192/msg2048 limits, strict id grammar/length/depth, C0/C1/control/
+bidi/default-ignorable removal, exhaustive ActivityPhase mapping, root priority,
+32-child overflow and exact all-thread counts, wire diff/idle/eviction/root clear,
+strict on/off configuration, visible-only completion acknowledgment, stale auth
+attempt generation and actual HyperlinkBackend byte capture outside cell frames.
+No progress/query/heartbeat is emitted. Seen metadata is session-only and pruned
+when latest completion or stored Thread changes.
+
+Native Unix PTY integration (temporary HOME/config/data-dir and a loopback-only
+Responses mock) passes on macOS. It holds the first mock response until working
+is observed, executes a real shell that prints a forged OSC7501 error/app/id,
+and sees the shell bytes in saved tool-result input, never as terminal records.
+It observes hidden completion done, clear on selecting that Thread, HTTP401
+blocked with auth kind, normal-exit id-less clear and clean process exit. The
+same flow with ui.program_status=off emits no OSC7501 at all. Condition-based
+PTY readiness/oneshots and60-second watchdogs are used; no short negative window
+or sleep polling is used in these regressions. Cell-frame capture independently
+shows sanitized before/after content and no forged report through the renderer.
+
+An installed tmux3.6a was checked with a dedicated temporary socket/server,
+empty config and disposable HOME: print before, valid OSC7501 working, after;
+wait-for notifications delimit the capture. capture-pane contains beforeafter
+and no protocol payload; the isolated server is then released/stopped. This is
+real tmux parser smoke, not a GUI/whole-Shellboy receiver qualification. No user
+session/config is changed. Installed herdr and TERM_PROGRAM=WezTerm were observed,
+but receiver status UI/visual behavior was not qualified. kitty/cmux/herdr,
+Terminal.app and WezTerm physical receiver behavior remain explicitly unverified.
+
+Local full check RUST_TEST_THREADS=2 sh scripts/check.sh passes before the
+metadata-record rebase; final rebased check and ordinary three-OS main CI remain
+independent gates. No new package/version, schema, worker/poller/process or queue
+is added to production. All request/owner/data fixtures are synthetic; no real
+provider, installed shellboy binary, real owner or private conversation is used.
