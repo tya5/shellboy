@@ -56,8 +56,10 @@ preservation, source membership, late replies, selection and bounds are covered.
 
 The [detailed record](conversation-redesign-bc.md) separates exact source,
 measurement starts/values, the final binary's six real PTYs, P1 p95 3.974ms,
-initial P3/P7 evidence, pending main admission/CI and untested physical/real-API
-cases. D–G and shared one-job consolidation remain open. No installed binary,
+initial P3/P7 evidence and untested physical/real-API cases. Main17c4271 passes
+CI41068514157: Linux1,680/0/31, macOS1,679/0/32, Windows1,563/0/24
+(passed/failed/ignored; Windows threads4); downloaded artifacts name that exact
+SHA. This closes the B+C freshness gate. D–G and shared one-job consolidation remain open. No installed binary,
 release/tag, paid API or user data is changed by this #41 increment.
 
 ## v0.3.0 preparation (#62)

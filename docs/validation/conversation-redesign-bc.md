@@ -281,3 +281,14 @@ All six actual PTYs pass seven checks each using those bytes; NO_COLOR emits0
 chromatic SGR in both widths. Private fixtures/captures are retained locally.
 No paid API, user store, installed binary, tag or release is changed.
 Main three-OS CI for the combined follow-up remains pending admission.
+
+
+### Main admission and native three-OS gate
+
+Follow-up main `17c42710f1be41289fb2e0c478b1dff7b24d1f09` passes
+[CI41068514157](https://github.com/tya5/shellboy/actions/runs/41068514157).
+Downloaded native-test-timings artifacts report that exact source SHA and no
+failures: Linux1,680/0/31, macOS1,679/0/32, Windows1,563/0/24
+(passed/failed/ignored; Windows test threads4). B+C freshness BC-R1–R6 is now
+qualified through main. D–G and their shared-refresh/performance gates remain
+open; no physical Windows GUI, paid API or installed-binary claim is added.

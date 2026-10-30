@@ -13,9 +13,9 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | Increment | Scope | State |
 | --- | --- | --- |
 | Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Complete: e8c1ff2, native three-OS CI41034892332 green |
-| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; structural/interaction subset shipped; B+C freshness follow-up open |
-| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Structural subset shipped in b0e3c29; B+C freshness follow-up open |
-| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Interaction subset shipped in b0e3c29; B+C freshness follow-up open |
+| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
+| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
+| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Planned |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
@@ -41,22 +41,22 @@ claiming B+C done; the next main admission is this follow-up. The shipped
 structure/interaction remains usable, but current cached facts may become stale.
 No new worker/table/queue or timer-driven DB polling is authorized.
 
-- [ ] BC-R1: change title/model/connection/cwd through a separate CLI client;
+- [x] BC-R1: change title/model/connection/cwd through a separate CLI client;
   verify the selected header updates without input, measuring commit-to-paint
   against the1s unloaded-local target. Existing refresh code is not test evidence.
-- [ ] BC-R2: keep F6 open while its execution state or source availability changes;
+- [x] BC-R2: keep F6 open while its execution state or source availability changes;
   update mutable facts on relevant Changed without moving the selected identity.
   Coalesce reads and mark failed/lost refreshes stale/unavailable.
-- [ ] BC-R3: invalidate F7 cached links when exact source membership/revision or
+- [x] BC-R3: invalidate F7 cached links when exact source membership/revision or
   availability changes; reject delayed old replies. Verify actual source-change
   routes, not just mismatched request IDs in isolation.
-- [ ] BC-R4: identify valid immutable original/finished-preview snapshots with
+- [x] BC-R4: identify valid immutable original/finished-preview snapshots with
   read/source time and an explicit refresh/reopen action. Current preview text
   only explains reopening and lacks the read time. Mutable lifecycle facts must
   remain reactive even when associated raw content is an identified snapshot.
-- [ ] BC-R5: F2 intentionally freezes display; show the time it was frozen and
+- [x] BC-R5: F2 intentionally freezes display; show the time it was frozen and
   how to resume. Current frozen banner has only the resume instruction.
-- [ ] BC-R6: cover the remaining current-view inventory routes (footer/recovery,
+- [x] BC-R6: cover the remaining current-view inventory routes (footer/recovery,
   foreign pending sends and cancellation) with external-mutation latency tests,
   and document every untested route separately. Keep stale/late/read-budget and
   paid-text preservation regressions green.
@@ -65,12 +65,14 @@ Local follow-up sourcefd968e5 (including main ed40f33/#59) implements BC-R1–R6
 standard1,679/0/32,
 four actual separate-CLI/current-view tests, six final native PTYs and P1
 p95 3.974ms. See the qualification record for precise latency starts, snapshot
-semantics, code limits and untested cases. These boxes await main admission and
-its exact-SHA three-OS CI; local success alone does not mark shipment complete.
+semantics, code limits and untested cases. Main admission17c4271 and exact-SHA three-OS CI41068514157 now succeed.
+Downloaded timing artifacts confirm Linux1,680/0/31, macOS1,679/0/32 and
+Windows1,563/0/24 (passed/failed/ignored; Windows threads4). This closes BC-R1–R6;
+D–G and combined current-view read consolidation remain open.
 
 Review choice at the first report: record the missing routes explicitly rather
 than claim a rushed unvalidated fix. The follow-up above delivers code and local state/CLI/PTY evidence together;
-its main gate is still pending. G still owns general F8 management
+its main gate is now green at17c4271. G still owns general F8 management
 freshness and popup wheel/layout work. Shared one-job/500ms consolidation remains
 open for the subsequent shared refresh refactor; measured seven jobs is not a
 claim that the final one-job target has been met.
@@ -151,7 +153,7 @@ and explicit snapshot exception there. This includes existing F6/F7/F8 and #47
 reference results, not only new E/F surfaces. All unchecked items remain pending;
 this design update proves neither implementation nor measurement.
 
-- [ ] A/B+C: inventory-driven current conversation/header/footer/queue/F6/F7
+- [x] A/B+C: inventory-driven current conversation/header/footer/queue/F6/F7
   reactivity for CLI mutations; target1s visible updates; stale/lost/error labels.
 - [ ] D/E/F/G: finish every remaining mutable-fact inventory row as its owning
   surface lands; no blanket fixed reference/result snapshot exception.
@@ -176,14 +178,14 @@ this design update proves neither implementation nor measurement.
 
 ### Required comparison ledger (baseline main1fec7f0)
 
-- [ ] P1 B+C:128 nodes/50 tool rows, focus/open-close UI+draw p95<=8ms and<=baseline+2ms.
+- [x] P1 B+C:128 nodes/50 tool rows, focus/open-close UI+draw p95<=8ms and<=baseline+2ms.
 - [ ] P2 D/F: silent background shell10min, <=1 redraw/sec,0 DB jobs/tick, CPU no worse.
 - [ ] P3 Each applicable increment: visible Changed jobs and DB-worker time with
   list/watch/descendant consumers enabled, showing combined/coalesced work.
 - [ ] P4 F:256 descendants/depth8 one-query p95<=50ms plus bounded slow-only logging.
 - [ ] P5 D/E/F: hidden output40 batches/sec ->0 visible redraws/0 output-driven DB jobs.
 - [ ] P6 G:64KiB original,60 wheel events/sec ->frames<=max_fps and p95<=8ms/+2ms.
-- [ ] P7 B+C:128x16KiB expanded previews counted within cache.body_bytes, including
+- [x] P7 B+C:128x16KiB expanded previews counted within cache.body_bytes, including
   retained metadata; discarded previews rehydrate correctly under #58 rules.
   Report the explicit finite active working-set exception (<=64KiB total for an
   active visible/focused preview at zero/tiny budget), never as an uncounted cache
@@ -202,7 +204,7 @@ self-asserted names, and verify that source snapshots do not erase sender facts.
 Pre-merge source4bf14a9 standard/PTY/P1 evidence is retained as such; repeat
 qualification on the merged runtime/embedded guides before push. This is now
 locally complete at fd968e5 (standard1,679/0/32, actual PTYs6/6, P1 gates pass);
-main admission/CI remains pending. No historical
+main17c4271/CI41068514157 is green on all three OSes. No historical
 null is upgraded into a verified sender or Core compatibility path.
 
 

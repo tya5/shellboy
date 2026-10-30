@@ -42,7 +42,7 @@ authority, credential exclusion, cross-data-dir real CLI and F6 TestBackend.
 Native Windows/Linux CI and physical-terminal sender-details checks are pending;
 see [acceptance](../validation/acceptance.md#59-sender-inspection-and-labels).
 
-## #41 B+C freshness follow-up: locally qualified, main CI pending
+## #41 B+C freshness shipped; D shared-read refactor next
 
 The structural/interaction subset shipped on main b0e3c29 with three-OS
 CI41057195099 green. Review6523314574 correctly identified unfinished B+C
@@ -60,11 +60,14 @@ fixed F2 time and preview read time; UI p95 is3.974ms (baseline2.110ms).
 The merged #59 sender regression preserves kind/name after a source snapshot;
 external_cli and historical-null display conventions match comment6524373262.
 See [qualification](../validation/conversation-redesign-bc.md) for exact source,
-measurements and limits. Main admission/three-OS CI for this follow-up is pending;
-initial b0e3c29 CI is not substituted for it.
+measurements and limits. Main17c4271 now passes three-OS CI41068514157. Downloaded exact-SHA artifacts
+confirm Linux1,680/0/31, macOS1,679/0/32 and Windows1,563/0/24
+(passed/failed/ignored; Windows threads4). This qualifies the follow-up itself,
+not merely the earlier b0e3c29 structural source.
 
 The [BC-R1–R6 ledger](issue-41-plan.md#bc-freshness-follow-up-review6523314574)
-has local evidence but remains pending its main gate. D–G, global refresh
+is complete through its native main gate. Next is D's shared current-view
+read refactor before adding live-work rendering. D–G, global refresh
 consolidation and their performance/freshness gates remain open; #41 stays open.
 An external-delete notification producer gap is explicitly tracked under E.
 This task did not replace the installed binary, create a release/tag, call a
