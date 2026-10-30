@@ -29,15 +29,15 @@ The first B+C structural/interaction subset shipped as main b0e3c29. Source342cb
 passes the native standard check and six actual PTY conditions; main three-OS
 CI41057195099 passes at b0e3c29. P1/P3/P7 results and limits are in
 [the qualification record](../validation/conversation-redesign-bc.md). This does
-not complete all B+C inventory rows: the freshness follow-up below remains open
-alongside D–G. Unchecked cross-cutting requirements must not be inferred complete
-from shipment of their structural subset. Existing background management and F8 controls remain available
+not itself complete every B+C inventory row. The later freshness follow-up below
+shipped on17c4271 and passed its native main gate. D–G remain open; unchecked
+cross-cutting requirements must not be inferred complete from the B+C shipment. Existing background management and F8 controls remain available
 until the new live/watch/form increments are delivered.
 
 ## B+C freshness follow-up (review6523314574)
 
-This remains **B+C work**, not an implicit transfer to D–G. Complete it before
-claiming B+C done; the next main admission is this follow-up. The shipped
+This is **B+C work**, not an implicit transfer to D–G. It shipped on17c4271
+and passed its native main gate; the checklist below records its completed scope. The shipped
 structure/interaction remains usable, but current cached facts may become stale.
 No new worker/table/queue or timer-driven DB polling is authorized.
 
