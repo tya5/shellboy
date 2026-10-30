@@ -60,6 +60,31 @@ When a human moves foreground work to the background, the shell stays alive and 
 
 In that case, the tool result includes `status: "running"`, the continuing `execution_id`, and an intervention `reason` of `"human_backgrounded"` or `"additional_input"`. Each subsequent call, if any, receives a `cancelled` result. The UI reports the target and subsequent cancellations from the same stored results; it does not invent cancellations when no subsequent calls exist. The shell may finish after that notification, so get/read/wait on the same ID for its latest state.
 
+Later calls that were not executed save `status: "cancelled"`, `executed: false`,
+a machine-readable `reason`, a human-readable `message`, and any known
+`prerequisite` call ID, execution ID, observed state, exit code, output completeness,
+and CLI wait-release outcome. These facts describe the prerequisite when its
+result was returned; they do not assert its current liveness.
+
+- `previous_wait_released_by_new_input` / `previous_wait_released_by_human_background`:
+  inspect the prerequisite's existing execution with `shell get`, `shell read`,
+  and `wait`. Do not restart the same command just because its wait was released.
+- `previous_call_failed`: inspect retained output and the actual state/exit code
+  before deciding whether to retry or change the plan.
+- `previous_output_incomplete`: inspect the execution and retained output;
+  incomplete output alone does not imply a nonzero exit code.
+- `previous_wait_released`: inspect `prerequisite.wait_release_outcome`; a CLI
+  wait timing out does not imply that the work it observed failed or stopped.
+- `tool_group_validation_failed`, `run_stopped_before_call`, or
+  `owner_shutdown_before_call`: fix invalid arguments or respect the stop/shutdown;
+  the cancelled call itself has not executed.
+
+There is no time-based automatic foreground backgrounding. Use `background: true`
+for intentionally long work, retain its execution ID, and stop owned servers or
+other persistent commands when finished. A sequence whose later commands depend
+on success can be one shell command (`test-command && next-command`) rather than
+separate tool calls; releasing the foreground wait still leaves that shell alive.
+
 Unlike backgrounding, interrupting a Run with Ctrl+C requests stopping it and its owned descendants. Acceptance of a stop request does not mean every PID has been reclaimed; query the terminal Run/shell state. An interrupted model is not automatically resumed merely to deliver a notification.
 
 ### Minimal check of background output only (Bash)

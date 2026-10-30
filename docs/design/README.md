@@ -24,3 +24,4 @@ handling. A design document does not establish successful verification. Check th
   validation, audit and new-Turn notification (#51).
 
 - [Interrupted message recovery](message-recovery.md) (#53)
+- [Tool cancellation reasons](tool-cancel-reasons.md) (#56)

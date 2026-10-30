@@ -172,3 +172,11 @@ The last retained output sequence supplies received_at via the output_chunk
 primary key, with no output/collected output represented by null. `status`
 uses the same reader for returned shell items. Reads do not claim OS liveness.
 No new persistent facts, worker or polling cadence are introduced.
+
+## Unexecuted calls after a prerequisite (#56)
+
+The serial tool-group driver saves structured cancellation facts described in
+[tool cancellation reasons](tool-cancel-reasons.md): stable reason, human message,
+`executed: false`, and known prerequisite call/execution/state/exit facts. It
+preserves the existing halt decisions and does not add a foreground timeout or
+stop a shell merely because its foreground wait was released.

@@ -186,3 +186,6 @@ Issue #53 adopts [interrupted message recovery](message-recovery.md): persist
 path-admission facts, share terminal repair, and recover known unadmitted input
 only at an authorized explicit resume. Ambiguous historical admission remains
 visible and requires explicit restoration; original assignments remain immutable.
+Issue #56 adopts [tool cancellation reasons](tool-cancel-reasons.md): distinguish
+failed prerequisites from released waits using saved facts without changing
+execution policy or adding an automatic background timer.
