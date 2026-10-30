@@ -18,8 +18,11 @@ all failed names as ASCII-safe lines before the unchanged tail. A strict-ASCII
 child-runner regression fails against the old script and passes after repair,
 retaining full Unicode logs, exit 101/names and runner exit 1.
 
-Focused macOS fixture tests and six Python self-checks pass. Full local checks
-and exact repair-branch three-OS CI remain separate gates; neither failed c0f
+Focused macOS fixture tests and six Python self-checks pass. The clean exact
+repair `ff84d81682e477db91aa34be751609081cdb535b` also passes the local standard
+check: layout82, Python6, format, strict all-target Clippy, Rust 7 groups /
+1,468 passed / 0 failed / 28 ignored. Independent review approves `ff84d81`;
+exact repair-branch three-OS CI remains a separate gate. Neither failed c0f
 attempt is relabeled successful. Required publication order is reviewed local
 checks, normal repair-branch push, exact-SHA three-OS success, latest-main
 reconciliation/necessary rebase and recheck, then normal main push and main CI.

@@ -38,9 +38,25 @@ the tail, the inventory retains Unicode identities, no runner-stage encoding
 error is added and overall exit remains 1. This is a synthetic failure-path
 check, not native Windows execution of the repaired Rust suite.
 
-Full local standard checks, independent review and new exact-SHA three-OS CI
-results are pending at this checkpoint. The publication gate is repair branch
-CI success before any main update, followed by latest-main reconciliation and
+### Local Repair Checkpoint
+
+At exact clean `ff84d81682e477db91aa34be751609081cdb535b`, the coder's macOS arm64 /
+Rust 1.99.1 standard command
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH exits 0: layout82, Python6, format, strict
+all-target Clippy and Rust **7 groups / 1,468 passed / 0 failed / 28 ignored**.
+The background shell took 168,648 ms including its preceding runner commit/status
+steps; this is not isolated test-runtime evidence. Its saved command/cwd/exit and
+complete log were checked, test results independently re-aggregated, and
+`shellboy wait` observed completion. Sources were unchanged during that check.
+
+Independent focused review repeats both fixture tests, all six Python checks in
+normal and strict-ASCII parent environments, and the old-runner negative check
+(two failed subcases). Those are separate focused results, not native Windows
+repair-branch success. Independent review formally approves exact `ff84d816`
+after confirming the standard log and saved shell facts. New exact-SHA three-OS
+CI remains a separate gate. The publication gate is repair branch CI success before any
+main update, followed by latest-main reconciliation and
 necessary rebase/recheck, normal main push and main CI. Only the integrator is
 authorized to push; recording this plan does not authorize force pushes, issue
 operations, release or installed-binary replacement. Physical-terminal/real
