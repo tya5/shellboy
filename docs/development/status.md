@@ -1,6 +1,32 @@
 # Development status
 
-## Issues #42/#43/#55: combined local validation complete; native CI pending
+## Index integration with main `16fe4aa`: combined local check pending
+
+The index branch is merging canonical main `16fe4aa`. Its resulting combined
+local standard check is pending; previous checks do not establish this tree's
+success. After that local gate, manual index-branch CI is already authorized.
+Automatic branch CI is now disabled under #57; native branch verification needs
+an explicit workflow dispatch. No release or installed-binary update is included.
+
+Index source `b22a30a` passed native Linux (1,499) and macOS (1,498). Windows
+failed two #51 path fixtures and then aborted cp1252 diagnostic printing before
+the integration harness ran. Retain that failed evidence; Windows index
+integration is not verified by that run.
+
+Canonical main repairs `509daa5` / `ff84d81` / `5234f94` pass all three OSes in
+[CI40992985197](https://github.com/tya5/shellboy/actions/runs/40992985197).
+Only #57 policy was then applied to `5234f94`, producing `16fe4aa`. Its local
+standard check passed on macOS: 1,468 passed / zero failed / 28 ignored and six
+Python checks. The user authorized main publication and that push is complete;
+[main CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000)
+is in progress, not yet a successful result for `16fe4aa`.
+
+The earlier proposed merge of duplicate hotfix `34ca8d3` was aborted; that
+alternative remains local and is not the adopted integration source. Records
+below preserve earlier sources, results and permissions at their checkpoints;
+this opening section states the current integration and publication state.
+
+## Issues #42/#43/#55: pre-main-repair combined local checkpoint
 
 Origin/main `c0f1ad9`, containing #48/#51, is now merged into the local index
 branch at merge `80caf38`. The combined tree passes macOS standard checks:
@@ -25,8 +51,9 @@ space's frozen mode. See [acceptance](../validation/acceptance.md).
 
 The default batch count remains one; users opt in with documented caps. No paid
 API calls, user-store rebuild/GC, installed-binary update or release was performed.
-This index branch has not been pushed. New native three-OS CI requires separate
-push authorization; main's successful #46 CI does not validate these changes.
+At this checkpoint the index branch had not been pushed and native CI
+authorization was pending. Later b22a30a results and current manual-CI permission
+are recorded above; main's successful #46 CI does not validate index changes.
 
 Separately, the reviewed #46 measurement branch was fast-forwarded into main at
 `a949688` and pushed on user instruction. Main CI
@@ -37,6 +64,53 @@ The three index issues were not included in that push.
 The #48/#51 sections below retain their original local integration and review
 checkpoints. Their historical publication restrictions and base descriptions
 record those stages; current combined integration is described above.
+
+## #51/#48: Windows CI fixture and diagnostic repair
+
+Repair-branch CI run `40991269818` at `0cf9c405` clears the earlier two lib failures
+and completes all harnesses with failed-name diagnostics, but Windows exposes
+one further mixed-separator expectation in the persistence-only history fork
+test. Its expected inherited path now joins `project` and `AGENTS.md` as separate
+components; full path equality, explicit-override rejection and atomicity checks
+remain intact. A read-only search of all #51/#48 added Rust test path comparisons
+finds no other unresolved same-kind expectation. Raw CLI/form relative strings,
+fixed mock response paths and filesystem-write inputs intentionally stay unchanged.
+The focused history test and pre-commit standard check pass locally on macOS:
+layout82, Python6, format, strict Clippy and Rust 7 groups / 1,468 passed /
+0 failed / 28 ignored. No runner or production change is added. The current #57 publication rule supersedes the earlier branch-CI gate:
+after independent review, fetch/rebase onto latest origin/main and pass the local
+standard check before a normal main push; then verify exact-SHA main three-OS CI.
+Branch dispatch is optional for platform-specific concern, not a required gate.
+Do not admit unrelated work while main CI is red. Workflow changes are out of scope.
+
+Main source `c0f1ad984be7a5d64d9dfbab4189cd3ba0438151` failed Windows in both
+attempts of run `40988162209`. The two native failures are portable-expectation
+bugs in `explicit_agents_resolution_inheritance_validation_and_receipt_replay`
+and `empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents`:
+Windows-native separators differed from slash-containing expected strings.
+Expected values now use Path components; production normalization/rendering and
+the full equality/rendered-label assertions are unchanged.
+
+The timing runner's raw artifacts were already UTF-8 and recoverable. A cp1252
+console error while printing the failed log tail interrupted harness-result
+recording. The separately scoped repair uses UTF-8 stdout/stderr and libtest
+listing decoding, saves the native harness result before diagnostics, and prints
+all failed names as ASCII-safe lines before the unchanged tail. A strict-ASCII
+child-runner regression fails against the old script and passes after repair,
+retaining full Unicode logs, exit 101/names and runner exit 1.
+
+Focused macOS fixture tests and six Python self-checks pass. The clean exact
+repair `ff84d81682e477db91aa34be751609081cdb535b` also passes the local standard
+check: layout82, Python6, format, strict all-target Clippy, Rust 7 groups /
+1,468 passed / 0 failed / 28 ignored. Independent review approves `ff84d81`;
+repair-branch native CI was not yet verified at that checkpoint. Neither failed
+c0f attempt is relabeled successful. The earlier publication order required
+reviewed local checks, repair-branch CI,
+then latest-main reconciliation and main CI. That mandatory branch-CI gate is
+superseded by the #57 rule above; the failed runs remain failed evidence.
+The integrator alone handles authorized pushes. No force push, issue close,
+release, installed-binary update or GitHub post is authorized.
+
 
 ## Issue #48: working-instruction provenance
 

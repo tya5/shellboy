@@ -1,5 +1,103 @@
 # Validation record
 
+## #51/#48 Windows repair: separate failed and corrected evidence
+
+### Additional History Expectation From Repair-Branch CI
+
+Repair-branch run `40991269818`, exact source `0cf9c405`, is still failed evidence:
+Windows clears the earlier two lib failures and the runner completes all harnesses
+with failure names, but
+`history::persistence_fork_returns_inherited_agents_and_rejects_explicit_overrides_atomically`
+fails at the final inherited-path comparison. The actual path contains native
+`project\AGENTS.md`; the expectation used `join("project/AGENTS.md")`.
+These are the integrator/reviewer's native-log observations, not local Windows
+execution by the coder. Main is not updated on this result.
+
+The separately approved test-only correction builds the expectation with
+`join("project").join("AGENTS.md")`. It retains exact inherited-path equality,
+both explicit-override validation paths, zero operation receipts and the unchanged
+Thread count after rejection. No production code, runner, test inventory, retry,
+ignore or timeout changes. A read-only search of #51/#48 additions across Rust
+source/tests finds no other unresolved same-kind path expectation; remaining
+raw CLI/form strings, mock-returned paths and filesystem-write inputs are intentional.
+
+On macOS arm64 / Rust 1.99.1, the focused command
+`cargo test --locked --test integration history::persistence_fork_returns_inherited_agents_and_rejects_explicit_overrides_atomically -- --exact`
+passes once with four test threads. The same pre-commit working tree passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`:
+layout82, Python6, format, strict all-target Clippy and Rust 7 groups /
+1,468 passed / 0 failed / 28 ignored. This local result is not native Windows
+validation or the integrator's required latest-main post-rebase check.
+
+Under the latest explicitly authorized #57
+rule, independent review and latest-main fetch/rebase plus successful local
+standard checks precede the integrator's normal main push; exact-SHA main three-OS
+CI follows. Branch CI is optional, not a mandatory pre-push gate. The earlier
+main `c0f1ad9` and repair-branch `0cf9c405` failures remain separate failed evidence.
+No push is performed by the coder; workflow-trigger changes are out of scope.
+
+The [#51 failure report](https://github.com/tya5/shellboy/issues/51#issuecomment-6513119814)
+and [#46 console diagnosis](https://github.com/tya5/shellboy/issues/46#issuecomment-6513118002)
+identify two Windows failures at exact main SHA
+`c0f1ad984be7a5d64d9dfbab4189cd3ba0438151`, run `40988162209`, attempts 1 and 2.
+Both downloaded results records identify that source and the same native lib
+exit 101/failure names:
+
+- `control::db::agents_reference_tests::explicit_agents_resolution_inheritance_validation_and_receipt_replay`:
+  actual native project/backslash/role.md versus expected mixed project/role.md.
+- `ui::chrome::tests::empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents`:
+  actual cwd.join-generated AGENTS path versus a literal slash-only label.
+
+Both records also contain the secondary runner charmap encoding error. Raw
+harness logs are present UTF-8 artifacts; the failure was printing their Unicode
+tail to the Windows cp1252 console before appending/saving the harness record.
+These two failed attempts remain failed evidence; no further same-SHA rerun is
+used to hide them. Local macOS success at the old source did not prove Windows
+expectation portability.
+
+The repair changes only the two fixture expectations, timing-runner Unicode
+observability and its existing self-check suite, plus these records. It does not
+change Rust production paths/rendering, native test inventories, ignored tests,
+parallelism, deadlines, retries or dependencies. The fixture tests each pass
+once on macOS arm64 / Rust 1.99.1, using the existing four-thread configuration.
+
+The new Python regression launches a real child runner with
+`PYTHONIOENCODING=ascii:strict`, `PYTHONUTF8=0` and an uncoerced C locale. A real
+Python fixture process emits UTF-8 Japanese/emoji output exceeding the console
+tail size and exits 101; subcases use ASCII and non-ASCII test names. Before the
+runner repair it reproduces secondary encoding/decoding failures. After repair,
+all six Python self-checks pass: the full raw log bytes match, the harness record
+retains exit 101/counts/names, every name is printed as an ASCII-safe line before
+the tail, the inventory retains Unicode identities, no runner-stage encoding
+error is added and overall exit remains 1. This is a synthetic failure-path
+check, not native Windows execution of the repaired Rust suite.
+
+### Local Repair Checkpoint
+
+At exact clean `ff84d81682e477db91aa34be751609081cdb535b`, the coder's macOS arm64 /
+Rust 1.99.1 standard command
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH exits 0: layout82, Python6, format, strict
+all-target Clippy and Rust **7 groups / 1,468 passed / 0 failed / 28 ignored**.
+The background shell took 168,648 ms including its preceding runner commit/status
+steps; this is not isolated test-runtime evidence. Its saved command/cwd/exit and
+complete log were checked, test results independently re-aggregated, and
+`shellboy wait` observed completion. Sources were unchanged during that check.
+
+Independent focused review repeats both fixture tests, all six Python checks in
+normal and strict-ASCII parent environments, and the old-runner negative check
+(two failed subcases). Those are separate focused results, not native Windows
+repair-branch success. Independent review formally approves exact `ff84d816`
+after confirming the standard log and saved shell facts. That checkpoint did not
+establish native success. The earlier mandatory repair-branch CI gate is superseded
+by the #57 rule recorded above: latest-main reconciliation and successful local
+standard checks precede normal main push and exact-SHA main CI; branch CI is
+optional. Only the integrator is
+authorized to push; recording this plan does not authorize force pushes, issue
+operations, release or installed-binary replacement. Physical-terminal/real
+provider verification is not claimed.
+
+
 ## Issue #48: outbound working-instruction provenance
 
 ### Combined Local Integration Checkpoint
