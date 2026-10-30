@@ -1663,3 +1663,74 @@ debug-binary result and does not claim physical terminal pixel/IME/clipboard,
 company Windows proxy or paid-model validation. Provider retry-count/prefill
 measurements and the original intermittent attachment cause remain the explicit
 follow-ups above.
+
+
+## 2026-10-30: #46 main integration verification
+
+After the latest review reported no Medium findings, the user authorized main
+integration. Fast-forwarded `0469ca0..a949688` (15 commits) without rewriting the
+measured commits and pushed main. Exact main source `a94968898c704b4ee7b78be1cda860ee6d057b04`
+succeeds on macOS, Linux and Windows in
+[CI 40987103680](https://github.com/tya5/shellboy/actions/runs/40987103680).
+Commented on #46 and closed it after that result, as required by the review.
+The #42/#43/#55 working changes remain on a separate local branch and were not
+included. No release or installed-binary update was performed. The original
+benchmark and deliberately deferred timer/sleep cleanup remain separate evidence.
+
+
+## 2026-10-30: #42/#43/#55 local index acceptance
+
+The tested implementation tree was committed as `7a8e547` (shared Core/request
+modes), `930786e` (batch regressions), `83d2be7` (dimension/probe regressions),
+`31a8f31` (explicit inactive-space GC), and `f9d3ee7` (TUI recovery). The adopted
+design is `37d2d78`. Later guide/evidence changes are recorded separately.
+
+On native macOS, with pinned Rust 1.99.1, `CARGO_BUILD_JOBS=2`,
+`CARGO_INCREMENTAL=0` and `RUST_TEST_THREADS=2`, `sh scripts/check.sh` succeeds:
+85 suites registered exactly once, five Python failure-gate tests, formatting,
+all-target Clippy with `-D warnings`, and 1,482 passed / zero failed / 28 ignored
+across seven Cargo targets. Breakdown: lib636, integration836, termination7,
+crash-recovery3. Ignored tests were not counted as verified.
+
+Verified with fresh synthetic stores and loopback HTTP:
+
+- Saved pause timestamps/identity survive reads and service recreation; unchanged
+  per-Thread observations deduplicate; absent historical time remains unknown.
+  Explicit retry clears current state without deleting the historical notice.
+- Six batch regressions verify identical snapshot grouping, Unicode/count caps,
+  request reduction, default singleton JSON, full-response index/count/vector
+  validation, recorded per-input fallback even with zero retry budget, preserved
+  singleton length-split children, auth pause and vector-transaction rollback.
+  Retry preview mirrors actual current targets and marks unread admissions
+  unavailable without file/API reads or new source authorization.
+- Seven dimension/probe regressions verify one real first candidate input even
+  with concurrent workers, first-vector reuse, old active search during build,
+  rejection/wrong-length stopping, transient retry with the same N, changed-model
+  native reset, persisted query/ingest mode after reopen, inherited rebuild mode,
+  superseded failure fencing, one probe request, bounded32 tuple observations,
+  and operation replay/conflict without another HTTP request. Four HTTP boundary
+  regressions also check exact native/explicit wire shape and malformed arrays.
+- Three GC regressions verify multiple bounded32-space transactions, active/
+  candidate/running-work protection, invalid identifier rejection and atomic
+  rollback including vector-table DDL. Payload counts are float32 arithmetic;
+  physical file/WAL shrink is not asserted.
+- Native PTY uses the real binary, temporary durable401 pause and local proxies.
+  It opens the saved stop record, shows time/action, gives P-without-target
+  guidance, obtains global T preview, displays source1/character29 in one full
+  repaint, requires Y, refreshes S to unpaused and completes a normal conversation.
+  Existing streaming animation/input/scroll/manual-repaint/idle/shutdown checks
+  still pass. Full paint uses existing Ctrl+L; no terminal emulator was invented.
+
+Earlier checks failed on stale test fixtures (wrong management mode, old command
+counts, missing synthetic Thread cursor, and assertions over terminal diff cells).
+They were corrected rather than accepted as passing evidence. The PTY also found
+a real S-key collision with generic output navigation; Index mode now routes S
+to IndexStatus, with regressions for default/all/explicit-space scopes. Read-only
+review found mutable request-mode lookup and superseded failure adoption races;
+claims now freeze the mode inside their DB transaction and late errors recheck
+the rebuild group before changing pause/failure state.
+
+Not performed: new Linux/Windows native CI for this branch, company proxy/model
+validation, paid APIs, default-user data reindex/GC, installed binary replacement
+or release. Main CI 40987103680 validates #46 at a949688 only. A mock success
+does not establish provider dimension support or retrieval quality.

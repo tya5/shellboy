@@ -1,9 +1,38 @@
 # Development status
 
+## Issues #42/#43/#55: local implementation verified; native CI pending
+
+Work is isolated on `issue-42-43-55/index`; user data and the installed binary
+are unchanged. The adopted [index operation design](../design/index-operations.md)
+covers saved pause observations/recovery preview, deterministic bounded batches,
+explicit dimension candidates/probes and space payload facts. Existing workers,
+spaces and app_meta own the work; no table, queue, dependency or poller is added.
+
+The implementation tree, committed through `f9d3ee7`, passes macOS standard
+checks: 1,482 passed, zero failed, 28 ignored; all-target strict Clippy and
+formatting succeed. Real PTY recovery verifies saved stop time, target counts,
+Y confirmation and S status refresh. Mock HTTP covers deterministic batches,
+first-dimension validation, refusal/transient/late replies, persisted query/ingest
+mode, probe receipts and explicit inactive-space GC. Tests are split by issue;
+Core request-mode/claim plumbing is shared because batching must carry the
+space's frozen mode. See [acceptance](../validation/acceptance.md).
+
+The default batch count remains one; users opt in with documented caps. No paid
+API calls, user-store rebuild/GC, installed-binary update or release was performed.
+This index branch has not been pushed. New native three-OS CI requires separate
+push authorization; main's successful #46 CI does not validate these changes.
+
+Separately, the reviewed #46 measurement branch was fast-forwarded into main at
+`a949688` and pushed on user instruction. Main CI
+[40987103680](https://github.com/tya5/shellboy/actions/runs/40987103680) succeeded
+on all three OSes; #46 is closed.
+The three index issues were not included in that push.
+
 ## Issue #46: measured native test performance completed
 
-The reviewed measurement branch `issue-46/test-performance` is pushed; main is
-unchanged. Ordinary integration links fall from 82 to 3; registration, normalized
+The reviewed measurement branch `issue-46/test-performance` was pushed and
+subsequently fast-forwarded into main at `a949688` on user instruction. Main
+three-OS CI 40987103680 succeeds; #46 is closed. Ordinary integration links fall from 82 to 3; registration, normalized
 identity and ignored-set checks retain every original test. Historical schema
 fixture setup is batched, while unproven index seed batching was discarded.
 Shared runtime/retry fixture guards now use bounded phase diagnostics and
@@ -21,8 +50,7 @@ failed evidence.
 
 The [acceptance record](../validation/acceptance.md) records exact sources,
 runner/measurement limits and the final benchmark. The evidence update is docs
-only; subsequent workflow results must be identified by their own SHA. No main
-merge, release or installed-binary update is part of this task.
+only; subsequent workflow results must be identified by their own SHA. No release or installed-binary update is part of this task.
 
 ## Issue #44 review follow-up: readable activity column
 

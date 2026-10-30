@@ -221,19 +221,20 @@ Add/list elements return `source_node_id` and `delivery_status` (accepted/held/a
 
 `compact [--thread THREAD]` saves compaction for the next safe boundary and returns `thread_id/status=queued/operation_id`. Normally it includes model summarization and API cost. Queued is not adopted completion. Same-ID replay returns original queued acceptance even after processing. Inspect `operation get --operation ID` `downstream.state` (queued/running/completed/failed), terminal outcome/ended_at. Original nodes are not overwritten: a replacement path retains source references. See [history and search](history-and-search.md).
 
-### Index (5 operations)
+### Index (6 operations)
 
-All support `[--scope threads|all] [--space SPACE] [--thread THREAD ...] [--source NODE ...]`; repeat thread/source flags.
+Status/preview/backfill/retry/rebuild support `[--scope threads|all] [--space SPACE] [--thread THREAD ...] [--source NODE ...]`; repeat thread/source flags.
 
 | Operation | Main result and conditions |
 |---|---|
-| `index status` | space_id/pending/running/done/failed/paused/reason; observes without automatically backfilling all history |
+| `index status` | Work counts and saved pause reason/time; bounded spaces with connection/model/dimensions/segment count/vector payload bytes, plus recorded probes; no automatic backfill |
 | `index preview` | sources/segments/characters/already_indexed/unavailable; read-only candidates, no embedding requests/jobs/candidate creation |
 | `index backfill` | sources/segments/characters/already_indexed/unavailable; accepts explicit selection into index jobs, with API costs separate from conversation |
 | `index retry` | accepted; explicit retry of failed jobs/pause, not a new all-history backfill |
-| `index rebuild` | Same acceptance-size shape as backfill; rebuilds selection, preserving current active space until the new one is searchable |
+| `index rebuild [--dimensions N]` | Same acceptance-size shape as backfill; first real input validates an explicit dimension, preserving the active space until complete catch-up; refusal stops the candidate |
+| `index probe [--dimensions N]` | One potentially charged fixed-input request; saves outcome/dimension per endpoint/model/request mode; no automatic fallback |
 
-Preview/backfill/rebuild require **explicit targets** via scope, thread, or source. `--scope threads` alone adds no IDs: also specify Thread IDs. `--scope all` strongly authorizes all targets. `--space` alone is not an explicit selection. Omitted space means current configuration's space. Unsupported nonactive-space changes or inconsistent combinations fail; successful status does not authorize arbitrary space mutation. Returned characters are not a monetary estimate. First preview the same selection, check scope and your contracted unit price, then execute. Preview reserves nothing; later additions/deletion/configuration can change work volume. The CLI is noninteractive and backfill/rebuild do not pause for confirmation.
+Backfill/rebuild require **explicit targets** via scope, thread, or source. `--scope threads` alone adds no IDs: also specify Thread IDs. `--scope all` strongly authorizes all targets. `--space` alone is not an explicit selection. Omitted space means current configuration's space. Unsupported nonactive-space changes or inconsistent combinations fail; successful status does not authorize arbitrary space mutation. Without a source selection, preview reports currently authorized retry-eligible work (failed admissions count as unavailable when their input size is unknown). It never authorizes new history. Dimensions are 1..8192 and are accepted only by rebuild/probe, not every endpoint. A probe does not authorize a rebuild. Returned characters are not a monetary estimate. First preview the same selection, check scope and your contracted unit price, then execute. Preview reserves nothing; later additions/deletion/configuration can change work volume. The CLI is noninteractive and backfill/rebuild do not pause for confirmation.
 
 ### Storage (2 operations)
 
@@ -280,7 +281,7 @@ Errors/timeouts never justify unconditional repetition under a new ID. Inspect s
 
 ## Implementation references
 
-Syntax follows [cli.rs](../../src/cli.rs), public types/constants [protocol.rs](../../src/protocol.rs), JSON/exit behavior [main.rs](../../src/main.rs), and results [Control](../../src/control.rs) / [DB operations](../../src/control/db.rs). Public CLI has no standalone subcommands for TUI-only edited sending, attachment reload, or index cost preview. See [TUI guide](tui.md) for screen controls.
+Syntax follows [cli.rs](../../src/cli.rs), public types/constants [protocol.rs](../../src/protocol.rs), JSON/exit behavior [main.rs](../../src/main.rs), and results [Control](../../src/control.rs) / [DB operations](../../src/control/db.rs). Public CLI has no standalone subcommands for TUI-only edited sending or attachment reload; index preview is available from both CLI and TUI. See [TUI guide](tui.md) for screen controls.
 
 ## Compact range selection
 

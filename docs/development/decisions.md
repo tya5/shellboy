@@ -1079,3 +1079,32 @@ added only to the bounded status page after fingerprint/cursor derivation.
 Revisit this choice if a future contract requires output-driven ordering or
 monotonic live timing; that would require a separate persistence/ownership
 design, not an implicit change to the present read projection.
+
+
+## 2026-10-30: bounded index operations (#42/#43/#55)
+
+- Preserve singleton embedding requests by default (`batch_max_inputs=1`).
+  No portable proxy batching limit is known; configurable count/Unicode caps
+  are explicit bounds rather than a provider support claim. Revisit the default
+  only with evidence across supported endpoint configurations.
+- Keep requested dimension separate from observed dimension. Native spaces omit
+  the wire option; an explicit rebuild freezes its mode with the space and all
+  query/ingest consumers reuse it. No provider catalogue or silent truncation or
+  fallback is permitted. The first authorized input validates a candidate once;
+  rejection stops that group while keeping the old active search available.
+- Use bounded app_meta observations (32 probe tuples, one candidate mode per
+  profile, one optional mode per retained space). Existing DB/HTTP workers and
+  cancellation own them; add no background engine or polling notification.
+- Expose float32 payload arithmetic only, not claimed file reclamation or
+  retrieval quality. Explicit GC may collect inactive derived spaces, protecting
+  current active/candidate pointers and running work. SQLite file/WAL shrink
+  remains separate. Paid operations require the guide's user consent, without
+  adding an approval state machine to Core.
+- Historical pause observations remain immutable. Preserve the first saved
+  timestamp for the same pause cause, expose unknown time honestly, and clear
+  current UI attention only on fresh state. Existing Turn-boundary observation
+  markers deduplicate notices; do not introduce a poller for immediate delivery.
+
+These decisions are provisional only where endpoint support or retrieval
+quality is unknown. A failing endpoint or measured quality regression warrants
+reconsidering the user's chosen caps/dimension, not inventing a provider default.
