@@ -50,6 +50,8 @@ impl UiUpdate {
             | Self::EditConfirmationRequired { .. }
             | Self::Management { .. }
             | Self::IndexPreviewReady { .. }
+            | Self::IndexPreviewStarted { .. }
+            | Self::IndexPreviewFailed { .. }
             | Self::ShutdownProgress { .. }
             | Self::ForceShutdown
             | Self::Shutdown => false,

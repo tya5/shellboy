@@ -756,6 +756,13 @@ pub enum UiUpdate {
         args: IndexArgs,
         text: String,
     },
+    IndexPreviewStarted {
+        args: IndexArgs,
+    },
+    IndexPreviewFailed {
+        args: IndexArgs,
+        error: String,
+    },
     ShutdownProgress {
         elapsed_ms: u64,
         detail: String,
@@ -2083,18 +2090,26 @@ impl UiState {
                     }
                 }
             }
+            UiUpdate::IndexPreviewStarted { args } => self.management.begin_preview(args),
+            UiUpdate::IndexPreviewFailed { args, error } => {
+                self.management.fail_preview(args, error)
+            }
             UiUpdate::IndexPreviewReady { args, text } => {
-                if self.management.scope.as_ref() == Some(&args) {
-                    self.management.preview = Some((args, text.clone()));
-                    if let Some(command) = self.management.pending.take() {
-                        self.confirmation = Some(Confirmation::Index {
-                            command,
-                            detail: format!(
-                                "{}\n{text}\n外部embedding APIの費用が発生します。Yで実行 / Nで取消",
-                                self.management.index_label()
-                            ),
-                        });
-                    }
+                if self.management.accept_preview(args, text.clone())
+                    && let Some(command) = self.management.pending.take()
+                {
+                    let label = if matches!(&command, Command::IndexRetry(args) if !management::explicit_index_targets(args))
+                    {
+                        "失敗した許可済み索引作業（全体）".into()
+                    } else {
+                        self.management.index_label()
+                    };
+                    self.confirmation = Some(Confirmation::Index {
+                        command,
+                        detail: format!(
+                            "{label}\n{text}\n外部embedding APIの費用が発生します。Yで実行 / Nで取消"
+                        ),
+                    });
                 }
             }
             UiUpdate::Management { title, text } => {
@@ -3211,11 +3226,12 @@ impl UiState {
         }
         self.management.mode = management::ManagementMode::Index;
         self.management.scope = selection.clone();
-        self.management.preview = None;
-        self.management.open_text(ManagementView{title:"Index管理".into(),text:"pending / running / done / failed / pausedを取得中。B backfill / T retry / R rebuildは明示対象と確認が必要です。\n/search QUERYで検索結果を表示。\n外部embedding APIの利用で費用が発生します。金額は未見積です。".into(),scroll:0});
+        self.management.reset_preview();
+        self.management.open_text(ManagementView{title:"Index管理".into(),text:"現在の索引状態を取得中。停止理由は過去の記録で、待機中の要求を示しません。\nTで失敗分を再試行（previewと確認）。B/Rは明示対象が必要です。\n/search QUERYで検索。会話は続けられます。外部APIの利用で費用が発生する場合があります。".into(),scroll:0});
         let args = selection.clone().unwrap_or_default();
         let mut actions = vec![UiAction::Manage(Command::IndexStatus(args))];
         if let Some(selection) = selection.filter(management::explicit_index_targets) {
+            self.management.begin_preview(selection.clone());
             actions.push(UiAction::IndexPreview(selection));
         }
         actions
@@ -3323,13 +3339,16 @@ impl UiState {
             Command::IndexBackfill(args)
             | Command::IndexRetry(args)
             | Command::IndexRebuild(args) => {
-                if !management::explicit_index_targets(args) {
+                if !matches!(&command, Command::IndexRetry(_))
+                    && !management::explicit_index_targets(args)
+                {
                     return self.command_error("索引の実行対象を明示してください");
                 }
                 self.management.scope = Some(args.clone());
-                self.management.preview = None;
+                self.management.reset_preview();
                 self.management.pending = Some(command.clone());
                 self.management.mode = management::ManagementMode::Index;
+                self.management.begin_preview(args.clone());
                 self.management.open_text(ManagementView {
                     title: "索引 · 費用preview".into(),
                     text: "対象件数を確認しています。まだ実行していません".into(),
@@ -3439,7 +3458,7 @@ impl UiState {
                 self.send_current(Some(run_id))
             }
             Some(Confirmation::Index { command, .. }) => {
-                self.management.preview = None;
+                self.management.reset_preview();
                 vec![UiAction::Manage(command)]
             }
             Some(Confirmation::Operation { command, .. }) => vec![UiAction::Manage(command)],

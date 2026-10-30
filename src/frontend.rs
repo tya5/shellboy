@@ -1266,14 +1266,15 @@ async fn run_with_delivery(
                     }
                     UiAction::IndexPreview(args) => {
                         let Ok(permit) = command_slots.clone().try_acquire_owned() else {
-                            management_status(
+                            management_update(
                                 &updates,
                                 context.clone(),
-                                "索引操作を準備中です。完了後に再操作してください",
+                                UiUpdate::IndexPreviewFailed { args, error: "索引操作を準備中です。完了後に再操作してください".into() },
                             )
                             .await;
                             continue;
                         };
+                        management_update(&updates, context.clone(), UiUpdate::IndexPreviewStarted { args: args.clone() }).await;
                         let control = control.clone();
                         let sender = background_tx.clone();
                         spawn_work(&mut workers, permit, async move {
@@ -1292,7 +1293,7 @@ async fn run_with_delivery(
                                     });
                             let result = match result {
                                 Ok(value) => {
-                                    presentation_work(move || management::preview_text(&value)).await
+                                    presentation_work(move || management::index_preview_text(&value)).await
                                 }
                                 Err(error) => Err(error),
                             };
@@ -2699,10 +2700,7 @@ async fn run_with_delivery(
                         management_update(
                             &updates,
                             context,
-                            UiUpdate::Management {
-                                title: format!("索引見積り {}", args.thread_ids.join(",")),
-                                text: error.to_string(),
-                            },
+                            UiUpdate::IndexPreviewFailed { args, error: error.to_string() },
                         )
                         .await
                     }

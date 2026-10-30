@@ -126,8 +126,28 @@ fn index_preview_is_invalidated_on_close_and_same_scope_reopening_but_not_detail
         }),
     });
     assert!(ui.confirmation.is_none());
-    assert!(ui.management.preview.is_none());
-    ui.apply(report(current.clone(), "index report"));
+    assert!(matches!(
+        ui.management.preview,
+        management::IndexPreviewState::Loading(_)
+    ));
+    // IndexStatus is not the work-status overview. Keep the production index
+    // mode while its structured report races the cost preview.
+    ui.apply(UiUpdate::ScopedManagement {
+        context: current.clone(),
+        update: Box::new(UiUpdate::StructuredManagement {
+            work_status: false,
+            request_id: 1,
+            title: "index report".into(),
+            fields: vec![PresentationField {
+                value_omitted: false,
+                key: "/paused".into(),
+                label: "一時停止".into(),
+                value: "true".into(),
+                display: None,
+            }],
+            omitted: false,
+        }),
+    });
     let detail = ui.event(key(KeyCode::Enter));
     assert_eq!(
         context(&detail[0]).epoch,
@@ -433,5 +453,41 @@ fn recalled_return_to_slash_draft_uses_the_same_scope_and_respects_overlay_owner
                 "the recalled command's late report cannot reopen a popup"
             );
         }
+    }
+}
+
+#[test]
+fn index_status_key_refreshes_the_index_after_a_structured_retry_receipt() {
+    for input in ["/index", "/index all", "/index space fixture-space"] {
+        let mut ui = UiState::new(&Config::default(), fixture_cwd());
+        ui.insert(input, false);
+        let actions = ui.event(key(KeyCode::Enter));
+        let owner = context(&actions[0]);
+        let expected = ui.management.scope.clone().unwrap_or_default();
+        ui.apply(UiUpdate::ScopedManagement {
+            context: owner,
+            update: Box::new(UiUpdate::StructuredManagement {
+                work_status: false,
+                request_id: 42,
+                title: "index retry accepted".into(),
+                fields: vec![PresentationField {
+                    value_omitted: false,
+                    key: "/accepted".into(),
+                    label: "受付".into(),
+                    value: "true".into(),
+                    display: None,
+                }],
+                omitted: false,
+            }),
+        });
+        let actions = ui.event(key(KeyCode::Char('s')));
+        assert_eq!(actions.len(), 1);
+        let UiAction::ManagementIntent { action, .. } = &actions[0] else {
+            panic!("index refresh must retain its management epoch");
+        };
+        assert!(
+            matches!(action.as_ref(), UiAction::Manage(Command::IndexStatus(args)) if args == &expected),
+            "{input}: {actions:?}"
+        );
     }
 }

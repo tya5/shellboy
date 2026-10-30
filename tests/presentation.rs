@@ -644,9 +644,10 @@ fn human_events_keep_important_differences_and_unknown_kinds_in_details_only() {
     let p = project("event", &payload, &canonical, 0);
     assert_eq!(p.event_class, EventClass::Attention);
     assert!(p.requires_attention());
-    assert!(p.title.starts_with("索引の状態"));
-    assert!(p.title.contains("old-model → new-model"));
-    assert!(p.title.contains("一時停止"));
+    assert!(p.title.starts_with("/index → T"));
+    assert!(p.blocks[0].text.contains("old-model → new-model"));
+    assert!(p.title.contains("停止記録"));
+    assert!(p.blocks[0].text.contains("時刻不明"));
     assert!(!p.title.contains("index_state"));
     assert!(p.fields.iter().any(|field| field.value == "provider_limit"));
     assert_eq!(text_of_payload(&payload), canonical);
@@ -780,9 +781,9 @@ fn first_observations_are_compact_but_real_null_transitions_and_raw_fields_remai
         "future":{"preserved":"original"}}}}),
     );
     assert_eq!(p.event_class, EventClass::Attention);
-    assert!(p.title.contains("configured-model"));
+    assert!(p.blocks[0].text.contains("configured-model"));
     assert!(p.title.contains("provider_limit"));
-    assert!(!p.title.contains('→'));
+    assert!(p.title.starts_with("/index → T"));
     assert!(p.fields.iter().any(|f| f.value == "original"));
     let p = project_event(
         json!({"kind":"index_state","change":{"before":{"model":"old-model"},
@@ -1310,4 +1311,18 @@ fn revisit_event_names_the_continuation_and_shows_instruction_without_changing_s
             .iter()
             .any(|f| f.key == "/change/revisits/detail_node_ids/0" && f.value == "revisit-details")
     );
+}
+
+#[test]
+fn index_pause_is_an_actionable_historical_record_with_saved_time() {
+    let event = json!({"kind":"context_changed","payload":{"kind":"index_state","change":{"before":null,"after":{"paused":true,"pause_kind":"authentication","paused_at":"2026-10-30T12:00:00Z","pause_id":"saved-identity"}}}});
+    let payload = json!({"text":format!("Shellboy event v1: {event}")});
+    let p = project("event", &payload, &text_of_payload(&payload), 0);
+    assert_eq!(p.event_class, EventClass::Attention);
+    assert!(p.title.starts_with("/index → T"));
+    assert!(p.title.contains("停止記録"));
+    assert!(p.blocks[0].text.contains("2026-10-30T12:00:00Z"));
+    assert!(p.blocks[0].text.contains("会話は続行"));
+    assert!(!p.title.contains("復旧待ち"));
+    assert!(p.fields.iter().any(|field| field.value == "saved-identity"));
 }

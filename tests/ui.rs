@@ -740,7 +740,10 @@ fn space_status_is_readonly_until_scope_and_matching_preview_are_present() {
     assert!(
         matches!(command_action(&actions[0]),UiAction::Manage(Command::IndexStatus(args))if args.space_id.as_deref()==Some("old-space") && args.scope.is_none())
     );
-    assert!(ui.event(key(KeyCode::Char('t'))).is_empty());
+    let retry = ui.event(key(KeyCode::Char('t')));
+    assert!(
+        matches!(command_action(&retry[0]), UiAction::IndexPreview(args) if args.space_id.as_deref() == Some("old-space") && args.scope.is_none())
+    );
     assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
     ui.event(key(KeyCode::Esc));
     text(&mut ui, "/index space selected-space threads one two");
@@ -3602,4 +3605,99 @@ fn shellboy_provenance_fixture() -> shellboy::protocol::NodeProvenance {
         run_id: None,
         origin_thread_id: None,
     }
+}
+
+#[test]
+fn index_management_shows_preview_states_and_global_retry_requires_confirmation() {
+    use shellboy::protocol::{Command, IndexArgs};
+    let mut ui = state();
+    text(&mut ui, "/index");
+    enter(&mut ui);
+    let mut terminal = Terminal::new(TestBackend::new(110, 34)).unwrap();
+    assert!(ui.event(key(KeyCode::Char('p'))).is_empty());
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    let shown = screen_text(&terminal);
+    assert!(shown.contains("対象を明示"), "{shown}");
+    assert!(shown.contains("/index all"));
+
+    let actions = ui.event(key(KeyCode::Char('t')));
+    assert!(
+        matches!(command_action(&actions[0]), UiAction::IndexPreview(args) if args == &IndexArgs::default())
+    );
+    assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    let shown = screen_text(&terminal);
+    assert!(shown.contains("再試行preview · 取得中"), "{shown}");
+    assert!(shown.contains("API未送信"));
+
+    ui.apply(UiUpdate::IndexPreviewFailed {
+        args: IndexArgs::default(),
+        error: "synthetic preview failure".into(),
+    });
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    let shown = screen_text(&terminal);
+    assert!(shown.contains("取得失敗"), "{shown}");
+    assert!(shown.contains("synthetic preview failure"));
+    assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
+
+    let actions = ui.event(key(KeyCode::Char('t')));
+    assert!(matches!(
+        command_action(&actions[0]),
+        UiAction::IndexPreview(_)
+    ));
+    ui.apply(UiUpdate::IndexPreviewReady {
+        args: IndexArgs::default(),
+        text: "資料数: 2\n分割数: 3\n文字数: 400\nAPI未送信 · 金額は未見積".into(),
+    });
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    let shown = screen_text(&terminal);
+    assert!(shown.contains("資料数: 2"), "{shown}");
+    assert!(shown.contains("文字数: 400"));
+    assert!(shown.contains("費用"));
+    ui.event(key(KeyCode::Char('n')));
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    assert!(screen_text(&terminal).contains("再試行preview · 取得済み"));
+    assert!(ui.event(key(KeyCode::Char('t'))).is_empty());
+    let actions = ui.event(key(KeyCode::Char('y')));
+    assert!(
+        matches!(command_action(&actions[0]), UiAction::Manage(Command::IndexRetry(args)) if args == &IndexArgs::default())
+    );
+}
+
+#[test]
+fn structured_index_status_cannot_hide_ready_preview() {
+    use shellboy::protocol::IndexArgs;
+    let mut ui = state();
+    text(&mut ui, "/index all");
+    let actions = enter(&mut ui);
+    let args = actions
+        .iter()
+        .find_map(|action| match command_action(action) {
+            UiAction::IndexPreview(args) => Some(args.clone()),
+            _ => None,
+        })
+        .unwrap();
+    ui.apply(UiUpdate::IndexPreviewReady {
+        args: args.clone(),
+        text: "資料数: 2\n分割数: 3\n文字数: 400".into(),
+    });
+    ui.apply(UiUpdate::StructuredManagement {
+        work_status: false,
+        request_id: 77,
+        title: "index status".into(),
+        fields: vec![],
+        omitted: false,
+    });
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    let shown = screen_text(&terminal);
+    assert!(shown.contains("費用preview · 取得済み"), "{shown}");
+    assert!(shown.contains("資料数: 2"));
+    assert!(shown.contains("文字数: 400"));
+    ui.apply(UiUpdate::IndexPreviewFailed {
+        args: IndexArgs::default(),
+        error: "wrong-scope-error".into(),
+    });
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    assert!(!screen_text(&terminal).contains("wrong-scope-error"));
 }
