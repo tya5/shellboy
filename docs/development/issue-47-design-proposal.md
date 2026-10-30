@@ -250,10 +250,11 @@ submits one bounded DB job and awaits it, then yields to the existing runtime/DB
 FIFO before submitting the next; check owner stop each batch. No new OS worker,
 poller, interval, queue, detached task or synchronous startup/read loop. Startup
 only starts the existing task, and reads use aggregates plus initializing/partial.
-Receipt collection and existing maintenance work get explicit turns between small
-sets of batches, not starvation until all initialization completes. Final review
-must pin that interleaving (proposed one existing receipt/GC turn per 16 batches)
-and byte-bound legacy rows without hiding SQL parsing cost: probe source byte
+Keep the existing receipt/GC collection cadence, checking its existing deadline
+between batches, rather than running full GC after every batch or delaying it
+until initialization completes. This reuses the existing maintenance task's
+60-second scheduling/cancellation responsibility, not a second timer/poller.
+Byte-bound legacy rows without hiding SQL parsing cost: probe source byte
 lengths first and process at most 256 records / 1 MiB source documents per DB
 transaction. As with existing raw batching, a single older oversized row may
 occupy its own transaction so initialization cannot starve forever. This is a
@@ -296,7 +297,7 @@ logical/physical growth; no timing correctness assertions or paid/user DB tests.
 The schema, accounting module and regression code have not been implemented.
 Leader confirmation is still required on this candidate, especially source observer
 CAS vs obsolete Core adoption, exact byte expression and bounded initialization
-interleaving. No additional age/pressure/embedding policy is requested here.
+interleaving/cancellation. No additional age/pressure/embedding policy is requested here.
 Coordinate edits touching control/state.rs, db.rs, driver.rs and driver/tools.rs
 with parallel #53/#56; keep helpers local to accounting and do not rework their
 cancel/ownership semantics. Before push the integrator fetches/rebases current
