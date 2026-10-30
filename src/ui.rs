@@ -20,6 +20,7 @@ mod chrome;
 mod composer;
 mod details;
 pub mod live_work;
+pub mod thread_patch;
 pub use details::{DetailSourceFacts, DetailSourceSnapshot};
 pub(crate) mod draft;
 mod help;
@@ -451,6 +452,12 @@ pub enum UiAction {
         run_id: String,
     },
 
+    ObserveBrowser {
+        generation: u64,
+        filter: String,
+        selected: Option<String>,
+        visible: bool,
+    },
     ObserveLiveWork {
         thread_id: String,
         generation: u64,
@@ -705,6 +712,17 @@ pub struct DraftRecoveryTarget {
 pub enum UiUpdate {
     ProgramStatus(crate::program_status::Snapshot),
 
+    BrowserPatch {
+        patch: Box<thread_patch::BrowserPatch>,
+    },
+    BrowserPatchFailed {
+        generation: u64,
+        error: String,
+    },
+    BrowserResync {
+        generation: u64,
+        reason: String,
+    },
     LiveWorkObserved {
         thread_id: String,
         generation: u64,
@@ -843,6 +861,7 @@ pub enum UiUpdate {
     },
     Threads {
         generation: u64,
+        read_sequence: u64,
         requested_cursor: Option<String>,
         threads: Vec<ThreadSummary>,
         display_times: Vec<ThreadDisplayTime>,
@@ -1781,12 +1800,22 @@ impl UiState {
     }
     fn take_deferred_actions_at(&mut self, now: Instant) -> Vec<UiAction> {
         let generation = self.thread_browser.generation();
-        let visible = self.thread_browser.visible();
+        let browser_visible = self.top_overlay() == Some(overlay::Overlay::Threads);
+        // Only the latest bounded visibility/filter observation is useful. A
+        // rejected action is retained until a newer scope supersedes it.
+        let observation = self.thread_browser.observe(browser_visible);
+        if observation.is_some() {
+            self.deferred_actions
+                .retain(|action| !matches!(action, UiAction::ObserveBrowser { .. }));
+        }
         self.deferred_actions.retain(|action| {
-            !matches!(action, UiAction::LoadThreads { generation: requested, .. }
-                if !visible || *requested != generation)
+            !matches!(action,UiAction::LoadThreads {generation:requested,..}
+                if !browser_visible || *requested!=generation)
         });
-        if let Some(action) = self.thread_browser.take_filter_request(now) {
+        if let Some(action) = observation {
+            self.deferred_actions.push(action);
+        }
+        if browser_visible && let Some(action) = self.thread_browser.take_filter_request(now) {
             self.deferred_actions.push(action);
         }
         // Only the actually visible detail consumer requests saved facts. The
@@ -2433,11 +2462,22 @@ impl UiState {
                     self.active_view_mut().status = "起動cwdが未解決です".into();
                 }
             }
+            UiUpdate::BrowserPatch { patch } => {
+                self.dirty |= self.thread_browser.patch(*patch);
+            }
+            UiUpdate::BrowserPatchFailed { generation, error } => {
+                self.thread_browser.patch_failed(generation, error);
+                self.dirty |= self.thread_browser.visible();
+            }
+            UiUpdate::BrowserResync { generation, reason } => {
+                self.dirty |= self.thread_browser.resync(generation, reason);
+            }
             UiUpdate::ThreadListFailed { generation, error } => {
                 self.thread_browser.failed(generation, error)
             }
             UiUpdate::Threads {
                 generation,
+                read_sequence,
                 requested_cursor,
                 threads,
                 display_times,
@@ -2447,6 +2487,7 @@ impl UiState {
                 let active = self.view().thread_id.clone();
                 if !self.thread_browser.apply(
                     generation,
+                    read_sequence,
                     requested_cursor,
                     threads,
                     display_times,

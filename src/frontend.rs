@@ -3,6 +3,8 @@ pub mod activity;
 mod admission;
 mod program_status;
 use admission::{spawn_read, spawn_work};
+mod browser;
+mod browser_read;
 mod draft_images;
 mod draft_saver;
 mod header;
@@ -277,6 +279,10 @@ enum BackgroundResult {
     ProgramStatus {
         epoch: u64,
         result: Result<program_status::Projected, ApiError>,
+    },
+    BrowserPatch {
+        ticket: browser::Ticket,
+        result: Result<crate::ui::thread_patch::BrowserPatch, ApiError>,
     },
     ThreadDeletion {
         request_id: u64,
@@ -747,6 +753,8 @@ async fn run_with_delivery(
     let read_cancel = CancellationToken::new();
     let progress_slots = Arc::new(Semaphore::new(1));
     let mut dirty_threads: HashSet<String> = HashSet::new();
+    let mut browser = browser::Browser::default();
+    let mut view_read_next: Option<tokio::time::Instant> = None;
     let mut refreshing: HashSet<String> = HashSet::new();
     let mut draft_saver = draft_saver::DraftSaver::new(control.clone(), background_tx.clone());
     let clipboard_slots = Arc::new(Semaphore::new(2));
@@ -808,6 +816,8 @@ async fn run_with_delivery(
                 .iter()
                 .find(|thread| {
                     !refreshing.contains(*thread)
+                        && (selection.active_thread.as_deref() != Some(thread.as_str())
+                            || view_read_next.is_none_or(|due| tokio::time::Instant::now() >= due))
                         && selection.refresh_ready(thread, tokio::time::Instant::now())
                 })
                 .cloned()
@@ -827,6 +837,13 @@ async fn run_with_delivery(
             refreshing.insert(thread.clone());
             selection.refresh_started(&thread, tokio::time::Instant::now());
             let tool_scope = visible.then(|| selection.tool_scope.clone()).flatten();
+            let browser_ticket = if visible {
+                let at = tokio::time::Instant::now();
+                view_read_next = Some(at + Duration::from_millis(500));
+                browser.take(at)
+            } else {
+                None
+            };
             #[cfg(test)]
             stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             read_workers.spawn(refresh::run(
@@ -838,6 +855,7 @@ async fn run_with_delivery(
                     epoch: selection.progress_epoch,
                     render_width,
                     tool_scope,
+                    browser: browser_ticket,
                 },
                 control.clone(),
                 updates.worker(),
@@ -846,6 +864,9 @@ async fn run_with_delivery(
                 progress_slots.clone(),
                 permit,
             ));
+        }
+        if let Some((generation, reason)) = browser.take_resync() {
+            update(&updates, UiUpdate::BrowserResync { generation, reason }).await;
         }
         if updates.closed() {
             break;
@@ -887,9 +908,36 @@ async fn run_with_delivery(
         }
         ui_subscription.select(selection.active_thread.as_deref());
         actions.enable_cancel(control_tasks.is_empty());
-        let refresh_deadline = selection.refresh_deadline(&dirty_threads, &refreshing);
+        let refresh_deadline = selection
+            .refresh_deadline(&dirty_threads, &refreshing)
+            .or_else(|| {
+                selection
+                    .active_thread
+                    .as_ref()
+                    .filter(|thread| {
+                        dirty_threads.contains(*thread) && !refreshing.contains(*thread)
+                    })
+                    .and(view_read_next)
+            })
+            .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         let live_deadline = live_output.deadline();
+        let browser_deadline = browser
+            .deadline()
+            .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         tokio::select! {
+            _=tokio::time::sleep_until(browser_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
+                if browser_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
+                if let Ok(permit)=read_slots.clone().try_acquire_owned()
+                    && let Some(ticket)=browser.take(tokio::time::Instant::now()) {
+                    view_read_next=Some(tokio::time::Instant::now()+Duration::from_millis(500));
+                    let control=control.clone();let results=background_tx.clone();
+                    read_workers.spawn(async move {
+                        let _permit=permit;
+                        let result=tokio::select! {biased;_=ticket.stop.cancelled()=>Err(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")),value=browser::read(&control,&ticket)=>value};
+                        let _=results.send(BackgroundResult::BrowserPatch {ticket,result}).await;
+                    });
+                }
+            },
             _=output_signal.as_mut()=>{
                 output_signal.set(observed_control.shell_output_notification().notified());
                 output_signal.as_mut().enable();
@@ -1752,84 +1800,35 @@ async fn run_with_delivery(
                             }
                         }
                     }
-                    UiAction::LoadThreads {
-                        cursor,
-                        filter,
-                        generation,
-                    } => {
-                        let control = control.clone();
-                        let sender = updates.worker();
-                        if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                            let requested_cursor = cursor.clone();
-                            match request(
-                                &control,
-                                Command::ThreadList(ThreadListArgs {
-                                    limit: DEFAULT_LIST_LIMIT,
-                                    cursor,
-                                    query: if filter.is_empty() {
-                                        None
-                                    } else {
-                                        Some(filter)
-                                    },
-                                }),
-                            )
-                            .await
-                            .and_then(|value| {
-                                serde_json::from_value::<Page<ThreadSummary>>(value).map_err(|_| {
-                                    ApiError::new(ErrorCode::IoFailed, "Invalid Thread list reply")
-                                })
-                            }) {
-                                Ok(page) => match presentation_work(move || {
-                                    let times = thread_display_times(&page.items);
-                                    (page, times)
-                                })
-                                .await
-                                {
-                                    Ok((page, display_times)) => {
-                                        update(
-                                            &sender,
-                                            UiUpdate::Threads {
-                                                generation,
-                                                requested_cursor,
-                                                threads: page.items,
-                                                display_times,
-                                                next_cursor: page.next_cursor,
-                                            },
-                                        )
-                                        .await
-                                    }
-                                    Err(error) => {
-                                        update(
-                                            &sender,
-                                            UiUpdate::ThreadListFailed {
-                                                generation,
-                                                error: error.to_string(),
-                                            },
-                                        )
-                                        .await
-                                    }
-                                },
-                                Err(error) => {
-                                    update(
-                                        &sender,
-                                        UiUpdate::ThreadListFailed {
-                                            generation,
-                                            error: error.to_string(),
-                                        },
-                                    )
-                                    .await
-                                }
+                    UiAction::ObserveBrowser {generation,filter,selected,visible}=>{
+                        if let Err(error)=browser.observe(generation,filter,selected,visible) {
+                            update(&updates,UiUpdate::BrowserPatchFailed {generation,error:error.to_string()}).await;
+                        }
+                    },
+                    UiAction::LoadThreads {cursor,filter,generation}=>{
+                        let page_stop=match browser.begin_page(generation,filter.clone()) {
+                            Ok(Some(stop))=>stop,
+                            Ok(None)=>continue,
+                            Err(error)=>{
+                                update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await;
+                                continue;
+                            }
+                        };
+                        let control=control.clone();let sender=updates.worker();
+                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
+                            let requested_cursor=cursor.clone();
+                            let args=ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter)};
+                            let result=tokio::select! {biased;
+                                _=page_stop.cancelled()=>return,
+                                result=browser::page(&control,args,page_stop.clone())=>result,
+                            };
+                            if page_stop.is_cancelled() {return;}
+                            match result {
+                                Ok((page,display_times,read_sequence))=>update(&sender,UiUpdate::Threads {generation,read_sequence,requested_cursor,threads:page.items,display_times,next_cursor:page.next_cursor}).await,
+                                Err(error)=>update(&sender,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await,
                             }
                         }) {
-                            update(
-                                &updates,
-                                UiUpdate::ThreadListFailed {
-                                    generation,
-                                    error: "スレッド読込キューが満杯です。Ctrl+Rで再取得してください"
-                                        .into(),
-                                },
-                            )
-                            .await;
+                            update(&updates,UiUpdate::ThreadListFailed {generation,error:"スレッド読込キューが満杯です。Ctrl+Rで再取得してください".into()}).await;
                         }
                     }
                     UiAction::ProgramStatusSeen { thread_id, run_id } => {
@@ -2746,6 +2745,14 @@ async fn run_with_delivery(
                         Err(error) => status(&updates, Some(thread_id), error).await,
                     }
                 }
+                Some(BackgroundResult::BrowserPatch {ticket,result})=>{
+                    if browser.complete(&ticket) {
+                        match result {
+                            Ok(patch)=>update(&updates,UiUpdate::BrowserPatch {patch:Box::new(patch)}).await,
+                            Err(error)=>update(&updates,UiUpdate::BrowserPatchFailed {generation:ticket.generation,error:error.to_string()}).await,
+                        }
+                    }
+                },
                 Some(BackgroundResult::LivePreview {ticket,result})=>{
                     if live_output.complete(&ticket) {
                         let result=result.map(|(cursor,page)| {live_output.install_cursor(cursor);page});
@@ -3020,11 +3027,15 @@ async fn run_with_delivery(
                         selection.changed(&parent);
                         dirty_threads.insert(parent);
                     }
+                    browser.changed(&thread_id);
                     management.usage_changed(&thread_id);
                     streams.invalidate(&thread_id);
                     selection.changed(&thread_id);
                     receipt_delivery::changed(&mut pending, &thread_id);
-                    dirty_threads.insert(thread_id);
+                    if selection.active_thread.as_deref()==Some(&thread_id)
+                        || pending.values().any(|receipt|receipt.thread==thread_id) {
+                        dirty_threads.insert(thread_id);
+                    }
                 }
                 Ok(EngineEvent::Stream {
                     thread_id,
@@ -3058,6 +3069,7 @@ async fn run_with_delivery(
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     status_dirty |= status_enabled;
                     management.usage_lagged();
+                    browser.request_resync("会話一覧の変更通知を取りこぼしました。最新のページから再取得します");
                     #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
@@ -3111,6 +3123,7 @@ async fn run_with_delivery(
     drop(ui_subscription);
     read_cancel.cancel();
     drop(live_output);
+    drop(browser);
     selection.cancel.cancel();
     cancel.cancel();
     drop(background_rx);

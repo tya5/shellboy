@@ -12,6 +12,7 @@ pub(super) struct Query {
     pub epoch: u64,
     pub render_width: u16,
     pub tool_scope: Option<ToolObservation>,
+    pub browser: Option<browser::Ticket>,
 }
 
 struct RawVisible {
@@ -160,6 +161,7 @@ pub(super) async fn run(
         epoch,
         render_width,
         tool_scope,
+        mut browser,
     } = query;
     let _permit = permit;
     tokio::select! {biased;_=stop.cancelled()=>{},_=async {
@@ -176,24 +178,43 @@ pub(super) async fn run(
             if let Some(revision)=tool_revision {
                 update(&updates,UiUpdate::ToolFacts {thread_id:thread.clone(),generation,revision,result:Err(error.to_string())}).await;
             }
+            if let Some(ticket)=browser.take() {
+                let _=sender.send(BackgroundResult::BrowserPatch {ticket,result:Err(error.clone())}).await;
+            }
             let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(Err(error)),epoch,generation:Some(generation)}).await;
             return;
         };
         let target=thread.clone();
         let waits=control.pending_wait_sources();
+        let browser_scope=browser.as_ref().map(|ticket|(ticket.ids.clone(),ticket.selected.clone(),ticket.stop.clone()));
         let read=control.store.database.call(move |db| {
             let tx=db.transaction()?;
             let receipts=receipt_states_tx(&tx,&ids)?;
             // Domain failures of the selected view do not discard independently
             // committed receipt facts. Storage failures retain their real type.
-            let visible=read_visible_tx(&tx,&target,tool_scope,waits.as_deref()).map_err(StorageError::into_api_error);
+            let mut visible=read_visible_tx(&tx,&target,tool_scope,waits.as_deref()).map_err(StorageError::into_api_error);
+            let browser=browser_scope.map(|(ids,selected,stop)|{
+                if stop.is_cancelled() {return Err(ApiError::new(ErrorCode::InvalidState,"Browser observation closed"));}
+                super::browser_read::read_tx(&tx,&ids,selected.as_deref()).map_err(StorageError::into_api_error)
+            });
+            let sequence=message_queue::read_revision();
+            if let Ok(raw)=&mut visible {raw.history.set_read_revision(sequence);}
             tx.commit()?;
-            Ok((receipts,visible))
+            Ok((receipts,visible,browser,sequence))
         }).await.map_err(storage_error);
-        let (receipts,visible)=match checked_storage(&control,read).await {
-            Ok((receipts,visible))=>(Ok(receipts),visible),
-            Err(error)=>(Err(error.clone()),Err(error)),
+        let (receipts,visible,browser_result,sequence)=match checked_storage(&control,read).await {
+            Ok((receipts,visible,browser,sequence))=>(Ok(receipts),visible,browser,sequence),
+            Err(error)=>(Err(error.clone()),Err(error.clone()),Some(Err(error)),0),
         };
+        if let Some(ticket)=browser.take() {
+            let result=match browser_result {
+                Some(Ok(raw))=>super::browser::project(raw,sequence,ticket.generation).await,
+                Some(Err(error))=>Err(error),
+                None=>Err(ApiError::new(ErrorCode::InvalidState,"Browser observation unavailable")),
+            };
+            let result=checked_storage(&control,result).await;
+            let _=sender.send(BackgroundResult::BrowserPatch {ticket,result}).await;
+        }
         let result=async {
             let raw=checked_storage(&control,visible).await?;
             // Rendering, sender/model-error JSON, decoding and timestamp work

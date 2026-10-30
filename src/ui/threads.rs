@@ -1,5 +1,6 @@
 //! Thread-list presentation; previews use the same Markdown parser as history.
 use super::theme;
+use super::thread_patch::BrowserPatch;
 use super::{UiAction, popup};
 use crate::protocol::ThreadSummary;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -41,10 +42,19 @@ pub(super) struct ThreadBrowser {
     next_cursor: Option<String>,
     loading: bool,
     error: Option<String>,
+    patch_error: Option<String>,
     notice: Option<String>,
     notice_seen: std::cell::Cell<bool>,
     preferred: Option<String>,
     generation: u64,
+    page_read_sequence: u64,
+    complete_page_sequence: Option<u64>,
+    row_versions: BTreeMap<String, (u64, bool)>,
+    patch_overlay: BTreeSet<String>,
+    limited_titles: BTreeSet<String>,
+    stale_excerpts: BTreeSet<String>,
+    excerpt_error: Option<(String, String)>,
+    observed_scope: Option<(u64, String, Option<String>, bool)>,
     filter_deadline: Option<Instant>,
     tree: OnceCell<TreeCache>,
     tree_revision: u64,
@@ -123,24 +133,45 @@ impl ThreadBrowser {
     }
     fn invalidate(&mut self, cursor: Option<String>) {
         self.next_cursor = cursor;
-        self.generation += 1;
+        self.generation = self.generation.wrapping_add(1);
+        self.reset_patch_evidence();
         self.loading = true;
         self.error = None;
         self.notice = None;
     }
     fn begin(&mut self, cursor: Option<String>) -> UiAction {
         self.filter_deadline = None;
-        self.invalidate(cursor.clone());
+        if cursor.is_none() {
+            self.invalidate(None);
+        } else {
+            self.loading = true;
+            self.error = None;
+            self.notice = None;
+        }
         self.request(cursor)
     }
     pub(super) fn take_filter_request(&mut self, now: Instant) -> Option<UiAction> {
-        if !self.visible || self.filter_deadline.is_none_or(|deadline| now < deadline) {
+        if !self.visible
+            || self
+                .observed_scope
+                .as_ref()
+                .is_some_and(|(_, _, _, visible)| !*visible)
+            || self.filter_deadline.is_none_or(|deadline| now < deadline)
+        {
             return None;
         }
         self.filter_deadline = None;
-        Some(self.request(None))
+        Some(self.request(self.next_cursor.clone()))
     }
     pub(super) fn filter_wait(&self, now: Instant) -> Option<Duration> {
+        if !self.visible
+            || self
+                .observed_scope
+                .as_ref()
+                .is_some_and(|(_, _, _, visible)| !*visible)
+        {
+            return None;
+        }
         self.filter_deadline
             .map(|deadline| deadline.saturating_duration_since(now))
     }
@@ -175,6 +206,7 @@ impl ThreadBrowser {
     pub fn failed(&mut self, generation: u64, error: String) {
         if generation == self.generation {
             self.loading = false;
+            self.filter_deadline = None;
             self.error = Some(error);
         }
     }
@@ -198,6 +230,7 @@ impl ThreadBrowser {
             .map(|thread| thread.thread_id.clone());
         let refresh_filter = self.visible && (self.loading || self.filter_deadline.is_some());
         self.generation = self.generation.wrapping_add(1);
+        self.reset_patch_evidence();
         self.filter_deadline = refresh_filter.then(Instant::now);
         self.loading = refresh_filter;
         self.error = None;
@@ -225,6 +258,7 @@ impl ThreadBrowser {
     pub fn apply(
         &mut self,
         generation: u64,
+        read_sequence: u64,
         requested_cursor: Option<String>,
         items: Vec<ThreadSummary>,
         display_times: Vec<ThreadDisplayTime>,
@@ -233,6 +267,7 @@ impl ThreadBrowser {
         active: Option<String>,
     ) -> bool {
         if generation != self.generation
+            || read_sequence < self.page_read_sequence
             || (requested_cursor.is_some() && requested_cursor != self.next_cursor)
         {
             return false;
@@ -251,8 +286,32 @@ impl ThreadBrowser {
             .filter(|thread| selected.as_deref() == Some(thread.thread_id.as_str()))
             .and_then(|_| self.selected_position())
             .map(|_| self.selected_screen_row());
+        let exhaustive = requested_cursor.is_none() && next_cursor.is_none();
+        if exhaustive {
+            let returned = items
+                .iter()
+                .map(|row| row.thread_id.as_str())
+                .collect::<BTreeSet<_>>();
+            for (id, (sequence, present)) in &mut self.row_versions {
+                if *sequence <= read_sequence && !returned.contains(id.as_str()) {
+                    *sequence = read_sequence;
+                    *present = false;
+                }
+            }
+            self.complete_page_sequence = Some(
+                self.complete_page_sequence
+                    .map_or(read_sequence, |old| old.max(read_sequence)),
+            );
+            self.patch_overlay.retain(|id| {
+                self.row_versions
+                    .get(id)
+                    .is_some_and(|(_, present)| *present)
+            });
+        }
         if requested_cursor.is_none() {
-            self.items.clear();
+            self.items.retain(|row| {
+                row.thread_id.starts_with("draft:") || self.patch_overlay.contains(&row.thread_id)
+            });
         }
         let mut positions: BTreeMap<_, _> = self
             .items
@@ -261,6 +320,31 @@ impl ThreadBrowser {
             .map(|(i, t)| (t.thread_id.clone(), i))
             .collect();
         for item in items.into_iter().chain(drafts) {
+            if !item.thread_id.starts_with("draft:") {
+                if self
+                    .row_versions
+                    .get(&item.thread_id)
+                    .is_some_and(|(sequence, present)| {
+                        *sequence > read_sequence || (!present && *sequence >= read_sequence)
+                    })
+                {
+                    continue;
+                }
+                if !self.row_versions.contains_key(&item.thread_id)
+                    && self.row_versions.len() >= 2000
+                {
+                    self.resync(
+                        generation,
+                        "一覧の更新履歴が保持上限に達したため再同期します".into(),
+                    );
+                    return false;
+                }
+                self.row_versions
+                    .insert(item.thread_id.clone(), (read_sequence, true));
+                self.stale_excerpts.remove(&item.thread_id);
+                self.limited_titles.remove(&item.thread_id);
+                self.patch_overlay.remove(&item.thread_id);
+            }
             if let Some(index) = positions.get(&item.thread_id) {
                 self.items[*index] = item;
             } else if self.items.len() < 2000 {
@@ -268,6 +352,9 @@ impl ThreadBrowser {
                 self.items.push(item);
             }
         }
+        self.sort_items();
+        self.page_read_sequence = read_sequence;
+        self.filter_deadline = None;
         self.invalidate_tree();
         self.update_times(display_times);
         self.loading = false;
@@ -289,6 +376,271 @@ impl ThreadBrowser {
             *state.offset_mut() = 0;
         }
         true
+    }
+    fn reset_patch_evidence(&mut self) {
+        self.page_read_sequence = 0;
+        self.complete_page_sequence = None;
+        self.row_versions.clear();
+        self.patch_overlay.clear();
+        self.limited_titles.clear();
+        self.stale_excerpts.clear();
+        self.excerpt_error = None;
+        self.patch_error = None;
+    }
+    fn sort_items(&mut self) {
+        self.items.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| b.thread_id.cmp(&a.thread_id))
+        });
+    }
+    pub fn observe(&mut self, visible: bool) -> Option<UiAction> {
+        let visible = visible && self.visible;
+        if !visible && self.visible && self.loading && self.filter_deadline.is_none() {
+            self.filter_deadline = Some(Instant::now());
+        }
+        let selected = visible
+            .then(|| self.items.get(self.selected))
+            .flatten()
+            .filter(|row| !row.thread_id.starts_with("draft:"))
+            .map(|row| row.thread_id.clone());
+        let scope = (
+            self.generation,
+            self.filter.clone(),
+            selected.clone(),
+            visible,
+        );
+        if self.observed_scope.as_ref() == Some(&scope)
+            || (self.observed_scope.is_none() && !visible)
+        {
+            return None;
+        }
+        self.observed_scope = Some(scope);
+        Some(UiAction::ObserveBrowser {
+            generation: self.generation,
+            filter: self.filter.clone(),
+            selected,
+            visible,
+        })
+    }
+    pub fn resync(&mut self, generation: u64, reason: String) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.preferred = self
+            .items
+            .get(self.selected)
+            .map(|row| row.thread_id.clone());
+        self.invalidate(None);
+        self.notice = Some(one_line(&reason.chars().take(512).collect::<String>()));
+        self.notice_seen.set(false);
+        self.filter_deadline = Some(Instant::now());
+        true
+    }
+    pub fn patch_failed(&mut self, generation: u64, error: String) {
+        if generation != self.generation {
+            return;
+        }
+        self.patch_error = Some(format!(
+            "一覧の更新に失敗: {}",
+            one_line(&error.chars().take(512).collect::<String>())
+        ));
+        self.stale_excerpts.extend(
+            self.items
+                .iter()
+                .filter(|row| !row.thread_id.starts_with("draft:"))
+                .map(|row| row.thread_id.clone()),
+        );
+    }
+    pub fn patch(&mut self, patch: BrowserPatch) -> bool {
+        let BrowserPatch {
+            generation,
+            read_sequence,
+            rows,
+            display_times,
+            missing_ids,
+            limited_titles,
+            excerpt,
+        } = patch;
+        if generation != self.generation
+            || self
+                .complete_page_sequence
+                .is_some_and(|floor| read_sequence < floor)
+        {
+            return false;
+        }
+        if rows.len() > 128 || missing_ids.len() > 128 || limited_titles.len() > 128 {
+            return self.resync(
+                generation,
+                "一覧の更新範囲が上限を超えたため再同期します".into(),
+            );
+        }
+        let added = rows
+            .iter()
+            .map(|row| &row.thread_id)
+            .chain(missing_ids.iter())
+            .filter(|id| !self.row_versions.contains_key(*id))
+            .collect::<BTreeSet<_>>()
+            .len();
+        if self.row_versions.len() + added > 2000 {
+            return self.resync(
+                generation,
+                "一覧の更新履歴が保持上限に達したため再同期します".into(),
+            );
+        }
+        let selected = self
+            .items
+            .get(self.selected)
+            .map(|row| row.thread_id.clone());
+        let position = self.selected_position().unwrap_or(0);
+        let screen = self.selected_screen_row();
+        let limited = limited_titles.into_iter().collect::<BTreeSet<_>>();
+        let mut changed = false;
+        let mut accepted = false;
+        for row in rows {
+            let id = row.thread_id.clone();
+            if id.starts_with("draft:")
+                || self
+                    .row_versions
+                    .get(&id)
+                    .is_some_and(|(sequence, _)| *sequence > read_sequence)
+            {
+                continue;
+            }
+            accepted = true;
+            let known_match = if limited.contains(&id) {
+                crate::control::db::thread_summary::matches_filter(
+                    &row.thread_id,
+                    "",
+                    "",
+                    &self.filter,
+                ) || crate::control::db::thread_summary::matches_filter(
+                    "",
+                    "",
+                    &row.cwd,
+                    &self.filter,
+                )
+            } else {
+                crate::control::db::thread_summary::matches_filter(
+                    &row.thread_id,
+                    &row.title,
+                    &row.cwd,
+                    &self.filter,
+                )
+            };
+            let uncertain = !known_match && limited.contains(&id);
+            if !known_match && !uncertain {
+                changed |= self.remove_patch_row(&id, read_sequence);
+                continue;
+            }
+            self.row_versions.insert(id.clone(), (read_sequence, true));
+            self.patch_overlay.insert(id.clone());
+            if uncertain {
+                self.limited_titles.insert(id.clone());
+            } else {
+                self.limited_titles.remove(&id);
+            }
+            let mut row = row;
+            if let Some(existing) = self.items.iter_mut().find(|old| old.thread_id == id) {
+                row.excerpt = existing.excerpt.clone();
+                changed |= *existing != row;
+                *existing = row;
+            } else {
+                if self.items.len() >= 2000 {
+                    return self
+                        .resync(generation, "一覧の表示上限に達したため再同期します".into());
+                }
+                row.excerpt.clear();
+                self.items.push(row);
+                changed = true;
+            }
+            changed |= self.stale_excerpts.insert(id);
+        }
+        for id in missing_ids {
+            if id.starts_with("draft:")
+                || self
+                    .row_versions
+                    .get(&id)
+                    .is_some_and(|(sequence, _)| *sequence > read_sequence)
+            {
+                continue;
+            }
+            accepted = true;
+            changed |= self.remove_patch_row(&id, read_sequence);
+        }
+        self.sort_items();
+        self.invalidate_tree();
+        let visible = self.visible_indices();
+        self.selected = selected
+            .as_ref()
+            .and_then(|id| self.tree().ids.get(id).copied())
+            .filter(|index| visible.contains(index))
+            .or_else(|| {
+                visible
+                    .get(position.min(visible.len().saturating_sub(1)))
+                    .copied()
+            })
+            .unwrap_or(0);
+        self.restore_screen_row(screen);
+        self.update_times(display_times);
+        if let Some((id, result)) = excerpt
+            && self
+                .items
+                .get(self.selected)
+                .is_some_and(|row| row.thread_id == id)
+            && self
+                .row_versions
+                .get(&id)
+                .is_none_or(|(sequence, present)| *present && read_sequence >= *sequence)
+        {
+            accepted = true;
+            match result {
+                Ok(text) => {
+                    if let Some(row) = self.items.iter_mut().find(|row| row.thread_id == id) {
+                        changed |= row.excerpt != text;
+                        row.excerpt = text;
+                    }
+                    changed |= self.stale_excerpts.remove(&id);
+                    self.row_versions.insert(id.clone(), (read_sequence, true));
+                    self.excerpt_error = None;
+                }
+                Err(error) => {
+                    self.stale_excerpts.insert(id.clone());
+                    self.excerpt_error =
+                        Some((id, one_line(&error.chars().take(512).collect::<String>())));
+                    changed = true;
+                }
+            }
+        }
+        if accepted {
+            changed |= self.patch_error.take().is_some();
+        }
+        changed
+    }
+    fn remove_patch_row(&mut self, id: &str, sequence: u64) -> bool {
+        self.row_versions.insert(id.into(), (sequence, false));
+        self.patch_overlay.remove(id);
+        self.limited_titles.remove(id);
+        self.stale_excerpts.remove(id);
+        self.display_times.remove(id);
+        let before = self.items.len();
+        self.items.retain(|row| row.thread_id != id);
+        before != self.items.len()
+    }
+    fn excerpt_text(&self, thread: &ThreadSummary) -> String {
+        if self.stale_excerpts.contains(&thread.thread_id) {
+            let reason = self
+                .excerpt_error
+                .as_ref()
+                .filter(|(id, _)| id == &thread.thread_id)
+                .map(|(_, error)| format!("取得失敗: {error}"))
+                .unwrap_or_else(|| "更新を取得中".into());
+            if thread.excerpt.is_empty() {
+                return format!("抜粋は未取得 · {reason}");
+            }
+            return format!("以前の抜粋（未更新） · {reason}\n{}", thread.excerpt);
+        }
+        thread.excerpt.clone()
     }
     pub fn key(&mut self, key: KeyEvent) -> ThreadOutcome {
         self.key_at(key, Instant::now())
@@ -329,14 +681,18 @@ impl ThreadBrowser {
                     return ThreadOutcome::Info(format!(
                         "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
                         thread.thread_id,
-                        thread.title,
+                        if self.limited_titles.contains(&thread.thread_id) {
+                            format!("{}（検索条件との一致は未確認）", thread.title)
+                        } else {
+                            thread.title.clone()
+                        },
                         thread.cwd,
                         thread.parent_id.as_deref().unwrap_or("root"),
                         activity_label(thread),
                         thread.state,
                         thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
                         thread.updated_at,
-                        thread.excerpt
+                        self.excerpt_text(thread)
                     ));
                 }
             }
@@ -639,7 +995,7 @@ impl ThreadBrowser {
         let filter = &self.filter;
         let next_cursor = self.next_cursor.is_some();
         let loading = self.loading;
-        let error = self.error.as_deref();
+        let error = self.error.as_deref().or(self.patch_error.as_deref());
         let rows = self.rows();
         let title = format!(
             "会話 · {}件{}{}",
@@ -842,6 +1198,9 @@ impl ThreadBrowser {
         if interrupted_by_app_exit(thread) {
             label.push_str("[exit] ");
         }
+        if self.limited_titles.contains(&thread.thread_id) {
+            label.push_str("[検索未確認] ");
+        }
         let title = one_line(&thread.title);
         label.push_str(if title.width() == 0 {
             "名称未設定"
@@ -907,7 +1266,7 @@ impl ThreadBrowser {
                 width,
             )),
             Line::from(Span::styled(
-                plain_preview(&thread.excerpt, width),
+                plain_preview(&self.excerpt_text(thread), width),
                 Style::default().fg(theme::TEXT),
             )),
         ];
@@ -1161,6 +1520,7 @@ mod tests {
         assert!(browser.collapsed.contains("parent"));
         assert!(!browser.apply(
             old_generation,
+            0,
             None,
             vec![thread("chosen", None)],
             vec![],
@@ -1412,6 +1772,7 @@ mod tests {
             browser.open(String::new(), vec![], Some("t".into()));
             assert!(browser.apply(
                 browser.generation(),
+                0,
                 None,
                 vec![item.clone()],
                 vec![],
@@ -1442,6 +1803,7 @@ mod tests {
             item.state = "running".into();
             assert!(browser.apply(
                 browser.generation(),
+                0,
                 None,
                 vec![item],
                 vec![],
@@ -1526,7 +1888,16 @@ mod tests {
         let mut tree = ThreadBrowser::default();
         tree.open(String::new(), vec![], Some("s7".into()));
         let generation = tree.generation();
-        assert!(tree.apply(generation, None, items.clone(), vec![], None, vec![], None));
+        assert!(tree.apply(
+            generation,
+            0,
+            None,
+            items.clone(),
+            vec![],
+            None,
+            vec![],
+            None
+        ));
         assert_eq!(
             tree.table_state.borrow().offset(),
             0,
@@ -1559,9 +1930,13 @@ mod tests {
             }
         }
         let mut refreshed = items;
-        refreshed[7].state = "recovery_wait".into();
-        refreshed[7].activity = crate::activity::ActivityPhase::Recovery;
-        assert!(tree.apply(generation, None, refreshed, vec![], None, vec![], None));
+        let refreshed_target = refreshed
+            .iter_mut()
+            .find(|row| row.thread_id == "s7")
+            .unwrap();
+        refreshed_target.state = "recovery_wait".into();
+        refreshed_target.activity = crate::activity::ActivityPhase::Recovery;
+        assert!(tree.apply(generation, 0, None, refreshed, vec![], None, vec![], None));
         assert_eq!(tree.items()[tree.selected()].thread_id, "s7");
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         terminal
@@ -1572,9 +1947,13 @@ mod tests {
             theme::ATTENTION
         );
         let mut inactive = tree.items().to_vec();
-        inactive[7].state = "idle".into();
-        inactive[7].activity = crate::activity::ActivityPhase::Idle;
-        assert!(tree.apply(generation, None, inactive, vec![], None, vec![], None));
+        let inactive_target = inactive
+            .iter_mut()
+            .find(|row| row.thread_id == "s7")
+            .unwrap();
+        inactive_target.state = "idle".into();
+        inactive_target.activity = crate::activity::ActivityPhase::Idle;
+        assert!(tree.apply(generation, 0, None, inactive, vec![], None, vec![], None));
         terminal
             .draw(|frame| tree.draw(frame, frame.area(), None, true))
             .unwrap();
@@ -1647,6 +2026,7 @@ mod tests {
         let generation = tree.generation();
         assert!(tree.apply(
             generation,
+            0,
             None,
             vec![thread("replacement", None)],
             vec![],
@@ -1659,6 +2039,7 @@ mod tests {
         assert_eq!(tree.tree_rebuilds.get(), 3);
         assert!(!tree.apply(
             generation.wrapping_add(1),
+            0,
             None,
             vec![],
             vec![],
@@ -1702,6 +2083,7 @@ mod tests {
         reordered.rotate_left(10);
         assert!(tree.apply(
             tree.generation(),
+            0,
             None,
             reordered,
             vec![],
@@ -2040,7 +2422,7 @@ mod filter_tests {
         assert_eq!(browser.filter(), "日本語");
         assert_eq!(browser.generation(), original + 3);
         assert!(
-            !browser.apply(original, None, vec![], vec![], None, vec![], None),
+            !browser.apply(original, 0, None, vec![], vec![], None, vec![], None),
             "old page is stale immediately, before the delayed request"
         );
     }
@@ -2118,22 +2500,44 @@ mod filter_tests {
         sender.try_send(initial).unwrap();
         ui.thread_browser.key_at(key(KeyCode::Char('a')), now);
         let requests = ui.take_deferred_actions_at(now + FILTER_DELAY);
-        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|action| matches!(action,UiAction::LoadThreads {filter,..} if filter=="a"))
+                .count(),
+            1
+        );
+        assert_eq!(requests.iter().filter(|action|matches!(action,UiAction::ObserveBrowser {filter,visible:true,..} if filter=="a")).count(),1);
         for action in requests {
             ui.deferred_actions
                 .push(sender.try_send(action).unwrap_err().into_inner());
         }
         for _ in 0..3 {
             let retry = ui.take_deferred_actions_at(now + FILTER_DELAY);
-            assert_eq!(retry.len(), 1, "queue refusal retains one current snapshot");
+            assert_eq!(
+                retry
+                    .iter()
+                    .filter(
+                        |action| matches!(action,UiAction::LoadThreads {filter,..} if filter=="a")
+                    )
+                    .count(),
+                1,
+                "queue refusal retains one latest page request"
+            );
+            assert_eq!(retry.iter().filter(|action|matches!(action,UiAction::ObserveBrowser {filter,visible:true,..} if filter=="a")).count(),1,"queue refusal retains one latest visible scope");
             ui.deferred_actions.extend(retry);
         }
         ui.thread_browser
             .key_at(key(KeyCode::Char('b')), now + Duration::from_secs(1));
+        let changed_scope = ui.take_deferred_actions_at(now + Duration::from_secs(1));
         assert!(
-            ui.take_deferred_actions_at(now + Duration::from_secs(1))
-                .is_empty(),
-            "stale queued filter must be dropped before the new deadline"
+            !changed_scope
+                .iter()
+                .any(|action| matches!(action, UiAction::LoadThreads { .. })),
+            "superseded queued page must be dropped before deadline"
+        );
+        assert!(
+            matches!(changed_scope.as_slice(),[UiAction::ObserveBrowser {filter,visible:true,..}] if filter=="ab")
         );
         assert!(
             matches!(&ui.take_deferred_actions_at(now + Duration::from_secs(2))[..],
@@ -2148,9 +2552,522 @@ mod filter_tests {
         let request = ui.take_deferred_actions_at(now + Duration::from_secs(4));
         ui.deferred_actions.extend(request);
         ui.thread_browser.close();
+        let closed = ui.take_deferred_actions_at(now + Duration::from_secs(4));
         assert!(
-            ui.take_deferred_actions_at(now + Duration::from_secs(4))
-                .is_empty()
+            !closed
+                .iter()
+                .any(|action| matches!(action, UiAction::LoadThreads { .. }))
+        );
+        assert!(matches!(
+            closed.as_slice(),
+            [UiAction::ObserveBrowser { visible: false, .. }]
+        ));
+    }
+}
+
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+    fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
+        ThreadSummary {
+            thread_id: id.into(),
+            title: title.into(),
+            cwd: "/synthetic".into(),
+            parent_id: None,
+            state: "idle".into(),
+            activity: crate::activity::ActivityPhase::Idle,
+            latest_run_stop_reason: None,
+            revisit: None,
+            updated_at: at.into(),
+            excerpt: format!("saved excerpt {id}"),
+        }
+    }
+    fn patch(
+        browser: &ThreadBrowser,
+        sequence: u64,
+        rows: Vec<ThreadSummary>,
+        missing: &[&str],
+    ) -> BrowserPatch {
+        BrowserPatch {
+            generation: browser.generation,
+            read_sequence: sequence,
+            rows,
+            display_times: vec![],
+            missing_ids: missing.iter().map(|id| (*id).into()).collect(),
+            limited_titles: vec![],
+            excerpt: None,
+        }
+    }
+    fn initial(items: Vec<ThreadSummary>) -> ThreadBrowser {
+        let mut browser = ThreadBrowser::default();
+        browser.open(String::new(), vec![], None);
+        assert!(browser.apply(
+            browser.generation,
+            10,
+            None,
+            items,
+            vec![],
+            Some("page-two".into()),
+            vec![],
+            None
+        ));
+        browser
+    }
+    #[test]
+    fn additions_reorders_and_deletion_preserve_selected_screen_anchor_and_local_drafts() {
+        let items = (0..40)
+            .map(|n| row(&format!("t{n:02}"), "topic", "2026-10-01"))
+            .collect();
+        let mut browser = initial(items);
+        browser
+            .items
+            .push(row("draft:local", "unsent draft", "2026-01-01"));
+        browser.selected = browser
+            .items
+            .iter()
+            .position(|row| row.thread_id == "t15")
+            .unwrap();
+        let position = browser.selected_position().unwrap();
+        *browser.table_state.borrow_mut().offset_mut() = position - 4;
+        let screen = browser.selected_screen_row();
+        assert!(browser.patch(patch(
+            &browser,
+            20,
+            vec![row("new", "new topic", "2026-11-01")],
+            &["t01"]
+        )));
+        assert_eq!(browser.items[browser.selected].thread_id, "t15");
+        assert_eq!(browser.selected_screen_row(), screen);
+        assert_eq!(browser.items[0].thread_id, "new");
+        assert!(
+            browser
+                .items
+                .iter()
+                .any(|row| row.thread_id == "draft:local")
+        );
+        assert!(!browser.items.iter().any(|row| row.thread_id == "t01"));
+        assert_eq!(
+            browser
+                .items
+                .iter()
+                .filter(|row| row.thread_id == "new")
+                .count(),
+            1
+        );
+    }
+    #[test]
+    fn older_pages_cannot_undo_a_patch_or_missing_row_and_paging_keeps_generation() {
+        let mut browser = initial(vec![
+            row("a", "old a", "2026-01-01"),
+            row("b", "old b", "2026-01-01"),
+        ]);
+        assert!(browser.patch(patch(
+            &browser,
+            20,
+            vec![row("a", "new a", "2026-02-01")],
+            &["b"]
+        )));
+        let generation = browser.generation;
+        let outcome = browser.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        assert!(
+            matches!(outcome,ThreadOutcome::Load(action) if matches!(*action,UiAction::LoadThreads {generation:g,cursor:Some(ref c),..} if g==generation && c=="page-two"))
+        );
+        assert_eq!(browser.generation, generation);
+        assert!(browser.apply(
+            generation,
+            15,
+            Some("page-two".into()),
+            vec![
+                row("a", "stale a", "2026-01-01"),
+                row("b", "stale b", "2026-01-01"),
+                row("c", "older page c", "2025-01-01")
+            ],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        assert_eq!(
+            browser
+                .items
+                .iter()
+                .find(|row| row.thread_id == "a")
+                .unwrap()
+                .title,
+            "new a"
+        );
+        assert!(!browser.items.iter().any(|row| row.thread_id == "b"));
+        assert!(browser.items.iter().any(|row| row.thread_id == "c"));
+        assert!(!browser.apply(
+            generation,
+            14,
+            None,
+            vec![row("b", "late first page", "2026-01-01")],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        assert!(!browser.items.iter().any(|row| row.thread_id == "b"));
+    }
+    #[test]
+    fn unknown_title_is_explicit_filter_uncertainty_and_known_nonmatches_are_removed() {
+        let mut browser = initial(vec![row("old", "needle", "2026-01-01")]);
+        browser.filter = "needle".into();
+        let mut update = patch(
+            &browser,
+            20,
+            vec![
+                row("limited", "名称未設定（元本文の取得範囲外）", "2026-02-01"),
+                row("old", "known nonmatch", "2026-01-01"),
+                row(
+                    "needle-id",
+                    "名称未設定（元本文の取得範囲外）",
+                    "2026-02-01",
+                ),
+            ],
+            &[],
+        );
+        update.limited_titles = vec!["limited".into(), "needle-id".into()];
+        assert!(browser.patch(update));
+        assert!(!browser.items.iter().any(|row| row.thread_id == "old"));
+        assert!(browser.limited_titles.contains("limited"));
+        assert!(!browser.limited_titles.contains("needle-id"));
+        let item = browser
+            .items
+            .iter()
+            .find(|row| row.thread_id == "limited")
+            .unwrap();
+        let tree_row = browser
+            .rows()
+            .iter()
+            .find(|row| browser.items[row.index].thread_id == "limited")
+            .unwrap();
+        assert!(
+            browser
+                .label(tree_row, item, false, false, 100)
+                .contains("検索未確認")
+        );
+    }
+    #[test]
+    fn patches_preserve_collapse_and_selected_excerpt_distinguishes_stale_error_and_empty() {
+        let parent = row("parent", "parent", "2026-01-01");
+        let mut child = row("child", "child", "2026-01-01");
+        child.parent_id = Some("parent".into());
+        let mut browser = initial(vec![parent, child, row("chosen", "chosen", "2026-01-01")]);
+        browser.collapsed.insert("parent".into());
+        browser.invalidate_tree();
+        browser.selected = browser
+            .items
+            .iter()
+            .position(|row| row.thread_id == "chosen")
+            .unwrap();
+        let mut changed = row("chosen", "chosen updated", "2026-02-01");
+        changed.excerpt.clear();
+        assert!(browser.patch(patch(&browser, 20, vec![changed], &[])));
+        assert!(browser.collapsed.contains("parent"));
+        let chosen = browser
+            .items
+            .iter()
+            .find(|row| row.thread_id == "chosen")
+            .unwrap();
+        assert_eq!(chosen.excerpt, "saved excerpt chosen");
+        assert!(
+            browser
+                .excerpt_text(chosen)
+                .contains("以前の抜粋（未更新）")
+        );
+        let mut failed = patch(&browser, 21, vec![], &[]);
+        failed.excerpt = Some(("chosen".into(), Err("fixture failure".into())));
+        browser.patch(failed);
+        assert!(
+            browser
+                .excerpt_text(&browser.items[browser.selected])
+                .contains("取得失敗: fixture failure")
+        );
+        let mut empty = patch(&browser, 22, vec![], &[]);
+        empty.excerpt = Some(("chosen".into(), Ok(String::new())));
+        browser.patch(empty);
+        assert!(browser.items[browser.selected].excerpt.is_empty());
+        assert!(!browser.stale_excerpts.contains("chosen"));
+        let mut old = patch(&browser, 21, vec![], &[]);
+        old.excerpt = Some(("chosen".into(), Ok("stale late text".into())));
+        browser.patch(old);
+        assert!(browser.items[browser.selected].excerpt.is_empty());
+    }
+    #[test]
+    fn observation_changes_once_for_selection_cover_and_close_without_paint_polling() {
+        let mut browser = initial(vec![row("a", "a", "now"), row("b", "b", "now")]);
+        assert!(matches!(
+            browser.observe(true),
+            Some(UiAction::ObserveBrowser { visible: true, .. })
+        ));
+        assert!(browser.observe(true).is_none());
+        browser.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(
+            matches!(browser.observe(true),Some(UiAction::ObserveBrowser {selected:Some(id),..}) if id=="a")
+        );
+        assert!(browser.observe(true).is_none());
+        assert!(matches!(
+            browser.observe(false),
+            Some(UiAction::ObserveBrowser {
+                selected: None,
+                visible: false,
+                ..
+            })
+        ));
+        assert!(browser.observe(false).is_none());
+        assert!(matches!(
+            browser.observe(true),
+            Some(UiAction::ObserveBrowser { visible: true, .. })
+        ));
+        browser.close();
+        assert!(matches!(
+            browser.observe(false),
+            Some(UiAction::ObserveBrowser { visible: false, .. })
+        ));
+    }
+    #[test]
+    fn sequence_metadata_overflow_schedules_one_resync_and_retires_old_generation() {
+        let mut browser = initial(vec![row("chosen", "chosen", "now")]);
+        browser.items.push(row("draft:local", "draft", "now"));
+        browser.filter = "filter".into();
+        browser.collapsed.insert("parent".into());
+        for n in 0..1999 {
+            browser
+                .row_versions
+                .insert(format!("gone-{n}"), (10, false));
+        }
+        let generation = browser.generation;
+        let update = patch(&browser, 20, vec![], &["one-more"]);
+        assert!(browser.patch(update.clone()));
+        assert_eq!(browser.generation, generation + 1);
+        assert_eq!(browser.row_versions.len(), 0);
+        assert_eq!(browser.patch_overlay.len(), 0);
+        assert_eq!(browser.filter, "filter");
+        assert!(browser.collapsed.contains("parent"));
+        assert!(
+            browser
+                .items
+                .iter()
+                .any(|row| row.thread_id == "draft:local")
+        );
+        assert!(!browser.patch(update));
+        assert!(matches!(
+            browser.take_filter_request(Instant::now() + Duration::from_secs(1)),
+            Some(UiAction::LoadThreads { cursor: None, .. })
+        ));
+        assert!(
+            browser
+                .take_filter_request(Instant::now() + Duration::from_secs(2))
+                .is_none()
+        );
+    }
+    #[test]
+    fn exhaustive_first_page_fences_unknown_old_patch_and_retires_old_absent_overlay() {
+        let mut browser = initial(vec![row("kept", "kept", "2026-01-01")]);
+        assert!(browser.patch(patch(
+            &browser,
+            15,
+            vec![row("old-overlay", "old overlay", "2026-02-01")],
+            &[]
+        )));
+        assert!(browser.patch(patch(
+            &browser,
+            30,
+            vec![row("newer-overlay", "new overlay", "2026-03-01")],
+            &[]
+        )));
+        let generation = browser.generation;
+        assert!(browser.apply(
+            generation,
+            20,
+            None,
+            vec![row("kept", "fresh kept", "2026-01-01")],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        assert!(
+            !browser
+                .items
+                .iter()
+                .any(|row| row.thread_id == "old-overlay")
+        );
+        assert!(
+            browser
+                .items
+                .iter()
+                .any(|row| row.thread_id == "newer-overlay")
+        );
+        browser.patch_failed(generation, "newer observer failure".into());
+        let old = patch(
+            &browser,
+            10,
+            vec![row("unknown", "deleted before page20", "2026-01-01")],
+            &[],
+        );
+        assert!(!browser.patch(old));
+        assert!(!browser.items.iter().any(|row| row.thread_id == "unknown"));
+        assert!(
+            browser.patch_error.is_some(),
+            "stale reply must not clear newer consumer error"
+        );
+        assert!(!browser.patch(patch(&browser, 19, vec![], &["newer-overlay"])));
+        assert!(
+            browser
+                .items
+                .iter()
+                .any(|row| row.thread_id == "newer-overlay")
+        );
+    }
+    #[test]
+    fn partial_pages_do_not_infer_absence_and_page_and_patch_errors_have_separate_owners() {
+        let mut browser = initial(vec![row("kept", "kept", "2026-01-01")]);
+        assert!(browser.apply(
+            browser.generation,
+            20,
+            None,
+            vec![row("kept", "kept", "2026-01-01")],
+            vec![],
+            Some("partial".into()),
+            vec![],
+            None
+        ));
+        assert!(browser.patch(patch(
+            &browser,
+            10,
+            vec![row(
+                "offpage",
+                "older snapshot but not disproved",
+                "2025-01-01"
+            )],
+            &[]
+        )));
+        let generation = browser.generation;
+        browser.failed(generation, "current pagination failed".into());
+        browser.patch_failed(generation, "patch failed".into());
+        assert!(browser.patch(patch(
+            &browser,
+            30,
+            vec![row("kept", "updated kept", "2026-02-01")],
+            &[]
+        )));
+        assert!(browser.patch_error.is_none());
+        assert_eq!(browser.error.as_deref(), Some("current pagination failed"));
+        browser.patch_failed(generation, "new patch failed".into());
+        assert!(!browser.patch(patch(
+            &browser,
+            29,
+            vec![row("kept", "stale kept", "2026-01-01")],
+            &[]
+        )));
+        assert!(browser.patch_error.is_some());
+    }
+    #[test]
+    fn covered_pagination_retries_same_cursor_once_unless_success_was_already_accepted() {
+        for completed in [false, true] {
+            let mut browser = initial(vec![row("kept", "kept", "now")]);
+            let generation = browser.generation;
+            browser.observe(true);
+            assert!(matches!(
+                browser.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE)),
+                ThreadOutcome::Load(_)
+            ));
+            browser.observe(false);
+            assert!(
+                browser
+                    .take_filter_request(Instant::now() + Duration::from_secs(1))
+                    .is_none(),
+                "covered scope admits no retry"
+            );
+            if completed {
+                assert!(browser.apply(
+                    generation,
+                    20,
+                    Some("page-two".into()),
+                    vec![row("next", "next", "earlier")],
+                    vec![],
+                    None,
+                    vec![],
+                    None
+                ));
+            }
+            browser.observe(true);
+            let retry = browser.take_filter_request(Instant::now() + Duration::from_secs(1));
+            if completed {
+                assert!(retry.is_none());
+            } else {
+                assert!(
+                    matches!(retry,Some(UiAction::LoadThreads {generation:g,cursor:Some(ref cursor),..}) if g==generation && cursor=="page-two")
+                );
+            }
+            assert!(
+                browser
+                    .take_filter_request(Instant::now() + Duration::from_secs(2))
+                    .is_none()
+            );
+        }
+    }
+    #[test]
+    fn covered_expired_filter_does_not_busy_poll_but_resume_keeps_one_request() {
+        let mut browser = initial(vec![row("visible", "visible", "now")]);
+        browser.observe(true);
+        let now = Instant::now();
+        browser.key_at(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), now);
+        browser.observe(false);
+        let future = now + Duration::from_secs(1);
+        assert!(
+            browser.filter_wait(future).is_none(),
+            "a covered popup must allow blocking terminal input"
+        );
+        assert!(browser.take_filter_request(future).is_none());
+        browser.observe(true);
+        assert_eq!(browser.filter_wait(future), Some(Duration::ZERO));
+        assert!(browser.take_filter_request(future).is_some());
+        assert!(browser.take_filter_request(future).is_none());
+    }
+    #[test]
+    fn actual_ui_filter_covered_before_deadline_resumes_one_latest_page_request() {
+        use super::super::UiState;
+        use crossterm::event::Event;
+        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        ui.thread_browser = initial(vec![row("chosen", "answer", "now")]);
+        ui.take_deferred_actions();
+        ui.event(Event::Key(KeyEvent::new(
+            KeyCode::Char('a'),
+            KeyModifiers::NONE,
+        )));
+        ui.event(Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)));
+        assert!(ui.help_visible);
+        let future = Instant::now() + Duration::from_secs(1);
+        let covered = ui.take_deferred_actions_at(future);
+        assert!(
+            !covered
+                .iter()
+                .any(|action| matches!(action, UiAction::LoadThreads { .. })),
+            "deadline while covered must not start a hidden page"
+        );
+        assert!(
+            covered
+                .iter()
+                .any(|action| matches!(action, UiAction::ObserveBrowser { visible: false, .. }))
+        );
+        ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        let resumed = ui.take_deferred_actions_at(future + Duration::from_secs(1));
+        assert_eq!(
+            resumed
+                .iter()
+                .filter(|action| matches!(action,UiAction::LoadThreads {filter,..} if filter=="a"))
+                .count(),
+            1
+        );
+        assert!(resumed.iter().any(|action|matches!(action,UiAction::ObserveBrowser {filter,visible:true,..} if filter=="a")));
+        assert!(
+            !ui.take_deferred_actions_at(future + Duration::from_secs(2))
+                .iter()
+                .any(|action| matches!(action, UiAction::LoadThreads { .. }))
         );
     }
 }
