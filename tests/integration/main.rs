@@ -163,3 +163,6 @@ mod ui_scroll_stream;
 mod ui_thread_deletion;
 #[path = "../work_status.rs"]
 mod work_status;
+
+#[path = "../index_space_gc.rs"]
+mod index_space_gc;
