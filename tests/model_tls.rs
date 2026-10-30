@@ -207,7 +207,13 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
         assert_eq!(failure.kind, "transport");
         let failure = timeout(
             Duration::from_secs(5),
-            client.embeddings("synthetic-tls", &input, Some(2), CancellationToken::new()),
+            client.embeddings(
+                "synthetic-tls",
+                &input,
+                Some(2),
+                None,
+                CancellationToken::new(),
+            ),
         )
         .await
         .unwrap()
@@ -226,7 +232,13 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
     assert_eq!(models, ["synthetic-tls-model"]);
     let embedding = timeout(
         Duration::from_secs(5),
-        client.embeddings("synthetic-tls", &input, Some(2), CancellationToken::new()),
+        client.embeddings(
+            "synthetic-tls",
+            &input,
+            Some(2),
+            None,
+            CancellationToken::new(),
+        ),
     )
     .await
     .unwrap()
@@ -249,7 +261,13 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
     assert_eq!(
         timeout(
             Duration::from_secs(5),
-            fresh.embeddings("synthetic-tls", &input, Some(2), CancellationToken::new())
+            fresh.embeddings(
+                "synthetic-tls",
+                &input,
+                Some(2),
+                None,
+                CancellationToken::new()
+            )
         )
         .await
         .unwrap()

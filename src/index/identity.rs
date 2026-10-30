@@ -8,11 +8,13 @@ pub(super) struct EmbeddingIdentity {
     pub(super) profile: String,
     pub(super) model: String,
     pub(super) query_key: String,
+    pub(super) requested_dimensions: Option<usize>,
 }
 impl EmbeddingIdentity {
     pub(super) fn configured(config: &Config, key: String) -> Self {
         Self {
             key,
+            requested_dimensions: None,
             query_key: endpoint_family_key(config).expect("configured embedding identity"),
             profile: config.embedding.connection.clone().unwrap_or_default(),
             model: config.embedding.model.clone().unwrap_or_default(),
@@ -113,6 +115,7 @@ impl IndexService {
         self.database
             .call(move |db| {
                 let tx = db.transaction()?;
+                dimensions::clear_failure(&tx, IndexKeys::new(&current_key))?;
                 retry_tx(&tx, args, current_key, compatible_keys, family, filter)?;
                 tx.commit()?;
                 Ok(())
@@ -161,7 +164,15 @@ impl IndexService {
                 None => reason,
             });
         }
-        Ok(status)
+        let keys = self.identity_keys();
+        let family = self.endpoint_family_key.clone();
+        self.database
+            .call(move |db| {
+                observations::enrich(db, &mut status, &keys, family.as_deref())?;
+                Ok(status)
+            })
+            .await
+            .map_err(db_error)
     }
     pub(super) async fn next_delay(&self) -> Result<Duration, ApiError> {
         let keys = self.identity_keys();
@@ -389,6 +400,12 @@ fn read_status(
         failed: 0,
         paused: false,
         reason: None,
+        paused_at: None,
+        pause_id: None,
+        spaces: Vec::new(),
+        spaces_total: 0,
+        spaces_truncated: false,
+        probes: Vec::new(),
     };
     let mut spaces = HashSet::new();
     if let Some(space) = &selected {

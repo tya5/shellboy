@@ -101,10 +101,11 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
         ("index.backfill", json!({"scope":"all"})),
         ("index.retry", json!({})),
         ("index.rebuild", json!({"thread_ids":["t"]})),
+        ("index.probe", json!({"dimensions":768})),
         ("storage.status", json!({})),
         ("storage.collect", json!({})),
     ];
-    assert_eq!(fixtures.len(), 38);
+    assert_eq!(fixtures.len(), 39);
     for (command, args) in fixtures {
         let request = Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"instance:nonce","command":command,"args":args})).unwrap_or_else(|e| panic!("{command}: {e}"));
         assert_eq!(request.command.name(), command);
@@ -670,9 +671,10 @@ fn optional_operation_defaults_keep_empty_wire_and_explicit_index_target_semanti
     assert!(
         Command::IndexPreview(IndexArgs::default())
             .validate()
-            .is_err()
+            .is_ok()
     );
     let preview = Command::IndexPreview(IndexArgs {
+        dimensions: None,
         scope: Some(IndexScope::All),
         ..Default::default()
     });
@@ -830,4 +832,41 @@ fn revisit_wire_rejects_blank_and_oversized_utf8_instructions() {
     );
     assert!(Command::RevisitGet(RevisitArgs { run_id: None }).is_read_only());
     assert!(!Command::RevisitCancel(RevisitArgs { run_id: None }).is_read_only());
+}
+
+#[test]
+fn index_dimensions_are_explicit_bounded_and_rebuild_only() {
+    assert!(
+        Command::IndexPreview(IndexArgs::default())
+            .validate()
+            .is_ok()
+    );
+    for n in [0, 8193] {
+        assert!(
+            Command::IndexProbe(IndexProbeArgs {
+                dimensions: Some(n)
+            })
+            .validate()
+            .is_err()
+        );
+    }
+    for n in [1, 8192] {
+        assert!(
+            Command::IndexProbe(IndexProbeArgs {
+                dimensions: Some(n)
+            })
+            .validate()
+            .is_ok()
+        );
+        let args = IndexArgs {
+            scope: Some(IndexScope::All),
+            dimensions: Some(n),
+            ..Default::default()
+        };
+        assert!(Command::IndexRebuild(args.clone()).validate().is_ok());
+        assert!(Command::IndexBackfill(args.clone()).validate().is_err());
+        assert!(Command::IndexRetry(args.clone()).validate().is_err());
+        assert!(Command::IndexStatus(args.clone()).validate().is_err());
+        assert!(Command::IndexPreview(args).validate().is_err());
+    }
 }

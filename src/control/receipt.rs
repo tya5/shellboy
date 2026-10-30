@@ -209,6 +209,7 @@ pub(super) fn runtime_preflight(request: &Request) -> Result<()> {
             | Command::IndexBackfill(_)
             | Command::IndexRetry(_)
             | Command::IndexRebuild(_)
+            | Command::IndexProbe(_)
             | Command::StorageCollect(_)
     ) {
         let base = serde_json::to_vec(&Response::success(&request.operation_id, Value::Null))

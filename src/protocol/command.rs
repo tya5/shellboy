@@ -50,6 +50,7 @@ impl Command {
             Self::IndexBackfill(_) => ("index.backfill", CommandRoute::Runtime),
             Self::IndexRetry(_) => ("index.retry", CommandRoute::Runtime),
             Self::IndexRebuild(_) => ("index.rebuild", CommandRoute::Runtime),
+            Self::IndexProbe(_) => ("index.probe", CommandRoute::Runtime),
             Self::StorageStatus(_) => ("storage.status", CommandRoute::Runtime),
             Self::StorageCollect(_) => ("storage.collect", CommandRoute::Runtime),
         }
@@ -77,6 +78,7 @@ impl Command {
             | Self::IndexBackfill(_)
             | Self::IndexRetry(_)
             | Self::IndexRebuild(_)
+            | Self::IndexProbe(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => true,
             Self::Status(_)
@@ -153,6 +155,7 @@ impl Command {
             | Self::IndexBackfill(_)
             | Self::IndexRetry(_)
             | Self::IndexRebuild(_)
+            | Self::IndexProbe(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => false,
         }
@@ -199,6 +202,7 @@ impl Command {
             | Self::IndexBackfill(_)
             | Self::IndexRetry(_)
             | Self::IndexRebuild(_)
+            | Self::IndexProbe(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => false,
         }
@@ -246,6 +250,7 @@ impl Command {
             | Self::IndexBackfill(_)
             | Self::IndexRetry(_)
             | Self::IndexRebuild(_)
+            | Self::IndexProbe(_)
             | Self::StorageCollect(_) => false,
         }
     }

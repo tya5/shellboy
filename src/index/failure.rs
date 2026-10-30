@@ -50,6 +50,7 @@ impl IndexService {
         let pause_keys = self.identity_keys();
         let key = key.to_owned();
         let config = self.config.clone();
+        let recovery_key = key.clone();
         let recovery_claim = claimed.clone();
         let provider_error = error.clone();
         let outcome = self
@@ -86,7 +87,9 @@ impl IndexService {
             // transaction must not rerun the malformed streak update.
             let _ = self.database.call(move |db| {
                 let tx = db.transaction()?;
-                if claim_valid(&tx, &claimed)? {
+                if claim_valid(&tx, &claimed)?
+                    && group_current(&tx, IndexKeys::new(&recovery_key), &claimed.work.group)?
+                    && witness_valid(&tx, &claimed.work.witness, &claimed.work.body_kind)? {
                     if let Some(job) = &claimed.job_id {
                         tx.execute("UPDATE embedding_job SET state='failed',error_json=?2,next_attempt_at=NULL WHERE id=?1",params![job,diagnostic.to_string()])?;
                     }
@@ -98,7 +101,7 @@ impl IndexService {
                         update_json_meta(&tx, bootstrap, &work)?;
                     }
                     for key in pause_keys {
-                        set_meta(&tx, &IndexKeys::new(&key).pause(), &diagnostic.to_string())?;
+                        pause::save(&tx, &IndexKeys::new(&key).pause(), &diagnostic)?;
                     }
                 }
                 tx.commit()?;
@@ -135,6 +138,7 @@ fn adopt_failure_tx(
     let common = failure.transient;
     let cause = failure_cause(error, common);
     if !claim_valid(tx, claimed)?
+        || !group_current(tx, keys, &claimed.work.group)?
         || !witness_valid(tx, &claimed.work.witness, &claimed.work.body_kind)?
     {
         discard_claim(tx, claimed, "Source disappeared before error adoption")?;
@@ -155,7 +159,13 @@ fn adopt_failure_tx(
             child.attempts = 0;
             child.state = "pending".into();
             child.next_at = None;
-            child.error = None;
+            // A rejected aggregate is retried individually even after the
+            // existing length splitter creates smaller authorized children.
+            child.error = if claim::singleton_fallback(&claimed.work) {
+                claimed.work.error.clone()
+            } else {
+                None
+            };
             if let Some(space) = &claimed.space {
                 queue_job(tx, space, &child)?;
             } else {
@@ -224,7 +234,7 @@ fn adopt_failure_tx(
         };
         if pause {
             for paused in pause_keys {
-                set_meta(tx, &IndexKeys::new(paused).pause(), &error_json.to_string())?;
+                pause::save(tx, &IndexKeys::new(paused).pause(), &error_json)?;
             }
             if let Some(space) = &claimed.space {
                 tx.execute("UPDATE index_space SET state=CASE WHEN state='candidate' THEN 'candidate_paused' ELSE 'paused' END WHERE id=?1 AND state IN ('active','candidate')",[&space.id])?;

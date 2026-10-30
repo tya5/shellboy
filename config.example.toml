@@ -37,6 +37,9 @@ api_key_env = "SHELLBOY_API_KEY"
 # [embedding]
 # connection = "proxy"
 # model = "REPLACE_WITH_EMBEDDING_MODEL_ID"
+# Optional synchronous request aggregation; select caps supported by your proxy.
+# batch_max_inputs = 1 # 1..128; default keeps singleton requests
+# batch_max_chars = 64000 # 1..1048576 Unicode characters; covers split_chars if batching
 
 [retention]
 tool_raw_days = 7

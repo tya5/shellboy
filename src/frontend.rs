@@ -361,6 +361,7 @@ fn command_title(command: &Command) -> String {
         Command::IndexPreview(_) => "索引の費用対象の確認",
         Command::IndexBackfill(_) => "未索引資料の追加",
         Command::IndexRetry(_) => "索引の再試行",
+        Command::IndexProbe(_) => "埋め込み接続の確認",
         Command::IndexRebuild(_) => "索引の再構築",
         Command::StorageStatus(_) => "保存容量",
         Command::StorageCollect(_) => "保存データの回収",

@@ -379,6 +379,7 @@ async fn embeddings_are_sorted_validated_and_dimension_is_finite() {
             "embed",
             &["first".into(), "second".into()],
             None,
+            None,
             CancellationToken::new(),
         )
         .await
@@ -414,10 +415,219 @@ async fn embeddings_are_sorted_validated_and_dimension_is_finite() {
         )
         .await;
         let error = client
-            .embeddings("embed", &["one".into()], expected, CancellationToken::new())
+            .embeddings(
+                "embed",
+                &["one".into()],
+                expected,
+                None,
+                CancellationToken::new(),
+            )
             .await
             .unwrap_err();
         assert_eq!(error.kind, kind);
+        assert_eq!(server.await.unwrap(), 1);
+    }
+}
+
+#[tokio::test]
+async fn native_embedding_request_omits_dimensions_and_preserves_exact_fields() {
+    let (client, request, server) = fake(
+        200,
+        "application/json",
+        serde_json::to_vec(&json!({"data":[{"index":0,"embedding":[1.0,2.0]}]})).unwrap(),
+        128,
+    )
+    .await;
+    let result = client
+        .embeddings(
+            "embed",
+            &["one".into()],
+            Some(2),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.dimension, 2);
+    assert_eq!(
+        request.await.unwrap().body,
+        json!({"model":"embed","input":["one"],"encoding_format":"float"})
+    );
+    assert_eq!(server.await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn requested_embedding_dimension_is_sent_and_validated_without_fallback() {
+    for (returned, succeeds) in [(2, true), (3, false)] {
+        let raw = json!({"data":[{"index":0,"embedding":vec![1.0;returned]}]});
+        let (client, request, server) = fake(
+            200,
+            "application/json",
+            serde_json::to_vec(&raw).unwrap(),
+            128,
+        )
+        .await;
+        // A probe has no previously observed dimension, but still requires N.
+        let result = client
+            .embeddings(
+                "embed",
+                &["one".into()],
+                None,
+                Some(2),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(
+            request.await.unwrap().body,
+            json!({"model":"embed","input":["one"],"encoding_format":"float","dimensions":2})
+        );
+        if succeeds {
+            assert_eq!(result.unwrap().vectors, vec![vec![1.0, 1.0]]);
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(error.kind, "dimension_mismatch");
+            assert!(error.message.contains("length 3"));
+            assert!(error.message.contains("dimension 2"));
+        }
+        assert_eq!(server.await.unwrap(), 1, "no native-dimension fallback");
+    }
+    let (client, request, server) = fake(
+        200,
+        "application/json",
+        serde_json::to_vec(
+            &json!({"data":[{"index":1,"embedding":[3.0,4.0]},{"index":0,"embedding":[1.0,2.0]}]}),
+        )
+        .unwrap(),
+        128,
+    )
+    .await;
+    let result = client
+        .embeddings(
+            "embed",
+            &["one".into(), "two".into()],
+            Some(2),
+            Some(2),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.vectors, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+    let request = request.await.unwrap();
+    assert_eq!(request.body["dimensions"], 2);
+    assert_eq!(request.body["input"], json!(["one", "two"]));
+    assert_eq!(server.await.unwrap(), 1);
+
+    let (client, request, server) = fake(
+        400,
+        "application/json",
+        serde_json::to_vec(&json!({"error":{"code":"unsupported_dimensions","message":"fixture refuses dimensions"}})).unwrap(),
+        128,
+    )
+    .await;
+    let error = client
+        .embeddings(
+            "embed",
+            &["one".into()],
+            None,
+            Some(2),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.status, Some(400));
+    assert_eq!(
+        error.provider_code.as_deref(),
+        Some("unsupported_dimensions")
+    );
+    assert_eq!(request.await.unwrap().body["dimensions"], 2);
+    assert_eq!(
+        server.await.unwrap(),
+        1,
+        "refusal never retries without dimensions"
+    );
+}
+
+#[tokio::test]
+async fn zero_or_conflicting_embedding_dimensions_fail_before_http() {
+    // A synchronous nonblocking accept proves absence without waiting on time.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let client = HttpModelClient::new(Connection {
+        base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    for (expected, requested) in [(None, Some(0)), (Some(0), None), (Some(2), Some(3))] {
+        let error = client
+            .embeddings(
+                "embed",
+                &["one".into()],
+                expected,
+                requested,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, "input_invalid");
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+}
+
+#[tokio::test]
+async fn embedding_batches_reject_misaligned_or_partially_invalid_vectors_atomically() {
+    let cases = [
+        (json!({"data":[{"index":0,"embedding":[1.0]}]}), "protocol"),
+        (
+            json!({"data":[{"index":0,"embedding":[1.0]},{"index":0,"embedding":[2.0]}]}),
+            "protocol",
+        ),
+        (
+            json!({"data":[{"index":0,"embedding":[1.0]},{"index":2,"embedding":[2.0]}]}),
+            "protocol",
+        ),
+        (
+            json!({"data":[{"index":0,"embedding":[1.0]},{"index":1.5,"embedding":[2.0]}]}),
+            "protocol",
+        ),
+        (
+            json!({"data":[{"index":0,"embedding":[1.0]},{"index":-1,"embedding":[2.0]}]}),
+            "protocol",
+        ),
+        (
+            json!({"data":[{"index":0,"embedding":[1.0]},{"index":1,"embedding":[]}]}),
+            "protocol",
+        ),
+        (
+            json!({"data":[{"index":0,"embedding":[1.0]},{"index":1,"embedding":[2.0,3.0]}]}),
+            "dimension_mismatch",
+        ),
+        (
+            json!({"data":[{"index":0,"embedding":[1.0]},{"index":1,"embedding":[1e100]}]}),
+            "protocol",
+        ),
+    ];
+    for (raw, kind) in cases {
+        let (client, _, server) = fake(
+            200,
+            "application/json",
+            serde_json::to_vec(&raw).unwrap(),
+            128,
+        )
+        .await;
+        let error = client
+            .embeddings(
+                "embed",
+                &["one".into(), "two".into()],
+                None,
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, kind, "{raw}");
         assert_eq!(server.await.unwrap(), 1);
     }
 }
@@ -968,6 +1178,7 @@ async fn automatic_session_is_per_request_stable_and_does_not_leak_through_a_poo
             "fixture",
             &["synthetic".into()],
             Some(1),
+            None,
             CancellationToken::new(),
         )
         .await

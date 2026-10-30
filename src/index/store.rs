@@ -7,6 +7,7 @@ pub(super) struct Space {
     pub(super) profile: String,
     pub(super) model: String,
     pub(super) dimension: usize,
+    pub(super) requested_dimensions: Option<usize>,
     pub(super) splitter: String,
     pub(super) state: String,
     pub(super) table: String,
@@ -105,6 +106,8 @@ pub(super) fn load_space(db: &Connection, id: &str) -> Result<Option<Space>, Sto
             profile: row.get(1)?,
             model: row.get(2)?,
             dimension: row.get::<_, i64>(3)? as usize,
+            requested_dimensions: dimensions::space_request(db, id)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
             splitter: row.get(4)?,
             state: row.get(5)?,
             table: row.get(6)?,
@@ -169,12 +172,15 @@ pub(super) fn ensure_space(
     let (profile, model) = (&embedding.profile, &embedding.model);
     let splitter = keys.splitter();
     if let Some(space) = space_for_group(tx, keys, group)? {
-        if space.dimension != dimension {
+        if space.dimension != dimension
+            || space.requested_dimensions != embedding.requested_dimensions
+        {
             return Err(StorageError::from(err(
                 ErrorCode::InvalidState,
-                "Embedding dimension changed; explicitly rebuild into a new space",
+                "Embedding dimension or request mode changed; explicitly rebuild into a new space",
             )));
         }
+        dimensions::bind_space(tx, &space.id, embedding.requested_dimensions)?;
         identity::bind_query_profile(tx, &space.id, &embedding.query_key)?;
         return Ok(space);
     }
@@ -217,11 +223,13 @@ pub(super) fn ensure_space(
         ],
     )?;
     identity::bind_query_profile(tx, &space, &embedding.query_key)?;
+    dimensions::bind_space(tx, &space, embedding.requested_dimensions)?;
     Ok(Space {
         id: space,
         profile: profile.into(),
         model: model.into(),
         dimension,
+        requested_dimensions: embedding.requested_dimensions,
         splitter,
         state: state.into(),
         table,
@@ -543,6 +551,7 @@ mod metadata_tests {
             matches!(error,StorageError::Worker(ref text) if text=="Stored index job is malformed")
         );
         let claimed = Claimed {
+            requested_dimensions: None,
             job_id: None,
             bootstrap_key: Some("input".into()),
             space: None,

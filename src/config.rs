@@ -206,11 +206,23 @@ fn api_root(value: &str) -> Result<Url, ConfigError> {
     Ok(url)
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Embedding {
     pub connection: Option<String>,
     pub model: Option<String>,
+    pub batch_max_inputs: usize,
+    pub batch_max_chars: usize,
+}
+impl Default for Embedding {
+    fn default() -> Self {
+        Self {
+            connection: None,
+            model: None,
+            batch_max_inputs: 1,
+            batch_max_chars: 64_000,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

@@ -119,6 +119,7 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
         ),
         (&["compact", "--restore"], "context.edit"),
         (&["index", "status"], "index.status"),
+        (&["index", "probe"], "index.probe"),
         (&["index", "backfill", "--scope", "all"], "index.backfill"),
         (&["index", "preview", "--scope", "all"], "index.preview"),
         (&["index", "retry"], "index.retry"),
@@ -129,7 +130,7 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
             "storage.collect",
         ),
     ];
-    assert_eq!(cases.len(), 42);
+    assert_eq!(cases.len(), 43);
     for (args, name) in cases {
         let command = convert(args).await;
         assert_eq!(serde_json::to_value(command).unwrap()["command"], *name);
@@ -885,4 +886,21 @@ async fn revisit_targets_and_bounded_stdin_map_to_shared_commands() {
         1,
         "stdin reads at most limit+1 bytes before rejecting"
     );
+}
+
+#[tokio::test]
+async fn explicit_index_dimension_commands_preserve_wire_selection() {
+    let Command::IndexProbe(args) = convert(&["index", "probe", "--dimensions", "768"]).await
+    else {
+        panic!("probe")
+    };
+    assert_eq!(args.dimensions, Some(768));
+    let Command::IndexRebuild(args) =
+        convert(&["index", "rebuild", "--scope", "all", "--dimensions", "768"]).await
+    else {
+        panic!("rebuild")
+    };
+    assert_eq!(args.dimensions, Some(768));
+    assert_eq!(args.scope, Some(shellboy::protocol::IndexScope::All));
+    assert!(Cli::try_parse_from(["shellboy", "index", "retry", "--dimensions", "768"]).is_err());
 }

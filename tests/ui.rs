@@ -756,6 +756,7 @@ fn space_status_is_readonly_until_scope_and_matching_preview_are_present() {
     assert_eq!(selected.thread_ids, vec!["one", "two"]);
     ui.apply(UiUpdate::IndexPreviewReady {
         args: IndexArgs {
+            dimensions: None,
             space_id: Some("wrong-space".into()),
             ..selected.clone()
         },

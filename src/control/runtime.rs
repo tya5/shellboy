@@ -267,6 +267,11 @@ impl Control {
                 ErrorCode::InvalidState,
                 "Cannot encode search result",
             ),
+            Command::IndexProbe(args) => encode_result(
+                self.index.probe(args).await?,
+                ErrorCode::InvalidState,
+                "Cannot encode index probe",
+            ),
             Command::IndexStatus(args) => encode_result(
                 self.index.status(args).await?,
                 ErrorCode::InvalidState,

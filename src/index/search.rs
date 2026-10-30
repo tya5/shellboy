@@ -127,6 +127,7 @@ impl IndexService {
                 &space.model,
                 std::slice::from_ref(&args.query),
                 Some(space.dimension),
+                space.requested_dimensions,
                 cancel.clone(),
             )
             .await
@@ -363,6 +364,12 @@ pub(crate) fn rag_profile_key(config: &Config, space: &SpaceDescriptor) -> Optio
         &space.model,
         &space.query_profile_key,
     )
+    .map(|key| {
+        space.requested_dimensions.map_or_else(
+            || key.clone(),
+            |n| hash(format!("requested-dimension-v1\0{key}\0{n}").as_bytes()),
+        )
+    })
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SpaceDescriptor {
@@ -370,6 +377,7 @@ pub(crate) struct SpaceDescriptor {
     pub(crate) profile: String,
     pub(crate) model: String,
     pub(crate) dimension: usize,
+    pub(crate) requested_dimensions: Option<usize>,
     pub(crate) splitter: String,
     pub(crate) query_profile_key: String,
     table: String,
@@ -389,6 +397,7 @@ pub(crate) fn rag_space(db: &Connection) -> Result<Option<SpaceDescriptor>, ApiE
         profile: space.profile,
         model: space.model,
         dimension: space.dimension,
+        requested_dimensions: space.requested_dimensions,
         splitter: space.splitter,
         table: space.table,
     }))

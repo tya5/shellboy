@@ -880,6 +880,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     assert_eq!(loaded.4, expected);
     assert!(loaded.5.is_empty() && loaded.6.is_none());
     let scope = IndexArgs {
+        dimensions: None,
         scope: Some(IndexScope::Threads),
         space_id: None,
         thread_ids: vec!["source".into()],
@@ -1030,6 +1031,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     .await;
     assert!(!field(&shown, "/logical_live_bytes").is_empty());
     send.send(UiAction::Manage(Command::IndexStatus(IndexArgs {
+        dimensions: None,
         scope: Some(IndexScope::All),
         space_id: None,
         thread_ids: vec![],
