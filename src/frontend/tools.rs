@@ -2,22 +2,27 @@
 use crate::{
     control::Control,
     presentation::{BlockKind, ToolReasonKind},
-    protocol::ApiError,
+    protocol::{ApiError, ErrorCode},
+    storage::StorageError,
     ui::UiNode,
 };
+use rusqlite::{Connection, OptionalExtension};
 
-struct CallSource {
-    node_index: usize,
-    call_id: String,
+const MAX_NODES: usize = 128;
+const MAX_GROUP_CALLS: usize = 128;
+
+pub(super) struct CallSource {
+    pub(super) node_id: String,
+    pub(super) call_id: String,
     ordinal: u32,
     command: Option<String>,
     result_state: String,
-    shell_state: Option<String>,
+    pub(super) shell_state: Option<String>,
     shell_exit_code: Option<i64>,
     released: bool,
-    group_id: String,
+    pub(super) group_id: String,
     prior_reason: Option<String>,
-    execution_id: Option<String>,
+    pub(super) execution_id: Option<String>,
     call_node_id: Option<String>,
     result_node_id: Option<String>,
     elapsed_ms: Option<u64>,
@@ -65,8 +70,39 @@ JOIN node n ON n.id=r.node_id
 WHERE r.group_id=?1 AND c.ordinal<?2 AND r.status<>'cancelled' AND json_valid(n.payload_json)
 ORDER BY c.ordinal DESC LIMIT 1";
 
-pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
-    for node in &mut *nodes {
+#[derive(Default)]
+pub(super) struct ToolFacts {
+    sources: Vec<CallSource>,
+    truncated_nodes: Vec<String>,
+}
+impl ToolFacts {
+    #[cfg(test)]
+    pub(super) fn sources(&self) -> &[CallSource] {
+        &self.sources
+    }
+    #[cfg(test)]
+    pub(super) fn append(&mut self, other: Self) {
+        let mut seen = self
+            .sources
+            .iter()
+            .map(|source| (source.node_id.clone(), source.call_id.clone()))
+            .collect::<std::collections::HashSet<_>>();
+        self.sources.extend(
+            other
+                .sources
+                .into_iter()
+                .filter(|source| seen.insert((source.node_id.clone(), source.call_id.clone()))),
+        );
+        for node in other.truncated_nodes {
+            if !self.truncated_nodes.contains(&node) {
+                self.truncated_nodes.push(node);
+            }
+        }
+    }
+}
+
+fn clear_observations(nodes: &mut [UiNode]) {
+    for node in nodes {
         for block in &mut node.presentation.blocks {
             if let Some(tool) = &mut block.tool {
                 tool.clear_observation();
@@ -76,70 +112,143 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             }
         }
     }
-    let requests = nodes
-        .iter()
-        .enumerate()
-        .flat_map(|(index, node)| {
-            let mut ids = std::collections::HashSet::new();
-            node.presentation.blocks.iter().filter_map(move |block| {
-                let call = block.tool.as_ref()?;
-                if call.call_id.is_empty() || !ids.insert(call.call_id.clone()) {
-                    return None;
-                }
-                Some((index, node.node_id.clone(), call.call_id.clone()))
-            })
-        })
-        .collect::<Vec<_>>();
-    if requests.is_empty() {
-        return Ok(());
+}
+
+pub(super) fn read_tx(
+    db: &Connection,
+    requests: &[(String, String)],
+) -> Result<ToolFacts, StorageError> {
+    if requests.len() > MAX_NODES * MAX_GROUP_CALLS
+        || requests
+            .iter()
+            .map(|(node, _)| node)
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            > MAX_NODES
+    {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "Tool source metadata exceeds its input bound",
+        )
+        .into());
     }
-    let sources = control
-        .store
-        .database
-        .call(move |db| {
-            let mut query = db.prepare(SOURCE_SQL)?;
-            let mut prior_query = db.prepare(PRIOR_REASON_SQL)?;
-            let mut sources = Vec::new();
-            use rusqlite::OptionalExtension;
-            for (index, node, call) in requests {
-                let source = query
-                    .query_row(rusqlite::params![node, call], |row| {
-                        Ok(CallSource {
-                            node_index: index,
-                            call_id: call.clone(),
-                            ordinal: row.get(0)?,
-                            command: row.get(1)?,
-                            result_state: row.get(2)?,
-                            shell_state: row.get(3)?,
-                            released: row.get(4)?,
-                            group_id: row.get(5)?,
-                            prior_reason: None,
-                            shell_exit_code: row.get(6)?,
-                            execution_id: row.get(7)?,
-                            call_node_id: row.get(8)?,
-                            result_node_id: row.get(9)?,
-                            elapsed_ms: row.get::<_, Option<i64>>(10)?.map(|value| value as u64),
-                        })
+    let mut query = db.prepare(SOURCE_SQL)?;
+    let mut prior_query = db.prepare(PRIOR_REASON_SQL)?;
+    let mut sources = Vec::new();
+    for (node, call) in requests {
+        let source = query
+            .query_row(rusqlite::params![node, call], |row| {
+                Ok(CallSource {
+                    node_id: node.clone(),
+                    call_id: call.clone(),
+                    ordinal: row.get(0)?,
+                    command: row.get(1)?,
+                    result_state: row.get(2)?,
+                    shell_state: row.get(3)?,
+                    released: row.get(4)?,
+                    group_id: row.get(5)?,
+                    prior_reason: None,
+                    shell_exit_code: row.get(6)?,
+                    execution_id: row.get(7)?,
+                    call_node_id: row.get(8)?,
+                    result_node_id: row.get(9)?,
+                    elapsed_ms: row.get::<_, Option<i64>>(10)?.map(|value| value as u64),
+                })
+            })
+            .optional()?;
+        if let Some(mut source) = source {
+            if source.result_state == "cancelled" {
+                source.prior_reason = prior_query
+                    .query_row(rusqlite::params![source.group_id, source.ordinal], |row| {
+                        row.get(0)
                     })
-                    .optional()?;
-                if let Some(mut source) = source {
-                    if source.result_state == "cancelled" {
-                        source.prior_reason = prior_query
-                            .query_row(rusqlite::params![source.group_id, source.ordinal], |row| {
-                                row.get(0)
-                            })
-                            .optional()?
-                            .flatten();
-                    }
-                    sources.push(source);
-                }
+                    .optional()?
+                    .flatten();
             }
-            Ok(sources)
-        })
-        .await
-        .map_err(|error| error.into_api_error())?;
-    for source in sources {
-        for block in &mut nodes[source.node_index].presentation.blocks {
+            sources.push(source);
+        }
+    }
+    Ok(ToolFacts {
+        sources,
+        truncated_nodes: Vec::new(),
+    })
+}
+
+// Scalar selectors only; direct per-output-item nodes never expand to all
+// calls in the group. Whole-response arrays qualify only with a real call.
+#[cfg(test)]
+const MODERN_SOURCE_SQL: &str = r"
+SELECT n.kind,
+ CASE WHEN json_valid(n.payload_json) THEN CASE WHEN json_type(n.payload_json,'$.group_id')='text' THEN json_extract(n.payload_json,'$.group_id') END END,
+ CASE WHEN json_valid(n.payload_json) THEN CASE
+   WHEN json_extract(n.payload_json,'$.item.type') IN ('function_call','function_call_output') AND json_type(n.payload_json,'$.item.call_id')='text' THEN json_extract(n.payload_json,'$.item.call_id')
+   WHEN json_extract(n.payload_json,'$.type') IN ('function_call','function_call_output') AND json_type(n.payload_json,'$.call_id')='text' THEN json_extract(n.payload_json,'$.call_id') END END,
+ CASE WHEN json_valid(n.payload_json) THEN
+   EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.output')='array' THEN json_extract(n.payload_json,'$.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
+   OR EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.response.output')='array' THEN json_extract(n.payload_json,'$.response.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
+ ELSE 0 END
+FROM node n WHERE n.id=?1";
+
+#[cfg(test)]
+pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts, StorageError> {
+    if ids.len() > MAX_NODES {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "Tool source metadata exceeds its node bound",
+        )
+        .into());
+    }
+    let mut modern = db.prepare(MODERN_SOURCE_SQL)?;
+    let mut calls = db.prepare(
+        "SELECT call_id FROM tool_call WHERE group_id=?1 ORDER BY ordinal,call_id LIMIT 129",
+    )?;
+    let mut requests = Vec::new();
+    let mut truncated_nodes = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for node in ids {
+        if !seen.insert(node) {
+            continue;
+        }
+        let row: Option<(String, Option<String>, Option<String>, bool)> = modern
+            .query_row([node], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .optional()?;
+        let Some((kind, Some(group), direct, whole)) = row else {
+            continue;
+        };
+        if !matches!(kind.as_str(), "assistant_response" | "tool_result") {
+            continue;
+        }
+        if let Some(call) = direct {
+            requests.push((node.clone(), call));
+        } else if kind == "assistant_response" && whole {
+            let found = calls
+                .query_map([group], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            if found.len() > MAX_GROUP_CALLS {
+                truncated_nodes.push(node.clone());
+            }
+            requests.extend(
+                found
+                    .into_iter()
+                    .take(MAX_GROUP_CALLS)
+                    .map(|call| (node.clone(), call)),
+            );
+        }
+    }
+    let mut facts = read_tx(db, &requests)?;
+    facts.truncated_nodes = truncated_nodes;
+    Ok(facts)
+}
+
+pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
+    clear_observations(nodes);
+    for source in &facts.sources {
+        let Some(node) = nodes.iter_mut().find(|node| node.node_id == source.node_id) else {
+            continue;
+        };
+        for block in &mut node.presentation.blocks {
             let Some(tool) = &mut block.tool else {
                 continue;
             };
@@ -192,7 +301,45 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
         }
     }
     for node in nodes {
+        if facts.truncated_nodes.iter().any(|id| id == &node.node_id) {
+            node.presentation.metadata_limited = true;
+            node.presentation.details_omitted = true;
+        }
         node.presentation.bound_metadata();
+    }
+}
+
+pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
+    clear_observations(nodes);
+    let requests = nodes
+        .iter()
+        .flat_map(|node| {
+            let mut seen = std::collections::HashSet::new();
+            node.presentation.blocks.iter().filter_map(move |block| {
+                let tool = block.tool.as_ref()?;
+                (!tool.call_id.is_empty() && seen.insert(tool.call_id.clone()))
+                    .then(|| (node.node_id.clone(), tool.call_id.clone()))
+            })
+        })
+        .collect::<Vec<_>>();
+    if requests.is_empty() {
+        return Ok(());
+    }
+    let facts = control
+        .store
+        .database
+        .call(move |db| read_tx(db, &requests))
+        .await
+        .map_err(StorageError::into_api_error)?;
+    let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
+    let projected = super::presentation_work(move || {
+        let mut owned = owned;
+        apply(&mut owned, &facts);
+        owned
+    })
+    .await?;
+    for (target, node) in nodes.iter_mut().zip(projected) {
+        *target = node;
     }
     Ok(())
 }

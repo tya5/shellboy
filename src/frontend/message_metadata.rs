@@ -3,6 +3,7 @@ use crate::{
     control::Control,
     presentation::InputSource,
     protocol::{ApiError, ErrorCode},
+    storage::StorageError,
     ui::UiNode,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -14,6 +15,103 @@ const RECEIPTS_AT_STAMP: &str = "SELECT message_node_id,substr(sender_json,1,819
 struct Metadata {
     created_at: Option<String>,
     source: InputSource,
+}
+struct RawSource {
+    node_id: String,
+    created_at: Option<String>,
+    revisit: bool,
+    // Preserve raw legacy null separately from missing/ambiguous evidence.
+    // No sender JSON is interpreted on the DB worker.
+    sender: Option<String>,
+}
+pub(super) struct SourceFacts {
+    viewed: Option<String>,
+    parent: Option<String>,
+    rows: Vec<RawSource>,
+}
+
+impl SourceFacts {
+    /// Merge bounded sets captured in the same current-view transaction.
+    #[cfg(test)]
+    pub(super) fn append(&mut self, other: Self) -> Result<(), StorageError> {
+        if self.viewed != other.viewed || self.parent != other.parent {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Source metadata scopes do not match",
+            )
+            .into());
+        }
+        let mut seen = self
+            .rows
+            .iter()
+            .map(|row| row.node_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let added = other
+            .rows
+            .into_iter()
+            .filter(|row| seen.insert(row.node_id.clone()))
+            .collect::<Vec<_>>();
+        if self.rows.len() + added.len() > 2 * MAX_NODES {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                "Combined source metadata exceeds its bounded sets",
+            )
+            .into());
+        }
+        self.rows.extend(added);
+        Ok(())
+    }
+}
+
+pub(super) fn read_tx(
+    db: &Connection,
+    viewed: Option<&str>,
+    ids: &[String],
+) -> Result<SourceFacts, StorageError> {
+    if ids.len() > MAX_NODES {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "Display source metadata exceeds its node bound",
+        )
+        .into());
+    }
+    let parent: Option<String> = match viewed {
+        Some(thread) => db
+            .query_row(
+                "SELECT parent_thread_id FROM thread WHERE id=?1",
+                [thread],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten(),
+        None => None,
+    };
+    let rows = ids
+        .iter()
+        .map(|id| read_row(db, id, viewed))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(SourceFacts {
+        viewed: viewed.map(str::to_owned),
+        parent,
+        rows,
+    })
+}
+
+pub(super) fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
+    let keyed = facts
+        .rows
+        .iter()
+        .map(|row| (row.node_id.as_str(), row))
+        .collect::<std::collections::HashMap<_, _>>();
+    for node in nodes {
+        let Some(raw) = keyed.get(node.node_id.as_str()) else {
+            continue;
+        };
+        let metadata = project(raw, facts.viewed.as_deref(), facts.parent.as_deref());
+        node.presentation.created_at = metadata.created_at;
+        node.presentation.input_source = metadata.source;
+        node.presentation.bound_metadata();
+    }
 }
 
 pub(super) async fn enrich(
@@ -32,79 +130,56 @@ pub(super) async fn enrich(
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let viewed = viewed_thread.map(str::to_owned);
-    let metadata = control
+    let facts = control
         .store
         .database
-        .call(move |db| {
-            let parent: Option<String> = match viewed.as_deref() {
-                Some(thread) => db
-                    .query_row(
-                        "SELECT parent_thread_id FROM thread WHERE id=?1",
-                        [thread],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .flatten(),
-                None => None,
-            };
-            ids.iter()
-                .map(|id| read(db, id, viewed.as_deref(), parent.as_deref()))
-                .collect::<Result<Vec<_>, _>>()
-        })
+        .call(move |db| read_tx(db, viewed.as_deref(), &ids))
         .await
-        .map_err(|error| error.into_api_error())?;
-    for (node, metadata) in nodes.iter_mut().zip(metadata) {
-        node.presentation.created_at = metadata.created_at;
-        node.presentation.input_source = metadata.source;
-        node.presentation.bound_metadata();
+        .map_err(StorageError::into_api_error)?;
+    let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
+    let projected = super::presentation_work(move || {
+        let mut owned = owned;
+        apply(&mut owned, &facts);
+        owned
+    })
+    .await?;
+    for (target, node) in nodes.iter_mut().zip(projected) {
+        *target = node;
     }
     Ok(())
 }
 
-fn read(
-    db: &Connection,
-    id: &str,
-    viewed: Option<&str>,
-    parent: Option<&str>,
-) -> Result<Metadata, crate::storage::StorageError> {
+fn read_row(db: &Connection, id: &str, viewed: Option<&str>) -> Result<RawSource, StorageError> {
     let row: Option<(String,String,Option<String>,Option<String>)> = db.query_row(
         "SELECT n.created_at,n.kind,u.thread_id,CASE WHEN json_valid(n.payload_json) THEN json_extract(n.payload_json,'$.event_id') END FROM node n LEFT JOIN turn u ON u.id=n.turn_id WHERE n.id=?1",
         [id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
     ).optional()?;
-    let Some((stamp, kind, source_thread, event)) = row else {
-        return Ok(Metadata {
-            created_at: None,
-            source: InputSource::Unknown,
-        });
+    let mut raw = RawSource {
+        node_id: id.into(),
+        created_at: None,
+        revisit: false,
+        sender: None,
     };
-    let created_at = (stamp.len() <= 128).then(|| stamp.clone());
+    let Some((stamp, kind, source_thread, event)) = row else {
+        return Ok(raw);
+    };
+    raw.created_at = (stamp.len() <= 128).then(|| stamp.clone());
     let target = source_thread.as_deref().or(viewed);
     if kind == "event"
         && let (Some(event), Some(target)) = (event, target)
     {
-        let revisit: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM event WHERE id=?1 AND kind='revisit' AND target_thread_id=?2)",params![event,target],|row|row.get(0))?;
-        if revisit {
-            return Ok(Metadata {
-                created_at,
-                source: InputSource::Revisit,
-            });
+        raw.revisit=db.query_row("SELECT EXISTS(SELECT 1 FROM event WHERE id=?1 AND kind='revisit' AND target_thread_id=?2)",params![event,target],|row|row.get(0))?;
+        if raw.revisit {
+            return Ok(raw);
         }
     }
     if !matches!(kind.as_str(), "user" | "user_message" | "message") {
-        return Ok(Metadata {
-            created_at,
-            source: InputSource::Unknown,
-        });
+        return Ok(raw);
     }
     let Some(target) = target else {
-        return Ok(Metadata {
-            created_at,
-            source: InputSource::Unknown,
-        });
+        return Ok(raw);
     };
-    // There is no receipt-by-node index. Four exact target/state/stamp seeks
-    // inspect at most129 rows each. Timestamp collisions fail closed; never
-    // scan a Thread or the global receipt table to guess sender identity.
+    // Same finite receipt-target/state/stamp seeks as the ordinary wrapper.
     let mut matches = Vec::new();
     let mut query = db.prepare_cached(RECEIPTS_AT_STAMP)?;
     for state in ["accepted", "held", "applied", "cancelled"] {
@@ -114,10 +189,7 @@ fn read(
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         if candidates.len() > STAMP_CANDIDATES {
-            return Ok(Metadata {
-                created_at,
-                source: InputSource::Unknown,
-            });
+            return Ok(raw);
         }
         matches.extend(
             candidates
@@ -126,10 +198,21 @@ fn read(
                 .map(|(_, sender)| sender),
         );
     }
-    let source = if matches.len() != 1 {
-        InputSource::Unknown
+    if matches.len() == 1 {
+        raw.sender = matches.pop();
+    }
+    Ok(raw)
+}
+
+fn project(raw: &RawSource, viewed: Option<&str>, parent: Option<&str>) -> Metadata {
+    let source = if raw.revisit {
+        InputSource::Revisit
     } else {
-        match serde_json::from_str::<serde_json::Value>(&matches[0]).ok() {
+        match raw
+            .sender
+            .as_deref()
+            .and_then(|sender| serde_json::from_str::<serde_json::Value>(sender).ok())
+        {
             Some(serde_json::Value::Null) => InputSource::Human,
             Some(sender)
                 if sender.get("kind").and_then(serde_json::Value::as_str) == Some("human") =>
@@ -145,7 +228,20 @@ fn read(
             None => InputSource::Unknown,
         }
     };
-    Ok(Metadata { created_at, source })
+    Metadata {
+        created_at: raw.created_at.clone(),
+        source,
+    }
+}
+
+#[cfg(test)]
+fn read(
+    db: &Connection,
+    id: &str,
+    viewed: Option<&str>,
+    parent: Option<&str>,
+) -> Result<Metadata, StorageError> {
+    Ok(project(&read_row(db, id, viewed)?, viewed, parent))
 }
 
 #[cfg(test)]
@@ -259,5 +355,82 @@ mod tests {
         assert!(plan.contains("receipt_target"), "{plan}");
         assert!(plan.contains("created_at=?"), "{plan}");
         assert!(RECEIPTS_AT_STAMP.ends_with("LIMIT 129"));
+    }
+    #[test]
+    fn raw_receipt_evidence_survives_db_exit_and_keeps_59_null_and_label_boundaries() {
+        let db = fixture();
+        input(&db, "legacy-null", Some("null"), "applied");
+        input(
+            &db,
+            "named-cli",
+            Some(r#"{"kind":"external_cli","label":"human"}"#),
+            "applied",
+        );
+        let mut facts = read_tx(&db, Some("child"), &["legacy-null".into()]).unwrap();
+        assert_eq!(facts.rows[0].sender.as_deref(), Some("null"));
+        facts
+            .append(read_tx(&db, Some("child"), &["named-cli".into()]).unwrap())
+            .unwrap();
+        facts
+            .append(read_tx(&db, Some("child"), &["legacy-null".into()]).unwrap())
+            .unwrap();
+        assert_eq!(facts.rows.len(), 2);
+        assert!(
+            facts
+                .append(read_tx(&db, Some("fork"), &["legacy-null".into()]).unwrap())
+                .is_err()
+        );
+        drop(db);
+        let mut nodes = ["named-cli", "legacy-null"]
+            .into_iter()
+            .map(|id| UiNode {
+                node_id: id.into(),
+                presentation: crate::presentation::NodePresentation {
+                    read_revision: 77,
+                    body_evicted: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        apply(&mut nodes, &facts);
+        assert_eq!(
+            nodes[0].presentation.input_source,
+            InputSource::Unknown,
+            "a self-asserted human label never changes CLI authority"
+        );
+        assert_eq!(
+            nodes[1].presentation.input_source,
+            InputSource::Human,
+            "historical null retains only its band convention"
+        );
+        assert_eq!(
+            crate::protocol::MessageSender::from_saved(Some("null")).kind,
+            crate::protocol::SenderKind::Unknown,
+            "explicit sender inspection remains unknown for legacy null"
+        );
+        assert!(nodes.iter().all(|node|node.presentation.read_revision==77 && node.presentation.body_evicted));
+    }
+
+    #[test]
+    fn separate_bounded_source_sets_merge_above_128_without_silent_truncation() {
+        let db = fixture();
+        let first = (0..128).map(|n| format!("missing-{n}")).collect::<Vec<_>>();
+        let second = (128..178)
+            .map(|n| format!("missing-{n}"))
+            .collect::<Vec<_>>();
+        let mut facts = read_tx(&db, Some("child"), &first).unwrap();
+        facts
+            .append(read_tx(&db, Some("child"), &second).unwrap())
+            .unwrap();
+        assert_eq!(facts.rows.len(), 178);
+        assert_eq!(
+            read_tx(&db, Some("child"), &vec!["missing".into(); 129])
+                .err()
+                .unwrap()
+                .into_api_error()
+                .code,
+            ErrorCode::InputLimit
+        );
     }
 }
