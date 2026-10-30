@@ -182,8 +182,12 @@ async fn stopping_thread_remains_observable_when_context_metrics_are_temporarily
     let result = details.result.unwrap();
     assert_eq!(result["thread_id"], thread);
     assert_eq!(result["run_id"], "stopping-run");
-    assert_eq!(result["context_usage"]["available"], false);
-    assert!(result["context_usage"]["error"].is_object());
+    assert!(result["context_usage"]["last_successful_attempt"].is_null());
+    assert!(
+        result["context_usage"]
+            .get("estimated_input_tokens")
+            .is_none()
+    );
     let decoded: ThreadDetails = serde_json::from_value(result).unwrap();
     assert!(decoded.context_usage.is_some());
     control.shutdown().await.unwrap();
@@ -1114,8 +1118,8 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
         })
         .await
         .expect("queued context edit did not finish");
-        assert!(outcome["after_tokens"].is_u64());
-        assert!(outcome["cache_invalidated_tokens"].is_u64());
+        assert!(outcome["after_characters"].is_u64());
+        assert!(outcome["changed_suffix_characters"].is_u64());
         let replay = control.request(req).await;
         assert_eq!(
             replay.result, accepted.result,

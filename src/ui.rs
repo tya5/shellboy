@@ -3142,6 +3142,12 @@ impl UiState {
                 vec![self.thread_browser.open(argument.into(), drafts, preferred)]
             }
             "/switch" if !argument.is_empty() => self.select_thread(argument.into()),
+            "/compact-max" => vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
+                thread_id: thread_id.clone(),
+                action: ContextEditAction::Maximal,
+                from_node_id: None,
+                to_node_id: None,
+            }))],
             "/compact" => vec![UiAction::Command(Command::Compact(ThreadTarget {
                 thread_id,
             }))],

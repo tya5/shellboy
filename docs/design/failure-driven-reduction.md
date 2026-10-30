@@ -35,3 +35,11 @@ model switch on retry, factual projections and API-free manual reduction.
 Actual provider-specific error encodings and physical terminals are unverified;
 no paid API or real conversation is used. No OS/process/encoding behavior changes
 are planned; if such changes become necessary, run manual Windows CI before push.
+
+First-version presentation scope: recovery uses the existing short stage/reason
+line and F8 factual error details, not a new dashboard or a new user-action
+ledger. Existing operation receipts/history remain the record of manual actions.
+The model-selection choice is listed when another configured connection is
+known; inspecting other models on the same connection remains the normal model
+selector's responsibility. Protected sizes are replay JSON character/byte facts,
+not a tokenizer estimate or the size of unmeasured external file contents.

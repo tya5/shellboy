@@ -173,6 +173,28 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::stora
                 }
                 .into();
             }
+            if let Some(details) = error.as_ref().and_then(|e| e.details.as_ref()) {
+                let facts = &details["recovery"];
+                if facts.is_object() {
+                    stage.push_str(&format!(
+                        " · retry {}/{} · request {}B · tool {}B",
+                        details["automatic_retries"],
+                        details["retry_limit"],
+                        facts["protected_request"]["bytes"],
+                        facts["protected_latest_tool"]["bytes"]
+                    ));
+                    if let Some(actions) = facts["actions"].as_array() {
+                        message.push_str(" · ");
+                        message.push_str(
+                            &actions
+                                .iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        );
+                    }
+                }
+            }
             let (pending_messages,saved_tool_results,live_shells,uncollected_shells) = db.query_row(
                 "SELECT
                   (SELECT COUNT(*) FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held')),

@@ -222,7 +222,7 @@ Search uses a separate readonly connection, allowing conversation and shell outp
 
 ## Input size and range editing
 
-Use `context_usage` from `shellboy thread get --thread THREAD_ID` to inspect the current estimated input, `compact_hint_tokens`, and the most recent successful request's `input_tokens` / `cached_tokens`. Estimates and observed usage differ. When unavailable, for example while stopping, it returns `available:false` with a reason; other Thread details remain accessible.
+Use `context_usage.last_successful_attempt` from `shellboy thread get --thread THREAD_ID` for measured input_tokens/cached_tokens, started_at and ended_at. next_request_pending means an edit occurred after that request; its effect is known on the next successful request. Core provides no token estimate or size threshold. When unavailable, for example while stopping, it returns `available:false` with a reason; other Thread details remain accessible.
 
 ```sh
 shellboy compact --spill --thread THREAD_ID --from FIRST_NODE --to LAST_NODE
@@ -241,11 +241,10 @@ Originals remain after omission. `restore` restores the original range at the la
 
 To restore omitted context in shorter form, use `--summary --from ... --to ...` with the notice's first/last original node IDs. This targets all omitted sources of one marker. Selecting only part of a hidden range is rejected with guidance to the full boundaries. Reading large amounts of originals through `history get` itself adds those read results to conversation input.
 
-Edit infrequently and in coherent ranges. Prompt caching after the edited position may be invalidated. Result `before_tokens` / `after_tokens` / `cache_invalidated_tokens` are estimates, not guarantees of cache hits or successful connections. Omission/restoration does not undo executed commands or file changes.
+Edit infrequently and in coherent ranges. Prompt caching after the edited position may be invalidated. Result `before_characters` / `after_characters` / `changed_suffix_characters` count replay characters, not tokens or cache hits. Omission/restoration does not undo executed commands or file changes.
 
 To select a restoration range from its notice, use `compact --restore --from FIRST_OMITTED_SOURCE_NODE`. `--from` uniquely identifies either a selected marker ID or the first omitted source node ID. Argument-free restoration restores the most recently created selected marker, not necessarily that particular notice. Explicit `--summary` can include the currently adopted request, so normally keep the current request outside the range to preserve important instructions.
 
-Before the first successful request with usage information, estimates use a fixed character-to-token ratio and may be too small, especially for Japanese-heavy conversations. Also inspect observed `context_usage.last_successful_attempt.input_tokens`; if needed, shrink earlier with explicit compact or the connection's `compact_hint_tokens`. Do not treat unmeasured content as an exact token count.
 
 ## Keyword retrieval after trimming
 
@@ -263,3 +262,11 @@ node. This differs from `history list --thread`, which pages only the current
 path. Global `--scope history` intentionally searches all history instead.
 Read the original or summarize a selected range before restoring a large omitted
 range, which can recreate the same input failure.
+
+### API-free maximum reduction
+
+Use `/compact-max` or `shellboy compact --maximal --thread THREAD_ID` to omit
+all safe context outside protected work, without a model call or node IDs.
+It does not retry or resume the Run. Inspect the saved edit outcome, then choose
+`/retry` explicitly (another model request may be charged). `/restore` can bring
+omitted text back. `/compact` without flags still requests a model summary.

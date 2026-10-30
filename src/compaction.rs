@@ -84,7 +84,6 @@ struct Snapshot {
     turn_boundaries: HashMap<String, String>,
     turn_fence: Option<(String, i64)>,
     run_fence: Option<String>,
-    estimate: edit::TokenEstimate,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CompactResult {
@@ -273,7 +272,6 @@ impl Compactor {
         let thread = thread.to_owned();
         self.database.call(move |db| {
             let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
-            let estimate=edit::TokenEstimate::load(db,&thread,&data.3,&data.4,data.0)?;
             let current_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
             let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
@@ -306,7 +304,7 @@ impl Compactor {
                     }
                 }
             }
-            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,estimate})
+            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence})
         }).await.map_err(storage_error)
     }
 
@@ -865,7 +863,6 @@ mod tests {
             turn_boundaries: HashMap::new(),
             turn_fence: None,
             run_fence: None,
-            estimate: edit::TokenEstimate::default(),
         }
     }
     #[test]

@@ -93,6 +93,10 @@ const COMMANDS: &[CommandHint] = &[
         help: "依頼を編集して分岐",
     },
     CommandHint {
+        name: "/compact-max",
+        help: "APIなしで最大縮小",
+    },
+    CommandHint {
         name: "/compact",
         help: "会話を圧縮",
     },

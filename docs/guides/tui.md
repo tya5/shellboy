@@ -301,3 +301,12 @@ During sent-text recall with Up/Down, current unsent attachments move to the rec
 Failed requests display readable received reasoning/answers as `途中で切れた応答（保存済み・会話には含めない）` (interrupted response, saved but excluded from conversation). Differences between streaming and final content on successful requests are marked `ストリーム差分 · 最終応答は確定済み` (stream difference, final adopted). Ordinary conversation retains display windows for the latest two records; older records and omitted portions remain accessible in the list. Attention color applies only while the original Turn is in recovery wait, becoming a normal notification after recovery/stop. Local time and the same Turn's request excerpt identify records. Reselecting a conversation or restarting reconstructs display from saved records.
 
 These are receive-audit records, excluded from adopted history resent to the model. Display windows extract text/reasoning excerpts rather than showing source JSON itself. Source retains partial text, completed items, final response, and failure/difference information. Encrypted reasoning is never expanded as screen text.
+
+### Minimal failure recovery (#50)
+
+`/compact-max` performs maximum safe API-free reduction without node IDs; it
+does not retry. `/retry` is a separate potentially charged request. The compact
+recovery line shows saved facts; F8 Run/Turn context has retry count, failure
+time/stage, protected replay sizes and attachment sizes (null when unknown).
+Only applicable edit/detach/restore choices are listed, without recommendations.
+No recovery dashboard is added ahead of #41/#58.

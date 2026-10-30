@@ -96,12 +96,7 @@ impl Connection {
                 "must be at least 1000 milliseconds",
             ));
         }
-        if self.compact_hint_tokens == Some(0) {
-            return Err(invalid(
-                format!("connections.{name}.compact_hint_tokens"),
-                "must be a positive integer when specified",
-            ));
-        }
+
         if self.response_max_retries > 20 {
             return Err(invalid(
                 format!("connections.{name}.response_max_retries"),
