@@ -24,6 +24,15 @@ the actual total/overflow count. Full content remains obtainable by source ID.
 No expiry removes pending input. Reuse Changed-driven refreshes; clocks do not
 query the queue.
 
+Schema v14 adds two ordinary indexes on the existing draft table: state/Thread/
+updated-time/ID for bounded current submitted bindings and archive reads, and a
+partial submitted source-draft/revision expression index for autosave/restore
+watermarks. A bounded result must not scan all accumulated frozen submissions on
+every history refresh. These indexes add no source facts, counter or lifecycle;
+their owner and lifetime are the existing draft rows and database. Use stable ID
+tie ordering for newest submitted/archive reads; reception order still comes
+from immutable receipts for messages and combined restoration.
+
 Show compact user-style rows above the composer, with sender, pending/held reason
 and immediate-delivery mark. A shared-framework queue popup permits inspection,
 single cancellation and cancellation of explicitly displayed IDs. Show counts
@@ -45,6 +54,15 @@ restorable, including a first send before any Thread exists. Never identify send
 by text. Submission IDs derive from the operation identity, not wall-clock text.
 
 ## Cancellation and restoration
+
+Ordered draft sends look up a canonical request fingerprint before mutable file
+or target preflight. It includes the original Thread/create arguments, text and
+element positions, raw attachment paths/kinds, now mode and frozen submission.
+Derived selection revisions and file observations are not request identity.
+Control and Store reuse that fingerprint through preparation. A known saved
+outcome from a prior owner returns without side effects; changed same-ID input
+conflicts, and an unknown prior-owner operation stays expired. This prevents a
+deleted attachment or changed owner from breaking commit-before-ack replay.
 
 `message cancel --message ID [--message ID ...]` accepts 1..128 fixed unique IDs
 under one operation receipt and transaction. Return each ID's outcome:
@@ -79,6 +97,17 @@ ordinary attachment layout for existing file GC. All remain subject to existing
 draft/payload limits and Thread deletion; no unbounded in-memory archive cache is
 added. `/restore list` and `/restore draft ID` expose durable archives; preserve
 argumentless `/restore` as the existing context-restore operation.
+
+The existing draft_bytes limit measures raw UTF-8 text, not escaped JSON plus
+metadata. Enforce that text limit separately. Bound a frozen serialized snapshot
+by six times the text budget (JSON's maximum per-byte escape expansion) plus
+MAX_FRAME_BYTES for non-text metadata, using checked/saturating arithmetic.
+This reuses an existing finite transport-sized metadata allowance without adding
+configuration or silently shrinking valid raw-text input. Apply the same bound
+after acceptance metadata is added. Source-reference cancellation archives contain
+no copied text and use only that metadata allowance. Excess metadata is reported
+as such, never as an oversized user message. Existing logical byte accounting
+still counts the full serialized draft payload.
 
 ## Explicit foreground release
 
@@ -118,6 +147,11 @@ Use a single Turn-bound cancellation token and native-start gate inside the
 existing DriverSlot registration. Never use the Run-wide stop token. Binding a
 snapshot reads the durable intent, covering commit-before-registration. Reuse
 the binding throughout the same Turn, and replace it only after acknowledgement.
+Interrupt admission holds the existing driver-registry publication mutex through
+exact target validation, matching Turn binding installation, native gate acquisition
+and the short DB commit. This also fences absent/replaced registrations. Lock
+order is registry, Turn binding, native gate, DB job; no DB callback acquires
+these runtime locks. Driver/native paths release their gates before registry use.
 Interrupt admission acquires the same asynchronous gate used immediately around
 native process creation/publication; no DB callback acquires it. Thus a call
 already started may continue, while a call losing to the interrupt cannot spawn.
@@ -135,7 +169,13 @@ Acknowledgement terminalizes only that Turn, settles its already-admitted event
 deliveries (not genuinely later completions), repairs admitted receipts, and
 carries its known unadmitted input to a new same-Run Turn without reassigning
 original receipt/node provenance. The factual context_changed interruption marker
-is admitted once before carried/new input. A marker alone does not wake a Turn.
+is admitted once before carried/new input. It records the actual new Turn ID,
+carried count, up to 128 receipt/message/original-assignment source facts, explicit
+truncation, and first/last carried message IDs. Each carried receipt retains its
+immutable original assignment and adds bounded delivery_context in its existing
+result JSON with the new Run/Turn and admission reason/time. Existing receipt
+logical-byte accounting and transaction rollback remain intact; this does not promise an
+unbounded source-ID list in the marker. A marker alone does not wake a Turn.
 Then always pass through normal driver next(): no work completes the Run, owned
 background work keeps it alive, pending input starts a fresh Turn, and later real
 completion events retain their usual wake behavior. Do not leave an empty live
