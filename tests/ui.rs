@@ -371,8 +371,9 @@ fn test_backend_renders_status_modes_and_native_unicode_cursor() {
     let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let rendered = screen_text(&terminal);
-    assert!(rendered.replace(' ', "").starts_with("[入力できます]"));
-    assert!(rendered.replace(' ', "").contains("追従中"));
+    assert!(rendered.trim_start().starts_with('·'));
+    assert!(rendered.contains("F1 help"));
+    assert!(!rendered.contains("追従中"));
     assert!(rendered.replace(' ', "").contains("日本語"));
     ui.event(key(KeyCode::F(2)));
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
@@ -2012,18 +2013,94 @@ fn long_folded_reasoning_and_inline_markdown_keep_original_body_position_on_resi
 fn derived_tool_excerpt_moves_by_visible_rows() {
     use serde_json::json;
     use shellboy::{history::text_of_payload, presentation::project};
-    let output = (0..60)
+    let mut output = (0..60)
         .map(|i| format!("O{i:03} {}\n", "long output ".repeat(30)))
         .collect::<String>();
+    output.push_str("EXCERPT_FINAL_TAIL\n");
     let payload = json!({"item":{"type":"function_call_output","call_id":"call",
         "output":json!({"status":"completed","exit_code":0,"output_complete":true,"output":output}).to_string()}});
     let original = text_of_payload(&payload);
     let mut node = scroll_fixture_node(0, original.clone());
     node.role = "tool".into();
     node.presentation = project("tool_result", &payload, &original, 0);
+    for tool in node
+        .presentation
+        .blocks
+        .iter_mut()
+        .filter_map(|block| block.tool.as_mut())
+    {
+        tool.group_id = Some("excerpt-group".into());
+        tool.result_node_id = Some("scroll-0".into());
+        tool.execution_id = Some("excerpt-execution".into());
+    }
     let mut ui = scroll_fixture(vec![node], 0, 1);
     let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    let closed = scroll_cells(&mut ui, &mut terminal);
+    assert!(
+        !closed
+            .iter()
+            .any(|line| line.contains("EXCERPT_FINAL_TAIL")),
+        "success starts closed"
+    );
+    assert!(ui.event(key(KeyCode::Tab)).is_empty());
+    let actions = ui.event(key(KeyCode::Char(' ')));
+    let request = actions
+        .into_iter()
+        .find_map(|action| match action {
+            UiAction::LoadToolPreview {
+                thread_id,
+                generation,
+                key,
+                request_revision,
+                source_node_id,
+                ..
+            } => {
+                assert_eq!(source_node_id, "scroll-0");
+                Some((thread_id, generation, key, request_revision))
+            }
+            _ => None,
+        })
+        .expect("opening success requests its bounded source preview");
+    let tail = output
+        .chars()
+        .rev()
+        .take(8192)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    assert!(tail.ends_with("EXCERPT_FINAL_TAIL\n"));
+    ui.apply(UiUpdate::ToolPreview {
+        thread_id: request.0,
+        generation: request.1,
+        key: request.2,
+        request_revision: request.3,
+        result: Ok(ToolPreview {
+            blocks: vec![shellboy::presentation::PresentationBlock {
+                kind: shellboy::presentation::BlockKind::ToolResult,
+                stream: Some(shellboy::presentation::OutputStream::Stdout),
+                text: tail,
+                source_exact: false,
+                ..Default::default()
+            }],
+            notice: None,
+        }),
+    });
+    assert!(ui.event(key(KeyCode::Esc)).is_empty());
+    assert!(
+        ui.event(Event::Key(KeyEvent::new(
+            KeyCode::End,
+            KeyModifiers::CONTROL
+        )))
+        .is_empty()
+    );
     let before = scroll_cells(&mut ui, &mut terminal);
+    assert!(
+        before
+            .iter()
+            .any(|line| line.contains("EXCERPT_FINAL_TAIL")),
+        "true output tail must be visible: {before:?}"
+    );
     scroll_wheel(&mut ui, true);
     let up = scroll_cells(&mut ui, &mut terminal);
     assert_eq!(&up[3..], &before[..before.len() - 3]);
@@ -2355,7 +2432,14 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
     }
     assert!(actual.view().loading);
     a.draw(|frame| draw(frame, &mut actual)).unwrap();
-    assert!(screen_text(&a).contains("読込み中"));
+    assert!(
+        screen_text(&a)
+            .lines()
+            .rev()
+            .take(2)
+            .any(|line| line.contains('…')),
+        "the quiet footer must show the pending read"
+    );
     let mut reads = 0;
     while let Some(action) = requests.pop_front() {
         if let UiAction::LoadNodeWindow {
@@ -2389,7 +2473,13 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
         scroll_cells(&mut expected, &mut b)
     );
     assert_eq!(actual.view().anchor, expected.view().anchor);
-    assert!(!screen_text(&a).contains("読込み中"));
+    assert!(
+        !screen_text(&a)
+            .lines()
+            .rev()
+            .take(2)
+            .any(|line| line.contains('…'))
+    );
 }
 
 #[test]
@@ -2797,7 +2887,12 @@ fn quiet_scroll_event(index: usize) -> UiNode {
     let mut node = scroll_fixture_node(index, "context changed".into());
     node.role = "event".into();
     node.presentation.kind = shellboy::presentation::PresentationKind::Event;
-    node.presentation.title = "状態変更".into();
+    node.presentation.title = if index.is_multiple_of(2) {
+        "AGENTS.md none"
+    } else {
+        "index not configured"
+    }
+    .into();
     node
 }
 
@@ -2811,7 +2906,12 @@ fn wheel_down_at_coalesced_event_tail_stays_at_the_true_end() {
     let mut ui = scroll_fixture(nodes, 0, 3);
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     let before = scroll_cells(&mut ui, &mut terminal);
-    assert!(before.iter().any(|line| line.contains("状態変更 2件")));
+    assert!(before.iter().any(|line| line.contains("AGENTS.md none")));
+    assert!(
+        before
+            .iter()
+            .any(|line| line.contains("index not configured"))
+    );
     for _ in 0..12 {
         assert!(scroll_wheel(&mut ui, false).is_empty());
         assert!(ui.view().follow);

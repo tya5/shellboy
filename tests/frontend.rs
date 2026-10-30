@@ -1519,9 +1519,13 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('recorded-turn','source','observed-run','completed','now','now')",[])?;
         tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,exit_code,output_complete,started_at,ended_at)VALUES('recorded-shell','observed-run','recorded-turn','recorded-shell-op','exited','/','{}','UTF-8','UTF-8','closed',2,0,1,'now','now')",[])?;
         tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('recorded-shell',0,'stdout',0,?1,'now')",[b"# raw output\n**plain**\n\x1b]8;;https://example.invalid/raw?long=one&keep=two#full\x1b\\raw link\x1b]8;;\x1b\\\n".as_slice()])?;
-        let stderr=format!("warning on stderr\n{}","!".repeat(9000));
+        let stderr=format!("warning on stderr\n{}\nTRUE_STDERR_TAIL","!".repeat(40_000));
         tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('recorded-shell',1,'stderr',0,?1,'now')",[stderr.as_bytes()])?;
         history::append_node(&tx,"source","stream-node",None,"tool_result",&tool_for_db,"now")?;
+        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('saved-attempt','recorded-turn',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
+        tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('saved-group','saved-attempt','recorded-turn','completed','now')",[])?;
+        tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('saved-group','stream-call',0,'shell','{}','completed','recorded-shell')",[])?;
+        tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('saved-group','stream-call','stream-node','exited')",[])?;
         history::append_node(&tx,"source","unknown-stream",None,"tool_result",&json!({"item":{"type":"function_call_output","call_id":"unknown-call","output":json!({"execution_id":"missing-execution","output":"unknown original"}).to_string()}}),"now")?;
         history::append_node(&tx,"source","explicit-streams",None,"tool_result",&json!({"item":{"type":"function_call_output","call_id":"explicit-call","output":json!({"stdout":"known stdout","stderr":"known stderr"}).to_string()}}),"now")?;
         history::append_node(&tx,"source","mixed-streams",None,"tool_result",&json!({"item":{"type":"function_call_output","call_id":"mixed-call","output":json!({"execution_id":"missing-execution","output":"combined original","stderr":"explicit stderr"}).to_string()}}),"now")?;
@@ -1569,38 +1573,87 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         .find(|node| node.node_id == "stream-node")
         .unwrap();
     assert_eq!(stream_node.text, history::text_of_payload(&tool));
-    let streams = &stream_node.presentation.blocks;
-    assert!(streams.iter().any(|block| block.stream
+    assert!(
+        !stream_node
+            .presentation
+            .blocks
+            .iter()
+            .any(
+                |block| block.stream == Some(shellboy::presentation::OutputStream::Stdout)
+                    && block.text.contains("# raw output")
+            ),
+        "successful output stays closed on history load"
+    );
+    assert!(
+        !stream_node
+            .presentation
+            .fields
+            .iter()
+            .any(|field| field.key.starts_with("/ui_raw_stream_preview"))
+    );
+    send.send(UiAction::LoadToolPreview {
+        thread_id: "source".into(),
+        generation: 3,
+        key: shellboy::ui::ItemKey::Tool {
+            group_id: "saved-group".into(),
+            call_id: "stream-call".into(),
+        },
+        request_revision: 17,
+        source_node_id: "stream-node".into(),
+        group_id: Some("saved-group".into()),
+        call_id: "stream-call".into(),
+    })
+    .await
+    .unwrap();
+    let preview = next_update(&mut incoming, |update| match update {
+        UiUpdate::ToolPreview {
+            thread_id,
+            generation,
+            key,
+            request_revision,
+            result,
+        } if request_revision == 17 => {
+            assert_eq!(thread_id, "source");
+            assert_eq!(generation, 3);
+            assert_eq!(
+                key,
+                shellboy::ui::ItemKey::Tool {
+                    group_id: "saved-group".into(),
+                    call_id: "stream-call".into()
+                }
+            );
+            Some(result.unwrap())
+        }
+        _ => None,
+    })
+    .await;
+    assert!(preview.blocks.iter().any(|block| block.stream
         == Some(shellboy::presentation::OutputStream::Stdout)
         && block.text == "# raw output\n**plain**\nraw link\n"));
-    assert!(streams.iter().any(|block| block.stream
-        == Some(shellboy::presentation::OutputStream::Stderr)
-        && block.text.starts_with("warning on stderr")));
+    let stderr = preview
+        .blocks
+        .iter()
+        .find(|block| block.stream == Some(shellboy::presentation::OutputStream::Stderr))
+        .unwrap();
     assert!(
-        streams
+        stderr.text.ends_with("TRUE_STDERR_TAIL") && !stderr.text.contains("warning on stderr")
+    );
+    assert!(
+        preview.blocks.iter().all(|block| !block.source_exact
+            && block.rendered.is_none()
+            && block.markdown.is_empty())
+    );
+    assert!(
+        preview
+            .blocks
             .iter()
-            .all(|block| !block.source_exact && block.rendered.is_none())
+            .map(|block| block.text.len())
+            .sum::<usize>()
+            <= 16 * 1024
     );
-    assert!(
-        stream_node.presentation.details_omitted,
-        "limited raw excerpt must disclose remaining bytes"
-    );
-    let raw_link = stream_node
-        .presentation
-        .links
-        .iter()
-        .find(|link| link.url == "https://example.invalid/raw?long=one&keep=two#full")
-        .unwrap();
-    let envelope = streams
-        .iter()
-        .find(|block| block.stream == Some(shellboy::presentation::OutputStream::Stdout))
-        .unwrap();
-    assert_eq!(
-        (raw_link.source_start, raw_link.source_end),
-        (envelope.source_start, envelope.source_end)
-    );
-    assert!(!envelope.text.contains('\u{1b}'));
-    let full_url = raw_link.url.clone();
+    assert!(preview.notice.as_deref().unwrap().contains("省略"));
+    // The exact original/copy route is independent of the abbreviated display.
+    let full_url = "https://example.invalid/raw?long=one&keep=two#full".to_owned();
     send.send(UiAction::CopyText {
         text: full_url.clone(),
         scope: shellboy::ui::CopyScope::Value,
@@ -1666,11 +1719,12 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         == Some(shellboy::presentation::OutputStream::Combined)
         && block.text.contains("unknown original")));
     assert!(
-        field(&unknown.presentation.fields, "/ui_raw_stream_preview").contains("TargetUnavailable")
-    );
-    assert_eq!(
-        field(&unknown.presentation.fields, "/ui_raw_stream_preview_error"),
-        "TargetUnavailable"
+        !unknown
+            .presentation
+            .fields
+            .iter()
+            .any(|field| field.key.starts_with("/ui_raw_stream_preview")),
+        "unverified execution references do not trigger eager raw reads"
     );
     let mixed_node = nodes.iter().find(|node| node.node_id == "mixed").unwrap();
     assert_eq!(mixed_node.text, history::text_of_payload(&mixed));
@@ -1922,15 +1976,37 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         == Some(shellboy::presentation::OutputStream::Combined)
         && block.text.contains("saved combined preview")));
     assert!(
-        field(&fallback.presentation.fields, "/ui_raw_stream_preview").contains("OutputExpired")
+        !fallback
+            .presentation
+            .fields
+            .iter()
+            .any(|field| field.key.starts_with("/ui_raw_stream_preview")),
+        "successful source hydration still does not eagerly read raw after retention"
     );
-    assert_eq!(
-        field(
-            &fallback.presentation.fields,
-            "/ui_raw_stream_preview_error"
-        ),
-        "OutputExpired"
-    );
+    send.send(UiAction::LoadToolPreview {
+        thread_id: "source".into(),
+        generation: 3,
+        key: shellboy::ui::ItemKey::Tool {
+            group_id: "saved-group".into(),
+            call_id: "stream-call".into(),
+        },
+        request_revision: 18,
+        source_node_id: "stream-node".into(),
+        group_id: Some("saved-group".into()),
+        call_id: "stream-call".into(),
+    })
+    .await
+    .unwrap();
+    let expired = next_update(&mut incoming, |update| match update {
+        UiUpdate::ToolPreview {
+            request_revision: 18,
+            result,
+            ..
+        } => Some(result),
+        _ => None,
+    })
+    .await;
+    assert!(expired.unwrap_err().contains("no longer fully retained"));
     observer
         .store
         .database

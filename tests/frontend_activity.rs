@@ -454,7 +454,7 @@ async fn wall_clock_changes_do_not_change_ui_observation_time_or_saved_shell_mea
         text
     }
     let text = screen(&mut state);
-    assert!(text.contains("観測経過2分13秒"), "{text}");
+    assert!(text.contains("133s"), "{text}");
     assert!(
         text.contains("1.2秒"),
         "S6 saved shell measurement stays independent: {text}"
@@ -464,7 +464,10 @@ async fn wall_clock_changes_do_not_change_ui_observation_time_or_saved_shell_mea
     assert_eq!(background.snapshot.phase, ActivityPhase::Background);
     assert!(!background.snapshot.turn_in_progress);
     apply(&mut state, background, at + Duration::from_secs(133));
-    assert!(screen(&mut state).contains("観測経過2分13秒"));
+    assert!(
+        !screen(&mut state).contains("133s"),
+        "a stopped Turn clock must not label background-work age"
+    );
     // No locally observed active Turn means no invented duration after selection.
     state.select_thread("t".into());
     let new_generation = state.view().generation;
@@ -476,7 +479,7 @@ async fn wall_clock_changes_do_not_change_ui_observation_time_or_saved_shell_mea
         snapshot: background.snapshot,
         observed_at: at + Duration::from_secs(9000),
     });
-    assert!(!screen(&mut state).contains("観測経過"));
+    assert!(!screen(&mut state).contains("133s"));
     db.shutdown().await.unwrap();
 }
 

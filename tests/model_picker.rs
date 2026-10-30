@@ -207,7 +207,16 @@ fn shared_list_keeps_last_wrapped_model_selected_and_footer_fixed() {
         .unwrap();
     assert_eq!(
         buffer[(40, selected_y)].bg,
-        ratatui::style::Color::Rgb(32, 44, 58)
+        if std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty()) {
+            ratatui::style::Color::Reset
+        } else {
+            ratatui::style::Color::Rgb(32, 44, 58)
+        }
+    );
+    assert!(
+        buffer[(40, selected_y)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
     );
     let copied = state.event(Event::Key(KeyEvent::new(
         KeyCode::Char('y'),

@@ -458,9 +458,9 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     // commits a distinct persisted assistant node. Exact row identity is
     // asserted by TestBackend; emitted PTY bytes are not a screen emulator.
     terminal.write_all(b"\x1b[<64;10;5M").unwrap();
-    read_until_text(&mut terminal, &mut output, "Ctrl+Endで末尾へ").await;
+    read_repaint_text(&mut terminal, &mut output, &["↓"]).await;
     allow_completion.send(()).unwrap();
-    read_until_text(&mut terminal, &mut output, "完了").await;
+    read_repaint_text(&mut terminal, &mut output, &["✓", "↓"]).await;
     collect_output(&mut terminal, &mut output, Duration::from_millis(800)).await;
     let idle = collect_output(&mut terminal, &mut output, Duration::from_millis(500)).await;
     assert!(
@@ -490,10 +490,14 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         "draft must survive repaint: {text}"
     );
     assert!(
-        text.contains("Ctrl+Endで末尾へ"),
+        text.contains("↓"),
         "scroll anchor/follow must survive repaint: {text}"
     );
     assert!(!text.contains("FOREIGN_SCREEN_MARKER"));
+    // Explicit return-to-tail must recover the paid response after the paused
+    // provisional node was replaced by its canonical saved source.
+    terminal.write_all(b"\x1b[1;5F").unwrap();
+    read_repaint_text(&mut terminal, &mut output, &["SHELLBOY_TUI_OK"]).await;
     terminal.write_all(&[0x11]).unwrap(); // Ctrl+Q after raw mode has disabled IXON.
     // A terminal emulator keeps reading while its child shuts down. Without
     // draining the master here, a final redraw can fill the PTY buffer and

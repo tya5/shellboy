@@ -599,6 +599,10 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
             assert!(node.text.contains(id));
         }
     }
+    let identities = calls
+        .iter()
+        .map(|tool| (tool.group_id.clone(), tool.call_id.clone()))
+        .collect::<std::collections::HashSet<_>>();
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(180, 90)).unwrap();
     terminal.draw(|frame| ui::draw(frame, &mut ui)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -613,16 +617,26 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         shown.push('\n');
     }
     for wanted in [
-        "#1 printf one",
-        "#2 sleep 30",
-        "#3 printf MUST_NOT_RUN",
-        "現在 背景で継続中",
-        "利用者の操作で背景へ移行",
-        "未実行・取消",
+        "printf one",
+        "↳ sleep 30",
+        "⊘ printf MUST_NOT_RUN",
         "利用者が先行する呼出しを背景へ移したため未実行",
+        "背景継続（返却時）",
     ] {
         assert!(shown.contains(wanted), "missing {wanted}: {shown}");
     }
+    for command in ["printf one", "sleep 30", "printf MUST_NOT_RUN"] {
+        assert_eq!(
+            shown.matches(command).count(),
+            1,
+            "call/result merge must emit one item per stable identity: {shown}"
+        );
+    }
+    assert!(shown.find("printf one").unwrap() < shown.find("sleep 30").unwrap());
+    assert!(shown.find("sleep 30").unwrap() < shown.find("printf MUST_NOT_RUN").unwrap());
+    assert!(!shown.contains("#1") && !shown.contains("#2") && !shown.contains("#3"));
+    assert_eq!(identities.len(), 3);
+    assert!(identities.iter().all(|(group, _)| group.is_some()));
     let count = control
         .store
         .database
