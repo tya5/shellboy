@@ -130,13 +130,26 @@ Set with `thread set --thread THREAD --title 'Investigation and fixes'`. `--titl
 
 Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd resolves against the creation/change target's base. Changing cwd does not change an existing AGENTS reference. See [configuration](configuration.md#startup-settings-and-thread-settings).
 
-### Message / Operation (3 operations)
+### Message / Operation (4 operations)
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
+| `message send [--thread THREAD] [--now] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
 | `message get --message MESSAGE` | Original immutable assignment, current delivery_status, and answer_node_id when available |
+| `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed queued message IDs. Each item reports cancelled/already_cancelled/already_admitted/not_found/forbidden/unavailable and an archive_draft_id when available; admitted history cannot be cancelled. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
+
+Ordinary sends queue for the next safe boundary. Add `--now` only to request
+urgent delivery by releasing a foreground shell wait: that shell continues under
+its execution ID, and an in-progress model response is not interrupted.
+Acceptance still does not mean delivery or completion.
+
+Humans may cancel any sender's queued input; authenticated models may cancel
+only input sent by their own Thread. Check each result: admission may win the
+race. Same-operation replay returns saved outcomes, without cancelling or
+restoring twice. A human can retrieve archived input with TUI `/restore list`
+or `/restore draft ID`; restoration does not send it automatically. See
+[queued messages](agent-guide.md#queued-messages-and-human-turn-interruption).
 
 Supply exactly one of `--text` and `--text-stdin`. Stdin is read as UTF-8 with an 8MiB limit and no truncation; configured message/draft limits also apply.
 

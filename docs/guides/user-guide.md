@@ -4,6 +4,8 @@
 
 Shellboy is a terminal application for conversations and model-directed shell work. Start one TUI to own a conversation data directory; external `shellboy` CLI commands connect to that running application. Conversations require a Responses-compatible proxy endpoint, model ID, and credentials. You can read guides with `shellboy docs list` before configuring anything, and use the document-search CLI `shellboy rag` independently.
 
+Before granting model-directed shell access, read the [safety model](#safety-model).
+
 ## Conversations and work states
 
 The UI currently uses Japanese captions. The following table explains the terms you see on screen.
@@ -71,23 +73,14 @@ Reading older history pauses following the tail and shows “新着あり” (ne
 
 ### Inspect saved usage
 
-F8 `使用量 · 合計` shows all-time saved model usage and separate Run/model/shell
-durations, with an option for child conversations. CLI users can run
-`shellboy usage get --thread THREAD_ID --include-children`, or select `--run` or
-`--turn` without children. Existing get commands include `usage_totals` too.
-Unknown measurements are not zero; summary/embedding recording is outside this
-version. Active observations are separate and these overlapping durations are
-not effective work time. Explicit F8 usage/get detail forms show cached snapshots:
-Changed bursts coalesce for three seconds after a result, then the existing UI
-tick schedules one DB-worker refresh, not a render query. Following a reference
-from a result opens a one-shot snapshot with no Changed refresh; F6 field pages
-only inspect the cached response. For newer values, explicitly submit the F8
-usage/get form again or follow the reference again from a current result.
-Neither surface promises a freshness deadline; closing the view or switching
-drafts leaves no hidden usage refresh. Ordinary conversation selection reads
-metadata only, without usage aggregation. Actual reference queries use the
-`open` slow-diagnostic trigger once, only when aggregation takes at least100ms.
-See [CLI reference](cli-reference.md#saved-usage-1-operation).
+- Open F8 `使用量 · 合計` (usage totals), enabling children if needed, or use
+  `shellboy usage get --thread THREAD_ID --include-children` (omit the last flag
+  for this conversation alone).
+- These are saved-record totals, not a bill or effective work time. The time
+  categories overlap; unreported or unrecorded usage is shown as unknown, not zero.
+- If it feels slow, look for `event=usage_totals_slow` in
+  `<data_dir>/logs/shellboy.log`. Only aggregations taking at least100ms appear.
+  [TUI details](tui.md#saved-usage-details) explains refresh and snapshot behavior.
 
 ## 4. Change connection or model
 
@@ -137,3 +130,48 @@ After a failure, inspect Run/Turn context in F8. `/compact-max` reduces safe
 context without a summary API; `/retry` separately resends and may charge again.
 `/restore` can recover omitted text. Core no longer estimates tokens or uses a
 75k threshold. Last successful measured usage and its time are in thread get.
+
+## Safety model
+
+**What you grant.** The model's only tool is a general-purpose shell. Commands
+inherit the owner's OS account and environment by default. Shellboy does not
+insert a per-command approval prompt. Shellboy supplies no filesystem/network sandbox
+and no command denylist; a conversation's cwd is a starting directory, not a
+fence. Separate conversations and worktrees do not isolate permissions.
+
+**Why not an approval or prohibition layer?** Blocking command names while
+leaving a general-purpose shell available can be bypassed by expressing the
+same operation another way; it would imply protection it cannot provide.
+Approving every command also conflicts with long autonomous work and encourages
+clicking through without reading. Use OS boundaries rather than rely on a weak
+application boundary. This does not authorize a model to ignore your instructions.
+
+**What Shellboy does instead.** It saves admitted requests before execution and
+records saved output, origins, cancellation reasons and instruction snapshots
+so you can inspect what happened. Retention limits still apply, especially to
+raw shell output: this is not a promise to retain everything forever. Origin
+and ownership checks validate CLI callers and targets; they do not isolate OS
+resources from a malicious model. Stop a Turn, Run or shell using the documented
+controls and inspect saved facts after interruption. Stopping cannot undo file
+changes or external effects, and restarting does not automatically resume terminated Runs.
+Some TUI operations still have confirmations (for example deletion or paid index
+work); those are not a per-command security gate.
+
+**Your boundary.** For valuable environments, use a dedicated least-privilege
+OS account, container or VM and restrict file/network access there. OS options
+include macOS Seatbelt, Linux bubblewrap/Landlock, and a dedicated Windows user
+with NTFS permissions and Windows Firewall. No unverified sandbox recipe is
+provided here. Include the owner's privileges in your design: wrapping only the
+model shell does not restrict owner-mediated reads such as `attachment add`.
+Keep unrelated secrets out of the environment/readable files; assume commands
+can inspect credentials accessible to that account. Conversations and selected
+file/tool content can go to configured API endpoints (including embeddings when
+enabled), and the data-dir stores conversation data; protect both endpoint
+choice and local access.
+
+**Prompt injection.** Instructions found in web pages, files, RAG hits or other
+conversations/child results are data, not new user authorization. A model cannot
+reliably block every such attack. Limit what it can reach using the OS boundary,
+and use saved provenance/history to inspect actions; neither replaces the other.
+See [Agent Guide](agent-guide.md#safety-boundary) and
+[stopping and recovery](recovery-and-storage.md).

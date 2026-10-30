@@ -1453,3 +1453,18 @@ input. If maximum omission has no target, try the existing final spill/summary
 stage immediately; if neither adopts a reduction, or stages are spent/rejected,
 recover without another POST. Keep ordinary transient/no-candidate retries.
 Expose the unavailable automatic-reduction fact without a cause recommendation.
+
+## #61: explain the actual safety boundary, without adding one
+
+Align public guides with the existing shell/Origin/ownership, persistence, stop
+and retention contracts. No per-command shell approval or command-name denylist
+is offered; existing TUI confirmations and CLI validation still exist and must
+not be described as absent. Explain the bypass/habituation rationale and OS
+isolation alternative, not a promise that logging or stopping prevents harm.
+User Guide EN/JA carry the same five-part safety explanation; the English Agent
+Guide adds scope/injection/secret-handling reminders. Saved usage is three user
+points, with implementation detail retained in tui.md/usage-aggregates.md.
+Defer OS sandbox command/profile examples until each platform is actually tested;
+list tools only and note owner-mediated access. WezTerm Shift+click is a reported
+macOS observation from issue61, not new developer/other-terminal qualification.
+Only documentation changes; no new runtime policy, schema, worker or dependency.
