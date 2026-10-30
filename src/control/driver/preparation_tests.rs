@@ -856,6 +856,108 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
 }
 
 #[tokio::test]
+async fn saved_tool_result_notifies_its_selected_history_only_after_commit() {
+    for rollback in [false, true] {
+        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let snapshot = ready(&control, &accepted).await;
+        let prepared = Arc::new(
+            control
+                .attachments
+                .prepare_at_revision(
+                    &accepted.thread_id,
+                    CancellationToken::new(),
+                    false,
+                    snapshot.selection,
+                )
+                .await
+                .unwrap(),
+        );
+        assert!(
+            admit_attempt(
+                &control,
+                &snapshot,
+                "result-attempt",
+                prepared.clone(),
+                0,
+                0
+            )
+            .await
+            .unwrap()
+        );
+        let response = model::ModelResponse::completed(
+            json!({
+                "id":"result-response", "status":"completed", "output":[{
+                    "type":"function_call", "name":"shell", "call_id":"result-call",
+                    "arguments":"{\"command\":\"unused synthetic call\"}",
+                }],
+            }),
+            true,
+        )
+        .unwrap();
+        assert!(
+            adopt_response(
+                &control,
+                &snapshot,
+                "result-attempt",
+                &response,
+                prepared,
+                Some("result-group".into()),
+            )
+            .await
+            .unwrap()
+        );
+        if rollback {
+            control.store.database.call(|db| {
+                db.execute_batch("CREATE TRIGGER reject_result BEFORE INSERT ON tool_result BEGIN SELECT RAISE(ABORT,'fixture result rollback'); END;")?;
+                Ok(())
+            }).await.unwrap();
+        }
+        // The adopted call's notification has already happened. Only the saved
+        // result can make this subscription observe another history change.
+        let mut subscription = control.subscribe_ui();
+        let result = save_tool_result(
+            &control,
+            &snapshot,
+            "result-group",
+            "result-call",
+            json!({"status":"completed","text":"COMMITTED_TOOL_RESULT"}),
+        )
+        .await;
+        if rollback {
+            assert!(result.is_err());
+            assert!(matches!(
+                subscription.receiver.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ));
+        } else {
+            result.unwrap();
+            assert!(
+                matches!(subscription.receiver.try_recv(), Ok(EngineEvent::Changed {thread_id,recovery:false}) if thread_id==accepted.thread_id)
+            );
+            assert!(matches!(
+                subscription.receiver.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ));
+        }
+        let thread = accepted.thread_id.clone();
+        control.store.database.call(move |db| {
+            let payloads = db.prepare("SELECT n.payload_json FROM tool_result r JOIN node n ON n.id=r.node_id JOIN thread_path p ON p.node_id=n.id WHERE p.thread_id=?1 AND r.group_id='result-group' AND r.call_id='result-call'")?
+                .query_map([thread], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            assert_eq!(payloads.len(), usize::from(!rollback));
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM node WHERE kind='tool_result'",[],|row|row.get::<_,i64>(0))?, i64::from(!rollback));
+            if !rollback { assert!(payloads[0].contains("COMMITTED_TOOL_RESULT")); }
+            assert_eq!(db.query_row("SELECT state FROM tool_call WHERE group_id='result-group' AND call_id='result-call'",[],|row|row.get::<_,String>(0))?, if rollback {"pending"} else {"completed"});
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM model_attempt",[],|row|row.get::<_,i64>(0))?,1);
+            if rollback { db.execute_batch("DROP TRIGGER reject_result")?; }
+            Ok(())
+        }).await.unwrap();
+        drop(snapshot);
+        drop(subscription);
+        close(control, owner).await;
+    }
+}
+
+#[tokio::test]
 async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again() {
     for saved in ["running", "completed"] {
         let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;

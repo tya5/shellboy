@@ -597,6 +597,7 @@ async fn save_tool_result(
     call: &str,
     mut result: Value,
 ) -> Result<(), ApiError> {
+    let thread = snapshot.thread.clone();
     let snapshot = snapshot.clone();
     let group = group.to_owned();
     let call = call.to_owned();
@@ -622,7 +623,11 @@ async fn save_tool_result(
         {
             tx.execute("UPDATE delivery SET state='processed' WHERE event_id=?1 AND recipient_id=?2",params![format!("shell-ended-{execution}"),snapshot.run])?;
         }
-        tx.commit()?;Ok(())}).await.map_err(storage_error)
+        tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+    // Shell collection can notify before this canonical result exists. Publish
+    // its own committed history change even when the next HTTP sends no bytes.
+    control.changed(&thread);
+    Ok(())
 }
 
 async fn run_shell(
