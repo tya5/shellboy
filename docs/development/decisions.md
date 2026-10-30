@@ -1289,3 +1289,34 @@ notification, so use a bounded5ms fixture poll instead of a tight yield/DB loop.
 Keep all failure caching, receipt, Run-stop and drain assertions. No product
 timer, retry, worker or native lifecycle changes. Revisit if the expanded
 diagnostics expose a real request failure or a missing durable registration.
+
+
+## Pending-message review dispositions (#52, 2026-10-30)
+
+Review6517077748 identifies a reachable busy loop: an interrupted active or
+recovery-wait Turn with an unfinished adopted group cannot be acknowledged,
+but next previously returned Recheck unconditionally. Use Idle only while that
+same interrupted Turn has an unfinished group. Keep Recheck for an intent
+committed after acknowledgement when no pair blocks progress. Preserve saved
+results and uncertainty; do not call startup repair in a live owner or reject
+previously allowed human interruptions. Existing nudge and Run-stop ownership
+remain responsible for further progress. No timer, event, queue or worker is added.
+
+Correct the review's failure location using its exact log: tests/recovery_paths.rs
+429 is the registration guard before prepare_shutdown, not the later shutdown
+watchdog. Retain both failed native run and separately rerun evidence.
+
+Adopt60-second deadlock watchdogs and notification-before-read in the new native
+Turn scenarios where Changed is guaranteed. A reserved native-start row has no
+guaranteed notification while its start gate is held; retain bounded5ms fixture
+polling there. Product timers and side-effect assertions do not change.
+
+Defer submitted-draft retention cleanup (review Low3). Those rows also preserve
+crash/replay correlation and the source-revision watermark; deleting them at
+admission would revive stale autosaves or lose replay provenance. They already
+count toward the existing logical storage cap and are removed with their Thread.
+Revisit with measured draft-byte pressure and a design that retains a bounded
+watermark/replay guarantee without an independent archive engine. The registry
+lock versus long DB work observation (Low5) remains a documented ordering tradeoff,
+not a newly discovered deadlock; revisit through the separate DB-query work.
+Fix the Agent Guide's "up to128" typo without changing its cancellation contract.

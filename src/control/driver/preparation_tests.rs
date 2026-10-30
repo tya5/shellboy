@@ -1092,7 +1092,7 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
         )
         .await
     });
-    timeout(Duration::from_secs(5), async {
+    timeout(Duration::from_secs(60), async {
         loop {
             let reserved = control
                 .store
@@ -1109,7 +1109,9 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
             if reserved {
                 break;
             }
-            tokio::task::yield_now().await;
+            // Reservation precedes native creation and has no guaranteed
+            // Changed notification while the native-start gate is held.
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
@@ -1120,7 +1122,7 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
     *gate = true;
     binding.cancel.cancel();
     drop(gate);
-    timeout(Duration::from_secs(5), task)
+    timeout(Duration::from_secs(60), task)
         .await
         .unwrap()
         .unwrap()
@@ -1138,4 +1140,116 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
     assert!(!root.path().join("must-not-exist").exists());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
+    for state in ["running", "recovery_wait"] {
+        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let snapshot = ready(&control, &accepted).await;
+        let saved_turn = snapshot.turn.clone();
+        control.store.database.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('orphan-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&saved_turn])?;
+            tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('orphan-group','orphan-attempt',?1,'running','now')", [&saved_turn])?;
+            tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('orphan-group','orphan-call',0,'shell','{}','running')", [])?;
+            tx.execute("UPDATE turn SET state=?2 WHERE id=?1", params![saved_turn,state])?;
+            tx.commit()?; Ok(())
+        }).await.unwrap();
+        let result = super::super::turn_interrupt::admit_locked(
+            &control,
+            &snapshot.thread,
+            &snapshot.turn,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["requested"], true);
+        super::super::turn_interrupt::acknowledge(&control, &snapshot.thread, &snapshot.run)
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                next(&control, &snapshot.thread, &snapshot.run)
+                    .await
+                    .unwrap(),
+                Next::Idle
+            ),
+            "an unfinished group must wait for a nudge or stop, including recovery_wait"
+        );
+        let saved_turn = snapshot.turn.clone();
+        control
+            .store
+            .database
+            .call(move |db| {
+                assert_eq!(
+                    db.query_row("SELECT state FROM turn WHERE id=?1", [saved_turn], |r| {
+                        r.get::<_, String>(0)
+                    })?,
+                    state
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT state FROM tool_group WHERE id='orphan-group'",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )?,
+                    "running"
+                );
+                assert_eq!(
+                    db.query_row("SELECT COUNT(*) FROM tool_result", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                assert_eq!(
+                    db.query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r
+                        .get::<_, i64>(0))?,
+                    1
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        // Existing full Run stop must remain selectable while that pair is
+        // unresolved. Do not invent a successful tool result to unblock it.
+        let slot = DriverSlot {
+            id: id(),
+            run_id: snapshot.run.clone(),
+            stop: CancellationToken::new(),
+            nudge: Arc::new(Notify::new()),
+            foreground: Arc::new(ForegroundSlot::default()),
+            turn: Arc::new(Mutex::new(None)),
+        };
+        let stop = slot.stop.clone();
+        let running = tokio::spawn(drive(control.clone(), snapshot.thread.clone(), slot));
+        stop.cancel();
+        timeout(Duration::from_secs(60), running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let saved_run = snapshot.run.clone();
+        control
+            .store
+            .database
+            .call(move |db| {
+                assert_eq!(
+                    db.query_row("SELECT state FROM run WHERE id=?1", [saved_run], |r| r
+                        .get::<_, String>(
+                        0
+                    ))?,
+                    "stopped"
+                );
+                assert_eq!(
+                    db.query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r
+                        .get::<_, i64>(0))?,
+                    1
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(snapshot);
+        close(control, owner).await;
+    }
 }

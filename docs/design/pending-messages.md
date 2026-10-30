@@ -149,6 +149,14 @@ complete real/synthetic result pairs, preserving attachment ordering. Repeated
 requests are idempotent and never affect a replacement Turn. Run stop/shutdown
 and deleted-target facts dominate.
 
+If an interrupted Turn still has an unfinished adopted group (including a
+previous driver failure in recovery_wait), leave its facts and results unchanged
+and use the existing Idle/nudge-or-stop wait. Never repeatedly enqueue DB reads
+while acknowledgement cannot progress. A newly committed interruption with no
+unfinished group may recheck once to acknowledge it. Group completion or explicit
+Run stop provides the next boundary; no polling timer or synthetic repair is
+introduced for this case.
+
 Use a single Turn-bound cancellation token and native-start gate inside the
 existing DriverSlot registration. Never use the Run-wide stop token. Binding a
 snapshot reads the durable intent, covering commit-before-registration. Reuse

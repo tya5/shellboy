@@ -367,7 +367,13 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         let run:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND id=?2 AND state='live'",params![thread,run_id],|r|r.get(0)).optional()?;
         let Some(run)=run else{return Ok(Next::Done);};
         let interrupted:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') AND interrupt_requested_at IS NOT NULL)",[&run],|r|r.get(0))?;
-        if interrupted{return Ok(Next::Recheck);}
+        if interrupted {
+            // A failed earlier driver can leave an adopted group unfinished.
+            // Acknowledgement cannot pass it: wait for progress/stop rather
+            // than filling the shared DB lane with an unbounded recheck loop.
+            let blocked:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN tool_group g ON g.turn_id=u.id WHERE u.run_id=?1 AND u.state IN ('preparing','running','waiting','recovery_wait') AND u.interrupt_requested_at IS NOT NULL AND g.state<>'completed')",[&run],|r|r.get(0))?;
+            return Ok(if blocked {Next::Idle} else {Next::Recheck});
+        }
         let mut turn:Option<String>=tx.query_row("SELECT id FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting')",[&run],|r|r.get(0)).optional()?;
         let recovering:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state='recovery_wait')",[&run],|r|r.get(0))?;
         if recovering{return Ok(Next::Done);}
