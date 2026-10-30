@@ -46,6 +46,8 @@ pub(super) struct ThreadBrowser {
     notice: Option<String>,
     notice_seen: std::cell::Cell<bool>,
     preferred: Option<String>,
+    preferred_screen: Option<usize>,
+    reconfirming_row: Option<String>,
     generation: u64,
     page_read_sequence: u64,
     complete_page_sequence: Option<u64>,
@@ -191,6 +193,8 @@ impl ThreadBrowser {
         self.visible = true;
         self.filter = filter;
         self.preferred = preferred;
+        self.preferred_screen = None;
+        self.reconfirming_row = None;
         self.items = drafts;
         self.selected = 0;
         self.invalidate_tree();
@@ -235,7 +239,20 @@ impl ThreadBrowser {
         self.loading = refresh_filter;
         self.error = None;
         self.notice = None;
-        self.preferred = None;
+        if self
+            .preferred
+            .as_ref()
+            .is_some_and(|id| deleted.contains(id.as_str()))
+        {
+            self.clear_preferred();
+        }
+        if self
+            .reconfirming_row
+            .as_ref()
+            .is_some_and(|id| deleted.contains(id.as_str()))
+        {
+            self.reconfirming_row = None;
+        }
         self.items
             .retain(|thread| !deleted.contains(thread.thread_id.as_str()));
         self.collapsed.retain(|id| !deleted.contains(id.as_str()));
@@ -272,7 +289,8 @@ impl ThreadBrowser {
         {
             return false;
         }
-        let selected = self.preferred.take().or_else(|| {
+        let preferred = self.preferred.clone();
+        let selected = preferred.clone().or_else(|| {
             self.items
                 .get(self.selected)
                 .map(|t| t.thread_id.clone())
@@ -280,14 +298,49 @@ impl ThreadBrowser {
         });
         // An initial preferred selection has no previously displayed row to
         // anchor. Starting it at the top would hide earlier rows unnecessarily.
-        let screen_row = self
-            .items
-            .get(self.selected)
-            .filter(|thread| selected.as_deref() == Some(thread.thread_id.as_str()))
-            .and_then(|_| self.selected_position())
-            .map(|_| self.selected_screen_row());
+        let screen_row = self.preferred_screen.or_else(|| {
+            self.items
+                .get(self.selected)
+                .filter(|thread| selected.as_deref() == Some(thread.thread_id.as_str()))
+                .and_then(|_| self.selected_position())
+                .map(|_| self.selected_screen_row())
+        });
+        let matched_preferred = preferred.as_ref().is_some_and(|id| {
+            items
+                .iter()
+                .chain(drafts.iter())
+                .any(|row| &row.thread_id == id)
+                && self
+                    .row_versions
+                    .get(id)
+                    .is_none_or(|(sequence, present)| *present && *sequence <= read_sequence)
+        });
         let exhaustive = requested_cursor.is_none() && next_cursor.is_none();
         if exhaustive {
+            if preferred.as_ref().is_some_and(|id| {
+                !items
+                    .iter()
+                    .chain(drafts.iter())
+                    .any(|row| &row.thread_id == id)
+                    && !self
+                        .row_versions
+                        .get(id)
+                        .is_some_and(|(sequence, present)| *present && *sequence > read_sequence)
+            }) {
+                self.clear_preferred();
+            }
+            if self.reconfirming_row.as_ref().is_some_and(|id| {
+                !items
+                    .iter()
+                    .chain(drafts.iter())
+                    .any(|row| &row.thread_id == id)
+                    && !self
+                        .row_versions
+                        .get(id)
+                        .is_some_and(|(sequence, present)| *present && *sequence > read_sequence)
+            }) {
+                self.reconfirming_row = None;
+            }
             let returned = items
                 .iter()
                 .map(|row| row.thread_id.as_str())
@@ -310,7 +363,10 @@ impl ThreadBrowser {
         }
         if requested_cursor.is_none() {
             self.items.retain(|row| {
-                row.thread_id.starts_with("draft:") || self.patch_overlay.contains(&row.thread_id)
+                row.thread_id.starts_with("draft:")
+                    || self.patch_overlay.contains(&row.thread_id)
+                    || self.preferred.as_deref() == Some(row.thread_id.as_str())
+                    || self.reconfirming_row.as_deref() == Some(row.thread_id.as_str())
             });
         }
         let mut positions: BTreeMap<_, _> = self
@@ -338,6 +394,9 @@ impl ThreadBrowser {
                         "一覧の更新履歴が保持上限に達したため再同期します".into(),
                     );
                     return false;
+                }
+                if self.reconfirming_row.as_deref() == Some(item.thread_id.as_str()) {
+                    self.reconfirming_row = None;
                 }
                 self.row_versions
                     .insert(item.thread_id.clone(), (read_sequence, true));
@@ -375,7 +434,39 @@ impl ThreadBrowser {
             state.select(position);
             *state.offset_mut() = 0;
         }
+        if matched_preferred {
+            self.clear_preferred();
+        }
         true
+    }
+    fn clear_preferred(&mut self) {
+        self.preferred = None;
+        self.preferred_screen = None;
+    }
+    fn remember_selection(&mut self) {
+        if self.preferred.is_none() {
+            let selected = self
+                .items
+                .get(self.selected)
+                .map(|row| row.thread_id.clone());
+            let screen = self.selected_position().map(|_| self.selected_screen_row());
+            if let Some(old) = self.reconfirming_row.take()
+                && selected.as_deref() != Some(old.as_str())
+            {
+                self.items.retain(|row| row.thread_id != old);
+                self.invalidate_tree();
+                self.selected = selected
+                    .as_ref()
+                    .and_then(|id| self.items.iter().position(|row| &row.thread_id == id))
+                    .unwrap_or(0);
+            }
+            self.preferred = selected;
+            self.preferred_screen = screen;
+            self.reconfirming_row = self
+                .preferred
+                .clone()
+                .filter(|id| !id.starts_with("draft:"));
+        }
     }
     fn reset_patch_evidence(&mut self) {
         self.page_read_sequence = 0;
@@ -400,10 +491,15 @@ impl ThreadBrowser {
             self.filter_deadline = Some(Instant::now());
         }
         let selected = visible
-            .then(|| self.items.get(self.selected))
+            .then(|| {
+                self.preferred.clone().or_else(|| {
+                    self.items
+                        .get(self.selected)
+                        .map(|row| row.thread_id.clone())
+                })
+            })
             .flatten()
-            .filter(|row| !row.thread_id.starts_with("draft:"))
-            .map(|row| row.thread_id.clone());
+            .filter(|id| !id.starts_with("draft:"));
         let scope = (
             self.generation,
             self.filter.clone(),
@@ -427,10 +523,7 @@ impl ThreadBrowser {
         if generation != self.generation {
             return false;
         }
-        self.preferred = self
-            .items
-            .get(self.selected)
-            .map(|row| row.thread_id.clone());
+        self.remember_selection();
         self.invalidate(None);
         self.notice = Some(one_line(&reason.chars().take(512).collect::<String>()));
         self.notice_seen.set(false);
@@ -488,12 +581,16 @@ impl ThreadBrowser {
                 "一覧の更新履歴が保持上限に達したため再同期します".into(),
             );
         }
-        let selected = self
-            .items
-            .get(self.selected)
-            .map(|row| row.thread_id.clone());
+        let selected = self.preferred.clone().or_else(|| {
+            self.items
+                .get(self.selected)
+                .map(|row| row.thread_id.clone())
+        });
         let position = self.selected_position().unwrap_or(0);
-        let screen = self.selected_screen_row();
+        let screen = self
+            .preferred_screen
+            .unwrap_or_else(|| self.selected_screen_row());
+        let mut matched_preferred = false;
         let limited = limited_titles.into_iter().collect::<BTreeSet<_>>();
         let mut changed = false;
         let mut accepted = false;
@@ -533,6 +630,11 @@ impl ThreadBrowser {
                 changed |= self.remove_patch_row(&id, read_sequence);
                 continue;
             }
+            if self.reconfirming_row.as_deref() == Some(id.as_str()) {
+                self.reconfirming_row = None;
+                changed = true;
+            }
+            matched_preferred |= known_match && self.preferred.as_deref() == Some(id.as_str());
             self.row_versions.insert(id.clone(), (read_sequence, true));
             self.patch_overlay.insert(id.clone());
             if uncertain {
@@ -581,6 +683,17 @@ impl ThreadBrowser {
                     .copied()
             })
             .unwrap_or(0);
+        if matched_preferred {
+            changed = true;
+            if let Some(index) = selected
+                .as_ref()
+                .and_then(|id| self.tree().ids.get(id).copied())
+            {
+                self.selected = index;
+                self.reveal(index);
+            }
+            self.clear_preferred();
+        }
         self.restore_screen_row(screen);
         self.update_times(display_times);
         if let Some((id, result)) = excerpt
@@ -618,6 +731,14 @@ impl ThreadBrowser {
         changed
     }
     fn remove_patch_row(&mut self, id: &str, sequence: u64) -> bool {
+        let intent_changed =
+            self.preferred.as_deref() == Some(id) || self.reconfirming_row.as_deref() == Some(id);
+        if self.preferred.as_deref() == Some(id) {
+            self.clear_preferred();
+        }
+        if self.reconfirming_row.as_deref() == Some(id) {
+            self.reconfirming_row = None;
+        }
         self.row_versions.insert(id.into(), (sequence, false));
         self.patch_overlay.remove(id);
         self.limited_titles.remove(id);
@@ -625,9 +746,15 @@ impl ThreadBrowser {
         self.display_times.remove(id);
         let before = self.items.len();
         self.items.retain(|row| row.thread_id != id);
-        before != self.items.len()
+        intent_changed || before != self.items.len()
     }
     fn excerpt_text(&self, thread: &ThreadSummary) -> String {
+        if (self.preferred.as_deref() == Some(thread.thread_id.as_str())
+            || self.reconfirming_row.as_deref() == Some(thread.thread_id.as_str()))
+            && !thread.thread_id.starts_with("draft:")
+        {
+            return format!("前回の表示（選択先を再確認中）\n{}", thread.excerpt);
+        }
         if self.stale_excerpts.contains(&thread.thread_id) {
             let reason = self
                 .excerpt_error
@@ -653,6 +780,7 @@ impl ThreadBrowser {
             || (matches!(key.code, KeyCode::Char('d' | 'D'))
                 && key.modifiers == KeyModifiers::CONTROL)
         {
+            self.clear_preferred();
             return self.items.get(self.selected).map_or(ThreadOutcome::None, |thread| {
                 if thread.thread_id.starts_with("draft:") {
                     ThreadOutcome::Info("未送信の下書きはこの一覧から削除できません。切り替えて本文や添付を編集してください".into())
@@ -670,13 +798,14 @@ impl ThreadBrowser {
                 | KeyCode::Left
                 | KeyCode::Right
         ) {
-            self.preferred = None;
+            self.clear_preferred();
         }
         let previous_filter_len = self.filter.len();
         let position = self.selected_position().unwrap_or(0);
         match key.code {
             KeyCode::Esc => self.close(),
             KeyCode::F(1) => {
+                self.clear_preferred();
                 if let Some(thread) = self.items.get(self.selected) {
                     return ThreadOutcome::Info(format!(
                         "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
@@ -745,6 +874,7 @@ impl ThreadBrowser {
                 }
             }
             KeyCode::Enter => {
+                self.clear_preferred();
                 if let Some(thread) = self.items.get(self.selected) {
                     return ThreadOutcome::Open(thread.thread_id.clone());
                 }
@@ -758,6 +888,7 @@ impl ThreadBrowser {
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.remember_selection();
                 return ThreadOutcome::Load(Box::new(self.begin(None)));
             }
             KeyCode::Backspace => {
@@ -777,6 +908,8 @@ impl ThreadBrowser {
             _ => return ThreadOutcome::None,
         }
         if self.filter.len() != previous_filter_len {
+            self.clear_preferred();
+            self.reconfirming_row = None;
             self.invalidate_tree();
             self.invalidate(None);
             self.filter_deadline = Some(now + FILTER_DELAY);
@@ -1041,13 +1174,22 @@ impl ThreadBrowser {
             }
             keys
         };
-        let context = match error {
+        let mut context = match error {
             Some(error) => format!("取得失敗 {} · 検索 › {}", one_line(error), one_line(filter)),
             None => match &self.notice {
                 Some(notice) => format!("{} · 検索 › {}", one_line(notice), one_line(filter)),
                 None => format!("検索 › {}", one_line(filter)),
             },
         };
+        if self
+            .preferred
+            .as_ref()
+            .is_some_and(|id| !id.starts_with("draft:"))
+        {
+            context.push_str(" · 選択先を再確認中");
+        } else if self.reconfirming_row.is_some() {
+            context.push_str(" · 前回の行を再確認中");
+        }
         let inner = popup::panel(frame, area, &title, &context, &footer_text);
         // Tiny popups omit their context row. Use the shared geometry rather
         // than consuming a notice which was never rendered on screen.
@@ -1197,6 +1339,12 @@ impl ThreadBrowser {
         }
         if interrupted_by_app_exit(thread) {
             label.push_str("[exit] ");
+        }
+        if (self.preferred.as_deref() == Some(thread.thread_id.as_str())
+            || self.reconfirming_row.as_deref() == Some(thread.thread_id.as_str()))
+            && !thread.thread_id.starts_with("draft:")
+        {
+            label.push_str("[再確認中] ");
         }
         if self.limited_titles.contains(&thread.thread_id) {
             label.push_str("[検索未確認] ");
@@ -3069,5 +3217,201 @@ mod patch_tests {
                 .iter()
                 .any(|action| matches!(action, UiAction::LoadThreads { .. }))
         );
+    }
+    fn offpage() -> ThreadBrowser {
+        let items = (0..80)
+            .map(|n| row(&format!("t{n:03}"), "matching topic", "2026-10-01"))
+            .collect();
+        let mut browser = initial(items);
+        browser.selected = browser
+            .items
+            .iter()
+            .position(|row| row.thread_id == "t005")
+            .unwrap();
+        let position = browser.selected_position().unwrap();
+        *browser.table_state.borrow_mut().offset_mut() = position - 5;
+        browser
+    }
+    fn newest_page() -> Vec<ThreadSummary> {
+        (30..80)
+            .map(|n| row(&format!("t{n:03}"), "matching topic", "2026-10-01"))
+            .collect()
+    }
+    #[test]
+    fn resync_and_ctrl_r_keep_one_counted_offpage_selected_row_until_exact_confirmation() {
+        for refresh in [false, true] {
+            let mut browser = offpage();
+            let screen = browser.selected_screen_row();
+            if refresh {
+                browser.key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+            } else {
+                assert!(browser.resync(browser.generation, "bounded overflow".into()));
+            }
+            let generation = browser.generation;
+            assert!(
+                matches!(browser.observe(true),Some(UiAction::ObserveBrowser {selected:Some(id),..}) if id=="t005")
+            );
+            assert!(browser.apply(
+                generation,
+                20,
+                None,
+                newest_page(),
+                vec![],
+                Some("page-two".into()),
+                vec![],
+                None
+            ));
+            assert_eq!(
+                browser.items.len(),
+                51,
+                "only one previous selected row is pinned"
+            );
+            assert_eq!(browser.items[browser.selected].thread_id, "t005");
+            assert_eq!(browser.selected_screen_row(), screen);
+            assert_eq!(browser.preferred.as_deref(), Some("t005"));
+            let selected = &browser.items[browser.selected];
+            let tree_row = browser
+                .rows()
+                .iter()
+                .find(|row| row.index == browser.selected)
+                .unwrap();
+            assert!(
+                browser
+                    .label(tree_row, selected, true, false, 120)
+                    .contains("再確認中")
+            );
+            assert!(browser.excerpt_text(selected).contains("前回の表示"));
+            assert!(browser.patch(patch(
+                &browser,
+                21,
+                vec![row("t005", "matching confirmed", "2026-10-01")],
+                &[]
+            )));
+            assert_eq!(browser.items[browser.selected].thread_id, "t005");
+            assert_eq!(browser.selected_screen_row(), screen);
+            assert!(browser.preferred.is_none());
+            assert!(browser.reconfirming_row.is_none());
+            assert!(browser.items.len() <= 2000);
+        }
+    }
+    #[test]
+    fn initial_preferred_outside_first_page_is_observed_until_matching_patch_arrives() {
+        let mut browser = ThreadBrowser::default();
+        browser.open(String::new(), vec![], Some("outside".into()));
+        assert!(
+            matches!(browser.observe(true),Some(UiAction::ObserveBrowser {selected:Some(id),..}) if id=="outside")
+        );
+        assert!(browser.apply(
+            browser.generation,
+            20,
+            None,
+            newest_page(),
+            vec![],
+            Some("next".into()),
+            vec![],
+            None
+        ));
+        assert_eq!(browser.preferred.as_deref(), Some("outside"));
+        assert!(
+            browser.observe(true).is_none(),
+            "same exact preferred consumer is not polled again"
+        );
+        assert!(browser.patch(patch(
+            &browser,
+            21,
+            vec![row("outside", "matching outside", "2026-01-01")],
+            &[]
+        )));
+        assert_eq!(browser.items[browser.selected].thread_id, "outside");
+        assert!(browser.preferred.is_none());
+    }
+    #[test]
+    fn authoritative_missing_nonmatch_or_exhaustive_page_retires_pending_selection() {
+        for proof in 0..3 {
+            let mut browser = offpage();
+            browser.resync(browser.generation, "fixture".into());
+            let generation = browser.generation;
+            assert!(browser.apply(
+                generation,
+                20,
+                None,
+                newest_page(),
+                vec![],
+                Some("next".into()),
+                vec![],
+                None
+            ));
+            match proof {
+                0 => {
+                    browser.patch(patch(&browser, 21, vec![], &["t005"]));
+                }
+                1 => {
+                    browser.filter = "needle".into();
+                    browser.patch(patch(
+                        &browser,
+                        21,
+                        vec![row("t005", "known nonmatch", "2026-10-01")],
+                        &[],
+                    ));
+                }
+                _ => {
+                    browser.apply(
+                        generation,
+                        21,
+                        None,
+                        newest_page(),
+                        vec![],
+                        None,
+                        vec![],
+                        None,
+                    );
+                }
+            }
+            assert!(browser.preferred.is_none());
+            assert!(browser.reconfirming_row.is_none());
+            assert!(!browser.items.iter().any(|row| row.thread_id == "t005"));
+            assert!(
+                !matches!(browser.observe(true),Some(UiAction::ObserveBrowser {selected:Some(id),..}) if id=="t005")
+            );
+        }
+    }
+    #[test]
+    fn deliberate_selection_cancels_autofocus_but_keeps_unconfirmed_row_label_until_refreshed() {
+        let mut browser = offpage();
+        browser.resync(browser.generation, "fixture".into());
+        browser.apply(
+            browser.generation,
+            20,
+            None,
+            newest_page(),
+            vec![],
+            Some("next".into()),
+            vec![],
+            None,
+        );
+        browser.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        let chosen = browser.items[browser.selected].thread_id.clone();
+        assert_ne!(chosen, "t005");
+        assert!(browser.preferred.is_none());
+        let old = browser
+            .items
+            .iter()
+            .find(|row| row.thread_id == "t005")
+            .unwrap();
+        assert!(
+            browser.excerpt_text(old).contains("再確認中"),
+            "canceling autofocus cannot relabel old facts as fresh"
+        );
+        browser.patch(patch(
+            &browser,
+            21,
+            vec![row("t005", "matching confirmed", "2026-10-01")],
+            &[],
+        ));
+        assert_eq!(
+            browser.items[browser.selected].thread_id, chosen,
+            "late preferred result must not snap selection back"
+        );
+        assert!(browser.reconfirming_row.is_none());
     }
 }
