@@ -321,6 +321,7 @@ impl CopyScope {
 #[derive(Clone, Debug)]
 pub enum UiAction {
     SelectAgents {
+        request_id: String,
         draft_id: String,
         generation: u64,
         args: crate::protocol::ThreadCreateArgs,
@@ -512,6 +513,7 @@ pub enum UiAction {
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
     AgentsSelected {
+        request_id: String,
         draft_id: String,
         generation: u64,
         result: Result<ThreadDetails, crate::protocol::ApiError>,
@@ -1659,6 +1661,7 @@ impl UiState {
                 }
             }
             UiUpdate::AgentsSelected {
+                request_id,
                 draft_id,
                 generation,
                 result,
@@ -1670,10 +1673,12 @@ impl UiState {
                 else {
                     return;
                 };
-                if view.generation != generation {
+                if view.generation != generation
+                    || view.selecting_agents.as_deref() != Some(request_id.as_str())
+                {
                     return;
                 }
-                view.selecting_agents = false;
+                view.selecting_agents = None;
                 if view.thread_id.is_some() {
                     return;
                 }
@@ -2218,7 +2223,35 @@ impl UiState {
         }
         self.dirty = true;
     }
+    fn reject_agents_selection(&mut self, action: &UiAction) -> bool {
+        match action {
+            UiAction::SubmittedCommand { action, .. }
+            | UiAction::ManagementIntent { action, .. } => self.reject_agents_selection(action),
+            UiAction::SelectAgents {
+                request_id,
+                draft_id,
+                generation,
+                ..
+            } => {
+                if let Some(view) = self.views.values_mut().find(|v| {
+                    v.draft.draft_id == *draft_id
+                        && v.generation == *generation
+                        && v.selecting_agents.as_deref() == Some(request_id.as_str())
+                }) {
+                    view.selecting_agents = None;
+                    view.status =
+                        "AGENTS参照の選択は未受付です。本文を保持しています。再操作してください"
+                            .into();
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn action_rejected(&mut self, action: &UiAction) {
+        let rejected_agents = self.reject_agents_selection(action);
+
         if let UiAction::ManagementIntent { action, .. } = action {
             self.invalidate_management();
             self.action_rejected(action);
@@ -2232,6 +2265,9 @@ impl UiState {
             if matches!(action.as_ref(), UiAction::ManagementIntent { .. }) {
                 self.invalidate_management();
             }
+            return;
+        }
+        if rejected_agents {
             return;
         }
         if let UiAction::SaveDraft { thread_id, .. } = action {
@@ -2663,7 +2699,7 @@ impl UiState {
         self.send_current(None)
     }
     fn send_current(&mut self, confirmed_run_id: Option<String>) -> Vec<UiAction> {
-        if self.view().selecting_agents {
+        if self.view().selecting_agents.is_some() {
             self.active_view_mut().status =
                 "AGENTS参照を選択中です。本文を保持して完了を待ってください".into();
             return vec![];
@@ -3412,11 +3448,13 @@ impl UiState {
     }
     fn select_agents(&mut self, args: crate::protocol::ThreadCreateArgs) -> Vec<UiAction> {
         let view = self.active_view_mut();
-        if view.selecting_agents {
+        if view.selecting_agents.is_some() {
             return vec![];
         }
-        view.selecting_agents = true;
+        let request_id = uuid::Uuid::new_v4().to_string();
+        view.selecting_agents = Some(request_id.clone());
         vec![UiAction::SelectAgents {
+            request_id,
             draft_id: view.draft.draft_id.clone(),
             generation: view.generation,
             args,

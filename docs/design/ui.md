@@ -132,3 +132,9 @@ Adopt only into that unsaved draft, preserving edits made during selection.
 While selection is pending, normal send retains its draft rather than creating
 a second default Thread. An inactive origin can adopt its own result without
 switching the current view. Generic management success alone is not adoption.
+
+UI-to-frontend admission rejection unwraps submitted/management actions and
+releases only the matching draft/generation/request selection. Submitted slash
+text retains its normal restoration behavior. A local UUID identifies each
+pending selection (one bounded value per view) so a stale rejection or result
+cannot release a later selection in the same draft generation.

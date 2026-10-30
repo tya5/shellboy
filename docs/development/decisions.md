@@ -1095,6 +1095,12 @@ rejected rather than silently ignored by the helpers. Return inherited paths
 truthfully. Unsaved TUI selection must adopt the created Thread into the original
 draft; a generic management result is not adoption. A draft/generation-bound
 UI action/result uses the existing command slots and ordered outbox; one local
-pending bit blocks a racing first send. No new Core event, persistent state,
+pending request identity blocks a racing first send. No new Core event, persistent state,
 worker or queue is added. Later edits are retained; replies cannot select an
 unrelated active draft. The existing worker/shutdown owns completion.
+
+UI-to-frontend admission rejection unwraps submitted/management actions and
+releases only the matching draft/generation/request selection. Submitted slash
+text retains its normal restoration behavior. A local UUID identifies each
+pending selection (one bounded value per view) so a stale rejection or result
+cannot release a later selection in the same draft generation.

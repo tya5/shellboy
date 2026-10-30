@@ -650,6 +650,7 @@ mod contract_tests {
         let actions = ui.slash("/agents role.md");
         let [
             UiAction::SelectAgents {
+                request_id,
                 draft_id,
                 generation,
                 ..
@@ -658,10 +659,12 @@ mod contract_tests {
         else {
             panic!("selection action");
         };
-        let (draft_id, generation) = (draft_id.clone(), *generation);
+        let (request_id, draft_id, generation) =
+            (request_id.clone(), draft_id.clone(), *generation);
         ui.insert("newer draft text", false);
         let details:ThreadDetails=serde_json::from_value(serde_json::json!({"agents_path":"/role.md","thread_id":"created","title":"","cwd":"/","connection":"fixture","model":"fixture","children_count":0,"shells_count":0})).unwrap();
         ui.apply(UiUpdate::AgentsSelected {
+            request_id: request_id.clone(),
             draft_id: draft_id.clone(),
             generation: generation + 1,
             result: Ok(details.clone()),
@@ -669,6 +672,7 @@ mod contract_tests {
         assert!(ui.view().thread_id.is_none());
         assert_eq!(ui.view().draft.text, "newer draft text");
         ui.apply(UiUpdate::AgentsSelected {
+            request_id: request_id.clone(),
             draft_id: draft_id.clone(),
             generation,
             result: Ok(details.clone()),
@@ -678,6 +682,7 @@ mod contract_tests {
         assert_eq!(ui.view().draft.text, "newer draft text");
         ui.take_deferred_actions();
         ui.apply(UiUpdate::AgentsSelected {
+            request_id,
             draft_id,
             generation,
             result: Ok(details),
@@ -685,6 +690,79 @@ mod contract_tests {
         assert!(
             ui.take_deferred_actions().is_empty(),
             "duplicate result must not readopt"
+        );
+    }
+    #[test]
+    fn rejected_agents_admission_releases_only_matching_selection_and_restores_slash() {
+        for closed in [false, true] {
+            let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+            ui.insert("/agents role.md", false);
+            let action = ui
+                .event(crossterm::event::Event::Key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                )))
+                .remove(0);
+            assert!(ui.view().selecting_agents.is_some());
+            let (sender, receiver) = actions::channel(1);
+            let rejected = if closed {
+                drop(receiver);
+                sender.try_send(action).unwrap_err().into_inner()
+            } else {
+                sender
+                    .try_send(UiAction::ActivateDraft {
+                        draft_id: "occupy".into(),
+                    })
+                    .unwrap();
+                sender.try_send(action).unwrap_err().into_inner()
+            };
+            ui.action_rejected(&rejected);
+            assert!(ui.view().selecting_agents.is_none());
+            assert_eq!(
+                ui.view().draft.text,
+                "/agents role.md",
+                "submitted slash must be restored"
+            );
+            let retry = ui
+                .event(crossterm::event::Event::Key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                )))
+                .remove(0);
+            let current = ui.view().selecting_agents.clone();
+            assert!(current.is_some(), "retry must be available after rejection");
+            ui.action_rejected(&rejected);
+            assert_eq!(
+                ui.view().selecting_agents,
+                current,
+                "stale rejection cannot release a new request"
+            );
+            ui.action_rejected(&retry);
+            assert!(ui.view().selecting_agents.is_none());
+        }
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("keep direct-form draft", false);
+        let action = ui
+            .execute_operation(Command::ThreadCreate(crate::protocol::ThreadCreateArgs {
+                agents: Some("role.md".into()),
+                cwd: None,
+                connection: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            }))
+            .remove(0);
+        ui.action_rejected(&action);
+        assert!(ui.view().selecting_agents.is_none());
+        assert_eq!(ui.view().draft.text, "keep direct-form draft");
+        assert!(
+            ui.event(crossterm::event::Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE
+            )))
+            .iter()
+            .any(|a| matches!(a, UiAction::Send { .. })),
+            "normal send must not remain blocked"
         );
     }
     #[cfg(unix)]
