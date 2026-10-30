@@ -37,7 +37,7 @@ until the new live/watch/form increments are delivered.
 ## B+C freshness follow-up (review6523314574)
 
 This remains **B+C work**, not an implicit transfer to D–G. Complete it before
-claiming B+C done; next implementation priority is this follow-up. The shipped
+claiming B+C done; the next main admission is this follow-up. The shipped
 structure/interaction remains usable, but current cached facts may become stale.
 No new worker/table/queue or timer-driven DB polling is authorized.
 
@@ -61,29 +61,35 @@ No new worker/table/queue or timer-driven DB polling is authorized.
   and document every untested route separately. Keep stale/late/read-budget and
   paid-text preservation regressions green.
 
-Review choice: record the missing routes explicitly now, rather than claim a
-rushed unvalidated fix. The next usable follow-up will deliver these together
-with appropriate state/CLI/PTY evidence. G still owns general F8 management
+Local follow-up source4bf14a9 now implements BC-R1–R6: standard1,671/0/32,
+four actual separate-CLI/current-view tests, six final native PTYs and P1
+p95 3.324ms. See the qualification record for precise latency starts, snapshot
+semantics, code limits and untested cases. These boxes await main admission and
+its exact-SHA three-OS CI; local success alone does not mark shipment complete.
+
+Review choice at the first report: record the missing routes explicitly rather
+than claim a rushed unvalidated fix. The follow-up above delivers code and local state/CLI/PTY evidence together;
+its main gate is still pending. G still owns general F8 management
 freshness and popup wheel/layout work. Shared one-job/500ms consolidation remains
 open for the subsequent shared refresh refactor; measured seven jobs is not a
 claim that the final one-job target has been met.
 
 ## Complete requirement ledger
 
-- [ ] Full-width multiline user bands with right-side muted saved time; distinguish
+- [x] Full-width multiline user bands with right-side muted saved time; distinguish
   human, parent, self and Revisit input; dark/light selection and non256/NO_COLOR.
-- [ ] Fixed header distinct from user bands; title prominent, state symbol/color,
+- [x] Fixed header distinct from user bands; title prominent, state symbol/color,
   connection/model/cwd muted/right-aligned with leading cwd truncation.
-- [ ] One tool row per saved call identity, no ordinary IDs/repeated command/#N;
+- [x] One tool row per saved call identity, no ordinary IDs/repeated command/#N;
   right-side saved outcome/time/count only when known.
-- [ ] Successful tool output closed without raw reads on page load; failures open
+- [x] Successful tool output closed without raw reads on page load; failures open
   a small real-tail preview; on-demand expansion uses bounded existing limits.
-- [ ] True output tail beyond8KiB; honest encoding boundaries, controls stripped,
+- [x] True output tail beyond8KiB; honest encoding boundaries, controls stripped,
   carriage-return progress collapsed without unbounded reconstruction.
-- [ ] Concrete muted Turn-end notification facts; actionable failures remain visible.
-- [ ] History focus/keys/click and F6/F7/original/copy share stable selected identity
+- [x] Concrete muted Turn-end notification facts; actionable failures remain visible.
+- [x] History focus/keys/click and F6/F7/original/copy share stable selected identity
   across refresh, scroll, follow, expansion and eviction; preserve composer Up.
-- [ ] Quiet status/input chrome, conditional new count, help hint; no generic
+- [x] Quiet status/input chrome, conditional new count, help hint; no generic
   operation-prepared message; transient successes clear on input, failures persist
   until the next deliberate user action; activity and result messages are separate.
 - [ ] At most3 oldest live work rows plus overflow; own shells/children/waits remain

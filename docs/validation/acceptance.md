@@ -1,19 +1,21 @@
 # Validation record
 
-## #41 conversation structure and inline interaction
+## #41 structural unit and B+C freshness follow-up
 
-Source342cb6e qualifies the B+C structural/interaction subset on native macOS arm64/Rust1.99.1: standard checks
-**1,658 passed / zero failed / 32 ignored**, plus real PTYs80x40/140x40 across
-dark/light/NO_COLOR. Source identities, Unicode/wheel boundaries, bounded true
-raw suffixes, stale replies and shared preview accounting are covered.
+Initial structural/interaction main b0e3c29 passes native three-OS CI41057195099
+(Linux1,659/0/31, macOS1,658/0/32, Windows1,543/0/24).
+Follow-up source4bf14a9 addresses review6523314574 and qualifies locally on
+macOS arm64/Rust1.99.1: **1,671 passed / zero failed / 32 ignored**,
+layout89/Python6/fmt/strict Clippy. Four genuine separate-CLI tests cover header,
+foreign input/cancel/recovery/stop and real raw/history GC while F6/F7 stay open;
+local target1s passes. Snapshot read/freeze times, real reread with paid-copy
+preservation, source membership, late replies, selection and bounds are covered.
 
-The [detailed record](conversation-redesign-bc.md) separates P1/P3/P7 measurements,
-private synthetic fixtures and untested physical/real-API cases. Main exact-SHA
-b0e3c29 CI41057195099 succeeds on all3OS (Linux1,659/0/31, macOS1,658/0/32,
-Windows1,543/0/24; passed/failed/ignored). **B+C freshness BC-R1–R6 remains open**:
-external-mutation latency, open F6/F7 invalidation, snapshot read/freeze times and
-remaining current-view freshness coverage. D–G remain open too; successful CI
-and existing PTYs do not qualify these missing routes or the entire #41 scope.
+The [detailed record](conversation-redesign-bc.md) separates exact source,
+measurement starts/values, the final binary's six real PTYs, P1 p95 3.324ms,
+initial P3/P7 evidence, pending main admission/CI and untested physical/real-API
+cases. D–G and shared one-job consolidation remain open. No installed binary,
+release/tag, paid API or user data is changed by this #41 increment.
 
 ## v0.3.0 preparation (#62)
 

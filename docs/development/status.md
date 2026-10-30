@@ -1,38 +1,31 @@
 # Development status
 
-## #41: first conversation/interaction subset shipped; freshness still open
+## #41 B+C freshness follow-up: locally qualified, main CI pending
 
-Runtime/test source342cb6e passes native macOS standard checks: **1,658 passed /
-zero failed / 32 ignored**, layout88, Python6, format and strict all-target Clippy.
-Conversation bands/header, stable collapsed tool rows, real failure tails, inline
-focus/open/original/copy and bounded off-page links are implemented. Shared
-preview accounting includes metadata; stale reads release only their own slots.
-Quiet facts coalesce without losing canonical backward navigation.
+The structural/interaction subset shipped on main b0e3c29 with three-OS
+CI41057195099 green. Review6523314574 correctly identified unfinished B+C
+freshness; it was explicitly recorded and reported in issue comment6523388336.
 
-The exact debug binary passes actual PTYs80x40/140x40 in dark/light/NO_COLOR
-(all six cases). UI p95 is3.407ms against baseline~1.7ms;50 closed successful
-tools reduce actual shared DB jobs per refresh656→7. See the detailed
-[qualification record](../validation/conversation-redesign-bc.md).
+Follow-up source4bf14a9 now implements scoped reactive F6/F7 facts, new-result
+source membership, GC availability notifications, snapshot read/freeze times,
+and bounded rereads that preserve known paid text on failure. External CLI
+header/queue/footer mutations and real raw/history GC are tested without later
+UI input. Local standard: **1,671 passed / zero failed / 32 ignored**;
+layout89, Python6, formatting and strict all-target Clippy pass.
 
-The first structural/interaction subset is on main b0e3c29. Native three-OS
-CI[41057195099](https://github.com/tya5/shellboy/actions/runs/41057195099) passes
-at that exact SHA: Linux1,659/0/31, macOS1,658/0/32, Windows1,543/0/24
-(passed/failed/ignored; Windows test threads4).
+The final binary passes six actual macOS PTY width/palette conditions, including
+fixed F2 time and preview read time; UI p95 is3.324ms (baseline1.855ms).
+See [qualification](../validation/conversation-redesign-bc.md) for exact source,
+measurements and limits. Main admission/three-OS CI for this follow-up is pending;
+initial b0e3c29 CI is not substituted for it.
 
-Review[6523314574](https://github.com/tya5/shellboy/issues/41#issuecomment-6523314574)
-correctly identifies unfinished **B+C freshness**, not only D–G work. The
-[BC-R1–R6 ledger](issue-41-plan.md#bc-freshness-follow-up-review6523314574)
-tracks external CLI-to-header latency, open F6 mutable facts, F7 source-change
-invalidation/late replies, snapshot read times/reopen instructions, F2 freeze
-time, and remaining current-view external-mutation tests. These are not verified
-by the successful structural PTYs or native CI. Cached details may still be stale.
-The next implementation priority is this B+C follow-up; D–G and their performance
-and freshness gates remain open. #41 stays open.
-
-This #41 increment did not replace the installed binary or change user data,
-use a paid API, or create a release/tag. Separate release-session records below
-are historical and are not evidence that the installed/released binary includes
-this main increment.
+The [BC-R1–R6 ledger](issue-41-plan.md#bc-freshness-follow-up-review6523314574)
+has local evidence but remains pending its main gate. D–G, global refresh
+consolidation and their performance/freshness gates remain open; #41 stays open.
+An external-delete notification producer gap is explicitly tracked under E.
+This task did not replace the installed binary, create a release/tag, call a
+paid API or modify default user data. The separate v0.3.0 publication below is
+source8fb885d and does not include the later #41 main increments.
 
 ## v0.3.0 published (#62)
 
