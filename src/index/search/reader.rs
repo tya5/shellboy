@@ -333,6 +333,7 @@ mod tests {
                     excerpt: "old snapshot".into(),
                     distance: 0.5,
                     provenance: crate::protocol::NodeProvenance {
+                        sender: None,
                         kind: "user".into(),
                         created_at: "now".into(),
                         source_revision: 0,

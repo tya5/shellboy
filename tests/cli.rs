@@ -983,3 +983,38 @@ async fn saved_usage_cli_scopes_are_read_only_and_exclude_period_filters() {
         assert!(Cli::try_parse_from(std::iter::once("shellboy").chain(args)).is_err());
     }
 }
+
+#[tokio::test]
+async fn sender_label_is_optional_bounded_display_metadata_not_origin() {
+    let command = convert(&[
+        "message",
+        "send",
+        "--thread",
+        "target",
+        "--sender-label",
+        "別owner: リーダー",
+        "--text",
+        "hello",
+    ])
+    .await;
+    assert!(
+        matches!(command, Command::MessageSend(a) if a.sender_label.as_deref() == Some("別owner: リーダー"))
+    );
+    for label in ["界".repeat(65), "line\nbreak".into()] {
+        let cli = Cli::try_parse_from([
+            "shellboy",
+            "message",
+            "send",
+            "--sender-label",
+            &label,
+            "--text",
+            "hello",
+        ])
+        .unwrap();
+        let error = cli
+            .into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+    }
+}

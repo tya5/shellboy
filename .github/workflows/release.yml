@@ -330,6 +330,20 @@ jobs:
           $env:SHELLBOY_INSTALL_DIR = Join-Path $root 'install dir'
           $env:SHELLBOY_VERSION = '0.3.0'
           $source = Get-Content install.ps1 -Raw
+          $held = $null
+          function Start-HeldBinary([string]$path) {
+              # Keep the real executable mapped without an owner, provider or DB:
+              # message send waits for stdin EOF before connecting to an owner.
+              $info = New-Object Diagnostics.ProcessStartInfo
+              $info.FileName = $path
+              $info.Arguments = 'message send --text-stdin'
+              $info.UseShellExecute = $false
+              $info.RedirectStandardInput = $true
+              $process = [Diagnostics.Process]::Start($info)
+              Start-Sleep -Milliseconds 500
+              if ($process.HasExited) { throw 'Image-lock fixture exited early' }
+              return $process
+          }
           try {
               # iex uses the same execution form as `irm ... | iex`.
               $output = $source.Replace('__SHELLBOY_RELEASE_VERSION__', 'v99.0.0') | Invoke-Expression | Out-String
@@ -338,11 +352,38 @@ jobs:
               $binary = Join-Path $env:SHELLBOY_INSTALL_DIR 'shellboy.exe'
               if ((& $binary --version) -ne 'shellboy 0.3.0') { throw 'Wrong version' }
               $hash = (Get-FileHash $binary).Hash
+              $held = Start-HeldBinary $binary
               Remove-Item Env:SHELLBOY_VERSION
               $source.Replace('__SHELLBOY_RELEASE_VERSION__', 'v0.3.0') | Invoke-Expression
               $backups = @(Get-ChildItem "$binary.backup-*")
               if ($backups.Count -ne 1 -or (Get-FileHash $backups[0].FullName).Hash -ne $hash) { throw 'Missing backup' }
+              if ($held.HasExited) { throw 'Replacement stopped the running executable' }
+              if ((& $binary --version) -ne 'shellboy 0.3.0') { throw 'Replacement binary unusable' }
+              $held.Kill()
+              $held.WaitForExit()
+              $held.Dispose()
+              $held = Start-HeldBinary $binary
               $env:SHELLBOY_VERSION = 'v0.3.0'
+              # Remove the staged file after copying it to force the final rename
+              # to fail after the existing (running) image has moved to backup.
+              function Copy-Item {
+                  param([string]$LiteralPath, [string]$Destination)
+                  Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination
+                  Remove-Item -LiteralPath $Destination
+              }
+              $rolledBack = $false
+              try { $source | Invoke-Expression } catch {
+                  Write-Output "Expected install failure: $_"
+                  $rolledBack = $true
+              }
+              Remove-Item Function:Copy-Item
+              if (-not $rolledBack -or $held.HasExited) { throw 'Rollback fixture failed' }
+              if ((Get-FileHash $binary).Hash -ne $hash -or @(Get-ChildItem "$binary.backup-*").Count -ne 1) { throw 'Rollback did not restore original binary' }
+              if ((& $binary --version) -ne 'shellboy 0.3.0') { throw 'Restored binary unusable' }
+              $held.Kill()
+              $held.WaitForExit()
+              $held.Dispose()
+              $held = $null
               function Invoke-WebRequest {
                   param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile)
                   if ($Uri.EndsWith('/SHA256SUMS')) {
@@ -366,5 +407,9 @@ jobs:
               $env:PROCESSOR_ARCHITEW6432 = 'ARM64'
               Assert-Failure 'Unsupported OS/CPU'
           } finally {
+              if ($held) {
+                  if (-not $held.HasExited) { $held.Kill(); $held.WaitForExit() }
+                  $held.Dispose()
+              }
               if (Test-Path $root) { Remove-Item $root -Recurse -Force }
           }

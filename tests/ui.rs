@@ -3760,6 +3760,7 @@ fn omitted_long_and_deep_metadata_use_the_complete_value_reader_for_copy() {
 
 fn shellboy_provenance_fixture() -> shellboy::protocol::NodeProvenance {
     shellboy::protocol::NodeProvenance {
+        sender: None,
         kind: "assistant_response".into(),
         created_at: "2026-10-25T00:00:00Z".into(),
         source_revision: 0,

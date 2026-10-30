@@ -157,6 +157,7 @@ async fn message(control: &Arc<Control>, thread: &str) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 now: false,
                 thread_id: Some(thread.into()),
                 text: "next lifecycle turn".into(),

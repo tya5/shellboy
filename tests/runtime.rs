@@ -143,6 +143,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 now: false,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
                 text: "fixture instruction".into(),
@@ -535,6 +536,7 @@ async fn foreground_additional_input_is_accepted_while_shell_lives_and_stop_reap
         command(
             &control,
             Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "while foreground waits".into(),
                 now: true,
@@ -780,6 +782,7 @@ async fn input_accepted_during_model_request_still_interrupts_the_next_foregroun
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "new input before shell starts".into(),
             now: true,
@@ -910,6 +913,7 @@ async fn incomplete_attempt_is_preserved_retry_reuses_turn_instruction_snapshot_
     let next = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some(accepted.thread_id.clone()),
             text: "next turn".into(),
@@ -2444,6 +2448,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some(accepted.thread_id.clone()),
             text: "explicit next input after shutdown".into(),
@@ -2534,6 +2539,7 @@ async fn graceful_context_revision_does_not_adopt_a_late_model_response() {
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some(accepted.thread_id.clone()),
             text: "new explicit input".into(),

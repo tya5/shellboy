@@ -133,6 +133,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 now: false,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
                 text: "fixture instruction".into(),
@@ -528,6 +529,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
     let accepted = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some("parent".into()),
             text: "explicit resume instruction".into(),

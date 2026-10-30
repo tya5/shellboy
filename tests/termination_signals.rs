@@ -328,6 +328,7 @@ impl Fixture {
             ipc::call(
                 &directory,
                 Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
                     now: false,
                     thread_id: Some(thread),
                     text: "wait for OS termination".into(),

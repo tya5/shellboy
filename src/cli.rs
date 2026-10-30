@@ -400,6 +400,9 @@ pub struct TextOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageSendOptions {
+    /// Self-asserted name (at most 64 Unicode characters); grants no authority.
+    #[arg(long)]
+    pub sender_label: Option<String>,
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
     /// Release a foreground shell wait; does not interrupt response generation.
@@ -739,6 +742,7 @@ impl Cli {
             },
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
+                    sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,
                     now: a.now,

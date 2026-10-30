@@ -342,7 +342,10 @@ impl Command {
                 nonempty(&a.thread_id, "thread_id")
             }
             Self::ThreadSet(a) => a.validate(),
-            Self::MessageSend(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::MessageSend(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                validate_sender_label(a.sender_label.as_deref())
+            }
             Self::MessageGet(a) => nonempty(&a.message_id, "message_id"),
             Self::MessageCancel(a) => {
                 if a.message_ids.is_empty() || a.message_ids.len() > 128 {

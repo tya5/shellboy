@@ -17,6 +17,11 @@ use crate::{
     storage::{DbWorker, StorageError},
 };
 
+struct SendContent {
+    elements: Vec<Value>,
+    sender: MessageSender,
+}
+
 use super::receipt::Admission;
 
 type Result<T> = std::result::Result<T, ApiError>;
@@ -431,6 +436,7 @@ impl Store {
                         let result = store.send_content(
                             tx,
                             &MessageSendArgs {
+                                sender_label: None,
                                 thread_id: Some(target),
                                 text: content.text.clone(),
                                 now: options.now,
@@ -438,7 +444,10 @@ impl Store {
                             None,
                             &operation_id,
                             now,
-                            content.new_source_elements(files.len())?,
+                            SendContent {
+                                elements: content.new_source_elements(files.len())?,
+                                sender: MessageSender::recorded(None, None, true),
+                            },
                         )?;
                         let node = result
                             .result
@@ -722,7 +731,7 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs{thread_id:Some(fork),text:content.text.clone(),now:options.now},None,&operation_id,&now,content.new_source_elements(files.len())?)?;
+                let mut result=store.send_content(&tx,&MessageSendArgs { sender_label: None,thread_id:Some(fork),text:content.text.clone(),now:options.now},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
@@ -816,16 +825,21 @@ impl Store {
                     Admission::Normal,
                     |tx, now| {
                         let thread_id = store.create_thread(tx, &args, now)?;
-                        store.send(
+                        store.send_content(
                             tx,
                             &MessageSendArgs {
+                                sender_label: None,
                                 thread_id: Some(thread_id),
-                                text,
+                                text: text.clone(),
                                 now: false,
                             },
                             None,
                             &operation_id,
                             now,
+                            SendContent {
+                                elements: vec![json!({"type":"input_text","text":text})],
+                                sender: MessageSender::recorded(None, None, true),
+                            },
                         )
                     },
                 ))
@@ -1302,7 +1316,10 @@ impl Store {
             caller,
             operation_id,
             now,
-            vec![json!({"type":"input_text","text":args.text})],
+            SendContent {
+                elements: vec![json!({"type":"input_text","text":args.text})],
+                sender: MessageSender::recorded(caller, args.sender_label.clone(), false),
+            },
         )
     }
     fn send_content(
@@ -1312,8 +1329,9 @@ impl Store {
         caller: Option<&Origin>,
         operation_id: &str,
         now: &str,
-        content: Vec<Value>,
+        content: SendContent,
     ) -> Result<MutationResult> {
+        validate_sender_label(content.sender.label.as_deref())?;
         if args.text.len() as u64 > self.config.limits.draft_bytes {
             return Err(error(
                 ErrorCode::InputLimit,
@@ -1330,7 +1348,7 @@ impl Store {
             wake,
         } = assign_message(tx, &id, caller, now)?;
         let message_id = uuid::Uuid::new_v4().to_string();
-        let payload = json!({"role":"user","content":content});
+        let payload = json!({"role":"user","content":content.elements});
         let body = payload.to_string();
         tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,'user',?3,?4,?5,?6)",params![message_id,assigned_turn,now,body,body.len() as i64,hash(body.as_bytes())]).map_err(sql_error)?;
         self.index
@@ -1352,7 +1370,7 @@ impl Store {
         };
         let saved_acceptance = serde_json::to_value(&accepted)
             .map_err(|_| error(ErrorCode::InvalidState, "Cannot encode message acceptance"))?;
-        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&caller.as_ref().map(|origin| origin.identity())).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
         tx.execute(
             "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
             params![id, now],
@@ -1838,7 +1856,7 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
 }
 
 pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetails> {
-    let row=connection.query_row("SELECT r.target_thread_id,r.state,r.run_id,r.turn_id,r.result_json,t.answer_node_id FROM receipt r LEFT JOIN turn t ON t.id=r.turn_id WHERE message_node_id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"message not found"))?;
+    let row=connection.query_row("SELECT r.target_thread_id,r.state,r.run_id,r.turn_id,r.result_json,t.answer_node_id,r.sender_json FROM receipt r LEFT JOIN turn t ON t.id=r.turn_id WHERE message_node_id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,String>(6)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"message not found"))?;
     let status = match row.1.as_str() {
         "accepted" => DeliveryStatus::Accepted,
         "held" => DeliveryStatus::Held,
@@ -1867,6 +1885,7 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
             .unwrap_or(Assignment::ExistingTurn)
     };
     Ok(MessageDetails {
+        sender: MessageSender::from_saved(Some(&row.6)),
         context: crate::context::for_message(connection, id)?,
         message_id: id.into(),
         thread_id: row.0,
@@ -2904,6 +2923,248 @@ mod agents_reference_tests {
             event["change"]["after"]["path"]
         );
     }
+    #[tokio::test]
+    async fn sender_receipts_cover_appends_deleted_sources_labels_and_cancel_authority() {
+        let (_root, store) = fixture().await;
+        let source = store
+            .execute(req(create(None, None, None)), None)
+            .await
+            .unwrap()
+            .result["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let target = store
+            .execute(req(create(None, None, None)), None)
+            .await
+            .unwrap()
+            .result["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let origin = Origin {
+            instance_id: "fixture".into(),
+            thread_id: source.clone(),
+            run_id: "source-run".into(),
+            turn_id: "source-turn".into(),
+            execution_id: "source-shell".into(),
+            token: "secret-never-persist-or-return".into(),
+        };
+        let mut prior_run = None;
+        let mut model_id = String::new();
+        for (caller, label, kind) in [
+            (None, None, "external_cli"),
+            (None, Some("other owner"), "external_cli"),
+            (Some(origin.clone()), Some("human"), "model"),
+        ] {
+            let accepted = store
+                .execute(
+                    req(Command::MessageSend(MessageSendArgs {
+                        thread_id: Some(target.clone()),
+                        text: "synthetic sender fixture".into(),
+                        now: false,
+                        sender_label: label.map(str::to_owned),
+                    })),
+                    caller,
+                )
+                .await
+                .unwrap()
+                .result;
+            if let Some(run) = &prior_run {
+                assert_eq!(&accepted["run_id"], run);
+                assert_eq!(accepted["assignment"], "existing_turn");
+            }
+            prior_run = Some(accepted["run_id"].clone());
+            let id = accepted["message_id"].as_str().unwrap().to_owned();
+            let expected = json!({"kind":kind,"label":label});
+            let result = store
+                .execute(
+                    req(Command::MessageGet(MessageTarget {
+                        message_id: id.clone(),
+                    })),
+                    None,
+                )
+                .await
+                .unwrap()
+                .result;
+            assert_eq!(result["sender"]["kind"], expected["kind"]);
+            assert_eq!(result["sender"]["label"], expected["label"]);
+            let node = id.clone();
+            let facts = store
+                .database
+                .call(move |db| {
+                    let body = history::get_node(
+                        db,
+                        &HistoryGetArgs {
+                            node_id: node.clone(),
+                            limit_bytes: MAX_BODY_BYTES,
+                            cursor: None,
+                            encoding: DEFAULT_ENCODING.into(),
+                        },
+                    )
+                    .unwrap();
+                    let raw: String = db.query_row(
+                        "SELECT sender_json FROM receipt WHERE message_node_id=?1",
+                        [&node],
+                        |row| row.get(0),
+                    )?;
+                    Ok((serde_json::to_value(body).unwrap(), raw))
+                })
+                .await
+                .unwrap();
+            assert_eq!(facts.0["provenance"]["sender"], result["sender"]);
+            assert!(!format!("{result}{facts:?}").contains(&origin.token));
+            if kind == "model" {
+                assert_eq!(result["sender"]["thread_id"], source);
+                model_id = id;
+            }
+        }
+        // Sender IDs are facts, not live Thread foreign-key lookups.
+        let deleted = source.clone();
+        store
+            .database
+            .call(move |db| {
+                db.execute(
+                    "UPDATE thread SET deleted_at='fixture-deleted' WHERE id=?1",
+                    [deleted],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let result = store
+            .execute(
+                req(Command::MessageGet(MessageTarget {
+                    message_id: model_id.clone(),
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(result["sender"]["thread_id"], source);
+        let own = store
+            .execute(
+                req(Command::MessageCancel(MessageCancelArgs {
+                    message_ids: vec![model_id.clone()],
+                })),
+                Some(origin.clone()),
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            own["items"][0]["outcome"], "cancelled",
+            "additive kind/label must preserve top-level sender ownership"
+        );
+        let mut foreign = origin.clone();
+        foreign.thread_id = "different-thread".into();
+        let denied = store
+            .execute(
+                req(Command::MessageCancel(MessageCancelArgs {
+                    message_ids: vec![model_id.clone()],
+                })),
+                Some(foreign),
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(denied["items"][0]["outcome"], "forbidden");
+        // A model claiming 'human' still cannot resume a recovery-wait Turn.
+        let target_id = target.clone();
+        store
+            .database
+            .call(move |db| {
+                db.execute(
+                    "UPDATE turn SET state='recovery_wait' WHERE thread_id=?1",
+                    [target_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let held = store
+            .execute(
+                req(Command::MessageSend(MessageSendArgs {
+                    thread_id: Some(target),
+                    text: "no authority from label".into(),
+                    now: false,
+                    sender_label: Some("human".into()),
+                })),
+                Some(origin),
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(held["delivery_status"], "held");
+        store.database.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sender_human_is_recorded_only_by_internal_submission_and_history_lists_it() {
+        let (_root, store) = fixture().await;
+        let accepted = store
+            .send_new_thread(
+                format!("fixture:{}", uuid::Uuid::new_v4()),
+                ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    model: None,
+                    effort: None,
+                    cwd: None,
+                    parent_id: None,
+                },
+                "TUI synthetic input".into(),
+            )
+            .await
+            .unwrap()
+            .result;
+        let id = accepted["message_id"].as_str().unwrap().to_owned();
+        let thread = accepted["thread_id"].as_str().unwrap().to_owned();
+        let detail = store
+            .execute(
+                req(Command::MessageGet(MessageTarget {
+                    message_id: id.clone(),
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(detail["sender"], json!({"kind":"human"}));
+        store
+            .database
+            .call(move |db| {
+                // Source-backed selected-path projection, independent of a runtime.
+                db.execute(
+                    "INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES(?1,0,?2)",
+                    params![thread, id],
+                )?;
+                let args: HistoryListArgs =
+                    serde_json::from_value(json!({"thread_id":thread})).unwrap();
+                let list = history::list_nodes(db, &args).unwrap();
+                assert_eq!(
+                    list.items[0].provenance.sender.as_ref().unwrap().kind,
+                    SenderKind::Human
+                );
+                db.execute(
+                    "UPDATE receipt SET sender_json='null' WHERE message_node_id=?1",
+                    [&id],
+                )?;
+                assert_eq!(
+                    message_details(db, &id).unwrap().sender.kind,
+                    SenderKind::Unknown
+                );
+                assert_eq!(
+                    history::provenance(db, &id).unwrap().sender.unwrap().kind,
+                    SenderKind::Unknown
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store.database.shutdown().await.unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -3084,6 +3345,7 @@ mod message_acknowledgement_state_tests {
         let request = Request::new(
             "fixture:typed-ack",
             Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 thread_id: Some("t".into()),
                 text: "urgent".into(),
                 now: true,

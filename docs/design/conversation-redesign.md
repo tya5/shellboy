@@ -384,3 +384,23 @@ and page while updating the surrounding source membership. An unrelated node
 navigation clears the item binding. Changed membership invalidates any pending
 old-scope read through the same dirty/retirement sequence and500ms coalescing.
 No body is pinned and no extra query discovers membership by row during paint.
+
+
+### Saved sender boundary after #59 (comment6524373262)
+
+Use the adopted [sender inspection](protocol.md#message-sender-inspection-59)
+contract when classifying conversation input. New external CLI receipts are
+`external_cli` and keep the existing distinct generic-input band; trusted TUI
+input is recorded human. Parent/self model and Revisit classifications require
+saved identity/allocation evidence, never a self-asserted name. Historical null
+retains the existing Human conversation-band convention only; CLI/F6 sender
+inspection reports unknown when evidence is missing. This display convention
+must not invent a sender identity or authority.
+
+Preserve #59's immutable, credential-free sender kind/IDs and bounded name in
+F6/original details even when a newer mutable-source snapshot arrives. Names
+remain explicitly self-asserted. This follow-up keeps names in details; adding
+them to ordinary bands is optional and is not required to change the existing
+band classification. The explicit initial user-source provenance read remains
+separate from notification-driven mutable-source refresh, without a new worker
+or Core sender inference.

@@ -228,6 +228,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
             Request::new(
                 "fixture:queued",
                 Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
                     thread_id: Some("t".into()),
                     text: "ordinary".into(),
                     now: false,
@@ -252,6 +253,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
             Request::new(
                 "fixture:now",
                 Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
                     thread_id: Some("t".into()),
                     text: "urgent".into(),
                     now: true,

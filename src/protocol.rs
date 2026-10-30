@@ -1,4 +1,7 @@
 //! Versioned local-operation contracts shared by CLI, Control, and TUI.
+mod sender;
+pub use sender::{MessageSender, SenderKind, validate_sender_label};
+
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -405,7 +408,7 @@ args!(ThreadDeleteArgs {
     descendants: bool
 });
 args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<String> });
-args!(MessageSendArgs { #[serde(default)] thread_id: Option<String>, text: String, #[serde(default)] now: bool });
+args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default)] now: bool });
 args!(MessageCancelArgs { message_ids: Vec<String> });
 states!(MessageCancelOutcome {
     Cancelled,
@@ -497,7 +500,7 @@ states!(HistoryRelation {
     Previous => "previous", Next => "next", Sources => "sources", Replacements => "replacements"
 });
 args!(HistoryRelationsArgs { node_id: String, relation: HistoryRelation, #[serde(default = "list_limit")] limit: u32, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String> });
-args!(NodeProvenance { kind: String, created_at: String, source_revision: i64, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String> });
+args!(NodeProvenance { #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>, kind: String, created_at: String, source_revision: i64, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String> });
 args!(RelationItem { node_id: String, provenance: NodeProvenance, #[serde(default, skip_serializing_if = "Option::is_none")] replacement_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] source_revision: Option<i64>, #[serde(default, skip_serializing_if = "Option::is_none")] source_hash: Option<String> });
 args!(ShellReadArgs { execution_id: String, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
 args!(ShellWriteArgs {
@@ -816,7 +819,7 @@ fn frame_io(error: std::io::Error) -> ApiError {
 args!(RevisitSummary { pending: bool, consumed_count: u64, last_fired_at: Option<String> });
 args!(ThreadSummary { activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, excerpt: String });
 args!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String> });
-args!(MessageDetails { context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String> });
+args!(MessageDetails { sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String> });
 args!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] owner_run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>, owned_run_ids: Vec<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
 args!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, turn_id: String, run_id: String, thread_id: String, state: TurnState, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
 // Optional shell fields describe unknown/live lifecycle facts and the internal

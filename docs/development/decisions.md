@@ -1553,7 +1553,8 @@ repaint. It has one permit, no payload/task/queue, and existing owner lifetime.
 A global GC invalidation is justified because its selected exact source set is
 at most2 and can include another Thread's source; it does not make unrelated
 shell-output notifications repaint the view. Validate the actual collector path,
-including raw retention and an off-path result shared through a fork boundary.
+including raw retention, protected complete fork sources and loss after deletion
+of the final referencing Thread.
 
 Explicit preview close/reopen must perform the advertised bounded reread. Keep
 the last known paid output and its original read-time notice while that read is
@@ -1561,3 +1562,21 @@ pending or fails. A separate at-most512-character refresh error is counted with
 the retained preview payload, rather than replacing the timestamp or silently
 hiding known output. Existing cache-pressure eviction still applies. An explicit
 R during a pending detail read queues one dirty follow-up, not a concurrent read.
+
+## 2026-10-30: #59 sender facts and existing source presentation
+
+Active. Source: issue #59 body and mandatory comment
+[6517220821](https://github.com/tya5/shellboy/issues/59#issuecomment-6517220821),
+plus implementation-scope approval during review. Store explicit sender kind and
+optional self-asserted label in the existing flat receipt sender JSON, retaining
+top-level Origin IDs for cancellation authorization. Expose an allowlisted,
+credential-free observation; incomplete old evidence is unknown, not repaired.
+No schema migration or Core legacy request-format shim is introduced.
+
+The reviewer identified that the existing conversation metadata classifier would
+map a newly explicit human object to Unknown. Preserve its established Human
+classification with a data-boundary check and regression, ignoring label. Do not
+change render/layout/index refresh or add conversation badges. Historical null
+receipts keep the existing conversation display convention only; CLI/F6 sender
+facts correctly remain unknown. Revisit that historical presentation only under
+separate conversation-design scope, not by inventing identity in sender facts.

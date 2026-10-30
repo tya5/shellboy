@@ -1,7 +1,7 @@
 # Conversation redesign delivery plan (#41)
 
 Baseline: main e8c1ff2 after independently completed #58. Follow the issue body
-and comments through6523314574 (the first B+C review).
+and comments through6524373262 (including the #59 sender boundary).
 The latest user instruction permits independent usable main increments, each
 with complete local standard checks and main three-OS CI. Do not close #41
 until every adopted requirement is delivered. Keep #58 separate and first;
@@ -191,3 +191,13 @@ this design update proves neither implementation nor measurement.
 Measure the same synthetic fixture before/after; distinguish measurement from
 functional tests and native PTY observation. Record justified target changes
 before admission. No new worker/table/queue is authorized by these requirements.
+
+
+## #59 integration before the next main admission
+
+Comment6524373262 requires the newly saved sender boundary. Merge main ed40f33,
+preserve external_cli versus trusted-human classification and original/F6
+self-asserted names, and verify that source snapshots do not erase sender facts.
+Pre-merge source4bf14a9 standard/PTY/P1 evidence is retained as such; repeat
+qualification on the merged runtime/embedded guides before push. No historical
+null is upgraded into a verified sender or Core compatibility path.

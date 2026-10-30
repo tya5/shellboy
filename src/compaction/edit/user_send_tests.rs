@@ -76,6 +76,7 @@ async fn accepted_user_message_fences_new_owner_scope_without_revising_selection
                 Request::new(
                     format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
                     Command::MessageSend(MessageSendArgs {
+                        sender_label: None,
                         now: false,
                         thread_id: Some(thread.clone()),
                         text: "new accepted user instruction".into(),

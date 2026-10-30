@@ -151,6 +151,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     request(
         control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some(thread.into()),
             text: text.into(),
@@ -554,6 +555,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     let accepted = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some(thread.clone()),
             text: "check changed version".into(),
@@ -1015,6 +1017,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
     let resumed = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some(thread.clone()),
             text: "after compaction".into(),

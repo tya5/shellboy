@@ -345,3 +345,111 @@ fn parser_errors_identify_known_arguments_without_echoing_rejected_values() {
         assert!(value.get("operation_id").is_none());
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cross_data_directory_sender_label_survives_but_model_origin_is_stripped() {
+    use shellboy::protocol::*;
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("receiving")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let created = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:create", owner.instance_id),
+                Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    model: None,
+                    cwd: None,
+                    effort: None,
+                    parent_id: None,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let thread = created["thread_id"].as_str().unwrap().to_owned();
+    let (send, mut receive) = tokio::sync::mpsc::channel(1);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let store = control.store.clone();
+    let responder = tokio::spawn(async move {
+        let invocation = receive.recv().await.unwrap();
+        assert!(
+            invocation.request.origin.is_none(),
+            "cross-owner credentials must be removed by CLI"
+        );
+        let id = invocation.request.operation_id.clone();
+        let result = store
+            .execute(invocation.request, None)
+            .await
+            .unwrap()
+            .result;
+        invocation
+            .reply
+            .send(Response::success(id, result.clone()))
+            .unwrap();
+        result
+    });
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .arg("--data-dir")
+        .arg(&owner.loaded.data_dir)
+        .args([
+            "message",
+            "send",
+            "--thread",
+            &thread,
+            "--sender-label",
+            "other owner: leader",
+            "--text",
+            "synthetic cross-owner input",
+        ])
+        .env("SHELLBOY_DATA_DIR", root.path().join("sending"))
+        .env("SHELLBOY_INSTANCE_ID", "other-instance")
+        .env("SHELLBOY_THREAD_ID", "other-thread")
+        .env("SHELLBOY_RUN_ID", "other-run")
+        .env("SHELLBOY_TURN_ID", "other-turn")
+        .env("SHELLBOY_EXECUTION_ID", "other-shell")
+        .env("SHELLBOY_ORIGIN_TOKEN", "PRIVATE_CROSS_OWNER_TOKEN")
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let accepted = responder.await.unwrap();
+    let detail = control
+        .store
+        .execute(
+            Request::new(
+                "observe-cross-owner",
+                Command::MessageGet(MessageTarget {
+                    message_id: accepted["message_id"].as_str().unwrap().into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        detail["sender"],
+        serde_json::json!({"kind":"external_cli","label":"other owner: leader"})
+    );
+    assert!(!detail.to_string().contains("PRIVATE_CROSS_OWNER_TOKEN"));
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

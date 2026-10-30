@@ -1,5 +1,48 @@
 # Validation record
 
+## #59 sender inspection and labels
+
+2026-10-30, native macOS arm64/Rust1.99.1. `sh scripts/check.sh` succeeds:
+**1,666 passed / 0 failed / 32 ignored**, layout88, Python6, format and strict
+all-target Clippy. Tests use temporary databases/directories, loopback-only
+configuration and synthetic identities; no installed executable, real user store
+or paid API is used. The build cache is shared with the coder's earlier local
+validation target; source/worktree/branch are isolated for #59.
+
+Verified regression coverage:
+
+- Store receipt tests compare `message get` and `history get` provenance for
+  external labeled/unlabeled input and model input appended to an existing Run.
+  Top-level sender IDs remain after the source Thread is marked deleted.
+- Trusted internal submission records `human`; selected-path `history list`
+  exposes it. Saved null becomes unknown in sender facts. Complete historical
+  OriginIdentity can be inspected without credentials; partial/null evidence is
+  never upgraded into a fabricated identity.
+- Owner-issued Origin passes Control validation; a forged token does not.
+  A model labeling itself human cannot resume recovery-wait work. Own-Thread
+  cancellation still works with additive kind/label; a different model Thread
+  remains forbidden. Existing ownership/stop/retry tests pass unchanged.
+- 64 multibyte Unicode characters are accepted; 65, C0/C1 controls, newlines,
+  and Unicode line/paragraph separators are rejected without echoing input.
+  Real CLI cross-data-dir IPC strips Origin but keeps the unverified name and
+  records `external_cli`; no credential appears in sender output or receipts.
+- F6 TestBackend checks separate kind/name, exact `名乗り：…`, stale-reply
+  rejection and unchanged conversation presentation fields. A narrow existing
+  metadata-classifier regression preserves recorded-human categorization and
+  proves an external label 'human' does not change that category.
+
+Development checks initially caught two stale protocol/persistence expectations
+(the new required sender output and additive model kind) and a TestBackend
+assertion that did not account for wide-glyph continuation cells. Those fixtures
+now assert the adopted contract without dropping credential/context checks.
+The existing real-TUI PTY integration test passes unchanged. Its earlier #62
+intermittent repaint failure remains unresolved; this work does not claim a fix.
+
+Untested separately: native Windows/Linux execution pending ordinary main CI;
+physical-terminal F6 sender interaction, real providers, and a real cross-owner
+team session. TestBackend/mock/synthetic results do not establish those results.
+No conversation renderer/layout or index-refresh work is qualified by #59.
+
 ## #41 structural unit and B+C freshness follow-up
 
 Initial structural/interaction main b0e3c29 passes native three-OS CI41057195099

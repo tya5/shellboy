@@ -57,6 +57,7 @@ async fn send(store: &Store, thread: &str, text: &str) -> (MessageAccepted, Muta
     let result = execute(
         store,
         Command::MessageSend(MessageSendArgs {
+            sender_label: None,
             now: false,
             thread_id: Some(thread.into()),
             text: text.into(),
@@ -84,6 +85,7 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
     let (_directory, store) = store().await;
     let thread = create(&store, None).await;
     let req = request(Command::MessageSend(MessageSendArgs {
+        sender_label: None,
         now: false,
         thread_id: Some(thread.thread_id.clone()),
         text: "fixture".into(),
@@ -322,6 +324,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     .unwrap();
     assert_eq!(detail.delivery_status, DeliveryStatus::Cancelled);
     let sending = request(Command::MessageSend(MessageSendArgs {
+        sender_label: None,
         now: false,
         thread_id: Some(thread.thread_id),
         text: "too late".into(),
@@ -369,6 +372,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         store
             .execute(
                 request(Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
                     now: false,
                     thread_id: Some(child.thread_id.clone()),
                     text: "child".into(),
@@ -385,6 +389,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     let mechanical = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 now: false,
                 thread_id: Some(child.thread_id.clone()),
                 text: "ordinary parent note".into(),
@@ -437,6 +442,7 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let child_result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 now: false,
                 thread_id: Some(child.thread_id.clone()),
                 text: "child".into(),
@@ -465,6 +471,7 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 now: false,
                 thread_id: Some(new_child.thread_id),
                 text: "forbidden late child".into(),
@@ -497,6 +504,7 @@ async fn receipt_failure_rolls_back_message_run_turn_and_caches_error_without_ef
     let thread = create(&store, None).await;
     store.database.call(|connection| {connection.execute_batch("CREATE TRIGGER fixture_reject_receipt BEFORE INSERT ON receipt BEGIN SELECT RAISE(ABORT,'fixture save failure'); END;")?;Ok(())}).await.unwrap();
     let req = request(Command::MessageSend(MessageSendArgs {
+        sender_label: None,
         now: false,
         thread_id: Some(thread.thread_id),
         text: "must survive in UI".into(),
@@ -603,6 +611,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         .await
         .unwrap();
     let restart_request = request(Command::MessageSend(MessageSendArgs {
+        sender_label: None,
         now: false,
         thread_id: Some(thread.thread_id.clone()),
         text: "explicit human restart".into(),
@@ -911,6 +920,7 @@ async fn model_stop_authority_follows_run_ownership_instead_of_thread_genealogy(
     let accepted = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                sender_label: None,
                 now: false,
                 thread_id: Some(owned.thread_id),
                 text: "owned child".into(),
@@ -956,6 +966,7 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
         started.turn_id.as_deref().unwrap(),
     );
     let req = request(Command::MessageSend(MessageSendArgs {
+        sender_label: None,
         now: false,
         thread_id: None,
         text: "from authenticated shell".into(),
@@ -1014,7 +1025,9 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
             assert!(!bodies.is_empty());
             for body in bodies {
                 assert!(!body.contains("fixture-token"));
-                assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), expected);
+                let mut expected_record = expected.clone();
+                if sql.contains("SELECT sender_json") { expected_record["kind"] = serde_json::json!("model"); }
+                assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), expected_record);
             }
         }
         Ok(())
@@ -1697,6 +1710,7 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 })
             } else {
                 Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
                     now: false,
                     thread_id: Some(thread.thread_id.clone()),
                     text: "explicit human recovery".into(),
