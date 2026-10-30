@@ -179,11 +179,19 @@ pub(crate) fn summary(db: &Connection, run: &str) -> Result<Option<RevisitSummar
         Err(error) if error.code == ErrorCode::InvalidState => return Ok(None),
         Err(error) => return Err(error),
     };
-    Ok(state.map(|state| RevisitSummary {
+    Ok(state.map(summary_state))
+}
+/// Decode the same saved state for an off-DB-thread frontend projection.
+/// Unknown/malformed evidence retains summary()'s unavailable behavior.
+pub(crate) fn summary_from_body(body: &str) -> Option<RevisitSummary> {
+    serde_json::from_str::<State>(body).ok().map(summary_state)
+}
+fn summary_state(state: State) -> RevisitSummary {
+    RevisitSummary {
         pending: state.pending.is_some(),
         consumed_count: state.consumed_count,
         last_fired_at: state.last_fired_at,
-    }))
+    }
 }
 /// Called only after idle/owned-work checks, in the same completion transaction.
 pub(super) fn fire(

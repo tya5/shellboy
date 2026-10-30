@@ -31,19 +31,21 @@ const SUMMARY: &str = "WITH recent AS (
  ORDER BY started_at DESC,rowid DESC LIMIT 256
  ) SELECT facts FROM recent WHERE generation=?2 AND facts IS NOT NULL LIMIT 1";
 
-pub(super) fn summary(
+pub(super) fn read_tx(
     db: &Connection,
     turn: &str,
     generation: i64,
 ) -> Result<Option<String>, rusqlite::Error> {
-    let facts: Option<String> = db
-        .query_row(SUMMARY, rusqlite::params![turn, generation], |row| {
-            row.get(0)
-        })
-        .optional()?;
-    Ok(facts
+    db.query_row(SUMMARY, rusqlite::params![turn, generation], |row| {
+        row.get(0)
+    })
+    .optional()
+}
+
+pub(super) fn prepare(facts: Option<String>) -> Option<String> {
+    facts
         .and_then(|body| serde_json::from_str::<[u64; 4]>(&body).ok())
         .map(|[before, after, spilled, omitted]| {
             format!("自動縮小済み · spill {spilled}組 · 省略 {omitted}件 · {before}→{after} chars")
-        }))
+        })
 }
