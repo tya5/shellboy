@@ -109,6 +109,7 @@ pub(super) async fn archives(
     let submission_fence = crate::control::submission_retention::fence(
         "json_extract(current.body_json,'$._submission.source_draft_id')",
         "json_extract(current.body_json,'$._submission.source_revision')",
+        "COALESCE(current.thread_id,?1)",
     );
     let result=control.store.database.call(move|db|{
         let mut stmt=db.prepare(&format!("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {submission_fence}) ORDER BY updated_at DESC,id DESC LIMIT 128"))?;
@@ -129,6 +130,7 @@ async fn restore_archive_inner(control: &Control, id: String) -> Result<DraftSna
     let submission_fence = crate::control::submission_retention::fence(
         "json_extract(current.body_json,'$._submission.source_draft_id')",
         "json_extract(current.body_json,'$._submission.source_revision')",
+        "current.thread_id",
     );
     let value=control.store.database.call(move|db|Ok(db.query_row(&format!("SELECT body_json FROM draft current WHERE id=?1 AND state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (state<>'submitting' OR NOT {submission_fence})"),[id],|r|r.get::<_,String>(0)).optional()?)).await.map_err(storage_error)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Restorable draft not found"))?;
     let value: Value = serde_json::from_str(&value)

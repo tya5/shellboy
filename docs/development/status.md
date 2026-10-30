@@ -1,5 +1,14 @@
 # Development status
 
+## #60 Medium follow-up: indexed Thread-scoped receipt fences
+
+Autosave, selection and archive fences now constrain receipt.target_thread_id to
+the receiving/current Thread. The existing receipt_target index limits JSON reads;
+there is no schema/migration/new index. A regression verifies Thread isolation
+and EXPLAIN QUERY PLAN SEARCH (not SCAN) for the actual generated fence SQL.
+Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 standard check passes1699/0/32,
+layout90, Python6, fmt and strict Clippy. Native main CI remains pending.
+
 ## #60: bounded submission facts and terminal copy disposal
 
 Existing receipt.result_json holds only a bounded four-field submission binding.

@@ -2982,3 +2982,13 @@ same-SHA/same-environment full rerun passed without Rust/test changes. Preserve
 that failure independently; no timeout/assertion is weakened or failure cause
 claimed fixed. Only appended documentation conflicts arose during rebase and
 both #69 and #60 histories are retained; runtime patches are unchanged.
+
+
+## #60 indexed fence follow-up
+
+Thread isolation and EXPLAIN QUERY PLAN are checked against the actual generated
+fence SQL, requiring SEARCH binding USING INDEX receipt_target with a target-
+Thread equality and rejecting a binding table scan. No schema/index is added.
+Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 standard check passes1699/0/32,
+layout90, Python6, fmt and strict all-target Clippy. Native main CI remains
+a separate pending gate; prior #60 results are not substituted.

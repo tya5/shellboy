@@ -237,11 +237,13 @@ correlations fail closed. Editing/archived rows are never collection candidates.
 Autosave, editable restoration and submitting restoration consult both retained
 old submitted rows and receipt bindings, so removal cannot revive a sent revision.
 Newer edits remain eligible. Bounded queue reads project the most recent128
-bindings, not original bodies. Receipt JSON lookup does not have a new expression
-index: source-draft watermark checks may scan saved receipt scalar JSON; this is
-a conservative first-version cost, not a constant-time lookup guarantee. Preserve
-correctness for edit-fork source IDs across Threads rather than apply an unsafe
-receiver-Thread-only filter. Revisit indexing only with separate measured need.
+bindings, not original bodies. Receipt watermark lookups are constrained by the
+receiving Thread (`binding.target_thread_id`) and use the existing receipt_target
+index before inspecting JSON. Autosave/selection use the selected Thread;
+archive reads use the archived/submitting row's Thread (or the selected Thread
+for an unbound list entry). They never inspect other Threads' receipt JSON.
+The remaining submitted-copy fence keeps its existing source/revision index.
+
 
 Cancellation archives keep their existing source references. Restoration still
 reads canonical message text/attachment positions without sending it; deleting

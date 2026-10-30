@@ -1632,3 +1632,13 @@ scan receipt scalar JSON (including across edit-fork Threads). This is a bounded
 payload, not an O(1) query-cost claim. A new index/migration needs measured need;
 do not trade away cross-Thread correctness to pretend a target-only seek suffices.
 No user data or installed executable is edited as part of validation.
+
+
+## 2026-10-31: Thread-bounded submission fences (#60 Medium follow-up)
+
+Active, superseding the initial #60 global receipt-scan tradeoff. Per user/reviewer
+instruction, pass the receiving Thread at every autosave/selection/archive fence
+and constrain binding.target_thread_id before JSON checks. Reuse receipt_target;
+no migration/new index is needed. EXPLAIN QUERY PLAN must show SEARCH binding
+USING INDEX receipt_target(target_thread_id=?), not SCAN binding. A receipt in
+another Thread is not a watermark for the selected Thread's editable draft.

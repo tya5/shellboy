@@ -24,9 +24,9 @@ pub(super) fn save_marker(db: &Connection, operation: &str, value: &Value) -> ru
 }
 
 // SQL fragments are internal column expressions, never interpolated user input.
-pub(crate) fn fence(source: &str, revision: &str) -> String {
+pub(crate) fn fence(source: &str, revision: &str, thread: &str) -> String {
     format!(
-        "(EXISTS(SELECT 1 FROM draft submitted WHERE submitted.state='submitted' AND json_extract(submitted.body_json,'$._submission.source_draft_id')={source} AND json_extract(submitted.body_json,'$._submission.source_revision')>={revision}) OR EXISTS(SELECT 1 FROM receipt binding WHERE json_extract(binding.result_json,'$.draft_submission.operation_id')=binding.client_operation_id AND json_extract(binding.result_json,'$.draft_submission.message_id')=binding.message_node_id AND json_extract(binding.result_json,'$.draft_submission.source_draft_id')={source} AND json_type(binding.result_json,'$.draft_submission.source_revision')='integer' AND json_extract(binding.result_json,'$.draft_submission.source_revision')>={revision}))"
+        "(EXISTS(SELECT 1 FROM draft submitted WHERE submitted.state='submitted' AND json_extract(submitted.body_json,'$._submission.source_draft_id')={source} AND json_extract(submitted.body_json,'$._submission.source_revision')>={revision}) OR EXISTS(SELECT 1 FROM receipt binding WHERE binding.target_thread_id={thread} AND json_extract(binding.result_json,'$.draft_submission.operation_id')=binding.client_operation_id AND json_extract(binding.result_json,'$.draft_submission.message_id')=binding.message_node_id AND json_extract(binding.result_json,'$.draft_submission.source_draft_id')={source} AND json_type(binding.result_json,'$.draft_submission.source_revision')='integer' AND json_extract(binding.result_json,'$.draft_submission.source_revision')>={revision}))"
     )
 }
 
@@ -259,13 +259,49 @@ mod tests {
         ] {
             assert_eq!(
                 db.query_row(
-                    &format!("SELECT {}", fence("?1", "?2")),
-                    params![source, revision],
+                    &format!("SELECT {}", fence("?1", "?2", "?3")),
+                    params![source, revision, "t"],
                     |r| r.get::<_, bool>(0)
                 )
                 .unwrap(),
                 expected
             );
         }
+    }
+    #[test]
+    fn receipt_fence_is_thread_scoped_and_searches_receipt_target_index() {
+        let mut db = fixture();
+        copy(&db, "op", "admitted", "applied", "submitted");
+        let tx = db.transaction().unwrap();
+        collect_operation(&tx, "op").unwrap();
+        tx.commit().unwrap();
+        let sql = format!("SELECT {}", fence("?1", "?2", "?3"));
+        assert!(
+            db.query_row(&sql, params!["composer", 7, "t"], |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        assert!(
+            !db.query_row(&sql, params!["composer", 7, "another-thread"], |r| r
+                .get::<_, bool>(0))
+                .unwrap()
+        );
+        let plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(params!["composer", 7, "t"], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(
+                |line| line.contains("SEARCH binding USING INDEX receipt_target")
+                    && line.contains("target_thread_id=?")
+            ),
+            "{plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|line| line.contains("SCAN binding")),
+            "{plan:?}"
+        );
     }
 }
