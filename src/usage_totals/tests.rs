@@ -246,3 +246,143 @@ fn measure_public_saved_totals() {
         }
     }
 }
+
+#[test]
+#[ignore = "controlled varied-usage and per-query cause measurement; synthetic data only"]
+fn measure_varied_query_costs() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("varied.sqlite");
+    let mut writer = Connection::open(&path).unwrap();
+    writer
+        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;")
+        .unwrap();
+    writer
+        .execute_batch(crate::storage::CURRENT_SCHEMA)
+        .unwrap();
+    seed(&mut writer, 1000, false);
+    writer.execute("UPDATE model_attempt SET usage_json=json_set(usage_json,'$.input_tokens',100+rowid%97,'$.output_tokens',10+rowid%13)",[]).unwrap();
+    drop(writer);
+    let scopes = [
+        ("turn", Scope::Turn("u0".into())),
+        ("run", Scope::Run("r0".into())),
+        (
+            "thread",
+            Scope::Thread {
+                id: "t0".into(),
+                children: false,
+            },
+        ),
+        (
+            "children",
+            Scope::Thread {
+                id: "t0".into(),
+                children: true,
+            },
+        ),
+    ];
+    for legacy in [false, true] {
+        if legacy {
+            let db = Connection::open(&path).unwrap();
+            db.execute("UPDATE model_attempt SET usage_json=json_set(usage_json,'$.attribution',?1||CAST(rowid AS TEXT)) WHERE rowid<=256",["x".repeat(128*1024)]).unwrap();
+        }
+        for (label, scope) in &scopes {
+            let mut samples = Vec::new();
+            let mut first = 0.;
+            for i in 0..22 {
+                let db = Connection::open(&path).unwrap();
+                let t = Instant::now();
+                let v = read(&db, scope).unwrap();
+                let ms = t.elapsed().as_secs_f64() * 1000.;
+                assert_eq!(
+                    v["model_attempts"]["completed"]["count"],
+                    if *label == "thread" || *label == "children" {
+                        60_000
+                    } else {
+                        60
+                    }
+                );
+                if i == 0 { first = ms } else { samples.push(ms) }
+            }
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "VARIED scope={label} legacy_distinct256={legacy} n=21 first_ms={first:.3} median_ms={:.3} p95_ms={:.3}",
+                samples[10], samples[19]
+            );
+            let db = Connection::open(&path).unwrap();
+            let mut warm = Vec::new();
+            for _ in 0..21 {
+                let t = Instant::now();
+                read(&db, scope).unwrap();
+                warm.push(t.elapsed().as_secs_f64() * 1000.);
+            }
+            warm.sort_by(f64::total_cmp);
+            println!(
+                "VARIED_WARM scope={label} legacy_distinct256={legacy} median_ms={:.3} p95_ms={:.3}",
+                warm[10], warm[19]
+            );
+        }
+        let db = Connection::open(&path).unwrap();
+        let scope = Scope::Thread {
+            id: "t0".into(),
+            children: false,
+        };
+        let mut trace = Trace::default();
+        inspect(&db, &scope, &mut trace).unwrap();
+        let selected = selection(&db, &scope, &mut Trace::default()).unwrap();
+        for (sql, _) in trace.statements {
+            let kind = if sql.contains("FROM model_attempt a") {
+                if sql.contains("'completed'") {
+                    "model-terminal"
+                } else {
+                    "model-active"
+                }
+            } else if sql.contains("shell_terminal_time") {
+                "shell-terminal"
+            } else if sql.contains("shell_active_owner") {
+                "shell-active"
+            } else if sql.contains("FROM run r") {
+                "run"
+            } else {
+                continue;
+            };
+            let mut variants = vec![("actual", sql.clone())];
+            if kind == "model-terminal" {
+                let no_json =
+                    sql.replace(&usage::sql_projection("a.usage_json"), "100,75,10,2,110");
+                variants.push(("diagnostic-no-json", no_json.clone()));
+                variants.push((
+                    "diagnostic-no-duration-parse",
+                    sql.replace("usage_saved_ms(a.started_at,a.ended_at)", "10"),
+                ));
+                variants.push((
+                    "diagnostic-neither",
+                    no_json.replace("usage_saved_ms(a.started_at,a.ended_at)", "10"),
+                ));
+            }
+            for (variant, sql) in variants {
+                let mut samples = Vec::new();
+                let mut vm = 0;
+                for _ in 0..21 {
+                    let t = Instant::now();
+                    let mut st = db.prepare(&sql).unwrap();
+                    st.raw_bind_parameter(1, &selected.parameter).unwrap();
+                    if st.parameter_count() == 2 {
+                        st.raw_bind_parameter(2, chrono::Utc::now().to_rfc3339())
+                            .unwrap();
+                    }
+                    {
+                        let mut rows = st.raw_query();
+                        while rows.next().unwrap().is_some() {}
+                    }
+                    samples.push(t.elapsed().as_secs_f64() * 1000.);
+                    vm = st.get_status(StatementStatus::VmStep);
+                }
+                samples.sort_by(f64::total_cmp);
+                println!(
+                    "CAUSE scope=thread legacy_distinct256={legacy} kind={kind} variant={variant} median_ms={:.3} p95_ms={:.3} vmsteps={vm}",
+                    samples[10], samples[19]
+                );
+            }
+        }
+    }
+}

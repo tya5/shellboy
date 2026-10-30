@@ -174,6 +174,8 @@ fn model_sql(s: &Selection, wide: bool) -> String {
         turns = turn_source(s)
     )
 }
+// Rare SQL integer overflow retries exact high/low sums in bounded rowid blocks;
+// a block has at most 131,071 rows, so each i64 partial sum remains representable.
 fn models(
     db: &Connection,
     s: &Selection,
