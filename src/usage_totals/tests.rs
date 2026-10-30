@@ -347,8 +347,14 @@ fn measure_varied_query_costs() {
             };
             let mut variants = vec![("actual", sql.clone())];
             if kind == "model-terminal" {
-                let no_json =
-                    sql.replace(&usage::sql_projection("a.usage_json"), "100,75,10,2,110");
+                let mut no_json = sql.replace(standard_values_sql(), "NULL");
+                for (i, value) in [100, 75, 10, 2, 110].into_iter().enumerate() {
+                    no_json = no_json.replace(
+                        &usage::sql_valid_integer("standard_values", &format!("$[{i}]")),
+                        &value.to_string(),
+                    );
+                }
+                assert_ne!(no_json, sql, "diagnostic must remove actual JSON work");
                 variants.push(("diagnostic-no-json", no_json.clone()));
                 variants.push((
                     "diagnostic-no-duration-parse",
@@ -385,4 +391,138 @@ fn measure_varied_query_costs() {
             }
         }
     }
+}
+
+#[test]
+fn compact_jsonb_projection_preserves_all_49_numeric_read_rules() {
+    let db = db();
+    let projected = (0..5)
+        .map(|i| usage::sql_valid_integer("standard_values", &format!("$[{i}]")))
+        .collect::<Vec<_>>()
+        .join(",");
+    let optimized = format!(
+        "WITH a AS (SELECT 'completed' state,?1 usage_json),docs AS MATERIALIZED (SELECT {} standard_values FROM a) SELECT {projected} FROM docs",
+        standard_values_sql()
+    );
+    let original = format!("SELECT {}", usage::sql_projection("?1"));
+    for literal in [
+        "0",
+        "-0",
+        "123",
+        "9223372036854775807",
+        "9223372036854775808",
+        "18446744073709551615",
+        "18446744073709551616",
+        "-1",
+        "1.0",
+        "1e0",
+        "true",
+        "false",
+        "\"123\"",
+        "null",
+        "{}",
+        "[]",
+    ] {
+        let raw = format!(
+            r#"{{"input_tokens":{literal},"input_tokens_details":{{"cached_tokens":{literal}}},"output_tokens":{literal},"output_tokens_details":{{"reasoning_tokens":{literal}}},"total_tokens":{literal}}}"#
+        );
+        let expected = db
+            .query_row(&original, [&raw], |r| usage::StandardUsage::read(r, 0))
+            .unwrap();
+        let actual = db
+            .query_row(&optimized, [&raw], |r| usage::StandardUsage::read(r, 0))
+            .unwrap();
+        assert_eq!(actual, expected, "{literal}");
+    }
+    for raw in [
+        "{",
+        "not JSON",
+        "null",
+        "{}",
+        r#"{"input_tokens_details":false}"#,
+    ] {
+        assert_eq!(
+            db.query_row(&optimized, [raw], |r| usage::StandardUsage::read(r, 0))
+                .unwrap(),
+            usage::StandardUsage::default()
+        );
+    }
+}
+
+#[test]
+fn active_saved_records_and_cancelled_rows_do_not_pollute_terminal_totals() {
+    let mut db = db();
+    seed(&mut db, 1, false);
+    db.execute(
+        "INSERT INTO run(id,thread_id,state,created_at)VALUES('live','t0','live',?1)",
+        [START],
+    )
+    .unwrap();
+    db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('live','t0','live','waiting',?1)",[START]).unwrap();
+    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('live','live',0,0,'fixture','fixture',0,'inflight','{}','malformed',?1)",[START]).unwrap();
+    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('cancelled','u0',0,0,'fixture','fixture',0,'cancelled','{}','{\"input_tokens\":999}',?1,?2)",params![START,END]).unwrap();
+    db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('live','live','live','live','running','.','{}','UTF-8','UTF-8','closed',?1)",[START]).unwrap();
+    let v = read(
+        &db,
+        &Scope::Thread {
+            id: "t0".into(),
+            children: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(v["model_attempts"]["completed"]["count"], 60);
+    assert!(v["model_attempts"].get("inflight").is_none());
+    assert!(v["model_attempts"].get("cancelled").is_none());
+    assert_eq!(v["active"]["model_attempts"][0]["count"], 1);
+    assert_eq!(v["active"]["run"]["count"], 1);
+    assert_eq!(v["run"]["count"], 1);
+    assert_eq!(v["active"]["shell"]["count"], 1);
+    assert_eq!(v["shell"]["count"], 10);
+    assert!(v["active"]["shell"]["duration_ms"]["known_sum"].is_number());
+}
+
+#[test]
+fn descendant_limit_deleted_bridge_and_cycles_are_honest() {
+    let mut db = db();
+    seed(&mut db, 1, false);
+    db.execute("UPDATE thread SET deleted_at='now' WHERE id='t1'", [])
+        .unwrap();
+    db.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('hidden','t1','.','AGENTS.md','fixture','fixture','now')",[]).unwrap();
+    db.execute("UPDATE thread SET parent_thread_id='t2' WHERE id='t0'", [])
+        .unwrap();
+    let scope = Scope::Thread {
+        id: "t0".into(),
+        children: true,
+    };
+    let selected = selection(&db, &scope, &mut Trace::default()).unwrap();
+    assert!(selected.complete);
+    assert!(!selected.threads.contains(&"hidden".into()));
+    assert!(!selected.threads.contains(&"t1".into()));
+    for i in 101..250 {
+        db.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'t0','.','AGENTS.md','fixture','fixture','now')",[format!("t{i}")]).unwrap();
+    }
+    let v = read(&db, &scope).unwrap();
+    assert_eq!(v["selected_threads"], MAX_LIST_LIMIT);
+    assert_eq!(v["coverage"]["complete"], false);
+    assert_eq!(v["coverage"]["descendants"], "thread_limit");
+}
+
+#[test]
+fn saved_shell_sum_can_exceed_i64_without_wrapping_or_failing() {
+    let mut db = db();
+    seed(&mut db, 1, false);
+    db.execute(
+        "DELETE FROM shell_execution WHERE id NOT IN ('s0-0','s0-1','s0-2')",
+        [],
+    )
+    .unwrap();
+    db.execute("UPDATE shell_execution SET shell_json='{\"completion\":{\"elapsed_ms\":9223372036854775807}}'",[]).unwrap();
+    let scope = Scope::Run("r0".into());
+    let v = read(&db, &scope).unwrap();
+    assert_eq!(v["shell"]["duration_ms"]["overflow"], true);
+    db.execute("DELETE FROM shell_execution WHERE id='s0-2'", [])
+        .unwrap();
+    let v = read(&db, &scope).unwrap();
+    assert_eq!(v["shell"]["duration_ms"]["known_sum"], json!(u64::MAX - 1));
+    assert_eq!(v["shell"]["duration_ms"]["overflow"], false);
 }

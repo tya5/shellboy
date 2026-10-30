@@ -77,9 +77,10 @@ fn register(db: &Connection) -> rusqlite::Result<()> {
         2,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |ctx| {
-            let a: Option<String> = ctx.get(0)?;
-            let b: Option<String> = ctx.get(1)?;
-            Ok(saved_ms(a.as_deref(), b.as_deref()))
+            Ok(saved_ms(
+                ctx.get_raw(0).as_str().ok(),
+                ctx.get_raw(1).as_str().ok(),
+            ))
         },
     )
 }
@@ -148,8 +149,11 @@ fn turn_source(s: &Selection) -> String {
         _=>"SELECT u.id FROM json_each(?1) j JOIN turn u INDEXED BY turns_by_thread ON u.thread_id=j.value".into(),
     }
 }
+fn standard_values_sql() -> &'static str {
+    "CASE WHEN a.state IN ('completed','failed','incomplete') AND json_valid(a.usage_json) THEN jsonb_extract(a.usage_json,'$.input_tokens','$.input_tokens_details.cached_tokens','$.output_tokens','$.output_tokens_details.reasoning_tokens','$.total_tokens') END"
+}
 fn model_sql(s: &Selection, wide: bool) -> String {
-    let fields = [
+    let names = [
         "input_tokens",
         "cached_tokens",
         "output_tokens",
@@ -157,9 +161,12 @@ fn model_sql(s: &Selection, wide: bool) -> String {
         "total_tokens",
         "duration_ms",
     ];
-    let columns = usage::sql_projection("a.usage_json");
+    let projected = (0..5)
+        .map(|i| usage::sql_valid_integer("standard_values", &format!("$[{i}]")))
+        .collect::<Vec<_>>()
+        .join(",");
     let mut select = String::from("state,count(*)");
-    for field in fields {
+    for field in names {
         if wide {
             select.push_str(&format!(
                 ",sum({field}/1000000000),sum({field}%1000000000),count(*)-count({field})"
@@ -170,8 +177,9 @@ fn model_sql(s: &Selection, wide: bool) -> String {
     }
     let block = if wide { ",block" } else { "" };
     format!(
-        "WITH values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms) AS MATERIALIZED (SELECT a.rowid/65536 AS block,a.state,{columns},usage_saved_ms(a.started_at,a.ended_at) AS duration_ms FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({turns}) AND a.state IN ('completed','failed','incomplete')) SELECT {select} FROM values_read GROUP BY state{block}",
-        turns = turn_source(s)
+        "WITH docs AS MATERIALIZED (SELECT a.rowid/65536 block,a.state,{} standard_values,CASE WHEN a.state IN ('preparing','inflight') THEN usage_saved_ms(a.started_at,?2) ELSE usage_saved_ms(a.started_at,a.ended_at) END duration_ms FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.state IN ('completed','failed','incomplete','preparing','inflight')),values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms) AS MATERIALIZED (SELECT block,state,{projected},duration_ms FROM docs) SELECT {select} FROM values_read GROUP BY state{block}",
+        standard_values_sql(),
+        turn_source(s)
     )
 }
 // Rare SQL integer overflow retries exact high/low sums in bounded rowid blocks;
@@ -180,13 +188,14 @@ fn models(
     db: &Connection,
     s: &Selection,
     wide: bool,
+    observed: &str,
     trace: &mut Trace,
 ) -> rusqlite::Result<BTreeMap<String, Attempts>> {
     let sql = model_sql(s, wide);
     let mut statement = db.prepare(&sql)?;
     let mut result = BTreeMap::<String, Attempts>::new();
     {
-        let mut rows = statement.query([&s.parameter])?;
+        let mut rows = statement.query(params![s.parameter, observed])?;
         while let Some(row) = rows.next()? {
             let state: String = row.get(0)?;
             let count: i64 = row.get(1)?;
@@ -272,28 +281,17 @@ fn timing(
 fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, ApiError> {
     register(db).map_err(error)?;
     let s = selection(db, scope, trace)?;
-    let attempts = match models(db, &s, false, trace) {
+    let observed = chrono::Utc::now().to_rfc3339();
+    let mut attempts = match models(db, &s, false, &observed, trace) {
         Ok(v) => v,
         Err(rusqlite::Error::SqliteFailure(_, Some(ref message)))
             if message.contains("integer overflow") =>
         {
-            models(db, &s, true, trace).map_err(error)?
+            models(db, &s, true, &observed, trace).map_err(error)?
         }
         Err(e) => return Err(error(e)),
     };
-    let active_sql = format!(
-        "WITH values_read AS (SELECT state,usage_saved_ms(started_at,?2) elapsed FROM model_attempt a INDEXED BY attempts_by_turn WHERE turn_id IN ({}) AND state IN ('preparing','inflight')) SELECT state,count(*),sum(elapsed),count(*)-count(elapsed) FROM values_read GROUP BY state",
-        turn_source(&s)
-    );
-    let observed = chrono::Utc::now().to_rfc3339();
-    let active: Vec<Value> = {
-        let mut st = db.prepare(&active_sql).map_err(error)?;
-        let result=st.query_map(params![s.parameter,observed],|r|Ok(json!({"state":r.get::<_,String>(0)?,"count":r.get::<_,i64>(1)?,"elapsed_ms":r.get::<_,Option<i64>>(2)?,"unknown_elapsed_count":r.get::<_,i64>(3)?}))).map_err(error)?.collect::<rusqlite::Result<_>>().map_err(error)?;
-        trace
-            .statements
-            .push((active_sql, st.get_status(StatementStatus::VmStep) as u64));
-        result
-    };
+    let active= ["preparing","inflight"].into_iter().filter_map(|state|attempts.remove(state).map(|group|json!({"state":state,"count":group.count,"elapsed_ms":group.duration_ms.known_sum,"unknown_elapsed_count":group.duration_ms.unknown_count,"overflow":group.duration_ms.overflow}))).collect::<Vec<_>>();
     let (run, active_run) = if s.kind == "turn" {
         let na = json!({"duration_ms":null,"status":"not_applicable","reason":"A parent Run lifetime is not duplicated into a Turn"});
         (na.clone(), na)
@@ -315,14 +313,21 @@ fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, A
         )
     };
     let elapsed = "CASE WHEN json_type(s.shell_json,'$.completion.elapsed_ms')='integer' AND typeof(json_extract(s.shell_json,'$.completion.elapsed_ms'))='integer' AND json_extract(s.shell_json,'$.completion.elapsed_ms')>=0 THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END";
+    let shell_filter = match s.kind {
+        "turn" => "s.turn_id=?1",
+        "run" => "s.owner_run_id=?1",
+        _ => {
+            "s.owner_run_id IN (SELECT r.id FROM json_each(?1) j JOIN run r INDEXED BY run_thread_created ON r.thread_id=j.value)"
+        }
+    };
+    // Schema12 has no terminal owner/Turn index. Keep the complete indexed scan
+    // rather than dropping shells lacking a tool-call link. Active owners do seek.
     let shell_sql = format!(
-        "SELECT s.rowid/65536 block,{elapsed} duration FROM shell_execution s INDEXED BY shell_terminal_time WHERE s.state IN ('exited','failed','stopped') AND s.turn_id IN ({})",
-        turn_source(&s)
+        "SELECT s.rowid/65536 block,{elapsed} duration FROM shell_execution s INDEXED BY shell_terminal_time WHERE s.state IN ('exited','failed','stopped') AND {shell_filter}"
     );
     let shell = timing(db, &shell_sql, &s.parameter, None, trace).map_err(error)?;
     let active_shell_sql = format!(
-        "SELECT s.rowid/65536 block,usage_saved_ms(started_at,?2) duration FROM shell_execution s INDEXED BY shell_active_owner WHERE s.state IN ('starting','running','stopping') AND s.turn_id IN ({})",
-        turn_source(&s)
+        "SELECT s.rowid/65536 block,usage_saved_ms(started_at,?2) duration FROM shell_execution s INDEXED BY shell_active_owner WHERE s.state IN ('starting','running','stopping') AND {shell_filter}"
     );
     let active_shell =
         timing(db, &active_shell_sql, &s.parameter, Some(&observed), trace).map_err(error)?;

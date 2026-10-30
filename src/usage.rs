@@ -79,9 +79,21 @@ impl StandardUsage {
 // SQL identifiers are internal constants, never caller input. Guard parsing in
 // CASE, not WHERE: query planning must not expose malformed legacy documents.
 pub(crate) fn sql_projection(column: &str) -> String {
-    PATHS.map(|path| {
-        format!("CASE WHEN json_valid({column}) THEN CASE WHEN json_type({column},'{path}')='integer' AND typeof(json_extract({column},'{path}'))='integer' AND json_extract({column},'{path}')>=0 THEN json_extract({column},'{path}') END END")
-    }).join(",")
+    PATHS
+        .map(|path| {
+            format!(
+                "CASE WHEN json_valid({column}) THEN {} END",
+                sql_valid_integer(column, path)
+            )
+        })
+        .join(",")
+}
+
+/// The caller supplies SQLite-produced JSON/JSONB or NULL, never unchecked text.
+pub(crate) fn sql_valid_integer(column: &str, path: &str) -> String {
+    format!(
+        "CASE WHEN json_type({column},'{path}')='integer' AND typeof(json_extract({column},'{path}'))='integer' AND json_extract({column},'{path}')>=0 THEN json_extract({column},'{path}') END"
+    )
 }
 
 /// Only the provider response envelope; never traverse output/user content.

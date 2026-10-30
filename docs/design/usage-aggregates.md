@@ -35,9 +35,11 @@ Record placement/distribution, states, JSON size/shape (standard small usage
 separately from legacy large usage), indexes/EXPLAIN, SQLite version, Rust/build/
 OS environment, cold/warm definition, repetitions, median/p95 wall time and VM
 steps. Verify exact totals/unknown/active/child behavior independently of timing.
-The approximate target is 100ms per read, not a flaky absolute CI assertion.
+The initial100ms target is advisory, not a CI threshold. After removing obvious
+query/index/JSON/date waste, roughly500ms for an extreme100k-request Thread is
+acceptable for on-demand DB-worker reads; it is not UI-thread/render latency.
 
-If the measured reads are sufficiently fast, add no schema, persistent totals,
+If reads meet that practical goal, add no schema, persistent totals,
 producer/state/driver hooks or new workers. If too slow, report evidence and the
 cause before proposing only one simple total row per Run/Thread for separate
 approval. Do not preemptively redesign persistence. No paid API or user DB is used.

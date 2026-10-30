@@ -12,8 +12,10 @@ The started, untested schema-only WIP is isolated at protected archive commit
 ff2d0cd and is not part of the current branch or an integration candidate.
 
 Use existing saved state/standard usage/timing and measure indexed SQL first.
-Roughly100ms is a measurement goal, not an absolute CI correctness threshold.
-Only measured slowness warrants a separately approved simple Run/Thread total.
+100ms is advisory, not a CI threshold. The subsequent user/reviewer clarification
+accepts roughly500ms at100k requests after removing obvious read-query waste.
+Keep read-time aggregation; only substantially slower measured behavior warrants
+a new report with one minimal alternative, never an unapproved persistence change.
 This limits scope without pretending missing usage is zero. No period filters,
 client-invocation observation, summary accounting or new GC policy in version1.
 
