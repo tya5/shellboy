@@ -493,6 +493,12 @@ async fn recover(
     error: ApiError,
     attempt: Option<(String, Value)>,
 ) -> Result<(), ApiError> {
+    let error = crate::config_setup::enrich(
+        &control.store.config,
+        Some(&snapshot.profile),
+        Some(&snapshot.model),
+        error,
+    );
     // An attempt failure was already classified at the typed ModelError boundary.
     if attempt.is_none() {
         control.diagnostics.record(

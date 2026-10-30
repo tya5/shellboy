@@ -916,7 +916,7 @@ impl ThreadView {
         };
         if let Some(reason) = details.recovery_reason {
             let message = serde_json::from_str::<crate::protocol::ApiError>(&reason)
-                .map(|error| error.message)
+                .map(|error| crate::config_setup::tui_error(&error))
                 .unwrap_or_else(|_| "保存された復旧理由を詳細で確認してください".into());
             self.status = format!("復旧待ち: {message}");
         }

@@ -1,26 +1,50 @@
 # Development status
 
-## #41 D0 foundation in progress (local only)
+## #41 D0 shared current-view read (local qualification pending)
 
-Four reviewable local commits6d1e04a/54fd089/635cd9b/e6b1cfc separate connection
-reads from activity, saved-page, sender/tool, recovery/usage and received-response
-preparation. Existing async wrappers and state policies remain; Revisit shares
-one pure saved-state summary helper. Pre-planner APIs are fully tested but remain
-cfg(test) until their production caller is implemented, rather than adding
-redundant queries or silencing dead-code lint.
+Local foundation commits6d1e04a/54fd089/635cd9b/e6b1cfc extract connection reads
+and off-DB preparation. Commitf43f7dd consumes those helpers in one current-view
+transaction: receipts, Thread/page and paired pending, source/tool/recovery/usage,
+received audits and activity. The selected consumer shares one500ms start deadline
+and one in-flight refresh; paused tool facts are scoped to that transaction.
+The UI applies coherent generation/read revisions without dropping paid text,
+original sender evidence or #58 shrink/stale diagnostics. No new worker/table/queue.
 
-On sourcee6b1cfc before the later-main merge, native standard checks pass
-**1,687 passed / zero failed / 32 ignored** (library809, integration868,
-termination7, crash3), layout89/Python6/fmt/strict Clippy. Main f07ac85's newer
-watchdog tests and guides are now merged at151621a; that combination has not
-been qualified yet. These D0 code commits are local, not admitted to main.
+Separate commit55cdc67 caches Thread tree structure/ID maps and retains selected
+identity and screen row through refresh/removal; first preferred selection and
+viewport growth have explicit regressions. This is E's cache foundation only,
+not E's batched external-change projection or Watch implementation.
 
-Next: consume the raw helpers in one current-view transaction/shared deadline,
-including paused tool facts, preserve paired history/pending/read revisions and
-#59 immutable sender supplements, remove test-only guards as callers land, and
-measure actual DB jobs/work time. Current refresh is still7 jobs; live-work UI,
-background clock/output policy and the remaining D–G gates are not implemented.
-No new worker/table/queue, user-data change, installed update or release.
+The first shared-read library run found2 failures (818 passed/13 ignored): an
+old Thread-only notification expectation and a real initial-viewport regression.
+Both are corrected; additional audits restore event-kind filtering and paired
+history diagnostics. These corrections still need current-tree qualification.
+Latest main throughbb7e29b, including #59's explanation and #69's standalone setup,
+is integrated before that standard check. Prior foundation checks on e6b1cfc
+(1,687/0/32) do not qualify this new combined source.
+
+Next: standard checks, real separate-CLI reactivity and actual DB-job/work-time
+measurement, then D live-work/clock/output behavior, E/F list/watch/descendants,
+and G catalogue/forms/general popups. Visible source-detail reads are still their
+existing separate finite consumer; activity polling also remains until D's next
+unit. Do not claim every-surface1job/500ms or P2/P4/P5/P6 completion. These commits
+are local only; no installed update, release, paid API or default-data change.
+
+## #59 review follow-up: legacy sender explanation (D-006)
+
+The CLI reference and protocol design distinguish legacy null's historical human
+conversation band from evidence-based unknown in sender facts/F6. New external
+CLI records already use the generic input category; the previous blanket claim
+of unchanged conversation rendering is removed. F6 keeps sender.kind=unknown
+and adds an explanation for absent evidence, including old records. Source
+classification, band styling and #41 renderer/refresh code are untouched.
+The full local standard check passes1680/0/32 with RUST_TEST_THREADS=2,
+layout89, Python6, fmt and strict Clippy. Two preceding default-concurrency
+checks failed the unchanged PTY index-status/model-wait fixture; both are retained,
+not claimed fixed. Physical-terminal F6 remains untested; final main CI is pending.
+
+Windows watchdog follow-up f07ac85 main CI41072990263 passes all three OSes on
+its first attempt, following repeated native Windows branch qualification.
 
 ## Windows retry fixture watchdog follow-up
 
@@ -1097,3 +1121,22 @@ no executable Linux recipe is claimed. Windows gives unverified least-privilege
 account/ACL, egress-policy and VM alternatives, not a shell-wrapper recipe.
 See [verified and unverified scope](../validation/acceptance.md#guide-follow-up-67).
 No Rust code, installed binary, real database, real provider or Release changes.
+
+## First-run configuration guidance (#69, 2026-10-30)
+
+Standalone `config init` exclusively creates the bundled commented template at
+the selected path and leaves existing files/symlinks intact. `config check` needs
+no owner/database, strictly loads that path, reports missing defaults/credential
+variable names without values, and only GETs the bounded model catalog. API-root
+suffix errors and 404 explain `/v1` versus `/v1/responses`; exact template
+placeholders remain unfinished setup, not a ready configuration.
+
+The existing empty welcome and send/recovery notices show Japanese setup facts,
+path, minimal example and next steps; the welcome remains visible after a
+rejected unsaved first send. Rendering architecture and source/history semantics
+are unchanged. Guides (including the Japanese User Guide) and installer output
+use init -> edit/set environment -> check -> restart/start. Keyless loopback
+configuration and precedence are documented. AGENTS existence display is deferred
+because it needs worker-fed observations and overlaps #41. No schema, toolchain,
+provider login, interactive wizard, real-provider tests or Release changes.
+See [validation](../validation/acceptance.md#first-run-configuration-69).

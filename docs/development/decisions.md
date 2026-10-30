@@ -1597,3 +1597,23 @@ the existing private State and summary conversion. Malformed summary evidence
 remains unavailable as before; no state/schema/worker/queue or Core policy changes.
 The later shared-read commit must preserve raw legacy-null band evidence separately
 from typed unknown sender inspection and keep F6 immutable sender facts intact.
+
+## 2026-10-30: D-006 legacy sender display clarification (#68 / #59)
+
+Active. Source: issue68 D-006 and the issue59 review follow-up. Preserve old null
+senders' human conversation band to avoid reclassifying an entire existing
+conversation's appearance. It is a display convention, not sender evidence.
+CLI/message/history provenance and F6 continue to report unknown, with F6
+explaining absent evidence including old records. Newly recorded external_cli
+uses the existing generic input category. Correct the overly broad unchanged-
+rendering claim; do not change band code, source classification or #41 styling.
+Revisit only on an explicit user decision to restyle historical null records.
+
+## 2026-10-30: bounded first-run setup (#69)
+
+Adopt `config init` / `config check`: noun/verb naming matches existing CLI groups
+and limits the promise to configuration, unlike a general `doctor`. Reuse strict
+loading and model-catalog HTTP bounds rather than add provider templates, login,
+interactive setup or billed chat probes. Keep AGENTS existence display deferred:
+it requires worker-fed filesystem observations and overlaps #41; this task only
+changes empty-state/notification text. Revisit after that UI work is stable.

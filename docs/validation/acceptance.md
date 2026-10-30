@@ -2863,3 +2863,63 @@ changed. Local full check on d72155f first failed unchanged tui_process at its
 post-index model-wait footer, then passed without source changes:1679/0/32,
 layout89, Python6, fmt and strict Clippy. Neither failure is claimed fixed.
 Final main CI remains a separate gate.
+
+
+## #59 D-006 review clarification
+
+The follow-up changes CLI/design prose plus F6 sender_fields only. A regression
+requires the unknown kind unchanged, the old-record/missing-evidence explanation
+in both fields and original-page lines, and no fabricated self-asserted label.
+No conversation metadata/band/renderer code is modified. Native macOS arm64,
+Rust1.99.1: RUST_TEST_THREADS=2 sh scripts/check.sh passes1680/0/32, layout89,
+Python6, fmt and strict all-target Clippy. The added F6 regression and existing
+sender-only/TestBackend preservation test pass. Two prior default-concurrency
+full checks failed unchanged real_tui_accepts_text_renders_proxy_response_and_exits_cleanly:
+one lacked the unpaused index fact, the other missed the subsequent model-wait
+footer. Their original logs remain outside Git; no test was skipped or weakened,
+and a lower-concurrency success does not establish the failure's cause/fix.
+Final main CI is a separate gate; physical-terminal F6 remains unqualified.
+
+## First-run configuration (#69)
+
+2026-10-30. Native macOS ARM64, pinned Rust 1.99.1. Local standard check
+`export PATH="$HOME/.cargo/bin:$PATH"; sh scripts/check.sh` passes after rebase.
+Seven focused integration tests in `tests/config_setup.rs` cover standalone
+subprocesses with temporary HOME/USERPROFILE/APPDATA/LOCALAPPDATA/XDG paths,
+explicit/relative configuration paths, missing files/defaults/keys, unknown
+`compact_hint_tokens`, unreadable directory-as-file, endpoint suffixes, template
+identity, refusal to overwrite existing/dangling symlinks (Unix), and no owner
+storage creation. The report and owner cases also check source metadata and
+localized first-send or missing-key recovery details without an HTTP connection.
+
+A bounded loopback catalog mock requires `GET /v1/models` and rejects any second
+request. Cases include keyed/keyless success, unadvertised model, HTTP 401/404,
+malformed JSON and connection refusal. Synthetic key sentinels are absent from
+all command output even when returned in error bodies or catalog IDs. No actual
+provider, user configuration, paid model/embedding request or user key is used.
+
+[Manual native branch CI 41074920861](https://github.com/tya5/shellboy/actions/runs/41074920861)
+at initial implementation SHA `45600e0` passes all three ordinary OS jobs. Native
+subprocess tests check each OS's actual default-path environment resolution;
+Linux additionally checks HOME fallback without XDG_CONFIG_HOME. The later exact
+template-placeholder follow-up is locally checked, and final combined-source
+main CI is still a distinct gate, not replaced by this older branch run.
+
+TestBackend covers the configured/no-notice case and missing-configuration
+facts, template and next actions, including after a rejected first send. An
+actual disposable macOS PTY (no provider) verifies missing default config and
+an explicitly selected empty config, source paths, Japanese first-send failure,
+and retained setup text after a full repaint. ANSI/OSC cursor/hyperlink updates
+are accounted for rather than requiring repeated unchanged text in raw diffs.
+Paths with spaces are exercised. Empty-key presence and keyless behavior are
+also checked independently of UI rendering.
+
+No Windows/Linux physical terminal or particular Ollama/LM Studio release is
+qualified. The keyless example requires a server supporting catalog plus
+Responses; a catalog GET cannot prove chat compatibility or billing behavior.
+AGENTS existence display, OAuth/keychain, provider-specific templates and an
+interactive wizard remain outside this first version. Explicit missing/unreadable
+config files retain the existing strict loader error; use `config init` with the
+same `--config` before startup. No existing configuration or installed binary
+was changed by these checks. Installer guidance is a source/output change for
+the next release; old v0.3.0 assets are not modified.

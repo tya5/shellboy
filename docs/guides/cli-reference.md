@@ -37,7 +37,7 @@ shellboy <group> <operation> --help
 shellboy --version
 ```
 
-Global flags may also follow subcommands. `--data-dir` selects owner storage, not work cwd; `--config` selects TUI startup settings or standalone RAG embedding connection settings. CLI connection resolution is `--data-dir` > `SHELLBOY_DATA_DIR` > OS default; it does not read TOML. See [OS paths](configuration.md#locations-and-precedence).
+Global flags may also follow subcommands. `--data-dir` selects owner storage, not work cwd; `--config` selects TUI startup settings, standalone config init/check, or standalone RAG embedding connection settings. CLI connection resolution is `--data-dir` > `SHELLBOY_DATA_DIR` > OS default; it does not read TOML. See [OS paths](configuration.md#locations-and-precedence).
 
 The CLI automatically uses `SHELLBOY_*` context injected into the model shell. Do not display, copy, or manually generate origin tokens. Choosing another data directory does not inherit this context. Even when `--thread` is optional, external terminals have no current Thread: specify it. Omission resolves to the authenticated caller's Thread, never silently to the TUI's selected Thread.
 
@@ -80,6 +80,18 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
+
+### Standalone configuration (2 commands)
+
+| Command | Behavior |
+|---|---|
+| `config init` | Create the bundled commented template at `--config PATH` or the OS default; existing files/symlinks are never overwritten. `result.created=false` means an existing path was left intact |
+| `config check` | Strictly read that file, resolve defaults, check key-variable presence and GET the model catalog once. No owner or conversation/embedding request. A missing/unadvertised setting, HTTP/network error or invalid TOML exits 1 with path/facts in `error.details` |
+
+Both commands return ordinary JSON and reject `--operation-id`: they are not
+owner RPCs and create no receipt or owner database. Init is an explicit file
+write; check is a read plus a bounded catalog network request. Keep keys out of
+TOML. See [first setup](configuration.md#first-setup-without-an-owner).
 
 ### Saved usage (1 operation)
 
@@ -146,7 +158,9 @@ send without Origin, `human` for a recorded in-process TUI submission, or
 of a human. Sender IDs remain readable after the originating Thread is deleted.
 User-node `history get` and `history list` expose the same facts at
 `provenance.sender`, joined by the accepted `message_id`, including later input
-appended to an already-running Run. Legacy null sender records stay unknown.
+appended to an already-running Run. Legacy null sender records are `unknown`
+in these sender facts: old records cannot distinguish a TUI sender from an
+external CLI.
 
 `--sender-label TEXT` adds an optional self-asserted name: at most 64 Unicode
 characters, without newlines, control characters or line/paragraph separators.
@@ -154,7 +168,13 @@ It is returned as `sender.label`, separate from verified identity. The label
 never grants ownership, stop, retry or cancellation authority. Explicitly
 connecting to another data directory still strips model Origin; only the name
 survives, as `external_cli`. TUI F6 message details display it as `名乗り：…`,
-not as verified identity; conversation rendering is unchanged.
+not as verified identity. F6 also explains `unknown` as missing sender evidence,
+including old records. The conversation's source bands are a separate display
+convention: legacy null records keep the existing human band so old conversations
+do not all change appearance, whereas new `external_cli` records use the existing
+generic input band rather than the human band. That legacy human band is not
+verified sender identity. This follows decision D-006 in issue #68; band styling
+belongs to #41 and is not changed by this sender-inspection follow-up.
 
 Ordinary sends queue for the next safe boundary. Add `--now` only to request
 urgent delivery by releasing a foreground shell wait: that shell continues under

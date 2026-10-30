@@ -31,6 +31,11 @@ pub struct Cli {
 pub enum CliCommand {
     /// Inspect recorded work; no model call or persistent job engine.
     Status(StatusOptions),
+    /// Create a configuration template or check it without an owner.
+    Config {
+        #[command(subcommand)]
+        command: crate::config_setup::ConfigCommand,
+    },
     /// Read saved model usage and separate timing totals; no model call.
     Usage {
         #[command(subcommand)]
@@ -692,7 +697,9 @@ impl Cli {
                 turn_id: a.turn_id,
                 include_children: a.include_children,
             }),
-            CliCommand::Docs { .. } | CliCommand::Rag(_) => return Ok(None),
+            CliCommand::Docs { .. } | CliCommand::Rag(_) | CliCommand::Config { .. } => {
+                return Ok(None);
+            }
             CliCommand::Model {
                 command: ModelCommand::List(a),
             } => C::ModelList(wire::ModelListArgs {

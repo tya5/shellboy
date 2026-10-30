@@ -19,6 +19,8 @@ mod cli_process;
 mod composer;
 #[path = "../config.rs"]
 mod config;
+#[path = "../config_setup.rs"]
+mod config_setup;
 #[path = "../context.rs"]
 mod context;
 #[path = "../control_db.rs"]

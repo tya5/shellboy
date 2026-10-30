@@ -6,6 +6,7 @@ pub mod attachments;
 pub mod cli;
 pub mod compaction;
 pub mod config;
+pub mod config_setup;
 pub mod context;
 pub mod control;
 pub mod deletion;

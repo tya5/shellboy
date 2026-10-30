@@ -121,18 +121,31 @@ fn main() -> ExitCode {
     if cli.operation_id.is_some()
         && matches!(
             cli.command,
-            Some(CliCommand::Docs { .. } | CliCommand::Rag(_))
+            Some(CliCommand::Docs { .. } | CliCommand::Rag(_) | CliCommand::Config { .. })
         )
     {
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidArgument,
-                "--operation-id applies to owner RPCs; docs and rag are standalone commands",
+                "--operation-id applies to owner RPCs; docs, rag and config are standalone commands",
             ),
             cli.operation_id,
         );
     }
     match cli.command.take() {
+        Some(CliCommand::Config { command }) => {
+            match runtime.block_on(shellboy::config_setup::execute(
+                command,
+                cli.config,
+                cli.data_dir,
+                &cwd,
+            )) {
+                Ok(result) => standalone_response(
+                    serde_json::json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"ok":true,"result":result}),
+                ),
+                Err(error) => print_error(error, None),
+            }
+        }
         Some(CliCommand::Docs { command }) => standalone_response(docs_response(command)),
         Some(CliCommand::Rag(options)) => standalone_response(runtime.block_on(
             shellboy::rag::execute(options, cli.config, cli.data_dir, &cwd),

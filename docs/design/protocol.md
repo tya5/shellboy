@@ -325,8 +325,10 @@ entry point. Cross-data-dir CLI still strips Origin, retaining only the label.
 
 TUI sender display is confined to F6 message details (including the original
 page), fetched on demand through existing bounded original reads. It labels a
-self-asserted label `名乗り：…`, separate from verified sender kind/IDs. Conversation
-rendering, indexing and refresh scheduling are unchanged. Unknown evidence never
+self-asserted label `名乗り：…`, separate from verified sender kind/IDs. Unknown
+sender facts carry a human-readable missing-evidence explanation in F6, including
+old records, without changing the wire `unknown` kind. Conversation band styling,
+indexing and refresh scheduling are not redesigned here. Unknown evidence never
 becomes a claimed human or external CLI merely from message role or absent Origin.
 
 The existing conversation source classifier recognizes newly recorded `human`
@@ -335,3 +337,12 @@ reading labels. Its historical null/Human display convention remains unchanged
 by scope; it is not evidence of verified sender identity. Sender inspection in
 CLI/F6 reports such legacy null receipts as unknown. No renderer/layout or
 index-refresh change is part of this preservation adjustment.
+
+
+Decision D-006 (#68) explicitly preserves the conversation's historical null/Human
+band convention to avoid changing all old inputs' appearance. New external_cli
+objects fall into the existing generic input category instead, so the claim that
+all conversation rendering is unchanged would be inaccurate. CLI provenance and
+F6 remain evidence-based unknown for old null receipts; the human band is not a
+sender fact. This follow-up changes documentation and F6 explanation only, not
+source classification, bands or #41 rendering.

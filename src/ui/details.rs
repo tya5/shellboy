@@ -121,6 +121,13 @@ fn sender_fields(sender: &crate::protocol::MessageSender) -> Vec<PresentationFie
         crate::protocol::SenderKind::Unknown => "unknown",
     };
     let mut fields = vec![("sender.kind", "送り手", kind.to_owned())];
+    if sender.kind == crate::protocol::SenderKind::Unknown {
+        fields.push((
+            "sender.evidence",
+            "送り手の記録",
+            "古い記録など、送り手を確認できる記録がありません".into(),
+        ));
+    }
     for (key, value) in [
         ("instance_id", &sender.instance_id),
         ("thread_id", &sender.thread_id),
@@ -2585,6 +2592,25 @@ mod tests {
         assert!(
             matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { text: ref copied, .. } if copied == &text))
         );
+    }
+    #[test]
+    fn unknown_sender_details_explain_legacy_evidence_without_changing_the_kind() {
+        let fields = sender_fields(&crate::protocol::MessageSender::default());
+        assert!(
+            fields
+                .iter()
+                .any(|field| field.key == "sender.kind" && field.value == "unknown")
+        );
+        assert!(fields.iter().any(|field| field.key == "sender.evidence"
+            && field.value.contains("古い記録")
+            && field.value.contains("確認できる記録がありません")));
+        let lines = sender_lines(&crate::protocol::MessageSender::default());
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_string().contains("古い記録"))
+        );
+        assert!(!fields.iter().any(|field| field.key == "sender.label"));
     }
     #[test]
     fn sender_is_only_added_to_details_and_self_asserted_name_is_distinct() {

@@ -22,6 +22,7 @@ fn model_list_error(error: crate::model::ModelError) -> ApiError {
         None => error.to_string(),
     };
     ApiError::new(code, message)
+        .details(json!({"failure_kind":error.kind,"http_status":error.status}))
 }
 #[derive(Clone)]
 pub(super) struct RuntimeOperation {
@@ -365,9 +366,14 @@ impl Control {
             .or(thread_connection)
             .or_else(|| self.store.config.default_connection.clone())
             .ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::ConfigInvalid,
-                    "No default connection is configured",
+                crate::config_setup::enrich(
+                    &self.store.config,
+                    None,
+                    Some("catalog"),
+                    ApiError::new(
+                        ErrorCode::ConfigInvalid,
+                        "No default connection is configured",
+                    ),
                 )
             })?;
         self.store
@@ -375,18 +381,33 @@ impl Control {
             .connections
             .get(&connection)
             .ok_or_else(|| {
-                ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
+                crate::config_setup::enrich(
+                    &self.store.config,
+                    Some(&connection),
+                    Some("catalog"),
+                    ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured"),
+                )
             })?;
         let fetch = async {
-            let client = self
-                .store
-                .clients
-                .get(&connection)
-                .map_err(model_list_error)?;
+            let client = self.store.clients.get(&connection).map_err(|error| {
+                crate::config_setup::enrich(
+                    &self.store.config,
+                    Some(&connection),
+                    Some("catalog"),
+                    model_list_error(error),
+                )
+            })?;
             client
                 .models(self.stop.child_token())
                 .await
-                .map_err(model_list_error)
+                .map_err(|error| {
+                    crate::config_setup::enrich(
+                        &self.store.config,
+                        Some(&connection),
+                        Some("catalog"),
+                        model_list_error(error),
+                    )
+                })
         };
         // A read-only catalog request has no target work to keep alive on disconnect.
         let models = tokio::select! { biased;

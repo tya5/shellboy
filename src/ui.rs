@@ -5175,8 +5175,22 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     if view.thread_id.is_none()
         && view.nodes().is_empty()
         && view.provisional_nodes.is_empty()
-        && view.pending.is_empty()
+        && (view.pending.is_empty()
+            || (view.pending.values().all(|pending| {
+                matches!(
+                    pending.status,
+                    ReceiptStatus::Failed | ReceiptStatus::Cancelled
+                )
+            }) && !crate::config_setup::report(
+                &state.config,
+                view.connection.as_deref(),
+                view.model.as_deref(),
+                crate::config_setup::credential_set,
+            )
+            .missing
+            .is_empty()))
     {
+        // Keep setup facts visible after a rejected first send; no saved history is hidden.
         frame.render_widget(
             Paragraph::new(chrome::welcome(
                 view,
