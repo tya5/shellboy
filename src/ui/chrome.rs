@@ -9,21 +9,15 @@ pub(super) fn header_line(
     width: u16,
     selection: bool,
     palette: super::theme::Palette,
+    frozen_at: Option<&str>,
 ) -> ratatui::text::Line<'static> {
     use ratatui::{
         style::{Modifier, Style},
         text::{Line, Span},
     };
     if selection {
-        let label = if width >= 38 {
-            "表示固定（選択中） · F2/Esc解除"
-        } else if width >= 22 {
-            "表示固定 · F2/Esc解除"
-        } else {
-            "表示固定"
-        };
         return Line::styled(
-            fit(label, usize::from(width), false),
+            frozen_header_label(width, frozen_at),
             palette.header().add_modifier(Modifier::BOLD),
         );
     }
@@ -92,6 +86,32 @@ pub(super) fn header_line(
     Line::from(spans).style(palette.header())
 }
 
+fn frozen_header_label(width: u16, frozen_at: Option<&str>) -> String {
+    let time = frozen_at
+        .and_then(|stamp| stamp.get(11..19))
+        .filter(|time| time.is_ascii())
+        .map(|time| format!("{time}Z"));
+    let mut choices = Vec::new();
+    if let Some(stamp) = frozen_at {
+        choices.push(format!("表示固定開始 {stamp} · F2/Esc解除 · Ctrl+L更新"));
+    }
+    if let Some(time) = time {
+        choices.push(format!("表示固定開始 {time} · F2/Esc解除 · Ctrl+L更新"));
+        choices.push(format!("表示固定 {time} · F2/Esc解除"));
+        choices.push(format!("表示固定 {time} F2"));
+        choices.push(format!("表示固定 {time}"));
+    } else {
+        choices.push("表示固定 · 時刻未記録 · F2/Esc解除 · Ctrl+L更新".into());
+        choices.push("表示固定 · F2/Esc解除".into());
+    }
+    choices.push("表示固定".into());
+    let label = choices
+        .into_iter()
+        .find(|label| label.width() <= usize::from(width))
+        .unwrap_or_default();
+    fit(&label, usize::from(width), false)
+}
+
 #[cfg(test)]
 fn header(view: &ThreadView, width: u16, selection: bool) -> String {
     header_line(
@@ -99,6 +119,7 @@ fn header(view: &ThreadView, width: u16, selection: bool) -> String {
         width,
         selection,
         super::theme::Palette::from_capabilities(crate::config::PaletteMode::Dark, false, true),
+        None,
     )
     .spans
     .iter()
@@ -309,6 +330,20 @@ mod tests {
         text
     }
     #[test]
+    fn frozen_banner_identifies_entry_and_resume_without_inventing_a_time() {
+        let at = "2026-10-30T12:34:56Z";
+        let wide = frozen_header_label(100, Some(at));
+        assert!(wide.contains(at) && wide.contains("F2/Esc解除") && wide.contains("Ctrl+L更新"));
+        let compact = frozen_header_label(40, Some(at));
+        assert!(compact.contains("12:34:56Z") && compact.contains("F2/Esc解除"));
+        for width in [8, 16, 24, 40, 80, 120] {
+            let label = frozen_header_label(width, Some(at));
+            assert!(label.width() <= usize::from(width));
+            assert!(label.contains("表示固定"));
+        }
+        assert!(frozen_header_label(100, None).contains("時刻未記録"));
+    }
+    #[test]
     fn empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents() {
         let mut config = Config::default();
         config.ui.send_key = "Ctrl+Enter".into();
@@ -450,7 +485,7 @@ mod tests {
         ui.view_mut().pending_messages.total = 2;
         for mode in [PaletteMode::Dark, PaletteMode::Light] {
             let palette = super::super::theme::Palette::from_capabilities(mode, false, true);
-            let line = header_line(ui.view(), 100, false, palette);
+            let line = header_line(ui.view(), 100, false, palette, None);
             assert_eq!(line.style, palette.header());
             assert_eq!(line.width(), 100);
             assert!(
@@ -493,6 +528,7 @@ mod tests {
             35,
             false,
             super::super::theme::Palette::from_capabilities(PaletteMode::Dark, false, false),
+            None,
         );
         assert!(line.width() <= 35);
         assert!(

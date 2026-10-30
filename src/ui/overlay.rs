@@ -84,8 +84,14 @@ impl UiState {
             self.immediate_chord = false;
         }
         let input_owner = self.active.clone();
+        let selection_before = self.selection_mode;
         let follow_before = self.view().follow;
         let mut actions = self.event_inner(event);
+        if self.selection_mode != selection_before {
+            self.selection_frozen_at = self
+                .selection_mode
+                .then(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+        }
         if self.active == input_owner && self.view().follow != follow_before {
             let view = self.view();
             self.trace_history(crate::diagnostics::UiHistoryTrace {
@@ -514,6 +520,67 @@ mod tests {
             },
         );
         UiState::new(&config, PathBuf::from("/"))
+    }
+    #[test]
+    fn f2_captures_entry_time_once_and_all_exits_release_it() {
+        let mut ui = state();
+        assert!(ui.selection_frozen_at.is_none());
+        ui.event(key(KeyCode::F(2), KeyModifiers::NONE));
+        let captured = ui
+            .selection_frozen_at
+            .as_deref()
+            .expect("F2 captured its entry time");
+        assert_eq!(
+            chrono::DateTime::parse_from_rfc3339(captured)
+                .unwrap()
+                .offset()
+                .local_minus_utc(),
+            0
+        );
+        // A deterministic older entry avoids sleeps and does not depend on the
+        // wall clock advancing to another whole second while this test runs.
+        let fixed = "2000-01-02T03:04:05Z";
+        ui.selection_frozen_at = Some(fixed.into());
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut ui))
+            .unwrap();
+        let banner = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .take(100)
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(banner.contains(fixed), "{banner}");
+        ui.apply(UiUpdate::Status {
+            thread_id: None,
+            text: "new mutable fact while fixed".into(),
+        });
+        ui.event(Event::Resize(90, 24));
+        assert_eq!(ui.selection_frozen_at.as_deref(), Some(fixed));
+        ui.event(key(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(ui.full_redraw_requested);
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut ui))
+            .unwrap();
+        assert_eq!(
+            ui.selection_frozen_at.as_deref(),
+            Some(fixed),
+            "redrawing does not recapture entry time"
+        );
+        ui.event(key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!ui.selection_mode);
+        assert!(ui.selection_frozen_at.is_none());
+        ui.event(key(KeyCode::F(2), KeyModifiers::NONE));
+        assert!(ui.selection_mode);
+        assert_ne!(ui.selection_frozen_at.as_deref(), Some(fixed));
+        assert!(ui.selection_frozen_at.is_some());
+        ui.event(Event::Paste("selection-mode paste".into()));
+        assert!(!ui.selection_mode);
+        assert!(ui.selection_frozen_at.is_none());
     }
     #[test]
     fn derived_owner_keeps_valid_stacking_without_extra_mode_state() {

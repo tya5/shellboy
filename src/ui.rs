@@ -1409,6 +1409,7 @@ pub struct UiState {
     pub active: String,
     thread_browser: threads::ThreadBrowser,
     pub selection_mode: bool,
+    selection_frozen_at: Option<String>,
     pub help_visible: bool,
     help_page: help::Page,
     help_scroll: u16,
@@ -1500,6 +1501,7 @@ impl UiState {
             active,
             thread_browser: threads::ThreadBrowser::default(),
             selection_mode: false,
+            selection_frozen_at: None,
             help_visible: false,
             help_page: help::Page::guide(config),
             help_scroll: 0,
@@ -2745,6 +2747,7 @@ impl UiState {
                 self.lifecycle
                     .accept_progress((elapsed_ms, detail, force_available));
                 self.selection_mode = false;
+                self.selection_frozen_at = None;
             }
             UiUpdate::ForceShutdown => {
                 self.lifecycle.stop(true);
@@ -4795,6 +4798,7 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
             area.width,
             state.selection_mode,
             state.palette,
+            state.selection_frozen_at.as_deref(),
         )),
         area,
     );
