@@ -169,16 +169,19 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
                 |row| row.get(0),
             )?;
             assert_eq!(correlated, saved_message);
-            let frozen: String = db.query_row(
-                "SELECT body_json FROM draft WHERE thread_id=?1 AND state='submitted'",
-                [&thread],
-                |row| row.get(0),
+            let (binding, admission): (String,String) = db.query_row(
+                "SELECT json_extract(result_json,'$.draft_submission'),path_admission FROM receipt WHERE message_node_id=?1",
+                [&saved_message], |row|Ok((row.get(0)?,row.get(1)?)),
             )?;
-            let frozen: serde_json::Value = serde_json::from_str(&frozen).unwrap();
-            assert_eq!(frozen["text"], "saved message");
-            assert_eq!(frozen["_submission"]["source_draft_id"], "first-draft");
-            assert_eq!(frozen["_submission"]["source_revision"], 0);
-            assert_eq!(frozen["_submission"]["message_id"], saved_message);
+            let binding:serde_json::Value=serde_json::from_str(&binding).unwrap();
+            assert_eq!(admission,"admitted");
+            assert_eq!(binding["source_draft_id"],"first-draft");
+            assert_eq!(binding["source_revision"],0);
+            assert_eq!(binding["message_id"],saved_message);
+            assert!(!binding.to_string().contains("saved message"));
+            assert_eq!(db.query_row("SELECT count(*) FROM draft WHERE thread_id=?1 AND state='submitted'",[&thread],|r|r.get::<_,i64>(0))?,0);
+            let body:String=db.query_row("SELECT payload_json FROM node WHERE id=?1",[saved_message],|r|r.get(0))?;
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["content"][0]["text"],"saved message");
             Ok((
                 db.query_row("SELECT count(*) FROM thread", [], |r| r.get::<_, i64>(0))?,
                 db.query_row(
@@ -2935,10 +2938,20 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         .unwrap();
     reopened.db.call(move |db| {
         let draft:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1 AND state='editing'",[&thread],|r|r.get(0))?;
-        let frozen:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1 AND state='submitted'",[&thread],|r|r.get(0))?;
-        let frozen:serde_json::Value=serde_json::from_str(&frozen).unwrap();
-        assert_eq!(frozen["text"],"queued instruction survives");
-        assert_eq!(frozen["_submission"]["source_draft_id"],"queued-before-quit");
+        use rusqlite::OptionalExtension;
+        let (saved,admission,state):(String,String,String)=db.query_row("SELECT result_json,path_admission,state FROM receipt WHERE target_thread_id=?1",[&thread],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        let saved:serde_json::Value=serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["draft_submission"]["source_draft_id"],"queued-before-quit");
+        assert_eq!(saved["draft_submission"]["source_revision"],0);
+        assert!(!saved["draft_submission"].to_string().contains("queued instruction survives"));
+        let frozen:Option<String>=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1 AND state='submitted'",[&thread],|r|r.get(0)).optional()?;
+        if admission=="admitted" || (admission!="unknown" && state=="cancelled") {
+            assert!(frozen.is_none(),"finished copy must be retired");
+        } else {
+            let frozen:serde_json::Value=serde_json::from_str(&frozen.expect("unadmitted/unknown content must be retained")).unwrap();
+            assert_eq!(frozen["text"],"queued instruction survives");
+            assert_eq!(frozen["_submission"]["source_draft_id"],"queued-before-quit");
+        }
         assert_eq!(serde_json::from_str::<DraftSnapshot>(&draft).unwrap().text,"latest unsent draft");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM receipt WHERE target_thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?,1);
         let (kind,body):(String,String)=db.query_row("SELECT n.kind,n.payload_json FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1",[thread],|r|Ok((r.get(0)?,r.get(1)?)))?;

@@ -2955,3 +2955,20 @@ retry and non-overwrite. Catalog aliases not advertised by the mock now succeed
 with `model_advertised=false` and warnings, per #68 D-009. Eight focused Unix
 integration cases and the partial-write unit test pass locally; ordinary final
 three-OS CI is still required separately. No paid/provider probe is added.
+
+## #60 submission retention qualification
+
+Synthetic macOS temporary DB/loopback fixtures only; no installed binary, user DB
+or paid provider. Full `RUST_TEST_THREADS=2 sh scripts/check.sh` passes1688/0/32, layout89,
+Python6, formatting and strict all-target Clippy. Exact frozen-copy metadata validation, source-revision fences and
+bounded four-field receipt markers preserve cancellation archives. Sixteen repeated
+submitted/admitted sends each release at least8192 logical bytes and leave no
+submitted row; exact replay and reopen retain the markers. Old rows are collected
+128 then2 through the real history GC path. Unknown/submitting copies survive DB
+reopen. Cancelled text and attachment position restore without a model send after
+copy collection and ordinary GC; late autosave is suppressed, newer edit accepted.
+The initial full check failed two old frontend expectations that all accepted
+copies remain forever. Their replacements retain canonical-text/trace/edit/zero-
+shell assertions, assert receipt binding and admission, and require copy retention
+when admission is still uncertain. Final exact main CI remains pending. No
+physical-terminal crash or real-provider qualification; receipt watermark scan scalability is unmeasured.

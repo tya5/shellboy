@@ -48,6 +48,7 @@ pub struct CollectionReport {
     pub managed_protected_bytes: u64,
     pub index_sources_collected: u64,
     pub inactive_index_spaces_collected: u64,
+    pub submitted_drafts_collected: u64,
     pub summary_cache_parts_collected: u64,
     pub summary_cache_bytes_collected: u64,
     pub deferred: bool,
@@ -195,6 +196,18 @@ impl GcService {
         let mut report = CollectionReport::default();
         if matches!(category, StorageCategory::All | StorageCategory::Raw) {
             self.collect_raw(at, &mut report).await?;
+        }
+        if matches!(category, StorageCategory::All | StorageCategory::History) {
+            report.submitted_drafts_collected = self
+                .database
+                .call(|db| {
+                    let tx = db.transaction()?;
+                    let removed = crate::control::submission_retention::collect_batch(&tx)?;
+                    tx.commit()?;
+                    Ok(removed as u64)
+                })
+                .await
+                .map_err(crate::app::storage_error)?;
         }
         if matches!(category, StorageCategory::All | StorageCategory::History)
             && let Some(job) = self.start_history().await?

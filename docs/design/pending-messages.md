@@ -213,3 +213,36 @@ and foreground-shell interruption boundaries verify saved partials/results,
 no losing OS side effect, background/child survival, new same-Run Turn ordering,
 Revisit removal, no-work completion, later real completion and full Run-stop
 precedence. Record native environments separately from mocks and earlier results.
+
+
+## Terminal submission-copy retention (#60)
+
+Keep a bounded, body-free `draft_submission` binding in the existing
+receipt.result_json: operation_id, source_draft_id/source_revision and message_id.
+Each ID is at most4096 UTF-8 bytes, revision fits SQLite i64 and the complete
+binding is at most64KiB (including JSON escaping). No text, attachment content,
+paths, edit state or credentials belong in it. Acceptance records it in the same
+transaction as the submitted copy. Existing receipt retention owns the binding;
+there is no new table, column, migration, worker, queue or setting.
+
+Delete only the correlated submitted row after known admission, or a cancelled
+receipt with known admission. Unknown admission and all submitting rows remain,
+even on cancellation. A completed/stopped Run alone does not prove disposal of
+unadmitted held input. Admission/cancellation and copy disposal share their write
+transaction. Already-admitted first sends are collected after the copy is bound.
+Existing history/all GC also processes at most128 eligible old copies per DB
+transaction, saving the same binding before deletion; malformed or mismatched
+correlations fail closed. Editing/archived rows are never collection candidates.
+
+Autosave, editable restoration and submitting restoration consult both retained
+old submitted rows and receipt bindings, so removal cannot revive a sent revision.
+Newer edits remain eligible. Bounded queue reads project the most recent128
+bindings, not original bodies. Receipt JSON lookup does not have a new expression
+index: source-draft watermark checks may scan saved receipt scalar JSON; this is
+a conservative first-version cost, not a constant-time lookup guarantee. Preserve
+correctness for edit-fork source IDs across Threads rather than apply an unsafe
+receiver-Thread-only filter. Revisit indexing only with separate measured need.
+
+Cancellation archives keep their existing source references. Restoration still
+reads canonical message text/attachment positions without sending it; deleting
+the redundant submitted copy must not collect the archived message source.

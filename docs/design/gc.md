@@ -82,3 +82,13 @@ rollback retains the whole batch. Report `inactive_index_spaces_collected`
 separately from reclaimed source vectors. This does not delete conversation
 originals, promise physical SQLite/WAL shrink or automatically collect a space
 when switching. See [index operations](index-operations.md).
+
+
+## Finished submission copies (#60)
+
+History/all collection uses an existing DB-worker transaction per at-most128
+eligible submitted copies, before history marking. Save the small receipt binding
+and remove the matching submitted row atomically. Only admitted or known-admission
+cancelled input qualifies; never submitting, unknown, editing or archived rows.
+No receipt, original node, cancellation archive or attachment is removed by this
+step. Report submitted_drafts_collected, not physical SQLite shrink.

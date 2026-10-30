@@ -227,3 +227,11 @@ Adopt [sender inspection](protocol.md#message-sender-inspection-59): expose
 credential-free receipt provenance and optional bounded self-asserted labels.
 Absent historical evidence stays unknown; new external CLI is not called human.
 Labels have no authority. No schema migration or conversation rendering change.
+
+
+## Finished draft submission copies (#60)
+
+Adopt the body-free receipt binding and terminal-copy lifecycle in
+[pending messages](pending-messages.md#terminal-submission-copy-retention-60).
+Conversation schema stays14. Unknown/submitting copies and cancellation archives
+remain protected; autosave/restore fences survive admitted/cancelled copy disposal.

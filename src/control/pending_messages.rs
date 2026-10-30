@@ -97,6 +97,7 @@ pub(crate) fn cancel_tx(
         }
         tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,0,?3,'archived',?4)",params![archive,thread,archived,at])?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_sender"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string()])?;
+        super::submission_retention::collect_operation(tx, &operation)?;
         item.outcome = Cancelled;
         item.archive_draft_id = Some(archive);
         if !changed.contains(&thread) {
@@ -202,6 +203,16 @@ pub(super) fn prepare_submission(
         tx.commit()?;
         return Ok(());
     }
+    // A replay must not recreate a copy already retired after acceptance.
+    let accepted: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM receipt WHERE client_operation_id=?1)",
+        [operation],
+        |r| r.get(0),
+    )?;
+    if accepted {
+        tx.commit()?;
+        return Ok(());
+    }
     if let Some(thread) = thread {
         let live: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
@@ -271,6 +282,13 @@ pub(super) fn submit_draft_tx(
             "Frozen submission metadata is malformed".into(),
         ));
     }
+    let binding = super::submission_retention::marker(
+        operation,
+        &submission.source_draft_id,
+        submission.revision,
+        message,
+    )
+    .ok_or_else(|| invalid("Submission binding exceeds its bounded metadata allowance"))?;
     saved["_submission"]["message_id"] = json!(message);
     saved["_submission"]["accepted_thread_id"] = json!(thread);
     let saved = saved.to_string();
@@ -289,6 +307,8 @@ pub(super) fn submit_draft_tx(
         )
         .into());
     }
+    super::submission_retention::save_marker(tx, operation, &binding)?;
+    super::submission_retention::collect_operation(tx, operation)?;
     Ok(())
 }
 

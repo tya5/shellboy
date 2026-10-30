@@ -912,3 +912,222 @@ async fn cancelling_source_reference_is_independent_of_the_current_raw_draft_tex
     }).await.unwrap();
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_not_keep_two_bodies()
+{
+    let (root, store) = store().await;
+    let attachments = crate::attachments::AttachmentService::new(
+        store.database.clone(),
+        &store.config,
+        root.path().into(),
+        "fixture".into(),
+    );
+    let gc = crate::gc::GcService::new(
+        store.database.clone(),
+        store.config.clone(),
+        root.path().into(),
+        Arc::new(attachments),
+    );
+    for n in 0..16 {
+        let operation = format!("fixture:retention-{n}");
+        let text = format!("submitted text {n} {}", "x".repeat(8192));
+        let frozen = submission(&operation, "composer", n, &text);
+        store
+            .prepare_draft_submission(&operation, Some("t"), &frozen)
+            .await
+            .unwrap();
+        let args = ThreadCreateArgs {
+            agents: None,
+            connection: None,
+            cwd: None,
+            model: None,
+            effort: None,
+            parent_id: None,
+        };
+        let options = DraftSendOptions {
+            submission: Some(frozen.clone()),
+            ..Default::default()
+        };
+        let content = crate::attachments::DraftContent::appended(text.clone(), 0);
+        let accepted = store
+            .send_draft_content(
+                operation.clone(),
+                args.clone(),
+                Some("t".into()),
+                content.clone(),
+                vec![],
+                options.clone(),
+            )
+            .await
+            .unwrap();
+        let before = gc.status().await.unwrap().logical_live_bytes;
+        let message = accepted.result["message_id"].as_str().unwrap().to_owned();
+        let selected = message.clone();
+        store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let ordinal: i64 = tx.query_row(
+                    "SELECT COALESCE(max(ordinal),-1)+1 FROM thread_path WHERE thread_id='t'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                tx.execute(
+                    "INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',?1,?2)",
+                    params![ordinal, selected],
+                )?;
+                crate::control::message_delivery::mark_admitted_tx(&tx, "t", &[selected])?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let after = gc.status().await.unwrap().logical_live_bytes;
+        assert!(
+            before >= after + 8192,
+            "the whole submitted payload is reclaimed, not just hidden from UI"
+        );
+        let replay = store
+            .send_draft_content(
+                operation.clone(),
+                args,
+                Some("t".into()),
+                content,
+                vec![],
+                options,
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.result, accepted.result);
+        // Preparation replay itself must not recreate a retired copy.
+        store
+            .prepare_draft_submission(&operation, Some("t"), &frozen)
+            .await
+            .unwrap();
+        store
+            .database
+            .call(move |db| {
+                assert!(!db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM draft WHERE state='submitted')",
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )?);
+                let saved: String = db.query_row(
+                    "SELECT result_json FROM receipt WHERE client_operation_id=?1",
+                    [operation],
+                    |r| r.get(0),
+                )?;
+                let value: Value = serde_json::from_str(&saved).unwrap();
+                assert_eq!(value["draft_submission"]["message_id"], message);
+                assert!(!saved.contains("submitted text"));
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?,
+                    n as i64 + 1
+                );
+                assert_eq!(
+                    db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+                    14
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    store.database.shutdown().await.unwrap();
+    let reopened = DbWorker::open(root.path().join("pending.db"))
+        .await
+        .unwrap();
+    reopened.call(|db| {
+        assert!(!db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE state='submitted')",[],|r|r.get::<_,bool>(0))?);
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_type(result_json,'$.draft_submission')='object'",[],|r|r.get::<_,i64>(0))?,16);Ok(())
+    }).await.unwrap();
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn submitting_and_unknown_copies_survive_collection_and_database_reopen() {
+    let (root, store) = store().await;
+    let frozen = submission(
+        "fixture:uncommitted-copy",
+        "composer",
+        4,
+        "recover this unsent text",
+    );
+    store
+        .prepare_draft_submission("fixture:uncommitted-copy", Some("t"), &frozen)
+        .await
+        .unwrap();
+    store.database.call(|db| {
+        input(db,"uncertain-copy",None)?;
+        db.execute("UPDATE receipt SET path_admission='unknown',state='cancelled' WHERE id='uncertain-copy'",[])?;
+        let metadata=json!({"text":"unknown acceptance copy","_submission":{"operation_id":"uncertain-copy","source_draft_id":"another","source_revision":3,"message_id":"uncertain-copy","accepted_thread_id":"t"}});
+        db.execute("INSERT INTO draft VALUES(?1,'t',3,?2,'submitted','0')",params![DraftSubmission::id_for_operation("uncertain-copy"),metadata.to_string()])?;
+        let tx=db.transaction()?;assert_eq!(crate::control::submission_retention::collect_batch(&tx)?,0);tx.commit()?;Ok(())
+    }).await.unwrap();
+    store.database.shutdown().await.unwrap();
+    let reopened = DbWorker::open(root.path().join("pending.db"))
+        .await
+        .unwrap();
+    reopened
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM draft WHERE state IN ('submitting','submitted')",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                2
+            );
+            let body: String = db.query_row(
+                "SELECT body_json FROM draft WHERE state='submitting'",
+                [],
+                |r| r.get(0),
+            )?;
+            assert!(body.contains("recover this unsent text"));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batches() {
+    let (root, store) = store().await;
+    store.database.call(|db| {
+        let tx=db.transaction()?;
+        for n in 0..130 {
+            let op=format!("old-op-{n:03}");let source=format!("old-source-{n:03}");
+            input(&tx,&op,None)?;
+            tx.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE id=?1",[&op])?;
+            let body=json!({"draft_id":source,"revision":7,"text":"old redundant text","attachments":[],"_submission":{"operation_id":op,"source_draft_id":source,"source_revision":7,"message_id":op,"accepted_thread_id":"t"}}).to_string();
+            tx.execute("INSERT INTO draft VALUES(?1,'t',7,?2,'submitted','0')",params![DraftSubmission::id_for_operation(&op),body])?;
+        }
+        tx.commit()?;Ok(())
+    }).await.unwrap();
+    let attachments = Arc::new(crate::attachments::AttachmentService::new(
+        store.database.clone(),
+        &store.config,
+        root.path().into(),
+        "fixture".into(),
+    ));
+    let gc = crate::gc::GcService::new(
+        store.database.clone(),
+        store.config.clone(),
+        root.path().into(),
+        attachments,
+    );
+    for expected in [128, 2, 0] {
+        let report = gc
+            .collect(StorageCategory::History, chrono::Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(report.submitted_drafts_collected, expected);
+    }
+    store.database.call(|db| {
+        assert_eq!(db.query_row("SELECT count(*) FROM draft WHERE state='submitted'",[],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_type(result_json,'$.draft_submission')='object'",[],|r|r.get::<_,i64>(0))?,130);Ok(())
+    }).await.unwrap();
+    store.database.shutdown().await.unwrap();
+}
