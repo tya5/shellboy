@@ -73,11 +73,21 @@ suite passed. Fix that fixture boundary with a generous deadlock watchdog and
 bounded saved-state diagnostics. Its settled helper subscribes before reading
 state, waits on existing Changed notifications and reinspects on lag. Preserve
 the exact no-live-Turn predicate; do not treat a timer expiry as successful
-settlement or claim an unproven database/port collision. Keep default Windows
-concurrency at two while separately checking the repaired four-thread fixture.
+settlement or claim an unproven database/port collision. The first follow-up kept default Windows concurrency at two while checking
+the repaired four-thread fixture.
 
 The isolated native Windows profiles support historical-DDL batching
 (storage28.687→4.719s), but do not support the405-node source-seed candidate
 (index20.298→24.953s overall, that case7.812→8.937s). Discard that source-seed
 change rather than retain duplicated setup SQL without demonstrated benefit.
 Keep the original per-node helper and all405-source/embedding assertions.
+
+
+The repaired native source `8fa0429` passes both two- and four-thread Windows runs,
+with identical 1,361 identities/ 20 ignored. Recorded harness sums are 350.876s
+(two) and 237.908s (four), despite a noisy standalone child-process sample.
+Adopt a bounded four-thread Windows CI default, followed by a normal three-OS
+verification. Keep explicit two-thread diagnosis and a Windows-only four-thread
+experiment available through the manual input; its `default` choice always
+preserves the ordinary three-OS matrix. Do not generalize these samples to
+arbitrary higher concurrency or promise deterministic runner latency.

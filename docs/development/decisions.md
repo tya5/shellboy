@@ -9,8 +9,14 @@ Use the [adopted performance design](../design/ci-test-performance.md) and
 separate substantial repeated linking from native fixture execution; the first
 candidate reduces links and fixture-only commits without changing production
 behavior. Keep subprocess suites standalone and enforce complete registration
-and normalized identity/ignored-set equality. Retain two Windows test threads
-until the separate native contention experiment supplies evidence for a change.
+and normalized identity/ignored-set equality. The initial native comparison
+retained two Windows test threads. After fixing
+shared runtime_features 5s watchdog/poll helpers, source `8fa0429` passes both two
+and four threads with identical test/ignored sets. Harness sums 350.876s versus
+237.908s favor a bounded four-thread CI default; verify it in the normal three-OS
+workflow and retain explicit two-thread diagnosis. These independent-runner
+samples are not a latency guarantee. Discard the 405-source index rewrite:
+isolated measurements did not support it, unlike historical-DDL seed batching.
 
 A short mock-arrival or waiter-completion watchdog is not a product latency
 contract. Raise deadlock guards, retain phase diagnostics and require all 24 IPC
@@ -19,8 +25,8 @@ is longer than the watchdog, so expiration cannot make a blocked dispatcher pass
 Do not blanket-convert native upload/termination tests to 1ms: those verify real
 phase/ownership wiring, whereas existing pure tests cover deadline and retry
 policy. Do not add test-only production clocks, new dependencies or filesystem
-security exclusions without evidence. Reconsider concurrency and further timer
-refactoring after native per-test measurements and failure names are available.
+security exclusions without evidence. Reconsider higher concurrency and further timer
+refactoring when repeated native measurements or changed failure profiles justify it.
 
 ## Review follow-up: bounded lifecycle fixes (2026-10-30)
 

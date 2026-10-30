@@ -93,6 +93,7 @@ and build versus execution times must accompany any claimed improvement.
 For a four-thread Windows check without rerunning the baseline profiling matrix,
 use the manual `windows_test_threads=4` input with `performance=false`. This
 additional stress run selects Windows only; ordinary pushes always execute the
-full three-OS matrix. Ordinary
-pushes retain two Windows test threads; experimental failures are retained and
-never automatically retried into success.
+full three-OS matrix. Ordinary pushes use four Windows test threads. The manual
+`default` choice also preserves all three OSes; `windows_test_threads=2` provides
+a two-thread diagnosis. Experimental failures are retained and never
+automatically retried into success.

@@ -14,10 +14,10 @@ on:
         type: boolean
         default: false
       windows_test_threads:
-        description: Windows-only concurrency experiment (ordinary pushes check all OSes)
+        description: Windows threads (4 selects Windows-only experiment; default/2 check all OSes)
         type: choice
-        options: ['2', '4']
-        default: '2'
+        options: ['default', '2', '4']
+        default: 'default'
       baseline_ref:
         description: Baseline commit for the optional Windows comparison
         type: string
@@ -58,7 +58,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          SELECTED_TEST_THREADS: ${{ inputs.windows_test_threads == '4' && '4' || '2' }}
+          SELECTED_TEST_THREADS: ${{ inputs.windows_test_threads == '2' && '2' || '4' }}
         run: '"RUST_TEST_THREADS=$env:SELECTED_TEST_THREADS" >> $env:GITHUB_ENV'
       - name: Tests
         run: python scripts/test-timings.py --output .local/ci-timings
