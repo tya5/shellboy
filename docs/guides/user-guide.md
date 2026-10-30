@@ -20,7 +20,7 @@ Selecting a conversation, stopping current work, and inspecting past results are
 
 In recovery wait, check the reason and target Run before resending a saved request. After addressing the cause, retry the same work with F8's Run retry operation or `shellboy run retry --run RUN_ID`. To stop it, use Ctrl+C or `shellboy run stop --run RUN_ID`. A new human instruction resuming the same recovery Turn differs from retrying the original work. Retry cannot revive a terminal Run after stopping or restarting. See [Recovery and storage](recovery-and-storage.md) for checking saved content and uncertain side effects.
 
-Saved input waiting for the next boundary is visible above the composer and in `/queue`, including CLI/other-conversation input. Ordinary send queues; Ctrl+Enter (unless configured as ordinary send) or Ctrl+X then Ctrl+S requests immediate delivery without interrupting generation. Esc closes a popup first, otherwise interrupts only the Turn; Ctrl+C stops the Run and owned background work. Cancel unread inputs by fixed IDs in `/queue`; recover archived inputs through `/restore list` and `/restore draft ID`. Newer composer edits are preserved. See [TUI controls](tui.md) for limits and confirmation details.
+Saved input waiting for the next boundary is visible above the composer and in `/queue`, including CLI/other-conversation input. Ordinary send queues; Ctrl+Enter (unless configured as ordinary send) or Ctrl+X then Ctrl+S requests immediate delivery without interrupting generation. Esc closes a popup or returns from history focus first; in the unfocused conversation it interrupts only the Turn; Ctrl+C stops the Run and owned background work. Cancel unread inputs by fixed IDs in `/queue`; recover archived inputs through `/restore list` and `/restore draft ID`. Newer composer edits are preserved. See [TUI controls](tui.md) for limits and confirmation details.
 
 ## 1. Start in a working directory
 
@@ -65,9 +65,68 @@ Until acceptance completes, the submitted text and attachments remain visible. E
 
 Each Thread retains its own draft and reading position. Switching does not stop execution. Shells or child Runs in the previous Thread continue. Background work may keep a Run live after its Turn's answer completes. See [Delegation](delegation.md) for the Thread/Run/Turn distinction.
 
-The conversation view distinguishes messages, execution results, and state changes. For full IDs or source values, use F6 to select an item and open its details, then O for the original-text page. F7 lists links and copies full URLs. F8 shows `この会話で` (in this conversation), `よく使う` (common), and `すべての操作` (all actions). Filter by human-facing name, CLI name, or related slash command; enter target IDs and arguments in separate fields to inspect history, Runs, shells, indexes, and storage. Results use field/value presentation; retrieve needed portions in a detail page. [TUI controls](tui.md#read-source-text-and-links-from-details) documents keys and copy ranges.
+### Read the conversation
 
-Reading older history pauses following the tail and shows “新着あり” (new content). Ctrl+End resumes tail following. [History and search](history-and-search.md) explains forks, request editing, search filters, provenance, and direct relationships.
+Your messages form full-width bands, with the saved time at the right when there
+is room. Marks distinguish input from a parent, the model itself, another model,
+or Revisit. The fixed header is separate from the conversation: title and state
+on the left, connection/model/working directory on the right. Long paths keep
+their final portion; the original value remains available in details.
+
+Each shell call has one compact row containing its command and known outcome or
+duration. IDs and per-response call numbers are left to details. Successful
+output starts closed; a failed call opens a short tail preview, including stderr
+when retained. Opening a row requests a bounded preview, rather than loading the
+whole output into the screen. An abbreviated preview keeps the real end of the
+retained output. A decoding warning means the byte boundary or encoding state
+is uncertain; use the original-output view for further inspection. Closing or
+opening the display does not run, retry or stop the command.
+
+| Place | Key | Action |
+|---|---|---|
+| Composer, with no slash completion | Tab | Focus a visible history item |
+| History focus | Up / Down | Select a message or shell-call row |
+| History focus | Enter / Space | Open or close the selected item inline |
+| History focus | `o` / `c` | Open the selected original / copy its source |
+| History focus | Esc / Tab | Return to the composer |
+| Conversation | F6 / F7 | Details / links for the selected item |
+
+With mouse capture enabled, click an item to open or close it. Empty-composer Up
+still recalls sent messages. Opening details does not submit a new request.
+Copies and originals refer to saved source content, which may contain more than
+the visible preview. F6's original-text page also retains its own copy controls.
+
+Routine observations appear as quiet facts at the end of the message section;
+failures and recovery decisions remain prominent. The bottom rows show current
+activity, pending input and concrete notices with a short help hint. Successful
+operation notices clear on subsequent input; failures remain until the next
+deliberate action. A completed answer can still have background work: use
+`/status` or existing F8 Run/shell details to inspect it.
+
+Choose `dark` (default) or `light` in the configuration file and restart the TUI:
+
+```toml
+[ui]
+palette = "dark"
+```
+
+`NO_COLOR` selects plain marks and spacing; terminals without
+advertised 256-color/truecolor support use reverse/separator fallback. No color
+is required to distinguish input sources or select an item.
+
+Explicitly reading older history or selecting a history item pauses tail
+following. A new-content mark appears when appropriate; Ctrl+End resumes tail
+following. Background refreshes do not pause following or erase already
+displayed response content. [History and search](history-and-search.md) explains
+forks, request editing, search filters, provenance and direct relationships.
+
+F8 retains its current `この会話で` (in this conversation), `よく使う` (common),
+and `すべての操作` (all actions) groups. Filter by human-facing name, CLI name or
+related slash command; enter target IDs and arguments in separate fields.
+Results use field/value presentation. [TUI controls](tui.md#read-source-text-and-links-from-details)
+documents detailed keys and copy ranges. The separate live-work region, watch
+mode and operation-form redesign are later increments; they are not implied by
+the conversation layout.
 
 ### Inspect saved usage
 
@@ -121,7 +180,7 @@ A Thread's `AGENTS.md` reference points to working instructions. A new root Thre
 
 ## 6. Interrupt and exit
 
-Ctrl+C interrupts the current Thread. Ctrl+B moves its current foreground shell into the background: the target shell continues, while any unexecuted later calls in the same group are canceled. This differs from changing screens. After backgrounding, the screen reports the target shell and treatment of later calls, and the model receives the corresponding result. If no later calls exist, no nonexistent cancellation is shown. An interruption progresses from stopping to interrupted according to saved state, distinctly from backgrounding or completion.
+Ctrl+C stops the current Run and its owned work. Ctrl+B moves its current foreground shell into the background: the target shell continues, while any unexecuted later calls in the same group are canceled. This differs from changing screens. After backgrounding, the screen reports the target shell and treatment of later calls, and the model receives the corresponding result. If no later calls exist, no nonexistent cancellation is shown. An interruption progresses from stopping to interrupted according to saved state, distinctly from backgrounding or completion.
 
 Waiting to observe completion differs from interrupting the target. To cancel only an observation started in F8's wait form, press lowercase w on the result screen or use `/cancel-wait`. This does not stop the target Run or shell. In forms, Enter executes, Ctrl+J inserts a newline in multiline text, and Ctrl+U replaces a suggested value.
 
