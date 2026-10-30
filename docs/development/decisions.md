@@ -1540,3 +1540,24 @@ Reason: successful standard checks and structural PTYs do not prove external
 mutation-to-paint latency or a missing Changed/read path. Revisit completion only
 with implementation and new route-specific evidence, preserving bounded readers,
 stale-response guards and the no-polling/no-new-worker boundary.
+
+
+## #41 detail availability notifications and preserved previews (2026-10-30)
+
+The B+C freshness audit found raw/history GC commits with no Thread Changed
+notification. A source-owner subscription alone therefore cannot fix availability.
+Use one private coalesced Notify in the existing GcService, signalled only after
+successful availability-changing commits. The existing frontend forwards only a
+selected-detail invalidation; hidden/F2/closed detail consumers do not read or
+repaint. It has one permit, no payload/task/queue, and existing owner lifetime.
+A global GC invalidation is justified because its selected exact source set is
+at most2 and can include another Thread's source; it does not make unrelated
+shell-output notifications repaint the view. Validate the actual collector path,
+including raw retention and an off-path result shared through a fork boundary.
+
+Explicit preview close/reopen must perform the advertised bounded reread. Keep
+the last known paid output and its original read-time notice while that read is
+pending or fails. A separate at-most512-character refresh error is counted with
+the retained preview payload, rather than replacing the timestamp or silently
+hiding known output. Existing cache-pressure eviction still applies. An explicit
+R during a pending detail read queues one dirty follow-up, not a concurrent read.

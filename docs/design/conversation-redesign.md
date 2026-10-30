@@ -373,3 +373,14 @@ at-most2 exact selected sources, so a single coalesced source read is justified;
 unrelated shell output does not use this notification. G can reuse it later for
 mutable storage/attachment management facts. The notification has no shutdown
 task: it drops with GcService/frontend references under existing owner shutdown.
+
+
+A detail popup opened for a tool retains its exact ItemKey in addition to the
+at-most2 source IDs. When the accepted history/tool projection revision changes,
+reconcile that key's call/result membership from already-prepared metadata; do
+not scan/re-layout on every draw or25ms wake. A newly saved result can therefore
+join an already-open F7 without user input. Preserve the chosen original node
+and page while updating the surrounding source membership. An unrelated node
+navigation clears the item binding. Changed membership invalidates any pending
+old-scope read through the same dirty/retirement sequence and500ms coalescing.
+No body is pinned and no extra query discovers membership by row during paint.
