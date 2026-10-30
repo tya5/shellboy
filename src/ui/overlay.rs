@@ -68,6 +68,7 @@ impl UiState {
         {
             self.input_notice = None;
         }
+        let usage_before = self.management.usage_snapshot;
         let owner_before = self.management.owner.clone();
         let epoch_before = self.management.epoch;
         let frame_before = self.management.is_some();
@@ -93,7 +94,7 @@ impl UiState {
             && (self.management.is_none() || self.top_overlay() != Some(Overlay::Management));
         let scope_invalidated = owner_before.is_some()
             && (owner_before != self.management.owner || epoch_before != self.management.epoch);
-        if (owner_before.is_some() || frame_before)
+        if usage_before
             && (closes_management || closed_operations || frame_hidden || scope_invalidated)
         {
             if self.management.epoch == epoch_before {
@@ -134,6 +135,19 @@ impl UiState {
                 action => action,
             }
         }
+        fn usage_read(action: &UiAction) -> bool {
+            match action {
+                UiAction::SubmittedCommand { action, .. } => usage_read(action),
+                UiAction::Command(command) | UiAction::Manage(command) => matches!(
+                    command,
+                    Command::UsageGet(_)
+                        | Command::ThreadGet(_)
+                        | Command::RunGet(_)
+                        | Command::TurnGet(_)
+                ),
+                _ => false,
+            }
+        }
         fn starts_scope(action: &UiAction) -> bool {
             match action {
                 UiAction::SubmittedCommand { action, .. } => starts_scope(action),
@@ -144,6 +158,7 @@ impl UiState {
         if actions.iter().any(needs_scope) {
             if actions.iter().any(starts_scope) {
                 self.management.epoch = self.management.epoch.wrapping_add(1);
+                self.management.usage_snapshot = actions.iter().any(usage_read);
             }
             let current = ManagementContext {
                 epoch: self.management.epoch,
@@ -954,6 +969,7 @@ mod usage_close_tests {
             std::path::PathBuf::from("."),
         );
         ui.open_operations(None);
+        ui.management.usage_snapshot = true;
         ui.management.owner = Some(ManagementContext {
             epoch: ui.management.epoch,
             owner_draft: ui.view().draft.draft_id.clone(),

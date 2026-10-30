@@ -46,6 +46,7 @@ impl IndexPreviewState {
 pub struct ManagementPopup {
     frame: Option<ManagementFrame>,
     pub(super) owner: Option<ManagementContext>,
+    pub(super) usage_snapshot: bool,
     pub(super) mode: ManagementMode,
     pub(super) epoch: u64,
     pub(super) scope: Option<IndexArgs>,
@@ -57,6 +58,7 @@ impl Default for ManagementPopup {
         Self {
             frame: None,
             owner: None,
+            usage_snapshot: false,
             mode: ManagementMode::General,
             epoch: 0,
             scope: None,
@@ -168,6 +170,7 @@ impl ManagementPopup {
         self.epoch = self.epoch.wrapping_add(1);
         self.frame = None;
         self.owner = None;
+        self.usage_snapshot = false;
         self.mode = ManagementMode::General;
         self.scope = None;
         self.reset_preview();
