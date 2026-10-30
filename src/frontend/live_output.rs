@@ -114,7 +114,13 @@ impl Observation {
             thread_id: scope.thread.clone(),
             generation: scope.generation,
             revision: scope.revision,
-            markers,
+            // A complete bounded snapshot permits latest-value delivery without
+            // losing an earlier marker for another visible execution.
+            markers: scope
+                .executions
+                .iter()
+                .filter_map(|id| self.seen.get(id).map(|at| (id.clone(), *at)))
+                .collect(),
         })
     }
     pub fn deadline(&self) -> Option<tokio::time::Instant> {
@@ -200,6 +206,20 @@ pub(super) async fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn replaceable_marker_snapshots_keep_previously_observed_other_executions() {
+        let mut view = Observation::default();
+        view.observe("t".into(), 1, 1, vec!["a".into(), "b".into()], None)
+            .unwrap();
+        let at = std::time::Instant::now();
+        view.markers(vec![("a".into(), at)]).unwrap();
+        let Some(UiUpdate::LiveWorkObserved { markers, .. }) = view.markers(vec![("b".into(), at)])
+        else {
+            panic!()
+        };
+        assert_eq!(markers, vec![("a".into(), at), ("b".into(), at)]);
+        assert!(view.markers(vec![("a".into(), at)]).is_none());
+    }
     #[test]
     fn scope_rate_limit_markers_and_cancellation_do_not_leak_into_another_execution() {
         let mut view = Observation::default();
