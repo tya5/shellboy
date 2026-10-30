@@ -695,3 +695,64 @@ async fn compact_history_listing_size_is_measured_without_removing_provenance() 
     );
     database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn persistence_fork_returns_inherited_agents_and_rejects_explicit_overrides_atomically() {
+    let (root, database, history) = repository().await;
+    append(&database, "source", "user", json!({"text":"source"})).await;
+    for agents in ["", "role.md"] {
+        let error = history
+            .fork(ThreadForkArgs {
+                agents: Some(agents.into()),
+                thread_id: "thread".into(),
+                node_id: "source".into(),
+                cwd: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert!(error.message.contains("Control thread.fork"));
+    }
+    let count: i64 = database
+        .call(|db| {
+            let tx = db.transaction()?;
+            let error = shellboy::history::fork_thread(
+                &tx,
+                &ThreadForkArgs {
+                    agents: Some("role.md".into()),
+                    thread_id: "thread".into(),
+                    node_id: "source".into(),
+                    cwd: None,
+                },
+                "not-created",
+                "now",
+            )
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidArgument);
+            assert_eq!(
+                tx.query_row("SELECT count(*) FROM operation_receipt", [], |r| r
+                    .get::<_, i64>(0))?,
+                0
+            );
+            let count = tx.query_row("SELECT count(*) FROM thread", [], |r| r.get(0))?;
+            tx.commit()?;
+            Ok(count)
+        })
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    let fork = history
+        .fork(ThreadForkArgs {
+            agents: None,
+            thread_id: "thread".into(),
+            node_id: "source".into(),
+            cwd: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        fork.agents_path,
+        root.path().join("project/AGENTS.md").to_str().unwrap()
+    );
+    database.shutdown().await.unwrap();
+}

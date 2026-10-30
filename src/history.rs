@@ -65,6 +65,8 @@ impl History {
             .map_err(storage_error)?
     }
 
+    /// Persistence-only fork: inherit the current reference. Explicit `agents`
+    /// requires Control's thread.fork validation, caller audit and file workers.
     pub async fn fork(&self, args: ThreadForkArgs) -> Result<ThreadDetails, ApiError> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
@@ -75,10 +77,10 @@ impl History {
                     return Ok(Err(error));
                 }
                 let details = tx.query_row(
-                    "SELECT cwd,profile_id,model_id,effort,parent_thread_id FROM thread WHERE id=?1",
+                    "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(ThreadDetails { agents_path: String::new(),
+                        Ok(ThreadDetails { agents_path: row.get(5)?,
                             context_usage: None,
                             context: None,
                             thread_id: id.clone(),
@@ -229,12 +231,20 @@ fn bump_root_revision(tx: &Transaction<'_>) -> Result<(), StorageError> {
 
 /// Share the chosen prefix and its sources; never copy immutable node bodies.
 /// Calling code can put this and its operation receipt in one transaction.
+/// Explicit `agents` is rejected before writes: use Control thread.fork for a
+/// validated, audited override; this primitive only inherits the saved reference.
 pub fn fork_thread(
     tx: &Transaction<'_>,
     args: &ThreadForkArgs,
     new_thread_id: &str,
     now: &str,
 ) -> Result<(), ApiError> {
+    if args.agents.is_some() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "Explicit AGENTS references require Control thread.fork; History forks only inherit the saved reference",
+        ));
+    }
     let source = tx.query_row(
         "SELECT cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision FROM thread WHERE id=?1 AND deleted_at IS NULL",
         [&args.thread_id],

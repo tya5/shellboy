@@ -37,3 +37,13 @@ CLI exposes --agents on create/set/fork and agents_path in thread get. TUI expos
 an optional reference in create/fork/settings forms and /agents [PATH] (without
 an argument, display the current reference). The current Thread view shows the
 reference. Paths remain literal data and must be rendered safely.
+
+### Persistence-only Rust fork helpers
+
+`History::fork` and `history::fork_thread` only inherit the saved instruction
+reference. They reject any explicit `agents: Some(...)`, including an empty
+string, with invalid_argument before writes, directing callers to Control
+thread.fork. These DB-only helpers do not acquire file workers or invent an
+actor. Their returned agents_path is the actual inherited path. Product
+Control/CLI/TUI fork supports explicit references through validation, CAS and
+audit before invoking the primitive with an inherited/default argument.

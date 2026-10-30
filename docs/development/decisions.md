@@ -1087,3 +1087,14 @@ the effective target cwd, lexical normalization and revision-checked preflight.
 Only reference-change events defer to the next new Turn. This preserves existing
 settings authority and snapshots without adding a worker, queue or table.
 Revisit clearing/composition only under a separate user requirement.
+
+### #51 review: persistence and unsaved TUI selection boundaries (adopted)
+
+Keep History fork helpers DB-only: explicit references require Control, and are
+rejected rather than silently ignored by the helpers. Return inherited paths
+truthfully. Unsaved TUI selection must adopt the created Thread into the original
+draft; a generic management result is not adoption. A draft/generation-bound
+UI action/result uses the existing command slots and ordered outbox; one local
+pending bit blocks a racing first send. No new Core event, persistent state,
+worker or queue is added. Later edits are retained; replies cannot select an
+unrelated active draft. The existing worker/shutdown owns completion.

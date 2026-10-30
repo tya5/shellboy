@@ -50,3 +50,13 @@ The [per-Thread instruction reference contract](agents-reference.md) supersedes
 previous fixed-reference wording: explicit create/set/fork selection is allowed,
 while cwd changes alone never rediscover instructions and same-Turn retry
 continues using its durable snapshot.
+
+### Persistence-only Rust fork helpers
+
+`History::fork` and `history::fork_thread` only inherit the saved instruction
+reference. They reject any explicit `agents: Some(...)`, including an empty
+string, with invalid_argument before writes, directing callers to Control
+thread.fork. These DB-only helpers do not acquire file workers or invent an
+actor. Their returned agents_path is the actual inherited path. Product
+Control/CLI/TUI fork supports explicit references through validation, CAS and
+audit before invoking the primitive with an inherited/default argument.
