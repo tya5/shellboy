@@ -2154,7 +2154,11 @@ fn delete_thread(
         )
         .map_err(sql_error)?;
     tx.execute("INSERT INTO gc_job(id,kind,root_revision,cursor_json,state) VALUES(?1,'history',?2,?3,'pending')",params![uuid::Uuid::new_v4().to_string(),revision,json!({"deleted_thread_ids":targets}).to_string()]).map_err(sql_error)?;
-    MutationResult::value(Accepted { accepted: true })
+    let mut result = MutationResult::value(Accepted { accepted: true })?;
+    // The caller publishes these existing notifications only after commit.
+    // A receipt replay returns its saved value without repeating the effects.
+    result.changed_threads = targets;
+    Ok(result)
 }
 
 fn bump_roots(tx: &Transaction<'_>) -> Result<()> {
@@ -3410,5 +3414,178 @@ mod message_acknowledgement_state_tests {
         assert!(replay.now);
         assert_eq!(replay.delivery_status, DeliveryStatus::Accepted);
         db.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod thread_deletion_notification_tests {
+    use super::*;
+    use crate::{
+        app::DataOwner,
+        control::{Control, EngineEvent},
+    };
+    use std::collections::BTreeSet;
+
+    async fn fixture() -> (tempfile::TempDir, DataOwner) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+        let owner = DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        (root, owner)
+    }
+
+    async fn seed(db: &DbWorker) {
+        db.call(|db| {
+            for (id, parent) in [("parent", None), ("child", Some("parent")), ("grandchild", Some("child")), ("unrelated", None)] {
+                db.execute("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?2,?1,'/','','fixture','synthetic','now')", params![id,parent])?;
+            }
+            Ok(())
+        }).await.unwrap();
+    }
+
+    fn delete(instance: &str, descendants: bool) -> Request {
+        Request::new(
+            format!("{instance}:delete-notification"),
+            Command::ThreadDelete(ThreadDeleteArgs {
+                thread_id: "parent".into(),
+                descendants,
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn deletion_effects_are_exact_committed_targets_and_replay_has_no_effects() {
+        for descendants in [false, true] {
+            let (root, owner) = fixture().await;
+            seed(&owner.db).await;
+            let store = Store::new(
+                owner.db.clone(),
+                Arc::new(owner.loaded.config.clone()),
+                root.path().into(),
+                owner.instance_id.clone(),
+            );
+            let request = delete(&owner.instance_id, descendants);
+            let first = store.execute(request.clone(), None).await.unwrap();
+            let targets = first
+                .changed_threads
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let expected = if descendants {
+                BTreeSet::from([
+                    "parent".to_owned(),
+                    "child".to_owned(),
+                    "grandchild".to_owned(),
+                ])
+            } else {
+                BTreeSet::from(["parent".to_owned()])
+            };
+            assert_eq!(targets, expected);
+            assert_eq!(first.changed_threads.len(), targets.len());
+            assert!(
+                first.wake_threads.is_empty()
+                    && first.quiet_wake_threads.is_empty()
+                    && first.stop_runs.is_empty()
+                    && first.compact_threads.is_empty()
+            );
+            let replay = store.execute(request, None).await.unwrap();
+            assert_eq!(replay.result, first.result);
+            assert!(
+                replay.changed_threads.is_empty()
+                    && replay.wake_threads.is_empty()
+                    && replay.quiet_wake_threads.is_empty()
+            );
+            owner.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn external_deletion_notifies_after_commit_but_never_on_replay_rejection_or_rollback() {
+        for mode in 0..4 {
+            let (root, owner) = fixture().await;
+            let control = Control::new(&owner, root.path().into());
+            control.start().await.unwrap();
+            seed(&owner.db).await;
+            owner.db.call(move |db| {
+                if mode == 2 {
+                    db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('live-child','child','live','now')", [])?;
+                } else if mode == 3 {
+                    db.execute_batch("CREATE TRIGGER reject_child_deletion BEFORE UPDATE OF deleted_at ON thread WHEN OLD.id='child' BEGIN SELECT RAISE(ABORT,'synthetic deletion rollback'); END;")?;
+                }
+                Ok(())
+            }).await.unwrap();
+            let mut events = control.subscribe();
+            let request = delete(&owner.instance_id, mode != 0);
+            let response = control.request(request.clone()).await;
+            assert_eq!(response.ok, mode < 2, "mode={mode}, {response:?}");
+            if mode >= 2 {
+                assert_eq!(
+                    response.error.as_ref().unwrap().code,
+                    if mode == 2 {
+                        ErrorCode::InvalidState
+                    } else {
+                        ErrorCode::SaveFailed
+                    }
+                );
+            }
+            let mut notified = BTreeSet::new();
+            while let Ok(event) = events.try_recv() {
+                let EngineEvent::Changed {
+                    thread_id,
+                    recovery: false,
+                } = event
+                else {
+                    panic!("unexpected deletion event: {event:?}")
+                };
+                assert!(notified.insert(thread_id), "one notification per target");
+            }
+            let committed = owner
+                .db
+                .call(|db| {
+                    let ids = db
+                        .prepare("SELECT id FROM thread WHERE deleted_at IS NOT NULL")?
+                        .query_map([], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+                    Ok(ids)
+                })
+                .await
+                .unwrap();
+            let expected = match mode {
+                0 => BTreeSet::from(["parent".to_owned()]),
+                1 => BTreeSet::from([
+                    "parent".to_owned(),
+                    "child".to_owned(),
+                    "grandchild".to_owned(),
+                ]),
+                _ => BTreeSet::new(),
+            };
+            assert_eq!(notified, expected, "mode={mode}");
+            assert_eq!(
+                committed, notified,
+                "event consumers see only committed deletion facts"
+            );
+            if mode < 2 {
+                let replay = control.request(request).await;
+                assert!(replay.ok);
+                assert_eq!(replay.result, response.result);
+                assert!(matches!(
+                    events.try_recv(),
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                ));
+            }
+            let shutdown = control.shutdown().await;
+            if mode == 3 {
+                assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
+            } else {
+                shutdown.unwrap();
+            }
+            owner.shutdown().await.unwrap();
+        }
     }
 }
