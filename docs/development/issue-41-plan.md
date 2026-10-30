@@ -16,7 +16,7 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
-| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Planned |
+| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local D0 helper extraction qualified before later-main merge; shared transaction/planner and live UI still pending |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |

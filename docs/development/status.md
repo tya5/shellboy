@@ -1,5 +1,27 @@
 # Development status
 
+## #41 D0 foundation in progress (local only)
+
+Four reviewable local commits6d1e04a/54fd089/635cd9b/e6b1cfc separate connection
+reads from activity, saved-page, sender/tool, recovery/usage and received-response
+preparation. Existing async wrappers and state policies remain; Revisit shares
+one pure saved-state summary helper. Pre-planner APIs are fully tested but remain
+cfg(test) until their production caller is implemented, rather than adding
+redundant queries or silencing dead-code lint.
+
+On sourcee6b1cfc before the later-main merge, native standard checks pass
+**1,687 passed / zero failed / 32 ignored** (library809, integration868,
+termination7, crash3), layout89/Python6/fmt/strict Clippy. Main f07ac85's newer
+watchdog tests and guides are now merged at151621a; that combination has not
+been qualified yet. These D0 code commits are local, not admitted to main.
+
+Next: consume the raw helpers in one current-view transaction/shared deadline,
+including paused tool facts, preserve paired history/pending/read revisions and
+#59 immutable sender supplements, remove test-only guards as callers land, and
+measure actual DB jobs/work time. Current refresh is still7 jobs; live-work UI,
+background clock/output policy and the remaining D–G gates are not implemented.
+No new worker/table/queue, user-data change, installed update or release.
+
 ## Windows retry fixture watchdog follow-up
 
 The two response retry fixture files share60s progress/cleanup watchdogs and
