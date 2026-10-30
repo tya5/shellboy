@@ -1,4 +1,4 @@
-//! Bounded nonblocking diagnostics: generated IDs and fixed model classifications only.
+//! Bounded nonblocking diagnostics: fixed classifications and numeric observations only.
 //! Model/provider text and request/response bodies never enter the writer queue.
 use crate::config::Logging;
 use serde::Serialize;
@@ -26,7 +26,43 @@ pub enum DiagnosticEvent {
     ShellFailure,
     StorageLimit,
     IndexPaused,
+    UsageTotalsSlow,
 }
+pub(crate) const USAGE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(100);
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UsageTrigger {
+    Open,
+    Changed,
+    #[default]
+    Cli,
+}
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UsageScope {
+    Turn,
+    Run,
+    Thread,
+    ThreadChildren,
+}
+#[derive(Serialize)]
+struct UsageSlowTrace {
+    trigger: UsageTrigger,
+    scope: UsageScope,
+    elapsed_ms: u64,
+}
+fn slow_usage_trace(
+    trigger: UsageTrigger,
+    scope: UsageScope,
+    elapsed: std::time::Duration,
+) -> Option<UsageSlowTrace> {
+    (elapsed >= USAGE_SLOW_THRESHOLD).then(|| UsageSlowTrace {
+        trigger,
+        scope,
+        elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+    })
+}
+
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct DiagnosticIds {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,6 +180,8 @@ struct Entry {
     shutdown: Option<ShutdownTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_repair: Option<ToolRepairFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usage_slow: Option<UsageSlowTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -219,6 +257,7 @@ struct Record {
     send: Option<MessageSendTrace>,
     shutdown: Option<ShutdownTrace>,
     tool_repair: Option<ToolRepairFailure>,
+    usage_slow: Option<UsageSlowTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -255,6 +294,7 @@ impl Diagnostics {
                     send,
                     shutdown,
                     tool_repair,
+                    usage_slow,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -268,6 +308,7 @@ impl Diagnostics {
                         send,
                         shutdown,
                         tool_repair,
+                        usage_slow,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -432,6 +473,28 @@ impl Diagnostics {
             send: None,
             shutdown: None,
             tool_repair: Some(failure),
+            usage_slow: None,
+        });
+    }
+    /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
+    pub(crate) fn record_usage_aggregation(
+        &self,
+        trigger: UsageTrigger,
+        scope: UsageScope,
+        elapsed: std::time::Duration,
+    ) {
+        let Some(usage_slow) = slow_usage_trace(trigger, scope, elapsed) else {
+            return;
+        };
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::UsageTotalsSlow,
+            ids: DiagnosticIds::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: Some(usage_slow),
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -507,6 +570,7 @@ impl Diagnostics {
             send,
             shutdown,
             tool_repair: None,
+            usage_slow: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -518,6 +582,7 @@ impl Diagnostics {
             send,
             shutdown,
             tool_repair,
+            usage_slow,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -545,6 +610,7 @@ impl Diagnostics {
                     send,
                     shutdown,
                     tool_repair,
+                    usage_slow,
                 })
                 .is_err()
         }) {
@@ -677,5 +743,53 @@ mod shutdown_result_tests {
         assert_eq!(record["shutdown"]["elapsed_ms"], 42);
         assert!(record.get("message").is_none());
         assert!(record.get("path").is_none());
+    }
+}
+
+#[cfg(test)]
+mod usage_slow_tests {
+    use super::*;
+    #[tokio::test]
+    async fn only_at_least_100ms_aggregations_reach_the_existing_log() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        for duration in [
+            std::time::Duration::ZERO,
+            std::time::Duration::from_micros(99_999),
+        ] {
+            assert!(
+                slow_usage_trace(UsageTrigger::Changed, UsageScope::Thread, duration).is_none()
+            );
+            diagnostics.record_usage_aggregation(
+                UsageTrigger::Changed,
+                UsageScope::Thread,
+                duration,
+            );
+        }
+        diagnostics.record_usage_aggregation(
+            UsageTrigger::Open,
+            UsageScope::Thread,
+            std::time::Duration::from_millis(100),
+        );
+        diagnostics.record_usage_aggregation(
+            UsageTrigger::Cli,
+            UsageScope::Turn,
+            std::time::Duration::from_millis(101),
+        );
+        diagnostics.shutdown().await;
+        let text = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let rows = text
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["event"], "usage_totals_slow");
+        assert_eq!(rows[0]["usage_slow"]["elapsed_ms"], 100);
+        assert_eq!(rows[1]["usage_slow"]["elapsed_ms"], 101);
+        assert_eq!(rows[0]["usage_slow"].as_object().unwrap().len(), 3);
+        assert!(
+            rows.iter()
+                .all(|row| row["ids"].as_object().unwrap().is_empty())
+        );
     }
 }

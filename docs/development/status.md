@@ -153,10 +153,15 @@ review and latest-main integration checks are separate gates.
 
 The existing non-2xx HTTP path remains diagnostic-only in #49. #47's latest
 measurement-first scope reads saved states/numbers only and does not extend it.
-The former write-time/period design is superseded. Current work is a short
-read-only query/scale fixture, with performance and correctness not yet verified.
-No schema, producer/state/driver hooks or period API are being added. Unrecorded
-summary/embedding coverage is explicit; #50 remains queued after #47.
+The former write-time/period design is superseded. Read-only SQL plus CLI/get and
+scoped UI detail-cache wiring is implemented; no schema, producer/state/driver
+hooks or period API. Initial and varied optimized query measurements pass the
+approved extreme-size~500ms direction; final metadata-inclusive remeasurement and
+latest full standard/independent/native gates remain separate. Latest mandatory
+UI cooldown is3s using the existing500ms tick, one pending/inflight; slow-only
+>=100ms diagnostics use existing shellboy.log with typed non-content fields.
+The focused usage suite passes25/0/3 ignored with synthetic clocks/data/logs.
+Unrecorded summary/embedding coverage is explicit; #50 remains queued after #47.
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 

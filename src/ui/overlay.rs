@@ -77,7 +77,7 @@ impl UiState {
             self.immediate_chord = false;
         }
         let input_owner = self.active.clone();
-        let close_usage = closes_management && self.management.owner.is_some();
+        let had_operations = self.operations.is_some();
         let mut actions = self.event_inner(event);
         if self.active != input_owner {
             self.immediate_chord = false;
@@ -85,6 +85,12 @@ impl UiState {
         if !self.composer_active() {
             self.immediate_chord = false;
         }
+        let closed_operations = had_operations && self.operations.is_none();
+        if closed_operations && !closes_management {
+            self.management.epoch = self.management.epoch.wrapping_add(1);
+        }
+        let close_usage =
+            (closes_management || closed_operations) && self.management.owner.is_some();
         if close_usage {
             actions.push(UiAction::CloseUsageDetails {
                 epoch: self.management.epoch,
@@ -928,5 +934,34 @@ mod tests {
         ui.dirty = false;
         ui.event(mouse(MouseEventKind::ScrollDown, 10, 10));
         assert!(!ui.dirty, "blocked wheel must not redraw the popup");
+    }
+}
+
+#[cfg(test)]
+mod usage_close_tests {
+    use super::*;
+    #[test]
+    fn f8_close_invalidates_a_scoped_usage_cache_without_interrupting_core() {
+        let mut ui = UiState::new(
+            &crate::config::Config::default(),
+            std::path::PathBuf::from("."),
+        );
+        ui.open_operations(None);
+        ui.management.owner = Some(ManagementContext {
+            epoch: ui.management.epoch,
+            owner_draft: ui.view().draft.draft_id.clone(),
+            owner_thread: None,
+        });
+        let actions = ui.event(Event::Key(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE)));
+        assert!(ui.operations.is_none());
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, UiAction::CloseUsageDetails { .. }))
+        );
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            UiAction::Cancel { .. } | UiAction::Command(Command::RunStop(_))
+        )));
     }
 }

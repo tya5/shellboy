@@ -182,19 +182,37 @@ planned #52 behavior require fresh combined checks.
 
 
 
-## #47 Read-Time Totals: Measurement Pending
+## #47 Saved Totals: Implementation Gates
 
-Latest comment6515082156 supersedes the former design/synthetic-DDL evidence.
-Current acceptance concerns saved-state SQL totals, per-field unknown/overflow,
-active separately, bounded Thread lineage, same public query across scopes and
-DB-worker/detail-cache behavior. No runtime/schema result is claimed yet.
+Latest comment6515082156 supersedes the former design/DDL evidence. Read-only
+saved-state SQL is wired to usage get and existing gets, with snapshot-based F8/F6
+fields. No schema/state/driver/producer/HTTP/summary-ledger changes are claimed.
 
-Measure synthetic100k attempts/10k shells/1k Runs/100 children with documented
-layout, standard versus legacy JSON, indexes/EXPLAIN/VM steps, SQLite/build/OS,
-cold/warm definitions and repeated median/p95. Compare the approximate100ms goal
-without a brittle CI timing assertion. Existing #49 evidence below is unchanged.
-No user DB/paid API, schema, observer, summary ledger or GC-policy work is part of
-this first version. Missing summary/embedding recording is coverage, not zero.
+Exact be76c12 (before the newest mandatory throttle/log addition) passes the local
+standard check: layout82, Python6, format, strict Clippy and Rust7groups /
+1,488 passed / 0 failed / 30 ignored. Its following release rebuild was stopped
+for the new requirement, not counted as a completed final measurement. Earlier
+surface candidates exposed outdated operation-count expectations and an unnecessary
+read-time timestamp on empty active sets; these are corrected without weakening
+Core atomicity assertions or renaming old test identities.
+
+The latest focused usage suite passes25/0/3 ignored: exact slow-log boundary,
+all four scope labels plus open/changed/cli request-task propagation, temporary
+SQLite/log dirs with private-content sentinels absent, 1,000 Changed bursts per
+window yielding one pending query, fast reads yielding zero aggregation logs,
+close/epoch/inflight guards and an actual worker-backed UI Changed refresh.
+The new cooldown initially missed idle views because the old progress tick was
+disabled; the same existing tick is now enabled only for pending usage too, without
+introducing extra activity reads. Tests use injected clocks/elapsed values and
+long deadlock watchdogs, not sleep-based timing correctness.
+
+See [measurement evidence](../development/issue-47-read-performance.md) for the
+initial and optimized shared projection results, layouts, JSON variation/cache
+limits, EXPLAIN/VM steps and fresh/warm definitions. These are not IPC/render
+latencies. Final metadata-inclusive scale, newest exact-source standard, independent
+feature review and native main CI are not yet established by this record.
+Summary/embedding/RAG remain not_recorded/out_of_scope, never known-zero usage.
+No user DB or paid provider call is used; #50 is still queued separately.
 
 ## Standard Usage Persistence And Scalar Reads (#49)
 

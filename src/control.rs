@@ -138,12 +138,13 @@ impl Control {
     pub fn new(owner: &DataOwner, startup_cwd: PathBuf) -> Arc<Self> {
         let config = Arc::new(owner.loaded.config.clone());
         let (events, _) = broadcast::channel(256);
-        let store = Store::new(
+        let mut store = Store::new(
             owner.db.clone(),
             config.clone(),
             startup_cwd,
             owner.instance_id.clone(),
         );
+        store.usage_diagnostics = Some(owner.diagnostics.clone());
         let index = store.index.clone();
         let compactor = crate::compaction::Compactor::with_clients(
             owner.db.clone(),
@@ -313,15 +314,18 @@ impl Control {
     ) -> Response<Value> {
         let control = self.clone();
         let operation = request.operation_id.clone();
-        tokio::spawn(async move {
-            let _guard = match control.admit(request.command.changes_context()) {
-                Ok(guard) => guard,
-                Err(error) => return Response::failure(request.operation_id, error),
-            };
-            let (reply, effects) = control.evaluate(request, disconnected).await;
-            control.apply_effects(effects).await;
-            reply
-        })
+        let usage_context = crate::usage_totals::read_context();
+        tokio::spawn(
+            crate::usage_totals::READ_CONTEXT.scope(usage_context, async move {
+                let _guard = match control.admit(request.command.changes_context()) {
+                    Ok(guard) => guard,
+                    Err(error) => return Response::failure(request.operation_id, error),
+                };
+                let (reply, effects) = control.evaluate(request, disconnected).await;
+                control.apply_effects(effects).await;
+                reply
+            }),
+        )
         .await
         .unwrap_or_else(|_| {
             Response::failure(

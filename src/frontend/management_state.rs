@@ -1,7 +1,11 @@
 //! Result generation and wait-observation ownership, independent of draft images.
 use crate::protocol::Command;
 use serde_json::Value;
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+const USAGE_COOLDOWN: Duration = Duration::from_secs(3);
 use tokio_util::sync::CancellationToken;
 #[derive(Default)]
 pub(super) struct Management {
@@ -54,6 +58,7 @@ pub(super) struct UsageWatch {
     children: bool,
     dirty: bool,
     inflight: bool,
+    next_refresh: Option<Instant>,
 }
 impl Management {
     pub(super) fn watch_usage(
@@ -88,6 +93,7 @@ impl Management {
                     children: matches!(command,Command::UsageGet(a) if a.include_children),
                     dirty: false,
                     inflight: true,
+                    next_refresh: None,
                 })
         } else {
             None
@@ -120,10 +126,18 @@ impl Management {
             w.dirty = true;
         }
     }
-    pub(super) fn usage_ready(&self) -> Option<UsageWatch> {
+    pub(super) fn usage_waiting(&self) -> bool {
         self.usage_watch
             .as_ref()
-            .filter(|w| w.dirty && !w.inflight)
+            .is_some_and(|w| w.dirty && !w.inflight)
+    }
+    pub(super) fn usage_ready(&self) -> Option<UsageWatch> {
+        self.usage_ready_at(Instant::now())
+    }
+    pub(super) fn usage_ready_at(&self, now: Instant) -> Option<UsageWatch> {
+        self.usage_watch
+            .as_ref()
+            .filter(|w| w.dirty && !w.inflight && w.next_refresh.is_none_or(|at| now >= at))
             .cloned()
     }
     pub(super) fn usage_begin_refresh(&mut self, generation: u64) {
@@ -140,10 +154,19 @@ impl Management {
             .is_some_and(|w| w.generation == generation)
     }
     pub(super) fn usage_finished(&mut self, generation: u64, value: Option<&Value>) {
+        self.usage_finished_at(generation, value, Instant::now());
+    }
+    pub(super) fn usage_finished_at(
+        &mut self,
+        generation: u64,
+        value: Option<&Value>,
+        now: Instant,
+    ) {
         if let Some(w) = &mut self.usage_watch
             && w.generation == generation
         {
             w.inflight = false;
+            w.next_refresh = Some(now + USAGE_COOLDOWN);
             if let Some(thread) = value
                 .and_then(|v| v.get("thread_id"))
                 .and_then(Value::as_str)
@@ -187,6 +210,7 @@ mod usage_tests {
     }
     #[test]
     fn usage_reads_are_change_driven_coalesced_and_generation_bound() {
+        let now = Instant::now();
         let mut m = Management::default();
         let ctx = ManagementContext {
             epoch: 1,
@@ -201,22 +225,25 @@ mod usage_tests {
             Some(&ctx),
             generation,
         );
-        assert!(m.usage_ready().is_none());
-        m.usage_changed("other");
-        m.usage_finished(generation, None);
-        assert!(m.usage_ready().is_none());
-        m.usage_changed("t");
-        m.usage_changed("t");
-        assert!(m.usage_ready().is_some());
+        assert!(m.usage_ready_at(now).is_none());
+        m.usage_finished_at(generation, None, now);
+        for _ in 0..1000 {
+            m.usage_changed("t");
+        }
+        assert!(
+            m.usage_ready_at(now + USAGE_COOLDOWN - Duration::from_nanos(1))
+                .is_none()
+        );
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN).is_some());
         m.usage_begin_refresh(generation);
-        assert!(m.usage_ready().is_none());
-        m.usage_changed("t");
-        m.usage_finished(generation, None);
-        assert!(m.usage_ready().is_some());
+        for _ in 0..1000 {
+            m.usage_changed("t");
+        }
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN * 2).is_none());
+        m.usage_finished_at(generation, None, now + USAGE_COOLDOWN);
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN * 2).is_some());
         m.close_usage();
-        assert!(m.usage_ready().is_none());
-        m.usage_changed("t");
-        assert!(!m.usage_accepts(generation));
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN * 3).is_none());
         let generation = m.next_generation();
         m.watch_usage(
             &Command::UsageGet(UsageGetArgs {
@@ -228,9 +255,109 @@ mod usage_tests {
             generation,
         );
         m.usage_changed("child");
-        m.usage_finished(generation, None);
-        assert!(m.usage_ready().is_some());
+        m.usage_finished_at(generation, None, now);
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN).is_some());
         m.next_generation();
         assert!(!m.usage_accepts(generation));
+    }
+}
+
+#[cfg(test)]
+mod usage_throttle_log_tests {
+    use super::*;
+    use crate::{
+        diagnostics::{Diagnostics, UsageTrigger},
+        protocol::UsageGetArgs,
+        storage::DbWorker,
+        ui::ManagementContext,
+        usage_totals::{ReadContext, Scope, read_logged},
+    };
+    #[tokio::test]
+    async fn changed_bursts_execute_one_pending_read_and_fast_reads_log_nothing() {
+        for elapsed in [Duration::from_micros(99_999), Duration::from_millis(100)] {
+            let root = tempfile::tempdir().unwrap();
+            let db = DbWorker::open(root.path().join("db.sqlite")).await.unwrap();
+            db.call(|db|{db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','CONTENT_SENTINEL_NEVER_LOG','.','AGENTS.md','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2026-10-30T00:00:00Z','2026-10-30T00:00:01Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-10-30T00:00:00Z','2026-10-30T00:00:01Z'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('a','u',0,0,'fixture','fixture',0,'completed','{\"text\":\"CONTENT_SENTINEL_NEVER_LOG\"}','{\"input_tokens\":1,\"attribution\":\"CONTENT_SENTINEL_NEVER_LOG\"}','2026-10-30T00:00:00Z','2026-10-30T00:00:00.010Z');")?;Ok(())}).await.unwrap();
+            let logs = root.path().join("logs");
+            let diagnostics = Diagnostics::start(logs.clone(), crate::config::Logging::default());
+            let mut m = Management::default();
+            let context = ManagementContext {
+                epoch: 1,
+                owner_draft: "d".into(),
+                owner_thread: Some("t".into()),
+            };
+            let generation = m.next_generation();
+            m.watch_usage(
+                &Command::UsageGet(UsageGetArgs {
+                    thread_id: Some("t".into()),
+                    ..Default::default()
+                }),
+                Some(&context),
+                generation,
+            );
+            let mut now = Instant::now();
+            let mut queries = 0;
+            for trigger in [
+                UsageTrigger::Open,
+                UsageTrigger::Changed,
+                UsageTrigger::Changed,
+            ] {
+                if queries > 0 {
+                    assert!(m.usage_ready_at(now).is_some());
+                    m.usage_begin_refresh(generation);
+                }
+                let diagnostic = diagnostics.clone();
+                let value = db
+                    .call(move |db| {
+                        read_logged(
+                            db,
+                            &Scope::Thread {
+                                id: "t".into(),
+                                children: false,
+                            },
+                            ReadContext {
+                                trigger,
+                                elapsed_override: Some(elapsed),
+                            },
+                            Some(&diagnostic),
+                        )
+                        .map_err(crate::storage::StorageError::from)
+                    })
+                    .await
+                    .unwrap();
+                queries += 1;
+                m.usage_finished_at(generation, Some(&value), now);
+                for _ in 0..1000 {
+                    m.usage_changed("t");
+                }
+                assert!(
+                    m.usage_ready_at(now + USAGE_COOLDOWN - Duration::from_nanos(1))
+                        .is_none()
+                );
+                now += USAGE_COOLDOWN;
+            }
+            assert_eq!(queries, 3);
+            m.close_usage_at(2);
+            assert!(m.usage_ready_at(now + USAGE_COOLDOWN).is_none());
+            diagnostics.shutdown().await;
+            db.shutdown().await.unwrap();
+            let text = std::fs::read_to_string(logs.join("shellboy.log")).unwrap_or_default();
+            assert!(!text.contains("CONTENT_SENTINEL_NEVER_LOG"));
+            let rows = text
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            if elapsed < crate::diagnostics::USAGE_SLOW_THRESHOLD {
+                assert!(rows.is_empty());
+            } else {
+                assert_eq!(rows.len(), 3);
+                assert_eq!(rows[0]["usage_slow"]["trigger"], "open");
+                assert!(
+                    rows[1..]
+                        .iter()
+                        .all(|row| row["usage_slow"]["trigger"] == "changed")
+                );
+            }
+        }
     }
 }

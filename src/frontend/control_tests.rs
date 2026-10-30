@@ -1643,3 +1643,131 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
     send.try_send(UiAction::Quit).unwrap();
     finish_bridge(bridge, &incoming).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_without_content() {
+    use crate::{
+        diagnostics::UsageTrigger,
+        protocol::{Command, RunTarget, ThreadTarget, TurnTarget, UsageGetArgs},
+    };
+    let (_root, owner, control, server) = fixture().await;
+    let logfile = owner.loaded.data_dir.join("logs").join("shellboy.log");
+    owner
+        .db
+        .call(|db| {
+            db.execute(
+                "UPDATE thread SET title='PRIVATE_CONTENT_SENTINEL_NEVER_LOG'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let commands = [
+        Command::UsageGet(UsageGetArgs {
+            thread_id: Some("thread".into()),
+            ..Default::default()
+        }),
+        Command::UsageGet(UsageGetArgs {
+            thread_id: Some("thread".into()),
+            include_children: true,
+            ..Default::default()
+        }),
+        Command::UsageGet(UsageGetArgs {
+            run_id: Some("target-run".into()),
+            ..Default::default()
+        }),
+        Command::UsageGet(UsageGetArgs {
+            turn_id: Some("target-run".into()),
+            ..Default::default()
+        }),
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some("thread".into()),
+        }),
+        Command::RunGet(RunTarget {
+            run_id: "target-run".into(),
+        }),
+        Command::TurnGet(TurnTarget {
+            turn_id: "target-run".into(),
+        }),
+    ];
+    for command in commands {
+        let response = crate::usage_totals::with_test_elapsed(
+            std::time::Duration::from_millis(100),
+            control.request(super::operation(&control, command)),
+        )
+        .await;
+        assert!(response.ok, "{response:?}");
+    }
+    let command = Command::UsageGet(UsageGetArgs {
+        thread_id: Some("thread".into()),
+        ..Default::default()
+    });
+    crate::usage_totals::with_test_elapsed(
+        std::time::Duration::from_millis(100),
+        super::management_request(
+            &control,
+            command.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    crate::usage_totals::with_test_elapsed(
+        std::time::Duration::from_millis(100),
+        super::management_request_trigger(
+            &control,
+            command.clone(),
+            tokio_util::sync::CancellationToken::new(),
+            UsageTrigger::Changed,
+        ),
+    )
+    .await
+    .unwrap();
+    for _ in 0..20 {
+        crate::usage_totals::with_test_elapsed(
+            std::time::Duration::from_micros(99_999),
+            super::management_request_trigger(
+                &control,
+                command.clone(),
+                tokio_util::sync::CancellationToken::new(),
+                UsageTrigger::Changed,
+            ),
+        )
+        .await
+        .unwrap();
+    }
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    let text = std::fs::read_to_string(logfile).unwrap();
+    assert!(!text.contains("PRIVATE_CONTENT_SENTINEL_NEVER_LOG"));
+    let entries = text
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|row| row["event"] == "usage_totals_slow")
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), 9);
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|row| row["usage_slow"]["trigger"] == "cli")
+            .count(),
+        7
+    );
+    assert_eq!(entries[7]["usage_slow"]["trigger"], "open");
+    assert_eq!(entries[8]["usage_slow"]["trigger"], "changed");
+    for scope in ["turn", "run", "thread", "thread_children"] {
+        assert!(
+            entries
+                .iter()
+                .any(|row| row["usage_slow"]["scope"] == scope)
+        );
+    }
+    assert!(
+        entries
+            .iter()
+            .all(|row| row["usage_slow"].as_object().unwrap().len() == 3
+                && row["usage_slow"]["elapsed_ms"] == 100)
+    );
+}

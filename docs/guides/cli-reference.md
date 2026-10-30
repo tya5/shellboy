@@ -101,6 +101,9 @@ excluding deleted Threads; a limit reports thread_limit and a partial scope tota
 Summary/embedding/RAG usage is not recorded in these totals and has explicit
 coverage rather than a guessed zero. Repeating a read ID evaluates current data.
 
+Slow aggregations only (`>=100ms`, fixed constant) appear in `<data_dir>/logs/shellboy.log` as `event=usage_totals_slow` with `usage_slow.trigger/scope/elapsed_ms`.
+Elapsed time is monotonic work inside the DB aggregation, excluding queueing and rendering; faster reads emit no aggregation diagnostic.
+
 ### Models (1 operation)
 
 | Operation and all specific flags | Main result and conditions |

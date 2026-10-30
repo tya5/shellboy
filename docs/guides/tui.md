@@ -18,12 +18,17 @@ Conversation, Run and Turn detail results also include these saved totals. Missi
 usage is marked unknown and unrecorded summary/embedding coverage is explicit.
 These values are not a bill, provider-receipt proof or a sum of effective work.
 
-Details query the existing DB worker on open and relevant Changed notification,
-coalescing one in-flight refresh. Rendering uses cached fields only. Esc, a new
+Details query the existing DB worker on open. Changed bursts become one pending
+refresh, eligible three seconds after the previous result and checked by the
+existing500ms UI tick (normally within3.5s plus worker/DB backlog). There is one
+in-flight refresh; displayed values are snapshots. Rendering uses cached fields only. Esc, a new
 operation or conversation selection stops that refresh; stale generations cannot
 replace another view. A refreshed result changes its detail identity, so links
 selected from an older result must be selected again. F6 field pages inspect the
 cached response. No per-frame database read or permanent footer total is added.
+
+In `<data_dir>/logs/shellboy.log`, filter `event=usage_totals_slow` and inspect `usage_slow.trigger`, `scope`, `elapsed_ms`.
+Only DB-worker aggregations taking at least the fixed100ms threshold are logged; fast reads are silent, and this is not render/IPC time.
 
 ## Activity display
 

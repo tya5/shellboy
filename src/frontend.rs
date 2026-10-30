@@ -124,15 +124,31 @@ async fn management_request(
     command: Command,
     cancel: CancellationToken,
 ) -> Result<Value, ApiError> {
+    management_request_trigger(
+        control,
+        command,
+        cancel,
+        crate::usage_totals::UsageTrigger::Open,
+    )
+    .await
+}
+async fn management_request_trigger(
+    control: &Arc<Control>,
+    command: Command,
+    cancel: CancellationToken,
+    trigger: crate::usage_totals::UsageTrigger,
+) -> Result<Value, ApiError> {
     let is_read_projection = !command.requires_receipt();
     let index_args = if let Command::IndexStatus(args) = &command {
         Some(args.clone())
     } else {
         None
     };
-    let response = control
-        .request_cancellable(operation(control, command), cancel)
-        .await;
+    let response = crate::usage_totals::with_trigger(
+        trigger,
+        control.request_cancellable(operation(control, command), cancel),
+    )
+    .await;
     let operation_id = response.operation_id;
     let mut result = if response.ok {
         response.result.unwrap_or(Value::Null)
@@ -724,8 +740,13 @@ async fn run_with_delivery(
             let sender = background_tx.clone();
             spawn_work(&mut workers, permit, async move {
                 let title = command_title(&watch.command);
-                let response =
-                    management_request(&control, watch.command, CancellationToken::new()).await;
+                let response = management_request_trigger(
+                    &control,
+                    watch.command,
+                    CancellationToken::new(),
+                    crate::usage_totals::UsageTrigger::Changed,
+                )
+                .await;
                 let result =
                     prepare_management(response, control.store.config.cache.body_bytes).await;
                 let _ = sender
@@ -2891,8 +2912,8 @@ async fn run_with_delivery(
                     });
                 }
             },
-            _=tick.tick(),if selection.progress_running=> {
-                if let Some(thread) = selection.active_thread.clone()
+            _=tick.tick(),if selection.progress_running || management.usage_waiting()=> {
+                if selection.progress_running && let Some(thread) = selection.active_thread.clone()
                     && let Some(generation) = selection.generations.get(&thread).copied()
                     && let Ok(permit) = progress_slots.clone().try_acquire_owned()
                 {

@@ -77,7 +77,8 @@ durations, with an option for child conversations. CLI users can run
 `--turn` without children. Existing get commands include `usage_totals` too.
 Unknown measurements are not zero; summary/embedding recording is outside this
 version. Active observations are separate and these overlapping durations are
-not effective work time. Details refresh through the DB worker, not rendering.
+not effective work time. Details are cached snapshots: Changed bursts coalesce for three seconds after a
+result, then the existing UI tick schedules one DB-worker refresh, not a render query.
 See [CLI reference](cli-reference.md#saved-usage-1-operation).
 
 ## 4. Change connection or model

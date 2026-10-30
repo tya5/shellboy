@@ -2,6 +2,24 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Coalesced Snapshot Reads And Slow-Only Diagnostics (#47, 2026-10-30, Active)
+
+Use one scoped UI snapshot with one inflight read. Changed bursts leave one dirty
+pending flag, eligible three seconds after the previous result. Reuse the existing
+500ms tick, including when no progress animation is active; do not add a timer,
+worker, queue, setting or DB-worker sleep. Normal eligibility is within3.5s plus
+existing worker/DB backlog, not a hard completion guarantee. Close/new-generation
+protect against late application. Esc and F8 closure stop refresh.
+
+The latest user instruction withdraws all-execution logging. Only monotonic DB
+aggregation durations >=100ms enter existing shellboy.log as usage_totals_slow.
+Its typed payload is trigger(open/changed/cli), scope and elapsed_ms, no content or
+IDs. Faster aggregations emit no aggregation event at any level. A small read-local
+context follows the existing request task and DB job to preserve the trigger;
+there is no protocol flag or new logger. Pure/injected duration/state-clock tests
+cover the exact boundary, burst query counts, zero fast logs and content exclusion.
+
+
 ## Measure Saved Totals First (#47, 2026-10-30, Active)
 
 [Latest comment 6515082156](https://github.com/tya5/shellboy/issues/47#issuecomment-6515082156)

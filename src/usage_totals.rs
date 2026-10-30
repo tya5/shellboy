@@ -9,6 +9,35 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+pub(crate) use crate::diagnostics::UsageTrigger;
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ReadContext {
+    pub trigger: UsageTrigger,
+    #[cfg(test)]
+    pub elapsed_override: Option<std::time::Duration>,
+}
+tokio::task_local! { pub(crate) static READ_CONTEXT:ReadContext; }
+pub(crate) fn read_context() -> ReadContext {
+    READ_CONTEXT.try_with(|value| *value).unwrap_or_default()
+}
+pub(crate) async fn with_trigger<T>(
+    trigger: UsageTrigger,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    let mut context = read_context();
+    context.trigger = trigger;
+    READ_CONTEXT.scope(context, future).await
+}
+#[cfg(test)]
+pub(crate) async fn with_test_elapsed<T>(
+    elapsed: std::time::Duration,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    let mut context = read_context();
+    context.elapsed_override = Some(elapsed);
+    READ_CONTEXT.scope(context, future).await
+}
+
 #[derive(Clone, Debug)]
 pub enum Scope {
     Turn(String),
@@ -456,3 +485,27 @@ pub fn read(db: &Connection, scope: &Scope) -> Result<Value, ApiError> {
 
 #[cfg(test)]
 mod tests;
+
+/// Timing begins on the DB lane, after request/queue admission, not on the UI.
+pub(crate) fn read_logged(
+    db: &Connection,
+    scope: &Scope,
+    context: ReadContext,
+    diagnostics: Option<&crate::diagnostics::Diagnostics>,
+) -> Result<Value, ApiError> {
+    let started = std::time::Instant::now();
+    let result = read(db, scope);
+    let elapsed = started.elapsed();
+    #[cfg(test)]
+    let elapsed = context.elapsed_override.unwrap_or(elapsed);
+    if let Some(diagnostics) = diagnostics {
+        let kind = match scope {
+            Scope::Turn(_) => crate::diagnostics::UsageScope::Turn,
+            Scope::Run(_) => crate::diagnostics::UsageScope::Run,
+            Scope::Thread { children: true, .. } => crate::diagnostics::UsageScope::ThreadChildren,
+            Scope::Thread { .. } => crate::diagnostics::UsageScope::Thread,
+        };
+        diagnostics.record_usage_aggregation(context.trigger, kind, elapsed);
+    }
+    result
+}

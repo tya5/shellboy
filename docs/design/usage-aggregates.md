@@ -56,3 +56,11 @@ Current UI read-cache contract: one scoped request is refreshed on Changed using
 existing worker admission; Esc/new operation/Thread switch closes it. Close carries
 an epoch through the existing bounded control mailbox so a saturated ordinary
 queue cannot rearm an older request. No Core cancellation/producer path changes.
+
+Changed refreshes use a fixed three-second post-result cooldown and the existing
+500ms UI tick; one pending/one in-flight scoped read, no added timer or sleep job.
+Normal eligibility is within3.5s plus existing worker/DB backlog, not a hard deadline.
+Only monotonic DB aggregation durations >=100ms enter the existing diagnostic
+writer as usage_totals_slow with typed trigger/scope/elapsed fields and no content
+or IDs. Faster reads emit no aggregation diagnostic. Trigger context follows the
+existing request task into the DB job; it is not a protocol option or setting.

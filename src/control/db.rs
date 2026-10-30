@@ -109,6 +109,8 @@ pub struct Store {
     pub startup_cwd: PathBuf,
     pub(crate) instructions: crate::instructions::InstructionLoader,
     pub instance_id: String,
+    pub(crate) usage_diagnostics: Option<crate::diagnostics::Diagnostics>,
+    usage_context: crate::usage_totals::ReadContext,
 }
 
 struct AgentsPlan {
@@ -155,6 +157,8 @@ impl Store {
             config,
             startup_cwd,
             instance_id,
+            usage_diagnostics: None,
+            usage_context: crate::usage_totals::ReadContext::default(),
         }
     }
 
@@ -200,7 +204,8 @@ impl Store {
                 .and_then(MutationResult::value);
         }
         let plan = self.prepare_agents(&request, &caller).await?;
-        let store = self.clone();
+        let mut store = self.clone();
+        store.usage_context = crate::usage_totals::read_context();
         self.database
             .call(move |connection| {
                 if !request.command.requires_receipt() {
@@ -935,12 +940,14 @@ impl Store {
             Command::ThreadGet(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
                 let mut details = thread_details(tx, &id)?;
-                details.usage_totals = Some(crate::usage_totals::read(
+                details.usage_totals = Some(crate::usage_totals::read_logged(
                     tx,
                     &crate::usage_totals::Scope::Thread {
                         id,
                         children: false,
                     },
+                    self.usage_context,
+                    self.usage_diagnostics.as_ref(),
                 )?);
                 MutationResult::value(details)
             }
@@ -955,7 +962,12 @@ impl Store {
                         children: args.include_children,
                     }
                 };
-                MutationResult::value(crate::usage_totals::read(tx, &scope)?)
+                MutationResult::value(crate::usage_totals::read_logged(
+                    tx,
+                    &scope,
+                    self.usage_context,
+                    self.usage_diagnostics.as_ref(),
+                )?)
             }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
             Command::ThreadSet(args) => self.set_thread(tx, args, caller, now),
@@ -1005,6 +1017,8 @@ impl Store {
                 details.usage_totals = Some(saved_usage_for_detail(
                     tx,
                     &crate::usage_totals::Scope::Run(args.run_id.clone()),
+                    self.usage_context,
+                    self.usage_diagnostics.as_ref(),
                 )?);
                 MutationResult::value(details)
             }
@@ -1013,6 +1027,8 @@ impl Store {
                 details.usage_totals = Some(saved_usage_for_detail(
                     tx,
                     &crate::usage_totals::Scope::Turn(args.turn_id.clone()),
+                    self.usage_context,
+                    self.usage_diagnostics.as_ref(),
                 )?);
                 MutationResult::value(details)
             }
@@ -1862,8 +1878,13 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     })
 }
 
-fn saved_usage_for_detail(db: &Connection, scope: &crate::usage_totals::Scope) -> Result<Value> {
-    match crate::usage_totals::read(db, scope) {
+fn saved_usage_for_detail(
+    db: &Connection,
+    scope: &crate::usage_totals::Scope,
+    context: crate::usage_totals::ReadContext,
+    diagnostics: Option<&crate::diagnostics::Diagnostics>,
+) -> Result<Value> {
+    match crate::usage_totals::read_logged(db, scope, context, diagnostics) {
         Ok(value) => Ok(value),
         Err(e)
             if matches!(
