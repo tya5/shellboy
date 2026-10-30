@@ -33,66 +33,81 @@ FROM model_attempt a
 WHERE a.turn_id=?1 AND julianday(a.ended_at)<=julianday(?2)
   AND json_valid(a.error_json) AND json_type(a.error_json,'$.error')='object'
 ORDER BY julianday(a.ended_at) DESC,a.rowid DESC LIMIT 1";
-struct Evidence {
+pub(super) struct Evidence {
     index: usize,
     count: i64,
     attempt: String,
-    error: Option<crate::model::ModelError>,
+    error_json: Option<String>,
     source: Option<String>,
 }
 
-pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
-    let requests = nodes
+pub(super) fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
+    nodes
         .iter()
         .enumerate()
         .filter(|(_, node)| node.presentation.kind == crate::presentation::PresentationKind::Event)
         .map(|(index, node)| (index, node.node_id.clone()))
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+/// Owned bounded SQL facts; decoding and display formatting happen in apply.
+pub(super) fn read_tx(
+    db: &rusqlite::Connection,
+    requests: &[(usize, String)],
+) -> Result<Vec<Evidence>, crate::storage::StorageError> {
+    let mut resume = db.prepare(RESUME)?;
+    let mut count = db.prepare(FAILURES)?;
+    let mut latest = db.prepare(LATEST)?;
+    let mut evidence = Vec::new();
+    for (index, node) in requests {
+        let saved: Option<(Option<String>, String)> = resume
+            .query_row([node], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        let Some((Some(turn), at)) = saved else {
+            continue;
+        };
+        let count: i64 = count.query_row(rusqlite::params![turn, at], |r| r.get(0))?;
+        if count == 0 {
+            continue;
+        }
+        let (attempt, body, source): (String, Option<String>, Option<String>) = latest
+            .query_row(rusqlite::params![turn, at], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?;
+        evidence.push(Evidence {
+            index: *index,
+            count,
+            attempt,
+            error_json: body,
+            source,
+        });
+    }
+    Ok(evidence)
+}
+
+pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
+    let requests = requests(nodes);
     if requests.is_empty() {
         return Ok(());
     }
     let evidence = control
         .store
         .database
-        .call(move |db| {
-            let mut resume = db.prepare(RESUME)?;
-            let mut count = db.prepare(FAILURES)?;
-            let mut latest = db.prepare(LATEST)?;
-            let mut evidence = Vec::new();
-            for (index, node) in requests {
-                let saved: Option<(Option<String>, String)> = resume
-                    .query_row([node], |r| Ok((r.get(0)?, r.get(1)?)))
-                    .optional()?;
-                let Some((Some(turn), at)) = saved else {
-                    continue;
-                };
-                let count: i64 = count.query_row(rusqlite::params![turn, at], |r| r.get(0))?;
-                if count == 0 {
-                    continue;
-                }
-                let (attempt, body, source): (String, Option<String>, Option<String>) = latest
-                    .query_row(rusqlite::params![turn, at], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-                    })?;
-                let error = body
-                    .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
-                    .and_then(|body| {
-                        serde_json::from_value::<crate::model::ModelError>(body["error"].clone())
-                            .ok()
-                    });
-                evidence.push(Evidence {
-                    index,
-                    count,
-                    attempt,
-                    error,
-                    source,
-                });
-            }
-            Ok(evidence)
-        })
+        .call(move |db| read_tx(db, &requests))
         .await
         .map_err(|error| error.into_api_error())?;
+    apply(nodes, evidence);
+    Ok(())
+}
+
+pub(super) fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>) {
     for saved in evidence {
+        let error = saved
+            .error_json
+            .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+            .and_then(|body| {
+                serde_json::from_value::<crate::model::ModelError>(body["error"].clone()).ok()
+            });
         let presentation = &mut nodes[saved.index].presentation;
         let note = format!("再開前にこの応答処理で記録したモデル失敗{}件", saved.count);
         presentation.title = format!("復旧再開 · {note}");
@@ -101,8 +116,7 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             .iter_mut()
             .find(|block| block.kind == BlockKind::Event)
         {
-            block.text = saved
-                .error
+            block.text = error
                 .as_ref()
                 .map(|error| {
                     let message = &error.message;
@@ -139,7 +153,7 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             saved.count.to_string(),
         );
         field("attempt_id", "直近の失敗のAttempt ID", saved.attempt);
-        if let Some(error) = saved.error {
+        if let Some(error) = error {
             field("error/message", "直近の保存理由", error.to_string());
         }
         if let Some(source) = saved.source {
@@ -147,7 +161,6 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
         }
         presentation.bound_metadata();
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -189,7 +202,23 @@ mod tests {
             reasoning_ranges: vec![],
             presentation: presentation::project("event", &payload, &text, 0),
         }];
-        enrich(&control, &mut nodes).await.unwrap();
+        let requested = requests(&nodes);
+        let evidence = control
+            .store
+            .database
+            .call(move |db| read_tx(db, &requested))
+            .await
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].count, 2);
+        assert!(
+            evidence[0]
+                .error_json
+                .as_ref()
+                .unwrap()
+                .contains("保存済み二回目🦀")
+        );
+        apply(&mut nodes, evidence);
         assert_eq!(nodes[0].text, text);
         let p = &nodes[0].presentation;
         assert_eq!(

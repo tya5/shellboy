@@ -1580,3 +1580,20 @@ change render/layout/index refresh or add conversation badges. Historical null
 receipts keep the existing conversation display convention only; CLI/F6 sender
 facts correctly remain unknown. Revisit that historical presentation only under
 separate conversation-design scope, not by inventing identity in sender facts.
+
+
+## #41 D0: separate helper extraction from shared-planner adoption (2026-10-30)
+
+First extract existing connection reads and off-DB preparation behind unchanged
+async wrappers. This is not yet the one-job refresh optimization and does not
+complete D. Fully implemented preprojection/aggregate helper APIs are tested
+under cfg(test) until the shared planner adds their production callers; promote
+those helpers in that caller commit rather than suppress dead-code warnings or
+add redundant runtime queries merely to satisfy lint. The existing projected
+read path remains fast and behavior-preserving in this foundation commit.
+
+Move Revisit summary decoding off the DB worker through one pure helper sharing
+the existing private State and summary conversion. Malformed summary evidence
+remains unavailable as before; no state/schema/worker/queue or Core policy changes.
+The later shared-read commit must preserve raw legacy-null band evidence separately
+from typed unknown sender inspection and keep F6 immutable sender facts intact.

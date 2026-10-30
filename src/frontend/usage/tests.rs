@@ -86,7 +86,17 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
         "unrelated",
     ]
     .map(node);
-    enrich(&control, &mut nodes).await.unwrap();
+    let requested = requests(&nodes);
+    let observations = control
+        .store
+        .database
+        .call(move |db| read_tx(db, &requested))
+        .await
+        .unwrap();
+    assert_eq!(observations[0].sources, vec![("old".into(), Some(16000))]);
+    assert_eq!(observations[5].sources.len(), 2);
+    assert!(observations[6].sources.is_empty());
+    apply(&mut nodes, observations);
     assert_eq!(field(&nodes[0], FIELD), Some("16000"));
     assert_eq!(
         field(&nodes[0], ATTEMPT),
