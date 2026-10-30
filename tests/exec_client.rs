@@ -74,6 +74,10 @@ fn answer(text: &str) -> String {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::with_final_read_rejection(None).await
+    }
+    // false: reject the preflight as an old owner; true: lose support after send.
+    async fn with_final_read_rejection(after_send: Option<bool>) -> Self {
         let root = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -105,9 +109,31 @@ impl Fixture {
         .await
         .unwrap();
         let control = Control::new(&owner, root.path().into());
-        let (rpc, receive) = mpsc::channel(16);
+        let (rpc, mut receive) = mpsc::channel::<shellboy::ipc::Invocation>(16);
         let server = LocalServer::bind(&owner, rpc).await.unwrap();
-        tokio::spawn(control.clone().serve(receive));
+        let (forward, requests) = mpsc::channel(16);
+        tokio::spawn(control.clone().serve(requests));
+        tokio::spawn(async move {
+            let mut sent = false;
+            while let Some(invocation) = receive.recv().await {
+                if matches!(&invocation.request.command, Command::MessageSend(_)) {
+                    sent = true;
+                }
+                let reject = after_send.is_some_and(|late| !late || sent)
+                    && matches!(&invocation.request.command,Command::HistoryGet(args)if args.final_answer_only);
+                if reject {
+                    let _ = invocation.reply.send(Response::failure(
+                        invocation.request.operation_id.clone(),
+                        ApiError::new(
+                            ErrorCode::InvalidArgument,
+                            "unknown field `final_answer_only` (synthetic old owner)",
+                        ),
+                    ));
+                } else if forward.send(invocation).await.is_err() {
+                    break;
+                }
+            }
+        });
         Self {
             root,
             owner,
@@ -555,5 +581,110 @@ async fn validated_numeric_json_spelling_is_not_rounded_by_the_client() {
         String::from_utf8(output.stdout).unwrap(),
         "9007199254740993.0\n"
     );
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn old_owner_is_rejected_before_creating_or_sending_work() {
+    let fixture = Fixture::with_final_read_rejection(Some(false)).await;
+    let schema = fixture.schema();
+    let mut command = fixture.command(&schema);
+    command.arg("do not execute on an incompatible owner");
+    let output = timeout(WATCHDOG, command.output()).await.unwrap().unwrap();
+    assert_eq!(output.status.code(), Some(6));
+    assert!(output.stdout.is_empty());
+    let diagnostic = diagnostic(&output);
+    assert_eq!(diagnostic["status"], "owner_version_mismatch");
+    assert_eq!(diagnostic["stage"], "capability");
+    assert!(
+        diagnostic["message"]
+            .as_str()
+            .unwrap()
+            .contains("history get")
+    );
+    fixture
+        .owner
+        .db
+        .call(|db| {
+            for table in ["thread", "receipt", "model_attempt"] {
+                assert_eq!(
+                    db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    fixture.close().await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_resend() {
+    let mut fixture = Fixture::with_final_read_rejection(Some(true)).await;
+    let schema = fixture.schema();
+    let mut command = fixture.command(&schema);
+    command.arg("execute once and retain the answer");
+    let mut child = spawn(command);
+    fixture
+        .next(&mut child)
+        .await
+        .reply
+        .send(answer("{\"value\":\"already done\"}"))
+        .unwrap();
+    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    assert_eq!(output.status.code(), Some(6));
+    assert!(output.stdout.is_empty());
+    let diagnostic = diagnostic(&output);
+    assert_eq!(diagnostic["status"], "owner_version_mismatch");
+    assert_eq!(diagnostic["stage"], "answer");
+    assert_eq!(diagnostic["repairs"], 0);
+    for key in [
+        "thread_id",
+        "message_id",
+        "run_id",
+        "turn_id",
+        "answer_node_id",
+    ] {
+        assert!(diagnostic[key].is_string(), "{diagnostic}");
+    }
+    assert!(
+        diagnostic["message"]
+            .as_str()
+            .unwrap()
+            .contains("do not resend")
+    );
+    let original = timeout(
+        WATCHDOG,
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(fixture.root.path().join("data"))
+            .args(["history", "get", "--node"])
+            .arg(diagnostic["answer_node_id"].as_str().unwrap())
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(original.status.success());
+    let original: Value = serde_json::from_slice(&original.stdout).unwrap();
+    assert_eq!(original["result"]["text"], "{\"value\":\"already done\"}");
+    fixture
+        .owner
+        .db
+        .call(|db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?,
+                1
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
+                    .get::<_, i64>(0))?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     fixture.close().await;
 }

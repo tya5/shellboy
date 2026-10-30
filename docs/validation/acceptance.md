@@ -3144,3 +3144,25 @@ a documentation write error, not intentional pruning. Status was audited against
 its6b2f5c9/872fbf7 deltas: only intended overview/qualification counters and the
 #64 overview were present, not the displaced detailed validation sections.
 Standard Python checks now enforce separate document role headings and content.
+
+
+## #65 old-owner/final-answer support guard
+
+The client probes final_answer_only decoding with a random missing-node read
+before creating a Thread or sending work. Expected target_unavailable proves
+argument acceptance; unsupported/closed-wire failures remain owner errors.
+There is no Core compatibility parser, automatic downgrade, owner start, transport
+mutation replay or schema-repair resend after a final-read rejection.
+
+Synthetic loopback RPC rejection modes cover an old-style owner refusing the
+argument before work (exit6, zero Threads/receipts/model attempts), and support
+lost after sending (exit6, complete message/Run/Turn/answer IDs, original answer
+still readable through ordinary history get, one receipt/attempt and no resend).
+The existing nine exec cases still pass, including real UTF-8/paging, active-Turn
+append, recovery and non-stopping timeout. A unit check covers InvalidArgument,
+ProtocolMismatch and IoFailed final-read mapping while keeping ordinary input
+errors as2 and missing-node errors as4. Native macOS arm64/Rust1.99.1 full
+RUST_TEST_THREADS=2 sh scripts/check.sh passes1726/0/32, layout92, Python7, fmt and
+strict all-target Clippy. Native main CI remains a separate pending gate.
+This is a portable simulated legacy rejection, not an installed0.3.0
+owner or real-provider run. User data and installed binaries are unchanged.

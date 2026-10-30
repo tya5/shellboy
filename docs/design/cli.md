@@ -217,3 +217,15 @@ subset. Model-result validity is shape evidence only, not factual correctness.
 
 JSON instance indexing is limited to100000 nodes/depth128. Numeric parsing uses
 the existing serde_json supported range; out-of-range numeric inputs fail explicitly.
+
+
+### exec owner-version guard
+
+Before Thread creation/message send, exec makes a read-only final_answer_only
+probe with a random missing node. A current owner decodes the argument and reports
+target_unavailable; old-style argument rejection exits6 before work. A refusal
+at answer read also exits6 (owner_version_mismatch), retaining known answer IDs
+and recommending ordinary history get --node ANSWER_NODE_ID without the new flag.
+Do not resend completed work as if this were an input/schema error. Closed-wire
+support failures are owner/capability errors6, not input2. This is detection only,
+not an old-Core format shim or automatic answer/protocol downgrade.

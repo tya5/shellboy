@@ -1,5 +1,14 @@
 # Development status
 
+## #65 owner-version guard and validation-record repair
+
+Exec checks the required final-answer read argument before creating/sending work.
+A refused projection is an owner/version error6, not user input error2; saved IDs
+and the ordinary history get recovery hint prevent accidental resubmission if
+support is lost after execution. Core formats/execution are unchanged.
+The complete acceptance history has been restored; detailed qualification and
+repair provenance live in the validation record, not copied into this overview.
+
 ## #65 exec client: local qualification complete
 
 A thin noninteractive client composes existing Thread/message/wait/answer reads,

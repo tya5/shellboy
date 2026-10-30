@@ -82,6 +82,18 @@ impl Failure {
             api: None,
         }
     }
+    fn final_answer_read(error: ApiError) -> Self {
+        if matches!(
+            error.code,
+            ErrorCode::InvalidArgument | ErrorCode::ProtocolMismatch
+        ) {
+            return Self {code:6,status:"owner_version_mismatch",message:"Owner/CLI version mismatch: the required final_answer_only read was refused. Use matching owner and CLI versions. If work already ran, read the saved answer with history get --node <answer_node_id> without --final-answer-only; do not resend the work.".into(),api:Some(Box::new(error))};
+        }
+        if error.code == ErrorCode::IoFailed {
+            return Self {code:6,status:"owner_capability_unavailable",message:"Cannot confirm the owner's final-answer read support; check matching owner/CLI versions. If work already ran, inspect the reported IDs with ordinary history get rather than resending it.".into(),api:Some(Box::new(error))};
+        }
+        Self::api(error)
+    }
     fn api(error: ApiError) -> Self {
         let code = match error.code {
             ErrorCode::InvalidArgument
@@ -171,11 +183,40 @@ impl Session {
             })?;
         Ok(())
     }
+    async fn verify_final_answer_support(&mut self) -> Result<(), Failure> {
+        // Missing-node rejection proves argument decoding without creating work.
+        let probe: Result<HistoryBody, Failure> = self
+            .request(
+                "capability",
+                Command::HistoryGet(HistoryGetArgs {
+                    final_answer_only: true,
+                    node_id: uuid::Uuid::new_v4().to_string(),
+                    limit_bytes: 1,
+                    cursor: None,
+                    encoding: "UTF-8".into(),
+                }),
+            )
+            .await;
+        match probe {
+            Err(failure)
+                if failure
+                    .api
+                    .as_ref()
+                    .is_some_and(|error| error.code == ErrorCode::TargetUnavailable) =>
+            {
+                Ok(())
+            }
+            Ok(_) => Ok(()),
+            Err(failure) => Err(failure),
+        }
+    }
     async fn request<T: DeserializeOwned>(
         &mut self,
         stage: &'static str,
         command: Command,
     ) -> Result<T, Failure> {
+        let final_answer_read =
+            matches!(&command,Command::HistoryGet(args)if args.final_answer_only);
         self.progress.stage = stage;
         if Instant::now() >= self.deadline {
             return Err(Failure::new(
@@ -193,11 +234,16 @@ impl Session {
             self.progress.create_operation_id = Some(operation.clone());
         }
         let response=timeout_at(self.deadline,ipc::call(&self.data,command,Some(operation),self.origin.clone())).await
-            .map_err(|_|Failure::new(5,"timeout","Client deadline expired; inspect the reported IDs before resending; no target was stopped"))?.map_err(Failure::api)?;
+            .map_err(|_|Failure::new(5,"timeout","Client deadline expired; inspect the reported IDs before resending; no target was stopped"))?.map_err(|error|if final_answer_read {Failure::final_answer_read(error)}else{Failure::api(error)})?;
         if !response.ok {
-            return Err(Failure::api(response.error.unwrap_or_else(|| {
+            let error = response.error.unwrap_or_else(|| {
                 ApiError::new(ErrorCode::InvalidState, "Owner returned no error detail")
-            })));
+            });
+            return Err(if final_answer_read {
+                Failure::final_answer_read(error)
+            } else {
+                Failure::api(error)
+            });
         }
         serde_json::from_value(
             response
@@ -498,6 +544,7 @@ pub async fn execute(
     };
     let result: Result<Outcome,Failure>=async {
         session.connect().await?;
+        session.verify_final_answer_support().await?;
         if session.progress.thread_id.is_none() {
             let created:Value=session.request("create",Command::ThreadCreate(create)).await?;
             session.progress.thread_id=Some(created["thread_id"].as_str().ok_or_else(||Failure::new(6,"owner_error","Thread creation returned no ID"))?.to_owned());
@@ -524,5 +571,33 @@ pub async fn execute(
             failure.status,
             json!({"message":failure.message,"error":failure.api}),
         ),
+    }
+}
+
+#[cfg(test)]
+mod owner_version_tests {
+    use super::*;
+    #[test]
+    fn projection_refusal_and_wire_close_are_owner_errors_without_masking_input_errors() {
+        for code in [
+            ErrorCode::InvalidArgument,
+            ErrorCode::ProtocolMismatch,
+            ErrorCode::IoFailed,
+        ] {
+            let failure =
+                Failure::final_answer_read(ApiError::new(code, "synthetic final-read refusal"));
+            assert_eq!(failure.code, 6);
+            assert!(failure.message.contains("history get"));
+            assert_eq!(failure.api.unwrap().code, code);
+        }
+        assert_eq!(
+            Failure::api(ApiError::new(ErrorCode::InvalidArgument, "bad user input")).code,
+            2
+        );
+        assert_eq!(
+            Failure::final_answer_read(ApiError::new(ErrorCode::TargetUnavailable, "node is gone"))
+                .code,
+            4
+        );
     }
 }
