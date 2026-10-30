@@ -1445,3 +1445,14 @@ and character/byte counts for facts only. Retain the existing finite retry budge
 and compaction safety machinery, not a new recovery engine. Choose /compact-max
 for the API-free action instead of a new dialog. Minimal recovery text precedes
 #41/#58 UI work. The old 75k provisional activation decision is superseded.
+
+
+## #41 staged preview API (2026-10-30)
+
+B+C uses bounded, independent read-only tails for completed tools. Keep only
+facts with concrete callers in its internal preview DTO; defer continuation
+cursors and live timing to D, which owns their actual lifecycle. This avoids
+unused speculative API fields and an unnecessary timing query on each completed
+preview. The adopted design describes that stage boundary. Raw byte and row
+limits remain checked in production, not only in tests. Revisit when D adds
+incremental live output; no protocol or saved format changes are involved.

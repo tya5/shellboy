@@ -145,6 +145,12 @@ impl ToolReasonKind {
 /// UI-only identity and facts for one call; canonical payloads remain unchanged.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolPresentation {
+    #[serde(skip)]
+    pub group_id: Option<String>,
+    #[serde(skip)]
+    pub call_node_id: Option<String>,
+    #[serde(skip)]
+    pub result_node_id: Option<String>,
     pub call_id: String,
     pub ordinal: Option<u32>,
     pub command: String,
@@ -268,6 +274,9 @@ impl ToolPresentation {
     }
     fn retained_bytes(&self) -> usize {
         self.call_id.capacity()
+            + self.group_id.as_ref().map_or(0, String::capacity)
+            + self.call_node_id.as_ref().map_or(0, String::capacity)
+            + self.result_node_id.as_ref().map_or(0, String::capacity)
             + self.command.capacity()
             + self.status.capacity()
             + self.current_state.as_ref().map_or(0, String::capacity)
@@ -681,8 +690,22 @@ pub enum EventClass {
     Change,
     Attention,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum InputSource {
+    Human,
+    Parent,
+    SelfModel,
+    OtherModel,
+    Revisit,
+    #[default]
+    Unknown,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodePresentation {
+    #[serde(skip)]
+    pub created_at: Option<String>,
+    #[serde(skip)]
+    pub input_source: InputSource,
     /// Worker-derived display identity; never persisted or a source/provenance hash.
     #[serde(skip)]
     pub projection_stamp: Option<[u8; 32]>,
@@ -772,6 +795,7 @@ impl NodePresentation {
     }
     pub fn retained_bytes(&self) -> usize {
         size_of::<Self>()
+            + self.created_at.as_ref().map_or(0, String::capacity)
             + self.title.capacity()
             + self.blocks.capacity() * size_of::<PresentationBlock>()
             + self.fields.capacity() * size_of::<PresentationField>()

@@ -196,6 +196,7 @@ impl<'a> HistoryReader<'a> {
             .map_err(storage_error)?;
         let (mut nodes, info, _) =
             presentation_work(move || raw.project(width, |_, _| None)).await?;
+        message_metadata::enrich(control, Some(&thread), &mut nodes).await?;
         streams::enrich(control, &mut nodes, width).await?;
         stamp_sources(&mut nodes, info.read_revision);
         let history = UiUpdate::History {
@@ -258,6 +259,7 @@ impl<'a> HistoryReader<'a> {
             })
         })
         .await?;
+        message_metadata::enrich(self.control, Some(&reply.target.thread), &mut nodes).await?;
         let enriched = streams::enrich(self.control, &mut nodes, self.width).await;
         checked_storage(self.control, enriched).await?;
         stamp_sources(&mut nodes, info.read_revision);
@@ -309,6 +311,7 @@ impl<'a> HistoryReader<'a> {
                 })
             })
             .await?;
+            message_metadata::enrich(self.control, Some(&reply.target.thread), &mut nodes).await?;
             streams::enrich(self.control, &mut nodes, self.width).await?;
             stamp_sources(&mut nodes, info.read_revision);
             let anchor = anchor.ok_or_else(|| {
@@ -370,6 +373,7 @@ impl<'a> HistoryReader<'a> {
                 })
             })
             .await?;
+            message_metadata::enrich(self.control, Some(&reply.thread), &mut nodes).await?;
             streams::enrich(self.control, &mut nodes, self.width).await?;
             stamp_sources(&mut nodes, info.read_revision);
             let before_cursor = before_cursor?;
@@ -413,7 +417,64 @@ impl<'a> HistoryReader<'a> {
         .await;
         checked_storage(self.control, result).await
     }
-    pub(super) async fn node(&self, node_id: String, offset: usize) -> Result<UiNode, ApiError> {
+    /// Item-scoped link hydration never installs off-page bodies into the
+    /// conversation window and never reads shell raw output.
+    pub(super) async fn links(
+        &self,
+        node_ids: Vec<String>,
+    ) -> Result<Vec<crate::presentation::PresentationLink>, ApiError> {
+        if node_ids.is_empty()
+            || node_ids.len() > 2
+            || node_ids.iter().any(|id| id.is_empty() || id.len() > 256)
+        {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "Link source requires one or two bounded node IDs",
+            ));
+        }
+        let result = async {
+            let rows = self.control.store.database.call(move |db| {
+                let tx = db.transaction()?;
+                let mut rows = Vec::with_capacity(node_ids.len());
+                let mut query = tx.prepare("SELECT id,kind,CASE WHEN length(CAST(payload_json AS BLOB))<=98304 THEN payload_json END,deleted_reason FROM node WHERE id=?1")?;
+                for id in node_ids {
+                    let row = query.query_row([id], |row|Ok(RawNode {
+                        id:row.get(0)?,kind:row.get(1)?,payload:row.get(2)?,reason:row.get(3)?,received_recovery_wait:false,
+                    })).optional()?;
+                    let Some(row) = row.filter(|row|row.payload.is_some() && row.reason.is_none()) else {
+                        return Err(StorageError::from(ApiError::new(ErrorCode::TargetUnavailable,"Link source is unavailable, deleted, or larger than the bounded preview allowance; use original access")));
+                    };
+                    rows.push(row);
+                }
+                drop(query);
+                tx.commit()?;
+                Ok(rows)
+            }).await.map_err(storage_error)?;
+            let width=self.width;
+            presentation_work(move || {
+                let mut links=Vec::<crate::presentation::PresentationLink>::new();
+                for row in rows {
+                    if row.payload.as_deref().is_none_or(|payload|serde_json::from_str::<Value>(payload).is_err()) {
+                        return Err(ApiError::new(ErrorCode::TargetUnavailable,"Saved link source is malformed; use original access"));
+                    }
+                    let node=row.into_ui_node(Some(NodePosition::At(0)),width);
+                    for link in node.presentation.links {
+                        if links.len() >= 128 {return Ok(links);}
+                        if !links.iter().any(|old|old.url==link.url) {links.push(link);}
+                    }
+                }
+                Ok(links)
+            }).await?
+        }.await;
+        checked_storage(self.control, result).await
+    }
+
+    pub(super) async fn node(
+        &self,
+        node_id: String,
+        offset: usize,
+        viewed_thread: &str,
+    ) -> Result<UiNode, ApiError> {
         let result = async {
             let (row, read_revision) = self
                 .control
@@ -448,6 +509,7 @@ impl<'a> HistoryReader<'a> {
             let mut node =
                 presentation_work(move || row.into_ui_node(Some(NodePosition::At(offset)), width))
                     .await?;
+            message_metadata::enrich(self.control, Some(viewed_thread), std::slice::from_mut(&mut node)).await?;
             streams::enrich(self.control, std::slice::from_mut(&mut node), self.width).await?;
             stamp_source(&mut node, read_revision);
             Ok(node)
@@ -689,6 +751,59 @@ fn raw_node_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PathNode> {
 }
 
 #[cfg(test)]
+mod detail_link_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn offwindow_sources_are_bounded_and_unavailable_is_not_an_empty_link_list() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        owner.db.call(|db| {
+            let call=json!({"text":"[call source](https://example.test/call)"}).to_string();
+            let result=json!({"item":{"type":"function_call_output","call_id":"call","output":json!({"status":"exited","exit_code":0,"output":"https://example.test/result"}).to_string()}}).to_string();
+            for (id,kind,payload) in [("call","assistant_response",call),("result","tool_result",result),("large","assistant_response",json!({"text":"x".repeat(100_000)}).to_string())] {
+                db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES(?1,?2,'now',?3,length(CAST(?3 AS BLOB)))",rusqlite::params![id,kind,payload])?;
+            }
+            db.execute("INSERT INTO node(id,kind,created_at,deleted_reason)VALUES('deleted','tool_result','now','gc')",[])?;
+            Ok(())
+        }).await.unwrap();
+        let (updates, _incoming) = std::sync::mpsc::sync_channel(8);
+        let reader = HistoryReader::new(&control, &updates, 80);
+        let links = reader
+            .links(vec!["call".into(), "result".into()])
+            .await
+            .unwrap();
+        assert!(
+            links
+                .iter()
+                .any(|link| link.url == "https://example.test/call")
+        );
+        assert!(
+            links
+                .iter()
+                .any(|link| link.url == "https://example.test/result")
+        );
+        for ids in [vec![], vec!["call".into(); 3], vec!["x".repeat(257)]] {
+            assert_eq!(
+                reader.links(ids).await.unwrap_err().code,
+                ErrorCode::InvalidArgument
+            );
+        }
+        for id in ["large", "deleted", "absent"] {
+            assert_eq!(
+                reader.links(vec![id.into()]).await.unwrap_err().code,
+                ErrorCode::TargetUnavailable
+            );
+        }
+        owner.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
 mod read_stamping_tests {
     use super::*;
     use serde_json::json;
@@ -806,10 +921,13 @@ mod read_stamping_tests {
             }
         };
         assert!(first > 0);
-        let hydrated = reader.node("tool_finished".into(), 0).await.unwrap();
+        let hydrated = reader
+            .node("tool_finished".into(), 0, "thread")
+            .await
+            .unwrap();
         assert!(hydrated.presentation.read_revision > first);
         assert!(!hydrated.presentation.body_evicted);
-        let empty = reader.node("empty".into(), 0).await.unwrap();
+        let empty = reader.node("empty".into(), 0, "thread").await.unwrap();
         assert!(empty.presentation.read_revision > hydrated.presentation.read_revision);
         assert_eq!(empty.total_chars, 0);
         assert!(!empty.presentation.body_evicted);

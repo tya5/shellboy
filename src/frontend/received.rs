@@ -656,7 +656,7 @@ mod tests {
                     .any(|field| field.key == "/source_node_id" && field.value == "audit")
             );
             let window = super::super::history_reader::HistoryReader::new(&control, &tx, 80)
-                .node("audit".into(), 5)
+                .node("audit".into(), 5, "t")
                 .await
                 .unwrap();
             assert_eq!(

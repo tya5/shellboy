@@ -46,6 +46,14 @@
 
 ## TUIの通知ベル
 
+`ui.palette` accepts `dark` (default) or `light`. It selects the fixed header
+and user-message surfaces without changing source text, Markdown semantics or
+saved state. Resolve `NO_COLOR`, `TERM` and `COLORTERM` once when constructing
+the UI: nonempty `NO_COLOR` selects plain markers/spacing, known 256-color or
+truecolor capability selects the configured palette, and other terminals use
+reverse/separator fallback. Do not query terminal background or perform terminal
+I/O to infer colors. Invalid palette strings/types are configuration errors.
+
 `ui.bell` はboolで既定true。TUIが起動後に新たな復旧待ちを観測したとき、現在会話と背景会話のどちらも端末BELで通知する。起動時に既に存在する復旧待ちは通知せず、同じ復旧待ちの再取得・画面切替・再描画でも鳴らさない。複数の通知は2秒間隔へ集約し、ベル専用worker・永続event・保存状態を追加しない。既存UI通知からローカルに判断し、falseなら通知を無効化する。音・visual bell・画面flashの実際の表現は端末とmultiplexerの設定へ委ねる。詳細は [画面操作](../guides/tui.md#recovery-wait-notification-bell) に示す。
 
 ## R3-6: 設定検証の局所化

@@ -1,7 +1,7 @@
 # Conversation redesign delivery plan (#41)
 
 Baseline: main e8c1ff2 after independently completed #58. Follow the issue body
-and comments through6519745314.
+and comments through6520544888.
 The latest user instruction permits independent usable main increments, each
 with complete local standard checks and main three-OS CI. Do not close #41
 until every adopted requirement is delivered. Keep #58 separate and first;
@@ -13,9 +13,9 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | Increment | Scope | State |
 | --- | --- | --- |
 | Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Complete: e8c1ff2, native three-OS CI41034892332 green |
-| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted locally; B+C implementation next |
-| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Planned |
-| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Planned |
+| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted locally; B+C implementation in progress |
+| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | In progress; validation and main admission pending |
+| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | In progress with B; validation and main admission pending |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Planned |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
@@ -24,6 +24,14 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 Each increment must be usable independently. A requirement that crosses these
 boundaries must land with its complete action/read/render path, not a stub.
 Report shipped and remaining scope on the issue after each main admission.
+
+B+C are one usable implementation unit. The current source/documentation changes
+are under integration; no B/C checkbox below denotes a verified or shipped result.
+Focused tests, full standard checks and actual PTY observations for this revision
+remain to be recorded before main admission. D–G remain pending; B+C do not add
+the fixed live-work region, background-work timers, watch mode, reactive browser
+patches, descendant counts, operation catalogue or popup wheel support. Existing
+background management and F8 controls remain available until those increments.
 
 ## Complete requirement ledger
 
@@ -86,3 +94,55 @@ not secretly scan the entire log. Watch state age distinguishes saved facts from
 local observation. Patches retain finite pagination/watermarks and deduplicate
 IDs without fetching every page. None justifies a new persistent job engine,
 table, worker, business event or protocol operation.
+
+## Mandatory cross-surface freshness and performance additions
+
+Comments[6520522032](https://github.com/tya5/shellboy/issues/41#issuecomment-6520522032)
+and[6520544888](https://github.com/tya5/shellboy/issues/41#issuecomment-6520544888)
+are adopted in the [notification/snapshot inventory](../design/conversation-redesign.md#notification-snapshot-and-latency-inventory).
+Every screen/popup fact has a notification/read owner, known gap, latency target
+and explicit snapshot exception there. This includes existing F6/F7/F8 and #47
+reference results, not only new E/F surfaces. All unchecked items remain pending;
+this design update proves neither implementation nor measurement.
+
+- [ ] A/B+C: inventory-driven current conversation/header/footer/queue/F6/F7
+  reactivity for CLI mutations; target1s visible updates; stale/lost/error labels.
+- [ ] D/E/F/G: finish every remaining mutable-fact inventory row as its owning
+  surface lands; no blanket fixed reference/result snapshot exception.
+- [ ] All legitimate immutable/intentionally time-scoped/external-source snapshots
+  show their observed/source time and explicit refresh/reopen action.
+- [ ] B+C/D/E/F/G: one combined frontend refresh plan/deadline; per visible consumer
+  <=1 DB-worker job/500ms, shared transaction/data, no hidden consumer work; usage
+  totals retain the documented3s interval. Record actual jobs and DB time.
+- [ ] B+C: bounded128-ID source/result batch, one in flight, source/read-revision
+  cache; no query per rendered row/frame. Focus remains a paint overlay; only a
+  changed expanded item is remeasured and its following geometry adjusted.
+- [ ] D: owned-work projection shares activity transaction, skipped when not owned;
+  output Notify compares visible markers only; background second clocks do not
+  format/query/layout or repaint unchanged text.
+- [ ] E: cache tree rows by item/collapse/filter/mode revision; arrows/draw reuse it.
+- [ ] F: descendant counts use one depth8/256-row recursive SQL with lightweight
+  latest-Run facts, visible scopes only, one in flight; no per-descendant activity
+  projection and no recount for unrelated non-new IDs. Watch details batched by
+  visible IDs and preformatted off UI draw.
+- [ ] G: popup wrapped rows cached by popup/page-revision/width, wheel coalesced at
+  max_fps; operation catalogue const/LazyLock and filtered rows cached on changes.
+
+### Required comparison ledger (baseline main1fec7f0)
+
+- [ ] P1 B+C:128 nodes/50 tool rows, focus/open-close UI+draw p95<=8ms and<=baseline+2ms.
+- [ ] P2 D/F: silent background shell10min, <=1 redraw/sec,0 DB jobs/tick, CPU no worse.
+- [ ] P3 Each applicable increment: visible Changed jobs and DB-worker time with
+  list/watch/descendant consumers enabled, showing combined/coalesced work.
+- [ ] P4 F:256 descendants/depth8 one-query p95<=50ms plus bounded slow-only logging.
+- [ ] P5 D/E/F: hidden output40 batches/sec ->0 visible redraws/0 output-driven DB jobs.
+- [ ] P6 G:64KiB original,60 wheel events/sec ->frames<=max_fps and p95<=8ms/+2ms.
+- [ ] P7 B+C:128x16KiB expanded previews counted within cache.body_bytes, including
+  retained metadata; discarded previews rehydrate correctly under #58 rules.
+  Report the explicit finite active working-set exception (<=64KiB total for an
+  active visible/focused preview at zero/tiny budget), never as an uncounted cache
+  or a per-item allowance; inactive/offscreen preview copies remain reclaimable.
+
+Measure the same synthetic fixture before/after; distinguish measurement from
+functional tests and native PTY observation. Record justified target changes
+before admission. No new worker/table/queue is authorized by these requirements.

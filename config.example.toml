@@ -47,5 +47,7 @@ clipboard_days = 7
 clipboard_bytes = 268435456
 
 [ui]
+# Header/user surfaces: dark or light; NO_COLOR uses plain markers instead.
+palette = "dark"
 # Notify once when a new recovery wait needs attention (terminal bell).
 bell = true

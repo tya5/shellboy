@@ -1,5 +1,7 @@
 //! Bounded raw-output retrieval with per-stream incremental decoding. Decoder
 //! state is rebuilt from retained raw pages, never serialized or guessed.
+pub(crate) mod preview;
+
 use crate::{
     protocol::{
         ApiError, ErrorCode, MAX_BODY_BYTES, ShellDetails, ShellOutput, ShellReadArgs, ShellState,

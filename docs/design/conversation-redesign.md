@@ -1,7 +1,7 @@
 # Conversation presentation and reactive Thread browser (#41)
 
 Adopted increment plan after #58 main e8c1ff2 and successful three-OS CI41034892332.
-This design covers the issue body and comments through6519745314; the complete
+This design covers the issue body and comments through6520544888; the complete
 implementation ledger is [the delivery plan](../development/issue-41-plan.md).
 Only the next complete B+C increment is starting; D/E/F/G remain planned.
 
@@ -58,7 +58,7 @@ Add narrow connection-based preview helpers in control/output.rs, shared decoder
     preview_tail(db: &Connection, execution: &str, limits: PreviewLimits) -> PreviewPage
     // D adds incremental reading only when its live-output consumer exists.
 
-These are crate-private in-process APIs, not new CLI/protocol semantics. PreviewCursor contains execution ID, saved sequence/stream offsets, retention_generation and canonical encoding; PreviewPage contains bounded stdout/stderr decoded segments, next cursor, skipped/decode-uncertain facts, terminal/output-complete and saved timing metadata. PreviewLimits is fixed call-site data, not another public config family. Query one SQLite read transaction so metadata/raw retention are consistent. Preview reads never override output_encoding or invalidate vectors.
+These are crate-private in-process APIs, not new CLI/protocol semantics. For B+C, PreviewPage contains bounded stdout/stderr decoded segments, raw-byte/inspected-row counts checked at the frontend boundary, skipped/decode-uncertain facts and terminal/output-complete. Snapshot retention/encoding remain internal read facts. Continuation cursor and saved timing fields are deferred to D, which adds them only together with its concrete incremental caller; existing tool metadata supplies B+C timing. PreviewLimits is fixed call-site data, not another public config family. Query one SQLite read transaction so metadata/raw retention are consistent. Preview reads never override output_encoding or invalidate vectors.
 
 Run the synchronous query/decoding on the existing finite frontend read/presentation blocking path, opening the existing DbWorker path with SQLITE_OPEN_READ_ONLY and query_only. Drop the connection/transaction when the bounded task ends; do not retain snapshots across sleeps. Existing read semaphore owns admission and existing cancellation/generation owns acceptance. No new DB thread or connection pool is introduced.
 
@@ -160,3 +160,150 @@ its CLI mapping; empty-ID help, RunGet read-only clarity, header nonselection,
 filtered/narrow lists, and every popup's wheel/edge/outside/F2 behavior. Record
 actual PTY forms/screens separately from TestBackend. G can contain reviewable
 subcommits but must enter main as a complete usable independent increment.
+
+## Cross-surface reactivity and performance admission (comments6520522032/6520544888)
+
+These mandatory additions supersede any blanket rule that reference navigation,
+F6 cached metadata or F8 results are fixed snapshots. Reactivity is the default
+for every visible mutable saved fact, including changes made through another
+CLI/client. A cache is an implementation detail, not a reason to display stale
+facts indefinitely. No timer-based DB polling replaces missing notifications.
+
+The inventory below is an adoption ledger, not a claim that the present source
+already implements each route. Its owner increment must complete and validate
+the route before claiming that surface done. B+C own current conversation,
+header/footer, queue interaction, item focus/body caches and mutable F6/F7 facts;
+D adds live-work facts, E/F browser/descendant facts, and G existing management,
+operation and popup freshness/geometry. Existing gaps remain explicit #41 work;
+the general reactivity requirement is not deferred to an unspecified later issue.
+
+### Notification, snapshot and latency inventory
+
+Normal visible saved-fact updates target1s from commit to display on an unloaded
+local fixture, using a shared500ms coalescing deadline. This is a measured target,
+not a guarantee during DB/file/API failure. Heavy usage totals retain a documented
+3s minimum refresh interval (normally up to3.5s plus finite worker/DB latency) to
+protect writes. Report delayed/failed reads as stale/unavailable with observed
+read time; do not silently extend freshness claims. Local clocks advance only
+visible changed second labels. Invisible consumers unsubscribe or remain dormant.
+
+| Surface / fact | Update trigger and finite read | Present gap / owner | Snapshot exception, time and refresh |
+| --- | --- | --- | --- |
+| Startup stages, failure and cleanup | Existing stage watch/owned completion updates; no DB polling | Existing route, verify unchanged; B+C | Startup error is the recorded failure, with stage/time; restart explicitly |
+| Main header: title, connection/model, cwd, saved phase | Thread Changed, including CLI thread set; shared current-view refresh | Verify complete external mutation route; B+C | Loaded config/palette is startup configuration, visibly documented restart scope; saved Thread settings are not snapshots |
+| Conversation selected path, new results, saved responses | Thread Changed plus existing selected-Thread Stream; bounded history/queue read and source revisions | #58 retention/fences retained; B+C | Immutable source windows retain node/source/read identity; refresh/hydration must not erase paid text |
+| Footer phase, recovery, retries, pending sends | Thread Changed, accepted-send results and typed activity snapshots; shared read | Full recovery+new-send facts and notice lifetime; B+C | Terminal result refers to its saved Run; current state remains reactive |
+| Footer elapsed/output silence | Existing visible local animation/receive observations; no tick DB query | Frozen Turn time must not stand for background elapsed; B+C/D | Elapsed is explicitly saved-base or local-observed, never guessed |
+| Composer/draft, attachment prep, notices | Local input and existing draft/attachment completion updates | Preserve newer edits and operation notice separation; B+C | Submitted frozen draft is an explicit immutable submission, keyed by revision/operation |
+| Pending-message strip and /queue | Thread Changed and paired history/queue read_revision | Verify CLI/foreign sender, cancellation, recovery and stale replies; B+C | Cancellation selection/confirmation is a chosen-ID snapshot; existing transaction revalidates each target |
+| Focused/expanded tool output | Saved tool/source changes; bounded exact source and preview reads; no closed-output raw reads | Source batch/read cache and shared body accounting; B+C | Completed raw preview is an identified source snapshot, with read time/retention/decode facts and reopen/refresh action; current lifecycle facts stay reactive |
+| Fixed live region: shells, owned children, waits | Relevant Thread Changed in activity transaction; global output Notify only compares at most3 displayed live markers | New D surface | No fixed snapshot for live state; elapsed base includes observation time |
+| Background footer work age/output age | Same D snapshot plus local second clock | New D data, no stopped Turn clock | No separate read or hidden timer |
+| Thread list titles/states/tree | Per-Thread Changed; bounded ID-only patch batch | Currently open/filter/Ctrl+R/page only; E | Never justify stale list as a snapshot; Ctrl+R remains manual recovery |
+| Watch rows and second-line work/recovery/answer | Same changed-ID batch, details for visible rows only | New F surface reusing D/E | Session unread state is local policy, not a saved-fact snapshot; timestamps advance locally |
+| Descendant counts/scoped watch | Relevant/new descendant Changed; one bounded recursive SQL on visible parent/scope | New F surface | Truncated count is an explicit lower bound, not silently exact/stale |
+| F6 saved node fields and tool/current execution facts | Selected source/Thread Changed; same bounded source/activity refresh, retain selection | Cached snapshot currently lacks general freshness route; B+C | Truly immutable fields may retain source identity; mutable execution/availability fields must update |
+| F6 original node page | Immutable node/hash source; retention/deletion/encoding changes invalidate availability | Existing reader plus explicit freshness labels; B+C/G | Valid immutable-source exception: show source/read time and refresh action; raw shell pages can change and must show bounds/age |
+| F7 links | Selected source membership/body/decoding change, tied to same ItemKey and source revision | Existing cached links need stale-source/late-reply checks; B+C | Immutable-node URLs may be fixed only with identified source/read time and refresh action |
+| F8 operation list and forms | Fixed catalog; local filter/context and selected-Thread Changed | Catalog/context caching and default-origin clarity; G | An edited form intentionally freezes entered IDs/values; show origin/selection time, do not overwrite edits, revalidate at execution |
+| F8 mutable inspection results: Run/Turn/shell/status/index/storage/attachments/history | Relevant target Thread Changed or existing state notifications; one visible consumer read, exact target identity | General cached results/reference routes are gaps; G | Following a reference does not itself justify a snapshot; default reactive, with stale/error/read-time indication |
+| F8 saved usage totals and usage through references | Relevant Thread Changed; existing3s coalescing/shared read, preserve scope | Reference one-shot exception must be removed; G | Explicit historical/time-scoped totals only: show scope/time and refresh; normal current totals reactive |
+| F8 mutation receipt/results and confirmations | Existing acceptance/result updates; downstream mutable state uses its own reactive fields | Separate saved acceptance from current state; G | Immutable operation outcome is a legitimate snapshot with operation/time; confirmations freeze chosen targets, then revalidate |
+| Deletion/index cost previews | Relevant target/source Changed marks/reloads bounded read-only preview before confirmation | Preserve existing stronger guards; G | A chosen preview records time/revision; changed targets cannot reuse a silently stale destructive/cost confirmation |
+| Model list | Current connection change invalidates target; explicit catalog fetch completion | Remote catalog supplies no Changed; G | Legitimate externally fetched snapshot: show fetched-at and refresh action; no hidden API polling |
+| Help/key explanations | Local UI mode/config/capability changes; immutable bundled guide/version | No DB read, cache by width/bindings/mode; G | Bundled text/config-at-startup exception: show version/context and reopen/current-help action |
+| F2 terminal-selection fixed display | Explicit entry/refresh/exit only | Retain intentional display freeze; B+C | Label fixed-at time and refresh (Ctrl+L) / exit (F2/Esc); not a silent current-value view |
+| Shutdown/progress/force confirmation | Existing owned shutdown progress and completion signals | Preserve input precedence and fact/error delivery; G | Captured pre-cancellation context is identified saved evidence; current shutdown stages remain reactive |
+
+Notification loss, coalescing overflow and refresh failure either trigger bounded
+saved-state resynchronization or display a stale marker/read time. Selection,
+filter, field edits, scrolling and immutable source identity survive refresh.
+Every inventory row requires an external CLI/synthetic mutation test, or an
+explicit immutable/external-source snapshot test proving time and refresh labels.
+Do not claim an absent remote notification has been solved by a periodic fetch.
+
+B+C F7 links for a selected item whose saved source is outside the current window
+use one scoped UI request/reply, fenced by popup request identity, Thread and
+generation. Read at most2 already-validated ItemRegion source node IDs in one
+existing read-slot DB job/transaction. Check SQL payload length before copying:
+at most96KiB per source and192KiB total. Project metadata/links only, without
+tools, raw-output or receipt enrichment, and retain at most128 links in that
+popup. Deleted/oversized/unavailable sources report explicit unavailability rather
+than an empty successful list. Do not install offpage nodes or change the #58
+history window, follow or selection. No new Core command/schema/queue is added.
+
+### One bounded frontend refresh and cached rendering
+
+Use the existing frontend loop, finite read slots and dirty-ID state. Merge
+current-view history/queue/header/activity, browser patches, visible watch detail,
+live work, descendant invalidation and eligible usage consumers into one deadline
+plan. Each visible consumer admits at most one DB-worker job per500ms; coalesce
+its data in the same transaction rather than enqueue a job per fact or row.
+Consumers sharing target data reuse it. No work is scheduled for invisible
+surfaces. Heavy totals honor their existing3s lower cadence without a parallel
+refresh engine. Record actual job counts and total DB-worker time per Changed.
+Do not hide per-row SQL inside a nominally single job and call it bounded work.
+
+B+C source correlation/missing-result metadata uses one window-bounded source
+batch (at most128 node/call IDs), with at most one in flight and cache by
+(node/source identity, accepted read revision). It must not issue a new DB job
+per rendered row or redraw. Explicit user expansion can request its bounded raw
+preview; its successful display copy belongs to cache.body_bytes, including
+String capacities, block/vector metadata and per-view retained entries. The finite #58 visible working-set exception also permits at most64KiB total
+explicit-preview working storage for the currently visible/focused active view
+when the configured body budget is zero/tiny, so an explicit open remains usable.
+This is counted in the shared retained-body accounting, not an additional cache
+per item or128 independent allowances. Inactive/offscreen preview copies are
+evicted first; the exception never pins an entire Turn. Report this finite
+over-budget working set explicitly in the P7 measurement rather than claiming
+all bytes fit a zero-byte budget. Evicted previews reload through the existing
+source path. Implementation and measurement of that bound remain to be verified.
+
+History focus is a paint overlay on cached row/item geometry and is not a layout
+cache key. Opening/closing remeasures only the changed item and adjusts following
+heights/source geometry; changing focus never reparses128 nodes/192KiB. Update
+click/F6/F7 hit maps only when source/layout geometry changes. Tree rows are cached
+by list revision (items, collapse state, filter, mode) and reused by draw/arrow
+navigation; no repeated tree rebuilds per frame/key. Popup wrapped originals are
+cached by popup identity/page revision/width; wheel deltas coalesce inside the
+existing max_fps draw admission. The catalog is const/LazyLock data; filtered
+operation rows are recomputed on filter/context changes, never every frame.
+
+D reads owned work in the activity transaction and skips the work query when
+owned=false. Global shell-output notifications do nothing unless live work is
+visible; compare only its displayed markers and repaint only when those values
+change. Clock-only background/watch displays update at most once/sec when their
+rendered second changes, with zero DB queries/formatting/layout in clock ticks.
+Hidden output must not invalidate visible history or trigger redraw/DB work.
+
+F descendant counting is exactly one bounded recursive SQL statement using the
+parent index, depth8/256 discovered rows and lightweight latest-Run/Turn facts.
+Do not call activity::project separately per descendant. Count only the visible
+parent footer/watch scope, at most one in flight, sharing the500ms deadline.
+Ignore Changed IDs outside the cached descendant set unless new-Thread evidence
+can affect that scope. Watch details use one visible-ID batch, sanitized/formatted
+at fetch time. Explicit truncation/cycle/deletion semantics remain unchanged.
+
+### Mandatory performance evidence per applicable increment
+
+Compare the same synthetic fixtures against baseline main1fec7f0; report native
+OS/terminal, fixture counts, command, samples and unmeasured cases. These are
+admission measurements, not claims inferred from passing functional tests:
+
+1. B+C:128-node window/50 tool rows, repeated focus and open/close. UI handling +
+   draw p95 target<=8ms and no more than2ms above baseline; focus must reuse layout.
+2. D/F: one silent background shell for10min: at most1 redraw/sec, zero DB jobs per
+   clock tick, and CPU no worse than baseline; report CPU/sample uncertainty.
+3. B+C/D/E/F/G: visible active Thread Changed with applicable list/watch/count
+   consumers: DB-worker jobs and aggregate time before/after, with shared batching.
+4. F:256 descendants/depth8: one-query p95 target<=50ms, and slow-only diagnostics
+   through the existing bounded writer; no per-descendant diagnostic flood.
+5. D/E/F: hidden Thread output at40 batches/sec causes zero visible redraws and
+   zero output-induced DB jobs for visible consumers.
+6. G:64KiB original popup,60 wheel events/sec: frames<=max_fps and UI/draw p95 within
+   the same<=8ms/+2ms target, using cached wrapped rows.
+7. B+C:128 expanded previews at16KiB each: retained bytes conform to the shared
+   body-cache accounting (including metadata), with correct eviction/rehydration.
+
+If a target requires adjustment based on native baseline evidence, record that
+reason and measured impact before admission; do not silently drop the requirement.

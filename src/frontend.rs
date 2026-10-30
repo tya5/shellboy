@@ -6,6 +6,7 @@ mod draft_images;
 mod draft_saver;
 mod history_reader;
 mod input_history;
+mod message_metadata;
 mod message_queue;
 mod receipt_delivery;
 mod received;
@@ -1833,7 +1834,10 @@ async fn run_with_delivery(
                             async move {
                                 let result = checked_storage(
                                     &control,
-                                    tools::enrich(&control, &mut nodes).await,
+                                    async {
+                                        tools::enrich(&control, &mut nodes).await?;
+                                        streams::enrich_previews(&control, &mut nodes, render_width).await
+                                    }.await,
                                 )
                                 .await
                                 .map(|_| nodes)
@@ -1973,6 +1977,64 @@ async fn run_with_delivery(
                             .await;
                         }
                     }
+                    UiAction::LoadDetailLinks { thread_id, generation, request_id, node_ids } => {
+                        let control=control.clone();
+                        let sender=updates.worker();
+                        let target=thread_id.clone();
+                        if !spawn_read(&mut read_workers,&read_slots,&selection.cancel,async move {
+                            let result=HistoryReader::new(&control,&sender,render_width).links(node_ids).await.map_err(|error|error.to_string());
+                            update(&sender,UiUpdate::DetailLinks {thread_id:target,generation,request_id,result}).await;
+                        }) {
+                            update(&updates,UiUpdate::DetailLinks {thread_id,generation,request_id,result:Err("リンクの読込キューが満杯です。完了後に再操作してください".into())}).await;
+                        }
+                    }
+                    UiAction::LoadToolPreview {
+                        thread_id,
+                        generation,
+                        key,
+                        request_revision,
+                        source_node_id,
+                        group_id,
+                        call_id,
+                    } => {
+                        let control = control.clone();
+                        let sender = updates.worker();
+                        let target = thread_id.clone();
+                        let requested_key = key.clone();
+                        if !spawn_read(
+                            &mut read_workers,
+                            &read_slots,
+                            &selection.cancel,
+                            async move {
+                                let identity_matches = match &requested_key {
+                                    ItemKey::Tool { group_id: expected_group, call_id: expected_call } => {
+                                        group_id.as_deref() == Some(expected_group.as_str()) && call_id == *expected_call
+                                    }
+                                    ItemKey::LocalTool { node_id, .. } => node_id == &source_node_id,
+                                    ItemKey::Node(_) => false,
+                                };
+                                let result = if !identity_matches {
+                                    Err("出力の表示対象が変わりました。項目を開き直してください".into())
+                                } else {
+                                    let limit = control.store.config.limits.tool_excerpt_bytes.min(16 * 1024) as usize;
+                                    let deadline = Duration::from_millis(control.store.config.io.file_prepare_timeout_ms.min(1000));
+                                    match tokio::time::timeout(deadline, streams::preview(&control, &source_node_id, group_id.as_deref(), &call_id, limit)).await {
+                                        Ok(Ok(page)) => Ok(tool_preview(page)),
+                                        Ok(Err(error)) => Err(error.to_string()),
+                                        Err(_) => Err("出力の読込が時間内に終わりませんでした。もう一度開いてください".into()),
+                                    }
+                                };
+                                update(&sender, UiUpdate::ToolPreview {
+                                    thread_id: target, generation, key: requested_key, request_revision, result,
+                                }).await;
+                            },
+                        ) {
+                            update(&updates, UiUpdate::ToolPreview {
+                                thread_id, generation, key, request_revision,
+                                result: Err("出力の読込キューが満杯です。完了後に再操作してください".into()),
+                            }).await;
+                        }
+                    }
                     UiAction::LoadNodeWindow {
                         thread_id,
                         generation,
@@ -1988,9 +2050,9 @@ async fn run_with_delivery(
                             &read_slots,
                             &selection.cancel,
                             async move {
-                                let reply = WindowReply::new(target, generation, view_revision);
+                                let reply = WindowReply::new(target.clone(), generation, view_revision);
                                 match HistoryReader::new(&control, &sender, render_width)
-                                    .node(node_id, char_offset)
+                                    .node(node_id, char_offset, &target)
                                     .await
                                 {
                                     Ok(node) => reply.deliver_node(&sender, node).await,
@@ -3318,6 +3380,46 @@ fn thread_display_times(threads: &[ThreadSummary]) -> Vec<crate::ui::ThreadDispl
         .collect()
 }
 
+fn tool_preview(page: crate::control::output::preview::PreviewPage) -> ToolPreview {
+    use crate::presentation::{BlockKind, OutputStream, PresentationBlock};
+    let mut notices = Vec::new();
+    if page.skipped {
+        notices.push("前方を省略した末尾抜粋です。全文は原文から取得できます");
+    }
+    if page.decode_uncertain {
+        notices.push("末尾からの文字変換は不確実です。原文を参照してください");
+    }
+    if page.decode_errors {
+        notices.push("文字変換エラーがあります");
+    }
+    if !page.output_complete {
+        notices.push(if page.terminal {
+            "未回収の出力があります"
+        } else {
+            "実行中の出力スナップショットです"
+        });
+    }
+    let blocks = [
+        (page.stdout, OutputStream::Stdout),
+        (page.stderr, OutputStream::Stderr),
+    ]
+    .into_iter()
+    .filter(|(text, _)| !text.is_empty())
+    .map(|(text, stream)| PresentationBlock {
+        kind: BlockKind::ToolResult,
+        stream: Some(stream),
+        text,
+        // Display tails cannot claim canonical node character offsets.
+        source_exact: false,
+        ..Default::default()
+    })
+    .collect();
+    ToolPreview {
+        blocks,
+        notice: (!notices.is_empty()).then(|| notices.join("。")),
+    }
+}
+
 async fn presentation_work<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, ApiError> {
@@ -3579,3 +3681,41 @@ mod notice_tests {
 
 #[cfg(test)]
 mod delivery_performance;
+
+#[cfg(test)]
+mod tool_preview_tests {
+    use super::*;
+    use crate::control::output::preview::PreviewPage;
+    use crate::presentation::OutputStream;
+
+    #[test]
+    fn inline_tail_keeps_streams_distinct_and_discloses_only_known_limits() {
+        let page = PreviewPage {
+            stdout: "last stdout".into(),
+            stderr: "last stderr".into(),
+            raw_bytes: 2048,
+            inspected_rows: 3,
+            skipped: true,
+            decode_uncertain: true,
+            decode_errors: false,
+            terminal: true,
+            output_complete: false,
+        };
+        let preview = tool_preview(page);
+        assert_eq!(preview.blocks.len(), 2);
+        assert_eq!(preview.blocks[0].stream, Some(OutputStream::Stdout));
+        assert_eq!(preview.blocks[1].stream, Some(OutputStream::Stderr));
+        assert_eq!(preview.blocks[0].text, "last stdout");
+        assert!(
+            preview
+                .blocks
+                .iter()
+                .all(|block| !block.source_exact && block.markdown.is_empty())
+        );
+        let notice = preview.notice.unwrap();
+        assert!(
+            notice.contains("末尾抜粋") && notice.contains("不確実") && notice.contains("未回収")
+        );
+        assert!(!notice.contains("行") && !notice.contains("文字変換エラー"));
+    }
+}

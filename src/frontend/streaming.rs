@@ -889,7 +889,7 @@ pub(super) async fn rebase(
     width: u16,
 ) -> Result<(), ApiError> {
     let canonical = super::HistoryReader::new(control, updates, width)
-        .node(request.node_id.clone(), 0)
+        .node(request.node_id.clone(), 0, &request.thread_id)
         .await?;
     let crate::ui::StreamRebase {
         thread_id,
