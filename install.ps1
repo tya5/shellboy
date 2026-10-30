@@ -40,12 +40,24 @@
         $destination = Join-Path $dir 'shellboy.exe'
         $staged = Join-Path $dir ([IO.Path]::GetRandomFileName())
         Copy-Item -LiteralPath $binary -Destination $staged
+        $backup = $null
         if (Test-Path -LiteralPath $destination) {
             $backup = "$destination.backup-$([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))-$([Guid]::NewGuid().ToString('N'))"
-            Copy-Item -LiteralPath $destination -Destination $backup
+            # Windows permits renaming a running image, but not overwriting it.
+            [IO.File]::Move($destination, $backup)
             Write-Output "Previous binary saved to $backup"
         }
-        Move-Item -LiteralPath $staged -Destination $destination -Force
+        try {
+            [IO.File]::Move($staged, $destination)
+        } catch {
+            $installError = $_
+            if ($backup) {
+                try { [IO.File]::Move($backup, $destination) } catch {
+                    throw "Installation failed and rollback failed. Previous binary remains at '$backup'. Restore it manually after resolving the destination error. $($_.Exception.Message)"
+                }
+            }
+            throw $installError
+        }
         Write-Output "Installed $installedVersion to $destination"
         if (($env:PATH -split ';') -notcontains $dir) {
             Write-Output "Add '$dir' to your user PATH in Environment Variables, then reopen your terminal. No profile or PATH settings were changed."
