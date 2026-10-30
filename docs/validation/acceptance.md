@@ -47,15 +47,15 @@ No conversation renderer/layout or index-refresh work is qualified by #59.
 
 Initial structural/interaction main b0e3c29 passes native three-OS CI41057195099
 (Linux1,659/0/31, macOS1,658/0/32, Windows1,543/0/24).
-Follow-up source4bf14a9 addresses review6523314574 and qualifies locally on
-macOS arm64/Rust1.99.1: **1,671 passed / zero failed / 32 ignored**,
+Follow-up sourcefd968e5 includes main ed40f33/#59 and addresses review6523314574.
+It qualifies locally on macOS arm64/Rust1.99.1: **1,679 passed / zero failed / 32 ignored**,
 layout89/Python6/fmt/strict Clippy. Four genuine separate-CLI tests cover header,
 foreign input/cancel/recovery/stop and real raw/history GC while F6/F7 stay open;
 local target1s passes. Snapshot read/freeze times, real reread with paid-copy
 preservation, source membership, late replies, selection and bounds are covered.
 
 The [detailed record](conversation-redesign-bc.md) separates exact source,
-measurement starts/values, the final binary's six real PTYs, P1 p95 3.324ms,
+measurement starts/values, the final binary's six real PTYs, P1 p95 3.974ms,
 initial P3/P7 evidence, pending main admission/CI and untested physical/real-API
 cases. D–G and shared one-job consolidation remain open. No installed binary,
 release/tag, paid API or user data is changed by this #41 increment.

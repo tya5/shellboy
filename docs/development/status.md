@@ -33,15 +33,17 @@ The structural/interaction subset shipped on main b0e3c29 with three-OS
 CI41057195099 green. Review6523314574 correctly identified unfinished B+C
 freshness; it was explicitly recorded and reported in issue comment6523388336.
 
-Follow-up source4bf14a9 now implements scoped reactive F6/F7 facts, new-result
+Follow-up sourcefd968e5 (including main ed40f33/#59) implements scoped reactive F6/F7 facts, new-result
 source membership, GC availability notifications, snapshot read/freeze times,
 and bounded rereads that preserve known paid text on failure. External CLI
 header/queue/footer mutations and real raw/history GC are tested without later
-UI input. Local standard: **1,671 passed / zero failed / 32 ignored**;
+UI input. Local standard: **1,679 passed / zero failed / 32 ignored**;
 layout89, Python6, formatting and strict all-target Clippy pass.
 
 The final binary passes six actual macOS PTY width/palette conditions, including
-fixed F2 time and preview read time; UI p95 is3.324ms (baseline1.855ms).
+fixed F2 time and preview read time; UI p95 is3.974ms (baseline2.110ms).
+The merged #59 sender regression preserves kind/name after a source snapshot;
+external_cli and historical-null display conventions match comment6524373262.
 See [qualification](../validation/conversation-redesign-bc.md) for exact source,
 measurements and limits. Main admission/three-OS CI for this follow-up is pending;
 initial b0e3c29 CI is not substituted for it.

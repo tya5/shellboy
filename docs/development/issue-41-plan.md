@@ -61,9 +61,10 @@ No new worker/table/queue or timer-driven DB polling is authorized.
   and document every untested route separately. Keep stale/late/read-budget and
   paid-text preservation regressions green.
 
-Local follow-up source4bf14a9 now implements BC-R1–R6: standard1,671/0/32,
+Local follow-up sourcefd968e5 (including main ed40f33/#59) implements BC-R1–R6:
+standard1,679/0/32,
 four actual separate-CLI/current-view tests, six final native PTYs and P1
-p95 3.324ms. See the qualification record for precise latency starts, snapshot
+p95 3.974ms. See the qualification record for precise latency starts, snapshot
 semantics, code limits and untested cases. These boxes await main admission and
 its exact-SHA three-OS CI; local success alone does not mark shipment complete.
 
@@ -199,7 +200,9 @@ Comment6524373262 requires the newly saved sender boundary. Merge main ed40f33,
 preserve external_cli versus trusted-human classification and original/F6
 self-asserted names, and verify that source snapshots do not erase sender facts.
 Pre-merge source4bf14a9 standard/PTY/P1 evidence is retained as such; repeat
-qualification on the merged runtime/embedded guides before push. No historical
+qualification on the merged runtime/embedded guides before push. This is now
+locally complete at fd968e5 (standard1,679/0/32, actual PTYs6/6, P1 gates pass);
+main admission/CI remains pending. No historical
 null is upgraded into a verified sender or Core compatibility path.
 
 

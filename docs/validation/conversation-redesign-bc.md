@@ -252,3 +252,32 @@ follow-up's new popup consumer. That consumer has one bounded DB call/read and
 one physical request in flight/500ms, no hidden/F2 polling. Combined current-view
 one-job consolidation and its fresh DB-time/count measurements remain D work.
 P2/P4/P5/P6 and D–G remain unqualified by this record.
+
+
+## Latest #59 integration qualification
+
+Comment6524373262 is adopted on merged main ed40f33. Latest runtime/test and
+embedded-guide source: `fd968e531e5cdc5c94b7e9c670977573e38559f7`. The earlier4bf14a9
+observations above remain pre-merge evidence, not a substitute for this run.
+Preserve explicit trusted-human versus external_cli bands, parent/self/Revisit
+identity and the documented historical-null display convention. Self-asserted
+names stay in F6; a mutable-source snapshot must not erase loaded immutable
+sender kind/name/IDs. The merged sender regression verifies that order.
+
+Fresh native macOS arm64/Rust1.99.1 standard: **1,679 passed / zero failed /
+32 ignored** (library801/0/13, integration868/0/17, termination7/0/1,
+crash3/0/1), layout89/Python6/fmt/strict all-target Clippy. Same final-source
+four external-CLI/GC tests pass. Measured postcommit Changed-observer-to-paint:
+header4.322ms, first-send/footer113.207ms, queue9.986ms, cancel9.805ms,
+recovery15.478ms, stop8.586ms. Conservative CLI-start-to-paint:
+raw GC/F6 **506.856ms**, history GC/F7 **464.325ms**; all assert the1s local target.
+These starts/physical-terminal limits are the same as documented above.
+
+Fresh interleaved baseline/current P1: p95 **2.110ms / 3.974ms** (delta1.864ms),
+current p50 2.934ms/max5.068ms,500 samples; both p95 targets pass. Layout/unit
+counters remain131/258/16,510. Final binary SHA256:
+`4a89ba055ff3ccfcc717c63938330b7eb9d97c17f6668e4cdbb5f47b4bf64d77`.
+All six actual PTYs pass seven checks each using those bytes; NO_COLOR emits0
+chromatic SGR in both widths. Private fixtures/captures are retained locally.
+No paid API, user store, installed binary, tag or release is changed.
+Main three-OS CI for the combined follow-up remains pending admission.
