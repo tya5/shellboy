@@ -2,6 +2,10 @@
 use super::*;
 #[derive(Debug)]
 pub struct ThreadView {
+    pub(super) palette: theme::Palette,
+    pub(super) items: history_items::ItemState,
+    pub(super) history_focus_item: Option<Arc<history_items::ItemRegion>>,
+    pub(super) operation_notice: Option<history_interaction::OperationNotice>,
     pub(super) activity: activity::ActivityView,
     pub thread_id: Option<String>,
     pub cwd: PathBuf,
@@ -235,6 +239,10 @@ impl ThreadView {
     }
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
         Self {
+            palette: theme::Palette::from_capabilities(config.ui.palette, false, true),
+            items: Default::default(),
+            history_focus_item: None,
+            operation_notice: None,
             agents_path: cwd.join("AGENTS.md").to_string_lossy().into_owned(),
             selecting_agents: None,
             activity: Default::default(),
@@ -458,14 +466,15 @@ impl ThreadView {
             let (width, height) = (self.scroll.width, self.scroll.height);
             let layout = self.history_layout(view_key, cache, budget, width, height);
             let top = self.viewport_row(&layout, width, height);
-            let top_source = layout.sources.get(top).copied();
+            let top_source = layout.sources.get(top).cloned();
             let origin = top_source
+                .as_ref()
                 .map(|source| ViewAnchor {
                     node_id: Some(self.nodes[source.node].node_id.clone()),
                     char_offset: source.offset,
                 })
                 .unwrap_or_else(|| self.anchor.clone());
-            let within = top_source.map_or(0, |source| {
+            let within = top_source.as_ref().map_or(0, |source| {
                 top.saturating_sub(
                     layout
                         .sources
@@ -1711,8 +1720,10 @@ impl ThreadView {
         }
     }
     pub(super) fn retained_body_bytes(&self, working: &[String]) -> usize {
-        let mut bytes =
-            self.nodes.capacity().saturating_sub(working.len()) * std::mem::size_of::<UiNode>();
+        let mut bytes = self.items.retained_bytes();
+        bytes = bytes.saturating_add(
+            self.nodes.capacity().saturating_sub(working.len()) * std::mem::size_of::<UiNode>(),
+        );
         let stored = self.body_storage_bytes.get().unwrap_or_else(|| {
             let stored = self.nodes.iter().map(node_storage_bytes).sum();
             self.body_storage_bytes.set(Some(stored));

@@ -21,6 +21,9 @@ mod composer;
 mod details;
 pub(crate) mod draft;
 mod help;
+mod history_interaction;
+mod history_items;
+pub use history_items::{ItemKey, Preview as ToolPreview};
 mod input;
 mod lifecycle;
 mod management;
@@ -197,8 +200,111 @@ impl UiNode {
                 changed = true;
             }
         }
+        // A paused source keeps its canonical body/offsets. Adopt only the
+        // bounded per-call display tail and facts returned by the same reader.
+        for marker in source
+            .presentation
+            .fields
+            .iter()
+            .filter(|field| field.key.starts_with("/ui_raw_stream_preview/"))
+        {
+            let call = marker
+                .key
+                .strip_prefix("/ui_raw_stream_preview/")
+                .expect("filtered marker");
+            let old_count = self.presentation.fields.len();
+            self.presentation
+                .fields
+                .retain(|field| field.key != format!("/ui_raw_stream_preview_error/{call}"));
+            changed |= old_count != self.presentation.fields.len();
+            let Some(incoming) = source
+                .presentation
+                .blocks
+                .iter()
+                .filter_map(|block| block.tool.as_ref())
+                .find(|tool| tool.call_id == call)
+            else {
+                continue;
+            };
+            let matching = |block: &crate::presentation::PresentationBlock| {
+                block
+                    .tool
+                    .as_ref()
+                    .is_some_and(|tool| tool.call_id == call && tool.group_id == incoming.group_id)
+            };
+            let Some(origin) = self
+                .presentation
+                .blocks
+                .iter()
+                .find(|block| matching(block))
+            else {
+                continue;
+            };
+            let span = (origin.source_start, origin.source_end);
+            let mut replacements = source
+                .presentation
+                .blocks
+                .iter()
+                .filter(|block| {
+                    matching(block)
+                        && block.kind == crate::presentation::BlockKind::ToolResult
+                        && block.stream.is_some()
+                        && !block.source_exact
+                })
+                .cloned()
+                .map(|mut block| {
+                    block.source_start = span.0;
+                    block.source_end = span.1;
+                    block
+                })
+                .collect::<Vec<_>>();
+            let current = self
+                .presentation
+                .blocks
+                .iter()
+                .filter(|block| {
+                    matching(block) && block.kind == crate::presentation::BlockKind::ToolResult
+                })
+                .collect::<Vec<_>>();
+            if current == replacements.iter().collect::<Vec<_>>() {
+                continue;
+            }
+            let old = std::mem::take(&mut self.presentation.blocks);
+            let mut inserted = false;
+            for block in old {
+                let matches = matching(&block);
+                if !(matches && block.kind == crate::presentation::BlockKind::ToolResult) {
+                    self.presentation.blocks.push(block);
+                }
+                if matches && !inserted {
+                    self.presentation.blocks.append(&mut replacements);
+                    inserted = true;
+                }
+            }
+            changed = true;
+        }
+        for field in source.presentation.fields.iter().filter(|field| {
+            field.key.starts_with("/ui_raw_stream_preview/")
+                || field.key.starts_with("/ui_raw_stream_preview_error/")
+        }) {
+            if let Some(existing) = self
+                .presentation
+                .fields
+                .iter_mut()
+                .find(|existing| existing.key == field.key)
+            {
+                if existing != field {
+                    *existing = field.clone();
+                    changed = true;
+                }
+            } else {
+                self.presentation.fields.push(field.clone());
+                changed = true;
+            }
+        }
         if changed {
             self.presentation.projection_stamp = None;
+            self.presentation.bound_metadata();
         }
         changed
     }
@@ -505,6 +611,21 @@ pub enum UiAction {
         revision: u64,
         attachment_ids: Vec<String>,
     },
+    LoadDetailLinks {
+        thread_id: String,
+        generation: u64,
+        request_id: u64,
+        node_ids: Vec<String>,
+    },
+    LoadToolPreview {
+        thread_id: String,
+        generation: u64,
+        key: ItemKey,
+        request_revision: u64,
+        source_node_id: String,
+        group_id: Option<String>,
+        call_id: String,
+    },
     LoadNodeWindow {
         thread_id: String,
         generation: u64,
@@ -797,6 +918,19 @@ pub enum UiUpdate {
         anchor: ViewAnchor,
         follow: bool,
     },
+    DetailLinks {
+        thread_id: String,
+        generation: u64,
+        request_id: u64,
+        result: Result<Vec<crate::presentation::PresentationLink>, String>,
+    },
+    ToolPreview {
+        thread_id: String,
+        generation: u64,
+        key: ItemKey,
+        request_revision: u64,
+        result: Result<ToolPreview, String>,
+    },
     NodeWindow {
         thread_id: String,
         generation: u64,
@@ -939,6 +1073,8 @@ struct HistoryLayoutKey {
     selection_revision: u64,
     anchor: Option<String>,
     expanded: Vec<String>,
+    items_revision: u64,
+    palette: theme::Palette,
     width: u16,
 }
 struct HistoryLayout {
@@ -956,6 +1092,11 @@ struct RenderUnitKey {
     stamps: Vec<([u8; 32], usize, usize)>,
     expanded: Vec<bool>,
     preceding_links: Vec<Arc<str>>,
+    item: Option<ItemKey>,
+    block_index: usize,
+    item_revision: u64,
+    dependency: Option<usize>,
+    palette: theme::Palette,
 }
 impl RenderUnitKey {
     fn new(
@@ -982,11 +1123,48 @@ impl RenderUnitKey {
                 .map(|node| view.reasoning_expanded.contains(&node.node_id))
                 .collect(),
             preceding_links: links.to_vec(),
+            item: None,
+            block_index: usize::MAX,
+            item_revision: view.nodes()[start..end]
+                .iter()
+                .map(|node| {
+                    view.items
+                        .cache_revision(&ItemKey::Node(node.node_id.clone()))
+                })
+                .max()
+                .unwrap_or(0),
+            dependency: None,
+            palette: view.palette,
         })
+    }
+    fn item(
+        view: &ThreadView,
+        primary: usize,
+        block_index: usize,
+        dependency: Option<usize>,
+        key: &ItemKey,
+        width: u16,
+        links: &[Arc<str>],
+    ) -> Option<Self> {
+        let mut result = Self::new(view, primary, primary + 1, width, links)?;
+        result.item = Some(key.clone());
+        result.block_index = block_index;
+        result.item_revision = view.items.cache_revision(key);
+        result.dependency = dependency;
+        if let Some(index) = dependency.filter(|index| *index != primary) {
+            let node = view.nodes().get(index)?;
+            result.stamps.push((
+                node.presentation.projection_stamp?,
+                node.base_char_offset,
+                node.total_chars,
+            ));
+        }
+        Some(result)
     }
     fn bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.stamps.capacity() * std::mem::size_of::<([u8; 32], usize, usize)>()
+            + self.item.as_ref().map_or(0, history_interaction::key_bytes)
             + self.expanded.capacity()
             + self.preceding_links.capacity() * std::mem::size_of::<Arc<str>>()
             + self
@@ -1026,6 +1204,8 @@ impl HistoryLayoutKey {
                 .get(projection_node_index(view))
                 .map(|n| n.node_id.clone()),
             expanded: view.reasoning_expanded.iter().cloned().collect(),
+            items_revision: view.items.revision(),
+            palette: view.palette,
             width,
         }
     }
@@ -1085,6 +1265,7 @@ impl HistoryLayoutCache {
             + value.targets.capacity() * std::mem::size_of::<Arc<str>>()
             + value.targets.iter().map(|link| link.len()).sum::<usize>()
             + value.sources.capacity() * std::mem::size_of::<presentation::RowSource>()
+            + history_interaction::region_bytes(&value.sources)
             + std::mem::size_of::<HistoryLayout>()
             + std::mem::size_of::<HistoryLayoutEntry>()
             + 128;
@@ -1110,7 +1291,10 @@ impl HistoryLayoutCache {
     fn discard_old_revision(&mut self, key: &HistoryLayoutKey) {
         let bytes = &mut self.bytes;
         self.entries.retain(|old, entry| {
-            if old.view == key.view && old.history_revision != key.history_revision {
+            if old.view == key.view
+                && (old.history_revision != key.history_revision
+                    || old.items_revision != key.items_revision)
+            {
                 *bytes -= entry.bytes;
                 false
             } else {
@@ -1134,6 +1318,7 @@ impl HistoryLayoutCache {
             + value.targets.capacity() * std::mem::size_of::<Arc<str>>()
             + value.targets.iter().map(|url| url.len()).sum::<usize>()
             + value.sources.capacity() * std::mem::size_of::<presentation::RowSource>()
+            + history_interaction::region_bytes(&value.sources)
             + std::mem::size_of::<HistoryLayoutKey>()
             + std::mem::size_of::<HistoryLayoutEntry>()
             + std::mem::size_of::<HistoryLayout>()
@@ -1211,6 +1396,7 @@ impl Confirmation {
     }
 }
 pub struct UiState {
+    palette: theme::Palette,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     bell: bell::Bell,
     autosave: autosave::Autosave,
@@ -1300,10 +1486,13 @@ impl UiState {
         self.thread_browser.generation()
     }
     pub fn new(config: &Config, cwd: PathBuf) -> Self {
-        let view = ThreadView::new(config, cwd.clone());
+        let palette = theme::Palette::detect(config.ui.palette);
+        let mut view = ThreadView::new(config, cwd.clone());
+        view.palette = palette;
         let active = view.draft.draft_id.clone();
         let initialized = cwd.is_absolute();
         Self {
+            palette,
             diagnostics: None,
             bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
@@ -1890,6 +2079,15 @@ impl UiState {
             | UiUpdate::ModelReceive { .. } => {
                 unreachable!("activity handled before general updates")
             }
+            UiUpdate::ToolPreview {
+                thread_id,
+                generation,
+                key,
+                request_revision,
+                result,
+            } => {
+                self.accept_tool_preview(&thread_id, generation, key, request_revision, result);
+            }
             UiUpdate::ToolFacts {
                 thread_id,
                 generation,
@@ -1916,6 +2114,18 @@ impl UiState {
                 result,
             } => {
                 self.apply_recalled_input(thread_id, generation, request_id, result);
+            }
+            UiUpdate::DetailLinks {
+                thread_id,
+                generation,
+                request_id,
+                result,
+            } => {
+                if self.view().matches(&thread_id, generation)
+                    && let Some(details) = &mut self.details
+                {
+                    details.accept_links(request_id, result);
+                }
             }
             UiUpdate::OriginalPage {
                 request_id,
@@ -2385,9 +2595,12 @@ impl UiState {
                         .find(|v| v.thread_id.as_deref() == Some(&thread_id))
                     {
                         view.status = text;
+                        view.promote_status_notice(history_interaction::NoticeKind::Info);
                     }
                 } else {
                     self.active_view_mut().status = text;
+                    self.active_view_mut()
+                        .promote_status_notice(history_interaction::NoticeKind::Info);
                 }
             }
             UiUpdate::ClipboardAttachment {
@@ -2448,6 +2661,7 @@ impl UiState {
                 }
                 let previous = self.view();
                 let mut view = ThreadView::new(&self.config, previous.cwd.clone());
+                view.palette = self.palette;
                 view.connection = previous.connection.clone();
                 view.model = previous.model.clone();
                 view.effort = previous.effort.clone();
@@ -2464,7 +2678,9 @@ impl UiState {
                 view.status = "原依頼・元会話は変更しません。編集後Enterで新しい会話へ送信".into();
                 let key = view.draft.draft_id.clone();
                 self.views.insert(key.clone(), view);
+                self.active_view_mut().items.cancel_pending();
                 self.active = key;
+                self.active_view_mut().items.cancel_pending();
                 self.deferred_actions.push(UiAction::ActivateDraft {
                     draft_id: self.view().draft.draft_id.clone(),
                 });
@@ -2585,6 +2801,7 @@ impl UiState {
         match result {
             Ok(()) => {
                 view.pending.remove(&submission.revision);
+                view.operation_notice = None;
             }
             Err(error) => {
                 pending.status = ReceiptStatus::Failed;
@@ -2600,6 +2817,7 @@ impl UiState {
                         submission.revision
                     );
                 }
+                view.promote_status_notice(history_interaction::NoticeKind::Failure);
             }
         }
         self.dirty = true;
@@ -2898,7 +3116,9 @@ impl UiState {
                 return self.select_thread(saved);
             }
             let mut actions = self.persist_active();
+            self.active_view_mut().items.cancel_pending();
             self.active = key;
+            self.active_view_mut().items.cancel_pending();
             actions.push(UiAction::ActivateDraft {
                 draft_id: self.view().draft.draft_id.clone(),
             });
@@ -2922,13 +3142,16 @@ impl UiState {
             key.clone()
         } else {
             let mut view = ThreadView::new(&self.config, self.startup_cwd.clone());
+            view.palette = self.palette;
             view.thread_id = Some(thread_id.clone());
             view.draft_restore_pending = true;
             let key = view.draft.draft_id.clone();
             self.views.insert(key.clone(), view);
             key
         };
+        self.active_view_mut().items.cancel_pending();
         self.active = key;
+        self.active_view_mut().items.cancel_pending();
         self.thread_browser.close();
         let generation = self.generation;
         let view = self.active_view_mut();
@@ -2955,10 +3178,13 @@ impl UiState {
         self.cancel_input_recall();
         self.active_view_mut().cancel_navigation();
         let mut actions = self.persist_active();
-        let view = ThreadView::new(&self.config, self.startup_cwd.clone());
+        let mut view = ThreadView::new(&self.config, self.startup_cwd.clone());
+        view.palette = self.palette;
         let key = view.draft.draft_id.clone();
         self.views.insert(key.clone(), view);
+        self.active_view_mut().items.cancel_pending();
         self.active = key;
+        self.active_view_mut().items.cancel_pending();
         actions.push(UiAction::ActivateDraft {
             draft_id: self.view().draft.draft_id.clone(),
         });
@@ -3180,7 +3406,7 @@ impl UiState {
         let mut words = text.splitn(2, char::is_whitespace);
         let command = words.next().unwrap_or("");
         let argument = words.next().unwrap_or("").trim();
-        self.active_view_mut().status = "操作を準備しました".into();
+        self.active_view_mut().operation_notice = None;
         let thread_id = self.view().thread_id.clone();
         match command {
             "/actions" | "/operations" => {
@@ -4217,6 +4443,28 @@ impl UiState {
         if retained <= budget {
             return;
         }
+        for (key, view) in &mut self.views {
+            let protected = if key == &self.active {
+                view.nodes()
+                    .iter()
+                    .filter(|node| working.contains(&node.node_id))
+                    .flat_map(|node| {
+                        node.presentation.blocks.iter().enumerate().filter_map(
+                            move |(index, block)| {
+                                block
+                                    .tool
+                                    .as_ref()
+                                    .map(|tool| ItemKey::tool(tool, &node.node_id, index))
+                            },
+                        )
+                    })
+                    .chain(view.items.focus.iter().cloned())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            retained = retained.saturating_sub(view.items.evict_previews_except(&protected));
+        }
         // Vec::clear/remove leave the allocation alive. Release spare slots
         // before evicting useful content, and account for their actual capacity.
         for view in self.views.values_mut() {
@@ -4501,15 +4749,13 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     if state.selection_mode {
         frame.render_widget(Clear, area);
     }
-    let title = chrome::header(state.view(), area.width, state.selection_mode);
     frame.render_widget(
-        Paragraph::new(title).style(if state.selection_mode {
-            Style::default()
-                .fg(theme::TEXT)
-                .add_modifier(ratatui::style::Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::TEXT)
-        }),
+        Paragraph::new(chrome::header_line(
+            state.view(),
+            area.width,
+            state.selection_mode,
+            state.palette,
+        )),
         area,
     );
 }
@@ -4533,17 +4779,10 @@ fn draw_input(
     input: &input::Display,
     metrics: &input::Metrics,
 ) -> (u16, u16) {
-    let view = state.view();
     let input_width = input_area.width.saturating_sub(2).max(1);
     let input_body_height = input_area.height.saturating_sub(2);
     let (x, y) = metrics.cursor;
     let input_scroll = y.saturating_sub(usize::from(input_body_height.saturating_sub(1)));
-    let phase = view
-        .activity
-        .snapshot
-        .as_ref()
-        .map(|snapshot| snapshot.phase);
-    let (primary, secondary) = input::hints(&state.config.ui, phase, !view.draft.folds.is_empty());
     frame.render_widget(
         Paragraph::new(input::visible(
             input,
@@ -4554,8 +4793,7 @@ fn draw_input(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(primary)
-                .title_bottom(secondary),
+                .border_style(Style::default().fg(state.palette.muted())),
         ),
         input_area,
     );
@@ -4569,152 +4807,44 @@ fn draw_input(
 }
 fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let view = state.view();
-    let follow = if view.follow {
-        "追従中"
-    } else if view.unseen {
-        "追従停止・新着あり · Ctrl+Endで末尾へ"
-    } else {
-        "追従停止 · Ctrl+Endで末尾へ"
-    };
-    let mode = if state.selection_mode {
-        "F2/Esc解除 · 選択中・表示固定"
-    } else {
-        "F1 ヘルプ · F6 詳細 · F8 操作 · Ctrl+Q 終了"
-    };
-    let send = view.sending();
-    let activity_phase = view.footer_phase();
-    let has_activity = view.activity.snapshot.is_some();
-    let has_indicator = has_activity || send.is_some();
-    let busy = if has_indicator {
-        activity_phase.is_active() || activity_phase == activity::ActivityPhase::Recovery
-    } else {
-        view.run_id.is_some()
-    };
-    let attention = matches!(
-        activity_phase,
-        activity::ActivityPhase::Recovery | activity::ActivityPhase::Failed
-    ) || (!has_activity
-        && ["失敗", "エラー", "復旧待ち", "異常終了", "error", "failed"]
-            .iter()
-            .any(|word| view.state.contains(word) || view.status.contains(word)));
-    let status_note = if view.status == activity::ActivityPhase::Idle.label()
-        || (has_activity
-            && (view.status == activity_phase.label()
-                || view.status == view.state
-                || view.status == "完了"))
-    {
-        ""
-    } else {
-        &view.status
-    };
-    let mut status_parts = vec![follow.to_owned()];
-    if let Some(label) = view
+    let phase = view.footer_phase();
+    let spans = state.animation.spans(
+        phase,
+        Style::default().fg(state.palette.muted()),
+        Instant::now(),
+    );
+    let recovery = view
         .activity
         .snapshot
         .as_ref()
-        .and_then(|snapshot| snapshot.revisit.as_ref())
+        .and_then(|s| s.recovery.as_ref())
+        .map(|r| (r.message.as_str(), true));
+    let notice = state
+        .input_notice
+        .map(|text| (text, true))
+        .or_else(|| {
+            view.operation_notice.as_ref().map(|n| {
+                (
+                    n.text.as_str(),
+                    n.kind == history_interaction::NoticeKind::Failure,
+                )
+            })
+        })
+        .or(recovery);
+    let mut lines = chrome::footer_lines(
+        view,
+        area.width,
+        state.selection_mode,
+        state.palette,
+        spans,
+        notice,
+    );
+    if view.items.active
+        && let Some(line) = lines.get_mut(1)
     {
-        status_parts.insert(0, label.clone());
+        *line = Line::from("↑↓ 項目 · Space 開閉 · o 原文 · c コピー · Esc 入力");
     }
-    if activity_phase.is_active()
-        && let Some(summary) = view
-            .activity
-            .snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.context_reduction.as_ref())
-    {
-        status_parts.insert(0, summary.clone());
-    }
-    if let Some((phase, count, started)) = send {
-        let mut note = String::new();
-        if phase != activity_phase {
-            note.push_str(phase.label());
-        }
-        if count > 1 {
-            note.push_str(&format!(" {count}件"));
-        }
-        let seconds = started.elapsed().as_secs();
-        if seconds > 0 {
-            note.push_str(&format!(" 送信から{seconds}秒"));
-        }
-        if !note.is_empty() {
-            status_parts.insert(0, note.trim().to_owned());
-        }
-    }
-    if activity_phase != activity::ActivityPhase::Recovery
-        && busy
-        && send.is_none()
-        && let Some(elapsed_ms) = view.activity.displayed_elapsed_ms()
-        && elapsed_ms > 0
-    {
-        let seconds = elapsed_ms / 1000;
-        status_parts.push(if seconds >= 60 {
-            format!("観測経過{}分{}秒", seconds / 60, seconds % 60)
-        } else {
-            format!("観測経過{seconds}秒")
-        });
-    }
-    if let Some(note) = view.activity.receive_gap_note(Instant::now()) {
-        status_parts.push(note);
-    }
-    if view.tool_calls > 0 {
-        status_parts.push(format!("ツール{}回", view.tool_calls));
-    }
-    if view.cancelled_calls > 0 {
-        status_parts.push(format!("取消{}件", view.cancelled_calls));
-    }
-    if !has_indicator {
-        status_parts.insert(
-            0,
-            if view.thread_id.is_some() {
-                "状態を確認中"
-            } else {
-                "入力できます"
-            }
-            .into(),
-        );
-    }
-    let status_text = status_parts.join(" · ");
-    let style = Style::default().fg(if attention {
-        theme::ATTENTION
-    } else if busy || view.loading {
-        theme::ACCENT
-    } else {
-        theme::MUTED
-    });
-    let mut status_spans = Vec::new();
-    if has_indicator {
-        status_spans.extend(state.animation.spans(activity_phase, style, Instant::now()));
-        if activity_phase == activity::ActivityPhase::Retrying
-            && let Some(retry) = view
-                .activity
-                .snapshot
-                .as_ref()
-                .and_then(|snapshot| snapshot.automatic_retry.as_ref())
-        {
-            status_spans.push(Span::styled(retry.label(), style));
-        }
-        status_spans.push(Span::styled(" · ", style));
-    }
-    if view.loading {
-        status_spans.push(Span::styled("履歴 読込み中 · ", style));
-    }
-    status_spans.push(Span::styled(status_text.to_owned(), style));
-    let notice = if let Some(notice) = state.input_notice {
-        notice.to_owned()
-    } else if !state.selection_mode && !status_note.is_empty() {
-        format!("{status_note} · F1 ヘルプ · F8 操作")
-    } else {
-        mode.to_owned()
-    };
-    let notice = if state.input_notice.is_some() {
-        Line::styled(notice, Style::default().fg(theme::ATTENTION))
-    } else {
-        Line::from(notice)
-    };
-    let status = vec![Line::from(status_spans), notice];
-
-    frame.render_widget(Paragraph::new(status), area);
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn visible_render_nodes(
@@ -4808,6 +4938,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         state.view().nodes().len(),
     );
     state.remember_painted_bodies(&visible);
+    state.prepare_visible_tool_previews(&history, scroll, body_area.height.saturating_sub(2));
     state.prepare_visible_render_width(
         body_area.width.saturating_sub(4).max(1),
         &visible,
@@ -4835,6 +4966,14 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         );
     } else {
         draw_conversation(frame, body_area, &history, scroll);
+        history_interaction::highlight(
+            frame,
+            body_area,
+            &history,
+            scroll,
+            state.view(),
+            state.palette,
+        );
     }
     if let Some(snapshot) = &view.activity.snapshot {
         draw_recovery(frame, recovery_area, snapshot);
@@ -4897,6 +5036,13 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         // The selection owner remains visible even when a minimum-size popup
         // occupies row zero. Its input/footer state is otherwise unchanged.
         draw_header(frame, layout[0], state);
+    }
+    if state.palette.plain() {
+        for cell in &mut frame.buffer_mut().content {
+            cell.set_fg(ratatui::style::Color::Reset)
+                .set_bg(ratatui::style::Color::Reset);
+            cell.underline_color = ratatui::style::Color::Reset;
+        }
     }
     state.dirty = false;
 }
@@ -5325,7 +5471,7 @@ mod layout_cache_tests {
             };
             let layout = ui.history_layout(80, height);
             let top = layout.lines.saturating_sub(usize::from(height) + 2);
-            let source = layout.sources[top];
+            let source = &layout.sources[top];
             ui.view_mut().anchor = ViewAnchor {
                 node_id: Some(ui.view().nodes()[source.node].node_id.clone()),
                 char_offset: source.offset,
@@ -5341,7 +5487,7 @@ mod layout_cache_tests {
             for step in 0..80 {
                 let layout = ui.history_layout(80, height);
                 let top = ui.viewport_row(&layout, 80, height);
-                let source = layout.sources[top];
+                let source = &layout.sources[top];
                 let first = layout
                     .sources
                     .iter()
@@ -5437,7 +5583,8 @@ mod layout_cache_tests {
             }
             text
         };
-        assert!(line(&terminal).contains("一時的なエラーのため再試行中（1/2）"));
+        assert!(line(&terminal).contains("一時的なエラーのため再試行中"));
+        assert!(line(&terminal).contains("（1/2）"));
         assert!(line(&terminal).contains("60秒待機"));
         assert!(line(&terminal).contains("途中応答を保存して作り直し"));
         assert!(line(&terminal).contains("重複課金の可能性"));
@@ -6008,7 +6155,7 @@ mod layout_cache_tests {
         ui.select_thread("t".into());
         let mut first = node("event-0", "context changed");
         first.presentation.kind = crate::presentation::PresentationKind::Event;
-        first.presentation.title = "状態変更".into();
+        first.presentation.title = "状態変更 · AGENTS更新".into();
         let mut second = first.clone();
         second.node_id = "event-1".into();
         ui.apply(UiUpdate::History {
@@ -6566,5 +6713,201 @@ mod stale_rebase_retry_tests {
             assert_eq!(ui.view().scroll.pending, 7);
             assert!(ui.take_deferred_actions().is_empty());
         }
+    }
+}
+
+#[cfg(test)]
+mod conversation_perf_observation {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+    #[test]
+    #[ignore = "manual native latency observation; no provider or user data"]
+    fn conversation_128_nodes_50_tools_latency() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let nodes = (0..128)
+            .map(|n| {
+                let text = format!("Synthetic message {n}: bounded fixture body.");
+                let tool = n >= 78;
+                UiNode {
+                    node_id: format!("perf-{n}"),
+                    role: if tool { "tool" } else { "assistant" }.into(),
+                    total_chars: text.chars().count(),
+                    text: text.clone(),
+                    presentation: crate::presentation::NodePresentation {
+                        projection_stamp: Some([n as u8; 32]),
+                        kind: if tool {
+                            crate::presentation::PresentationKind::ToolResult
+                        } else {
+                            crate::presentation::PresentationKind::Assistant
+                        },
+                        blocks: vec![crate::presentation::PresentationBlock {
+                            kind: if tool {
+                                crate::presentation::BlockKind::ToolResult
+                            } else {
+                                crate::presentation::BlockKind::Prose
+                            },
+                            text,
+                            tool: tool.then(|| crate::presentation::ToolPresentation {
+                                call_id: format!("call-{n}"),
+                                command: format!("fixture-{n}"),
+                                status: "completed".into(),
+                                exit_code: Some(0),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            })
+            .collect();
+        ui.view_mut().thread_id = Some("fixture".into());
+        ui.apply(UiUpdate::History {
+            thread_id: "fixture".into(),
+            generation: 0,
+            nodes,
+            pending: Default::default(),
+            read_revision: 1,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 1,
+            total_nodes: 128,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let interact = std::env::var("SHELLBOY_PERF_MODE").as_deref() == Ok("interaction");
+        if interact {
+            ui.event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+        }
+        let mut samples = Vec::new();
+        for i in 0..520 {
+            let start = Instant::now();
+            let builds_before = ui.layout_cache.builds;
+            let units_before = ui.layout_cache.unit_builds;
+            if interact {
+                ui.event(Event::Key(KeyEvent::new(
+                    if i % 2 == 0 {
+                        KeyCode::Up
+                    } else {
+                        KeyCode::Down
+                    },
+                    KeyModifiers::NONE,
+                )));
+                if i % 4 == 0 {
+                    ui.event(Event::Key(KeyEvent::new(
+                        KeyCode::Char(' '),
+                        KeyModifiers::NONE,
+                    )));
+                }
+            }
+            terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+            if i >= 20 {
+                samples.push(start.elapsed().as_micros());
+            }
+            if interact && i % 4 != 0 {
+                assert_eq!(
+                    ui.layout_cache.builds, builds_before,
+                    "focus alone must reuse the whole layout"
+                );
+                assert_eq!(
+                    ui.layout_cache.unit_builds, units_before,
+                    "focus alone must not measure item bodies"
+                );
+            }
+        }
+        samples.sort_unstable();
+        println!(
+            "PERF128 mode={} samples={} p50_us={} p95_us={} max_us={} layout_builds={} unit_builds={} unit_hits={}",
+            if interact { "interaction" } else { "redraw" },
+            samples.len(),
+            samples[samples.len() / 2],
+            samples[samples.len() * 95 / 100],
+            samples.last().unwrap(),
+            ui.layout_cache.builds,
+            ui.layout_cache.unit_builds,
+            ui.layout_cache.unit_hits
+        );
+    }
+}
+
+#[cfg(test)]
+mod paused_tool_preview_tests {
+    use super::*;
+    use crate::presentation::{BlockKind, OutputStream, PresentationBlock, ToolPresentation};
+    #[test]
+    fn paused_tool_refresh_adopts_tail_without_replacing_prose_or_source_offsets() {
+        let tool = ToolPresentation {
+            call_id: "c".into(),
+            group_id: Some("g".into()),
+            status: "requested".into(),
+            ..Default::default()
+        };
+        let mut node = UiNode {
+            node_id: "n".into(),
+            text: "paid canonical prose".into(),
+            base_char_offset: 40,
+            total_chars: 60,
+            presentation: NodePresentation {
+                read_revision: 7,
+                blocks: vec![
+                    PresentationBlock {
+                        kind: BlockKind::Prose,
+                        text: "paid canonical prose".into(),
+                        source_start: 40,
+                        source_end: 60,
+                        source_exact: true,
+                        ..Default::default()
+                    },
+                    PresentationBlock {
+                        kind: BlockKind::ToolCall,
+                        tool: Some(tool.clone()),
+                        source_start: 60,
+                        source_end: 80,
+                        source_exact: true,
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut incoming = node.tool_stub().unwrap();
+        let mut failed = tool;
+        failed.status = "failed".into();
+        failed.exit_code = Some(7);
+        incoming.presentation.blocks[0].tool = Some(failed.clone());
+        incoming.presentation.blocks.push(PresentationBlock {
+            kind: BlockKind::ToolResult,
+            stream: Some(OutputStream::Stderr),
+            text: "true tail".into(),
+            tool: Some(failed),
+            source_exact: false,
+            ..Default::default()
+        });
+        incoming.presentation.fields.push(PresentationField {
+            key: "/ui_raw_stream_preview/c".into(),
+            label: "tail".into(),
+            value: "bounded suffix".into(),
+            ..Default::default()
+        });
+        assert!(node.refresh_tools(&incoming));
+        assert_eq!(node.text, "paid canonical prose");
+        assert_eq!(node.base_char_offset, 40);
+        assert_eq!(node.presentation.read_revision, 7);
+        assert_eq!(node.presentation.blocks[0].text, "paid canonical prose");
+        let tail = node
+            .presentation
+            .blocks
+            .iter()
+            .find(|block| block.stream == Some(OutputStream::Stderr))
+            .unwrap();
+        assert_eq!(tail.text, "true tail");
+        assert_eq!((tail.source_start, tail.source_end), (60, 80));
+        assert!(
+            !node.refresh_tools(&incoming),
+            "unchanged facts and tail do not invalidate layout"
+        );
     }
 }

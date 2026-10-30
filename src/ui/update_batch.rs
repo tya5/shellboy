@@ -6,7 +6,8 @@ impl UiUpdate {
     pub(super) fn needs_retention(&self) -> bool {
         // Exhaustive: new update kinds must choose their cache responsibility.
         match self {
-            Self::ToolFacts { .. }
+            Self::ToolPreview { .. }
+            | Self::ToolFacts { .. }
             | Self::HistoryWindow { .. }
             | Self::History { .. }
             | Self::StreamCommitted { .. }
@@ -18,7 +19,8 @@ impl UiUpdate {
             | Self::EditRequestLoaded { .. }
             | Self::SavedMessage { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
-            Self::SendOperation { .. }
+            Self::DetailLinks { .. }
+            | Self::SendOperation { .. }
             | Self::DraftRecovery { .. }
             | Self::RestoreArchives { .. }
             | Self::SavedMessagePending { .. }

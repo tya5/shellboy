@@ -3,7 +3,17 @@ use super::ThreadView;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-pub(super) fn header(view: &ThreadView, width: u16, selection: bool) -> String {
+/// Fixed header surface; metadata occupies a separate right-aligned region.
+pub(super) fn header_line(
+    view: &ThreadView,
+    width: u16,
+    selection: bool,
+    palette: super::theme::Palette,
+) -> ratatui::text::Line<'static> {
+    use ratatui::{
+        style::{Modifier, Style},
+        text::{Line, Span},
+    };
     if selection {
         let label = if width >= 38 {
             "表示固定（選択中） · F2/Esc解除"
@@ -12,41 +22,177 @@ pub(super) fn header(view: &ThreadView, width: u16, selection: bool) -> String {
         } else {
             "表示固定"
         };
-        return fit(label, usize::from(width), false);
+        return Line::styled(
+            fit(label, usize::from(width), false),
+            palette.header().add_modifier(Modifier::BOLD),
+        );
     }
     let width = usize::from(width);
-    let phase = if view.activity.snapshot.is_some() || view.sending().is_some() {
-        view.footer_phase().label()
-    } else if view.thread_id.is_some() {
-        "状態を確認中"
-    } else {
-        "入力できます"
-    };
-    let mut text = fit(&format!("[{phase}]"), width, false);
-    let model = view.model.as_deref().unwrap_or("モデル未設定");
-    let available = width.saturating_sub(text.width() + 3);
-    let model_reserve = if available >= 9 {
-        model.width().min(available / 2)
-    } else {
-        0
-    };
-    let title_width = (width / 2)
-        .min(available.saturating_sub(model_reserve + if model_reserve > 0 { 3 } else { 0 }));
-    let mut append = |value: &str, limit: usize, tail: bool| {
-        let remaining = width.saturating_sub(text.width() + 3);
-        if remaining >= 3 {
-            let value = fit(value, remaining.min(limit), tail);
-            if !value.is_empty() {
-                text.push_str(" · ");
-                text.push_str(&value);
-            }
+    let phase = view.footer_phase();
+    let marker = match phase {
+        super::activity::ActivityPhase::Recovery | super::activity::ActivityPhase::Failed => {
+            format!("! {}", phase.column_label())
         }
+        super::activity::ActivityPhase::Stopped => "■".into(),
+        super::activity::ActivityPhase::Completed => "✓".into(),
+        super::activity::ActivityPhase::Idle => "·".into(),
+        _ => "◌".into(),
     };
-    append(&view.title, title_width, false);
-    append(model, usize::MAX, false);
-    append(&view.cwd.to_string_lossy(), usize::MAX, true);
-    append(&format!("AGENTS: {}", view.agents_path), usize::MAX, true);
-    text
+    let marker = fit(&marker, width, false);
+    let model = view.model.as_deref().unwrap_or("");
+    let available = width.saturating_sub(marker.width() + 2);
+    let reserve = model.width().min(24).min(available / 2);
+    let title_width = (width / 2).min(available.saturating_sub(reserve + usize::from(reserve > 0)));
+    let title = fit(&view.title, title_width, false);
+    let left_width = marker.width() + usize::from(!title.is_empty()) + title.width();
+    let right_width = width.saturating_sub(left_width + 1);
+    let mut right = fit(model, right_width.min(24), false);
+    if let Some(connection) = view.connection.as_deref() {
+        let remaining = right_width.saturating_sub(right.width() + 3);
+        if remaining >= 3 {
+            right = format!("{} · {right}", fit(connection, remaining.min(16), false));
+        }
+    }
+    let path_width = right_width.saturating_sub(right.width() + usize::from(!right.is_empty()) * 3);
+    if path_width >= 5 && !view.cwd.as_os_str().is_empty() {
+        let path = fit(&view.cwd.to_string_lossy(), path_width, true);
+        if !right.is_empty() {
+            right.push_str(" · ");
+        }
+        right.push_str(&path);
+    }
+    let gap = width.saturating_sub(left_width + right.width());
+    let attention = matches!(
+        phase,
+        super::activity::ActivityPhase::Recovery | super::activity::ActivityPhase::Failed
+    );
+    let marker_style = if attention && !palette.plain() {
+        Style::default()
+            .fg(super::theme::ATTENTION)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        palette.interactive()
+    };
+    let mut spans = vec![Span::styled(marker, marker_style)];
+    if !title.is_empty() {
+        spans.push(Span::styled(
+            format!(" {title}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.push(Span::styled(right, Style::default().fg(palette.muted())));
+    Line::from(spans).style(palette.header())
+}
+
+#[cfg(test)]
+fn header(view: &ThreadView, width: u16, selection: bool) -> String {
+    header_line(
+        view,
+        width,
+        selection,
+        super::theme::Palette::from_capabilities(crate::config::PaletteMode::Dark, false, true),
+    )
+    .spans
+    .iter()
+    .map(|span| span.content.as_ref())
+    .collect()
+}
+
+/// Two quiet footer rows. Caller owns animation and transient-notice lifetime.
+pub(super) fn footer_lines(
+    view: &ThreadView,
+    width: u16,
+    selection: bool,
+    palette: super::theme::Palette,
+    mut activity_spans: Vec<ratatui::text::Span<'static>>,
+    notice: Option<(&str, bool)>,
+) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::{
+        style::Style,
+        text::{Line, Span},
+    };
+    let phase = view.footer_phase();
+    let mut facts = Vec::new();
+    if !view.follow {
+        facts.push(if view.unseen {
+            "↓ new".into()
+        } else {
+            "↓".into()
+        });
+    }
+    let send = view.sending();
+    if let Some((send_phase, count, started)) = send {
+        facts.push(format!(
+            "{} {count} · {}s",
+            send_phase.label(),
+            started.elapsed().as_secs()
+        ));
+    } else if view
+        .activity
+        .snapshot
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.turn_in_progress)
+        && phase != super::activity::ActivityPhase::Recovery
+        && let Some(elapsed) = view.activity.displayed_elapsed_ms()
+    {
+        facts.push(format!("{}s", elapsed / 1000));
+    }
+    if view.pending_messages.total > 0 {
+        facts.push(format!("待ち {}", view.pending_messages.total));
+    }
+    if view.tool_calls > 0 {
+        facts.push(format!("{} tools", view.tool_calls));
+    }
+    if view.cancelled_calls > 0 {
+        facts.push(format!("× {}", view.cancelled_calls));
+    }
+    if let Some(snapshot) = view.activity.snapshot.as_ref() {
+        if let Some(retry) = snapshot.automatic_retry.as_ref() {
+            facts.push(retry.label());
+        }
+        if let Some(revisit) = snapshot.revisit.as_ref() {
+            facts.push(revisit.clone());
+        }
+        if phase.is_active()
+            && let Some(reduction) = snapshot.context_reduction.as_ref()
+        {
+            facts.push(reduction.clone());
+        }
+    }
+    if let Some(gap) = view.activity.receive_gap_note(std::time::Instant::now()) {
+        facts.push(gap);
+    }
+    if view.loading {
+        facts.push("…".into());
+    }
+    let facts = fit(
+        &facts.join(" · "),
+        usize::from(width).saturating_sub(
+            activity_spans
+                .iter()
+                .map(|s| s.content.width())
+                .sum::<usize>()
+                + 3,
+        ),
+        false,
+    );
+    if !facts.is_empty() {
+        if !activity_spans.is_empty() {
+            activity_spans.push(Span::raw(" · "));
+        }
+        activity_spans.push(Span::styled(facts, Style::default().fg(palette.muted())));
+    }
+    let (hint, error) = notice.unwrap_or((if selection { "F2/Esc" } else { "F1 help" }, false));
+    let notice_style = if error && !palette.plain() {
+        Style::default().fg(super::theme::ATTENTION)
+    } else {
+        Style::default().fg(palette.muted())
+    };
+    vec![
+        Line::from(activity_spans),
+        Line::styled(fit(hint, usize::from(width), false), notice_style),
+    ]
 }
 
 /// No filesystem observation: only settings and the worker-provided cwd are projected.
@@ -237,10 +383,6 @@ mod tests {
                 "{width}x{height}: {shown}"
             );
             assert!(
-                shown.contains("Enter"),
-                "the input's main action remains readable: {shown}"
-            );
-            assert!(
                 ui.view().scroll.area.unwrap().height >= 3,
                 "a padded source row remains available"
             );
@@ -270,7 +412,7 @@ mod tests {
                 .unwrap();
             let text = header(ui.view(), width, false);
             assert!(text.width() <= usize::from(width), "{width}: {text}");
-            assert!(text.starts_with("[復旧"));
+            assert!(text.starts_with("! 復旧"));
             if width >= 40 {
                 assert!(text.contains("mock-model"), "{width}: {text}");
             }
@@ -278,8 +420,7 @@ mod tests {
                 assert!(text.contains('…'));
             }
             let buffer = terminal.backend().buffer();
-            assert_eq!(buffer[(0, 0)].symbol(), "[");
-            assert_eq!(buffer[(0, 0)].fg, super::super::theme::TEXT);
+            assert_eq!(buffer[(0, 0)].symbol(), "!");
         }
         assert_eq!(ui.view().title, original);
         ui.view_mut().title = "短い題名".into();
@@ -289,5 +430,73 @@ mod tests {
         assert!(ui.view().cwd.to_string_lossy().len() > 200);
         assert_eq!(fit("e\u{301}日本語", 3, false), "e\u{301}…");
         assert!(!fit("unsafe\u{1b}[31m\nvalue", 80, false).contains('\u{1b}'));
+    }
+    #[test]
+    fn header_separates_metadata_and_quiet_footer_keeps_queue_and_errors() {
+        use crate::config::PaletteMode;
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::Span;
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/long/synthetic/project"));
+        ui.view_mut().title = "Important conversation".into();
+        ui.view_mut().connection = Some("fixture-link".into());
+        ui.view_mut().model = Some("fixture-model".into());
+        ui.view_mut().pending_messages.total = 2;
+        for mode in [PaletteMode::Dark, PaletteMode::Light] {
+            let palette = super::super::theme::Palette::from_capabilities(mode, false, true);
+            let line = header_line(ui.view(), 100, false, palette);
+            assert_eq!(line.style, palette.header());
+            assert_eq!(line.width(), 100);
+            assert!(
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains("Important")
+                        && span.style.add_modifier.contains(Modifier::BOLD))
+            );
+            let metadata = line.spans.last().unwrap();
+            assert!(metadata.content.contains("fixture-model"));
+            assert!(metadata.content.contains("fixture-link"));
+            assert!(metadata.content.ends_with("/project"));
+            assert_eq!(metadata.style.fg, Some(palette.muted()));
+            let rows = footer_lines(ui.view(), 100, false, palette, vec![Span::raw("✓")], None);
+            let text = rows
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            assert!(text.contains("待ち 2") && text.contains("F1 help"));
+            assert!(!text.contains("追従") && !text.contains("F6") && !text.contains("F8"));
+            let rows = footer_lines(
+                ui.view(),
+                100,
+                false,
+                palette,
+                vec![],
+                Some(("saved operation failed", true)),
+            );
+            assert_eq!(
+                rows[1].style,
+                Style::default().fg(super::super::theme::ATTENTION)
+            );
+            assert!(rows[1].spans[0].content.contains("saved operation failed"));
+        }
+        let original = ui.view().title.clone();
+        ui.view_mut().title = "unsafe\u{1b}[31m\nheader".into();
+        let line = header_line(
+            ui.view(),
+            35,
+            false,
+            super::super::theme::Palette::from_capabilities(PaletteMode::Dark, false, false),
+        );
+        assert!(line.width() <= 35);
+        assert!(
+            line.spans
+                .iter()
+                .all(|span| !span.content.chars().any(|ch| matches!(ch, '\n' | '\u{1b}')))
+        );
+        assert_ne!(ui.view().title, original);
+        assert!(
+            ui.view().title.contains('\u{1b}'),
+            "rendering must not rewrite saved source"
+        );
     }
 }

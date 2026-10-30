@@ -23,6 +23,12 @@ enum Mode {
 }
 pub(super) struct Details {
     pub node_id: String,
+    source_node_ids: Vec<String>,
+    item_scoped: bool,
+    extra_links: Vec<crate::presentation::PresentationLink>,
+    links_pending: bool,
+    links_request_id: u64,
+    links_error: Option<String>,
     mode: Mode,
     selected: usize,
     internal_fields: bool,
@@ -350,6 +356,12 @@ impl Details {
             .unwrap_or_default();
         let revision = source_revision(view, &node_id);
         Self {
+            source_node_ids: vec![node_id.clone()],
+            item_scoped: false,
+            extra_links: vec![],
+            links_pending: false,
+            links_request_id: 0,
+            links_error: None,
             node_id,
             mode: if links { Mode::Links } else { Mode::Nodes },
             selected: if links { 0 } else { selected_node },
@@ -360,6 +372,82 @@ impl Details {
             original: None,
             original_lines: Vec::new(),
             revision,
+        }
+    }
+    pub(super) fn for_node(view: &ThreadView, node_id: String, links: bool) -> Self {
+        let mut details = Self::new(view, links);
+        details.node_id = node_id.clone();
+        details.source_node_ids = vec![node_id];
+        details.item_scoped = true;
+        details.mode = if links { Mode::Links } else { Mode::Fields };
+        details.selected = 0;
+        details.revision = source_revision(view, &details.node_id);
+        details
+    }
+    pub(super) fn with_sources(mut self, sources: &[String]) -> Self {
+        self.source_node_ids = sources.iter().take(2).cloned().collect();
+        if !self.source_node_ids.contains(&self.node_id) {
+            self.source_node_ids.truncate(1);
+            self.source_node_ids.push(self.node_id.clone());
+        }
+        self
+    }
+    fn links(&self, view: &ThreadView) -> Vec<crate::presentation::PresentationLink> {
+        let mut links = Vec::new();
+        for id in &self.source_node_ids {
+            if let Some(node) = view.nodes().iter().find(|node| &node.node_id == id) {
+                for link in &node.presentation.links {
+                    if links.len() >= 128 {
+                        return links;
+                    }
+                    if !links
+                        .iter()
+                        .any(|saved: &crate::presentation::PresentationLink| saved.url == link.url)
+                    {
+                        links.push(link.clone());
+                    }
+                }
+            }
+        }
+        for link in &self.extra_links {
+            if links.len() >= 128 {
+                break;
+            }
+            if !links.iter().any(|saved| saved.url == link.url) {
+                links.push(link.clone());
+            }
+        }
+        links
+    }
+    pub(super) fn request_links(
+        &mut self,
+        thread_id: String,
+        generation: u64,
+        next: &mut u64,
+    ) -> UiAction {
+        *next = next.wrapping_add(1);
+        self.links_request_id = *next;
+        self.links_pending = true;
+        self.links_error = None;
+        UiAction::LoadDetailLinks {
+            thread_id,
+            generation,
+            request_id: self.links_request_id,
+            node_ids: self.source_node_ids.clone(),
+        }
+    }
+    pub(super) fn accept_links(
+        &mut self,
+        request_id: u64,
+        result: Result<Vec<crate::presentation::PresentationLink>, String>,
+    ) {
+        if self.links_request_id != request_id || !self.links_pending {
+            return;
+        }
+        self.links_pending = false;
+        match result {
+            Ok(links) => self.extra_links = links.into_iter().take(128).collect(),
+            Err(error) => self.links_error = Some(error),
         }
     }
     pub fn accept(&mut self, request_id: u64, body: HistoryBody, display: Vec<Line<'static>>) {
@@ -406,12 +494,19 @@ impl Details {
         match key.code {
             KeyCode::Esc => return Outcome::Close,
             KeyCode::F(6) => {
-                self.mode = Mode::Nodes;
-                self.selected = view
-                    .nodes()
-                    .iter()
-                    .position(|node| node.node_id == self.node_id)
-                    .unwrap_or(0);
+                self.mode = if self.item_scoped {
+                    Mode::Fields
+                } else {
+                    Mode::Nodes
+                };
+                self.selected = if self.item_scoped {
+                    0
+                } else {
+                    view.nodes()
+                        .iter()
+                        .position(|node| node.node_id == self.node_id)
+                        .unwrap_or(0)
+                };
                 self.scroll.set(0);
             }
             KeyCode::F(7) | KeyCode::Char('l') => {
@@ -464,12 +559,10 @@ impl Details {
                         }
                         field.map(|f| f.value)
                     }
-                    Mode::Links => view
-                        .nodes()
-                        .iter()
-                        .find(|n| n.node_id == self.node_id)
-                        .and_then(|n| n.presentation.links.get(self.selected))
-                        .map(|l| l.url.clone()),
+                    Mode::Links => self
+                        .links(view)
+                        .get(self.selected)
+                        .map(|link| link.url.clone()),
                     Mode::Original => self.original.as_ref().map(|b| b.text.clone()),
                 };
                 if let Some(text) = text {
@@ -524,11 +617,7 @@ impl Details {
         let count = match self.mode {
             Mode::Nodes => view.nodes().len(),
             Mode::Fields => self.fields(view).len(),
-            Mode::Links => view
-                .nodes()
-                .iter()
-                .find(|n| n.node_id == self.node_id)
-                .map_or(0, |n| n.presentation.links.len()),
+            Mode::Links => self.links(view).len(),
             Mode::Original => 1,
         };
         self.selected = self.selected.min(count.saturating_sub(1));
@@ -543,6 +632,11 @@ impl Details {
             && self.node_id != node.node_id
         {
             self.node_id = node.node_id.clone();
+            self.source_node_ids = vec![self.node_id.clone()];
+            self.links_request_id = 0;
+            self.links_pending = false;
+            self.links_error = None;
+            self.extra_links.clear();
             self.revision = source_revision(view, &self.node_id);
             self.original = None;
             self.original_lines = Vec::new();
@@ -564,11 +658,7 @@ impl Details {
         let count = match self.mode {
             Mode::Nodes => view.nodes().len(),
             Mode::Fields => self.fields(view).len(),
-            Mode::Links => view
-                .nodes()
-                .iter()
-                .find(|node| node.node_id == self.node_id)
-                .map_or(0, |node| node.presentation.links.len()),
+            Mode::Links => self.links(view).len(),
             Mode::Original => 0,
         };
         let mode = match self.mode {
@@ -614,6 +704,22 @@ impl Details {
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
             frame.render_widget(
                 ratatui::widgets::Paragraph::new("表示が更新されました。node参照を維持しています")
+                    .style(Style::default().fg(theme::WARNING)),
+                Rect { height: 1, ..body },
+            );
+            body.y += 1;
+            body.height -= 1;
+        }
+        if matches!(self.mode, Mode::Links)
+            && body.height > 1
+            && (self.links_pending || self.links_error.is_some())
+        {
+            let notice = self
+                .links_error
+                .as_deref()
+                .unwrap_or("出典のリンクを取得中");
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(safe(notice))
                     .style(Style::default().fg(theme::WARNING)),
                 Rect { height: 1, ..body },
             );
@@ -689,33 +795,26 @@ impl Details {
                 field_selection = Some(selected_row);
                 rows
             }
-            Mode::Links => view
-                .nodes()
+            Mode::Links => self
+                .links(view)
                 .iter()
-                .find(|node| node.node_id == self.node_id)
-                .map(|node| {
-                    node.presentation
-                        .links
-                        .iter()
-                        .enumerate()
-                        .map(|(index, link)| {
-                            targets.push(std::sync::Arc::<str>::from(link.url.as_str()));
-                            let mut lines = Vec::new();
-                            if link.label != link.url {
-                                lines.push(Line::from(safe(&link.label)));
-                            }
-                            let style = Style::default()
-                                .fg(theme::LINK)
-                                .underline_color(crate::terminal_links::marker_color(index));
-                            lines.push(Line::from(Span::styled(safe(&link.url), style)));
-                            ListItem::new(super::presentation::hanging_wrap(
-                                lines,
-                                body.width.saturating_sub(3).max(1),
-                            ))
-                        })
-                        .collect()
+                .enumerate()
+                .map(|(index, link)| {
+                    targets.push(std::sync::Arc::<str>::from(link.url.as_str()));
+                    let mut lines = Vec::new();
+                    if link.label != link.url {
+                        lines.push(Line::from(safe(&link.label)));
+                    }
+                    let style = Style::default()
+                        .fg(theme::LINK)
+                        .underline_color(crate::terminal_links::marker_color(index));
+                    lines.push(Line::from(Span::styled(safe(&link.url), style)));
+                    ListItem::new(super::presentation::hanging_wrap(
+                        lines,
+                        body.width.saturating_sub(3).max(1),
+                    ))
                 })
-                .unwrap_or_default(),
+                .collect(),
             Mode::Original => {
                 let loading = [Line::from("原文を取得中…")];
                 let lines = if self.original.is_some() {
@@ -817,6 +916,108 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    #[test]
+    fn scoped_offwindow_links_append_without_inserting_source_nodes_and_reject_old_replies() {
+        let ui = state();
+        let before = ui.view().nodes().to_vec();
+        let ids = vec!["source-node".to_owned(), "offwindow-result".to_owned()];
+        let mut details =
+            Details::for_node(ui.view(), "offwindow-result".into(), true).with_sources(&ids);
+        let mut next = 10;
+        let request = details.request_links("anonymous".into(), ui.view().generation, &mut next);
+        let token = match request {
+            UiAction::LoadDetailLinks {
+                request_id,
+                node_ids,
+                ..
+            } => {
+                assert_eq!(node_ids, ids);
+                request_id
+            }
+            _ => panic!("expected scoped links read"),
+        };
+        let extra = PresentationLink {
+            label: "saved result link".into(),
+            url: "https://example.invalid/offwindow".into(),
+            ..Default::default()
+        };
+        details.accept_links(token - 1, Ok(vec![extra.clone()]));
+        assert!(details.links_pending && details.extra_links.is_empty());
+        details.accept_links(token, Ok(vec![extra.clone()]));
+        assert!(!details.links_pending);
+        let links = details.links(ui.view());
+        assert_eq!(links.len(), 31);
+        assert!(links.iter().any(|link| link.url == extra.url));
+        assert_eq!(details.node_id, "offwindow-result");
+        assert_eq!(
+            ui.view().nodes(),
+            &before,
+            "offpage link metadata must not alter history order/body windows"
+        );
+        details.accept_links(token, Err("late duplicate".into()));
+        assert!(details.links_error.is_none());
+    }
+    #[test]
+    fn original_page_requests_do_not_invalidate_separate_scoped_link_request() {
+        let ui = state();
+        let mut details = Details::for_node(ui.view(), "source-node".into(), true);
+        let mut next = 0;
+        details.request_links("anonymous".into(), ui.view().generation, &mut next);
+        let links_token = details.links_request_id;
+        let original = details.open_source("source-node".into(), &mut next);
+        assert!(
+            matches!(original,UiAction::LoadOriginal{request_id,..} if request_id!=links_token)
+        );
+        details.accept_links(
+            links_token,
+            Ok(vec![PresentationLink {
+                label: "later".into(),
+                url: "https://example.invalid/later".into(),
+                ..Default::default()
+            }]),
+        );
+        assert_eq!(details.extra_links.len(), 1);
+        assert!(!details.links_pending);
+        assert!(matches!(details.mode, Mode::Original));
+        assert_ne!(details.request_id, details.links_request_id);
+    }
+    #[test]
+    fn selecting_another_source_clears_scoped_link_cache_and_invalidates_pending_reply() {
+        let mut ui = state();
+        let mut second = ui.view().nodes()[0].clone();
+        second.node_id = "second".into();
+        second.presentation.links.clear();
+        ui.view_mut().nodes_mut_for_test().push(second);
+        let mut details = Details::new(ui.view(), false);
+        details.selected = 0;
+        details.sync_node(ui.view());
+        let mut next = 20;
+        details.request_links("anonymous".into(), ui.view().generation, &mut next);
+        let old = details.links_request_id;
+        details.accept_links(
+            old,
+            Ok(vec![PresentationLink {
+                url: "https://example.invalid/old".into(),
+                ..Default::default()
+            }]),
+        );
+        details.request_links("anonymous".into(), ui.view().generation, &mut next);
+        let pending = details.links_request_id;
+        details.selected = 1;
+        details.sync_node(ui.view());
+        assert_eq!(details.node_id, "second");
+        assert!(details.extra_links.is_empty());
+        assert!(!details.links_pending);
+        assert_eq!(details.links_request_id, 0);
+        details.accept_links(
+            pending,
+            Ok(vec![PresentationLink {
+                url: "https://example.invalid/stale".into(),
+                ..Default::default()
+            }]),
+        );
+        assert!(details.links(ui.view()).is_empty());
     }
     #[test]
     fn saved_interruption_sections_are_distinguishable_and_keep_their_original_targets() {

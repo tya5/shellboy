@@ -203,6 +203,7 @@ pub(super) fn visible(
     lines
 }
 
+#[cfg(test)]
 pub(super) fn hints(
     config: &crate::config::Ui,
     phase: Option<super::activity::ActivityPhase>,
@@ -307,6 +308,15 @@ mod tests {
     #[test]
     fn folded_paste_uses_projected_height_and_typed_chip_style_without_changing_send_text() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        // This assertion exercises the rich palette deliberately. The host may
+        // set NO_COLOR/TERM=dumb; never mutate process-wide environment in tests.
+        let palette = super::super::theme::Palette::from_capabilities(
+            crate::config::PaletteMode::Dark,
+            false,
+            true,
+        );
+        ui.palette = palette;
+        ui.view_mut().palette = palette;
         let original = "source line 日本語\n".repeat(40);
         ui.insert(&original, true);
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();

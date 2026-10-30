@@ -67,6 +67,7 @@ impl UiState {
             || matches!(&event, Event::Key(key) if key.kind != KeyEventKind::Release)
         {
             self.input_notice = None;
+            self.active_view_mut().clear_operation_notice();
         }
         let usage_before = self.management.usage_snapshot;
         let owner_before = self.management.owner.clone();
@@ -118,6 +119,10 @@ impl UiState {
             actions.push(UiAction::CloseUsageDetails {
                 epoch: self.management.epoch,
             });
+        }
+        if self.active == input_owner {
+            self.active_view_mut()
+                .promote_status_notice(history_interaction::NoticeKind::Info);
         }
         self.scope_management_actions(actions)
     }
@@ -237,6 +242,9 @@ impl UiState {
                             3
                         })
                     }
+                    MouseEventKind::Down(event::MouseButton::Left) => {
+                        self.history_click(mouse.column, mouse.row)
+                    }
                     _ => vec![],
                 }
             }
@@ -268,12 +276,10 @@ impl UiState {
             return self.overlay_key(owner, key);
         }
         if key.code == KeyCode::F(6) {
-            self.details = Some(details::Details::new(self.view(), false));
-            return vec![];
+            return self.open_history_details(false, false);
         }
         if key.code == KeyCode::F(7) {
-            self.details = Some(details::Details::new(self.view(), true));
-            return vec![];
+            return self.open_history_details(true, false);
         }
         if key.code == KeyCode::F(8) {
             self.open_operations(None);
@@ -314,6 +320,7 @@ impl UiState {
                 KeyCode::Char('n') => return self.new_chat(),
                 KeyCode::End => {
                     let view = self.active_view_mut();
+                    view.items.active = false;
                     view.cancel_navigation();
                     view.follow = true;
                     view.unseen = false;
@@ -331,6 +338,9 @@ impl UiState {
                 }
                 _ => {}
             }
+        }
+        if let Some(actions) = self.history_focus_key(key) {
+            return actions;
         }
         if self.immediate_chord {
             self.immediate_chord = false;
@@ -904,9 +914,18 @@ mod tests {
             text: "saved worker result".into(),
         });
         assert!(ui.input_notice.is_some());
+        assert_eq!(
+            ui.view().operation_notice.as_ref().unwrap().text,
+            "saved worker result"
+        );
         ui.event(key(KeyCode::Char('x'), KeyModifiers::NONE));
         assert!(ui.help_visible && ui.input_notice.is_none());
-        assert_eq!(ui.view().status, "saved worker result");
+        assert!(ui.view().operation_notice.is_none());
+        assert_eq!(
+            ui.view().status,
+            ui.view().state,
+            "a deliberate next input clears the prior concrete operation notice"
+        );
     }
     #[test]
     fn tiny_frame_settles_and_clears_obsolete_links_without_an_idle_repaint() {
