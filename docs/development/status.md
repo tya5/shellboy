@@ -1,6 +1,6 @@
 # Development status
 
-## #41 B+C: local qualification complete
+## #41: first conversation/interaction subset shipped; freshness still open
 
 Runtime/test source342cb6e passes native macOS standard checks: **1,658 passed /
 zero failed / 32 ignored**, layout88, Python6, format and strict all-target Clippy.
@@ -14,10 +14,25 @@ The exact debug binary passes actual PTYs80x40/140x40 in dark/light/NO_COLOR
 tools reduce actual shared DB jobs per refresh656→7. See the detailed
 [qualification record](../validation/conversation-redesign-bc.md).
 
-B+C are ready for the authorized main admission; main three-OS CI is pending.
-D–G and their reactivity/performance gates remain open in the
-[delivery plan](issue-41-plan.md). #41 is not complete. The installed binary
-remains1fec7f0; no user data, paid API, release or tag was changed.
+The first structural/interaction subset is on main b0e3c29. Native three-OS
+CI[41057195099](https://github.com/tya5/shellboy/actions/runs/41057195099) passes
+at that exact SHA: Linux1,659/0/31, macOS1,658/0/32, Windows1,543/0/24
+(passed/failed/ignored; Windows test threads4).
+
+Review[6523314574](https://github.com/tya5/shellboy/issues/41#issuecomment-6523314574)
+correctly identifies unfinished **B+C freshness**, not only D–G work. The
+[BC-R1–R6 ledger](issue-41-plan.md#bc-freshness-follow-up-review6523314574)
+tracks external CLI-to-header latency, open F6 mutable facts, F7 source-change
+invalidation/late replies, snapshot read times/reopen instructions, F2 freeze
+time, and remaining current-view external-mutation tests. These are not verified
+by the successful structural PTYs or native CI. Cached details may still be stale.
+The next implementation priority is this B+C follow-up; D–G and their performance
+and freshness gates remain open. #41 stays open.
+
+This #41 increment did not replace the installed binary or change user data,
+use a paid API, or create a release/tag. Separate release-session records below
+are historical and are not evidence that the installed/released binary includes
+this main increment.
 
 ## v0.3.0 preparation (#62), not publication
 

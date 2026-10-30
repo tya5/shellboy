@@ -2,14 +2,18 @@
 
 ## #41 conversation structure and inline interaction
 
-Source342cb6e qualifies B+C on native macOS arm64/Rust1.99.1: standard checks
+Source342cb6e qualifies the B+C structural/interaction subset on native macOS arm64/Rust1.99.1: standard checks
 **1,658 passed / zero failed / 32 ignored**, plus real PTYs80x40/140x40 across
 dark/light/NO_COLOR. Source identities, Unicode/wheel boundaries, bounded true
 raw suffixes, stale replies and shared preview accounting are covered.
 
 The [detailed record](conversation-redesign-bc.md) separates P1/P3/P7 measurements,
-private synthetic fixtures, main CI still pending and untested physical/real-API
-cases. D–G remain open; these successes do not qualify the entire #41 scope.
+private synthetic fixtures and untested physical/real-API cases. Main exact-SHA
+b0e3c29 CI41057195099 succeeds on all3OS (Linux1,659/0/31, macOS1,658/0/32,
+Windows1,543/0/24; passed/failed/ignored). **B+C freshness BC-R1–R6 remains open**:
+external-mutation latency, open F6/F7 invalidation, snapshot read/freeze times and
+remaining current-view freshness coverage. D–G remain open too; successful CI
+and existing PTYs do not qualify these missing routes or the entire #41 scope.
 
 ## v0.3.0 preparation (#62)
 

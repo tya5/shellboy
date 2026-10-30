@@ -1527,3 +1527,16 @@ shown as checking, never known idle. History/send failures remain explicit until
 the next deliberate action; an unrelated older success cannot erase a failure.
 Both new readonly UI actions retire their loading state on UI queue rejection as
 well as reader-slot rejection. No new Core lifecycle, queue or producer is added.
+
+
+## #41 first-unit review: preserve B+C freshness ownership (2026-10-30)
+
+Review6523314574 is accepted. The shipped b0e3c29 unit covers conversation
+structure and inline interaction, not every adopted B+C freshness inventory row.
+Record BC-R1–R6 explicitly in plan/status/acceptance and the issue before further
+claims of completion. Prioritize that usable follow-up before D; do not relabel
+F6/F7 and snapshot timestamps as general G work simply to mark B+C complete.
+Reason: successful standard checks and structural PTYs do not prove external
+mutation-to-paint latency or a missing Changed/read path. Revisit completion only
+with implementation and new route-specific evidence, preserving bounded readers,
+stale-response guards and the no-polling/no-new-worker boundary.

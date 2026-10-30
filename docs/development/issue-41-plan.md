@@ -1,7 +1,7 @@
 # Conversation redesign delivery plan (#41)
 
 Baseline: main e8c1ff2 after independently completed #58. Follow the issue body
-and comments through6520544888.
+and comments through6523314574 (the first B+C review).
 The latest user instruction permits independent usable main increments, each
 with complete local standard checks and main three-OS CI. Do not close #41
 until every adopted requirement is delivered. Keep #58 separate and first;
@@ -13,9 +13,9 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | Increment | Scope | State |
 | --- | --- | --- |
 | Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Complete: e8c1ff2, native three-OS CI41034892332 green |
-| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C locally qualified, main CI pending |
-| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Local standard/PTY/P1/P3/P7 qualified; main admission/CI pending |
-| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Local qualification complete with B; main admission/CI pending |
+| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; structural/interaction subset shipped; B+C freshness follow-up open |
+| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Structural subset shipped in b0e3c29; B+C freshness follow-up open |
+| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Interaction subset shipped in b0e3c29; B+C freshness follow-up open |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Planned |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
@@ -25,12 +25,48 @@ Each increment must be usable independently. A requirement that crosses these
 boundaries must land with its complete action/read/render path, not a stub.
 Report shipped and remaining scope on the issue after each main admission.
 
-B+C are one usable implementation unit. Source342cb6e passes the native standard
-check and six actual PTY conditions; P1/P3/P7 results and limits are in
-[the qualification record](../validation/conversation-redesign-bc.md). Main
-admission/three-OS CI remain pending, so shipment checkboxes are not yet marked.
-D–G remain pending. Existing background management and F8 controls remain available
+The first B+C structural/interaction subset shipped as main b0e3c29. Source342cb6e
+passes the native standard check and six actual PTY conditions; main three-OS
+CI41057195099 passes at b0e3c29. P1/P3/P7 results and limits are in
+[the qualification record](../validation/conversation-redesign-bc.md). This does
+not complete all B+C inventory rows: the freshness follow-up below remains open
+alongside D–G. Unchecked cross-cutting requirements must not be inferred complete
+from shipment of their structural subset. Existing background management and F8 controls remain available
 until the new live/watch/form increments are delivered.
+
+## B+C freshness follow-up (review6523314574)
+
+This remains **B+C work**, not an implicit transfer to D–G. Complete it before
+claiming B+C done; next implementation priority is this follow-up. The shipped
+structure/interaction remains usable, but current cached facts may become stale.
+No new worker/table/queue or timer-driven DB polling is authorized.
+
+- [ ] BC-R1: change title/model/connection/cwd through a separate CLI client;
+  verify the selected header updates without input, measuring commit-to-paint
+  against the1s unloaded-local target. Existing refresh code is not test evidence.
+- [ ] BC-R2: keep F6 open while its execution state or source availability changes;
+  update mutable facts on relevant Changed without moving the selected identity.
+  Coalesce reads and mark failed/lost refreshes stale/unavailable.
+- [ ] BC-R3: invalidate F7 cached links when exact source membership/revision or
+  availability changes; reject delayed old replies. Verify actual source-change
+  routes, not just mismatched request IDs in isolation.
+- [ ] BC-R4: identify valid immutable original/finished-preview snapshots with
+  read/source time and an explicit refresh/reopen action. Current preview text
+  only explains reopening and lacks the read time. Mutable lifecycle facts must
+  remain reactive even when associated raw content is an identified snapshot.
+- [ ] BC-R5: F2 intentionally freezes display; show the time it was frozen and
+  how to resume. Current frozen banner has only the resume instruction.
+- [ ] BC-R6: cover the remaining current-view inventory routes (footer/recovery,
+  foreign pending sends and cancellation) with external-mutation latency tests,
+  and document every untested route separately. Keep stale/late/read-budget and
+  paid-text preservation regressions green.
+
+Review choice: record the missing routes explicitly now, rather than claim a
+rushed unvalidated fix. The next usable follow-up will deliver these together
+with appropriate state/CLI/PTY evidence. G still owns general F8 management
+freshness and popup wheel/layout work. Shared one-job/500ms consolidation remains
+open for the subsequent shared refresh refactor; measured seven jobs is not a
+claim that the final one-job target has been met.
 
 ## Complete requirement ledger
 

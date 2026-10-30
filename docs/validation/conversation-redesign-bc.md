@@ -1,8 +1,8 @@
 # Conversation structure and inline interaction (#41 B+C)
 
 Runtime/test source: `342cb6ef230538b2c659ce63446901a963589b51`, based on
-main8fb885d (including #50, #61 and 0.3.0 package preparation), after standalone #58. This qualifies only
-B+C; D–G remain open in the [delivery ledger](../development/issue-41-plan.md).
+main8fb885d (including #50, #61 and 0.3.0 package preparation), after standalone #58. This qualifies only the shipped
+B+C structural/interaction subset; B+C freshness and D–G remain open in the [delivery ledger](../development/issue-41-plan.md).
 No schema, protocol, dependency, worker or queue is added.
 
 ## Standard checks
@@ -17,7 +17,23 @@ sh scripts/check.sh
 Passes: **1,658 passed / zero failed / 32 ignored**. Breakdown: library786/0/13,
 integration862/0/17, termination7/0/1, crash recovery3/0/1. Layout88, Python6,
 formatting and strict all-target Clippy pass. Ignored timing observations are
-reported separately below. Main three-OS CI is a separate pending gate.
+reported separately below. Main native CI41057195099 succeeds on exact SHA
+b0e3c29d86dddaed1af4319a8404e3bf9fa9b9e2. Downloaded timing artifacts name that
+source SHA and report Linux1,659/0/31, macOS1,658/0/32 and Windows1,543/0/24
+(passed/failed/ignored; Windows threads4). These are native standard checks,
+not physical terminal or unimplemented-freshness qualification.
+
+## Explicit unverified B+C freshness
+
+Review6523314574 identifies missing code/evidence beyond the shipped structural
+subset. No external-client commit-to-header1s measurement has been performed.
+Open F6 mutable execution/availability refresh and source-change-driven F7
+invalidation are not qualified. Immutable original/finished-preview read times
+and the F2 frozen-at time are not fully displayed. Remaining footer/foreign
+queue mutation routes also need inventory-driven latency coverage. Request-ID
+unit tests and current PTY focus/original checks do not establish these routes.
+Track implementation and fresh evidence in BC-R1–R6 of the delivery ledger;
+these remain B+C requirements, not silently deferred general G work.
 
 Functional coverage includes true shared stdout/stderr suffix budgets, indexed
 chunk/row bounds, encoding uncertainty, CR progress normalization, zero raw reads
