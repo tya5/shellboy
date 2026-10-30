@@ -1,5 +1,20 @@
 # Development status
 
+## Windows retry fixture watchdog follow-up
+
+The two response retry fixture files share60s progress/cleanup watchdogs and
+notification-driven persisted-state waits. Product timers, retry/phase/count
+assertions and intentional timed absence/outage checks stay unchanged. Main
+b16f414 run41063015359 attempts1/2 remain failed evidence; the long-Turn arrival
+guard was already60s, so its cause is not established. Its third attempt passed;
+the two preceding failures remain evidence. Native macOS standard checks pass
+1666/0/32. Exact source3b45c3c passed two independent manual Windows four-thread
+runs,41067174706 and41067200942, both first attempts. After #41 main integration,
+combined d72155f also passes two Windows runs41069488710/41069483605; the latter
+needed a same-SHA failed-job rerun for an unrelated clients test. Local combined
+check passed1679/0/32 after an unchanged PTY footer failure. Both failure histories
+are retained in acceptance; final main CI is pending.
+
 ## #59: saved sender inspection and self-asserted names
 
 `message get` and user-node `history get/list` provenance expose the original
@@ -1046,3 +1061,17 @@ mkdir前に予定pathを記録し、locatorのみ・空directory・bind後の各
 改名前の作業履歴と公開用の新履歴は分離しています。名称変更・公開準備は旧goal全体の完遂とは扱いません。レビュー対応goalはv0.1.1公開後に再開しました。
 
 Windows/Linuxのnative検証はGitHub Actionsで実施しました。実provider API、実IME・OS clipboard、各端末GUIの再検証は今回未実施です。既知の制限は [一覧](known-limitations.md)、レビュー台帳は [運用](maintenance.md) に記載します。
+
+## Guide follow-up (#67, 2026-10-30)
+
+Documentation only: the delegation guide now gives the parent/user the completed
+child retention decision, preview-before-delete procedure and usage/audit tradeoff;
+the User Guide fixes `at least 100ms`. The English shell guide contains a macOS
+Seatbelt wrapper checked through a real synthetic model shell and isolated owner,
+with direct-write/network tests, owner CLI calls and process-group stopping.
+The English/Japanese User Guides link to it. Linux bubblewrap capability passes
+an Ubuntu branch-only probe, but its complete proxy/IPC wrapper is deferred and
+no executable Linux recipe is claimed. Windows gives unverified least-privilege
+account/ACL, egress-policy and VM alternatives, not a shell-wrapper recipe.
+See [verified and unverified scope](../validation/acceptance.md#guide-follow-up-67).
+No Rust code, installed binary, real database, real provider or Release changes.

@@ -87,6 +87,10 @@ shellboy wait --conditions-json '[{"type":"run_ended","run_id":"CHILD_RUN_ID"}]'
 
 Even after the parent's Turn answers, its Run remains live while it owns child/grandchild Runs or shells. Normal Run completion is finalized only after confirming that no owned work, unprocessed instructions, or similar obligations remain. Explicitly stopping the parent Run or exiting the application stops and reclaims its owned descendants. Do not use a child as a persistent daemon that survives application exit. Independent Runs on independent Threads are outside the parent Run's ownership cleanup.
 
+After reading the results and waiting for the child's Runs to end, the parent or user decides whether to retain the child.
+Preview with `shellboy thread delete-preview --thread CHILD_THREAD_ID` (optionally `--descendants`), then use `shellboy thread delete --thread CHILD_THREAD_ID` with the same descendant selection only if deletable; deletion rechecks live/stopping Runs.
+Deletion removes access to that child's conversation and excludes deleted Threads from usage totals (required shared sources may remain); retain children needed for audits or later cost checks.
+
 ## Deciding recovery
 
 ```bash
