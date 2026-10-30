@@ -9,6 +9,10 @@ struct CommandHint {
 }
 const COMMANDS: &[CommandHint] = &[
     CommandHint {
+        name: "/agents",
+        help: "指示ファイル参照を確認／変更",
+    },
+    CommandHint {
         name: "/received",
         help: "受信記録（失敗・ストリーム差分）を読む",
     },
@@ -604,6 +608,27 @@ mod contract_tests {
                 hint.name
             );
         }
+    }
+    #[test]
+    fn agents_slash_displays_reference_and_selects_saved_or_new_thread() {
+        let cwd = std::env::temp_dir();
+        let mut ui = UiState::new(&Config::default(), cwd.clone());
+        assert!(ui.slash("/agents").is_empty());
+        assert!(matches!(ui.slash("/agents role.md").as_slice(),
+            [UiAction::Command(Command::ThreadCreate(a))] if a.agents.as_deref()==Some("role.md")));
+        ui.active_view_mut().thread_id = Some("saved".into());
+        ui.active_view_mut().agents_path = "original.md".into();
+        assert!(matches!(ui.slash("/agents role.md").as_slice(),
+            [UiAction::Command(Command::ThreadSet(a))] if a.thread_id.as_deref()==Some("saved") && a.agents.as_deref()==Some("role.md")));
+        assert_eq!(
+            ui.view().agents_path,
+            "original.md",
+            "wait for canonical backend response"
+        );
+        assert!(
+            matches!(ui.slash("/cwd elsewhere").as_slice(),[UiAction::Command(Command::ThreadSet(a))] if a.agents.is_none())
+        );
+        assert_eq!(ui.view().agents_path, "original.md");
     }
     #[cfg(unix)]
     #[test]

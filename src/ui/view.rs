@@ -5,6 +5,7 @@ pub struct ThreadView {
     pub(super) activity: activity::ActivityView,
     pub thread_id: Option<String>,
     pub cwd: PathBuf,
+    pub agents_path: String,
     pub connection: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -176,6 +177,7 @@ impl ThreadView {
     }
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
         Self {
+            agents_path: cwd.join("AGENTS.md").to_string_lossy().into_owned(),
             activity: Default::default(),
             thread_id: None,
             cwd,
@@ -745,6 +747,7 @@ impl ThreadView {
 impl ThreadView {
     pub(super) fn on_thread(&mut self, details: ThreadDetails, draft: Option<DraftSnapshot>) {
         self.draft_restore_pending = false;
+        self.agents_path = details.agents_path;
         self.cwd = PathBuf::from(details.cwd);
         self.connection = Some(details.connection);
         self.model = Some(details.model);

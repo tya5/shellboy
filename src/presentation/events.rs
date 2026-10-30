@@ -12,7 +12,9 @@ pub(super) fn event_title(kind: &str) -> &str {
         "thread_settings" | "connection_changed" | "model_changed" | "settings_changed" => {
             "接続・設定変更"
         }
-        "instructions_observed" | "instruction_changed" | "agents_changed" => "指示ファイル更新",
+        "instructions_observed" | "instruction_changed" | "agents_changed" | "agents_reference" => {
+            "指示ファイル更新"
+        }
         "recovery_resumed" => "復旧再開",
         "context_changed" => "状態変更",
         "child_recovery_wait" => "子の作業が復旧待ち",
@@ -89,7 +91,7 @@ pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
     if first
         && matches!(
             kind,
-            "instructions_observed" | "instruction_changed" | "agents_changed"
+            "instructions_observed" | "instruction_changed" | "agents_changed" | "agents_reference"
         )
         && let Some(present) = event
             .pointer("/change/after/present")
@@ -243,7 +245,7 @@ pub(super) fn changes(value: &serde_json::Value) -> Vec<String> {
             ("pause_kind", "停止理由"),
             ("dimension", "次元数"),
         ],
-        "instructions_observed" | "instruction_changed" | "agents_changed" => {
+        "instructions_observed" | "instruction_changed" | "agents_changed" | "agents_reference" => {
             &[("path", "指示ファイル"), ("present", "存在")]
         }
         _ => &[],

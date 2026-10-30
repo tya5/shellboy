@@ -147,6 +147,7 @@ impl Page {
             "接続とモデルを名前で指定して変更する",
         );
         page.entry("/effort 値", "推論強度を変更。指定解除は /effort none");
+        page.entry("/agents [パス]", "指示ファイル参照を確認／変更する");
         page.entry("/cwd", "現在の作業フォルダーを確認する");
         page.entry("/cwd パス", "作業フォルダーを変更する");
 

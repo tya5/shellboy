@@ -2881,6 +2881,38 @@ impl UiState {
                     }))]
                 }
             }
+            "/agents" if argument.is_empty() => self.show_help(help::Page::info(
+                "AGENTS参照",
+                "次の新しいTurnで読む指示ファイル（現在Turnのsnapshotは不変）",
+                format!("{}\n\n変更するには /agents パス", self.view().agents_path),
+            )),
+            "/agents" => {
+                if let Some(thread_id) = thread_id {
+                    vec![UiAction::Command(Command::ThreadSet(ThreadSetArgs {
+                        thread_id: Some(thread_id),
+                        agents: Some(argument.into()),
+                        ..Default::default()
+                    }))]
+                } else {
+                    let view = self.view();
+                    let cwd = match crate::input_path::utf8(&view.cwd) {
+                        Ok(cwd) => cwd.to_owned(),
+                        Err(_) => {
+                            return self.command_error("作業場所はUTF-8で表現できる必要があります");
+                        }
+                    };
+                    vec![UiAction::Command(Command::ThreadCreate(
+                        crate::protocol::ThreadCreateArgs {
+                            agents: Some(argument.into()),
+                            cwd: Some(cwd),
+                            connection: view.connection.clone(),
+                            model: view.model.clone(),
+                            effort: view.effort.clone(),
+                            parent_id: None,
+                        },
+                    ))]
+                }
+            }
             "/cwd" if argument.is_empty() => self.show_help(help::Page::info(
                 "作業フォルダー",
                 "現在の会話でコマンドを実行する場所",
@@ -2892,6 +2924,8 @@ impl UiState {
                     Err(error) => return self.command_error(error),
                 };
                 if thread_id.is_none() {
+                    self.active_view_mut().agents_path =
+                        path.join("AGENTS.md").to_string_lossy().into_owned();
                     self.active_view_mut().cwd = path;
                     vec![]
                 } else {

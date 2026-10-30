@@ -80,6 +80,7 @@ fn event(
             | "model_changed"
             | "instructions_observed"
             | "instruction_changed"
+            | "agents_reference"
             | "agents_changed" => EventClass::Change,
             _ => EventClass::Unknown,
         };
