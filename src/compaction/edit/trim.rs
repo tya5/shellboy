@@ -66,6 +66,7 @@ struct NoticeDetails<'a> {
     after_request_nodes: usize,
     excluded_attachment_refs: usize,
     start_group: usize,
+    semantic_search: bool,
 }
 fn active_attachments(group: &Group) -> usize {
     group
@@ -85,12 +86,16 @@ fn count_active_attachments_tx(
     let count:i64=tx.query_row("SELECT count(*) FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id WHERE s.thread_id=?1 AND s.state='active' AND a.source_node_id IN (SELECT value FROM json_each(?2))",params![thread,ids],|row|row.get(0))?;
     Ok(count as usize)
 }
+fn semantic_search_configured(config: &Config) -> bool {
+    config.embedding.connection.is_some() && config.embedding.model.is_some()
+}
 fn marker_payload(
     snapshot: &Snapshot,
     omitted: &HashSet<usize>,
     before: u64,
     spilled: usize,
     reason: &str,
+    semantic_search: bool,
 ) -> Option<Value> {
     let first = (0..snapshot.groups.len()).find(|index| omitted.contains(index))?;
     let last = (0..snapshot.groups.len()).rfind(|index| omitted.contains(index))?;
@@ -136,6 +141,7 @@ fn marker_payload(
             after_request_nodes,
             excluded_attachment_refs,
             start_group: first,
+            semantic_search,
         },
     );
     payload["context_trim"]["original_order"] = json!(original_order);
@@ -177,14 +183,22 @@ fn marker_item(
     } else {
         String::new()
     };
+    let semantic = if details.semantic_search {
+        format!(
+            " To find decisions or context with different wording, use shellboy history search --thread {} --query TEXT (semantic search sends a query-embedding API request and may incur cost; configured embeddings do not guarantee index coverage).",
+            details.thread
+        )
+    } else {
+        String::new()
+    };
     let notice = format!(
-        "Shellboy context notice: {location} was omitted after {reason}. {count} source nodes ({first_id} through {last_id}); projected input before reduction: {before} characters; {spilled} tool groups spilled. The active Turn's initial user request (if any) and the latest group remain.{work} Executed actions, file changes, and command side effects have NOT been undone. Inspect the current state before repeating any earlier operation. Original data is retained: use shellboy history get --node <source_node_id> with a bounded limit, use shellboy compact --summary --from {first_id} --to {last_id} to summarize this omitted range without reading raw data into the conversation, or shellboy compact --restore --from {first_id} to restore this specific omitted range. Restoring a large range may reproduce the same failure; first use shellboy rag search --scope history:{} --mode keyword --query TEXT or a range summary.{attachment}",
+        "Shellboy context notice: {location} was omitted after {reason}. {count} source nodes ({first_id} through {last_id}); projected input before reduction: {before} characters; {spilled} tool groups spilled. The active Turn's initial user request (if any) and the latest group remain.{work} Executed actions, file changes, and command side effects have NOT been undone. Inspect the current state before repeating any earlier operation. Original data is retained: use shellboy history get --node <source_node_id> with a bounded limit, use shellboy compact --summary --from {first_id} --to {last_id} to summarize this omitted range without reading raw data into the conversation, or shellboy compact --restore --from {first_id} to restore this specific omitted range. Restoring a large range may reproduce the same failure; first use shellboy rag search --scope history:{} --mode keyword --query TEXT or a range summary.{semantic}{attachment}",
         details.thread
     );
     json!({"item":{"role":"developer","content":[{"type":"input_text","text":notice}]},"context_trim":{"version":1,"omitted_nodes":count,"history_characters":before,"spilled_groups":spilled,"reason":details.reason,"first_node_id":first_id,"last_node_id":last_id,"after_current_request_nodes":details.after_request_nodes,"excluded_attachment_refs":details.excluded_attachment_refs}})
 }
 /// Pure maximum-omission policy: calculate each retained projection once.
-fn disconnect_plan(snapshot: &Snapshot, reason: &str) -> TrimPlan {
+fn disconnect_plan(snapshot: &Snapshot, reason: &str, semantic_search: bool) -> TrimPlan {
     let latest_tool = snapshot.groups.iter().rposition(|g| g.complete && g.tool);
     let request = protected_request(snapshot);
     let mut omitted = HashSet::new();
@@ -213,7 +227,7 @@ fn disconnect_plan(snapshot: &Snapshot, reason: &str) -> TrimPlan {
         offset = end;
     }
     let before = history_characters(snapshot);
-    let marker = marker_payload(snapshot, &omitted, before, 0, reason);
+    let marker = marker_payload(snapshot, &omitted, before, 0, reason, semantic_search);
     let mut plan = TrimPlan {
         spills: Vec::new(),
         omitted,
@@ -233,7 +247,7 @@ impl Compactor {
         reason: &str,
     ) -> Result<ContextEditResult, ApiError> {
         let before = history_characters(&snapshot);
-        let plan = disconnect_plan(&snapshot, reason);
+        let plan = disconnect_plan(&snapshot, reason, semantic_search_configured(&self.config));
         if plan.omitted.is_empty() || plan.after >= before {
             return Ok(ContextEditResult {
                 compact: CompactResult { no_target: true, ..Default::default() },
@@ -267,7 +281,14 @@ impl Compactor {
         )?;
         let omitted: HashSet<_> = selected.collect();
         let before = history_characters(&snapshot);
-        let marker = marker_payload(&snapshot, &omitted, before, 0, "manual");
+        let marker = marker_payload(
+            &snapshot,
+            &omitted,
+            before,
+            0,
+            "manual",
+            semantic_search_configured(&self.config),
+        );
         let mut plan = TrimPlan {
             spills: Vec::new(),
             omitted,
@@ -397,7 +418,11 @@ impl Compactor {
             }
             json!({"characters":chars,"bytes":bytes})
         };
-        let plan = disconnect_plan(&snapshot, "manual_maximal");
+        let plan = disconnect_plan(
+            &snapshot,
+            "manual_maximal",
+            semantic_search_configured(&self.config),
+        );
         let reducible = !plan.omitted.is_empty() && plan.after < history_characters(&snapshot);
         let restored = snapshot
             .groups
@@ -452,7 +477,7 @@ mod budget_tests {
             })
             .collect();
         snapshot.protected.insert("node-1".into());
-        let plan = disconnect_plan(&snapshot, "manual_maximal");
+        let plan = disconnect_plan(&snapshot, "manual_maximal", false);
         assert!(plan.provenance_limited);
         assert_eq!(plan.omitted.len(), TURN_BOUNDARY_IDS - 1);
         assert!(plan.omitted.contains(&0));

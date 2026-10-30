@@ -190,3 +190,17 @@ each candidate.
 Transport failures before any HTTP-phase observation (including client-pool
 construction failure) keep ordinary retry and do not activate size reduction.
 Missing observation is not evidence of a partial upload or an oversized request.
+
+
+## Retrieval guidance after omission (#71)
+
+Omission notices keep the existing keyword history-scope RAG command. If and
+only if both embedding.connection and embedding.model are configured, also
+suggest `shellboy history search --thread THREAD_ID --query TEXT` for decisions
+and context with different wording, and disclose the query-embedding API cost.
+This is guidance only: do not search, embed, create an index, inspect credentials,
+or assume index coverage from configuration. With no embedding pair, the notice
+remains keyword-only. Keep source IDs, restoration/summary commands, side-effect
+warnings and immutable provenance unchanged. Agent guidance also explains
+cross-conversation semantic retrieval and verification of historical evidence;
+usage observation is a manual read of existing records, not new telemetry.

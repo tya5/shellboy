@@ -601,6 +601,8 @@ async fn marker_explicitly_reports_current_turn_work_after_the_retained_request(
     );
     assert!(text.contains("compact --restore --from old"));
     assert!(text.contains("rag search --scope history:t --mode keyword"));
+    assert!(!text.contains("history search"));
+    assert!(!text.contains("--mode hybrid") && !text.contains("--mode semantic"));
     assert!(text.contains("Restoring a large range may reproduce the same failure"));
     fixture.close().await;
 }
@@ -924,4 +926,51 @@ async fn legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows() 
         );
     }
     fixture.close().await;
+}
+
+#[tokio::test]
+async fn search_hints_follow_embedding_settings_for_explicit_and_maximal_omission() {
+    use clap::Parser;
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        for embeddings in [false, true] {
+            for maximal in [false, true] {
+                let mut fixture = Fixture::new().await;
+                if embeddings {
+                    let config = Config::parse("[connections.p]\nbase_url='http://127.0.0.1:1/v1'\n[embedding]\nconnection='p'\nmodel='fixture-embedding'").unwrap();
+                    fixture.compactor = Compactor::new(fixture.db.clone(), Arc::new(config));
+                }
+                fixture.text("old", &"x".repeat(20_000)).await;
+                fixture.text("latest", "retained").await;
+                let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+                let result = if maximal {
+                    fixture.compactor.trim_maximal(snapshot, CancellationToken::new(), "failure").await.unwrap()
+                } else {
+                    fixture.compactor.omit_range(snapshot, 0..1, CancellationToken::new()).await.unwrap()
+                };
+                let marker = result.marker_node_id.unwrap();
+                let payload = fixture.db.call(move |db| {
+                    let raw: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [marker], |r| r.get(0))?;
+                    Ok(serde_json::from_str::<Value>(&raw).unwrap())
+                }).await.unwrap();
+                let text = payload["item"]["content"][0]["text"].as_str().unwrap();
+                let keyword = "shellboy rag search --scope history:t --mode keyword --query TEXT";
+                let semantic = "shellboy history search --thread t --query TEXT";
+                assert!(text.contains(keyword));
+                assert_eq!(text.contains(semantic), embeddings);
+                assert_eq!(text.contains("query-embedding API request"), embeddings);
+                assert_eq!(text.contains("may incur cost"), embeddings);
+                assert_eq!(text.contains("do not guarantee index coverage"), embeddings);
+                assert!(!text.contains("--mode hybrid") && !text.contains("--mode semantic"));
+                for hint in [keyword, semantic] {
+                    if text.contains(hint) {
+                        crate::cli::Cli::try_parse_from(hint.split_whitespace()).unwrap();
+                    }
+                }
+                assert_eq!(payload["context_trim"]["first_node_id"], "old");
+                assert_eq!(payload["context_trim"]["last_node_id"], "old");
+                assert!(text.contains("have NOT been undone"));
+                fixture.close().await;
+            }
+        }
+    }).await.expect("context notice watchdog");
 }
