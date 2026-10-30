@@ -204,3 +204,10 @@ SQL over saved attempt states/standard usage and saved Run/model/shell timing,
 first measured at synthetic scale. All-time only; unrecorded summary/embedding
 coverage is explicit. No schema, producer observation or persistent totals are
 added unless measured slowness justifies a separately approved minimal follow-up.
+
+## #50: factual reduction
+
+[Failure-driven reduction](failure-driven-reduction.md) supersedes the estimated
+75k/hint preflight and once-per-Turn policy in older compaction/retry sections.
+Only failure facts activate automatic reduction; all resends share the normal
+consecutive retry budget. Context edit sizes are characters, never token estimates.

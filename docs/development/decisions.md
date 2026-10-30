@@ -1381,3 +1381,12 @@ header deadline, actual backpressure, partial consumption and exact attempt-coun
 assertions. Retain the failure and require fresh native Windows qualification.
 The reviewer-run unchanged-main second attempt succeeding is independent evidence,
 not proof of the cause of either failed attempt.
+
+## #50: remove inferred input-size policy (2026-10-30)
+
+Adopt [failure-driven reduction](../design/failure-driven-reduction.md). Delete
+compact_hint_tokens rather than preserve an optional override; use saved usage
+and character/byte counts for facts only. Retain the existing finite retry budget
+and compaction safety machinery, not a new recovery engine. Choose /compact-max
+for the API-free action instead of a new dialog. Minimal recovery text precedes
+#41/#58 UI work. The old 75k provisional activation decision is superseded.
