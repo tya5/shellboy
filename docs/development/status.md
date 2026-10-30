@@ -1,5 +1,19 @@
 # Development status
 
+## #50: failure facts, not token estimates
+
+First small implementation removes calibration, 75k, compact_hint_tokens and
+pre-POST reduction. Maximum reduction and explicit context overflow share the
+normal consecutive retry budget; successful responses reset it. /compact-max
+and compact --maximal reuse safe API-free omission. Context edits report replay
+characters; thread get exposes measured usage and times only. Recovery remains
+a minimal factual line/F8 details, not a redesigned screen ahead of #41/#58.
+Single-conversation implementation/self-review; no delegated work.
+Local standard check passes 7 Rust groups / 1,588 passed / 0 failed / 31 ignored,
+layout 88 / Python 6 / fmt / strict all-target Clippy. Native Windows pre-push CI
+and final main CI are separate gates; no success is claimed before observation.
+See [solo record](issue-50-solo-trial.md) and acceptance for limits.
+
 ## Pending Message Publication (#52)
 
 The review corrections at `6e62349` pass the complete local standard check

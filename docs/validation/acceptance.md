@@ -1,5 +1,41 @@
 # Validation record
 
+## #50 solo first version
+
+Environment: macOS arm64 (M1), Rust 1.99.1, bundled SQLite, dedicated worktree
+based on 1fec7f0. Design 01bbd3d precedes implementation 37a43a9. No child
+conversation, real provider or installed-owner/data modification.
+
+- `sh scripts/check.sh`: exit 0, 7 Rust groups / 1,588 passed / 0 failed /
+  31 ignored; layout 88; Python 6; fmt and strict all-target Clippy pass.
+  Background shell completion observed with shellboy wait, elapsed 79,219 ms.
+- Focused model retries: 22 passed / 0 failed / 1 existing ignored. This covers
+  first failure unchanged, second eligible failure reduction even on small input,
+  all 5xx, connection/EOF/header timeout, retry exhaustion after eight resends,
+  zero/configured retry limits, opt-out/rate limit, explicit context reduction,
+  same-Turn re-growth/reduction, stopped waits, partial-output safety, manual
+  maximum with no model call and model change on explicit retry.
+- Library: 717 passed / 0 failed / 12 existing ignored. Preserves restoration,
+  instruction snapshots, scope/generation/cancellation fences, original nodes and
+  immutable side effects. New marker-vs-user-request protection regression and
+  existing nested summary boundary tests pass without changing summary policy.
+- Runtime fixtures retain explicit-overflow stage/pair integrity and three saved
+  tool executions, with a configured two-resend budget. Native upload fixtures
+  now expect three requests under that same budget (two unchanged attempts,
+  then reduced retry if enabled), instead of the removed two-strike rule.
+- Earlier local runs exposed removed-policy expectations, missing CLI completion
+  entry, a now-obsolete stopping-metrics expectation, test indexes/pointers,
+  strict Clippy findings, and the repeated-marker fence defect. They were fixed;
+  no test skip, retry-limit inflation or timeout extension hides failures.
+- Pre-push manual Windows CI will cover changed native upload/tool fixtures;
+  actual provider context-code encodings, physical terminals and model behavior
+  are unverified. Final exact-SHA main CI is reported separately, not inferred
+  from this local run. No OS process/encoding implementation changed.
+
+Presentation is deliberately limited to existing recovery/F8 surfaces. Manual
+actions remain in existing receipts/history rather than a new action ledger;
+there is no ranked recovery dashboard, pre-POST override or new lifecycle state.
+
 ## Review Correction Qualification (#52)
 
 Review6517077748 is addressed by582ec70 (unfinished interrupted group uses
