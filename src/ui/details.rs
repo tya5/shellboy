@@ -766,8 +766,16 @@ impl Details {
         }
         // Sender provenance is immutable and comes from the explicit original
         // read. A later mutable-source snapshot must not hide those facts.
-        if let Some(sender)=self.original.as_ref().and_then(|body|body.provenance.sender.as_ref()) {
-            for field in sender_fields(sender) {if !fields.iter().any(|saved|saved.key==field.key){fields.push(field);}}
+        if let Some(sender) = self
+            .original
+            .as_ref()
+            .and_then(|body| body.provenance.sender.as_ref())
+        {
+            for field in sender_fields(sender) {
+                if !fields.iter().any(|saved| saved.key == field.key) {
+                    fields.push(field);
+                }
+            }
         }
         fields.sort_by_key(|field| {
             (
@@ -2622,10 +2630,10 @@ mod tests {
         details.accept(next, body, lines);
         // A source refresh may arrive after the independent sender read.
         // The cached facts are not permission to erase immutable provenance.
-        details.request_links("anonymous".into(),ui.view().generation,&mut next);
-        let mut snapshot=snapshot_for(&details,ui.view(),vec![],42);
-        snapshot.sources[0].kind=PresentationKind::User;
-        details.accept_links(next,Ok(snapshot));
+        details.request_links("anonymous".into(), ui.view().generation, &mut next);
+        let mut snapshot = snapshot_for(&details, ui.view(), vec![], 42);
+        snapshot.sources[0].kind = PresentationKind::User;
+        details.accept_links(next, Ok(snapshot));
         let fields = details.fields(ui.view());
         assert!(
             fields

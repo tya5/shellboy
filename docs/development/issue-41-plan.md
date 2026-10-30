@@ -201,3 +201,9 @@ self-asserted names, and verify that source snapshots do not erase sender facts.
 Pre-merge source4bf14a9 standard/PTY/P1 evidence is retained as such; repeat
 qualification on the merged runtime/embedded guides before push. No historical
 null is upgraded into a verified sender or Core compatibility path.
+
+
+G's later CLI/form catalogue must include the #59 `message send --sender-label`
+argument and sender-inspection fields. Its name is self-asserted, never a source
+of authority; preserve the sender contract rather than inventing a TUI-only
+meaning or silently treating external CLI as a verified human.
