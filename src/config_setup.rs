@@ -54,8 +54,13 @@ pub fn report(
     if connection.is_none() {
         missing.push("connection (default_connection or Thread connection)".into());
     }
-    if model.is_none_or(|model| model.trim().is_empty()) {
+    if model.is_none_or(|model| model.trim().is_empty() || model == "REPLACE_WITH_MODEL_ID") {
         missing.push("model (default_model or Thread model)".into());
+    }
+    if connection.is_some_and(|connection| {
+        connection.base_url.trim_end_matches('/') == "https://proxy.example/v1"
+    }) {
+        missing.push("base_url (replace the template API root)".into());
     }
     let credential_env = connection.and_then(|connection| connection.api_key_env.clone());
     let credential_set = credential_env.as_deref().map(env);
@@ -85,6 +90,9 @@ impl SetupReport {
         }
         if self.missing.iter().any(|m| m.starts_with("model")) {
             facts.push("モデルが未設定です".to_owned());
+        }
+        if self.missing.iter().any(|m| m.starts_with("base_url")) {
+            facts.push("base_url が雛形のままです。接続先の API root に変更してください".into());
         }
         if self.credential_set == Some(false) {
             facts.push(format!(

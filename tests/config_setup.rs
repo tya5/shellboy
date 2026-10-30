@@ -300,14 +300,24 @@ fn setup_report_is_pure_and_minimal_template_matches_bundled_defaults() {
     assert_eq!(missing.credential_env.as_deref(), Some("SHELLBOY_API_KEY"));
     assert_eq!(missing.credential_set, Some(false));
     assert!(missing.japanese(true).contains("SHELLBOY_API_KEY"));
+    assert!(
+        missing
+            .missing
+            .iter()
+            .any(|fact| fact.starts_with("base_url"))
+    );
+    assert!(missing.missing.iter().any(|fact| fact.starts_with("model")));
+    let mut configured = config.clone();
+    configured.default_model = Some("fixture-model".into());
+    configured.connections.get_mut("proxy").unwrap().base_url = "http://127.0.0.1:1/v1".into();
     let ready = report(
-        &config,
+        &configured,
         Some("proxy"),
-        config.default_model.as_deref(),
+        configured.default_model.as_deref(),
         |_| true,
     );
     assert!(ready.missing.is_empty());
-    let mut no_auth = config.clone();
+    let mut no_auth = configured.clone();
     no_auth.connections.get_mut("proxy").unwrap().api_key_env = None;
     assert!(
         report(&no_auth, Some("proxy"), Some("local-model"), |_| false)

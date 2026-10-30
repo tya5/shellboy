@@ -135,3 +135,6 @@ The existing empty-conversation welcome and submission/recovery notices project
 local setup facts and next actions, with Japanese TUI text. No new dialog,
 conversation renderer, automatic file creation, network probe at startup or
 per-command approval mechanism is added. Configured users see no setup notice.
+
+The exact bundled example model/API-root placeholders are reported as unfinished
+setup too; syntactically valid template values are not presented as ready.
