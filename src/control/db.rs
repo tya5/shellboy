@@ -1665,6 +1665,30 @@ fn bounded_thread_title(text: &str) -> String {
     title
 }
 
+/// Pure display policy shared with the frontend's off-worker title preparation.
+pub(crate) fn title_from_user_payload(payload: &Value) -> Option<String> {
+    if payload.get("role").and_then(Value::as_str) != Some("user") {
+        return None;
+    }
+    let text = match payload.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(content)) => content
+            .iter()
+            .filter(|part| {
+                matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("input_text" | "text")
+                )
+            })
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return None,
+    };
+    let title = bounded_thread_title(&text);
+    (!title.is_empty()).then_some(title)
+}
+
 /// Display-only fallback. Never rewrite an explicit title or the user's history.
 /// The selected path, rather than a Run's latest assistant/tool output, defines
 /// the earliest meaningful user text, including on a forked/shared history.
@@ -1690,26 +1714,7 @@ fn thread_display_title(connection: &Connection, id: &str, stored: &str) -> Resu
             else {
                 continue;
             };
-            if payload.get("role").and_then(Value::as_str) != Some("user") {
-                continue;
-            }
-            let text = match payload.get("content") {
-                Some(Value::String(text)) => text.clone(),
-                Some(Value::Array(content)) => content
-                    .iter()
-                    .filter(|part| {
-                        matches!(
-                            part.get("type").and_then(Value::as_str),
-                            Some("input_text" | "text")
-                        )
-                    })
-                    .filter_map(|part| part.get("text").and_then(Value::as_str))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                _ => continue,
-            };
-            let title = bounded_thread_title(&text);
-            if !title.is_empty() {
+            if let Some(title) = title_from_user_payload(&payload) {
                 return Ok(title);
             }
         }

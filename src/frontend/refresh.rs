@@ -15,7 +15,7 @@ pub(super) struct Query {
 }
 
 struct RawVisible {
-    details: ThreadDetails,
+    details: header::RawHeader,
     history: RawHistory,
     before_cursor: Result<Option<String>, ApiError>,
     sources: message_metadata::SourceFacts,
@@ -53,7 +53,7 @@ fn read_visible_tx(
         )
         .into());
     }
-    let details = crate::control::db::thread_details(db, thread).map_err(StorageError::from)?;
+    let details = header::read_tx(db, thread)?;
     let (mut history, before_cursor) = history_reader::query_current_tx(db, thread)?;
     let page_ids = history.source_ids().map(str::to_owned).collect::<Vec<_>>();
     let mut sources = message_metadata::read_tx(db, Some(thread), &page_ids)?;
@@ -131,7 +131,7 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
     let mut activity = activity::prepare(activity);
     activity.observed_at = observed_at;
     Ok(ProjectedVisible {
-        details,
+        details: details.prepare(),
         nodes,
         info,
         before_cursor: before_cursor?,

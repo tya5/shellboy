@@ -13,6 +13,14 @@ Shellboyの開発で使う採用仕様の入口です。仕様の採用と実装
 
 Shellboyへの改名では旧名の実行名・環境変数・既定保存先への互換を提供しない。旧データの移動は不要であり、既存環境を変更しない。新しい既定保存先は [setup](../development/setup.md) に記載する。
 
+## Current conversation storage
+
+Conversation schema14 records selected-path admission (13), Turn interruption
+and draft indexes (14); standalone RAG remains schema3. The existing migration2
+`tool_result_node(node_id)` index supports #41's retained-source query batching;
+no new index/migration is required. See [storage](storage.md). Historical version
+notes below describe their own releases, not the current schema number.
+
 ## 0.2.0 compatibility boundary
 
 Issue #33 adopts current-only formats: protocol version 2; required Message/Run/Turn/HistoryBody context, HistoryBody provenance and HistorySnippet provenance/context/selection; genuinely optional Thread/fork context; current index profile/query-marker validation; no expired status-operation alias, old-owner field defaults, legacy index fallback, attachment-origin repair, or duplicated RAG degradation warnings in `scope_errors`. Conversation schema advances to v11; standalone RAG schema remains v3. Isolated startup migration removes obsolete non-object index failure counters and the unused receipt-turn-source index; fresh conversation DBs use the complete current schema. Keep the general schema migration runner, ledger/user_version checks, and protocol-version rejection. Historical compatibility notes in adopted designs are superseded by their current-only sections.

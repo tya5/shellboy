@@ -1641,3 +1641,37 @@ Private cross-worktree measurement reused a before binary once because of a shar
 Cargo target cache. Exclude that sample; force package compilation and require an
 explicit source witness plus per-sample expected job assertion in future private
 comparisons. Instrumentation stays ignored and must never enter shipped code.
+
+
+## #41 D1: bounded title evidence belongs in the frontend (2026-10-31)
+
+Use the existing pure title policy with a bounded SQL-only frontend witness,
+leaving CLI lookup unchanged. Prefix caps cover inspected path/receipt entries,
+not merely returned matching users; source bytes share one512KiB budget. A missing
+earlier candidate yields an explicit limited-evidence title, never a confidently
+selected later request or an unsent claim. Pending-prefix exhaustion conservatively
+suppresses derivation because created_at ties can reorder by node rowid beyond the
+receipt-index prefix. This trades a rare generic title for finite read work and
+correct source order without Core indexes or persisted derived titles. Revisit if
+real bounded-witness exhaustion affects ordinary conversations; measure before
+raising caps or changing CLI contracts.
+
+
+## #41 D1: retain the existing source index; reject an unnecessary migration (2026-10-31)
+
+The initial Python minimal-schema probe omitted tool_result_node(node_id), which
+has shipped since migration2. Its rising VM-step curve therefore does not model
+the current store and must not justify a migration. Before any code/schema change,
+full-schema inspection found the existing index. With that index, the corrected
+probe remains3,486 VM steps for one missing-payload source plus49 known sources
+as unrelated results grow1,000→10,000; the proposed covering index saves only3
+VM operations in that fixture. Require a bundled-SQLite/full-current-schema
+regression rather than treating this Python result as native proof.
+
+Retain schema14 and the existing index. The briefly considered, uncommitted
+migration15 design is rejected; no migration/source-index code was written or
+user data changed. Current payload GC can still use exact saved result relations
+without an old-format shim or a new authority policy. Revisit a covering index
+only with measured same-node fanout or native lookup evidence demonstrating a
+material benefit beyond the current index. Check the full schema and existing
+migration history before using a minimal prototype to infer a missing index.

@@ -422,3 +422,41 @@ selection/read revisions, paid stream-commit mappings and existing source-window
 acceptance remain authoritative. Current-view coalescing and paused-source feedback
 must be integrated before the one-job target is claimed or this D0 unit admitted.
 There is no new queue, worker, table or protocol operation.
+
+
+### D1 bounded frontend header/title observation
+
+The shared current-view collector and initial Thread selection use a frontend raw header query, not the CLI
+ThreadDetails helper that derives titles while holding the DB worker. Read the
+Thread/current Run/open Turn and direct owned counts as raw SQL facts; construct
+context and labels on the existing presentation worker. Share the existing pure
+user-payload title policy so explicit stored titles remain verbatim and normal
+derived titles retain Unicode, text-part ordering and terminal-sanitization rules.
+CLI title lookup semantics and wire/schema are unchanged.
+
+For an empty stored title, inspect a prefix of at most128 selected-path entries
+(plus one sentinel), then accepted/held receipt prefixes of at most128 per state
+(plus sentinels), using the existing path/receipt indexes. Inspect prefix membership
+before node-kind/path exclusion rather than scan an unlimited history to find128
+users. Only user JSON bodies can be copied: at most128KiB each and512KiB total
+across the witness. Compute lengths and cumulative bounded-prefix budgets in SQL
+before copying; parse JSON only after releasing the transaction.
+
+An omitted earlier candidate or exhausted path prefix cannot justify choosing a
+later user as the first request. Pending prefix exhaustion is conservative because
+equal-time receipt and node order can differ: report limited evidence instead of
+selecting a possibly later input. Display `名称未設定（元本文の取得範囲外）` when that
+uncertainty prevents deriving a title; distinguish this from exhaustive no-user
+`未送信` and exhaustive unreadable/empty-user `名称未設定`. An already found earlier
+selected-path title wins regardless of later truncation. This label is a frontend
+observation limit, never a fabricated sender/Thread state or title mutation.
+No new worker, table, index, queue or protocol command is introduced.
+
+
+### D1 existing retained-source lookup index
+
+Use the existing `tool_result_node(node_id)` index, shipped since migration2,
+for exact retained source-relation resolution. This includes current payload-GC
+cases; it is not an old-format repair or new authority rule. Keep the existing
+uniqueness check and unknown result for genuinely ambiguous relations. Current
+conversation schema remains14 and no new index/migration is adopted.

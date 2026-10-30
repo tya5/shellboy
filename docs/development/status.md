@@ -1,5 +1,24 @@
 # Development status
 
+## #41 D1 actual SQL batching and raw header (in progress)
+
+Tool node and sender metadata now use set-based queries and bounded indexed
+recursive seeks; sender collision limits remain before identity matching and
+sender-body copying. The normal selected source path no longer executes one
+statement per node. Existing projected initial-page/scroll tool reads and recovery
+observations are being brought into the same batching discipline, with independent
+old-query parity oracles retained only in tests. A shared test-only SQLite trace
+records actual statements instead of maintaining production counters.
+
+A bounded frontend raw-header/title witness replaces the CLI title scan for
+current-view refresh and initial selection. Title JSON and draft decoding run
+after the DB worker; an unavailable earlier source produces an explicit limited
+header title rather than borrowing a later request. CLI semantics are unchanged.
+The first targeted frontend run passes165/0/1 on the intermediate source; later
+batch refinements and final-main integration are not yet qualified. Main1b559b9
+includes config and submitted-copy retention fixes and must be merged before the
+final standard check. D live work/E patches/F/G and native gates remain open.
+
 ## #41 D0 shared current-view read (locally qualified)
 
 Local foundation commits6d1e04a/54fd089/635cd9b/e6b1cfc extract connection reads

@@ -94,6 +94,11 @@ or Revisit. The fixed header is separate from the conversation: title and state
 on the left, connection/model/working directory on the right. Long paths keep
 their final portion; the original value remains available in details.
 
+For an automatically derived header title, `名称未設定（元本文の取得範囲外）` means
+that earlier source evidence exceeded the header's bounded read. Messages still
+exist; inspect history or assign an explicit conversation title. The display does
+not rewrite the saved title.
+
 Each shell call has one compact row containing its command and known outcome or
 duration. IDs and per-response call numbers are left to details. Successful
 output starts closed; a failed call opens a short tail preview, including stderr
