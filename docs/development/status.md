@@ -1,31 +1,30 @@
 # Development status
 
-## Index integration with main `16fe4aa`: local check passed; manual native CI next
+## Issues #42/#43/#55: implemented, pushed and native-verified; awaiting main integration
 
-The index branch merged canonical main `16fe4aa` at `5341512`. This combined
-source passes macOS standard checks: 1,498 passed, zero failed, 28 ignored;
-six Python gate tests, formatting and all-target strict Clippy also pass.
-Manual index-branch CI is already authorized and is the remaining native gate.
-Automatic branch CI is now disabled under #57; native branch verification needs
-an explicit workflow dispatch. No release or installed-binary update is included.
+The reviewed index branch `issue-42-43-55/index` is pushed. Exact source
+`ae9bc19` passes [manual CI40996181881](https://github.com/tya5/shellboy/actions/runs/40996181881)
+on all three OSes: Linux1,499 / macOS1,498 / Windows1,386 passed, zero failed;
+ignored27/28/20. Windows uses four test threads. All baseline main test identities
+and ignored sets remain, with 30 additional active cases per OS. Native macOS
+standard checks also pass (1,498/0/28, six Python gates, 85 registered suites,
+formatting and strict all-target Clippy). See [acceptance](../validation/acceptance.md).
 
-Index source `b22a30a` passed native Linux (1,499) and macOS (1,498). Windows
-failed two #51 path fixtures and then aborted cp1252 diagnostic printing before
-the integration harness ran. Retain that failed evidence; Windows index
-integration is not verified by that run.
+Main contains #57 at `16fe4aa`, with
+[push CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000)
+successful on all three OSes. Branch push of ae9bc19 started no automatic run;
+explicit workflow_dispatch selected that branch and completed all three jobs.
+CI runs automatically only on main push; retained manual inputs/jobs are unchanged.
+Tags/releases require an exact green main SHA and separate user authorization.
 
-Canonical main repairs `509daa5` / `ff84d81` / `5234f94` pass all three OSes in
-[CI40992985197](https://github.com/tya5/shellboy/actions/runs/40992985197).
-Only #57 policy was then applied to `5234f94`, producing `16fe4aa`. Its local
-standard check passed on macOS: 1,468 passed / zero failed / 28 ignored and six
-Python checks. The user authorized main publication and that push is complete;
-[main CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000)
-is in progress, not yet a successful result for `16fe4aa`.
-
-The earlier proposed merge of duplicate hotfix `34ca8d3` was aborted; that
-alternative remains local and is not the adopted integration source. Records
-below preserve earlier sources, results and permissions at their checkpoints;
-this opening section states the current integration and publication state.
+The index code includes canonical Windows repairs from main5234f94. The earlier
+failed b22a30a Windows run is retained; the duplicate local alternative34ca8d3
+was abandoned and not published. Index implementation/tests and UI are split
+across meaningful commits, followed by current-main integration. Remaining work
+is review and separately authorized main integration of the index changes.
+No paid provider test, default-user reindex/GC, installed-binary update, tag or
+release is included. Subsequent evidence-only updates do not change the verified
+Rust, bundled guides or workflow source and do not trigger automatic branch CI.
 
 ## Issues #42/#43/#55: pre-main-repair combined local checkpoint
 

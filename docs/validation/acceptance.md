@@ -2138,3 +2138,52 @@ start its push CI, then explicitly dispatch the retained three-OS workflow for
 that exact branch. Record source/event/run and per-OS results separately from
 b22's failed Windows result and main's baseline successes. No default data,
 paid provider API, installed binary, tag or release is changed by these checks.
+
+
+## 2026-10-30: final native index verification and #57 trigger observations
+
+Exact main source `16fe4aa27ec41ef05c803fb12808557117618e0f` succeeds in
+[push CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000):
+Linux1,469 / macOS1,468 / Windows1,356 passed, zero failed; ignored27/28/20.
+Artifacts match that SHA and have empty failure arrays. This verifies #57's
+main-push event actually starts and completes the ordinary three-OS matrix.
+Canonical Windows fixture/Unicode runner repairs remain those from main5234f94;
+the unpublished duplicate34ca8d3 was never used as publication evidence.
+
+User-authorized branch push advanced b22a30a to exact
+`ae9bc193947882ce1d4b99ac4765c7056a45565e`. Multiple run-list observations
+before manual dispatch show no push-triggered run for this SHA; only the prior
+failed b22a30a push run exists. Explicit `gh workflow run ci.yml --ref
+issue-42-43-55/index` then starts
+[workflow_dispatch CI40996181881](https://github.com/tya5/shellboy/actions/runs/40996181881)
+with diagnostics=false, performance=false, windows_test_threads=default and
+baseline_ref5234f94. All retained inputs are accepted and all three native jobs
+complete successfully:
+
+| OS | Passed | Failed | Ignored | Recorded test threads |
+| --- | ---: | ---: | ---: | --- |
+| Linux | 1,499 | 0 | 27 | libtest default |
+| macOS | 1,498 | 0 | 28 | libtest default |
+| Windows | 1,386 | 0 | 20 | 4 |
+
+Downloaded timing artifacts match ae9bc19 and contain no failures. For each OS,
+compare full normalized identities against the main16fe4aa artifact: every
+baseline identity is retained, exactly30 active cases are added, and ignored
+sets are identical. Windows now runs and passes the complete integration
+harness, including dimension/probe/batch/GC regressions previously not reached
+when b22's lib diagnostics aborted. Native OS success does not claim physical
+company-terminal/IME/clipboard or actual provider dimension/quality support.
+
+#57 is therefore verified for main push, branch push with no automatic CI, and
+explicit branch dispatch. Optional enabled diagnostics/performance workloads
+were not rerun solely for this trigger edit: their inputs/matrix/job bodies
+are byte-identical to the previously adopted workflow. No test tag or release
+was created; tag exclusion is verified by the branches-only configuration and
+GitHub's documented filter semantics.
+
+Post-result changes are development/status and acceptance records only, beyond
+the exact native-verified ae9bc19 code. Verify their links/diff/secrets before
+publishing; no Rust, bundled-guide, dependency or workflow source changes and
+no duplicate native run are needed for that evidence update. Index features
+remain on the work branch; main contains the authorized CI policy/repairs only.
+No user data, paid API, installed binary or release was changed.
