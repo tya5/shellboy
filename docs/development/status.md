@@ -1185,3 +1185,15 @@ separate integration gate. No provider is live-tested; Gemini/caching and vendor
 reasoning/tool metadata remain unverified/unsupported as documented. Anthropic's
 OpenAI facade, extra_body/cached_content, native vendor APIs and provider login
 are outside this version. No installed binary or real owner/data is changed.
+
+## Chat wire tolerance review (#64 / #68 D-010, 2026-10-31)
+
+The edge adapter accepts complete stop-terminated tool calls, repeated full
+declared shell names, missing call ids derived stably from response id/index,
+and omitted choices on usage chunks. Original finish reason, source identity,
+derivation/repetition/omission facts are retained in output-item metadata so
+normal Core persistence keeps them. Core execution, groups, storage and retry
+policies remain unchanged. Incomplete calls and missing both identities are not
+repaired. Four separate synthetic traces and negative/replay/persistence checks
+pass locally; standard local validation and final native CI are separate gates.
+No real-provider test, installed binary or user configuration is changed.

@@ -1185,3 +1185,31 @@ separate integration gate. No provider is live-tested; Gemini/caching and vendor
 reasoning/tool metadata remain unverified/unsupported as documented. Anthropic's
 OpenAI facade, extra_body/cached_content, native vendor APIs and provider login
 are outside this version. No installed binary or real owner/data is changed.
+
+## Fact-preserving Chat tolerances (#64 review / D-010)
+
+2026-10-31, native macOS ARM64, Rust1.99.1. Ten focused Chat integration tests
+pass, including four new credential-free synthetic SSE traces: complete calls
+ending with stop, repeated full shell names, missing call ids and usage chunks
+without choices. Feed variants at different byte boundaries; check original
+finish_reason and normalization markers, parse complete arguments, preserve
+reported usage and unknowns, and keep generated ids stable across chunk sizes
+and JSON/SSE decoding. A golden id locks the response-id/index derivation, and
+another response or index produces a different id. Replay sends the same ids
+for assistant calls and tool results; synthesis is not mislabelled provider data.
+
+The real loopback Core flow now uses stop-terminated complete calls, executes
+both harmless echo commands, and verifies the accepted original finish/marker
+in persisted assistant_response output, not only a temporary HTTP envelope.
+Normalization metadata stays in the normal saved output. An empty usage-only
+answer uses an empty message as its fact carrier, not invented text.
+
+Negative cases cover truncated/empty/non-object arguments, empty names, both
+response and tool identity absent, a no-choices chunk without usage, and partial
+name fragments that must not be repaired into shell. Existing Responses and
+Chat retry/reduction/cache-usage/timeout tests remain unchanged in behavior.
+Local full standard checks use RUST_TEST_THREADS=2; final rebased source must
+also pass the ordinary three-OS main CI gate. No live provider, billed request,
+real user config/data or installed binary is used. Real-provider compatibility
+is still unverified. Capacity classification is intentionally unchanged: only
+recognized string codes, not numeric Gemini/generic OpenRouter/message guesses.

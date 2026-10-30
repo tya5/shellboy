@@ -199,3 +199,24 @@ Expose dialect/unavailable features in catalog/check details. Anthropic's OpenAI
 facade is outside qualification because it lacks prompt-cache support. No live
 provider tests are authorized (#68 D-003); Gemini and all real providers remain
 unverified. Provider extra_body/cached_content controls are deferred.
+
+
+### D-010 fact-preserving Chat tolerances (#64 review)
+
+Accept stop with calls only when every call has a nonempty name and identity
+(provider or derived below) and fully parsed JSON-object arguments. Keep the
+original finish_reason and a stop_with_complete_tool_calls marker. Core's usual
+shell schema/group validation still applies. Repeated full declared `shell`
+name deltas are ignored and counted; partial name fragments still concatenate.
+For missing/empty tool ids, require a nonempty response id: hash its UTF-8 bytes
+once with SHA-256, then hash that hex seed plus the 8-byte big-endian index. Use
+`call_sb_` plus 48 hex digits; mark the original id, source/index and synthesis.
+No response identity is guessed if both identities are absent.
+
+An omitted choices field is empty only on a chunk carrying non-null usage, with
+an omission counter. Other malformed choices still fail. Store normalization
+facts in normalized output items (also in the direct-client raw envelope), so
+existing assistant_response persistence and raw/F6 inspection retain them;
+Core does not persist every top-level response property. An otherwise empty
+usage-only answer carries facts on an empty assistant message, not invented text.
+These rules are wire normalization, not legacy Core/data-format fallbacks.

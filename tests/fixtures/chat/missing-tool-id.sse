@@ -1,0 +1,6 @@
+data: {"id":"chat-missing-id","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"type":"function","function":{"name":"shell","arguments":"{\"command\":\"echo one\"}"}},{"index":0,"type":"function","function":{"name":"shell","arguments":"{\"command\":\"echo zero\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chat-missing-id","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

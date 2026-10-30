@@ -1,0 +1,8 @@
+data: {"id":"chat-jitter","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"repeat-call","type":"function","function":{"name":"shell","arguments":"{\"command\":"}}]},"finish_reason":null}]}
+
+data: {"id":"chat-jitter","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"shell","arguments":"\"echo repeated\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chat-jitter","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

@@ -15,6 +15,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 const TEXT: &str = include_str!("fixtures/chat/text-usage.sse");
 const TOOLS: &str = include_str!("fixtures/chat/tools.sse");
+const STOP_TOOLS: &str = include_str!("fixtures/chat/stop-complete-tools.sse");
+const REPEATED_NAME: &str = include_str!("fixtures/chat/repeated-function-name.sse");
+const MISSING_IDS: &str = include_str!("fixtures/chat/missing-tool-id.sse");
+const USAGE_NO_CHOICES: &str = include_str!("fixtures/chat/usage-no-choices.sse");
 const LENGTH: &str = include_str!("fixtures/chat/length.sse");
 const UNKNOWN: &str = include_str!("fixtures/chat/missing-usage.sse");
 const CONTEXT: &str = include_str!("fixtures/chat/context-error.sse");
@@ -406,7 +410,7 @@ async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared()
                     match index {
                         0=>reply(&mut stream,503,"application/json",r#"{"error":{"message":"temporary fixture"}}"#).await,
                         1=>reply(&mut stream,429,"application/json",r#"{"error":{"code":"rate_limit","message":"temporary fixture"}}"#).await,
-                        2=>reply(&mut stream,200,"text/event-stream",TOOLS).await,
+                        2=>reply(&mut stream,200,"text/event-stream",STOP_TOOLS).await,
                         4=>reply(&mut stream,400,"application/json",r#"{"error":{"code":"context_length_exceeded","message":"explicit synthetic overflow"}}"#).await,
                         _=>reply(&mut stream,200,"text/event-stream",TEXT).await,
                     }
@@ -438,6 +442,156 @@ async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared()
         assert_ne!(requests[4]["messages"], requests[5]["messages"]);
         let reduced = owner.db.call(|db| Ok(db.query_row("SELECT COUNT(*) FROM model_attempt WHERE json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.outcome')='adopted'", [], |row|row.get::<_,i64>(0))?)).await.unwrap();
         assert_eq!(reduced,1,"explicit overflow must use the shared reduction path");
+        let kept = owner.db.call(|db| Ok(db.query_row("SELECT COUNT(*) FROM node WHERE kind='assistant_response' AND json_valid(payload_json) AND json_extract(payload_json,'$.output[0].chat_completions.finish_reason')='stop' AND json_extract(payload_json,'$.output[0].chat_completions.stop_with_complete_tool_calls')=1", [], |row|row.get::<_,i64>(0))?)).await.unwrap();
+        assert_eq!(kept,1,"accepted stop/tool-call facts must survive Core storage");
+
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
     }).await.unwrap();
+}
+
+fn jitter_trace(trace: &str, size: usize) -> shellboy::model::ModelResponse {
+    let mut stream = Stream::new(Api::ChatCompletions);
+    for bytes in trace.as_bytes().chunks(size) {
+        stream.push(bytes).unwrap();
+    }
+    stream.finish(true).unwrap()
+}
+#[test]
+fn d010_complete_stop_calls_and_repeated_full_names_preserve_facts() {
+    for size in [1, 7, 4096] {
+        let result = jitter_trace(STOP_TOOLS, size);
+        assert_eq!(result.calls.len(), 2);
+        assert!(result.calls.iter().all(|call| call.args.is_ok()));
+        assert_eq!(result.raw["finish_reason"], "stop");
+        for item in &result.output {
+            assert_eq!(item["chat_completions"]["finish_reason"], "stop");
+            assert_eq!(
+                item["chat_completions"]["stop_with_complete_tool_calls"],
+                true
+            );
+        }
+        let result = jitter_trace(REPEATED_NAME, size);
+        assert_eq!(
+            result.calls[0].args.as_ref().unwrap().command,
+            "echo repeated"
+        );
+        assert_eq!(result.output[0]["name"], "shell");
+        assert_eq!(
+            result.output[0]["chat_completions"]["repeated_full_name_deltas"],
+            1
+        );
+    }
+}
+#[test]
+fn d010_missing_ids_are_stable_per_response_and_index_and_replay_consistently() {
+    let baseline = jitter_trace(MISSING_IDS, 1);
+    assert_eq!(baseline.calls.len(), 2);
+    let ids = baseline
+        .calls
+        .iter()
+        .map(|call| call.call_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids[0],
+        "call_sb_1482c0ddd2fcae00f5c6546169d3058e1e3adf342b3f8096"
+    );
+    assert_ne!(ids[0], ids[1]);
+    assert!(
+        ids.iter()
+            .all(|id| id.starts_with("call_sb_") && id.len() == 56)
+    );
+    for size in [2, 19, 4096] {
+        let result = jitter_trace(MISSING_IDS, size);
+        assert_eq!(
+            result
+                .calls
+                .iter()
+                .map(|call| call.call_id.clone())
+                .collect::<Vec<_>>(),
+            ids
+        );
+    }
+    let different = jitter_trace(
+        &MISSING_IDS.replace("chat-missing-id", "another-response"),
+        3,
+    );
+    assert_ne!(different.calls[0].call_id, ids[0]);
+    for (index, item) in baseline.output.iter().enumerate() {
+        assert_eq!(item["chat_completions"]["index"], index);
+        assert_eq!(item["chat_completions"]["id_synthesized"], true);
+        assert_eq!(item["chat_completions"]["response_id"], "chat-missing-id");
+        assert_eq!(item["chat_completions"]["original_id"], Value::Null);
+        assert_eq!(
+            item["chat_completions"]["id_source"],
+            "sha256_response_id_index"
+        );
+    }
+    let mut input = baseline.output;
+    for id in &ids {
+        input.push(json!({"type":"function_call_output","call_id":id,"output":"fixture result"}));
+    }
+    let encoded = dialect::encode(
+        Api::ChatCompletions,
+        response_request("fixture", input, None, true),
+    )
+    .unwrap();
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(encoded["messages"][0]["tool_calls"][index]["id"], *id);
+        assert_eq!(encoded["messages"][index + 1]["tool_call_id"], *id);
+    }
+    let decoded=dialect::decode_json(Api::ChatCompletions,json!({"id":"chat-missing-id","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"shell","arguments":"{}"}}]},"finish_reason":"tool_calls"}]})).unwrap();
+    assert_eq!(decoded["output"][0]["call_id"], ids[0]);
+}
+#[test]
+fn d010_omitted_choices_usage_is_retained_without_inventing_token_counters() {
+    let result = jitter_trace(USAGE_NO_CHOICES, 2);
+    assert_eq!(result.text, "Hello");
+    assert_eq!(
+        result.raw["usage"]["input_tokens_details"]["cached_tokens"],
+        100
+    );
+    assert_eq!(
+        result.raw["chat_completions"]["usage_chunks_without_choices"],
+        1
+    );
+    assert_eq!(
+        result.output[0]["chat_completions"]["usage_chunks_without_choices"],
+        1
+    );
+    let empty = "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"usage\":{}}\n\ndata: [DONE]\n\n";
+    let result = jitter_trace(empty, 1);
+    assert_eq!(result.raw["usage"], json!({}));
+    assert_eq!(
+        result.output[0]["chat_completions"]["usage_chunks_without_choices"], 1,
+        "facts survive an otherwise empty answer"
+    );
+}
+#[test]
+fn d010_does_not_accept_incomplete_calls_or_guess_missing_response_identity() {
+    let base = "data: {\"id\":\"negative\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-a\",\"function\":{\"name\":\"shell\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+    for invalid in [
+        base.replace("\"arguments\":\"{}\"", "\"arguments\":\"{\""),
+        base.replace("\"arguments\":\"{}\"", "\"arguments\":\"\""),
+        base.replace("\"arguments\":\"{}\"", "\"arguments\":\"[]\""),
+        base.replace("\"name\":\"shell\"", "\"name\":\"\""),
+        base.replace("\"id\":\"negative\",", "")
+            .replace("\"id\":\"call-a\",", ""),
+    ] {
+        assert_ne!(invalid, base);
+        let mut stream = Stream::new(Api::ChatCompletions);
+        assert!(stream.push(invalid.as_bytes()).is_err());
+        assert!(stream.is_terminal());
+    }
+    let mut stream = Stream::new(Api::ChatCompletions);
+    assert!(stream.push(b"data: {\"id\":\"not-usage\"}\n\n").is_err());
+    let fragments = REPEATED_NAME.replacen("\"name\":\"shell\"", "\"name\":\"s\"", 1);
+    let result = jitter_trace(&fragments, 3);
+    assert!(
+        result.calls[0].args.is_err(),
+        "partial names must not be repaired into the declared function"
+    );
+    assert_eq!(
+        result.output[0]["chat_completions"]["repeated_full_name_deltas"],
+        0
+    );
 }

@@ -252,6 +252,19 @@ length/filter/unknown completion reasons are not silently successful. Ordinary
 transport/cancellation/deadline/retry/reduction/recovery rules stay shared with
 Responses; only explicit context-limit codes trigger that classification.
 
+D-010 tolerances keep audit facts rather than quietly rewriting the response:
+complete tool calls can end with `stop` (the original value is kept), repeated
+full `shell` names are counted and ignored, and absent tool ids are derived
+stably from response id plus index with a synthesis marker. If both response id
+and tool id are missing, the adapter refuses to guess. Usage chunks may omit
+`choices`; an omission counter is retained. These facts live in the saved
+output's `chat_completions` metadata and direct-client raw JSON. Incomplete
+arguments, missing names and unrelated malformed chunks are still rejected.
+
+Capacity classification uses recognized **string `error.code` values only**;
+Gemini numeric-code/`INVALID_ARGUMENT` and OpenRouter-shaped errors without such
+a code may reach recovery rather than immediately shrinking input (no guessing).
+
 Responses reasoning items and encrypted reasoning are **not replayed** to Chat.
 Vendor `reasoning_content` is intentionally unused (not saved, displayed or
 replayed), and vendor-specific opaque tool metadata is not supported. Modes

@@ -167,8 +167,10 @@ fn usage(value: &Value) -> Value {
 #[derive(Default)]
 struct Call {
     id: String,
+    id_reported: bool,
     name: String,
     arguments: String,
+    repeated_full_names: u64,
 }
 #[derive(Default)]
 struct Chat {
@@ -178,6 +180,7 @@ struct Chat {
     calls: BTreeMap<u64, Call>,
     finish: Option<String>,
     usage: Option<Value>,
+    usage_chunks_without_choices: u64,
 }
 impl Chat {
     fn body(&mut self, kind: &str, field: &str, text: &str) {
@@ -203,9 +206,17 @@ impl Chat {
             }
             self.id = Some(id.into());
         }
-        let choices = value["choices"]
-            .as_array()
-            .ok_or_else(|| protocol("Chat chunk has no choices array"))?;
+        let no_choices = Vec::new();
+        let choices = match value.get("choices") {
+            Some(value) => value
+                .as_array()
+                .ok_or_else(|| protocol("Chat choices must be an array"))?,
+            None if value.get("usage").is_some_and(|usage| !usage.is_null()) => {
+                self.usage_chunks_without_choices += 1;
+                &no_choices
+            }
+            None => return Err(protocol("Chat chunk has no choices array or usage")),
+        };
         if choices.len() > 1 {
             return Err(protocol("Multiple Chat choices are unsupported"));
         }
@@ -257,6 +268,12 @@ impl Chat {
                         return Err(protocol("Unsupported Chat tool kind"));
                     }
                     let entry = self.calls.entry(index).or_default();
+                    if call
+                        .get("id")
+                        .is_some_and(|id| !id.is_null() && !id.is_string())
+                    {
+                        return Err(protocol("Chat tool id must be a string"));
+                    }
                     if let Some(id) = call["id"].as_str() {
                         if !entry.id.is_empty() && entry.id != id {
                             return Err(protocol("Chat tool ID changed"));
@@ -265,9 +282,14 @@ impl Chat {
                             return Err(protocol("Chat tool ID too large"));
                         }
                         entry.id = id.into();
+                        entry.id_reported = true;
                     }
                     if let Some(name) = call["function"]["name"].as_str() {
-                        entry.name.push_str(name);
+                        if entry.name == "shell" && name == entry.name {
+                            entry.repeated_full_names += 1;
+                        } else {
+                            entry.name.push_str(name);
+                        }
                         if entry.name.len() > 1024 {
                             return Err(protocol("Chat function name too large"));
                         }
@@ -309,24 +331,70 @@ impl Chat {
         if reason == "tool_calls" && self.calls.is_empty() {
             return Err(protocol("Chat tool finish without calls"));
         }
-        if reason == "stop" && !self.calls.is_empty() {
-            return Err(protocol("Chat stop with unfinished tool calls"));
+        let stop_with_calls = reason == "stop" && !self.calls.is_empty();
+        if stop_with_calls
+            && self.calls.values().any(|call| {
+                !serde_json::from_str::<Value>(&call.arguments).is_ok_and(|value| value.is_object())
+            })
+        {
+            return Err(protocol("Chat stop with incomplete tool arguments"));
         }
+        let id_seed = if self.calls.values().any(|call| call.id.is_empty()) {
+            let response_id = self
+                .id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| protocol("Cannot synthesize a tool id without a response id"))?;
+            Some(crate::digest::sha256_hex(response_id.as_bytes()))
+        } else {
+            None
+        };
+        let facts = json!({"response_id":self.id,"finish_reason":reason,"stop_with_complete_tool_calls":stop_with_calls,
+            "usage_chunks_without_choices":self.usage_chunks_without_choices});
         let complete = matches!(reason, "stop" | "tool_calls");
         let status = if complete { "completed" } else { "incomplete" };
         let mut output = Vec::new();
-        if !self.content.is_empty() {
+        if !self.content.is_empty()
+            || (self.calls.is_empty() && self.usage_chunks_without_choices > 0)
+        {
             output.push(
-                json!({"type":"message","role":"assistant","status":status,"content":self.content}),
+                json!({"type":"message","role":"assistant","status":status,"content":self.content,"chat_completions":facts}),
             );
         }
-        for call in self.calls.values() {
-            if call.id.is_empty() || call.name.is_empty() {
+        for (index, call) in &self.calls {
+            if call.name.is_empty() {
                 return Err(protocol("Incomplete Chat tool identity"));
             }
-            output.push(json!({"type":"function_call","status":status,"call_id":call.id,"name":call.name,"arguments":call.arguments}));
+            let synthesized = call.id.is_empty();
+            let id = if synthesized {
+                let mut seed = id_seed
+                    .as_ref()
+                    .expect("missing-id seed")
+                    .as_bytes()
+                    .to_vec();
+                seed.extend_from_slice(&index.to_be_bytes());
+                format!("call_sb_{}", &crate::digest::sha256_hex(seed)[..48])
+            } else {
+                call.id.clone()
+            };
+            let mut call_facts = facts.clone();
+            call_facts["index"] = json!(index);
+            call_facts["id_synthesized"] = json!(synthesized);
+            call_facts["original_id"] = if call.id_reported {
+                json!(call.id)
+            } else {
+                Value::Null
+            };
+            call_facts["id_reported"] = json!(call.id_reported);
+            call_facts["id_source"] = json!(if synthesized {
+                "sha256_response_id_index"
+            } else {
+                "provider"
+            });
+            call_facts["repeated_full_name_deltas"] = json!(call.repeated_full_names);
+            output.push(json!({"type":"function_call","status":status,"call_id":id,"name":call.name,"arguments":call.arguments,"chat_completions":call_facts}));
         }
-        let mut raw = json!({"status":if matches!(reason,"stop"|"tool_calls"){"completed"}else{"incomplete"},"output":output,"api":"chat_completions","finish_reason":reason});
+        let mut raw = json!({"status":if matches!(reason,"stop"|"tool_calls"){"completed"}else{"incomplete"},"output":output,"api":"chat_completions","finish_reason":reason,"chat_completions":facts});
         if let Some(id) = &self.id {
             raw["id"] = json!(id);
         }
