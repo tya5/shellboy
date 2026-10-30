@@ -1,19 +1,21 @@
 //! Real Driver recovery after repeated stalled request-body consumption.
 //! Synthetic loopback traffic only; the server reads a prefix and never drains it.
 use serde_json::{Value, json};
-use shellboy::{app::DataOwner, control::Control, protocol::*};
-use std::{sync::Arc, time::Duration};
-use tokio::{
-    io::AsyncReadExt,
-    net::TcpListener,
-    sync::mpsc,
-    time::{sleep, timeout},
+use shellboy::{
+    app::DataOwner,
+    control::{Control, EngineEvent},
+    protocol::*,
 };
+use std::{sync::Arc, time::Duration};
+use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc, time::timeout};
 use tokio_util::sync::CancellationToken;
+
+// Fixture bounds cover scheduling, persisted transitions and cleanup, not HTTP deadlines.
+const WATCHDOG: Duration = Duration::from_secs(60);
 
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = timeout(
-        Duration::from_secs(10),
+        WATCHDOG,
         control.request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             command,
@@ -40,7 +42,6 @@ async fn upload_recovery(auto_trim: bool) {
     // Observing the next prefix also includes prior replay preparation and
     // (when enabled) reducing 16MiB of saved history. This watchdog bounds that
     // fixture work, not HTTP.
-    const OBSERVATION_BUDGET: Duration = Duration::from_secs(60);
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -127,7 +128,7 @@ async fn upload_recovery(auto_trim: bool) {
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
                 now: false,
-                thread_id: Some(thread),
+                thread_id: Some(thread.clone()),
                 text: "small current request after a large saved history".into(),
             }),
         )
@@ -136,7 +137,7 @@ async fn upload_recovery(auto_trim: bool) {
     .unwrap();
     let turn = accepted.turn_id.unwrap();
     for ordinal in 1..=3 {
-        match timeout(OBSERVATION_BUDGET, received.recv()).await {
+        match timeout(WATCHDOG, received.recv()).await {
             Ok(Some(())) => {}
             result => panic!(
                 "request prefix {ordinal}/3 was not actually read (auto_trim={auto_trim}, result={result:?}); saved upload facts: {}",
@@ -144,8 +145,9 @@ async fn upload_recovery(auto_trim: bool) {
             ),
         }
     }
+    let mut events = control.subscribe();
     let observed_turn = turn.clone();
-    let recovery = timeout(OBSERVATION_BUDGET, async {
+    let recovery = timeout(WATCHDOG, async {
         loop {
             let turn = observed_turn.clone();
             let state: String = control
@@ -159,7 +161,7 @@ async fn upload_recovery(auto_trim: bool) {
             if state == "recovery_wait" {
                 break;
             }
-            sleep(Duration::from_millis(10)).await;
+            changed(&mut events, &thread).await;
         }
     })
     .await;
@@ -206,24 +208,18 @@ async fn upload_recovery(auto_trim: bool) {
         }
         Ok(())
     }).await.unwrap();
-    timeout(Duration::from_secs(5), control.shutdown())
+    timeout(WATCHDOG, control.shutdown())
         .await
         .unwrap()
         .unwrap();
-    timeout(Duration::from_secs(5), owner.shutdown())
-        .await
-        .unwrap()
-        .unwrap();
+    timeout(WATCHDOG, owner.shutdown()).await.unwrap().unwrap();
     stop.cancel();
-    timeout(Duration::from_secs(5), server)
-        .await
-        .unwrap()
-        .unwrap();
+    timeout(WATCHDOG, server).await.unwrap().unwrap();
 }
 
 async fn upload_facts(control: &Control, turn: &str) -> Value {
     let turn = turn.to_owned();
-    match timeout(Duration::from_secs(10), control.store.database.call(move |db| {
+    match timeout(WATCHDOG, control.store.database.call(move |db| {
         let (state, reason): (String, Option<String>) = db.query_row(
             "SELECT state,recovery_reason_json FROM turn WHERE id=?1", [&turn],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -248,15 +244,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     const REQUIRED_FAILURES: u64 = 3;
     const HEADER_TIMEOUT_MS: u64 = 3_000;
     const RETRY_DELAY_MS: u64 = 100;
-    // This observes three complete failed attempts, not a five-second SLA.
-    // Each may consume its own header/connect budget, plus capped retry delay.
-    // Keep a separate five-second fixture preparation allowance. In particular,
-    // loopback refusal must not be assumed instantaneous on every native OS.
-    let observation_budget =
-        Duration::from_millis(5_000 + REQUIRED_FAILURES * (HEADER_TIMEOUT_MS + RETRY_DELAY_MS));
-    // After listen starts, allow one already in-flight failed request and the
-    // next successful request, plus capped retry and fixture preparation.
-    let transition_budget = Duration::from_millis(5_000 + 2 * HEADER_TIMEOUT_MS + RETRY_DELAY_MS);
+    // Native refusal and subsequent admission are observed under the same fixture watchdog.
     let config = root.path().join("config.toml");
     std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_max_retries=8\nresponse_retry_max_delay_ms={RETRY_DELAY_MS}\nresponse_header_timeout_ms={HEADER_TIMEOUT_MS}\n")).unwrap();
     let owner = DataOwner::start(
@@ -288,7 +276,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
                 now: false,
-                thread_id: Some(thread),
+                thread_id: Some(thread.clone()),
                 text: "recover after actual proxy startup".into(),
             }),
         )
@@ -296,7 +284,8 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     )
     .unwrap();
     let turn = accepted.turn_id.unwrap();
-    let observed = timeout(observation_budget, async {
+    let mut events = control.subscribe();
+    let observed = timeout(WATCHDOG, async {
         loop {
             let turn = turn.clone();
             let (failed, state): (i64, String) = control
@@ -321,29 +310,26 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
             if failed >= REQUIRED_FAILURES as i64 {
                 break;
             }
-            sleep(Duration::from_millis(5)).await;
+            changed(&mut events, &thread).await;
         }
     })
     .await;
     if observed.is_err() {
         let target = turn.clone();
-        let progress = timeout(Duration::from_secs(1), control.store.database.call(move |db| {
+        let progress = timeout(WATCHDOG, control.store.database.call(move |db| {
         let state: String = db.query_row("SELECT state FROM turn WHERE id=?1", [&target], |r| r.get(0))?;
         let attempts = db.prepare("SELECT json_object('state',state,'kind',json_extract(error_json,'$.error.kind'),'phase',json_extract(error_json,'$.error.http_observation.phase'),'source_bytes',json_extract(error_json,'$.error.http_observation.body_source_bytes_consumed'),'duration_ms',round((julianday(ended_at)-julianday(started_at))*86400000)) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid LIMIT 9")?
             .query_map([target], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(json!({"turn_state":state,"attempts":attempts}))
     })).await;
         panic!(
-            "three failed connections exceeded derived {}ms observation budget; saved progress: {progress:?}",
-            observation_budget.as_millis()
+            "three failed connections exceeded {}ms fixture watchdog; saved progress: {progress:?}",
+            WATCHDOG.as_millis()
         );
     }
     let listener = TcpListener::bind(address).await.unwrap();
     let server = tokio::spawn(async move {
-        let (mut stream, _) = timeout(transition_budget, listener.accept())
-            .await
-            .unwrap()
-            .unwrap();
+        let (mut stream, _) = timeout(WATCHDOG, listener.accept()).await.unwrap().unwrap();
         stream.set_nodelay(true).unwrap();
         let mut bytes = Vec::new();
         loop {
@@ -368,7 +354,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         let body = json!({"id":"proxy-restored","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"connection restored"}]}]}).to_string();
         stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
     });
-    timeout(transition_budget, async {
+    timeout(WATCHDOG, async {
         loop {
             let target = turn.clone();
             let state: String = control
@@ -383,7 +369,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
             if state == "completed" {
                 break;
             }
-            sleep(Duration::from_millis(5)).await;
+            changed(&mut events, &thread).await;
         }
     })
     .await
@@ -424,7 +410,24 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         })
         .await
         .unwrap();
-    server.await.unwrap();
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
+    timeout(WATCHDOG, server).await.unwrap().unwrap();
+    timeout(WATCHDOG, control.shutdown())
+        .await
+        .unwrap()
+        .unwrap();
+    timeout(WATCHDOG, owner.shutdown()).await.unwrap().unwrap();
+}
+
+// Subscribe before the saved-state read; lag means re-read, not lost completion.
+async fn changed(events: &mut tokio::sync::broadcast::Receiver<EngineEvent>, thread: &str) {
+    loop {
+        match events.recv().await {
+            Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == thread => return,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => return,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                panic!("fixture event stream closed for Thread {thread}")
+            }
+            _ => {}
+        }
+    }
 }

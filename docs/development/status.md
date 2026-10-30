@@ -1,5 +1,14 @@
 # Development status
 
+## Windows retry fixture watchdog follow-up
+
+The two response retry fixture files share60s progress/cleanup watchdogs and
+notification-driven persisted-state waits. Product timers, retry/phase/count
+assertions and intentional timed absence/outage checks stay unchanged. Main
+b16f414 run41063015359 attempts1/2 remain failed evidence; the long-Turn arrival
+guard was already60s, so its cause is not established. Local standard and two
+manual native Windows branch runs are pending before main admission.
+
 ## #59: saved sender inspection and self-asserted names
 
 `message get` and user-node `history get/list` provenance expose the original
