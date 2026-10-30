@@ -36,6 +36,11 @@ async fn a_partial_large_upload_is_reduced_once_before_the_resumed_header_failur
 }
 
 async fn upload_recovery(auto_trim: bool) {
+    // The product's 3s header deadline bounds HTTP setup/upload/header waiting.
+    // Observing the next prefix also includes prior replay preparation and
+    // (when enabled) reducing 16MiB of saved history. This watchdog bounds that
+    // fixture work, not HTTP.
+    const OBSERVATION_BUDGET: Duration = Duration::from_secs(60);
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -128,15 +133,18 @@ async fn upload_recovery(auto_trim: bool) {
         .await,
     )
     .unwrap();
-    for _ in 0..2 {
-        timeout(Duration::from_secs(15), received.recv())
-            .await
-            .expect("the server must actually read a request prefix before timeout")
-            .expect("prefix server stopped");
-    }
     let turn = accepted.turn_id.unwrap();
+    for ordinal in 1..=2 {
+        match timeout(OBSERVATION_BUDGET, received.recv()).await {
+            Ok(Some(())) => {}
+            result => panic!(
+                "request prefix {ordinal}/2 was not actually read (auto_trim={auto_trim}, result={result:?}); saved upload facts: {}",
+                upload_facts(&control, &turn).await,
+            ),
+        }
+    }
     let observed_turn = turn.clone();
-    timeout(Duration::from_secs(15), async {
+    let recovery = timeout(OBSERVATION_BUDGET, async {
         loop {
             let turn = observed_turn.clone();
             let state: String = control
@@ -153,8 +161,12 @@ async fn upload_recovery(auto_trim: bool) {
             sleep(Duration::from_millis(10)).await;
         }
     })
-    .await
-    .expect("second incomplete source must enter recovery");
+    .await;
+    assert!(
+        recovery.is_ok(),
+        "second incomplete source must enter recovery (auto_trim={auto_trim}); saved upload facts: {}",
+        upload_facts(&control, &turn).await,
+    );
     assert!(
         timeout(Duration::from_millis(300), received.recv())
             .await
@@ -216,6 +228,23 @@ async fn upload_recovery(auto_trim: bool) {
         .await
         .unwrap()
         .unwrap();
+}
+
+async fn upload_facts(control: &Control, turn: &str) -> Value {
+    let turn = turn.to_owned();
+    match timeout(Duration::from_secs(10), control.store.database.call(move |db| {
+        let (state, reason): (String, Option<String>) = db.query_row(
+            "SELECT state,recovery_reason_json FROM turn WHERE id=?1", [&turn],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let attempts = db.prepare("SELECT state,error_json FROM model_attempt WHERE turn_id=?1 ORDER BY rowid")?
+            .query_map([turn], |row| Ok(json!({"state":row.get::<_,String>(0)?,"error":row.get::<_,Option<String>>(1)?})))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(json!({"turn_state":state,"recovery_reason":reason,"attempts":attempts}))
+    })).await {
+        Ok(Ok(facts)) => facts,
+        result => json!({"diagnostic_error":format!("{result:?}")}),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

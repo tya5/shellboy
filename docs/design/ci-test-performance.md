@@ -161,3 +161,12 @@ poll is permitted; it adds no product observer. The fixture's wait expiry must
 exceed the registration watchdog. Retain every capture-failure caching and
 wait/Run-drain assertion. This does not establish runner load as the cause;
 keep the failed native evidence and qualify the correction on Windows again.
+
+The follow-up manual Windows run41018286041 passes both shutdown fixtures but
+fails the existing large-upload prefix observation at15seconds. That observation
+includes16MiB preparation/reduction between native requests, not just the
+configured3-second header deadline. Preserve the real1024-byte socket prefix,
+backpressure, product timeout and exact two-attempt/phase assertions. Give only
+fixture arrival/settlement watchdogs60seconds and include prefix ordinal plus
+saved attempt/Turn facts if they expire. The original log does not identify
+which prefix was delayed; do not claim a specific product/network cause.

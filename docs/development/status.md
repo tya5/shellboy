@@ -2,6 +2,23 @@
 
 ## Pending Message Publication (#52)
 
+Review6517077748 additionally found a genuine interrupted-group busy loop.
+Commit `582ec70` makes an interrupted Turn with unfinished adopted work wait on
+existing nudge/stop rather than repeatedly rechecking the DB. Both running and
+recovery_wait fixtures retain unresolved pairs and allow full Run stop. Commit
+`beace3d` uses notification-driven native test observations and corrects the guide
+typo; those combined changes pass a local standard check1,572/0/29. Submitted
+snapshot retention remains deferred with crash/replay/watermark reasons recorded.
+
+The unchanged main source passes the reviewer's explicit second CI attempt;
+its first failed attempt remains evidence. Manual fixture follow-up41018286041
+passes shutdown registration but fails a different existing15-second large-upload
+prefix observation. That fixture now retains product deadlines/backpressure and
+adds60-second readiness watchdogs with saved-attempt diagnostics. The full final
+tree passes the complete macOS standard check1,572/0/29, layout88, Python6,
+format and strict all-target Clippy; another manual Windows qualification is
+required before its main push. No failed native run is presented as successful.
+
 Main `1aa591b` contains #52 after the successful pre-main Windows qualification.
 Its main CI41016702414 passes Linux1,572/macOS1,571 but Windows fails a
 three-second shutdown-fixture wait-registration guard before shutdown begins.

@@ -1320,3 +1320,18 @@ watermark/replay guarantee without an independent archive engine. The registry
 lock versus long DB work observation (Low5) remains a documented ordering tradeoff,
 not a newly discovered deadlock; revisit through the separate DB-query work.
 Fix the Agent Guide's "up to128" typo without changing its cancellation contract.
+
+
+## Large-upload fixture observation (#52 Windows follow-up, 2026-10-30)
+
+The shutdown-fixture correction run41018286041 passes that earlier failed test
+but fails the existing response_upload_recovery arrival watchdog after15seconds.
+The observed phase is a real1024-byte socket prefix, not a simulated source;
+between requests the fixture also reduces/rebuilds16MiB of history. The old
+message did not identify prefix ordinal or saved attempt phase, so causality
+remains unknown. Raise only arrival/settlement watchdogs to60seconds and report
+bounded saved Turn/attempt diagnostics if they fail. Keep the product3-second
+header deadline, actual backpressure, partial consumption and exact attempt-count
+assertions. Retain the failure and require fresh native Windows qualification.
+The reviewer-run unchanged-main second attempt succeeding is independent evidence,
+not proof of the cause of either failed attempt.

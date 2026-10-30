@@ -1,5 +1,27 @@
 # Validation record
 
+## Review Correction Qualification (#52)
+
+Review6517077748 is addressed by582ec70 (unfinished interrupted group uses
+Idle/nudge-or-stop) andbeace3d (native observation watchdogs/notifications and
+guide typo). The added regression preserves unresolved pairs in running and
+recovery_wait, creates no further model attempt, and retains full Run stop.
+Submitted snapshot retention remains deferred with recorded replay/watermark
+constraints; no live startup repair or new product machinery is introduced.
+
+The combined source including the subsequent large-upload fixture diagnostic
+correction passes the complete macOS arm64/Rust1.99.1 standard check:
+**1,572 passed / 0 failed / 29 ignored**, layout88, Python6, formatting and
+strict all-target Clippy. Its manual native Windows qualification is pending.
+The earlier fixture-only run41018286041 passed shutdown registration but failed
+the existing15-second upload-prefix observation; its failure is retained.
+Product header timeout remains3000ms and real1024-byte prefix/backpressure,
+partial-consumption and exact two-attempt assertions remain unchanged.
+
+Main1aa591b CI41016702414 attempt2 passes Windows1,456/0/21 (artifact SHA
+verified), with the earlier successful Linux/macOS jobs retained. That reviewer
+rerun does not erase attempt1 failure or validate these later review corrections.
+
 ## Main Windows Shutdown-Fixture Follow-up (#52)
 
 Main source `1aa591b` CI41016702414 passes Linux1,572/0/28 and
