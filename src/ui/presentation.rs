@@ -1,10 +1,15 @@
 //! Display-only layout of worker-produced typed blocks and Markdown tokens.
+use super::history_items::{ItemKey, ItemRegion};
 use super::theme;
 use super::{ThreadView, UiNode, rendered_node_text};
 use crate::presentation::{BlockKind, OutputStream, PresentationKind};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
 };
 
 fn conversational(node: &UiNode) -> bool {
@@ -20,6 +25,14 @@ fn source_candidate(text: &str) -> &str {
 }
 
 fn label(node: &UiNode) -> &str {
+    if node.presentation.kind == PresentationKind::Event {
+        if let Some(fact) = node.presentation.title.strip_prefix("状態変更 · ") {
+            return fact;
+        }
+        if node.presentation.title == "状態変更" {
+            return "変更内容を確認";
+        }
+    }
     if !node.presentation.title.is_empty() {
         return &node.presentation.title;
     }
@@ -94,6 +107,7 @@ fn node_lines_inner(
     start: usize,
     width: u16,
     targets: &mut Vec<std::sync::Arc<str>>,
+    show_header: bool,
 ) -> NodeLines {
     let conversational = conversational(node);
     let typed_tools = node
@@ -101,27 +115,30 @@ fn node_lines_inner(
         .blocks
         .iter()
         .any(|block| block.tool.is_some());
-    let header =
-        if conversational || node.presentation.kind == PresentationKind::ToolCall || typed_tools {
-            Vec::new()
-        } else {
-            vec![Line::from(Span::styled(
-                if node.presentation.kind == PresentationKind::ToolResult {
-                    format!("↳ {}", label(node))
-                } else {
-                    match node.presentation.kind {
-                        PresentationKind::Event => format!("· {}", label(node)),
-                        PresentationKind::Summary => format!("◇ {}", label(node)),
-                        PresentationKind::Spill => format!("↪ {}", label(node)),
-                        PresentationKind::Interrupted => format!("⊘ {}", label(node)),
-                        _ => label(node).to_owned(),
-                    }
-                },
-                Style::default()
-                    .fg(color(node))
-                    .add_modifier(Modifier::BOLD),
-            ))]
-        };
+    let header = if !show_header
+        || conversational
+        || node.presentation.kind == PresentationKind::ToolCall
+        || typed_tools
+    {
+        Vec::new()
+    } else {
+        vec![Line::from(Span::styled(
+            if node.presentation.kind == PresentationKind::ToolResult {
+                format!("↳ {}", label(node))
+            } else {
+                match node.presentation.kind {
+                    PresentationKind::Event => format!("· {}", label(node)),
+                    PresentationKind::Summary => format!("◇ {}", label(node)),
+                    PresentationKind::Spill => format!("↪ {}", label(node)),
+                    PresentationKind::Interrupted => format!("⊘ {}", label(node)),
+                    _ => label(node).to_owned(),
+                }
+            },
+            Style::default()
+                .fg(color(node))
+                .add_modifier(Modifier::BOLD),
+        ))]
+    };
     let mut out = NodeLines::new(header);
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
         out.push(Line::from("本文未キャッシュ · 詳細から原文を取得"));
@@ -515,6 +532,16 @@ fn node_lines(
     width: u16,
     links: &mut Vec<std::sync::Arc<str>>,
 ) -> Vec<Line<'static>> {
+    node_lines_with_header(node, expanded, start, width, links, true)
+}
+fn node_lines_with_header(
+    node: &UiNode,
+    expanded: bool,
+    start: usize,
+    width: u16,
+    links: &mut Vec<Arc<str>>,
+    show_header: bool,
+) -> Vec<Line<'static>> {
     let conversational = conversational(node);
     let tool_only = !node.presentation.blocks.is_empty()
         && node
@@ -522,7 +549,14 @@ fn node_lines(
             .blocks
             .iter()
             .all(|block| block.kind == BlockKind::ToolCall);
-    let mut source = node_lines_inner(node, expanded, start, width.saturating_sub(2).max(1), links);
+    let mut source = node_lines_inner(
+        node,
+        expanded,
+        start,
+        width.saturating_sub(2).max(1),
+        links,
+        show_header,
+    );
     // Preserve the legacy empty conversational placeholder: removing it changes
     // page boundary row counts when an uncached/unknown node is reprojected.
     if source.rows.is_empty() && conversational && !tool_only {
@@ -547,7 +581,11 @@ fn node_lines(
                 let marker = if matches!(role, LineRole::Body) && !body_marked {
                     body_marked = true;
                     Span::styled(
-                        if node.role == "user" { "› " } else { "● " },
+                        if node.role == "user" {
+                            input_marker(node)
+                        } else {
+                            "● "
+                        },
                         Style::default().fg(if node.role == "user" {
                             theme::USER_MARKER
                         } else {
@@ -595,42 +633,25 @@ fn quiet_event(node: &UiNode) -> bool {
     // Received audit previews retain their paid body even after recovery ends.
     node.role != "received_response"
         && !node.presentation.body_evicted
+        && node.presentation.title != "状態変更"
         && node.presentation.kind == PresentationKind::Event
         && !node.presentation.requires_attention()
 }
 
 fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
-    let routine = nodes
-        .iter()
-        .filter(|node| node.presentation.event_class == crate::presentation::EventClass::Routine)
-        .count();
-    let mut title = format!("· 状態変更 {}件", nodes.len());
-    let unknown = nodes
-        .iter()
-        .filter(|node| node.presentation.event_class == crate::presentation::EventClass::Unknown)
-        .count();
-    if unknown > 0 {
-        title.push_str(&format!(" · その他{unknown}件"));
+    let mut facts = Vec::new();
+    for node in nodes {
+        let fact = crate::presentation::sanitize_plain(label(node), 0).0;
+        if !fact.trim().is_empty() && !facts.contains(&fact) {
+            facts.push(fact);
+        }
     }
-    if routine > 0 {
-        title.push_str(&format!(" · 通常通知{routine}件"));
-    }
-    title.push_str(" · F6 詳細");
-    let mut lines = vec![Line::from(Span::styled(
-        title,
+    vec![Line::from(Span::styled(
+        format!("· {}", facts.join(" · ")),
         Style::default().fg(theme::MUTED),
-    ))];
-    for node in nodes
-        .iter()
-        .filter(|node| node.presentation.event_class == crate::presentation::EventClass::Change)
-    {
-        lines.push(Line::from(Span::styled(
-            format!("  · {}", label(node)),
-            Style::default().fg(theme::TEXT),
-        )));
-    }
-    lines
+    ))]
 }
+
 fn adjacent_tool_pair(call: &UiNode, result: &UiNode) -> bool {
     let calls = &call.presentation.blocks;
     (!result.text.is_empty() || result.total_chars == 0)
@@ -728,13 +749,14 @@ fn interruption_group(nodes: &[UiNode]) -> Option<usize> {
 }
 /// One physical wrapped row and its nearest original Unicode position. Decoration
 /// rows intentionally share an anchor; the viewport keeps their row displacement.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct RowSource {
     pub node: usize,
     /// Exclusive end of the source nodes represented by this physical row.
     /// Event groups retain their first-node anchor while covering every member.
     pub covered_end: usize,
     pub offset: usize,
+    pub item: Option<Arc<ItemRegion>>,
 }
 #[cfg(test)]
 pub(super) fn history(
@@ -782,6 +804,14 @@ pub(super) fn history_with_cache(
         if !added {
             break;
         }
+    }
+    if view.nodes()[begin..end].iter().any(|node| {
+        node.presentation
+            .blocks
+            .iter()
+            .any(|block| block.tool.is_some())
+    }) {
+        return typed_history(view, begin, end, width, cache, budget);
     }
     let mut index = begin;
     while index < end {
@@ -885,8 +915,17 @@ pub(super) fn history_with_cache(
         if chunk.is_empty() {
             continue;
         }
-        let chunk = hanging_wrap(chunk, width.max(1));
         let node = &view.nodes()[rendered_index];
+        let chunk = if view
+            .items
+            .is_open(&ItemKey::Node(node.node_id.clone()), true, "")
+        {
+            chunk
+        } else {
+            vec![Line::from("… 本文を折りたたみ · Enterで開く")]
+        };
+        let mut chunk = hanging_wrap(chunk, width.max(1));
+        user_band(&mut chunk, node, width, view.palette);
         let source_starts = node
             .presentation
             .blocks
@@ -912,6 +951,7 @@ pub(super) fn history_with_cache(
         for (row, line) in chunk.into_iter().enumerate() {
             if row < group_header_rows && rendered_index != begin {
                 sources.push(RowSource {
+                    item: None,
                     node: if row == 0 { begin } else { rendered_index },
                     covered_end: index,
                     offset: if row == 0 {
@@ -939,6 +979,7 @@ pub(super) fn history_with_cache(
                 // Keep the previous real anchor even if its label also occurs
                 // inside the omitted user output; do not spend search budget.
                 sources.push(RowSource {
+                    item: None,
                     node: rendered_index,
                     covered_end: index,
                     offset,
@@ -1039,6 +1080,7 @@ pub(super) fn history_with_cache(
                 byte = end;
             }
             sources.push(RowSource {
+                item: None,
                 node: rendered_index,
                 covered_end: index,
                 offset,
@@ -1046,11 +1088,16 @@ pub(super) fn history_with_cache(
             lines.push(line);
         }
         sources.push(RowSource {
+            item: None,
             node: rendered_index,
             covered_end: index,
             offset,
         });
         lines.push(Line::default());
+        let region = Arc::new(node_region(node));
+        for source in &mut sources[row_start..] {
+            source.item = Some(region.clone());
+        }
         if let (Some(key), Some(cache)) = (unit_key, cache.as_mut()) {
             cache.insert_unit(
                 key,
@@ -1065,8 +1112,738 @@ pub(super) fn history_with_cache(
             );
         }
     }
+    let (lines, sources) = quiet_section_tails(view, lines, sources, width);
     (lines, links, sources)
 }
+fn input_marker(node: &UiNode) -> &'static str {
+    use crate::presentation::InputSource;
+    match node.presentation.input_source {
+        InputSource::Human => "› ",
+        InputSource::Parent => "↳ 親 · ",
+        InputSource::SelfModel => "↺ 自分 · ",
+        InputSource::OtherModel => "↳ モデル · ",
+        InputSource::Revisit => "↻ 再訪 · ",
+        InputSource::Unknown => "› 入力 · ",
+    }
+}
+fn user_band(lines: &mut [Line<'static>], node: &UiNode, width: u16, palette: theme::Palette) {
+    if node.role != "user" {
+        return;
+    }
+    use unicode_width::UnicodeWidthStr;
+    let style = palette.user_band(node.presentation.input_source);
+    for line in &mut *lines {
+        line.style = line.style.patch(style);
+        let used = line.width();
+        if used < usize::from(width) {
+            line.spans
+                .push(Span::styled(" ".repeat(usize::from(width) - used), style));
+        }
+    }
+    if let (Some(first), Some(saved)) = (lines.first_mut(), node.presentation.created_at.as_deref())
+    {
+        let time = saved
+            .get(11..16)
+            .filter(|value| value.is_ascii())
+            .unwrap_or("");
+        if !time.is_empty() {
+            let body_width = first
+                .spans
+                .iter()
+                .map(|span| span.content.trim_end().width())
+                .sum::<usize>();
+            if body_width + time.width() + 2 <= usize::from(width) {
+                // The trailing padding is display-only and yields before the body.
+                if first
+                    .spans
+                    .last()
+                    .is_some_and(|span| span.content.chars().all(|ch| ch == ' '))
+                {
+                    first.spans.pop();
+                }
+                let used = first.width();
+                first.spans.push(Span::styled(
+                    " ".repeat(usize::from(width).saturating_sub(used + time.width())),
+                    style,
+                ));
+                first
+                    .spans
+                    .push(Span::styled(time.to_owned(), style.fg(palette.muted())));
+            }
+        }
+    }
+}
+fn node_region(node: &UiNode) -> ItemRegion {
+    ItemRegion {
+        key: ItemKey::Node(node.node_id.clone()),
+        source_node_ids: vec![node.node_id.clone()],
+        primary_node_id: node.node_id.clone(),
+        execution_id: None,
+        expandable: true,
+        default_open: true,
+        outcome: String::new(),
+    }
+}
+pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> String {
+    let current = tool
+        .current_state
+        .as_deref()
+        .filter(|state| *state != "observation_unavailable");
+    let state = current.unwrap_or(&tool.status);
+    let code = if current.is_some() {
+        tool.current_exit_code.or(tool.exit_code)
+    } else {
+        tool.exit_code
+    };
+    format!("{state}:{code:?}:{}", tool.requires_attention())
+}
+
+fn compact_tool_line(tool: &crate::presentation::ToolPresentation, width: u16) -> Line<'static> {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    let status = tool
+        .current_state
+        .as_deref()
+        .filter(|state| *state != "observation_unavailable")
+        .unwrap_or(&tool.status);
+    let failed = tool.requires_attention();
+    let mark = if matches!(status, "cancelled" | "not_started" | "interrupted") {
+        "⊘"
+    } else if failed {
+        "✗"
+    } else if matches!(status, "completed" | "exited" | "succeeded") {
+        "✓"
+    } else {
+        "↳"
+    };
+    let code = tool.current_exit_code.or(tool.exit_code);
+    let mut right = code.map(|code| format!("終了 {code}")).unwrap_or_default();
+    if let Some(ms) = tool.elapsed_ms {
+        if !right.is_empty() {
+            right.push_str(" · ");
+        }
+        right.push_str(&format!("{}.{:01}秒", ms / 1000, (ms % 1000) / 100));
+    }
+    let command = crate::presentation::sanitize_plain(&tool.command, 0)
+        .0
+        .replace(['\n', '\r'], " ");
+    let command = if command.trim().is_empty() {
+        "shell"
+    } else {
+        command.trim()
+    };
+    let right = if right.width() + 5 < usize::from(width) {
+        right
+    } else {
+        String::new()
+    };
+    let available =
+        usize::from(width).saturating_sub(right.width() + if right.is_empty() { 2 } else { 4 });
+    let mut left = format!("{mark} ");
+    let mut used = left.width();
+    for ch in command.chars() {
+        let next = ch.width().unwrap_or(0);
+        if used + next > available {
+            break;
+        }
+        left.push(ch);
+        used += next;
+    }
+    if left.trim_start_matches(['✓', '✗', '⊘', '↳', ' ']) != command && available > 3 {
+        left.push('…');
+    }
+    let mut line = Line::from(Span::styled(
+        left,
+        Style::default().fg(if failed {
+            theme::ATTENTION
+        } else {
+            theme::TOOL
+        }),
+    ));
+    if !right.is_empty() {
+        line.spans.push(Span::raw(" ".repeat(
+            usize::from(width).saturating_sub(line.width() + right.width()),
+        )));
+        line.spans
+            .push(Span::styled(right, Style::default().fg(theme::MUTED)));
+    }
+    line
+}
+fn append_item_rows(
+    lines: &mut Vec<Line<'static>>,
+    sources: &mut Vec<RowSource>,
+    chunk: Vec<Line<'static>>,
+    node: &UiNode,
+    node_index: usize,
+    region: ItemRegion,
+    width: u16,
+) {
+    let covered_end = node_index + 1;
+    let region = Arc::new(region);
+    let mut byte = 0usize;
+    let mut offset = node.base_char_offset;
+    let mut excerpt_jump = false;
+    let mut tail_search_budget = node.text.len();
+    for line in hanging_wrap(chunk, width.max(1)) {
+        // Raw display copies are not canonical text. Only exact saved substrings
+        // advance original character offsets; decoration keeps the previous one.
+        let plain = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        let candidate = source_candidate(plain.trim_end());
+        let gap_row = line
+            .spans
+            .iter()
+            .any(|span| span.style.underline_color == Some(EXCERPT_GAP_MARKER));
+        let output_row = line
+            .spans
+            .iter()
+            .any(|span| span.style.underline_color == Some(OUTPUT_ROW_MARKER));
+        if gap_row {
+            excerpt_jump = true;
+        }
+        if !candidate.is_empty() && !gap_row {
+            let end = node
+                .text
+                .floor_char_boundary((byte + 4096.max(candidate.len())).min(node.text.len()));
+            let matched = node.text[byte..end]
+                .find(candidate)
+                .map(|found| (byte + found, candidate.len()))
+                .or_else(|| {
+                    if excerpt_jump && output_row {
+                        excerpt_jump = false;
+                        excerpt_tail_match(&node.text, candidate, byte, &mut tail_search_budget)
+                    } else {
+                        None
+                    }
+                });
+            if let Some((start, length)) = matched {
+                offset = node.base_char_offset + node.text[..start].chars().count();
+                byte = start + length;
+            }
+        }
+        sources.push(RowSource {
+            node: node_index,
+            covered_end,
+            offset,
+            item: Some(region.clone()),
+        });
+        lines.push(line);
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn append_node_cached(
+    view: &ThreadView,
+    index: usize,
+    block_index: usize,
+    node: &UiNode,
+    start: usize,
+    width: u16,
+    links: &mut Vec<Arc<str>>,
+    lines: &mut Vec<Line<'static>>,
+    sources: &mut Vec<RowSource>,
+    cache: &mut Option<&mut super::HistoryLayoutCache>,
+    budget: usize,
+) {
+    let key = ItemKey::Node(node.node_id.clone());
+    let unit_key = cache.as_ref().and_then(|_| {
+        super::RenderUnitKey::item(view, index, block_index, None, &key, width, links)
+    });
+    if let Some(hit) = unit_key
+        .as_ref()
+        .and_then(|key| cache.as_mut().and_then(|cache| cache.unit(key)))
+    {
+        lines.extend_from_slice(&hit.styled);
+        sources.extend_from_slice(&hit.sources);
+        *links = hit.targets.clone();
+        return;
+    }
+    let row_start = lines.len();
+    let slice = if block_index != usize::MAX {
+        let mut copy = node.clone();
+        copy.presentation.blocks = vec![node.presentation.blocks[block_index].clone()];
+        copy.presentation.projection_stamp = None;
+        Some(copy)
+    } else {
+        None
+    };
+    let node = slice.as_ref().unwrap_or(node);
+    let mut chunk = if view.items.is_open(&key, true, "") {
+        node_lines(
+            node,
+            view.reasoning_expanded.contains(&node.node_id),
+            start,
+            width,
+            links,
+        )
+    } else {
+        vec![Line::from("… 本文を折りたたみ · Enterで開く")]
+    };
+    user_band(&mut chunk, node, width, view.palette);
+    append_item_rows(lines, sources, chunk, node, index, node_region(node), width);
+    if let (Some(key), Some(cache)) = (unit_key, cache.as_mut()) {
+        cache.insert_unit(
+            key,
+            Arc::new(super::HistoryLayout {
+                text: String::new(),
+                styled: lines[row_start..].to_vec(),
+                lines: lines.len() - row_start,
+                targets: links.clone(),
+                sources: sources[row_start..].to_vec(),
+            }),
+            budget,
+        );
+    }
+}
+fn typed_history(
+    view: &ThreadView,
+    begin: usize,
+    end: usize,
+    width: u16,
+    mut cache: Option<&mut super::HistoryLayoutCache>,
+    budget: usize,
+) -> (Vec<Line<'static>>, Vec<Arc<str>>, Vec<RowSource>) {
+    let mut lines = Vec::new();
+    let mut sources: Vec<RowSource> = Vec::new();
+    let mut links = Vec::new();
+    let mut best = BTreeMap::<ItemKey, (usize, usize)>::new();
+    for (index, node) in view.nodes().iter().enumerate().take(end).skip(begin) {
+        for (block_index, block) in node.presentation.blocks.iter().enumerate() {
+            if let Some(tool) = &block.tool {
+                let key = ItemKey::tool(tool, &node.node_id, block_index);
+                if !best.contains_key(&key) || block.kind == BlockKind::ToolResult {
+                    best.insert(key, (index, block_index));
+                }
+            }
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let mut summary_until = begin;
+    for index in begin..end {
+        if index < summary_until {
+            continue;
+        }
+        let node = &view.nodes()[index];
+        let before = lines.len();
+        if let Some(summary) = interruption_group(&view.nodes()[index..end]) {
+            let summary_index = index + summary;
+            let summary_node = &view.nodes()[summary_index];
+            let chunk = node_lines(
+                summary_node,
+                false,
+                summary_node.base_char_offset,
+                width,
+                &mut links,
+            );
+            append_item_rows(
+                &mut lines,
+                &mut sources,
+                chunk,
+                summary_node,
+                summary_index,
+                node_region(summary_node),
+                width,
+            );
+            summary_until = summary_index + 1;
+            continue;
+        }
+        if node
+            .presentation
+            .blocks
+            .iter()
+            .any(|block| block.tool.is_some())
+        {
+            for (block_index, block) in node.presentation.blocks.iter().enumerate() {
+                if let Some(tool) = &block.tool {
+                    let key = ItemKey::tool(tool, &node.node_id, block_index);
+                    if !seen.insert(key.clone()) {
+                        // Exact canonical output stays at its own source ordinal,
+                        // while sharing the one earlier header's item identity.
+                        if block.kind != BlockKind::ToolResult || !block.source_exact {
+                            continue;
+                        }
+                        let outcome = tool_outcome(tool);
+                        if view
+                            .items
+                            .is_open(&key, tool.requires_attention(), &outcome)
+                            && view.items.preview_for(&key, &outcome).is_none()
+                        {
+                            let mut copy = node.clone();
+                            copy.presentation.blocks = vec![block.clone()];
+                            copy.presentation.blocks[0].tool = None;
+                            let chunk = node_lines_with_header(
+                                &copy,
+                                false,
+                                block.source_start,
+                                width,
+                                &mut links,
+                                false,
+                            );
+                            append_item_rows(
+                                &mut lines,
+                                &mut sources,
+                                chunk,
+                                node,
+                                index,
+                                ItemRegion {
+                                    key,
+                                    source_node_ids: vec![
+                                        tool.call_node_id
+                                            .clone()
+                                            .unwrap_or_else(|| node.node_id.clone()),
+                                        node.node_id.clone(),
+                                    ],
+                                    primary_node_id: node.node_id.clone(),
+                                    execution_id: tool.execution_id.clone(),
+                                    expandable: true,
+                                    default_open: tool.requires_attention(),
+                                    outcome,
+                                },
+                                width,
+                            );
+                        }
+                        continue;
+                    }
+                    let (source_index, source_block) = best[&key];
+                    let tool = view.nodes()[source_index].presentation.blocks[source_block]
+                        .tool
+                        .as_ref()
+                        .expect("typed tool");
+                    let unit_key = cache.as_ref().and_then(|_| {
+                        super::RenderUnitKey::item(
+                            view,
+                            index,
+                            block_index,
+                            Some(source_index),
+                            &key,
+                            width,
+                            &links,
+                        )
+                    });
+                    if let Some(hit) = unit_key
+                        .as_ref()
+                        .and_then(|key| cache.as_mut().and_then(|cache| cache.unit(key)))
+                    {
+                        lines.extend_from_slice(&hit.styled);
+                        sources.extend_from_slice(&hit.sources);
+                        links = hit.targets.clone();
+                        continue;
+                    }
+                    let outcome = tool_outcome(tool);
+                    let default_open = tool.requires_attention();
+                    let open = view.items.is_open(&key, default_open, &outcome);
+                    let mut source_ids = vec![];
+                    for source in [&tool.call_node_id, &tool.result_node_id] {
+                        if let Some(id) = source
+                            && !source_ids.contains(id)
+                        {
+                            source_ids.push(id.clone());
+                        }
+                    }
+                    if source_ids.is_empty() {
+                        source_ids.push(node.node_id.clone());
+                    }
+                    let primary = tool
+                        .result_node_id
+                        .as_ref()
+                        .or(tool.call_node_id.as_ref())
+                        .unwrap_or(&node.node_id)
+                        .clone();
+                    let region = ItemRegion {
+                        key: key.clone(),
+                        source_node_ids: source_ids,
+                        primary_node_id: primary,
+                        execution_id: tool.execution_id.clone(),
+                        expandable: true,
+                        default_open,
+                        outcome,
+                    };
+                    let row_start = lines.len();
+                    let mut chunk = vec![compact_tool_line(tool, width)];
+                    // Canonical call URLs remain original link targets after
+                    // compacting the visible command.
+                    annotate_links(&mut chunk, &node.presentation.links, &mut links);
+                    let exact_body = &view.nodes()[source_index].presentation.blocks[source_block];
+                    let deferred_exact = exact_body.source_exact
+                        && source_index != index
+                        && view.items.preview_for(&key, &region.outcome).is_none()
+                        && !view.items.preview_failed(&key, &region.outcome);
+                    if open && !deferred_exact {
+                        if let Some(preview) = view.items.preview_for(&key, &region.outcome) {
+                            let mut copy = node.clone();
+                            copy.role = "tool".into();
+                            copy.text = String::new();
+                            copy.total_chars = 0;
+                            copy.presentation.kind = PresentationKind::ToolResult;
+                            copy.presentation.title = String::new();
+                            copy.presentation.blocks = preview.blocks.clone();
+                            for block in &mut copy.presentation.blocks {
+                                block.tool = None;
+                            }
+                            chunk.extend(node_lines_with_header(
+                                &copy, false, 0, width, &mut links, false,
+                            ));
+                            if let Some(notice) = &preview.notice {
+                                chunk.push(Line::from(Span::styled(
+                                    notice.clone(),
+                                    Style::default().fg(view.palette.muted()),
+                                )));
+                            }
+                        } else if view.items.preview_failed(&key, &region.outcome) {
+                            chunk.push(Line::from("出力取得に失敗 · 閉じて開くと再試行 · F6 原文"));
+                        } else if exact_body.source_exact {
+                            let mut copy = node.clone();
+                            copy.presentation.blocks = vec![exact_body.clone()];
+                            copy.presentation.blocks[0].tool = None;
+                            chunk.extend(node_lines_with_header(
+                                &copy,
+                                false,
+                                exact_body.source_start,
+                                width,
+                                &mut links,
+                                false,
+                            ));
+                        } else if default_open
+                            && view.nodes()[source_index]
+                                .presentation
+                                .fields
+                                .iter()
+                                .any(|field| {
+                                    field.key == format!("/ui_raw_stream_preview/{}", tool.call_id)
+                                })
+                        {
+                            let source = &view.nodes()[source_index];
+                            let mut copy = UiNode {
+                                node_id: source.node_id.clone(),
+                                role: "tool".into(),
+                                presentation: crate::presentation::NodePresentation {
+                                    kind: PresentationKind::ToolResult,
+                                    blocks: source
+                                        .presentation
+                                        .blocks
+                                        .iter()
+                                        .filter(|block| {
+                                            block.kind == BlockKind::ToolResult
+                                                && block.stream.is_some()
+                                                && block.tool.as_ref().is_some_and(|candidate| {
+                                                    candidate.group_id == tool.group_id
+                                                        && candidate.call_id == tool.call_id
+                                                })
+                                        })
+                                        .map(|block| {
+                                            let mut block = block.clone();
+                                            block.tool = None;
+                                            block
+                                        })
+                                        .collect(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            };
+                            copy.presentation.links = source.presentation.links.clone();
+                            chunk.extend(node_lines_with_header(
+                                &copy, false, 0, width, &mut links, false,
+                            ));
+                            if let Some(note) = source.presentation.fields.iter().find(|field| {
+                                field.key == format!("/ui_raw_stream_preview/{}", tool.call_id)
+                            }) {
+                                chunk.push(Line::from(Span::styled(
+                                    note.value.clone(),
+                                    Style::default().fg(view.palette.muted()),
+                                )));
+                            }
+                        } else if default_open
+                            && view.nodes()[source_index]
+                                .presentation
+                                .fields
+                                .iter()
+                                .any(|field| {
+                                    field.key
+                                        == format!("/ui_raw_stream_preview_error/{}", tool.call_id)
+                                })
+                        {
+                            chunk.push(Line::from("  出力を取得できませんでした · F6 原文"));
+                        } else if tool.execution_id.is_some() {
+                            chunk.push(Line::from(Span::styled(
+                                if view.items.preview_loading(&key, &region.outcome) {
+                                    "  出力を取得中 · F6 原文"
+                                } else {
+                                    "  出力未保持 · 閉じて開くと再取得 · F6 原文"
+                                },
+                                Style::default().fg(view.palette.muted()),
+                            )));
+                        } else if !tool.reason.is_empty() {
+                            chunk.push(Line::from(Span::styled(
+                                crate::presentation::sanitize_plain(&tool.reason, 0).0,
+                                Style::default().fg(theme::ATTENTION),
+                            )));
+                        } else {
+                            chunk.push(Line::from("  出力は原文で確認 · F6 詳細"));
+                        }
+                    }
+                    append_item_rows(&mut lines, &mut sources, chunk, node, index, region, width);
+                    if let (Some(key), Some(cache)) = (unit_key, cache.as_mut()) {
+                        cache.insert_unit(
+                            key,
+                            Arc::new(super::HistoryLayout {
+                                text: String::new(),
+                                styled: lines[row_start..].to_vec(),
+                                lines: lines.len() - row_start,
+                                targets: links.clone(),
+                                sources: sources[row_start..].to_vec(),
+                            }),
+                            budget,
+                        );
+                    }
+                } else {
+                    append_node_cached(
+                        view,
+                        index,
+                        block_index,
+                        node,
+                        block.source_start,
+                        width,
+                        &mut links,
+                        &mut lines,
+                        &mut sources,
+                        &mut cache,
+                        budget,
+                    );
+                }
+            }
+        } else {
+            append_node_cached(
+                view,
+                index,
+                usize::MAX,
+                node,
+                node.base_char_offset,
+                width,
+                &mut links,
+                &mut lines,
+                &mut sources,
+                &mut cache,
+                budget,
+            );
+        }
+        if lines.len() == before {
+            // A duplicate tool result has zero rows. Only advance the already
+            // traversed final frontier; never span over intervening prose.
+            if let Some(last) = sources.last_mut() {
+                last.covered_end = index + 1;
+            }
+        } else {
+            sources.push(RowSource {
+                node: index,
+                covered_end: index + 1,
+                offset: sources
+                    .last()
+                    .filter(|source| source.node == index)
+                    .map_or(node.base_char_offset, |source| source.offset),
+                item: sources.last().and_then(|source| source.item.clone()),
+            });
+            lines.push(Line::default());
+        }
+    }
+    let (lines, sources) = quiet_section_tails(view, lines, sources, width);
+    (lines, links, sources)
+}
+
+fn quiet_section_tails(
+    view: &ThreadView,
+    lines: Vec<Line<'static>>,
+    sources: Vec<RowSource>,
+    width: u16,
+) -> (Vec<Line<'static>>, Vec<RowSource>) {
+    fn flush(
+        view: &ThreadView,
+        pending: &mut BTreeSet<usize>,
+        lines: &mut Vec<Line<'static>>,
+        sources: &mut Vec<RowSource>,
+        width: u16,
+    ) {
+        let indices = pending.iter().copied().collect::<Vec<_>>();
+        for group in indices.chunks(2) {
+            let first = group[0];
+            let mut facts = Vec::new();
+            let mut ids = Vec::new();
+            for index in group {
+                let node = &view.nodes()[*index];
+                let fact = crate::presentation::sanitize_plain(label(node), 0).0;
+                if !facts.contains(&fact) {
+                    facts.push(fact);
+                }
+                ids.push(node.node_id.clone());
+            }
+            let fallback = &view.nodes()[first];
+            let anchor = sources.last().cloned().unwrap_or(RowSource {
+                node: first,
+                covered_end: first + 1,
+                offset: fallback.base_char_offset,
+                item: None,
+            });
+            let region = Arc::new(ItemRegion {
+                key: ItemKey::Node(fallback.node_id.clone()),
+                source_node_ids: ids,
+                primary_node_id: fallback.node_id.clone(),
+                execution_id: None,
+                expandable: false,
+                default_open: true,
+                outcome: String::new(),
+            });
+            let covered_end = anchor.covered_end.max(group.last().copied().unwrap() + 1);
+            for line in hanging_wrap(
+                vec![Line::from(Span::styled(
+                    format!("· {}", facts.join(" · ")),
+                    Style::default().fg(view.palette.muted()),
+                ))],
+                width.max(1),
+            ) {
+                lines.push(line);
+                sources.push(RowSource {
+                    node: anchor.node,
+                    covered_end,
+                    offset: anchor.offset,
+                    item: Some(region.clone()),
+                });
+            }
+        }
+        pending.clear();
+    }
+    let mut section_by_node = Vec::new();
+    let mut section = None;
+    for (index, node) in view.nodes().iter().enumerate() {
+        if node.role == "user" {
+            section = Some(index);
+        }
+        section_by_node.push(section);
+    }
+    let mut output = Vec::new();
+    let mut mapped: Vec<RowSource> = Vec::new();
+    let mut pending = BTreeSet::new();
+    let mut active_section = None;
+    for (line, source) in lines.into_iter().zip(sources) {
+        let next_section = section_by_node.get(source.node).copied().flatten();
+        if next_section != active_section {
+            flush(view, &mut pending, &mut output, &mut mapped, width);
+            active_section = next_section;
+        }
+        if view.nodes().get(source.node).is_some_and(quiet_event) {
+            for index in source.node..source.covered_end.min(view.nodes().len()) {
+                if quiet_event(&view.nodes()[index]) {
+                    pending.insert(index);
+                }
+            }
+        } else {
+            output.push(line);
+            mapped.push(source);
+        }
+    }
+    flush(view, &mut pending, &mut output, &mut mapped, width);
+    (output, mapped)
+}
+
 fn excerpt_tail_match(
     source: &str,
     text: &str,
@@ -1441,6 +2218,9 @@ mod tests {
         assert_eq!(token.len(), 20);
         let body = format!("{token}\n{token}\nTAIL\n");
         let tool = ToolPresentation {
+            group_id: Some("fixture-group".into()),
+            call_node_id: Some("call".into()),
+            result_node_id: Some("result".into()),
             call_id: "c".into(),
             ordinal: Some(0),
             command: format!("{} {token}", "prefix ".repeat(8)),
@@ -1488,6 +2268,13 @@ mod tests {
         };
         let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![call, result];
+        let tool = view.nodes()[1].presentation.blocks[0]
+            .tool
+            .as_ref()
+            .unwrap();
+        let key = ItemKey::tool(tool, "result", 0);
+        let outcome = tool_outcome(tool);
+        view.items.toggle(key, false, &outcome);
         let (lines, _, sources) = history(&view, 22);
         let first_body = lines
             .iter()
@@ -1497,17 +2284,36 @@ mod tests {
                 })
             })
             .unwrap();
-        assert!(
-            first_body > 1,
-            "the long command header has physical continuation rows"
+        assert_eq!(
+            lines[..first_body]
+                .iter()
+                .filter(|line| !plain(std::slice::from_ref(line)).trim().is_empty())
+                .count(),
+            1,
+            "the command occupies one compact row"
         );
         assert_eq!(sources[0].node, 0);
         assert!(
-            sources[1..first_body]
-                .iter()
-                .all(|source| source.node == 1 && source.offset == 123)
+            sources[..first_body].iter().all(|source| source.node == 0),
+            "header decoration keeps call anchors"
         );
         assert_eq!(sources[first_body].node, 1);
+        let repeated = lines
+            .iter()
+            .enumerate()
+            .skip(first_body + 1)
+            .find(|(_, line)| {
+                line.spans.iter().any(|span| {
+                    span.style.fg == Some(theme::TEXT) && span.content.contains("MATCH_BODY")
+                })
+            })
+            .unwrap()
+            .0;
+        assert_eq!(
+            sources[repeated].offset,
+            123 + token.chars().count() + 1,
+            "repeated body token advances only on actual output"
+        );
         assert_eq!(
             sources[first_body].offset, 123,
             "matching header continuation must not advance past the first stdout token"
@@ -1554,6 +2360,9 @@ mod tests {
             };
             let actual = if interruption { "summary" } else { "result" };
             let tool = ToolPresentation {
+                group_id: Some("fixture-group".into()),
+                call_node_id: Some("first".into()),
+                result_node_id: Some(actual.into()),
                 call_id: "c".into(),
                 ordinal: Some(0),
                 command: "echo grouped".into(),
@@ -1627,6 +2436,15 @@ mod tests {
             *view.nodes_mut_for_test() = vec![leading, rendered];
             view.total_nodes = 2;
             view.follow = false;
+            if !interruption {
+                let tool = view.nodes()[1].presentation.blocks[0]
+                    .tool
+                    .as_ref()
+                    .unwrap();
+                let key = ItemKey::tool(tool, actual, 0);
+                let outcome = tool_outcome(tool);
+                view.items.toggle(key, false, &outcome);
+            }
             let (lines, _, sources) = history(&view, 100);
             let target = if interruption { "行040" } else { "行118" };
             let next = if interruption { "行041" } else { "行119" };
@@ -1709,6 +2527,9 @@ mod tests {
         let mut results = Vec::new();
         for (ordinal, command, exit) in [(0, "echo first", 0), (1, "echo second", 7)] {
             let tool = ToolPresentation {
+                group_id: Some("fixture-group".into()),
+                call_node_id: Some("multi-call".into()),
+                result_node_id: Some(format!("result-{ordinal}")),
                 call_id: format!("call-{ordinal}"),
                 ordinal: Some(ordinal),
                 command: command.into(),
@@ -1745,19 +2566,23 @@ mod tests {
         *view.nodes_mut_for_test() = vec![call];
         view.nodes_mut_for_test().extend(results);
         let shown = plain(&history(&view, 120).0);
-        let requests = shown
-            .lines()
-            .filter(|line| line.trim_start().starts_with('↳'))
-            .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 2);
-        assert!(
-            requests
-                .iter()
-                .all(|line| !line.contains("終了") && !line.contains("呼出し"))
-        );
+        assert_eq!(shown.matches("echo first").count(), 1);
+        assert_eq!(shown.matches("echo second").count(), 1);
         assert_eq!(shown.matches("終了 0").count(), 1);
         assert_eq!(shown.matches("終了 7").count(), 1);
-        assert!(shown.contains("#1 echo first") && shown.contains("#2 echo second"));
+        assert!(!shown.contains("#1") && !shown.contains("#2"));
+        let (_, _, sources) = history(&view, 120);
+        let tools = sources
+            .iter()
+            .filter_map(|row| row.item.as_ref())
+            .filter(|item| matches!(item.key, ItemKey::Tool { .. }))
+            .map(|item| item.key.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            tools.len(),
+            2,
+            "each saved group/call has exactly one presentation item"
+        );
         assert_eq!(view.nodes().len(), 3);
     }
 
@@ -1833,6 +2658,9 @@ mod tests {
         use crate::presentation::{NodePresentation, PresentationBlock, ToolPresentation};
         let url = "https://example.invalid/tool";
         let tool = ToolPresentation {
+            group_id: Some("fixture-group".into()),
+            call_node_id: Some("call-node".into()),
+            result_node_id: Some("result-node".into()),
             call_id: "call".into(),
             command: format!("echo {url}"),
             status: "completed".into(),
@@ -1882,10 +2710,13 @@ mod tests {
         *view.nodes_mut_for_test() = vec![call.clone(), result.clone()];
         let (lines, targets, sources) = history(&view, 100);
         assert_eq!(plain(&lines).matches(url).count(), 1);
-        assert!(
-            sources.iter().all(|source| source.covered_end == 2)
-                && sources[0].node == 0
-                && sources.iter().skip(1).all(|source| source.node == 1)
+        assert_eq!(sources[0].node, 0, "compact header keeps call anchor");
+        assert_eq!(sources.last().unwrap().covered_end, 2);
+        let item = sources[0].item.as_ref().unwrap();
+        assert_eq!(item.source_node_ids, ["call-node", "result-node"]);
+        assert_eq!(
+            item.primary_node_id, "result-node",
+            "F6/original targets the saved result"
         );
         assert_eq!(
             targets[0].as_ref(),
@@ -1914,9 +2745,10 @@ mod tests {
         *view.nodes_mut_for_test() = vec![mixed, result.clone()];
         assert_eq!(
             plain(&history(&view, 100).0).matches(url).count(),
-            2,
-            "mixed prose is not collapsed"
+            1,
+            "mixed prose preserves one stable tool row"
         );
+        assert!(plain(&history(&view, 100).0).contains("prose before call"));
         *view.nodes_mut_for_test() = vec![
             call.clone(),
             UiNode {
@@ -1930,8 +2762,12 @@ mod tests {
         ];
         assert_eq!(
             plain(&history(&view, 100).0).matches(url).count(),
-            2,
-            "separated results do not erase call rows"
+            1,
+            "nonadjacent saved identity has one header"
+        );
+        assert!(
+            plain(&history(&view, 100).0).contains("other message"),
+            "the intervening user input is retained"
         );
         let mut metadata = result;
         metadata.text.clear();
@@ -2413,8 +3249,8 @@ mod tests {
             ),
         ];
         let shown = plain(&event_group(&events));
-        assert!(shown.contains("· 状態変更 3件"));
-        assert!(shown.contains("通常通知2件"));
+        assert!(!shown.contains("状態変更") && !shown.contains("通常通知"));
+        assert!(shown.contains("作業開始") && shown.contains("応答処理を開始"));
         assert!(shown.contains("モデル: A → B"));
         assert!(!shown.contains("作業開始 / 応答処理を開始"));
         let payload = serde_json::json!({"text":"要約の本文","source_node_ids":["one","two"]});
@@ -2647,5 +3483,245 @@ mod tests {
                 .iter()
                 .any(|span| span.content.contains('X') && span.style.fg == style.fg)
         );
+    }
+}
+
+#[cfg(test)]
+mod conversation_item_tests {
+    use super::*;
+    use crate::{
+        config::Config,
+        presentation::{InputSource, NodePresentation, PresentationBlock, ToolPresentation},
+    };
+    fn tool(group: &str, status: &str) -> ToolPresentation {
+        ToolPresentation {
+            group_id: Some(group.into()),
+            call_id: "same".into(),
+            command: "printf synthetic".into(),
+            status: status.into(),
+            exit_code: (status == "completed").then_some(0),
+            call_node_id: Some("call".into()),
+            result_node_id: Some("result".into()),
+            execution_id: Some("execution".into()),
+            ..Default::default()
+        }
+    }
+    fn prose(text: &str, start: usize) -> PresentationBlock {
+        PresentationBlock {
+            kind: BlockKind::Prose,
+            text: text.into(),
+            source_start: start,
+            source_end: start + text.chars().count(),
+            source_exact: true,
+            ..Default::default()
+        }
+    }
+    fn node(id: &str, text: &str, blocks: Vec<PresentationBlock>) -> UiNode {
+        UiNode {
+            node_id: id.into(),
+            role: "assistant".into(),
+            text: text.into(),
+            total_chars: text.chars().count(),
+            presentation: NodePresentation {
+                kind: PresentationKind::Assistant,
+                blocks,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn nonadjacent_tool_item_keeps_mixed_prose_and_canonical_frontier() {
+        let call = PresentationBlock {
+            kind: BlockKind::ToolCall,
+            tool: Some(tool("group-a", "requested")),
+            ..Default::default()
+        };
+        let result = PresentationBlock {
+            kind: BlockKind::ToolResult,
+            tool: Some(tool("group-a", "completed")),
+            text: "SECRET_OUTPUT_CLOSED".into(),
+            ..Default::default()
+        };
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "BEFORE AFTER",
+                vec![prose("BEFORE", 0), call, prose("AFTER", 7)],
+            ),
+            node("middle", "INTERMEDIATE", vec![prose("INTERMEDIATE", 0)]),
+            node("result", "canonical result", vec![result]),
+        ];
+        let (lines, _, sources) = history(&view, 80);
+        let text = plain(&lines);
+        assert_eq!(text.matches("printf synthetic").count(), 1);
+        assert!(!text.contains("SECRET_OUTPUT_CLOSED"));
+        assert!(text.find("BEFORE").unwrap() < text.find("printf synthetic").unwrap());
+        assert!(text.find("printf synthetic").unwrap() < text.find("AFTER").unwrap());
+        assert!(text.find("AFTER").unwrap() < text.find("INTERMEDIATE").unwrap());
+        let tool_row = sources
+            .iter()
+            .position(|row| {
+                matches!(
+                    row.item.as_deref().map(|item| &item.key),
+                    Some(ItemKey::Tool { .. })
+                )
+            })
+            .unwrap();
+        assert_eq!(sources[tool_row].node, 0);
+        assert_eq!(
+            sources[tool_row].covered_end, 1,
+            "header cannot span over intermediate prose"
+        );
+        assert_eq!(
+            sources.last().unwrap().covered_end,
+            3,
+            "zero-row result advances only the traversed tail"
+        );
+        let item = sources[tool_row].item.as_ref().unwrap();
+        assert_eq!(item.source_node_ids, ["call", "result"]);
+        assert_eq!(item.primary_node_id, "result");
+    }
+    #[test]
+    fn canonical_result_arrival_preserves_effective_outcome_and_received_inline_preview() {
+        let mut call = tool("group-a", "requested");
+        call.current_state = Some("exited".into());
+        call.current_exit_code = Some(0);
+        let mut result = tool("group-a", "completed");
+        result.current_state = Some("exited".into());
+        result.current_exit_code = Some(0);
+        let outcome = tool_outcome(&call);
+        assert_eq!(
+            outcome,
+            tool_outcome(&result),
+            "metadata hydration cannot change the observed terminal outcome"
+        );
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "call source",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(call),
+                    ..Default::default()
+                }],
+            ),
+            node(
+                "result",
+                "CANONICAL_OUTPUT",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(result),
+                    text: "CANONICAL_OUTPUT".into(),
+                    source_exact: true,
+                    source_end: 16,
+                    ..Default::default()
+                }],
+            ),
+        ];
+        let key = ItemKey::Tool {
+            group_id: "group-a".into(),
+            call_id: "same".into(),
+        };
+        view.items.toggle(key.clone(), false, &outcome);
+        assert!(plain(&history(&view, 80).0).contains("CANONICAL_OUTPUT"));
+        let request = view.items.request(&key, &outcome);
+        assert!(view.items.accept_preview(
+            &key,
+            request,
+            super::super::history_items::Preview {
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    stream: Some(OutputStream::Stdout),
+                    text: "RAW_AFTER_REPLY".into(),
+                    ..Default::default()
+                }],
+                notice: None
+            },
+            64 * 1024
+        ));
+        let shown = plain(&history(&view, 80).0);
+        assert!(
+            shown.contains("RAW_AFTER_REPLY"),
+            "a received explicit preview must remain rendered when canonical source is nonadjacent"
+        );
+        assert!(!shown.contains("CANONICAL_OUTPUT"));
+        assert_eq!(shown.matches("printf synthetic").count(), 1);
+        assert!(view.items.is_open(&key, false, &outcome));
+    }
+    #[test]
+    fn repeated_call_ids_in_other_groups_are_not_collapsed_together() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = ["a", "b"]
+            .iter()
+            .map(|group| {
+                node(
+                    group,
+                    "",
+                    vec![PresentationBlock {
+                        kind: BlockKind::ToolCall,
+                        tool: Some(tool(group, "completed")),
+                        ..Default::default()
+                    }],
+                )
+            })
+            .collect();
+        let (lines, _, sources) = history(&view, 80);
+        assert_eq!(plain(&lines).matches("printf synthetic").count(), 2);
+        let keys = sources
+            .iter()
+            .filter_map(|row| row.item.as_ref().map(|item| item.key.clone()))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(keys.len(), 2);
+    }
+    #[test]
+    fn failed_tool_opens_reason_without_execution_and_user_bands_fill_wrapped_rows() {
+        let mut failed = tool("failed", "cancelled");
+        failed.execution_id = None;
+        failed.reason = "未実行: 利用者がTurnを中断".into();
+        let mut user = node(
+            "human",
+            "one two three four five six seven eight nine",
+            vec![],
+        );
+        user.role = "user".into();
+        user.presentation.kind = PresentationKind::User;
+        user.presentation.input_source = InputSource::Human;
+        user.presentation.created_at = Some("2026-10-30T12:34:56+09:00".into());
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![
+            user,
+            node(
+                "cancelled",
+                "",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(failed),
+                    ..Default::default()
+                }],
+            ),
+        ];
+        let (lines, _, sources) = history(&view, 24);
+        assert!(plain(&lines).contains("未実行"));
+        let user_rows = sources
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                row.item
+                    .as_ref()
+                    .is_some_and(|item| item.key == ItemKey::Node("human".into()))
+            })
+            .filter(|(index, _)| !lines[*index].spans.is_empty())
+            .collect::<Vec<_>>();
+        assert!(user_rows.len() > 1);
+        for (index, _) in user_rows {
+            assert_eq!(
+                lines[index].width(),
+                24,
+                "every wrapped user row fills the band"
+            );
+        }
     }
 }
