@@ -131,3 +131,54 @@ Earlier candidate native checks alone do not prove public bytes execute.
 This public-byte smoke does not qualify physical terminals or real providers on
 every OS, nor rerun the candidate's synthetic migration on every public binary.
 Installed binaries and real user data are unchanged.
+
+## Installer assets (#63; releases after v0.3.0)
+
+Starting with the next release, assembly includes `install.sh` and `install.ps1`
+as standalone Release assets alongside the three archives and `SHA256SUMS`.
+The scripts in the repository are templates: assembly replaces their single
+`__SHELLBOY_RELEASE_VERSION__` marker with the release tag, so both the latest
+and version-specific asset URLs select matching archives, even after a later
+release. `SHELLBOY_VERSION` explicitly overrides that default. Unprocessed repository
+scripts require this variable; they do not resolve latest independently. Do not distribute
+raw main URLs. Do not add assets to the already published v0.3.0 Release.
+
+Before publication, run the manual **Release binaries** workflow on the proposed
+branch with `installer_checks=true` and `release_tag=v0.3.0` (leave
+`candidate_ref` empty). It downloads public v0.3.0 archives without authentication, uses temporary
+`SHELLBOY_INSTALL_DIR` directories, and checks fresh/replacement installation on
+macOS ARM64, Linux x64 (dash), Windows PowerShell 5.1 and PowerShell 7. Negative
+checks use local download mocks for corrupt checksums and unsupported CPUs.
+They do not update an installed binary or start an owner/database. This workflow
+is validation only and must never publish a Release. Review its run results;
+a written procedure is not evidence of a passing run.
+
+For the next candidate release, inspect the `candidate-assets` artifact: expect
+three archives, two version-bound scripts, and `SHA256SUMS` covering all five.
+Check the scripts contain the proposed tag and no template marker, and run them
+against the matching public release after publication using a temporary install
+directory. The ordinary three-OS Rust CI gate still applies independently.
+
+### Installer validation (2026-10-30)
+
+[Manual branch run 41060210585](https://github.com/tya5/shellboy/actions/runs/41060210585)
+at script/workflow SHA `64a5302` passes all four jobs: macOS 15 ARM64,
+Ubuntu 22.04 x64 (`sh`/dash), Windows PowerShell 5.1 and PowerShell 7.
+Public v0.3.0 downloads were unauthenticated. Each job uses a temporary directory
+with spaces in its path, installs fresh, replaces the binary, verifies
+`shellboy 0.3.0` and identical backup bytes, tests an environment version override
+against a differently bound script, and tests a bound script without an override.
+Mock downloads verify that checksum mismatch leaves an existing binary unchanged
+and creates no fresh destination; mock CPU detection verifies explicit rejection.
+PATH/restart/database-backup guidance is asserted. Build, assembly and publish
+jobs are skipped in this validation mode.
+
+Native macOS ARM64 runs the same installer checks successfully. Local validation
+also rejects invalid version strings and exercises the assembly Python with
+synthetic archives: three archives, two version-bound scripts and a five-entry
+`SHA256SUMS` are produced. This fixture is not a release build. Full standard
+checks pass locally after rebase; Rust code is unchanged. All installed-binary
+checks use `SHELLBOY_INSTALL_DIR`; the user's installed binary, profiles and real
+data are untouched. Downloading installer assets through the advertised Release
+URLs remains untested until the next release publishes those assets; v0.3.0 is
+intentionally unchanged.

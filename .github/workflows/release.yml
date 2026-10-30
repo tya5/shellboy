@@ -10,6 +10,12 @@ on:
         required: true
         type: string
 
+      installer_checks:
+        description: Test installers against public v0.3.0 assets only (no build or publication)
+        required: false
+        default: false
+        type: boolean
+
       candidate_ref:
         description: Exact main SHA for validation only (no tag or GitHub Release is created)
         required: false
@@ -25,6 +31,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ !inputs.installer_checks }}
     name: Build ${{ matrix.target }}
     strategy:
       fail-fast: false
@@ -154,13 +161,17 @@ jobs:
           retention-days: 14
 
   assemble:
-    name: Assemble validated archives and SHA256SUMS
+    name: Assemble validated archives, installers and SHA256SUMS
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_ref || format('refs/tags/{0}', inputs.release_tag || github.ref_name) }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -178,6 +189,12 @@ jobs:
               f'shellboy-{tag}-aarch64-apple-darwin.tar.gz',
               f'shellboy-{tag}-x86_64-unknown-linux-gnu.tar.gz',
           }
+          # Bind each installer to the archives from this exact release.
+          for name in ('install.sh', 'install.ps1'):
+              source = Path(name).read_text(encoding='utf-8')
+              assert source.count('__SHELLBOY_RELEASE_VERSION__') == 1
+              Path('dist', name).write_text(source.replace('__SHELLBOY_RELEASE_VERSION__', tag), encoding='utf-8')
+              expected.add(name)
           files = sorted(Path('dist').iterdir())
           assert {path.name for path in files} == expected, 'Incomplete or unexpected release assets'
           lines = [f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in files]
@@ -194,7 +211,7 @@ jobs:
 
   publish:
     name: Publish release and checksums
-    if: ${{ !inputs.candidate_ref }}
+    if: ${{ !inputs.installer_checks && !inputs.candidate_ref }}
     needs: assemble
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -222,3 +239,132 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" dist/* --clobber
           gh release edit "$RELEASE_TAG" --draft=false
+
+  installer-unix:
+    if: ${{ inputs.installer_checks }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check public downloads, replacement, and failure paths
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, tempfile
+          source = pathlib.Path('install.sh').read_text()
+          with tempfile.TemporaryDirectory(prefix='shellboy-installer-') as root:
+              root = pathlib.Path(root)
+              dest = root / 'install dir'
+              env = dict(os.environ, SHELLBOY_INSTALL_DIR=str(dest), SHELLBOY_VERSION='0.3.0')
+              # Input through stdin exercises the `curl ... | sh` execution form.
+              def run(script=source, ok=True, environment=env):
+                  result = subprocess.run(['sh'], input=script, text=True, env=environment, capture_output=True)
+                  print(result.stdout, result.stderr)
+                  assert (result.returncode == 0) == ok, result.returncode
+                  return result.stdout + result.stderr
+              out = run(source.replace('__SHELLBOY_RELEASE_VERSION__', 'v99.0.0'))
+              assert 'PATH' in out and 'restart' in out and 'back up' in out
+              binary = dest / 'shellboy'
+              assert subprocess.check_output([str(binary), '--version'], text=True).strip() == 'shellboy 0.3.0'
+              original = binary.read_bytes()
+              # A release-bound script works without an environment override.
+              pinned_env = env.copy()
+              pinned_env.pop('SHELLBOY_VERSION')
+              run(source.replace('__SHELLBOY_RELEASE_VERSION__', 'v0.3.0'), environment=pinned_env)
+              backups = list(dest.glob('shellboy.backup-*'))
+              assert len(backups) == 1 and backups[0].read_bytes() == original
+              mocks = root / 'mocks'
+              mocks.mkdir()
+              curl = mocks / 'curl'
+              curl.write_text('''#!/bin/sh
+          while [ "$#" -gt 0 ]; do
+              case "$1" in -o) shift; out=$1 ;; https:*) url=$1 ;; esac
+              shift
+          done
+          case "$url" in
+              */SHA256SUMS) printf '%064d  shellboy-v0.3.0-%s.tar.gz\\n' 0 "$TEST_TARGET" > "$out" ;;
+              *) printf 'corrupt archive' > "$out" ;;
+          esac
+          ''')
+              curl.chmod(0o755)
+              target = 'aarch64-apple-darwin' if os.uname().sysname == 'Darwin' else 'x86_64-unknown-linux-gnu'
+              bad_env = dict(env, PATH=str(mocks) + os.pathsep + env['PATH'], TEST_TARGET=target)
+              assert 'SHA-256 mismatch' in run(ok=False, environment=bad_env)
+              assert binary.read_bytes() == original and len(list(dest.glob('shellboy.backup-*'))) == 1
+              empty = root / 'must not exist'
+              bad_env['SHELLBOY_INSTALL_DIR'] = str(empty)
+              run(ok=False, environment=bad_env)
+              assert not empty.exists()
+              uname = mocks / 'uname'
+              uname.write_text('#!/bin/sh\ncase "$1" in -s) echo Linux ;; *) echo aarch64 ;; esac\n')
+              uname.chmod(0o755)
+              assert 'Unsupported OS/CPU' in run(ok=False, environment=bad_env)
+              assert not empty.exists()
+          PY
+
+  installer-windows:
+    if: ${{ inputs.installer_checks }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check public downloads, replacement, and failure paths
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetRandomFileName())
+          $env:SHELLBOY_INSTALL_DIR = Join-Path $root 'install dir'
+          $env:SHELLBOY_VERSION = '0.3.0'
+          $source = Get-Content install.ps1 -Raw
+          try {
+              # iex uses the same execution form as `irm ... | iex`.
+              $output = $source.Replace('__SHELLBOY_RELEASE_VERSION__', 'v99.0.0') | Invoke-Expression | Out-String
+              Write-Output $output
+              if ($output -notmatch 'PATH' -or $output -notmatch 'restart' -or $output -notmatch 'back up') { throw 'Missing guidance' }
+              $binary = Join-Path $env:SHELLBOY_INSTALL_DIR 'shellboy.exe'
+              if ((& $binary --version) -ne 'shellboy 0.3.0') { throw 'Wrong version' }
+              $hash = (Get-FileHash $binary).Hash
+              Remove-Item Env:SHELLBOY_VERSION
+              $source.Replace('__SHELLBOY_RELEASE_VERSION__', 'v0.3.0') | Invoke-Expression
+              $backups = @(Get-ChildItem "$binary.backup-*")
+              if ($backups.Count -ne 1 -or (Get-FileHash $backups[0].FullName).Hash -ne $hash) { throw 'Missing backup' }
+              $env:SHELLBOY_VERSION = 'v0.3.0'
+              function Invoke-WebRequest {
+                  param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile)
+                  if ($Uri.EndsWith('/SHA256SUMS')) {
+                      ('0' * 64) + '  shellboy-v0.3.0-x86_64-pc-windows-msvc.zip' | Set-Content $OutFile
+                  } else { 'corrupt archive' | Set-Content $OutFile }
+              }
+              function Assert-Failure([string]$message) {
+                  $failed = $false
+                  try { $source | Invoke-Expression } catch {
+                      Write-Output $_
+                      if ($_ -notmatch $message) { throw }
+                      $failed = $true
+                  }
+                  if (-not $failed) { throw 'Installer unexpectedly succeeded' }
+              }
+              Assert-Failure 'SHA-256 mismatch'
+              if ((Get-FileHash $binary).Hash -ne $hash -or @(Get-ChildItem "$binary.backup-*").Count -ne 1) { throw 'Existing installation changed on failure' }
+              $env:SHELLBOY_INSTALL_DIR = Join-Path $root 'must not exist'
+              Assert-Failure 'SHA-256 mismatch'
+              if (Test-Path $env:SHELLBOY_INSTALL_DIR) { throw 'Failure created destination' }
+              $env:PROCESSOR_ARCHITEW6432 = 'ARM64'
+              Assert-Failure 'Unsupported OS/CPU'
+          } finally {
+              if (Test-Path $root) { Remove-Item $root -Recurse -Force }
+          }
