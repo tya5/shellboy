@@ -388,7 +388,13 @@ impl Stream {
             return Err(error);
         }
         if chat.decoder.done_markers > 0 && !self.inner.is_terminal() {
-            let raw = chat.completed()?;
+            let raw = match chat.completed() {
+                Ok(raw) => raw,
+                Err(error) => {
+                    self.inner.terminal = Some(Err(error.clone()));
+                    return Err(error);
+                }
+            };
             self.inner.failed_response = None;
             let kind = if raw["status"] == "completed" {
                 "response.completed"

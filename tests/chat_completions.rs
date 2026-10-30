@@ -170,6 +170,10 @@ fn incomplete_length_disconnect_explicit_errors_and_terminal_junk_do_not_invent_
     assert_eq!(stream.finish(true).unwrap().text, "Hello");
     let mut stream = Stream::new(Api::ChatCompletions);
     assert!(stream.push(b"data: [DONE]\n\n").is_err());
+    assert!(
+        stream.is_terminal(),
+        "a received DONE is a boundary even when validation fails"
+    );
     let mut ordered = Stream::new(Api::ChatCompletions);
     for delta in [json!({"refusal":"first"}), json!({"content":"second"})] {
         ordered
