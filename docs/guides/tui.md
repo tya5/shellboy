@@ -102,7 +102,7 @@ This uses terminal BEL. Sound, screen flash, or visual-bell behavior follows ter
 
 ## Terminal program status
 
-Shellboy reports saved activity using [OSC7501 rev0.4](https://www.superlogical.com/rex/docs/build/program-status)
+Shellboy reports saved activity using [OSC 7501 rev 0.4](https://www.superlogical.com/rex/docs/build/program-status)
 on the same terminal, **between** cell frames. This does not alter the status row
 or conversation renderer. It uses the existing activity classifier: active work
 maps to working, recovery to blocked (auth/config failures may carry kind=auth),
@@ -116,12 +116,21 @@ encoded. Progress is not known and is omitted. Model/tool OSC bytes are stored
 and sanitized as ordinary untrusted output, not forwarded as Shellboy reports.
 
 Disable with `[ui] program_status = "off"` in TOML (put the field on a new line)
-and restart. It then writes no OSC7501, even at exit. There is no feature query,
+and restart. It then writes no OSC 7501, even at exit. There is no feature query,
 receiver process or kitty/cmux/herdr-specific command/passthrough. Supporting
 terminals decide how to present the records. Unknown OSCs should be ignored;
 tmux may discard them. PTY/byte-capture tests do not qualify a physical receiver's
 GUI: actual kitty/cmux/herdr and WezTerm/Terminal.app display remains separately
 verified or explicitly unverified in the validation record.
+
+With `program_status = "on"` (the default), older terminals, GNU screen and old Windows consoles
+without VT mode may show raw control strings (untested); if this happens, set `program_status = "off"`.
+Conversation titles and recovery-wait reason summaries are sent to the terminal, including raw
+recordings (script/asciinema) and your local terminal when running Shellboy over SSH.
+After forced termination, done/error records may remain by design; clear them in the terminal.
+OSC 7501 rev 0.4 is young and its format may change.
+Status changes trigger a read of all conversations, at most once per 0.5 seconds, which can be costly
+with very many conversations; a separate read-only connection keeps these reads off the save queue.
 
 ## Input and basic keys
 
