@@ -19,6 +19,24 @@ D–G and their reactivity/performance gates remain open in the
 [delivery plan](issue-41-plan.md). #41 is not complete. The installed binary
 remains1fec7f0; no user data, paid API, release or tag was changed.
 
+## v0.3.0 preparation (#62), not publication
+
+Cargo/lock package version is 0.3.0; dependency versions are unchanged. README is
+version-independent and links to the latest Release. Release notes are a draft
+for issue62 review, including removed compact_hint_tokens startup rejection and
+the partial-upload retry-budget change. Candidate validation adds a read-only
+exact-SHA path to the release workflow; its publish job is skipped in that mode.
+No v0.3.0 tag, GitHub Release or installed binary update is authorized/performed.
+
+A public checksum-verified v0.2.0 macOS binary created a schema11 synthetic store
+via owned PTYs/mock API, including indexed conversation, held input and recovery
+wait. Candidate0.3.0 opens a consistent backup at schema14; searches/usage/new
+work pass, standalone RAG stays3, old history reader rejects14, and invalid old
+configuration blocks startup before migration. See acceptance for method/limits.
+Local standard check passes1611/0/31. Exact main three-OS CI and native packaged
+archives/SHA256SUMS are later fixed-SHA gates, reported on issue62 rather than
+changing the chosen SHA recursively. Stop before tags/publication pending approval.
+
 ## #61: current user and agent guidance
 
 Documentation-only, single-conversation update: CLI reference includes send

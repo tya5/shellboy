@@ -4,7 +4,7 @@ A lightweight terminal AI agent environment written in Rust. Models have one too
 
 ## Features
 
-- **One executable** for Windows x64, macOS Apple Silicon, and Linux x64. Conversations and indexes live in local SQLite databases; no separate service or database server is required. A release build started in about 41 ms and used about 17 MiB RSS while idle in a limited, empty-database fixture with no model configured. See the [verification record](docs/validation/acceptance.md) for conditions.
+- **One executable** for Windows x64, macOS Apple Silicon, and Linux x64. Conversations and indexes live in local SQLite databases; no separate service or database server is required.
 - **Shell is the only model tool.** History, messaging, child conversations, waiting, and attachments all use the same CLI. People can use it from another terminal too.
 - **Inspectable history.** A Thread is a conversation, a Run owns ongoing work, and a Turn lasts until one normal response. Models can search past messages and shell output by keyword or meaning, retrieve originals, and follow their relationships. Forks, summaries, and compaction preserve provenance instead of rewriting history.
 - **Recursive delegation.** Models can create child Threads, assign work, wait, and read the results. Thread lineage and Run ownership are tracked separately.
@@ -18,22 +18,22 @@ The [development status](docs/development/status.md) and [verification record](d
 
 ## Download
 
-[Releases](https://github.com/tya5/shellboy/releases) provide Windows x64, macOS Apple Silicon, and Linux x64 archives with `SHA256SUMS`. The current release is [v0.2.0](https://github.com/tya5/shellboy/releases/tag/v0.2.0).
+Download the archive for your OS and CPU from the [latest Release](https://github.com/tya5/shellboy/releases/latest).
+Windows x64, macOS Apple Silicon, and Linux x64 archives include the executable
+and offline documentation; `SHA256SUMS` lets you verify the download. Extract the
+archive before running `shellboy` (`shellboy.exe` on Windows).
 
-On Windows, download and extract `shellboy-v0.2.0-x86_64-pc-windows-msvc.zip`. For example, in PowerShell:
+Set a connection and model as described in [configuration](docs/guides/configuration.md).
+See [known limitations](docs/development/known-limitations.md) for current limits.
 
-```powershell
-Expand-Archive .\shellboy-v0.2.0-x86_64-pc-windows-msvc.zip -DestinationPath .
-.\shellboy-v0.2.0-x86_64-pc-windows-msvc\shellboy.exe --help
-```
+### Upgrading
 
-Set a connection and model as described in [configuration](docs/guides/configuration.md). Known receipt-budget, index-switching, and large raw-search limits are listed in [known limitations](docs/development/known-limitations.md).
-
-v0.2.0 improves long-conversation recovery with early safe context reduction, separate header deadlines and transport diagnostics. Keyword RAG can search one Thread and its omitted sources without embeddings. Delivery, autosave, index-stop diagnosis and overlapping search scopes include the latest review fixes. Bundled guides are English, with a Japanese User Guide also available.
-
-This is a breaking release before 1.0: the local protocol is version 2, the conversation database advances to schema 11, and standalone RAG remains schema 3. Core accepts current formats only; unsupported legacy index metadata requires explicit rebuilding rather than automatic repair. Existing data migrates on the first write-capable open; older binaries with a lower supported schema cannot reopen it afterward. Take a consistent backup before upgrading. To roll back, restore into a separate data directory following the [storage design](docs/design/storage.md). A running process uses the new executable only after restarting.
-
-Built-in PDF/Office extraction and `--extractor` / `--adapter` have been removed. A complete scan marks old PDF/Office file-source entries as unsupported/removed. Convert externally, then register the text with provenance using `rag ingest`. See the [RAG guide](docs/guides/rag.md) for extracted text versus model interpretations.
+Stop the owner completely and take a consistent backup of the data-dir before
+upgrading. A write-capable first startup may automatically upgrade its databases;
+older binaries cannot open newer schemas. For rollback, restore the backup into
+a separate data directory rather than opening the upgraded store with an old
+binary. Read the target Release's notes for configuration changes and detailed
+upgrade instructions. Replacing the executable takes effect after owner restart.
 
 ## Build and run
 
@@ -69,7 +69,7 @@ docs/development/ Setup, status, and decision records
 docs/validation/  Verification procedures and observed results
 ```
 
-The Cargo package and executable are both named `shellboy`. Start development from the [effective specification](docs/design/effective-spec.md); [AGENTS.md](AGENTS.md) defines development boundaries. Former command names, environment variables, and default paths are not supported. Existing data does not need to be moved; Shellboy uses its own default storage location.
+The Cargo package and executable are both named `shellboy`. Start development from the [effective specification](docs/design/effective-spec.md); [AGENTS.md](AGENTS.md) defines development boundaries.
 
 ## License
 

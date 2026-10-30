@@ -6,15 +6,21 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing stable tag to build and publish
+        description: Stable package label (existing tag for publication, or candidate version)
         required: true
+        type: string
+
+      candidate_ref:
+        description: Exact main SHA for validation only (no tag or GitHub Release is created)
+        required: false
+        default: ''
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.release_tag || github.ref_name }}
+  group: release-${{ inputs.candidate_ref || inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -43,14 +49,18 @@ jobs:
         shell: bash
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      CANDIDATE_REF: ${{ inputs.candidate_ref }}
       RELEASE_TARGET: ${{ matrix.target }}
       RELEASE_EXECUTABLE: ${{ matrix.executable }}
       RELEASE_ARCHIVE: ${{ matrix.archive }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ inputs.release_tag || github.ref_name }}
+          ref: ${{ inputs.candidate_ref || format('refs/tags/{0}', inputs.release_tag || github.ref_name) }}
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install pinned native Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
       - uses: Swatinem/rust-cache@v2
@@ -66,6 +76,10 @@ jobs:
           version = next(package['version'] for package in metadata['packages'] if package['name'] == 'shellboy')
           assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag), 'Use a stable vX.Y.Z version tag'
           assert tag == f'v{version}', 'Tag must match the Cargo package version'
+          candidate = os.environ.get('CANDIDATE_REF', '')
+          if candidate:
+              assert re.fullmatch(r'[0-9a-f]{40}', candidate), 'Candidate must be an exact SHA'
+              assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == candidate
           rustc = subprocess.check_output(['rustc', '+1.99.1', '-vV'], text=True)
           assert f"host: {os.environ['RELEASE_TARGET']}" in rustc, rustc
           PY
@@ -107,6 +121,30 @@ jobs:
                   bundle.add(stage, arcname=name)
           print(archive)
           PY
+      - name: Extract and smoke-test the packaged native executable
+        run: |
+          python - <<'PY'
+          import hashlib, os, subprocess, tarfile, tempfile, zipfile
+          from pathlib import Path
+          archive, = Path('dist').iterdir()
+          root = Path(tempfile.mkdtemp(prefix='shellboy-packaged-'))
+          if archive.suffix == '.zip':
+              with zipfile.ZipFile(archive) as bundle:
+                  bundle.extractall(root)
+          else:
+              with tarfile.open(archive) as bundle:
+                  bundle.extractall(root, filter='data')
+          stage, = root.iterdir()
+          binary = stage / os.environ['RELEASE_EXECUTABLE']
+          version = subprocess.check_output([str(binary), '--version'], text=True).strip()
+          assert version == 'shellboy ' + os.environ['RELEASE_TAG'][1:], version
+          subprocess.run([str(binary), '--help'], check=True, stdout=subprocess.DEVNULL)
+          subprocess.run([str(binary), 'docs', 'list'], check=True, stdout=subprocess.DEVNULL)
+          assert all((stage / name).is_file() for name in ['LICENSE', 'README.md', 'config.example.toml'])
+          assert (stage / 'docs/guides/user-guide.md').is_file()
+          print('packaged native smoke:', version, os.environ['RELEASE_TARGET'])
+          print('binary_sha256:', hashlib.sha256(binary.read_bytes()).hexdigest())
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}
@@ -115,16 +153,12 @@ jobs:
           compression-level: 0
           retention-days: 14
 
-  publish:
-    name: Publish release and checksums
+  assemble:
+    name: Assemble validated archives and SHA256SUMS
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
     env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
@@ -150,6 +184,31 @@ jobs:
           Path('dist/SHA256SUMS').write_text(''.join(lines), encoding='utf-8')
           PY
           (cd dist && sha256sum --check SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-assets
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  publish:
+    name: Publish release and checksums
+    if: ${{ !inputs.candidate_ref }}
+    needs: assemble
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-assets
+          path: dist
       - name: Upload all assets before publishing
         shell: bash
         run: |

@@ -1505,3 +1505,14 @@ Inline preview limits include key/entry/block/vector metadata and conservative
 map overhead. Retire a matching in-flight preview when its source/outcome is no
 longer current; do not leave its finite admission slot permanently occupied.
 Token checks still prevent that old response from cancelling a newer request.
+
+## #62: validate release candidates without publishing
+
+Prepare 0.3.0 on a fixed, green main SHA. Add optional candidate_ref to the existing
+release workflow: candidate builds check out that exact SHA, build the three native
+archives, extract and launch them, and assemble SHA256SUMS as Actions artifacts.
+Build/assembly have read-only repository permission; publish is skipped whenever
+candidate_ref is supplied. release_tag is only a package/version label in this
+mode, not a Git tag creation. Do not use tag/publication mode without fresh user
+approval. No installed binary, user DB, tag or GitHub Release is changed here.
+Keep a release-specific notes draft separate from the version-independent README.
