@@ -70,6 +70,19 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
         _ => None,
     })
     .await;
+    // Stop only after the immutable user node has entered the selected path.
+    // Its terminal receipt records admission, not cancellation or an answer.
+    next_update(&mut updates_receive, |update| match update {
+        UiUpdate::History { nodes, .. }
+            if nodes
+                .iter()
+                .any(|node| node.role == "user" && node.text.contains("saved message")) =>
+        {
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
     actions_send
         .send(UiAction::Cancel {
             thread_id: thread.clone(),
@@ -78,12 +91,14 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
         .unwrap();
     next_update(&mut updates_receive, |update| match update {
         UiUpdate::Receipt {
-            status: ReceiptStatus::Cancelled,
-            message: Some(hint),
+            status: ReceiptStatus::Applied,
+            message,
             ..
         } => {
-            assert!(hint.contains("依頼を保持しました"));
-            assert!(hint.contains("/restore 0"));
+            assert!(
+                message.is_none(),
+                "admitted input must not suggest resending"
+            );
             Some(())
         }
         _ => None,

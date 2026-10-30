@@ -97,7 +97,10 @@ impl ThreadView {
             }
         }
         self.pending.retain(|_, pending| {
-            !(pending.status == ReceiptStatus::Completed && pending.source_node_id.is_some())
+            !(matches!(
+                pending.status,
+                ReceiptStatus::Completed | ReceiptStatus::Applied
+            ) && pending.source_node_id.is_some())
         });
     }
     pub(super) fn sending(&self) -> Option<(activity::ActivityPhase, usize, Instant)> {
@@ -1285,7 +1288,10 @@ impl ThreadView {
         // Status cannot regress after an accepted or terminal receipt.
         if matches!(
             pending.status,
-            ReceiptStatus::Failed | ReceiptStatus::Cancelled | ReceiptStatus::Completed
+            ReceiptStatus::Failed
+                | ReceiptStatus::Cancelled
+                | ReceiptStatus::Completed
+                | ReceiptStatus::Applied
         ) && status != pending.status
         {
             return false;
@@ -1309,6 +1315,7 @@ impl ThreadView {
             ReceiptStatus::Accepted
                 | ReceiptStatus::Preparing
                 | ReceiptStatus::Held
+                | ReceiptStatus::Applied
                 | ReceiptStatus::Completed
         );
         if accepted && self.draft.draft_id == draft_id && self.draft.revision == revision {
@@ -1340,7 +1347,7 @@ impl ThreadView {
             self.status
                 .push_str(" · 編集中の入力を保持（次は全文送信）");
         }
-        if status == ReceiptStatus::Completed
+        if matches!(status, ReceiptStatus::Completed | ReceiptStatus::Applied)
             && (pending.send.is_none() || pending.source_node_id.is_some())
         {
             self.pending.remove(&revision);

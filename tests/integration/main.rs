@@ -59,6 +59,8 @@ mod index;
 mod input_history_backend;
 #[path = "../instructions.rs"]
 mod instructions;
+#[path = "../message_recovery.rs"]
+mod message_recovery;
 #[path = "../model.rs"]
 mod model;
 #[path = "../model_catalog.rs"]

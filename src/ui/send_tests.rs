@@ -209,3 +209,21 @@ fn recovery_stays_static_when_a_new_send_is_pending() {
         "a pending send does not animate a static critical phase"
     );
 }
+
+#[test]
+fn terminal_admission_is_not_answered_or_cancelled_and_keeps_late_source_binding() {
+    let mut ui = ui();
+    let (id, rev, _) = send(&mut ui, "interrupted after admission");
+    receipt(&mut ui, &id, rev, ReceiptStatus::Accepted);
+    receipt(&mut ui, &id, rev, ReceiptStatus::Applied);
+    assert!(ui.view().status.contains("会話へ反映済み"));
+    assert!(!ui.view().status.contains("完了"));
+    assert!(!ui.view().status.contains("取消"));
+    assert!(!ui.view().status.contains("/restore"));
+    assert!(ui.view().sending().is_none());
+    assert!(ui.view().pending.contains_key(&rev));
+    receipt(&mut ui, &id, rev, ReceiptStatus::Cancelled);
+    assert_eq!(ui.view().pending[&rev].status, ReceiptStatus::Applied);
+    source(&mut ui, &id, rev, "original-message");
+    assert!(!ui.view().pending.contains_key(&rev));
+}

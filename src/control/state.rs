@@ -421,6 +421,7 @@ pub(super) fn stop_drained_runs(
         }
         tx.execute("UPDATE receipt SET state='held',hold_reason='stopped',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now()])?;
     }
+    super::message_delivery::repair_terminal_tx(tx, &now())?;
     Ok(())
 }
 
@@ -436,7 +437,8 @@ pub(crate) fn interrupt_previous_work(
     tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping')",[&now])?;
     interrupt_previous_attempts(tx, now)?;
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
-    tx.execute("UPDATE receipt SET state='held',hold_reason='previous_instance_interrupted',updated_at=?1 WHERE state IN ('accepted','held')",[&now])?;
+    tx.execute("UPDATE receipt SET state='held',hold_reason='previous_instance_interrupted',updated_at=?1 WHERE state='accepted'",[&now])?;
+    super::message_delivery::repair_terminal_tx(tx, now)?;
     Ok(report)
 }
 
@@ -446,6 +448,7 @@ pub(super) fn finish_drained_shutdown(tx: &rusqlite::Transaction<'_>) -> Result<
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
     tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'app_shutdown') WHERE state IN ('live','stopping')",[chrono::Utc::now().to_rfc3339()])?;
     tx.execute("UPDATE turn SET state='stopped',ended_at=?1 WHERE state IN ('preparing','running','waiting','recovery_wait')",[chrono::Utc::now().to_rfc3339()])?;
+    super::message_delivery::repair_terminal_tx(tx, &now())?;
     Ok(())
 }
 

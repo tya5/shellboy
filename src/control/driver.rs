@@ -329,6 +329,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         let nodes:Vec<String>=pending.iter().map(|(_,node)|node.clone()).collect();
         snapshot.receipts=pending.into_iter().map(|(receipt,_)|receipt).collect();
         history::append_existing_nodes(&tx,&thread,snapshot.selection as u64,&nodes,&now())?;
+        super::message_delivery::mark_admitted_tx(&tx,&thread,&nodes)?;
         for (event,payload)in &events{
             let node=format!("event-{event}");
             let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node WHERE id=?1)",[&node],|r|r.get(0))?;

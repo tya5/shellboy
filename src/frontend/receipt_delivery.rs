@@ -1,6 +1,17 @@
 //! Bounded continuation of receipt projections, owned by the frontend loop.
 use super::*;
 
+/// A terminal Turn is not evidence that its original input was cancelled or
+/// answered. Shared recovery owns that distinction in the saved receipt.
+pub(super) fn project_state(receipt: &str, turn: Option<&str>) -> Option<ReceiptStatus> {
+    match (receipt, turn) {
+        ("cancelled", _) => Some(ReceiptStatus::Cancelled),
+        ("applied", Some("completed")) => Some(ReceiptStatus::Completed),
+        ("applied", _) => Some(ReceiptStatus::Applied),
+        ("held", _) => Some(ReceiptStatus::Held),
+        _ => None,
+    }
+}
 pub(super) const BATCH_LIMIT: usize = 128;
 const TURN_LIMIT: usize = 32;
 pub(super) struct PendingReceipt {
@@ -92,23 +103,26 @@ impl Batch {
             let Some((message, status)) = self.receipts.next() else {
                 break;
             };
-            let Some(receipt) = pending.remove(&message) else {
+            let Some(receipt) = pending.get(&message) else {
                 continue;
             };
-            let hint =
-                matches!(status, ReceiptStatus::Cancelled | ReceiptStatus::Failed).then(|| {
-                    format!(
-                        "依頼を保持しました · /restore {} で入力欄へ戻す",
-                        receipt.revision
-                    )
-                });
+            let draft = receipt.draft.clone();
+            let revision = receipt.revision;
+            let thread = receipt.thread.clone();
+            // Held is an observed durable outcome, not the end of tracking.
+            // A later explicit resume may admit this same original receipt.
+            if status != ReceiptStatus::Held {
+                pending.remove(&message);
+            }
+            let hint = matches!(status, ReceiptStatus::Cancelled | ReceiptStatus::Failed)
+                .then(|| format!("依頼を保持しました · /restore {} で入力欄へ戻す", revision));
             // Main is the sole producer allowed into the last 32 slots. Its
             // synchronous capacity check + insertion cannot race another main
             // handler, and workers stop at 480. No await and no raw bypass.
             let rejected = updates.defer(UiUpdate::Receipt {
-                draft_id: receipt.draft,
-                revision: receipt.revision,
-                thread_id: Some(receipt.thread),
+                draft_id: draft,
+                revision,
+                thread_id: Some(thread),
                 status,
                 message: hint,
             });
@@ -142,6 +156,63 @@ pub(super) struct Startup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_delivery_fact_precedes_terminal_turn_labels() {
+        for turn in [
+            None,
+            Some("preparing"),
+            Some("running"),
+            Some("stopped"),
+            Some("failed"),
+        ] {
+            assert_eq!(project_state("applied", turn), Some(ReceiptStatus::Applied));
+            assert_eq!(project_state("held", turn), Some(ReceiptStatus::Held));
+            assert_eq!(
+                project_state("cancelled", turn),
+                Some(ReceiptStatus::Cancelled)
+            );
+            assert_eq!(project_state("accepted", turn), None);
+        }
+        assert_eq!(
+            project_state("applied", Some("completed")),
+            Some(ReceiptStatus::Completed)
+        );
+    }
+    #[test]
+    fn held_is_tracked_until_its_saved_admission_without_restore_hint() {
+        let (send, receive) = std::sync::mpsc::sync_channel(8);
+        let updates = BufferedUpdates::new(send);
+        let mut pending = HashMap::from([(
+            "message".into(),
+            PendingReceipt {
+                thread: "thread".into(),
+                draft: "draft".into(),
+                revision: 1,
+                checked: true,
+                repeat: false,
+            },
+        )]);
+        Batch::new(vec![("message".into(), ReceiptStatus::Held)]).drain(&mut pending, &updates);
+        assert!(pending.contains_key("message"));
+        assert!(matches!(
+            receive.try_recv().unwrap(),
+            UiUpdate::Receipt {
+                status: ReceiptStatus::Held,
+                message: None,
+                ..
+            }
+        ));
+        Batch::new(vec![("message".into(), ReceiptStatus::Applied)]).drain(&mut pending, &updates);
+        assert!(!pending.contains_key("message"));
+        assert!(matches!(
+            receive.try_recv().unwrap(),
+            UiUpdate::Receipt {
+                status: ReceiptStatus::Applied,
+                message: None,
+                ..
+            }
+        ));
+    }
     #[test]
     fn change_before_a_fresh_scan_is_observed_without_an_extra_pass() {
         for count in [1, 128, 200] {

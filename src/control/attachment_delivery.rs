@@ -66,6 +66,7 @@ pub fn apply_pending_tx(tx: &Transaction<'_>, thread: &str, now: &str) -> Result
         let earlier:Vec<String>=tx.prepare("SELECT r.message_node_id FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state='accepted' AND n.rowid<(SELECT rowid FROM node WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=n.id) ORDER BY n.rowid").map_err(sql)?.query_map(params![thread,node],|r|r.get(0)).map_err(sql)?.collect::<rusqlite::Result<_>>().map_err(sql)?;
         for message in earlier {
             append_selected(tx, thread, &message, now)?;
+            super::message_delivery::mark_admitted_tx(tx, thread, &[message]).map_err(sql)?;
         }
         append_selected(tx, thread, &node, now)?;
         tx.execute(

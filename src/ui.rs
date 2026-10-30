@@ -273,6 +273,7 @@ pub enum ReceiptStatus {
     Accepted,
     Preparing,
     Held,
+    Applied,
     Failed,
     Cancelled,
     Completed,
@@ -2727,8 +2728,12 @@ impl UiState {
             view.draft.revision += 1;
         }
         let draft = view.draft.clone();
-        view.pending
-            .retain(|_, pending| pending.status != ReceiptStatus::Completed);
+        view.pending.retain(|_, pending| {
+            !matches!(
+                pending.status,
+                ReceiptStatus::Completed | ReceiptStatus::Applied
+            )
+        });
         view.pending.insert(
             draft.revision,
             PendingSend {
@@ -3829,6 +3834,7 @@ fn receipt_label(status: &ReceiptStatus) -> &'static str {
         ReceiptStatus::Held => "保留",
         ReceiptStatus::Failed => "失敗",
         ReceiptStatus::Cancelled => "取消済み",
+        ReceiptStatus::Applied => "会話へ反映済み",
         ReceiptStatus::Completed => "完了",
     }
 }

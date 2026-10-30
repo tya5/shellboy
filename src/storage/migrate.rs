@@ -86,6 +86,13 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         tx.execute_batch(include_str!("../../migrations/0012_revisit_metadata.sql"))?;
         tx.commit()?;
     }
+    if version < 13 {
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(include_str!(
+            "../../migrations/0013_message_path_admission.sql"
+        ))?;
+        tx.commit()?;
+    }
     validate_schema(connection)?;
     Ok(())
 }

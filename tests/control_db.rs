@@ -581,13 +581,18 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         })
         .await
         .unwrap();
-    let (restart, _) = send(&store, &thread.thread_id, "explicit human restart").await;
+    let restart_request = request(Command::MessageSend(MessageSendArgs {
+        thread_id: Some(thread.thread_id.clone()),
+        text: "explicit human restart".into(),
+    }));
+    let restart_result = store.execute(restart_request.clone(), None).await.unwrap();
+    let restart: MessageAccepted = serde_json::from_value(restart_result.result.clone()).unwrap();
     assert_eq!(restart.assignment, Assignment::NewRun);
     let resumed: MessageDetails = serde_json::from_value(
         execute(
             &store,
             Command::MessageGet(MessageTarget {
-                message_id: pending.message_id,
+                message_id: pending.message_id.clone(),
             }),
         )
         .await
@@ -596,12 +601,16 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
     .unwrap();
     assert_eq!(resumed.run_id, restart.run_id);
     assert_eq!(resumed.turn_id, restart.turn_id);
-    assert_eq!(resumed.delivery_status, DeliveryStatus::Accepted);
+    assert_eq!(
+        resumed.delivery_status,
+        DeliveryStatus::Applied,
+        "explicit recovery already adopted the never-assigned input into history"
+    );
     let original: MessageDetails = serde_json::from_value(
         execute(
             &store,
             Command::MessageGet(MessageTarget {
-                message_id: old.message_id,
+                message_id: old.message_id.clone(),
             }),
         )
         .await
@@ -613,6 +622,33 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         "already assigned input cannot move to the resumed Run"
     );
     assert_eq!(original.turn_id, old.turn_id);
+    assert_eq!(
+        original.delivery_status,
+        DeliveryStatus::Applied,
+        "assigned-but-unadmitted input is recovered without reassignment"
+    );
+    let replay = store.execute(restart_request, None).await.unwrap();
+    assert_eq!(replay.result, restart_result.result);
+    assert!(
+        replay.wake_threads.is_empty(),
+        "saved acceptance cannot repeat recovery effects"
+    );
+    let expected = vec![old.message_id.clone(), pending.message_id.clone()];
+    let new_message = restart.message_id.clone();
+    let target = thread.thread_id.clone();
+    store.database.call(move |db| {
+        let nodes: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+            .query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        assert_eq!(nodes, expected, "original receipt order precedes the new unadmitted send");
+        for id in &nodes {
+            assert_eq!(db.query_row("SELECT state,path_admission,hold_reason FROM receipt WHERE message_node_id=?1", [id], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?,
+                ("applied".into(),"admitted".into(),"recovered_at_explicit_resume".into()));
+        }
+        assert_eq!(db.query_row("SELECT path_admission FROM receipt WHERE message_node_id=?1", [new_message], |r|r.get::<_,String>(0))?, "unadmitted");
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1", [&target], |r|r.get::<_,i64>(0))?, 3);
+        assert_eq!(db.query_row("SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='interrupted_messages_recovered'", [target], |r|r.get::<_,i64>(0))?, 1);
+        Ok(())
+    }).await.unwrap();
     store.database.shutdown().await.unwrap();
 }
 

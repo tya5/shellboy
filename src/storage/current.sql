@@ -98,7 +98,7 @@ CREATE TABLE receipt(
  turn_id TEXT REFERENCES turn(id), state TEXT NOT NULL CHECK(state IN ('accepted','held','applied','cancelled')),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT '',
  generation INTEGER NOT NULL DEFAULT 0 CHECK(generation>=0), hold_reason TEXT,
- result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)),
+ result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)), path_admission TEXT NOT NULL DEFAULT 'unadmitted' CHECK(path_admission IN ('unadmitted','admitted','unknown')),
  CHECK(turn_id IS NULL OR run_id IS NOT NULL));
 
 CREATE TRIGGER immutable_receipt_assignment BEFORE UPDATE OF run_id,turn_id ON receipt
@@ -380,4 +380,5 @@ INSERT INTO schema_migration(version,name) VALUES(9,'0009_compaction_turn_indexe
 INSERT INTO schema_migration(version,name) VALUES(10,'0010_hot_query_indexes');
 INSERT INTO schema_migration(version,name) VALUES(11,'0011_current_index_metadata');
 INSERT INTO schema_migration(version,name) VALUES(12,'0012_revisit_metadata');
-PRAGMA user_version=12;
+INSERT INTO schema_migration(version,name) VALUES(13,'0013_message_path_admission');
+PRAGMA user_version=13;

@@ -518,6 +518,11 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         requests.try_recv().is_err(),
         "startup must not call the model"
     );
+    owner.db.call(|db| {
+        assert_eq!(db.query_row("SELECT state,path_admission,EXISTS(SELECT 1 FROM thread_path WHERE thread_id='parent' AND node_id='old-request') FROM receipt WHERE id='old-message'", [], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,bool>(2)?)))?,
+            ("held".into(),"unadmitted".into(),false), "startup preserves unadmitted input without automatically replaying it");
+        Ok(())
+    }).await.unwrap();
     let control = Control::new(&owner, directory.path().to_path_buf());
     let accepted = command(
         &control,
@@ -559,9 +564,10 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         "completed",
     )
     .await;
+    let new_message = accepted["message_id"].as_str().unwrap().to_owned();
     owner
         .db
-        .call(|db| {
+        .call(move |db| {
             let assignment: (String, String, String) = db.query_row(
                 "SELECT run_id,turn_id,state FROM receipt WHERE id='old-message'",
                 [],
@@ -569,8 +575,13 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
             )?;
             assert_eq!(
                 assignment,
-                ("old-parent".into(), "parent-turn".into(), "held".into())
+                ("old-parent".into(), "parent-turn".into(), "applied".into())
             );
+            assert_eq!(db.query_row("SELECT n.turn_id,r.path_admission,r.hold_reason FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.id='old-message'", [], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?,
+                ("parent-turn".into(),"admitted".into(),"recovered_at_explicit_resume".into()));
+            let positions: (i64,i64) = db.query_row("SELECT (SELECT ordinal FROM thread_path WHERE thread_id='parent' AND node_id='old-request'),(SELECT ordinal FROM thread_path WHERE thread_id='parent' AND node_id=?1)", [new_message], |r|Ok((r.get(0)?,r.get(1)?)))?;
+            assert!(positions.0 < positions.1, "recovered instruction precedes explicit new send");
+            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE message_node_id='old-request'", [], |r|r.get::<_,i64>(0))?,1, "recovery preserves one original receipt");
             assert_eq!(
                 db.query_row("SELECT state FROM run WHERE id='old-child'", [], |r| r
                     .get::<_, String>(

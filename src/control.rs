@@ -3,6 +3,7 @@ mod compact;
 mod foreground;
 pub(crate) mod interruption;
 mod live;
+pub(crate) mod message_delivery;
 mod runtime;
 mod ui_events;
 pub use foreground::ForegroundRelease;

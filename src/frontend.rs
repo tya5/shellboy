@@ -548,10 +548,8 @@ async fn receipt_states(
     let result = async {
     control.store.database.call(move|db|{use rusqlite::OptionalExtension;let mut result=Vec::new();for id in ids{
         let state:Option<(String,Option<String>)>=db.query_row("SELECT r.state,u.state FROM receipt r LEFT JOIN turn u ON u.id=r.turn_id WHERE r.message_node_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if let Some((receipt,turn))=state {let status=match (receipt.as_str(),turn.as_deref()){
-            (_,Some("stopped"))|("cancelled",_)=>Some(ReceiptStatus::Cancelled),
-            (_,Some("failed"))=>Some(ReceiptStatus::Failed),
-            ("applied",Some("completed"))=>Some(ReceiptStatus::Completed),_=>None};if let Some(status)=status{result.push((id,status));}}
+        if let Some((receipt,turn))=state
+            && let Some(status)=receipt_delivery::project_state(&receipt,turn.as_deref()) { result.push((id,status)); }
     }Ok(result)}).await.map_err(storage_error)
 
     }.await;

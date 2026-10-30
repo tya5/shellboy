@@ -321,11 +321,20 @@ impl Store {
                             .ok_or_else(|| {
                                 error(ErrorCode::InvalidState, "Accepted draft has no source node")
                             })?;
+                        // The caller's pre-send CAS was checked above. Recovery
+                        // may legitimately adopt older input in this same tx;
+                        // registration must use the resulting local revision.
+                        let registration_revision = history::selection_revision(
+                            tx,
+                            result.result["thread_id"].as_str().unwrap(),
+                            history::ThreadScope::Live,
+                        )
+                        .map_err(sql_error)?;
                         crate::attachments::add_tx(
                             tx,
                             &crate::attachments::AddPlan {
                                 thread_id: result.result["thread_id"].as_str().unwrap().into(),
-                                selection_revision: revision,
+                                selection_revision: registration_revision,
                                 files,
                             },
                             Some(node),
@@ -1266,8 +1275,15 @@ fn assign_message(
         // child restart, is the resume boundary for unassigned saved input.
         // Previously assigned receipts keep their original Run/Turn forever.
         if caller.is_none() || owner.is_some() {
-            tx.execute("UPDATE receipt SET run_id=?2,turn_id=?3,state='accepted',hold_reason=NULL,updated_at=?4,result_json=json_set(COALESCE(result_json,'{}'),'$.assignment','existing_turn','$.delivery_status','accepted','$.run_id',?2,'$.turn_id',?3) WHERE target_thread_id=?1 AND run_id IS NULL AND turn_id IS NULL AND state='held' AND hold_reason IN ('stopping','previous_instance_interrupted')",params![id,run_id,turn_id,now]).map_err(sql_error)?;
-            tx.execute("UPDATE node SET turn_id=?2 WHERE turn_id IS NULL AND id IN (SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND run_id=?3 AND turn_id=?2)",params![id,turn_id,run_id]).map_err(sql_error)?;
+            super::message_delivery::recover_on_resume_tx(
+                tx,
+                id,
+                &run_id,
+                &turn_id,
+                actor(caller),
+                now,
+            )
+            .map_err(storage_error)?;
         }
         assigned_run = Some(run_id);
         assigned_turn = Some(turn_id);
@@ -2647,5 +2663,159 @@ mod agents_reference_tests {
             details(&store, &id).await["agents_path"],
             event["change"]["after"]["path"]
         );
+    }
+}
+
+#[cfg(test)]
+mod interrupted_message_assignment_tests {
+    use super::*;
+    #[test]
+    fn only_human_or_live_direct_parent_new_run_recovers_original_assigned_input() {
+        for caller_kind in ["human", "parent", "foreign"] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','/','/a','p','m','0'),('foreign','/','/a','p','m','0'),('child','/','/a','p','m','0'); UPDATE thread SET parent_thread_id='parent' WHERE id='child'; INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','0'),('foreign-run','foreign','live','0'),('old','child','stopped','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old-turn','child','old','stopped','0'); INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('input','old-turn','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at)VALUES('input','operation','null','child','input','old','old-turn','held','0');").unwrap();
+            let caller = (caller_kind != "human").then(|| Origin {
+                instance_id: "fixture".into(),
+                thread_id: caller_kind.into(),
+                run_id: format!("{caller_kind}-run"),
+                turn_id: "caller-turn".into(),
+                execution_id: "shell".into(),
+                token: "private-origin-token".into(),
+            });
+            let tx = db.transaction().unwrap();
+            let assigned = assign_message(&tx, "child", caller.as_ref(), "resume").unwrap();
+            assert_eq!(assigned.assignment, Assignment::NewRun);
+            let count: i64 = tx
+                .query_row(
+                    "SELECT count(*) FROM thread_path WHERE thread_id='child' AND node_id='input'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                count,
+                if caller_kind == "foreign" { 0 } else { 1 },
+                "{caller_kind}"
+            );
+            let original: (String, String) = tx
+                .query_row(
+                    "SELECT run_id,turn_id FROM receipt WHERE id='input'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(original, ("old".into(), "old-turn".into()));
+            let payloads: Vec<String> = tx
+                .prepare("SELECT payload_ref_json FROM event")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert!(!payloads.join("").contains("private-origin-token"));
+            tx.commit().unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod draft_recovery_revision_tests {
+    use super::*;
+    #[tokio::test]
+    async fn actual_draft_resume_preserves_original_cas_and_registers_zero_or_one_file_after_recovery()
+     {
+        for file_count in [0, 1] {
+            let root = tempfile::tempdir().unwrap();
+            let db = DbWorker::open(root.path().join("draft.db")).await.unwrap();
+            let config=Config::parse("default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+            let store = Store::new(
+                db.clone(),
+                Arc::new(config),
+                root.path().into(),
+                "fixture".into(),
+            );
+            let cwd = root.path().to_string_lossy().into_owned();
+            db.call(move |db| {
+                db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t',?1,?1,'fixture','synthetic','0')",[cwd])?;
+                db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('old','t','stopped','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old-turn','t','old','stopped','0'); INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('old-input','old-turn','user','0','{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"earlier\"}]}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at)VALUES('old-receipt','old-op','null','t','old-input','old','old-turn','held','0');")?;
+                Ok(())
+            }).await.unwrap();
+            let file = root.path().join("synthetic.txt");
+            std::fs::write(&file, b"fixture").unwrap();
+            let files = if file_count == 0 {
+                vec![]
+            } else {
+                vec![crate::attachments::PlannedAttachment {
+                    path: file,
+                    kind: AttachmentKind::File,
+                    observed_bytes: Some(7),
+                    managed_id: None,
+                }]
+            };
+            let args = ThreadCreateArgs {
+                agents: None,
+                cwd: None,
+                parent_id: None,
+                connection: None,
+                model: None,
+                effort: None,
+            };
+            let rejected = store
+                .send_draft_content(
+                    "fixture:stale-draft".into(),
+                    args.clone(),
+                    Some("t".into()),
+                    crate::attachments::DraftContent::appended("new".into(), file_count),
+                    files.clone(),
+                    Some(99),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(rejected.code, ErrorCode::InvalidState);
+            db.call(|db| {
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM run WHERE state='live'", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT state FROM receipt WHERE id='old-receipt'",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )?,
+                    "held"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+            let accepted = store
+                .send_draft_content(
+                    "fixture:resume-draft".into(),
+                    args,
+                    Some("t".into()),
+                    crate::attachments::DraftContent::appended("new".into(), file_count),
+                    files,
+                    Some(0),
+                )
+                .await
+                .unwrap();
+            let new_node = accepted.result["message_id"].as_str().unwrap().to_owned();
+            db.call(move |db| {
+                assert_eq!(db.query_row("SELECT node_id FROM thread_path WHERE ordinal=0",[],|r|r.get::<_,String>(0))?,"old-input");
+                assert_eq!(db.query_row("SELECT run_id,turn_id,state,path_admission FROM receipt WHERE id='old-receipt'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?,("old".into(),"old-turn".into(),"applied".into(),"admitted".into()));
+                assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE message_node_id=?1 AND state='accepted'",[&new_node],|r|r.get::<_,i64>(0))?,1);
+                assert_eq!(db.query_row("SELECT count(*) FROM attachment_ref WHERE source_node_id=?1",[new_node],|r|r.get::<_,i64>(0))?,file_count as i64);
+                Ok(())
+            }).await.unwrap();
+            db.shutdown().await.unwrap();
+        }
     }
 }
