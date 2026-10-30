@@ -72,7 +72,16 @@ pub(super) async fn retry_or_recover(
     let exhausted = matches!(retry_policy, super::retry::RetryPolicy::Retry { .. })
         && automatic_retries >= retry_limit
         && retry_limit > 0;
-    let message = if exhausted {
+    let reduction_unavailable = failure.error.is_context_limit()
+        && trim_not_applied
+            .as_ref()
+            .is_some_and(|o| o["outcome"] != "adopted");
+    let message = if reduction_unavailable {
+        format!(
+            "{} (no further automatic input reduction available)",
+            failure.error
+        )
+    } else if exhausted {
         format!(
             "{} (automatic retries exhausted: {automatic_retries}/{retry_limit})",
             failure.error
@@ -84,7 +93,7 @@ pub(super) async fn retry_or_recover(
     let error=ApiError::new(ErrorCode::IoFailed,message)
         .hint("Choose an available action; retry may charge again. Saved tools are not re-executed.")
         .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
-            "last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
+            "automatic_reduction_unavailable":reduction_unavailable,"last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
     let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
     if let Some(observation) = trim_not_applied {
         saved["automatic_trim_attempt"] = observation;

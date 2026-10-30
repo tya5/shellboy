@@ -1445,3 +1445,11 @@ and character/byte counts for facts only. Retain the existing finite retry budge
 and compaction safety machinery, not a new recovery engine. Choose /compact-max
 for the API-free action instead of a new dialog. Minimal recovery text precedes
 #41/#58 UI work. The old 75k provisional activation decision is superseded.
+
+## #50 review: explicit overflow requires an adopted reduction
+
+An explicit capacity rejection must not spend remaining retries on the same
+input. If maximum omission has no target, try the existing final spill/summary
+stage immediately; if neither adopts a reduction, or stages are spent/rejected,
+recover without another POST. Keep ordinary transient/no-candidate retries.
+Expose the unavailable automatic-reduction fact without a cause recommendation.

@@ -295,7 +295,10 @@ maximum safe omission. 429 and stream-idle reception timeouts retry without
 that trigger. Explicit context-limit errors immediately reduce, with the
 existing latest-spill/summary stage as a last resort on another overflow.
 Every resend counts against response_max_retries (default eight), even after
-reduction; zero disables automatic resends. No candidates retries unchanged.
+reduction; zero disables automatic resends. Transient failures with no safe
+candidates retry unchanged. Explicit overflow never resends unchanged input:
+if maximum omission has no target, the final spill/summary stage is tried
+immediately; absent/rejected/exhausted reduction enters recovery without a resend.
 Successful responses reset the consecutive budget, so a long Turn can reduce
 again after growing. Partial-output opt-out, stop and Retry-After safety remain.
 

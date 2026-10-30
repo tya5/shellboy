@@ -513,66 +513,76 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn clear_overflow_without_spill_skips_first_retry_summarizes_once_then_stops_at_second_failure()
- {
+async fn overflow_without_maximum_target_summarizes_without_unchanged_resend() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
-    let owner = owner_with_retries(root.path(), &url, 2).await;
+    let owner = owner_with_retries(root.path(), &url, 8).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    for n in 0..2 {
-        send(&control, &thread, &format!("previous task {n}")).await;
-        incoming(&control, &mut receive)
-            .await
-            .reply
-            .send((200, answer("saved")))
-            .unwrap();
-        settled(&control, &thread).await;
-    }
-    send(&control, &thread, "overflowing task").await;
+    send(&control, &thread, "protected overflowing task").await;
+    incoming(&control,&mut receive).await.reply.send((200,json!({"id":"tool","status":"completed","output":[{
+        "type":"function_call","call_id":"protected-tool","name":"shell","arguments":json!({"command":format!("echo {}","x".repeat(2000))}).to_string()
+    }]}))).unwrap();
+    let pending = incoming(&control, &mut receive).await;
+    let target = thread.clone();
+    control.store.database.call(move |db| {
+        let tx=db.transaction()?;
+        let request:String=tx.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 ORDER BY created_at LIMIT 1",[&target],|r|r.get(0))?;
+        let selected=tx.prepare("SELECT n.id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND (n.id=?2 OR json_extract(n.payload_json,'$.group_id') IS NOT NULL) ORDER BY p.ordinal")?.query_map(rusqlite::params![target,request],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(selected.len(),3,"only the request and latest complete pair remain");
+        let revision:i64=tx.query_row("SELECT selection_revision FROM thread WHERE id=?1",[&target],|r|r.get(0))?;
+        shellboy::history::select_path(&tx,&target,revision as u64,&selected,"2026-10-30T00:00:00Z")?;
+        tx.commit()?; Ok(())
+    }).await.unwrap();
     let overflow =
         json!({"error":{"code":"context_length_exceeded","message":"fixture context exceeded"}});
-    incoming(&control, &mut receive)
-        .await
-        .reply
-        .send((400, overflow.clone()))
-        .unwrap();
-    // No safe maximum edit still gets the first ordinary resend.
-    incoming(&control, &mut receive)
-        .await
-        .reply
-        .send((400, overflow.clone()))
-        .unwrap();
+    pending.reply.send((400, overflow.clone())).unwrap();
     let summary = incoming(&control, &mut receive).await;
-    assert_eq!(summary.body["tools"], json!([]));
     assert_eq!(
-        control.replay_cache_stats().pinned_bytes,
-        0,
-        "failed HTTP input must be unpinned before waiting for compaction"
+        summary.body["tools"],
+        json!([]),
+        "no unchanged conversation resend before the final stage"
     );
-    summary.reply.send((200, answer("small summary"))).unwrap();
+    summary
+        .reply
+        .send((
+            200,
+            answer("retained task; original source remains accessible"),
+        ))
+        .unwrap();
     let retry = incoming(&control, &mut receive).await;
     assert_eq!(retry.body["tools"].as_array().unwrap().len(), 1);
     retry.reply.send((400, overflow)).unwrap();
     settled(&control, &thread).await;
-    assert!(
-        timeout(Duration::from_millis(60), receive.recv())
-            .await
-            .is_err()
-    );
-    let state = control
+    control
         .store
         .database
         .call(|db| {
-            Ok(db.query_row(
-                "SELECT state FROM turn ORDER BY rowid DESC LIMIT 1",
+            assert_eq!(
+                db.query_row("SELECT state FROM turn", [], |r| r.get::<_, String>(0))?,
+                "recovery_wait"
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
+                    .get::<_, i64>(0))?,
+                3
+            );
+            let saved: String = db.query_row(
+                "SELECT error_json FROM model_attempt WHERE state='failed'",
                 [],
-                |r| r.get::<_, String>(0),
-            )?)
+                |r| r.get(0),
+            )?;
+            let saved: Value = serde_json::from_str(&saved).unwrap();
+            assert_eq!(
+                saved["automatic_trim_attempt"]["maximum_outcome"],
+                "no_safe_reduction"
+            );
+            assert_eq!(saved["automatic_retry"]["number"], 1);
+            Ok(())
         })
         .await
         .unwrap();
-    assert_eq!(state, "recovery_wait");
+    assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -654,7 +664,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     }
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
-    let owner = owner_with_retries(root.path(), &url, 2).await;
+    let owner = owner_with_retries(root.path(), &url, 8).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
     send(&control, &thread, "three tool groups then overflow").await;
@@ -728,6 +738,23 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         timeout(Duration::from_millis(60), receive.recv())
             .await
             .is_err()
+    );
+    let run_id = control
+        .store
+        .database
+        .call(|db| {
+            Ok(
+                db.query_row("SELECT id FROM run WHERE state='live'", [], |r| {
+                    r.get::<_, String>(0)
+                })?,
+            )
+        })
+        .await
+        .unwrap();
+    let turn_context = request(&control, Command::RunGet(RunTarget { run_id })).await;
+    assert_eq!(
+        turn_context["context"]["recovery_reason"]["details"]["automatic_reduction_unavailable"],
+        true
     );
     let counts = control
         .store

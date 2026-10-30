@@ -150,7 +150,7 @@ pub(super) async fn retry_or_recover(
         &failure.facts,
         connection.response_retry_partial,
     );
-    let delay = if matches!(policy, RetryPolicy::Retry { .. }) {
+    let mut delay = if matches!(policy, RetryPolicy::Retry { .. }) {
         budget.delay(
             limit,
             Duration::from_millis(connection.response_retry_max_delay_ms),
@@ -161,27 +161,44 @@ pub(super) async fn retry_or_recover(
     };
     let mut trim_not_applied = None;
     if delay.is_some() {
-        if failure.error.is_context_limit() && overflow.available() {
-            if overflow.begin() == Some(overflow::Reduction::OldGroups) {
-                trim_not_applied = Some(trim::reduce(control, snapshot, slot, &mut failure).await?);
-            } else {
-                trim_not_applied = Some(
-                    match spill_and_summarize(
-                        &control.compactor,
-                        &snapshot.thread,
-                        slot.stop.clone(),
-                    )
-                    .await
-                    {
-                        Ok(result) => {
-                            json!({"outcome":if result.no_target {"no_safe_reduction"} else {"adopted"},"summary":result})
-                        }
-                        Err(error) if error.is_storage_failure() => return Err(error),
-                        Err(error) => json!({"outcome":"rejected","error":error}),
-                    },
-                );
+        if failure.error.is_context_limit() {
+            let mut observation = json!({"outcome":"stages_exhausted"});
+            let stage = overflow.begin();
+            if stage == Some(overflow::Reduction::OldGroups) {
+                observation = trim::reduce(control, snapshot, slot, &mut failure).await?;
+            }
+            // No safe maximum target must not cause an identical POST. Try the
+            // final existing stage now, while the same retry slot is available.
+            if stage == Some(overflow::Reduction::CurrentSuffix)
+                || (stage == Some(overflow::Reduction::OldGroups)
+                    && observation["outcome"] == "no_safe_reduction")
+            {
+                if stage == Some(overflow::Reduction::OldGroups) {
+                    overflow.begin();
+                }
+                let maximum_outcome = observation["outcome"].clone();
+                observation = match spill_and_summarize(
+                    &control.compactor,
+                    &snapshot.thread,
+                    slot.stop.clone(),
+                )
+                .await
+                {
+                    Ok(result) => {
+                        json!({"outcome":if result.no_target {"no_safe_reduction"} else {"adopted"},"summary":result})
+                    }
+                    Err(error) if error.is_storage_failure() => return Err(error),
+                    Err(error) => json!({"outcome":"rejected","error":error}),
+                };
+                if stage == Some(overflow::Reduction::OldGroups) {
+                    observation["maximum_outcome"] = maximum_outcome;
+                }
                 control.changed(&snapshot.thread);
             }
+            if observation["outcome"] != "adopted" {
+                delay = None;
+            }
+            trim_not_applied = Some(observation);
         } else if budget.used >= 1
             && connection.auto_trim_on_disconnect
             && eligible_trim_failure(

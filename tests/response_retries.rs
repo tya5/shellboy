@@ -1208,25 +1208,29 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
         .await;
     assert!(edit.ok, "{:?}", edit.error);
     let operation = edit.operation_id.clone();
-    loop {
-        let result = f
-            .control
-            .request(Request::new(
-                format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
-                Command::OperationGet(shellboy::protocol::OperationTarget {
-                    operation_id: operation.clone(),
-                }),
-            ))
-            .await;
-        if result
-            .result
-            .as_ref()
-            .is_some_and(|r| r["downstream"]["state"] == "completed")
-        {
-            break;
+    timeout(Duration::from_secs(60), async {
+        loop {
+            let result = f
+                .control
+                .request(Request::new(
+                    format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+                    Command::OperationGet(shellboy::protocol::OperationTarget {
+                        operation_id: operation.clone(),
+                    }),
+                ))
+                .await;
+            if result
+                .result
+                .as_ref()
+                .is_some_and(|r| r["downstream"]["state"] == "completed")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
         }
-        tokio::task::yield_now().await;
-    }
+    })
+    .await
+    .expect("manual maximum compaction must finish within the fixture watchdog");
     assert_eq!(
         f.attempts().await.len(),
         1,
@@ -1344,5 +1348,86 @@ async fn a_long_turn_can_reduce_again_after_successful_tool_work() {
         })
         .await
         .unwrap();
+    f.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unreducible_explicit_overflow_recovers_without_any_resend() {
+    let mut f = Fixture::with_history(
+        8,
+        10,
+        5000,
+        true,
+        None,
+        true,
+        None,
+        "only protected request",
+    )
+    .await;
+    let first = f.incoming().await;
+    let target = f.accepted.thread_id.clone();
+    let turn = f.accepted.turn_id.clone().unwrap();
+    f.control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let request: String = tx.query_row(
+                "SELECT message_node_id FROM receipt WHERE turn_id=?1",
+                [turn],
+                |r| r.get(0),
+            )?;
+            let revision: i64 = tx.query_row(
+                "SELECT selection_revision FROM thread WHERE id=?1",
+                [&target],
+                |r| r.get(0),
+            )?;
+            shellboy::history::select_path(
+                &tx,
+                &target,
+                revision as u64,
+                &[request],
+                "2026-10-30T00:00:00Z",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    first.reply.send(Reply::http(400,"application/json",&json!({"error":{"code":"context_length_exceeded","message":"explicit capacity rejection"}}).to_string(),"")).ok().unwrap();
+    assert_eq!(f.settled().await, "recovery_wait");
+    let attempts = f.attempts().await;
+    assert_eq!(
+        attempts.len(),
+        1,
+        "no retry is admitted for unchanged explicitly rejected input"
+    );
+    assert_eq!(
+        attempts[0].1.as_ref().unwrap()["automatic_trim_attempt"]["outcome"],
+        "no_safe_reduction"
+    );
+    let detail = f
+        .control
+        .request(Request::new(
+            format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+            Command::TurnGet(TurnTarget {
+                turn_id: f.accepted.turn_id.clone().unwrap(),
+            }),
+        ))
+        .await;
+    assert!(detail.ok);
+    let reason = &detail.result.unwrap()["context"]["recovery_reason"];
+    assert_eq!(reason["details"]["automatic_retries"], 0);
+    assert_eq!(reason["details"]["automatic_reduction_unavailable"], true);
+    assert!(
+        reason["message"]
+            .as_str()
+            .unwrap()
+            .contains("no further automatic input reduction")
+    );
+    assert!(
+        f.requests.try_recv().is_err(),
+        "no outbound request is queued after terminal recovery"
+    );
     f.close().await;
 }
