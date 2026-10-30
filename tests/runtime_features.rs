@@ -2145,7 +2145,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         }),
     )
     .await;
-    let first = incoming(&mut receive).await;
+    let first = incoming(&control, &mut receive).await;
     assert!(developer_text(&first.body).contains(&"OLD_EXPLICIT_ROLE"));
     let first_events = reference_events(&first.body);
     assert_eq!(
@@ -2174,7 +2174,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     )
     .await;
     first.reply.send((200,json!({"id":"agents-tool","status":"completed","output":[{"type":"function_call","call_id":"agents-call","name":"shell","arguments":json!({"command":"echo synthetic","background":false}).to_string()}]}))).unwrap();
-    let after_tool = incoming(&mut receive).await;
+    let after_tool = incoming(&control, &mut receive).await;
     assert!(
         developer_text(&after_tool.body)
             .iter()
@@ -2235,7 +2235,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         }),
     )
     .await;
-    let retried = incoming(&mut receive).await;
+    let retried = incoming(&control, &mut receive).await;
     assert!(developer_text(&retried.body).contains(&"OLD_EXPLICIT_ROLE"));
     assert_eq!(reference_events(&retried.body).len(), 1);
     retried
@@ -2251,7 +2251,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         }),
     )
     .await;
-    let next = incoming(&mut receive).await;
+    let next = incoming(&control, &mut receive).await;
     assert!(developer_text(&next.body).contains(&"NEW_EXPLICIT_ROLE"));
     assert!(!developer_text(&next.body).contains(&"OLD_EXPLICIT_ROLE"));
     let events = reference_events(&next.body);
@@ -2289,7 +2289,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         }),
     )
     .await;
-    let notification_retry = incoming(&mut receive).await;
+    let notification_retry = incoming(&control, &mut receive).await;
     assert_eq!(
         reference_events(&notification_retry.body)
             .iter()
@@ -2389,7 +2389,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         }),
     )
     .await;
-    let absent = incoming(&mut receive).await;
+    let absent = incoming(&control, &mut receive).await;
     assert!(!developer_text(&absent.body).contains(&"NEW_EXPLICIT_ROLE"));
     absent
         .reply
