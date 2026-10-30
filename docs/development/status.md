@@ -2,31 +2,20 @@
 
 ## Pending Message Publication (#52)
 
-Review6517077748 additionally found a genuine interrupted-group busy loop.
-Commit `582ec70` makes an interrupted Turn with unfinished adopted work wait on
-existing nudge/stop rather than repeatedly rechecking the DB. Both running and
-recovery_wait fixtures retain unresolved pairs and allow full Run stop. Commit
-`beace3d` uses notification-driven native test observations and corrects the guide
-typo; those combined changes pass a local standard check1,572/0/29. Submitted
-snapshot retention remains deferred with crash/replay/watermark reasons recorded.
+The review corrections at `6e62349` pass the complete local standard check
+(macOS arm64/Rust1.99.1:1,572/0/29, layout88, Python6, fmt, strict Clippy) and
+manual native Windows CI[41019801385](https://github.com/tya5/shellboy/actions/runs/41019801385):
+**1,457 passed / 0 failed / 21 ignored**, artifact source SHA verified, threads4.
+The new interrupted unfinished-group regression ran on Windows. Commit582ec70
+fixes the busy loop without modifying saved pairs or introducing polling;beace3d
+uses reactive test observations and fixes the guide typo. Submitted draft cleanup
+is deferred with replay/watermark constraints in decisions.md. Gitleaks passes.
 
-The unchanged main source passes the reviewer's explicit second CI attempt;
-its first failed attempt remains evidence. Manual fixture follow-up41018286041
-passes shutdown registration but fails a different existing15-second large-upload
-prefix observation. That fixture now retains product deadlines/backpressure and
-adds60-second readiness watchdogs with saved-attempt diagnostics. The full final
-tree passes the complete macOS standard check1,572/0/29, layout88, Python6,
-format and strict all-target Clippy; another manual Windows qualification is
-required before its main push. No failed native run is presented as successful.
-
-Main `1aa591b` contains #52 after the successful pre-main Windows qualification.
-Its main CI41016702414 passes Linux1,572/macOS1,571 but Windows fails a
-three-second shutdown-fixture wait-registration guard before shutdown begins.
-All new Turn-interruption/native-gate cases passed. Keep that failure distinct
-from the earlier successful manual run. A fixture-only readiness/diagnostic
-correction passes a fresh macOS standard check (1,571/0/29, layout88, Python6,
-format and strict Clippy). It must pass manual Windows qualification before
-another main push. Issue #52 remains open.
+The correction is qualified for the user-authorized main push. Main CI remains
+an independent exact-source gate; final run links/results are recorded on issue52.
+Previous CI failures and the unchanged-source reviewer rerun are retained in
+acceptance, rather than being overwritten by this successful qualification.
+No #52 installed-binary change or release is included.
 
 #53/#56 are published on main `b686ec1`, with successful exact-SHA native CI
 41005281669 (Linux1,527 / macOS1,526 / Windows1,411 passed, zero failures).
@@ -44,14 +33,14 @@ send correlation, explicit immediate delivery and human-only Turn interruption
 are implemented. An additional compaction fix preserves absent owner fences
 without invalidating ordinary queued input or adding a counter.
 
-The separate issue52 branch at `33936cf` passes the required manual native
+Earlier, the separate issue52 branch at `33936cf` passed the required manual native
 Windows qualification [41015832578](https://github.com/tya5/shellboy/actions/runs/41015832578):
 1,456 passed / 0 failed / 21 ignored, four test threads, artifact source SHA
 verified. All six new real HTTP/shell Turn-interruption/quiet-delivery scenarios
 and three native-gate/binding tests ran successfully on Windows. Final independent
 backend, UI and Core/native reviews found no concrete blocker. Main admission is
-now authorized and qualified; the subsequent main three-OS CI remains a separate
-exact-source gate. No #52 release or installed-binary update is claimed.
+authorized and qualified at that checkpoint; the subsequent main three-OS CI
+and later review corrections are recorded separately. No #52 release or installed-binary update is claimed.
 
 #42/#43/#55 remain published on main343c2d6, with successful exact-SHA CI
 41001556952 and review-result comments; all three are closed. Those results do

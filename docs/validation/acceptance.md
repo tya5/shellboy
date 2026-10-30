@@ -12,7 +12,15 @@ constraints; no live startup repair or new product machinery is introduced.
 The combined source including the subsequent large-upload fixture diagnostic
 correction passes the complete macOS arm64/Rust1.99.1 standard check:
 **1,572 passed / 0 failed / 29 ignored**, layout88, Python6, formatting and
-strict all-target Clippy. Its manual native Windows qualification is pending.
+strict all-target Clippy. The final correction is committed as6e62349204254e534acf758e520c870cc20bb801.
+Its manual native Windows qualification
+[41019801385](https://github.com/tya5/shellboy/actions/runs/41019801385) passes:
+**1,457 passed / 0 failed / 21 ignored**, threads4. Artifact source SHA matches;
+the new busy-loop regression is active and passes, and both previously failing
+fixture cases pass. Ignored sets remain unchanged. Only development/validation
+records change after that qualified source; runtime/tests/embedded guides and
+workflow remain identical for main publication. Main CI is still a separate
+exact-source gate, with final result linked from issue52.
 The earlier fixture-only run41018286041 passed shutdown registration but failed
 the existing15-second upload-prefix observation; its failure is retained.
 Product header timeout remains3000ms and real1024-byte prefix/backpressure,
