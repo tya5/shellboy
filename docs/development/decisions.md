@@ -1216,3 +1216,27 @@ never delivered. Record unknown honestly and expose it in #52's queue. Revisit
 only with additional positive historical evidence, not an absence-based guess.
 A bounded 128-ID resume rejects excess input atomically instead of overtaking
 old messages or adding a recovery scheduler.
+## Pending-message implementation boundaries (#52, 2026-10-30)
+
+- Use a frontend read-order stamp assigned inside the serialized DB read, rather
+  than a new durable queue version. History and pending rows are one transaction
+  and one update; existing generation/view checks still apply. Revisit if reads
+  leave this shared DB lane or a second UI producer bypasses paired delivery.
+- Freeze a submission in a separate row of the existing draft table. One editable
+  row cannot preserve revision R while accepting a newer autosave of R+1. Bind by
+  operation/source draft/revision, never text; preserve newer edits and make
+  failed precommit snapshots explicitly restorable. Original source references
+  serve cancellation archives, retaining attachments and provenance without
+  copying conversation bodies into another store.
+- A nullable per-Turn interrupt timestamp records durable human intent without
+  adding a lifecycle state. Keep the Turn active until adopted call/result pairs
+  finish, because attachment admission relies on that boundary. The existing
+  Run-wide cancellation token cannot represent a light Turn interrupt. One
+  Turn-bound token/native-start gate is owned by each driver and released with
+  it; DB callbacks never acquire the gate. Native Windows behavior needs fresh
+  CI evidence; passing a loopback test on macOS will not establish it.
+- Ordinary sends no longer release foreground waits. Immediate delivery is an
+  explicit persisted fact and never interrupts response generation. Existing
+  send-key configuration wins over the Ctrl+Enter convenience; the two-key chord
+  remains available. Timed automatic backgrounding stays deferred by the latest
+  #56 decision, avoiding an unrelated timer/configuration mechanism.
