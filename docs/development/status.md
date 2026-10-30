@@ -1,5 +1,21 @@
 # Development status
 
+## #59 review follow-up: legacy sender explanation (D-006)
+
+The CLI reference and protocol design distinguish legacy null's historical human
+conversation band from evidence-based unknown in sender facts/F6. New external
+CLI records already use the generic input category; the previous blanket claim
+of unchanged conversation rendering is removed. F6 keeps sender.kind=unknown
+and adds an explanation for absent evidence, including old records. Source
+classification, band styling and #41 renderer/refresh code are untouched.
+The full local standard check passes1680/0/32 with RUST_TEST_THREADS=2,
+layout89, Python6, fmt and strict Clippy. Two preceding default-concurrency
+checks failed the unchanged PTY index-status/model-wait fixture; both are retained,
+not claimed fixed. Physical-terminal F6 remains untested; final main CI is pending.
+
+Windows watchdog follow-up f07ac85 main CI41072990263 passes all three OSes on
+its first attempt, following repeated native Windows branch qualification.
+
 ## Windows retry fixture watchdog follow-up
 
 The two response retry fixture files share60s progress/cleanup watchdogs and

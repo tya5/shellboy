@@ -146,7 +146,9 @@ send without Origin, `human` for a recorded in-process TUI submission, or
 of a human. Sender IDs remain readable after the originating Thread is deleted.
 User-node `history get` and `history list` expose the same facts at
 `provenance.sender`, joined by the accepted `message_id`, including later input
-appended to an already-running Run. Legacy null sender records stay unknown.
+appended to an already-running Run. Legacy null sender records are `unknown`
+in these sender facts: old records cannot distinguish a TUI sender from an
+external CLI.
 
 `--sender-label TEXT` adds an optional self-asserted name: at most 64 Unicode
 characters, without newlines, control characters or line/paragraph separators.
@@ -154,7 +156,13 @@ It is returned as `sender.label`, separate from verified identity. The label
 never grants ownership, stop, retry or cancellation authority. Explicitly
 connecting to another data directory still strips model Origin; only the name
 survives, as `external_cli`. TUI F6 message details display it as `名乗り：…`,
-not as verified identity; conversation rendering is unchanged.
+not as verified identity. F6 also explains `unknown` as missing sender evidence,
+including old records. The conversation's source bands are a separate display
+convention: legacy null records keep the existing human band so old conversations
+do not all change appearance, whereas new `external_cli` records use the existing
+generic input band rather than the human band. That legacy human band is not
+verified sender identity. This follows decision D-006 in issue #68; band styling
+belongs to #41 and is not changed by this sender-inspection follow-up.
 
 Ordinary sends queue for the next safe boundary. Add `--now` only to request
 urgent delivery by releasing a foreground shell wait: that shell continues under

@@ -1580,3 +1580,15 @@ change render/layout/index refresh or add conversation badges. Historical null
 receipts keep the existing conversation display convention only; CLI/F6 sender
 facts correctly remain unknown. Revisit that historical presentation only under
 separate conversation-design scope, not by inventing identity in sender facts.
+
+
+## 2026-10-30: D-006 legacy sender display clarification (#68 / #59)
+
+Active. Source: issue68 D-006 and the issue59 review follow-up. Preserve old null
+senders' human conversation band to avoid reclassifying an entire existing
+conversation's appearance. It is a display convention, not sender evidence.
+CLI/message/history provenance and F6 continue to report unknown, with F6
+explaining absent evidence including old records. Newly recorded external_cli
+uses the existing generic input category. Correct the overly broad unchanged-
+rendering claim; do not change band code, source classification or #41 styling.
+Revisit only on an explicit user decision to restyle historical null records.

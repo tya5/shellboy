@@ -2863,3 +2863,19 @@ changed. Local full check on d72155f first failed unchanged tui_process at its
 post-index model-wait footer, then passed without source changes:1679/0/32,
 layout89, Python6, fmt and strict Clippy. Neither failure is claimed fixed.
 Final main CI remains a separate gate.
+
+
+## #59 D-006 review clarification
+
+The follow-up changes CLI/design prose plus F6 sender_fields only. A regression
+requires the unknown kind unchanged, the old-record/missing-evidence explanation
+in both fields and original-page lines, and no fabricated self-asserted label.
+No conversation metadata/band/renderer code is modified. Native macOS arm64,
+Rust1.99.1: RUST_TEST_THREADS=2 sh scripts/check.sh passes1680/0/32, layout89,
+Python6, fmt and strict all-target Clippy. The added F6 regression and existing
+sender-only/TestBackend preservation test pass. Two prior default-concurrency
+full checks failed unchanged real_tui_accepts_text_renders_proxy_response_and_exits_cleanly:
+one lacked the unpaused index fact, the other missed the subsequent model-wait
+footer. Their original logs remain outside Git; no test was skipped or weakened,
+and a lower-concurrency success does not establish the failure's cause/fix.
+Final main CI is a separate gate; physical-terminal F6 remains unqualified.
