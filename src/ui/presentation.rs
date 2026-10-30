@@ -765,15 +765,9 @@ pub(super) fn history(
 ) -> (Vec<Line<'static>>, Vec<std::sync::Arc<str>>, Vec<RowSource>) {
     history_with_cache(view, width, None, 0)
 }
-pub(super) fn history_with_cache(
-    view: &ThreadView,
-    width: u16,
-    mut cache: Option<&mut super::HistoryLayoutCache>,
-    budget: usize,
-) -> (Vec<Line<'static>>, Vec<std::sync::Arc<str>>, Vec<RowSource>) {
-    let mut links = Vec::new();
-    let mut lines = Vec::new();
-    let mut sources = Vec::new();
+/// Canonical source window examined by the projection, including zero-row
+/// quiet/duplicate members. Navigation must not infer this from visible rows.
+pub(super) fn projection_bounds(view: &ThreadView) -> (usize, usize) {
     // Layout only a contiguous neighborhood, independent of retained cache size.
     // A single body is already bounded by the frontend's source-window limit.
     let focus = super::projection_node_index(view);
@@ -805,6 +799,18 @@ pub(super) fn history_with_cache(
             break;
         }
     }
+    (begin, end)
+}
+pub(super) fn history_with_cache(
+    view: &ThreadView,
+    width: u16,
+    mut cache: Option<&mut super::HistoryLayoutCache>,
+    budget: usize,
+) -> (Vec<Line<'static>>, Vec<std::sync::Arc<str>>, Vec<RowSource>) {
+    let mut links = Vec::new();
+    let mut lines = Vec::new();
+    let mut sources = Vec::new();
+    let (begin, end) = projection_bounds(view);
     if view.nodes()[begin..end].iter().any(|node| {
         node.presentation
             .blocks
@@ -3727,6 +3733,46 @@ mod conversation_item_tests {
             "all immutable source records remain available through originals"
         );
         assert!(!shown.contains("状態変更") && !shown.contains("通常通知"));
+    }
+    #[test]
+    fn canonical_projection_bounds_include_a_quiet_prefix_hidden_by_tail_grouping() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let nodes = (0..270)
+            .map(|index| {
+                let mut value = node(
+                    &format!("q{index}"),
+                    if index == 269 {
+                        "FINAL ANSWER"
+                    } else {
+                        "saved observation"
+                    },
+                    vec![],
+                );
+                if index < 269 {
+                    value.presentation.kind = PresentationKind::Event;
+                    value.presentation.title = "AGENTS.md none".into();
+                    value.role = "event".into();
+                }
+                value
+            })
+            .collect();
+        *view.nodes_mut_for_test() = nodes;
+        view.scroll.focus = Some("q269".into());
+        let (begin, end) = projection_bounds(&view);
+        assert_eq!(end, 270);
+        assert_eq!(end - begin, 128);
+        let (lines, _, sources) = history(&view, 80);
+        assert!(plain(&lines).contains("FINAL ANSWER"));
+        assert_eq!(
+            sources.first().unwrap().node,
+            269,
+            "visible rows begin at the later answer"
+        );
+        assert!(
+            begin < sources.first().unwrap().node,
+            "backward navigation must retain the hidden canonical prefix"
+        );
+        assert_eq!(begin.checked_sub(1), Some(141));
     }
     #[test]
     fn repeated_call_ids_in_other_groups_are_not_collapsed_together() {

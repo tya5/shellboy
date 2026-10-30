@@ -667,7 +667,10 @@ impl ThreadView {
                     let adjacent = if forward {
                         (source.covered_end < view.nodes.len()).then_some(source.covered_end)
                     } else {
-                        source.node.checked_sub(1)
+                        // Quiet observations may be painted after later prose.
+                        // Their canonical prefix still belongs to this bounded
+                        // projection; navigation uses its range, not row order.
+                        presentation::projection_bounds(view).0.checked_sub(1)
                     };
                     if let Some(index) = adjacent {
                         let focus = projection_node_index(view);
