@@ -130,6 +130,8 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
     ui.select_thread("t".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "t".into(),
         generation,
         nodes: vec![nodes[0].clone()],

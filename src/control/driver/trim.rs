@@ -165,6 +165,7 @@ mod tests {
             stop: CancellationToken::new(),
             nudge: Arc::new(Notify::new()),
             foreground: Arc::new(ForegroundSlot::default()),
+            turn: Arc::new(tokio::sync::Mutex::new(None)),
         };
         slot.stop.cancel();
         let mut budget = retry::RetryBudget::default();

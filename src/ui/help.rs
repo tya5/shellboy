@@ -52,7 +52,7 @@ impl Page {
         let mut page = Guide { rows: Vec::new() };
         page.section("よく使う操作");
         page.entry("F1 / /help", "操作ガイドを開く");
-        page.entry(&config.ui.send_key, "メッセージを送る");
+        page.entry(&config.ui.send_key, "次の区切りでメッセージを渡す");
         page.entry(&config.ui.newline_keys.join(" / "), "入力中に改行する");
         if !config.ui.send_key.eq_ignore_ascii_case("Ctrl+U")
             && !config
@@ -71,7 +71,7 @@ impl Page {
         } else {
             page.entry("Ctrl+L", "画面再描画は無効（送信・改行キーの設定と重複）");
         }
-        page.entry("Ctrl+C", "現在の会話の処理を中断する");
+        page.entry("Ctrl+C", "Runと所有する背景の作業を停止する");
         page.entry("Ctrl+Q / /quit", "保存・停止処理をしてアプリを終了する");
         page.entry("/", "コマンド候補を表示。↑↓で選び、Tabで補完");
 
@@ -92,6 +92,18 @@ impl Page {
         page.entry("/switch ID", "指定した会話へ切り替える");
         page.entry("↑ / ↓", "入力の先頭行で送信履歴を呼び出す。↓で新しい履歴へ");
         page.note("送信履歴の最新からさらに↓で、書きかけの下書きに戻ります。");
+
+        page.section("反映待ち・中断・復元");
+        if !config.ui.send_key.eq_ignore_ascii_case("Ctrl+Enter") {
+            page.entry("Ctrl+Enter", "すぐ渡す（応答生成は中断しない）");
+        }
+        page.entry("Ctrl+X → Ctrl+S", "すぐ渡す。前景shellの待機だけを解除する");
+        page.entry("/queue", "保存済みの反映待ち・保留入力を確認／取消");
+        page.entry(
+            "/restore list / /restore draft ID",
+            "保存した取消入力・未確定送信を復元",
+        );
+        page.entry("Esc", "画面を閉じる。通常の会話ではTurnだけ中断");
 
         page.section("内容・処理状況を調べる");
         page.entry("F6", "会話の内容を選び、詳細・原文・IDを確認（/details）");
@@ -401,7 +413,7 @@ mod tests {
         for expected in [
             "よく使う操作",
             "Ctrl+Enter",
-            "メッセージを送る",
+            "次の区切りでメッセージを渡す",
             "入力中に改行する",
             "Ctrl+C",
             "Ctrl+Q",

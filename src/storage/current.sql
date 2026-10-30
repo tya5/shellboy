@@ -1,4 +1,4 @@
--- Current conversation schema v11. Historical upgrades live in storage::migrate.
+-- Current conversation schema v14. Historical upgrades live in storage::migrate.
 -- Keep this definition equivalent to the completed historical migrations.
 
 CREATE TABLE app_meta(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -36,7 +36,7 @@ CREATE TABLE turn(
  state TEXT NOT NULL CHECK(state IN ('preparing','running','waiting','recovery_wait','completed','stopped','failed')),
  generation INTEGER NOT NULL DEFAULT 0 CHECK(generation>=0), instruction_snapshot_id TEXT REFERENCES instruction_snapshot(id),
  answer_node_id TEXT REFERENCES node(id), created_at TEXT NOT NULL, ended_at TEXT,
- recovery_reason_json TEXT CHECK(recovery_reason_json IS NULL OR json_valid(recovery_reason_json)),
+ recovery_reason_json TEXT CHECK(recovery_reason_json IS NULL OR json_valid(recovery_reason_json)), interrupt_requested_at TEXT,
  FOREIGN KEY(run_id,thread_id) REFERENCES run(id,thread_id));
 
 CREATE UNIQUE INDEX one_open_turn ON turn(thread_id)
@@ -111,6 +111,9 @@ CREATE INDEX receipt_target ON receipt(target_thread_id,state,created_at);
 CREATE TABLE draft(
  id TEXT PRIMARY KEY NOT NULL, thread_id TEXT REFERENCES thread(id), revision INTEGER NOT NULL CHECK(revision>=0),
  body_json TEXT NOT NULL CHECK(json_valid(body_json)), state TEXT NOT NULL, updated_at TEXT NOT NULL);
+
+CREATE INDEX draft_state_thread_updated ON draft(state,thread_id,updated_at DESC,id DESC);
+CREATE INDEX draft_submitted_source_revision ON draft(json_extract(body_json,'$._submission.source_draft_id'),json_extract(body_json,'$._submission.source_revision')) WHERE state='submitted';
 
 CREATE TABLE view_state(
  thread_id TEXT PRIMARY KEY NOT NULL REFERENCES thread(id), anchor_node_id TEXT,
@@ -381,4 +384,5 @@ INSERT INTO schema_migration(version,name) VALUES(10,'0010_hot_query_indexes');
 INSERT INTO schema_migration(version,name) VALUES(11,'0011_current_index_metadata');
 INSERT INTO schema_migration(version,name) VALUES(12,'0012_revisit_metadata');
 INSERT INTO schema_migration(version,name) VALUES(13,'0013_message_path_admission');
-PRAGMA user_version=13;
+INSERT INTO schema_migration(version,name) VALUES(14,'0014_turn_interrupt');
+PRAGMA user_version=14;

@@ -554,6 +554,7 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
             .request(Request::new(
                 format!("{}:send-{n}", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some(thread.clone()),
                     text: format!("synthetic {n}"),
                 }),

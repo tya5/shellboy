@@ -420,6 +420,7 @@ mod frame_delivery_tests {
         let operation = "instance:oversized";
         let make = |text| {
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some("t".into()),
                 text,
             })
@@ -495,6 +496,7 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some("t".into()),
                 text: "hello".into(),
             }),
@@ -662,6 +664,7 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some("t".into()),
                 text: "hello".into(),
             }),

@@ -153,6 +153,9 @@ async fn quit_bypasses_full_normal_queue_but_preserves_accepted_send_and_drafts_
     let (sender, mut receiver) = actions::channel(3);
     sender
         .try_send(UiAction::Send {
+            generation: 0,
+            now: false,
+            snapshot: None,
             draft_id: "send".into(),
             revision: 0,
             thread_id: Some("thread".into()),
@@ -396,6 +399,9 @@ async fn saturated_queue_quit_persists_prior_send_and_latest_snapshot_without_st
     let (sender, receiver) = actions::channel(8);
     sender
         .try_send(UiAction::Send {
+            generation: 0,
+            now: false,
+            snapshot: None,
             draft_id: "accepted-send".into(),
             revision: 1,
             thread_id: Some("thread".into()),

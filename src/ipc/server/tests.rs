@@ -95,6 +95,7 @@ impl Fixture {
         self.connect_command(
             number,
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some("t".into()),
                 text: "fixture".into(),
             }),

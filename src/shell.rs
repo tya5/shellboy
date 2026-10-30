@@ -235,6 +235,27 @@ impl ShellSupervisor {
         args: ShellToolArgs,
         env: BTreeMap<String, String>,
     ) -> Result<ShellExecution, ApiError> {
+        self.spawn_inner(execution_id, cwd, args, env, None).await
+    }
+    pub(crate) async fn spawn_guarded(
+        &self,
+        execution_id: String,
+        cwd: PathBuf,
+        args: ShellToolArgs,
+        env: BTreeMap<String, String>,
+        gate: Arc<tokio::sync::Mutex<bool>>,
+    ) -> Result<ShellExecution, ApiError> {
+        self.spawn_inner(execution_id, cwd, args, env, Some(gate))
+            .await
+    }
+    async fn spawn_inner(
+        &self,
+        execution_id: String,
+        cwd: PathBuf,
+        args: ShellToolArgs,
+        env: BTreeMap<String, String>,
+        gate: Option<Arc<tokio::sync::Mutex<bool>>>,
+    ) -> Result<ShellExecution, ApiError> {
         args.validate()?;
         if execution_id.trim().is_empty() {
             return Err(ApiError::new(
@@ -267,7 +288,7 @@ impl ShellSupervisor {
             })?;
         #[cfg(windows)]
         {
-            self.spawn_windows(execution_id, cwd, args, env, initial, budget_size)
+            self.spawn_windows(execution_id, cwd, args, env, initial, budget_size, gate)
                 .await
         }
         #[cfg(not(any(unix, windows)))]
@@ -280,12 +301,13 @@ impl ShellSupervisor {
         }
         #[cfg(unix)]
         {
-            self.spawn_unix(execution_id, cwd, args, env, initial, budget_size)
+            self.spawn_unix(execution_id, cwd, args, env, initial, budget_size, gate)
                 .await
         }
     }
 
     #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
     async fn spawn_unix(
         &self,
         execution_id: String,
@@ -294,6 +316,7 @@ impl ShellSupervisor {
         env: BTreeMap<String, String>,
         initial: Option<Vec<u8>>,
         budget_size: usize,
+        gate: Option<Arc<tokio::sync::Mutex<bool>>>,
     ) -> Result<ShellExecution, ApiError> {
         use std::process::Stdio;
         let mut command = launch_command(&self.config, &args.command);
@@ -306,6 +329,17 @@ impl ShellSupervisor {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .process_group(0);
+        let turn_gate = match &gate {
+            Some(gate) => Some(gate.lock().await),
+            None => None,
+        };
+        if turn_gate.as_ref().is_some_and(|guard| **guard) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Turn interrupted before shell spawn",
+            )
+            .details(serde_json::json!({"reason":"turn_interrupted_before_spawn"})));
+        }
         let spawned_at = Instant::now();
         // Serialize native publication with emergency force cleanup. No await
         // or DB/file work occurs while this short native ownership lock is held.
@@ -325,6 +359,7 @@ impl ShellSupervisor {
             let _ = signal_group(pgid, libc::SIGKILL);
         }
         drop(groups);
+        drop(turn_gate);
         let owned_group = unix_group::OwnedGroup::new(self.native_groups.clone(), pgid);
         let stdin = Arc::new(Mutex::new(child.stdin.take().map(ShellStdin::Unix)));
         let stdout = child.stdout.take().expect("stdout configured as piped");

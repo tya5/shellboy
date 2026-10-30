@@ -134,7 +134,8 @@ fn escape_hides_the_menu_until_edit_and_pasted_slashes_are_literal() {
 fn popup_fits_small_terminals_and_scrolls_to_the_selected_candidate() {
     let mut ui = state();
     type_text(&mut ui, "/");
-    key(&mut ui, KeyCode::Up);
+    key(&mut ui, KeyCode::Up); // /queue is the final candidate.
+    key(&mut ui, KeyCode::Up); // Select /quit above it.
     assert!(screen(&mut ui, 90, 24).contains("/quit"));
     for (width, height) in [(8, 5), (20, 10), (35, 20)] {
         screen(&mut ui, width, height);

@@ -3028,7 +3028,7 @@ async fn old_integer_reset_migrates_before_real_workers_and_exhausted_failures_t
     let path = f._temp.path().join("db.sqlite");
     f.db.shutdown().await.unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10; INSERT OR REPLACE INTO app_meta(key,value) SELECT 'index.common_failures.'||value,'0' FROM app_meta WHERE key GLOB 'index.query_profile.*';").unwrap();
+    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10; INSERT OR REPLACE INTO app_meta(key,value) SELECT 'index.common_failures.'||value,'0' FROM app_meta WHERE key GLOB 'index.query_profile.*';").unwrap();
     db.close().unwrap();
     f.db = DbWorker::open(&path).await.unwrap();
     f.service = IndexService::new(f.db.clone(), f.config.clone());

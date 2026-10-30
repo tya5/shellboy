@@ -31,6 +31,8 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         .map(|i| persisted(i, format!("SAVED {i:03}\n")))
         .collect::<Vec<_>>();
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         nodes: selected[50..].to_vec(),
@@ -97,6 +99,8 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         .expect("completion must resolve real path ordinals without sending a message");
     assert_ne!(anchor.node_id.as_deref(), Some("stream-attempt-id"));
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         nodes: selected[51..].to_vec(),
@@ -118,6 +122,8 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         .unwrap();
     let first = position.saturating_sub(10);
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         view_revision,
@@ -176,6 +182,8 @@ fn paused_new_streams_do_not_enter_the_ordered_history_cache() {
     ui.select_thread("fixture".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         nodes: vec![persisted(0, "saved prose\n".repeat(80))],
@@ -242,6 +250,8 @@ fn late_commit_cannot_rename_a_different_thread_or_generation() {
     ui.select_thread("fixture".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         nodes: vec![persisted(0, "saved prose\n".repeat(80))],
@@ -313,6 +323,8 @@ fn late_commit_cannot_rename_a_different_thread_or_generation() {
     let mut canonical = persisted(1, "canonical final body".into());
     canonical.node_id = "canonical-response".into();
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         nodes: vec![persisted(0, "saved prose\n".repeat(80)), canonical],
@@ -351,6 +363,8 @@ fn completion_rebases_a_paused_anchor_inside_streamed_code() {
     let generation = ui.view().generation;
     let saved = persisted(0, "earlier saved prose".into());
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         nodes: vec![saved.clone()],
@@ -429,6 +443,8 @@ fn completion_rebases_a_paused_anchor_inside_streamed_code() {
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert_eq!(visible_history(&terminal), before);
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         view_revision,

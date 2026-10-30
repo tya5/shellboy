@@ -156,6 +156,10 @@ const COMMANDS: &[CommandHint] = &[
         name: "/quit",
         help: "通常終了",
     },
+    CommandHint {
+        name: "/queue",
+        help: "保存済みの反映待ち・保留入力を確認／取消",
+    },
 ];
 
 #[derive(Debug, Default)]

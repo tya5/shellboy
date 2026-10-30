@@ -17,6 +17,7 @@ struct Controls {
     tool_start_gate: Option<Arc<AtomicBool>>,
     quit: Option<Vec<UiAction>>,
     cancels: BTreeSet<String>,
+    interrupts: BTreeSet<(String, String)>,
     active_cancel: Option<String>,
     cancel_wait: bool,
     wait: bool,
@@ -116,6 +117,7 @@ impl ActionSender {
             action,
             UiAction::Quit
                 | UiAction::Cancel { .. }
+                | UiAction::InterruptTurn { .. }
                 | UiAction::CancelWait
                 | UiAction::WaitForShutdown
                 | UiAction::ForceQuit
@@ -149,6 +151,19 @@ impl ActionSender {
                     }
                     controls.cancels.insert(thread_id);
                 }
+            }
+            UiAction::InterruptTurn { thread_id, turn_id } => {
+                if controls.interrupts.len() >= CANCEL_TARGETS
+                    && !controls
+                        .interrupts
+                        .contains(&(thread_id.clone(), turn_id.clone()))
+                {
+                    return Err(mpsc::error::TrySendError::Full(UiAction::InterruptTurn {
+                        thread_id,
+                        turn_id,
+                    }));
+                }
+                controls.interrupts.insert((thread_id, turn_id));
             }
             UiAction::CancelWait => controls.cancel_wait = true,
             UiAction::WaitForShutdown => controls.wait = true,
@@ -245,6 +260,13 @@ impl ActionReceiver {
         {
             controls.active_cancel = Some(thread_id.clone());
             return Some(UiAction::Cancel { thread_id });
+        }
+        if !self.closing
+            && self.cancel_enabled
+            && controls.active_cancel.is_none()
+            && let Some((thread_id, turn_id)) = controls.interrupts.pop_first()
+        {
+            return Some(UiAction::InterruptTurn { thread_id, turn_id });
         }
         None
     }

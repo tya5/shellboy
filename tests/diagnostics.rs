@@ -260,6 +260,7 @@ async fn streamed_fixture(malformed_final: bool) {
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(thread.clone()),
                 text: "PRIVATE_HUMAN_MESSAGE".into(),
             }),

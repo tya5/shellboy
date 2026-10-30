@@ -215,6 +215,8 @@ fn thread_switch_restores_draft_and_anchor_and_rejects_stale_pages() {
     assert!(matches!(&actions[0], UiAction::SaveDraft { thread_id, .. } if thread_id == "one"));
     text(&mut ui, "draft two");
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "two".into(),
         generation,
         nodes: vec![UiNode {
@@ -480,6 +482,8 @@ fn original_character_anchor_requests_window_outside_cached_tail() {
     ui.select_thread("one".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "one".into(),
         generation,
         nodes: vec![UiNode {
@@ -893,6 +897,8 @@ fn reasoning_is_folded_by_default_and_toggle_preserves_node_and_source_offsets()
     let start = "公開前文\n".chars().count();
     let end = start + "秘密の推論日本語".chars().count();
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "t".into(),
         generation,
         nodes: vec![UiNode {
@@ -946,6 +952,8 @@ fn reasoning_ranges_use_original_unicode_offsets_inside_a_loaded_window() {
     ui.select_thread("t".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "t".into(),
         generation,
         nodes: vec![UiNode {
@@ -1042,6 +1050,8 @@ fn reasoning_metadata_capacity_counts_towards_nonvisible_body_cache() {
     let mut ranges = Vec::with_capacity(4096);
     ranges.push((0, 1));
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "old".into(),
         generation,
         nodes: vec![UiNode {
@@ -1102,6 +1112,8 @@ fn tail_follow_uses_rendered_word_wrapping_for_long_context_messages() {
         reasoning_ranges: vec![],
     });
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "t".into(),
         generation,
         nodes,
@@ -1194,6 +1206,8 @@ fn evicted_history_metadata_recovers_previous_and_next_ordinals() {
     ui.select_thread("thread".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "thread".into(),
         generation,
         nodes: (0..10)
@@ -1235,6 +1249,8 @@ fn evicted_history_metadata_recovers_previous_and_next_ordinals() {
     // page displacement without invalidating the accepted source-window reply.
     assert!(ui.event(key(KeyCode::PageDown)).is_empty());
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "thread".into(),
         generation,
         view_revision,
@@ -1275,6 +1291,8 @@ fn evicted_body_keeps_node_identity_and_reloads_at_original_character_offset() {
     ui.select_thread("thread".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "thread".into(),
         generation,
         nodes: (0..5)
@@ -1361,6 +1379,8 @@ fn zero_body_budget_releases_page_allocations_and_preserves_three_working_nodes(
         });
     }
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "zero".into(),
         generation,
         nodes,
@@ -1390,6 +1410,8 @@ fn cached_history_render_replaces_same_length_source_and_recomputes_resize() {
     ui.select_thread("render".into());
     let generation = ui.view().generation;
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "render".into(),
         generation,
         nodes: vec![UiNode {
@@ -1449,6 +1471,8 @@ fn typed_conversation_has_inline_markers_and_details_copy_full_urls_without_chan
     );
     shellboy::presentation::render_markdown(&mut presentation, 60);
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "thread".into(),
         generation: ui.view().generation,
         before_cursor: None,
@@ -1681,6 +1705,8 @@ fn markdown_resize_and_internal_source_anchor_request_bounded_worker_reprojectio
         shellboy::presentation::project("assistant_response", &payload, original, 0);
     shellboy::presentation::render_markdown(&mut projection, 60);
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "thread".into(),
         generation: ui.view().generation,
         before_cursor: None,
@@ -1766,6 +1792,8 @@ fn scroll_fixture(nodes: Vec<UiNode>, first: u64, total: u64) -> UiState {
     let mut ui = state();
     ui.select_thread("scroll-fixture".into());
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "scroll-fixture".into(),
         generation: ui.view().generation,
         nodes,
@@ -1856,6 +1884,8 @@ fn wheel_burst_preserves_rows_across_overlapping_async_history_windows_and_prefe
                 char_offset.min(count)
             };
             actual.apply(UiUpdate::HistoryWindow {
+                pending: Default::default(),
+                read_revision: 0,
                 thread_id,
                 generation,
                 view_revision,
@@ -1885,6 +1915,8 @@ fn wheel_during_initial_loading_cannot_replay_on_unrelated_node_prefetch() {
     ui.select_thread("scroll-fixture".into());
     assert!(scroll_wheel(&mut ui, true).is_empty());
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "scroll-fixture".into(),
         generation: ui.view().generation,
         nodes: vec![scroll_fixture_node(
@@ -2221,6 +2253,8 @@ fn slow_forward_history_page_keeps_the_visible_rows_until_the_reply() {
             assert!(reads < 4);
             let first = ordinal.saturating_sub(10) as usize;
             actual.apply(UiUpdate::HistoryWindow {
+                pending: Default::default(),
+                read_revision: 0,
                 thread_id,
                 generation,
                 view_revision,
@@ -2438,6 +2472,8 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
         node.text.clear();
     }
     actual.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "scroll-fixture".into(),
         generation: actual.view().generation,
         nodes,
@@ -2502,6 +2538,8 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
                 let nodes = all[first..(first + 50).min(all.len())].to_vec();
                 let node = &all[ordinal as usize];
                 actual.apply(UiUpdate::HistoryWindow {
+                    pending: Default::default(),
+                    read_revision: 0,
                     thread_id,
                     generation,
                     view_revision,
@@ -2660,6 +2698,8 @@ fn cancelling_an_inflight_scroll_allows_later_resize_and_rejects_its_stale_body(
         }
         let generation = ui.view().generation;
         ui.apply(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "scroll-fixture".into(),
             generation,
             nodes: vec![node.clone()],
@@ -2824,6 +2864,8 @@ fn recovery_view() -> UiState {
     let mut ui = UiState::new(&Config::default(), cwd());
     ui.select_thread("recovery".into());
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation: ui.view().generation,
         nodes: vec![recovery_node("old0"), recovery_node("old1")],
@@ -2848,6 +2890,8 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
     let previous = ui.view().view_revision;
     let anchor = ui.view().anchor.clone();
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         nodes: vec![recovery_node("old1"), recovery_node("new2")],
@@ -2880,6 +2924,8 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
     });
     assert!(ui.view().loading);
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         view_revision: previous,
@@ -2891,6 +2937,8 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
     });
     assert!(ui.view().nodes().iter().all(|n| n.node_id != "stale"));
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         view_revision: current,
@@ -2925,6 +2973,8 @@ fn history_rebase_replaces_removed_anchor_and_rejects_old_refresh() {
     let current = ui.view().view_revision;
     ui.take_deferred_actions();
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         view_revision: current,
@@ -2941,6 +2991,8 @@ fn history_rebase_replaces_removed_anchor_and_rejects_old_refresh() {
     assert_eq!(ui.view().anchor.node_id.as_deref(), Some("replacement"));
     assert!(ui.view().status.contains("選択経路から外れた"));
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         nodes: vec![recovery_node("old0")],
@@ -2974,6 +3026,8 @@ fn follow_latest_cancels_an_outstanding_history_rebase() {
     assert!(ui.view().follow);
     assert_ne!(ui.view().view_revision, previous);
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         view_revision: previous,
@@ -3002,6 +3056,8 @@ fn history_rebase_adopts_clamped_character_offset_for_a_surviving_node() {
     let node = recovery_node("old1");
     let clamped = node.total_chars;
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         view_revision: current,
@@ -3039,6 +3095,8 @@ fn sending_cancels_history_rebase_and_later_navigation_can_recover_again() {
     );
     assert!(ui.view().follow);
     ui.apply(UiUpdate::HistoryWindow {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "recovery".into(),
         generation,
         view_revision: previous,

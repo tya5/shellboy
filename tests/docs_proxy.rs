@@ -59,6 +59,7 @@ async fn luna_discovers_bundled_guides_and_observes_its_background_shell() {
         })).await;
         let thread_id = thread["thread_id"].as_str().unwrap().to_owned();
         request(&control, Command::MessageSend(MessageSendArgs {
+now: false,
             thread_id: Some(thread_id.clone()),
             text: "操作に不慣れなので、まず利用可能な操作ガイドで背景shellの手順を確認してから実行して。shell toolで command='sleep 2; printf SHELLBOY_DOCS_DISCOVERY_V1' をbackground:trueで直接起動し、その実行の出力だけを後続のshell get/readで確認して結果を報告してください。リポジトリはありません。続いて子エージェントを一つ作り、SHELLBOY_DOCS_CHILD_V1 とだけ回答するよう依頼し、回答原文を取得して報告してください。親自身への会話送信は不要です。".into(),
         })).await;

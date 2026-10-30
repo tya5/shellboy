@@ -197,6 +197,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
     let req = request(
         "first",
         Command::MessageSend(MessageSendArgs {
+            now: false,
             thread_id: Some(thread.clone()),
             text: "fixture request".into(),
         }),
@@ -235,6 +236,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
     );
     let mut conflicting = req;
     conflicting.command = Command::MessageSend(MessageSendArgs {
+        now: false,
         thread_id: Some(thread),
         text: "changed".into(),
     });

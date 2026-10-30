@@ -33,6 +33,8 @@ fn source(ui: &mut UiState, id: &str, revision: u64, node: &str) {
 }
 fn history(ui: &mut UiState, node: &str, revision: u64) {
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: revision,
         thread_id: "t".into(),
         generation: ui.view().generation,
         nodes: vec![UiNode {
@@ -46,6 +48,71 @@ fn history(ui: &mut UiState, node: &str, revision: u64) {
         first_ordinal: 0,
         selection_revision: revision,
         total_nodes: 1,
+    });
+}
+fn saved(
+    ui: &mut UiState,
+    id: &str,
+    revision: u64,
+    node: &str,
+    read_revision: u64,
+    admitted: bool,
+) {
+    let pending = PendingMessages {
+        items: if admitted {
+            vec![]
+        } else {
+            vec![PendingMessage {
+                message_id: node.into(),
+                operation_id: "operation".into(),
+                sender_thread: None,
+                created_at: "2026-10-30T00:00:00Z".into(),
+                held: false,
+                hold_reason: None,
+                uncertain: false,
+                now: false,
+                excerpt: "saved request".into(),
+                excerpt_truncated: false,
+                attachment_count: 0,
+            }]
+        },
+        total: u64::from(!admitted),
+        submitted: vec![SubmittedMessage {
+            operation_id: "operation".into(),
+            source_draft_id: id.into(),
+            revision,
+            message_id: node.into(),
+        }],
+    };
+    let generation = ui.view().generation;
+    let history = UiUpdate::History {
+        thread_id: "t".into(),
+        generation,
+        nodes: if admitted {
+            vec![UiNode {
+                node_id: node.into(),
+                role: "user".into(),
+                text: "saved request".into(),
+                ..Default::default()
+            }]
+        } else {
+            vec![]
+        },
+        pending,
+        read_revision,
+        before_cursor: None,
+        append: false,
+        first_ordinal: 0,
+        selection_revision: u64::from(admitted),
+        total_nodes: u64::from(admitted),
+    };
+    ui.apply(UiUpdate::SavedMessage {
+        draft_id: id.into(),
+        revision,
+        generation,
+        thread_id: "t".into(),
+        status: ReceiptStatus::Accepted,
+        history: Box::new(history),
     });
 }
 fn footer(ui: &UiState) -> String {
@@ -98,22 +165,42 @@ fn enter_draws_and_animates_before_frontend_then_hands_off_only_after_matching_h
         ui.dirty,
         "local send uses the existing animation clock before a Run exists"
     );
-    receipt(&mut ui, &id, rev, ReceiptStatus::Accepted);
+    ui.apply(UiUpdate::SendOperation {
+        draft_id: id.clone(),
+        revision: rev,
+        operation_id: "operation".into(),
+    });
+    saved(&mut ui, &id, rev, "m1", 1, false);
     preparing(&mut ui);
     assert!(footer(&ui).contains("準備中"));
-    assert!(footer(&ui).contains("保存済み・表示待ち"));
+    assert!(!footer(&ui).contains("保存済み・取得中"));
+    assert!(
+        ui.view().pending.is_empty(),
+        "the DB projection owns committed input"
+    );
+    assert_eq!(ui.view().pending_messages.items[0].message_id, "m1");
+    assert!(
+        ui.view().nodes().is_empty(),
+        "queued input has not entered the selected path"
+    );
     source(&mut ui, &id, rev, "m1");
-    history(&mut ui, "unrelated", 1);
-    assert!(footer(&ui).contains("保存済み・表示待ち"));
-    history(&mut ui, "m1", 2);
-    assert!(footer(&ui).contains("準備中"));
-    assert!(!footer(&ui).contains("保存済み・表示待ち"));
     receipt(&mut ui, &id, rev, ReceiptStatus::Accepting);
-    assert_eq!(ui.view().pending[&rev].status, ReceiptStatus::Accepted);
+    assert!(
+        ui.view().pending.is_empty(),
+        "late progress/source replies cannot recreate local copies"
+    );
+    history(&mut ui, "m1", 2);
+    assert_eq!(ui.view().nodes()[0].node_id, "m1");
+    assert_eq!(
+        ui.view().pending_messages.total,
+        0,
+        "one paired snapshot moves input out of the queue"
+    );
+    assert!(footer(&ui).contains("準備中"));
     history(&mut ui, "another-page", 3);
     assert!(
         ui.view().sending().is_none(),
-        "scroll/cache changes cannot regress an observed source"
+        "scroll/cache changes cannot recreate a local saved-message clock"
     );
 }
 
@@ -121,14 +208,24 @@ fn enter_draws_and_animates_before_frontend_then_hands_off_only_after_matching_h
 fn fast_completion_and_history_before_source_do_not_drop_the_message_binding() {
     let mut ui = ui();
     let (id, rev, _) = send(&mut ui, "fast");
-    receipt(&mut ui, &id, rev, ReceiptStatus::Accepted);
+    saved(&mut ui, &id, rev, "m", 1, true);
+    assert!(
+        ui.view().pending.is_empty(),
+        "saved history carries the immutable message binding before a source callback"
+    );
+    assert_eq!(ui.view().nodes()[0].node_id, "m");
+    assert_eq!(ui.view().pending_messages.total, 0);
     receipt(&mut ui, &id, rev, ReceiptStatus::Completed);
-    history(&mut ui, "m", 1);
-    assert!(footer(&ui).contains("保存済み・表示待ち"));
-    assert!(ui.view().pending.contains_key(&rev));
+    history(&mut ui, "stale-page", 0);
     source(&mut ui, &id, rev, "m");
-    assert!(!ui.view().pending.contains_key(&rev));
+    assert_eq!(
+        ui.view().nodes()[0].node_id,
+        "m",
+        "an older history page must not replace the paired commit"
+    );
+    assert!(ui.view().pending.is_empty());
     assert!(ui.view().sending().is_none());
+    assert!(!footer(&ui).contains("保存済み・取得中"));
 }
 
 #[test]

@@ -318,6 +318,8 @@ fn mutation_owner_survives_saved_draft_install_receipt_body_eviction_and_other_r
     );
     let text = "old body".repeat(1024);
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "a".into(),
         generation: ui.view().generation,
         nodes: vec![UiNode {

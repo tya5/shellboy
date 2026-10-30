@@ -161,6 +161,8 @@ fn performance_ui_state_and_test_backend() {
     let generation = state.view().generation;
     let body = "synthetic 日本語😀 output\n".repeat(128);
     state.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation,
         nodes: (0..50)

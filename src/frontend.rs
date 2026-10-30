@@ -6,6 +6,7 @@ mod draft_images;
 mod draft_saver;
 mod history_reader;
 mod input_history;
+mod message_queue;
 mod receipt_delivery;
 mod received;
 mod thread_deletion;
@@ -279,6 +280,8 @@ enum BackgroundResult {
         result: Result<activity::Projection, ApiError>,
     },
     Sent {
+        generation: u64,
+        projection: Option<Box<UiUpdate>>,
         draft_id: String,
         revision: u64,
         attachments: HashSet<String>,
@@ -333,6 +336,7 @@ fn command_title(command: &Command) -> String {
         Command::ThreadDeletePreview(_) => "会話の削除前確認",
         Command::ThreadSet(_) => "会話の設定",
         Command::MessageSend(_) => "依頼の送信",
+        Command::MessageCancel(_) => "反映待ちの取消",
         Command::MessageGet(_) => "依頼と回答の確認",
         Command::OperationGet(_) => "操作の受付結果",
         Command::RunGet(_) => "作業の詳細",
@@ -890,7 +894,31 @@ async fn run_with_delivery(
                             .await;
                         }
                     }
+                    UiAction::InterruptTurn {thread_id,turn_id} => {
+                        if !control_tasks.is_empty() {status(&updates,Some(thread_id),"中断操作を処理中です。状態を確認して再操作してください").await;continue;}
+                        let control=control.clone();
+                        control_tasks.spawn(async move {let result=control.interrupt_turn(thread_id.clone(),turn_id).await.map(|_|());(thread_id,result)});
+                    }
+                    UiAction::CancelMessages {message_ids,target} => {
+                        let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,target.thread_id.clone(),"取消キューが満杯です。未受付です").await;continue;};
+                        let control=control.clone();let sender=updates.worker();
+                        spawn_work(&mut workers,permit,async move {message_queue::cancel(&control,&sender,target,message_ids).await;});
+                    }
+                    UiAction::RestoreArchive {archive_id,target} => {
+                        let control=control.clone();let sender=updates.worker();let rejected=target.thread_id.clone();
+                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {message_queue::restore(&control,&sender,target,archive_id).await;}) {status(&updates,rejected,"復元キューが満杯です。再操作してください").await;}
+                    }
+                    UiAction::ListRestore {thread_id,generation,request_id} => {
+                        let control=control.clone();let sender=updates.worker();let rejected=thread_id.clone();
+                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
+                            match message_queue::archives(&control,thread_id.clone()).await {
+                                Ok(entries)=>update(&sender,UiUpdate::RestoreArchives {thread_id,generation,request_id,entries,error:None}).await,
+                                Err(error)=>update(&sender,UiUpdate::RestoreArchives {thread_id,generation,request_id,entries:vec![],error:Some(error.to_string())}).await,
+                            }
+                        }) {status(&updates,rejected,"下書き一覧の取得キューが満杯です").await;}
+                    }
                     UiAction::Send {
+                        generation, now, snapshot,
                         draft_id,
                         revision,
                         thread_id,
@@ -916,13 +944,7 @@ async fn run_with_delivery(
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, thread_id.as_deref(), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = thread_id.clone();
-                        let accepting = UiUpdate::Receipt {
-                                draft_id: draft_id.clone(),
-                                revision,
-                                thread_id: thread_id.clone(),
-                                status: ReceiptStatus::Accepting,
-                                message: None,
-                            };
+                        let accepting=UiUpdate::SendOperation {draft_id:draft_id.clone(),revision,operation_id:trace.operation_id.clone()};
                         if !actions.is_closing() {
                             update(&updates, accepting).await;
                         }
@@ -976,7 +998,11 @@ async fn run_with_delivery(
                                         "Thread cwd must be valid Unicode",
                                     )
                                 })?;
-                                let (content, files) = draft_input(&text, attachments)?;
+                                let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,None,control.store.config.limits.draft_bytes)?;
+                                let (content, files) = draft_input(&snapshot.text,snapshot.attachments.clone())?;
+                                let submission=crate::control::db::DraftSubmission {draft_id:crate::control::db::DraftSubmission::id_for_operation(&trace.operation_id),source_draft_id:draft_id.clone(),revision,snapshot:serde_json::to_value(&snapshot).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Cannot preserve draft"))?};
+                                control.store.prepare_draft_submission(&trace.operation_id,thread_id.as_deref(),&submission).await?;
+                                let options=crate::control::db::DraftSendOptions {now,submission:Some(submission),..Default::default()};
                                 control
                                     .send_ordered_draft(
                                         trace.operation_id.clone(),
@@ -990,6 +1016,7 @@ async fn run_with_delivery(
                                         thread_id,
                                         content,
                                         files,
+                                        options,
                                     )
                                     .await
                             }
@@ -1001,8 +1028,13 @@ async fn run_with_delivery(
                                 trace_thread.as_deref(),
                                 result.as_ref().ok(),
                             );
+                            let projection=match &result {
+                                Ok(value)=>HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value).await.ok(),
+                                Err(_)=>None,
+                            };
                             let _ = sender
                                 .send(BackgroundResult::Sent {
+                                    generation, projection: projection.map(Box::new),
                                     draft_id,
                                     revision,
                                     attachments: ids,
@@ -1366,6 +1398,7 @@ async fn run_with_delivery(
                         });
                     }
                     UiAction::SendEdited {
+                        generation, now, snapshot,
                         draft_id,
                         revision,
                         source_thread_id,
@@ -1393,13 +1426,7 @@ async fn run_with_delivery(
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, Some(source_thread_id.as_str()), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = None;
-                        let accepting = UiUpdate::Receipt {
-                                draft_id: draft_id.clone(),
-                                revision,
-                                thread_id: None,
-                                status: ReceiptStatus::Accepting,
-                                message: None,
-                            };
+                        let accepting=UiUpdate::SendOperation {draft_id:draft_id.clone(),revision,operation_id:trace.operation_id.clone()};
                         if !actions.is_closing() {
                             update(&updates, accepting).await;
                         }
@@ -1444,13 +1471,17 @@ async fn run_with_delivery(
                             let trace_thread = Some(source_thread_id.clone());
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
                             let result = async {
-                                let (content, files) = draft_input(&text, attachments)?;
+                                let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,Some((&source_thread_id,&source_node_id)),control.store.config.limits.draft_bytes)?;
+                                let (content, files) = draft_input(&snapshot.text,snapshot.attachments.clone())?;
                                 let cwd = cwd.into_os_string().into_string().map_err(|_| {
                                     ApiError::new(
                                         ErrorCode::InvalidArgument,
                                         "Thread cwd must be valid Unicode",
                                     )
                                 })?;
+                                let submission=crate::control::db::DraftSubmission {draft_id:crate::control::db::DraftSubmission::id_for_operation(&trace.operation_id),source_draft_id:draft_id.clone(),revision,snapshot:serde_json::to_value(&snapshot).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Cannot preserve draft"))?};
+                                control.store.prepare_draft_submission(&trace.operation_id,Some(&source_thread_id),&submission).await?;
+                                let options=crate::control::db::DraftSendOptions {now,submission:Some(submission),..Default::default()};
                                 control
                                     .edit_ordered_request(
                                         trace.operation_id.clone(),
@@ -1466,6 +1497,7 @@ async fn run_with_delivery(
                                             effort,
                                             parent_id: None,
                                         },
+                                        options,
                                     )
                                     .await
                             }
@@ -1477,8 +1509,13 @@ async fn run_with_delivery(
                                 trace_thread.as_deref(),
                                 result.as_ref().ok(),
                             );
+                            let projection=match &result {
+                                Ok(value)=>HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value).await.ok(),
+                                Err(_)=>None,
+                            };
                             let _ = sender
                                 .send(BackgroundResult::Sent {
+                                    generation, projection: projection.map(Box::new),
                                     draft_id,
                                     revision,
                                     attachments: ids,
@@ -2496,6 +2533,7 @@ async fn run_with_delivery(
                         .await
                 }
                 Some(BackgroundResult::Sent {
+                    generation, projection,
                     draft_id,
                     revision,
                     attachments,
@@ -2507,32 +2545,11 @@ async fn run_with_delivery(
                             .get("thread_id")
                             .and_then(Value::as_str)
                             .map(str::to_owned);
-                        if let (Some(message), Some(target)) = (
-                            value.get("message_id").and_then(Value::as_str),
-                            thread.as_ref(),
-                        ) {
-                            pending.insert(
-                                message.to_owned(),
-                                receipt_delivery::PendingReceipt { thread: target.clone(), draft: draft_id.clone(), revision, checked: false, repeat: false },
-                            );
+                        if let Some(projection)=projection {
+                            update(&updates,*projection).await;
+                        } else {
+                            if let Some(thread_id)=thread.clone() {update(&updates,UiUpdate::SavedMessagePending {draft_id:draft_id.clone(),revision,generation,thread_id}).await;}
                         }
-                        let state =
-                            if value.get("delivery_status").and_then(Value::as_str) == Some("held") {
-                                ReceiptStatus::Held
-                            } else {
-                                ReceiptStatus::Accepted
-                            };
-                        update(
-                            &updates,
-                            UiUpdate::Receipt {
-                                draft_id: draft_id.clone(),
-                                revision,
-                                thread_id: thread.clone(),
-                                status: state,
-                                message: None,
-                            },
-                        )
-                        .await;
                         if let Some(node_id) = value.get("message_id").and_then(Value::as_str) {
                             update(
                                 &updates,
@@ -3044,7 +3061,7 @@ async fn save_draft(
     follow: bool,
 ) -> Result<(), ApiError> {
     let result = async {
-    control.store.database.call(move|db|{let tx=db.transaction()?;let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",[&thread],|row|row.get(0))?;if !live{return Ok(());}let body=serde_json::to_string(&draft).map_err(|error|crate::storage::StorageError::Configuration(error.to_string()))?;tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,?3,?4,'editing',?5)ON CONFLICT(id)DO UPDATE SET revision=excluded.revision,body_json=excluded.body_json,updated_at=excluded.updated_at WHERE excluded.revision>=draft.revision",rusqlite::params![draft.draft_id,thread,draft.revision as i64,body,chrono::Utc::now().to_rfc3339()])?;tx.execute("INSERT INTO view_state(thread_id,anchor_node_id,anchor_offset,follow_tail,input_state_json)VALUES(?1,?2,?3,?4,'{}')ON CONFLICT(thread_id)DO UPDATE SET anchor_node_id=excluded.anchor_node_id,anchor_offset=excluded.anchor_offset,follow_tail=excluded.follow_tail",rusqlite::params![thread,anchor.node_id,anchor.char_offset as i64,follow])?;tx.commit()?;Ok(())}).await.map_err(storage_error)
+    control.store.database.call(move|db|{let tx=db.transaction()?;let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",[&thread],|row|row.get(0))?;if !live{return Ok(());}let body=serde_json::to_string(&draft).map_err(|error|crate::storage::StorageError::Configuration(error.to_string()))?;tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at) SELECT ?1,?2,?3,?4,'editing',?5 WHERE NOT EXISTS(SELECT 1 FROM draft submitted WHERE submitted.state='submitted' AND json_extract(submitted.body_json,'$._submission.source_draft_id')=?1 AND json_extract(submitted.body_json,'$._submission.source_revision')>=?3) ON CONFLICT(id)DO UPDATE SET revision=excluded.revision,body_json=excluded.body_json,updated_at=excluded.updated_at WHERE excluded.revision>=draft.revision",rusqlite::params![draft.draft_id,thread,draft.revision as i64,body,chrono::Utc::now().to_rfc3339()])?;tx.execute("INSERT INTO view_state(thread_id,anchor_node_id,anchor_offset,follow_tail,input_state_json)VALUES(?1,?2,?3,?4,'{}')ON CONFLICT(thread_id)DO UPDATE SET anchor_node_id=excluded.anchor_node_id,anchor_offset=excluded.anchor_offset,follow_tail=excluded.follow_tail",rusqlite::params![thread,anchor.node_id,anchor.char_offset as i64,follow])?;tx.commit()?;Ok(())}).await.map_err(storage_error)
 
     }.await;
     checked_storage(control, result).await
@@ -3070,7 +3087,7 @@ async fn select_thread(
     )
     .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Invalid Thread details reply"))?;
     let target = thread.to_owned();
-    let (draft,view)=control.store.database.call(move|db|{use rusqlite::OptionalExtension;let body:Option<String>=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1 AND state='editing' ORDER BY updated_at DESC LIMIT 1",[&target],|r|r.get(0)).optional()?;let view=db.query_row("SELECT anchor_node_id,anchor_offset,follow_tail FROM view_state WHERE thread_id=?1",[target],|r|Ok((ViewAnchor{node_id:r.get(0)?,char_offset:r.get::<_,i64>(1)? as usize},r.get::<_,bool>(2)?))).optional()?;Ok((body.and_then(|v|serde_json::from_str::<DraftSnapshot>(&v).ok()),view))}).await.map_err(storage_error)?;
+    let (draft,view)=control.store.database.call(move|db|{use rusqlite::OptionalExtension;let body:Option<String>=db.query_row("SELECT body_json FROM draft current WHERE thread_id=?1 AND state='editing' AND NOT EXISTS(SELECT 1 FROM draft submitted WHERE submitted.state='submitted' AND json_extract(submitted.body_json,'$._submission.source_draft_id')=current.id AND json_extract(submitted.body_json,'$._submission.source_revision')>=current.revision) ORDER BY updated_at DESC LIMIT 1",[&target],|r|r.get(0)).optional()?;let view=db.query_row("SELECT anchor_node_id,anchor_offset,follow_tail FROM view_state WHERE thread_id=?1",[target],|r|Ok((ViewAnchor{node_id:r.get(0)?,char_offset:r.get::<_,i64>(1)? as usize},r.get::<_,bool>(2)?))).optional()?;Ok((body.and_then(|v|serde_json::from_str::<DraftSnapshot>(&v).ok()),view))}).await.map_err(storage_error)?;
     update(
         updates,
         UiUpdate::Thread {

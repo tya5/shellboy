@@ -61,6 +61,8 @@ fn transient_raw_preview_failure_does_not_jump_up_after_a_downward_wheel() {
     ui.select_thread("fixture".into());
     let prior = (0..80).map(|i| format!("P{i:03}\n")).collect::<String>();
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation: ui.view().generation,
         nodes: vec![
@@ -125,6 +127,8 @@ fn transient_neighbor_preview_failure_cannot_clamp_a_paused_history_refresh_upwa
         presentation: Default::default(),
     };
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation: ui.view().generation,
         nodes: vec![preceding.clone(), tool_node(true)],
@@ -148,6 +152,8 @@ fn transient_neighbor_preview_failure_cannot_clamp_a_paused_history_refresh_upwa
     // Background history_page refresh performs raw enrichment again. The
     // canonical bodies are unchanged; only the neighbor's raw read timed out.
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation: ui.view().generation,
         nodes: vec![preceding, tool_node(false)],
@@ -169,6 +175,8 @@ fn paused_tool() -> UiState {
     let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
     ui.select_thread("fixture".into());
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "fixture".into(),
         generation: ui.view().generation,
         nodes: vec![tool_node(true)],

@@ -21,6 +21,57 @@ use super::receipt::Admission;
 
 type Result<T> = std::result::Result<T, ApiError>;
 
+/// An immutable submission snapshot stored separately from the editable draft.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DraftSubmission {
+    pub draft_id: String,
+    pub source_draft_id: String,
+    pub revision: u64,
+    pub snapshot: Value,
+}
+impl DraftSubmission {
+    pub fn id_for_operation(operation_id: &str) -> String {
+        format!("draft-submission:{}", hash(operation_id.as_bytes()))
+    }
+}
+#[derive(Debug, Clone, Default)]
+pub struct DraftSendOptions {
+    pub now: bool,
+    pub submission: Option<DraftSubmission>,
+    pub expected_selection_revision: Option<i64>,
+    /// Control's canonical preflight-independent request hash; never a wire field.
+    #[doc(hidden)]
+    pub request_fingerprint: Option<String>,
+}
+
+/// Original human draft request identity, available before filesystem planning.
+/// Derived revisions/observations never change whether a saved request replays.
+pub(crate) fn draft_send_fingerprint(
+    args: &ThreadCreateArgs,
+    thread: Option<&str>,
+    content: &crate::attachments::DraftContent,
+    files: &[crate::attachments::AttachmentInput],
+    options: &DraftSendOptions,
+) -> Result<String> {
+    let files = files
+        .iter()
+        .map(|file| {
+            let path = file.path.to_str().ok_or_else(|| {
+                error(
+                    ErrorCode::InvalidArgument,
+                    "Attachment path must be valid Unicode",
+                )
+            })?;
+            Ok(json!({"path":path,"kind":file.kind}))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut intent = json!({"internal_operation":"draft_send_raw","args":args,"thread_id":thread,"text":content.text,"files":files,"now":options.now,"submission":options.submission});
+    content.fingerprint_positions(&mut intent);
+    Ok(hash(serde_json::to_vec(&intent).map_err(|_| {
+        error(ErrorCode::InvalidArgument, "Invalid draft request identity")
+    })?))
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MutationResult {
     pub result: Value,
@@ -255,9 +306,72 @@ impl Store {
             thread_id,
             content,
             files,
-            expected_revision,
+            DraftSendOptions {
+                expected_selection_revision: expected_revision,
+                ..Default::default()
+            },
         )
         .await
+    }
+    pub(crate) async fn replay_draft_send(
+        &self,
+        operation_id: &str,
+        fingerprint: &str,
+    ) -> Result<Option<MutationResult>> {
+        let operation = operation_id.to_owned();
+        let fingerprint = fingerprint.to_owned();
+        let active = operation_id
+            .split_once(':')
+            .is_some_and(|(instance, nonce)| instance == self.instance_id && !nonce.is_empty());
+        self.database
+            .call(move |db| {
+                if let Some(saved) =
+                    saved_operation(db, &operation, &fingerprint).map_err(StorageError::from)?
+                {
+                    return Ok(Some(saved));
+                }
+                if !active {
+                    return Err(StorageError::from(error(
+                        ErrorCode::OperationExpired,
+                        "Unknown draft operation belongs to an earlier owner",
+                    )));
+                }
+                Ok(None)
+            })
+            .await
+            .map_err(storage_error)
+    }
+    pub async fn prepare_draft_submission(
+        &self,
+        operation_id: &str,
+        thread_id: Option<&str>,
+        submission: &DraftSubmission,
+    ) -> Result<()> {
+        if !operation_id
+            .split_once(':')
+            .is_some_and(|(instance, nonce)| instance == self.instance_id && !nonce.is_empty())
+        {
+            return Err(error(
+                ErrorCode::OperationExpired,
+                "Draft submission has no active owner operation identity",
+            ));
+        }
+        let operation = operation_id.to_owned();
+        let thread = thread_id.map(str::to_owned);
+        let submission = submission.clone();
+        let config = self.config.clone();
+        self.database
+            .call(move |db| {
+                super::pending_messages::prepare_submission(
+                    db,
+                    &operation,
+                    thread.as_deref(),
+                    &submission,
+                    &config,
+                )
+            })
+            .await
+            .map_err(storage_error)
     }
     pub(crate) async fn send_draft_content(
         &self,
@@ -266,7 +380,7 @@ impl Store {
         thread_id: Option<String>,
         content: crate::attachments::DraftContent,
         files: Vec<crate::attachments::PlannedAttachment>,
-        expected_revision: Option<i64>,
+        options: DraftSendOptions,
     ) -> Result<MutationResult> {
         content.validate(files.len())?;
         if thread_id.is_none() {
@@ -276,9 +390,12 @@ impl Store {
             .iter()
             .map(|f| json!({"path":f.path,"kind":f.kind,"managed_id":f.managed_id}))
             .collect();
-        let mut intent = json!({"internal_operation":"draft_send","args":args,"thread_id":thread_id,"text":content.text,"files":paths});
+        let mut intent = json!({"internal_operation":"draft_send","args":args,"thread_id":thread_id,"text":content.text,"files":paths,"now":options.now,"submission":options.submission});
         content.fingerprint_positions(&mut intent);
-        let fingerprint = hash(serde_json::to_vec(&intent).unwrap());
+        let fingerprint = options
+            .request_fingerprint
+            .clone()
+            .unwrap_or_else(|| hash(serde_json::to_vec(&intent).unwrap()));
         let store = self.clone();
         self.database
             .call(move |db| {
@@ -297,7 +414,10 @@ impl Store {
                         let revision: i64 =
                             history::selection_revision(tx, &target, history::ThreadScope::Any)
                                 .map_err(sql_error)?;
-                        if expected_revision.is_some_and(|value| value != revision) {
+                        if options
+                            .expected_selection_revision
+                            .is_some_and(|value| value != revision)
+                        {
                             return Err(error(
                                 ErrorCode::InvalidState,
                                 "Draft attachment selection changed; retry from the retained draft",
@@ -308,6 +428,7 @@ impl Store {
                             &MessageSendArgs {
                                 thread_id: Some(target),
                                 text: content.text.clone(),
+                                now: options.now,
                             },
                             None,
                             &operation_id,
@@ -339,6 +460,17 @@ impl Store {
                             },
                             Some(node),
                         )?;
+                        if let Some(submission) = &options.submission {
+                            super::pending_messages::submit_draft_tx(
+                                tx,
+                                &operation_id,
+                                submission,
+                                &result.result,
+                                now,
+                                &store.config,
+                            )
+                            .map_err(storage_error)?;
+                        }
                         Ok(result)
                     },
                 ))
@@ -543,9 +675,18 @@ impl Store {
         args: ThreadCreateArgs,
     ) -> Result<MutationResult> {
         let content = crate::attachments::DraftContent::appended(text, files.len());
-        self.accept_ordered_edit(operation_id, thread, node, content, files, args)
-            .await
+        self.accept_ordered_edit(
+            operation_id,
+            thread,
+            node,
+            content,
+            files,
+            args,
+            DraftSendOptions::default(),
+        )
+        .await
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn accept_ordered_edit(
         &self,
         operation_id: String,
@@ -554,6 +695,7 @@ impl Store {
         content: crate::attachments::DraftContent,
         files: Vec<crate::attachments::PlannedAttachment>,
         args: ThreadCreateArgs,
+        options: DraftSendOptions,
     ) -> Result<MutationResult> {
         content.validate(files.len())?;
         let store = self.clone();
@@ -575,10 +717,14 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs{thread_id:Some(fork),text:content.text.clone()},None,&operation_id,&now,content.new_source_elements(files.len())?)?;
+                let mut result=store.send_content(&tx,&MessageSendArgs{thread_id:Some(fork),text:content.text.clone(),now:options.now},None,&operation_id,&now,content.new_source_elements(files.len())?)?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
-                result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);Ok(result)
+                result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
+                if let Some(submission)=&options.submission {
+                    super::pending_messages::submit_draft_tx(&tx,&operation_id,submission,&result.result,&now,&store.config).map_err(storage_error)?;
+                }
+                Ok(result)
             })();
             if result.is_err(){tx.execute_batch("ROLLBACK TO edit_accept")?;}
             tx.execute_batch("RELEASE edit_accept")?;
@@ -670,6 +816,7 @@ impl Store {
                             &MessageSendArgs {
                                 thread_id: Some(thread_id),
                                 text,
+                                now: false,
                             },
                             None,
                             &operation_id,
@@ -798,6 +945,14 @@ impl Store {
             Command::MessageSend(args) => self.send(tx, args, caller, operation_id, now),
             Command::MessageGet(args) => {
                 MutationResult::value(message_details(tx, &args.message_id)?)
+            }
+            Command::MessageCancel(args) => {
+                let (cancelled, changed) =
+                    super::pending_messages::cancel_tx(tx, args, caller, now)
+                        .map_err(storage_error)?;
+                let mut result = MutationResult::value(cancelled)?;
+                result.changed_threads = changed;
+                Ok(result)
             }
             Command::OperationGet(args) => MutationResult::value(operation_details(
                 tx,
@@ -1140,19 +1295,26 @@ impl Store {
             thread_id: id.clone(),
             delivery_status: status,
             assignment,
+            now: args.now,
             run_id: assigned_run,
             turn_id: assigned_turn,
         };
-        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&caller.as_ref().map(|origin| origin.identity())).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,serde_json::to_string(&accepted).unwrap()]).map_err(sql_error)?;
+        let saved_acceptance = serde_json::to_value(&accepted)
+            .map_err(|_| error(ErrorCode::InvalidState, "Cannot encode message acceptance"))?;
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&caller.as_ref().map(|origin| origin.identity())).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
         tx.execute(
             "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
             params![id, now],
         )
         .map_err(sql_error)?;
         bump_roots(tx)?;
-        let mut result = MutationResult::value(accepted)?;
+        let mut result = MutationResult::value(saved_acceptance)?;
         if wake {
-            result.wake_threads.push(id);
+            if args.now {
+                result.wake_threads.push(id);
+            } else {
+                result.quiet_wake_threads.push(id);
+            }
         }
         Ok(result)
     }
@@ -1638,7 +1800,13 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
             ));
         }
     };
-    let saved: Option<MessageAccepted> = row.4.and_then(|json| serde_json::from_str(&json).ok());
+    // Internal receipt metadata also contains current cancellation facts; it is
+    // not a second public MessageAccepted wire response.
+    #[derive(Deserialize)]
+    struct SavedAssignment {
+        assignment: Assignment,
+    }
+    let saved: Option<SavedAssignment> = row.4.and_then(|json| serde_json::from_str(&json).ok());
     let assignment = if row.2.is_none() {
         Assignment::Pending
     } else {
@@ -2768,7 +2936,10 @@ mod draft_recovery_revision_tests {
                     Some("t".into()),
                     crate::attachments::DraftContent::appended("new".into(), file_count),
                     files.clone(),
-                    Some(99),
+                    DraftSendOptions {
+                        expected_selection_revision: Some(99),
+                        ..Default::default()
+                    },
                 )
                 .await
                 .unwrap_err();
@@ -2803,7 +2974,10 @@ mod draft_recovery_revision_tests {
                     Some("t".into()),
                     crate::attachments::DraftContent::appended("new".into(), file_count),
                     files,
-                    Some(0),
+                    DraftSendOptions {
+                        expected_selection_revision: Some(0),
+                        ..Default::default()
+                    },
                 )
                 .await
                 .unwrap();
@@ -2817,5 +2991,71 @@ mod draft_recovery_revision_tests {
             }).await.unwrap();
             db.shutdown().await.unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod message_acknowledgement_state_tests {
+    use super::*;
+    #[tokio::test]
+    async fn typed_immediate_ack_replays_original_while_get_preserves_assignment_after_cancellation_metadata()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(root.path().join("ack.db")).await.unwrap();
+        db.call(|db| {db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/','fixture','synthetic','0')",[])?;Ok(())}).await.unwrap();
+        let store = Store::new(
+            db.clone(),
+            Arc::new(Config::default()),
+            root.path().into(),
+            "fixture".into(),
+        );
+        let request = Request::new(
+            "fixture:typed-ack",
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some("t".into()),
+                text: "urgent".into(),
+                now: true,
+            }),
+        );
+        let first = store.execute(request.clone(), None).await.unwrap();
+        let accepted: MessageAccepted = serde_json::from_value(first.result.clone()).unwrap();
+        assert!(accepted.now);
+        assert_eq!(accepted.assignment, Assignment::NewRun);
+        store
+            .execute(
+                Request::new(
+                    "fixture:cancel-ack",
+                    Command::MessageCancel(MessageCancelArgs {
+                        message_ids: vec![accepted.message_id.clone()],
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let current = store
+            .execute(
+                Request::new(
+                    "fixture:get-ack",
+                    Command::MessageGet(MessageTarget {
+                        message_id: accepted.message_id.clone(),
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let current: MessageDetails = serde_json::from_value(current.result).unwrap();
+        assert_eq!(current.assignment, Assignment::NewRun);
+        assert_eq!(current.run_id, accepted.run_id);
+        assert_eq!(current.turn_id, accepted.turn_id);
+        assert_eq!(current.delivery_status, DeliveryStatus::Cancelled);
+        let replay = store.execute(request, None).await.unwrap();
+        assert_eq!(replay.result, first.result);
+        assert!(replay.wake_threads.is_empty() && replay.quiet_wake_threads.is_empty());
+        let replay: MessageAccepted = serde_json::from_value(replay.result).unwrap();
+        assert!(replay.now);
+        assert_eq!(replay.delivery_status, DeliveryStatus::Accepted);
+        db.shutdown().await.unwrap();
     }
 }

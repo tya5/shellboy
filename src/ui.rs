@@ -24,7 +24,9 @@ mod help;
 mod input;
 mod lifecycle;
 mod management;
+mod message_queue;
 mod models;
+pub use message_queue::{PendingMessage, PendingMessages, SubmittedMessage};
 #[cfg(test)]
 mod send_tests;
 pub use management::ManagementPopup;
@@ -61,7 +63,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io,
     path::{Path, PathBuf},
     sync::{Arc, mpsc::Receiver},
@@ -387,7 +389,27 @@ pub enum UiAction {
     },
     CancelWait,
 
+    CancelMessages {
+        message_ids: Vec<String>,
+        target: DraftRecoveryTarget,
+    },
+    ListRestore {
+        thread_id: Option<String>,
+        generation: u64,
+        request_id: u64,
+    },
+    RestoreArchive {
+        archive_id: String,
+        target: DraftRecoveryTarget,
+    },
+    InterruptTurn {
+        thread_id: String,
+        turn_id: String,
+    },
     Send {
+        generation: u64,
+        now: bool,
+        snapshot: Option<Box<DraftSnapshot>>,
         draft_id: String,
         revision: u64,
         thread_id: Option<String>,
@@ -405,6 +427,9 @@ pub enum UiAction {
         draft_revision: u64,
     },
     SendEdited {
+        generation: u64,
+        now: bool,
+        snapshot: Option<Box<DraftSnapshot>>,
         draft_id: String,
         revision: u64,
         source_thread_id: String,
@@ -512,7 +537,46 @@ pub enum UiAction {
 // worker protocol while heap-backed bodies remain separately byte-limited.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
+pub struct DraftRecoveryTarget {
+    pub draft_id: String,
+    pub revision: u64,
+    pub generation: u64,
+    pub thread_id: Option<String>,
+}
+#[derive(Clone, Debug)]
 pub enum UiUpdate {
+    SendOperation {
+        draft_id: String,
+        revision: u64,
+        operation_id: String,
+    },
+    SavedMessagePending {
+        draft_id: String,
+        revision: u64,
+        generation: u64,
+        thread_id: String,
+    },
+    SavedMessage {
+        draft_id: String,
+        revision: u64,
+        generation: u64,
+        thread_id: String,
+        status: ReceiptStatus,
+        history: Box<UiUpdate>,
+    },
+    DraftRecovery {
+        target: DraftRecoveryTarget,
+        draft: Option<Box<DraftSnapshot>>,
+        message: String,
+        notification_id: Option<String>,
+    },
+    RestoreArchives {
+        thread_id: Option<String>,
+        generation: u64,
+        request_id: u64,
+        entries: Vec<(String, String)>,
+        error: Option<String>,
+    },
     AgentsSelected {
         request_id: String,
         draft_id: String,
@@ -644,6 +708,8 @@ pub enum UiUpdate {
         generation: u64,
         view_revision: u64,
         nodes: Vec<UiNode>,
+        pending: PendingMessages,
+        read_revision: u64,
         first_ordinal: u64,
         selection_revision: u64,
         total_nodes: u64,
@@ -653,6 +719,8 @@ pub enum UiUpdate {
         thread_id: String,
         generation: u64,
         nodes: Vec<UiNode>,
+        pending: PendingMessages,
+        read_revision: u64,
         before_cursor: Option<String>,
         append: bool,
         first_ordinal: u64,
@@ -791,6 +859,7 @@ pub struct PendingSend {
     pub status: ReceiptStatus,
     pub message: Option<String>,
     pub source_node_id: Option<String>,
+    pub operation_id: Option<String>,
     send: Option<SendProgress>,
 }
 #[derive(Clone, Debug)]
@@ -812,6 +881,10 @@ pub enum ThreadDeletionReply {
 }
 #[derive(Clone, Debug)]
 enum Confirmation {
+    MessageQueue {
+        action: Box<UiAction>,
+        detail: String,
+    },
     ThreadDeletion(thread_deletion::DeletionDialog),
     EditStop {
         draft_id: String,
@@ -1097,6 +1170,7 @@ impl Confirmation {
     }
     fn layout(&self, area: Rect) -> (String, u16) {
         let text = match self {
+                Confirmation::MessageQueue {detail,..}=>detail.clone(),
                 Confirmation::ThreadDeletion(dialog)=>dialog.text(),
                 Confirmation::EditStop{run_id,..}=>format!("旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"),
                 Confirmation::Index{command,detail}=>format!("索引処理の実行確認 · {}\n{detail}",match command { Command::IndexBackfill(_)=>"backfill", Command::IndexRetry(_)=>"retry", Command::IndexRebuild(_)=>"rebuild", _=>"索引操作" }),
@@ -1164,6 +1238,10 @@ pub struct UiState {
     details: Option<details::Details>,
     operations: Option<operations::Operations>,
     models: Option<models::ModelPicker>,
+    queue_popup: message_queue::QueuePopup,
+    send_now: bool,
+    immediate_chord: bool,
+    queue_notifications: VecDeque<String>,
     next_model_request: u64,
     next_detail_request: u64,
     next_input_request: u64,
@@ -1245,6 +1323,10 @@ impl UiState {
             details: None,
             operations: None,
             models: None,
+            queue_popup: message_queue::QueuePopup::default(),
+            send_now: false,
+            immediate_chord: false,
+            queue_notifications: VecDeque::new(),
             next_model_request: 0,
             autosave: Default::default(),
             batching_updates: false,
@@ -1420,6 +1502,53 @@ impl UiState {
         std::mem::take(&mut self.terminal_requests)
     }
     pub fn apply(&mut self, update: UiUpdate) {
+        if matches!(&update, UiUpdate::SavedMessage { .. }) {
+            self.touch_save_update(&update);
+        }
+        if let UiUpdate::SavedMessage {
+            draft_id,
+            revision,
+            generation,
+            thread_id,
+            status,
+            history,
+        } = update
+        {
+            let matching_header = matches!(history.as_ref(),
+                UiUpdate::History {thread_id:target,generation:target_generation,..}
+                | UiUpdate::HistoryWindow {thread_id:target,generation:target_generation,..}
+                if target==&thread_id && *target_generation==generation);
+            if !matching_header {
+                return;
+            }
+            let matching_view = self.views.values().any(|view| {
+                view.generation == generation
+                    && (view.thread_id.as_deref() == Some(&thread_id)
+                        || view
+                            .pending
+                            .get(&revision)
+                            .is_some_and(|pending| pending.snapshot.draft_id == draft_id))
+            });
+            if !matching_view {
+                return;
+            }
+            // A prior Changed projection may already have consumed the local
+            // accepting row. Only draft completion requires that row; newer
+            // paired DB facts still belong to this same Thread generation.
+            if let Some(view) = self.views.values_mut().find(|view| {
+                view.generation == generation
+                    && view
+                        .pending
+                        .get(&revision)
+                        .is_some_and(|pending| pending.snapshot.draft_id == draft_id)
+            }) {
+                view.finish_saved_input(draft_id, revision, thread_id, status);
+            }
+            self.apply(*history);
+            self.dirty = true;
+            return;
+        }
+
         let retains = update.needs_retention();
         self.apply_inner(update);
         self.retention_pending |= retains;
@@ -1562,12 +1691,95 @@ impl UiState {
             _ => None,
         };
         match update {
+            UiUpdate::SendOperation {
+                draft_id,
+                revision,
+                operation_id,
+            } => {
+                if let Some(view) = self.views.values_mut().find(|v| {
+                    v.pending
+                        .get(&revision)
+                        .is_some_and(|p| p.snapshot.draft_id == draft_id)
+                }) {
+                    view.pending
+                        .get_mut(&revision)
+                        .expect("matching submission")
+                        .operation_id = Some(operation_id);
+                    view.reconcile_saved_inputs();
+                }
+            }
+            UiUpdate::SavedMessagePending {
+                draft_id,
+                revision,
+                generation,
+                thread_id,
+            } => {
+                if let Some(view) = self.views.values_mut().find(|v| {
+                    v.generation == generation
+                        && v.pending
+                            .get(&revision)
+                            .is_some_and(|p| p.snapshot.draft_id == draft_id)
+                }) {
+                    view.thread_id = Some(thread_id);
+                    view.status = "入力は保存済みです。会話と反映待ちを取得中です".into();
+                }
+            }
+            UiUpdate::DraftRecovery {
+                target,
+                draft,
+                message,
+                notification_id,
+            } => {
+                if let Some(id) = notification_id {
+                    if self.queue_notifications.contains(&id) {
+                        return;
+                    }
+                    self.queue_notifications.push_back(id);
+                    if self.queue_notifications.len() > 128 {
+                        self.queue_notifications.pop_front();
+                    }
+                }
+                if self.view().draft.draft_id == target.draft_id
+                    && self.view().generation == target.generation
+                    && self.view().thread_id == target.thread_id
+                {
+                    let view = self.active_view_mut();
+                    if view.draft.revision == target.revision
+                        && view.draft.text.is_empty()
+                        && view.draft.attachments.is_empty()
+                        && let Some(mut draft) = draft
+                    {
+                        draft.draft_id = view.draft.draft_id.clone();
+                        draft.revision = view.draft.revision + 1;
+                        view.draft = *draft;
+                    }
+                    view.status = message;
+                }
+            }
+            UiUpdate::RestoreArchives {
+                thread_id,
+                generation,
+                request_id,
+                entries,
+                error,
+            } => {
+                if self.view().thread_id == thread_id
+                    && self.view().generation == generation
+                    && self.queue_popup.visible
+                    && self.queue_popup.epoch == request_id
+                {
+                    self.queue_popup.archives = Some(entries);
+                    self.queue_popup.archive_loading = false;
+                    self.queue_popup.archive_error = error;
+                }
+            }
             UiUpdate::ThreadDeletion {
                 request_id,
                 args,
                 execute,
                 result,
             } => self.apply_thread_deletion(request_id, args, execute, result),
+            UiUpdate::SavedMessage { .. } => unreachable!("handled as atomic saved projection"),
             UiUpdate::RecoveryBell => unreachable!("handled before selected-view updates"),
             UiUpdate::ScopedManagement { .. } => {
                 unreachable!("scoped result handled before normal updates")
@@ -1727,16 +1939,22 @@ impl UiState {
                 thread_id,
                 generation,
                 nodes,
+                pending,
+                read_revision,
                 before_cursor,
                 append,
                 first_ordinal,
                 selection_revision,
                 total_nodes,
             } => {
+                self.bind_saved_history(&thread_id, generation, &pending);
                 let is_active = self.view().thread_id.as_deref() == Some(&thread_id);
                 let Some(view) = self.view_for(&thread_id, generation) else {
                     return;
                 };
+                if read_revision < view.delivery_read_revision {
+                    return;
+                }
                 if !view.on_history(
                     nodes,
                     before_cursor,
@@ -1747,6 +1965,9 @@ impl UiState {
                 ) {
                     return;
                 }
+                view.delivery_read_revision = read_revision;
+                view.pending_messages = pending;
+                view.reconcile_saved_inputs();
                 if !view.follow && is_active {
                     view.tool_refresh_dirty = true;
                     if let Some(action) = view.request_tool_refresh() {
@@ -1936,8 +2157,10 @@ impl UiState {
                 }) {
                     let pending = view.pending.get_mut(&revision).expect("matching receipt");
                     pending.source_node_id = Some(node_id);
-                    pending.snapshot.text = String::new();
-                    pending.snapshot.attachments = Vec::new();
+                    if pending.status != ReceiptStatus::Accepting {
+                        pending.snapshot.text = String::new();
+                        pending.snapshot.attachments = Vec::new();
+                    }
                     // Fold ranges and cursor are lightweight source offsets.
                     // Keep them so restoring a large paste stays folded.
                     view.observe_sent_nodes();
@@ -1993,14 +2216,21 @@ impl UiState {
                 generation,
                 view_revision,
                 nodes,
+                pending,
+                read_revision,
                 first_ordinal,
                 selection_revision,
                 total_nodes,
                 anchor,
             } => {
                 if let Some(view) = self.view_for(&thread_id, generation).filter(|v| {
-                    v.view_revision == view_revision && selection_revision >= v.selection_revision
+                    v.view_revision == view_revision
+                        && selection_revision >= v.selection_revision
+                        && read_revision >= v.delivery_read_revision
                 }) {
+                    view.delivery_read_revision = read_revision;
+                    view.pending_messages = pending;
+                    view.reconcile_saved_inputs();
                     view.received_window_revision = Some(view_revision);
                     view.on_history_window(
                         nodes,
@@ -2025,6 +2255,9 @@ impl UiState {
                 }) else {
                     return;
                 };
+                // Generic receipt progress also serves slash operations. A
+                // message transfers ownership only through SavedMessage's
+                // atomic paired projection, or later source reconciliation.
                 if !view.on_receipt(draft_id, revision, thread_id, status, message) {
                     return;
                 }
@@ -2681,6 +2914,7 @@ impl UiState {
                             status: ReceiptStatus::Accepting,
                             message: None,
                             source_node_id: None,
+                            operation_id: None,
                             send: None,
                         },
                     );
@@ -2723,6 +2957,7 @@ impl UiState {
 
         self.dirty = true;
         let text = self.view().draft.text.clone();
+        let now = std::mem::take(&mut self.send_now);
         let view = self.active_view_mut();
         if text.trim().is_empty() && view.draft.attachments.is_empty() {
             return vec![];
@@ -2757,6 +2992,7 @@ impl UiState {
                 status: ReceiptStatus::Accepting,
                 message: None,
                 source_node_id: None,
+                operation_id: None,
                 send: Some(SendProgress {
                     started_at: Instant::now(),
                     reflected: false,
@@ -2767,8 +3003,12 @@ impl UiState {
         view.cancel_navigation();
         view.follow = true;
         view.unseen = false;
+        let snapshot = Some(Box::new(draft.clone()));
         if let Some(edit) = draft.edit {
             return vec![UiAction::SendEdited {
+                generation: view.generation,
+                now,
+                snapshot,
                 draft_id: draft.draft_id,
                 revision: draft.revision,
                 source_thread_id: edit.thread_id,
@@ -2783,6 +3023,9 @@ impl UiState {
             }];
         }
         vec![UiAction::Send {
+            generation: view.generation,
+            now,
+            snapshot,
             draft_id: draft.draft_id,
             revision: draft.revision,
             thread_id: view.thread_id.clone(),
@@ -3177,6 +3420,29 @@ impl UiState {
                 vec![]
             }
             "/paste" => self.paste_command(argument),
+            "/queue" => {
+                self.queue_popup.epoch = self.queue_popup.epoch.wrapping_add(1);
+                self.queue_popup.visible = true;
+                self.queue_popup.archives = None;
+                self.queue_popup.selected = 0;
+                vec![]
+            }
+            "/restore" if argument == "list" => {
+                self.queue_popup.epoch = self.queue_popup.epoch.wrapping_add(1);
+                self.queue_popup.visible = true;
+                self.queue_popup.archive_loading = true;
+                self.queue_popup.archive_error = None;
+                self.queue_popup.archives = Some(vec![]);
+                vec![UiAction::ListRestore {
+                    thread_id: self.view().thread_id.clone(),
+                    generation: self.view().generation,
+                    request_id: self.queue_popup.epoch,
+                }]
+            }
+            "/restore" if argument.starts_with("draft ") => vec![UiAction::RestoreArchive {
+                archive_id: argument[6..].trim().into(),
+                target: self.recovery_target(),
+            }],
             "/restore" if argument.is_empty() => {
                 let Some(thread_id) = thread_id else {
                     return self.command_error("入力範囲の復元は保存済み会話で /restore を実行してください。下書きの復元は /restore 番号です");
@@ -3600,6 +3866,10 @@ impl UiState {
         }
         self.confirmation_scroll = 0;
         match self.confirmation.take() {
+            Some(Confirmation::MessageQueue { action, .. }) => {
+                self.queue_popup.visible = false;
+                vec![*action]
+            }
             Some(Confirmation::EditStop {
                 draft_id,
                 revision,
@@ -4299,10 +4569,23 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     } else {
         0
     };
+    let queue_height = message_queue::height(
+        state.view(),
+        layout[1].height.saturating_sub(recovery_height),
+    );
     let body_area = Rect {
-        height: layout[1].height.saturating_sub(recovery_height),
+        height: layout[1]
+            .height
+            .saturating_sub(recovery_height)
+            .saturating_sub(queue_height),
         ..layout[1]
     };
+    let queue_area = Rect::new(
+        layout[1].x,
+        body_area.bottom() + recovery_height,
+        layout[1].width,
+        queue_height,
+    );
     let recovery_area = Rect {
         y: body_area.bottom(),
         height: recovery_height,
@@ -4355,6 +4638,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     if let Some(snapshot) = &view.activity.snapshot {
         draw_recovery(frame, recovery_area, snapshot);
     }
+    message_queue::draw_compact(frame, queue_area, view);
     let input_area = layout[2];
     let input_body_height = input_area.height.saturating_sub(2);
     let cursor = draw_input(frame, input_area, state, &input, &input_metrics);
@@ -4364,6 +4648,9 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         frame.set_cursor_position(cursor);
     }
     let popup_area = popup::viewport(area);
+    state
+        .queue_popup
+        .draw(frame, popup_area, &state.view().pending_messages);
     if state.thread_browser.visible() {
         let active = state.view().thread_id.as_deref();
         let notice_visible = state.top_overlay() == Some(overlay::Overlay::Threads);
@@ -4597,6 +4884,8 @@ mod layout_cache_tests {
     fn history(ui: &mut UiState, thread: &str, text: &str) {
         let generation = ui.view().generation;
         ui.apply(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: thread.into(),
             generation,
             nodes: vec![node("n", text)],
@@ -5363,6 +5652,8 @@ mod layout_cache_tests {
         let mut second = first.clone();
         second.node_id = "event-1".into();
         ui.apply(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "t".into(),
             generation: ui.view().generation,
             nodes: vec![first, second.clone()],
@@ -5484,6 +5775,8 @@ mod tool_refresh_tests {
     }
     fn history(ui: &mut UiState, nodes: Vec<UiNode>) {
         ui.apply(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "t".into(),
             generation: ui.view().generation,
             nodes,
@@ -5612,6 +5905,8 @@ mod thread_view_boundary_tests {
     }
     fn history(ui: &mut UiState, text: &str) {
         ui.apply(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "old".into(),
             generation: ui.view().generation,
             nodes: vec![node("saved", text)],
@@ -5707,6 +6002,8 @@ mod thread_view_boundary_tests {
         assert!(ui.take_deferred_actions().is_empty());
         let revision = ui.views[&owner].view_revision;
         ui.apply(UiUpdate::HistoryWindow {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "old".into(),
             generation,
             view_revision: revision,

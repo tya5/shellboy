@@ -157,6 +157,7 @@ fn create(parent_id: Option<String>) -> Command {
 }
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
+        now: false,
         thread_id: Some(thread.into()),
         text: text.into(),
     })
@@ -583,7 +584,7 @@ async fn pre_marker_history_without_admission_evidence_is_not_resurrected_on_new
     // migrate it. No read-time compatibility fallback is exercised or added.
     let path = root.path().join("data").join("shellboy.db");
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version=13; PRAGMA user_version=12; COMMIT;").unwrap();
+    db.execute_batch("BEGIN IMMEDIATE; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=13; PRAGMA user_version=12; COMMIT;").unwrap();
     drop(db);
     let owner = open(root.path()).await;
     let control = Control::new(&owner, root.path().into());

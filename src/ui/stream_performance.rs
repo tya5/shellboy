@@ -43,6 +43,8 @@ fn performance_long_history_stream_layout_and_resize() {
         .collect::<Vec<_>>();
     let source_bytes = nodes.iter().map(|node| node.text.len()).sum::<usize>();
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "layout-benchmark".into(),
         generation,
         nodes,
@@ -234,6 +236,8 @@ fn render_units_reuse_grouped_history_and_keep_links_sources_and_budget_identica
         nodes.push(node);
     }
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "layout-benchmark".into(),
         generation,
         nodes,
@@ -286,6 +290,8 @@ fn resize_reprojects_every_visible_short_node_and_defers_offscreen_nodes() {
         .map(|n| source(format!("short-{n}"), format!("Short source {n}"), 120))
         .collect();
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "layout-benchmark".into(),
         generation,
         nodes,

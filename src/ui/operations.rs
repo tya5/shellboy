@@ -798,6 +798,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
+                        now: false,
                         thread_id: form.optional("thread")?,
                         text: form.owned("text")?,
                     }))

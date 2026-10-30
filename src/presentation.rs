@@ -108,6 +108,8 @@ pub enum ToolReasonKind {
     PriorWaitNewInput,
     PriorWaitHumanBackground,
     PriorWaitReleased,
+    HumanTurnInterrupted,
+    PriorTurnInterrupted,
     OwnerShutdown,
     GroupValidation,
     AdditionalInput,
@@ -128,6 +130,8 @@ impl ToolReasonKind {
             "previous_wait_released_by_new_input" => Self::PriorWaitNewInput,
             "previous_wait_released_by_human_background" => Self::PriorWaitHumanBackground,
             "previous_wait_released" => Self::PriorWaitReleased,
+            "human_turn_interrupted" => Self::HumanTurnInterrupted,
+            "previous_turn_interrupted" => Self::PriorTurnInterrupted,
             "owner_shutdown_before_call" => Self::OwnerShutdown,
             "tool_group_validation_failed" => Self::GroupValidation,
             "additional_input" => Self::AdditionalInput,
@@ -324,6 +328,8 @@ fn tool_reason(value: &str) -> String {
             "利用者が先行する呼出しを背景へ移したため未実行".into()
         }
         ToolReasonKind::PriorWaitReleased => "先行する呼出しの待機結果により未実行".into(),
+        ToolReasonKind::HumanTurnInterrupted => "利用者がTurnを中断".into(),
+        ToolReasonKind::PriorTurnInterrupted => "利用者がTurnを中断したため未実行".into(),
         ToolReasonKind::OwnerShutdown => "アプリ終了処理のため未実行".into(),
         ToolReasonKind::GroupValidation => "呼出し群の検証失敗により未実行".into(),
         ToolReasonKind::AdditionalInput => "追加の指示を受けて背景へ移行".into(),

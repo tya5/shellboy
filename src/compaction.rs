@@ -629,19 +629,38 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
             "Compaction snapshot changed; late result discarded",
         )));
     }
-    if let Some(run) = &s.run_fence
-        && !tx.query_row(
+    let run_matches = if let Some(run) = &s.run_fence {
+        tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state='live')",
             [run],
             |r| r.get::<_, bool>(0),
         )?
-    {
-        return Err(StorageError::from(invalid(
-            "Compaction Run stopped before adoption",
-        )));
+    } else {
+        !tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",
+            [&s.thread],
+            |r| r.get::<_, bool>(0),
+        )?
+    };
+    if !run_matches {
+        return Err(StorageError::from(invalid(if s.run_fence.is_some() {
+            "Compaction Run stopped before adoption"
+        } else {
+            "Compaction snapshot changed: a Run started before adoption"
+        })));
     }
-    if let Some((turn, generation)) = &s.turn_fence
-        && !tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND generation=?2 AND state IN ('preparing','running','waiting','recovery_wait'))",params![turn,generation],|r|r.get::<_,bool>(0))?{return Err(StorageError::from(invalid("Compaction Turn generation changed before adoption")));}
+    let turn_matches = if let Some((turn, generation)) = &s.turn_fence {
+        tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND generation=?2 AND state IN ('preparing','running','waiting','recovery_wait'))",params![turn,generation],|r|r.get::<_,bool>(0))?
+    } else {
+        !tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait'))",[&s.thread],|r|r.get::<_,bool>(0))?
+    };
+    if !turn_matches {
+        return Err(StorageError::from(invalid(if s.turn_fence.is_some() {
+            "Compaction Turn generation changed before adoption"
+        } else {
+            "Compaction snapshot changed: a Turn started before adoption"
+        })));
+    }
 
     for source in s
         .groups

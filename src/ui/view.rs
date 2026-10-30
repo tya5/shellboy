@@ -33,6 +33,8 @@ pub struct ThreadView {
     pub unseen: bool,
     pub status: String,
     pub pending: BTreeMap<u64, PendingSend>,
+    pub pending_messages: PendingMessages,
+    pub delivery_read_revision: u64,
     pub loading: bool,
     pub(super) history_rebase_pending: bool,
     pub(super) tool_refresh: Option<u64>,
@@ -84,6 +86,58 @@ impl Default for VisualScroll {
     }
 }
 impl ThreadView {
+    pub(super) fn finish_saved_input(
+        &mut self,
+        draft_id: String,
+        revision: u64,
+        thread_id: String,
+        status: ReceiptStatus,
+    ) {
+        // Durable operation-correlated commit evidence outranks an earlier
+        // local observation failure; it must never leave the same body unsent.
+        if let Some(pending) = self
+            .pending
+            .get_mut(&revision)
+            .filter(|p| p.snapshot.draft_id == draft_id && p.send.is_some())
+        {
+            pending.status = ReceiptStatus::Accepting;
+        }
+        self.on_receipt(draft_id, revision, Some(thread_id), status, None);
+        self.pending.remove(&revision);
+    }
+    pub(super) fn reconcile_saved_inputs(&mut self) {
+        let saved = self
+            .pending
+            .iter()
+            .filter(|(_, p)| {
+                p.send.is_some()
+                    && (p.operation_id.as_ref().is_some_and(|operation| {
+                        self.pending_messages
+                            .items
+                            .iter()
+                            .any(|m| &m.operation_id == operation)
+                    }) || self.pending_messages.submitted.iter().any(|m| {
+                        m.source_draft_id == p.snapshot.draft_id
+                            && m.revision == p.snapshot.revision
+                            && p.operation_id
+                                .as_ref()
+                                .is_none_or(|operation| operation == &m.operation_id)
+                    }) || p.source_node_id.as_ref().is_some_and(|id| {
+                        self.pending_messages
+                            .items
+                            .iter()
+                            .any(|m| &m.message_id == id)
+                            || self.nodes.iter().any(|n| &n.node_id == id)
+                    }))
+            })
+            .map(|(revision, p)| (*revision, p.snapshot.draft_id.clone()))
+            .collect::<Vec<_>>();
+        for (revision, draft_id) in saved {
+            if let Some(thread) = self.thread_id.clone() {
+                self.finish_saved_input(draft_id, revision, thread, ReceiptStatus::Accepted);
+            }
+        }
+    }
     pub(super) fn observe_sent_nodes(&mut self) {
         for pending in self.pending.values_mut() {
             if let Some(send) = &mut pending.send
@@ -212,6 +266,8 @@ impl ThreadView {
             unseen: false,
             status: "入力できます".into(),
             pending: BTreeMap::new(),
+            pending_messages: PendingMessages::default(),
+            delivery_read_revision: 0,
             loading: false,
             history_rebase_pending: false,
             tool_refresh: None,
@@ -1914,6 +1970,8 @@ mod completion_notice_tests {
         assert_eq!(ui.view().nodes()[0].text, "bounded source");
         // A late accepted window from before Ctrl+End cannot pull follow back.
         ui.apply(UiUpdate::HistoryWindow {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "thread".into(),
             generation,
             view_revision: old_revision,
@@ -2320,6 +2378,8 @@ mod received_tests {
             ..Default::default()
         };
         let window = |revision, selection_revision| UiUpdate::HistoryWindow {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "t".into(),
             generation,
             view_revision: revision,

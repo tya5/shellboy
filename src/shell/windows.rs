@@ -441,6 +441,7 @@ impl NativeChild {
 }
 
 impl ShellSupervisor {
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn spawn_windows(
         &self,
         execution_id: String,
@@ -449,6 +450,7 @@ impl ShellSupervisor {
         env: BTreeMap<String, String>,
         initial: Option<Vec<u8>>,
         budget_size: usize,
+        gate: Option<Arc<tokio::sync::Mutex<bool>>>,
     ) -> Result<ShellExecution, ApiError> {
         let entries = environment(&self.config, env)?;
         let executable = resolve_program(&self.config, &cwd, &entries)?;
@@ -469,6 +471,17 @@ impl ShellSupervisor {
         let stdout = output_pipe().await?;
         let stderr = output_pipe().await?;
         let job = create_job()?;
+        let turn_gate = match &gate {
+            Some(gate) => Some(gate.lock().await),
+            None => None,
+        };
+        if turn_gate.as_ref().is_some_and(|guard| **guard) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Turn interrupted before shell spawn",
+            )
+            .details(serde_json::json!({"reason":"turn_interrupted_before_spawn"})));
+        }
         let jobs = [job.as_raw_handle()];
         let inherited = [
             stdin_child.as_raw_handle(),
@@ -518,6 +531,7 @@ impl ShellSupervisor {
         drop(stdout.child);
         drop(stderr.child);
         let native = NativeChild { job, process };
+        drop(turn_gate);
         let stdin = Arc::new(Mutex::new(Some(ShellStdin::Windows(stdin_parent))));
         let (io, handle, rx) = IoSession::start(
             stdin,

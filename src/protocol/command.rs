@@ -21,6 +21,7 @@ impl Command {
             Self::ThreadDeletePreview(_) => ("thread.delete_preview", CommandRoute::Database),
             Self::ThreadSet(_) => ("thread.set", CommandRoute::Database),
             Self::MessageSend(_) => ("message.send", CommandRoute::Database),
+            Self::MessageCancel(_) => ("message.cancel", CommandRoute::Database),
             Self::MessageGet(_) => ("message.get", CommandRoute::Database),
             Self::OperationGet(_) => ("operation.get", CommandRoute::Database),
             Self::RunGet(_) => ("run.get", CommandRoute::Database),
@@ -90,6 +91,7 @@ impl Command {
             | Self::ThreadDeletePreview(_)
             | Self::ThreadSet(_)
             | Self::MessageSend(_)
+            | Self::MessageCancel(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
             | Self::RevisitGet(_)
@@ -128,6 +130,7 @@ impl Command {
             | Self::ThreadDeletePreview(_)
             | Self::ThreadSet(_)
             | Self::MessageSend(_)
+            | Self::MessageCancel(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
             | Self::RevisitGet(_)
@@ -168,6 +171,7 @@ impl Command {
             | Self::ThreadDelete(_)
             | Self::ThreadSet(_)
             | Self::MessageSend(_)
+            | Self::MessageCancel(_)
             | Self::RunRetry(_)
             | Self::RevisitSet(_)
             | Self::RevisitCancel(_)
@@ -235,6 +239,7 @@ impl Command {
             | Self::ThreadDelete(_)
             | Self::ThreadSet(_)
             | Self::MessageSend(_)
+            | Self::MessageCancel(_)
             | Self::RunRetry(_)
             | Self::RevisitSet(_)
             | Self::RevisitCancel(_)
@@ -260,6 +265,48 @@ impl Command {
 mod tests {
     use super::*;
     use crate::protocol::{RevisitArgs, RevisitSetArgs};
+
+    #[test]
+    fn message_cancellation_is_atomic_database_work_with_receipts_and_shutdown_ordering() {
+        let command = Command::MessageCancel(crate::protocol::MessageCancelArgs {
+            message_ids: vec!["queued-message".into()],
+        });
+        assert_eq!(command.name(), "message.cancel");
+        assert_eq!(command.route(), CommandRoute::Database);
+        assert!(!command.is_read_only());
+        assert!(command.requires_receipt());
+        assert!(
+            command.changes_context(),
+            "cancellation must settle before shutdown captures the queue"
+        );
+        assert!(
+            !command.runtime_cancellable(),
+            "a DB transaction is not a cancellable model/runtime request"
+        );
+        assert!(
+            !command.runtime_allowed_while_stopping(),
+            "this flag only governs the runtime route"
+        );
+        command.validate().unwrap();
+        let encoded = serde_json::to_value(&command).unwrap();
+        let decoded: Command = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.name(), "message.cancel");
+        assert_eq!(decoded.route(), CommandRoute::Database);
+        assert!(
+            Command::MessageCancel(crate::protocol::MessageCancelArgs {
+                message_ids: vec![]
+            })
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Command::MessageCancel(crate::protocol::MessageCancelArgs {
+                message_ids: vec!["same".into(), "same".into()]
+            })
+            .validate()
+            .is_err()
+        );
+    }
 
     #[test]
     fn revisit_mutations_participate_in_receipts_and_shutdown_capture() {

@@ -27,7 +27,7 @@ impl ActivityPhase {
         match self {
             Self::Idle => "未実行",
             Self::Sending => "送信中",
-            Self::Reflecting => "反映待ち",
+            Self::Reflecting => "取得中",
             Self::Preparing => "準備中",
             Self::AwaitingModel => "応答待ち",
             Self::Retrying => "再試行",
@@ -49,7 +49,7 @@ impl ActivityPhase {
         match self {
             Self::Idle => "入力できます",
             Self::Sending => "送信受付中",
-            Self::Reflecting => "保存済み・表示待ち",
+            Self::Reflecting => "保存済み・取得中",
             Self::Preparing => "準備中",
             Self::AwaitingModel => "モデル応答待ち",
             Self::Retrying => "一時的なエラーのため再試行中",

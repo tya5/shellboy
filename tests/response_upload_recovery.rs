@@ -120,6 +120,7 @@ async fn upload_recovery(auto_trim: bool) {
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(thread),
                 text: "small current request after a large saved history".into(),
             }),
@@ -265,6 +266,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(thread),
                 text: "recover after actual proxy startup".into(),
             }),

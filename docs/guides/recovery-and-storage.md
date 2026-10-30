@@ -144,7 +144,8 @@ Explicit context-capacity overflow triggers automatic compaction and up to two r
 
 | Action | Meaning |
 |---|---|
-| TUI Ctrl+C | Request stopping the current Run |
+| TUI Esc, with no popup/completion/selection | Interrupt only the observed Turn; foreground shell moves to background; owned background work continues |
+| TUI Ctrl+C | Request stopping the current Run, including owned background work |
 | `shellboy run stop --run RUN_ID` | Accept stopping the specified Run and its owned descendants |
 | `shellboy shell stop --execution EXECUTION_ID` | Request stopping that shell |
 | Ctrl+C during external CLI wait | Disconnect observation; target Run/shell continues |

@@ -419,6 +419,8 @@ async fn wall_clock_changes_do_not_change_ui_observation_time_or_saved_shell_mea
         .await
         .unwrap();
     state.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "t".into(),
         generation,
         nodes: vec![node],

@@ -145,6 +145,7 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
 #[test]
 fn success_and_error_envelopes_match_contract_and_omit_absent_fields() {
     let message = MessageAccepted {
+        now: false,
         message_id: "m".into(),
         thread_id: "t".into(),
         delivery_status: DeliveryStatus::Held,
@@ -185,6 +186,7 @@ fn assignment_never_exposes_fabricated_or_partial_ids() {
     ] {
         assert!(
             MessageAccepted {
+                now: false,
                 message_id: "m".into(),
                 thread_id: "t".into(),
                 delivery_status: DeliveryStatus::Accepted,

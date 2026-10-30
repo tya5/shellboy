@@ -31,6 +31,9 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     ));
     actions_send
         .send(UiAction::Send {
+            generation: 0,
+            now: false,
+            snapshot: None,
             draft_id: "first-draft".into(),
             revision: 0,
             thread_id: None,
@@ -46,6 +49,11 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     let thread = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             match updates_receive.try_recv() {
+                Ok(UiUpdate::SavedMessage {
+                    status: ReceiptStatus::Accepted,
+                    thread_id,
+                    ..
+                }) => break thread_id,
                 Ok(UiUpdate::Receipt {
                     status: ReceiptStatus::Accepted,
                     thread_id: Some(id),
@@ -90,15 +98,13 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
         .await
         .unwrap();
     next_update(&mut updates_receive, |update| match update {
-        UiUpdate::Receipt {
-            status: ReceiptStatus::Applied,
-            message,
+        UiUpdate::Activity {
+            thread_id,
+            snapshot,
             ..
-        } => {
-            assert!(
-                message.is_none(),
-                "admitted input must not suggest resending"
-            );
+        } if thread_id == thread
+            && snapshot.phase == shellboy::ui::activity::ActivityPhase::Stopped =>
+        {
             Some(())
         }
         _ => None,
@@ -163,10 +169,20 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
                 |row| row.get(0),
             )?;
             assert_eq!(correlated, saved_message);
+            let frozen: String = db.query_row(
+                "SELECT body_json FROM draft WHERE thread_id=?1 AND state='submitted'",
+                [&thread],
+                |row| row.get(0),
+            )?;
+            let frozen: serde_json::Value = serde_json::from_str(&frozen).unwrap();
+            assert_eq!(frozen["text"], "saved message");
+            assert_eq!(frozen["_submission"]["source_draft_id"], "first-draft");
+            assert_eq!(frozen["_submission"]["source_revision"], 0);
+            assert_eq!(frozen["_submission"]["message_id"], saved_message);
             Ok((
                 db.query_row("SELECT count(*) FROM thread", [], |r| r.get::<_, i64>(0))?,
                 db.query_row(
-                    "SELECT body_json FROM draft WHERE thread_id=?1",
+                    "SELECT body_json FROM draft WHERE thread_id=?1 AND state='editing'",
                     [thread],
                     |r| r.get::<_, String>(0),
                 )?,
@@ -465,6 +481,9 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     .await
     .unwrap();
     send.send(UiAction::Send {
+        generation: 0,
+        now: false,
+        snapshot: None,
         draft_id: "image-draft".into(),
         revision: 1,
         thread_id: None,
@@ -613,6 +632,29 @@ async fn next_update<T>(
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             match receive.try_recv() {
+                Ok(UiUpdate::SavedMessage {
+                    draft_id,
+                    revision,
+                    thread_id,
+                    status,
+                    history,
+                    ..
+                }) => {
+                    // Product applies both together; these observer assertions
+                    // inspect each fact without changing UI delivery ordering.
+                    if let Some(value) = select(UiUpdate::Receipt {
+                        draft_id,
+                        revision,
+                        thread_id: Some(thread_id),
+                        status,
+                        message: None,
+                    }) {
+                        return value;
+                    }
+                    if let Some(value) = select(*history) {
+                        return value;
+                    }
+                }
                 Ok(update) => {
                     if let Some(value) = select(update) {
                         return value;
@@ -922,6 +964,9 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     // A new Run can appear after loading the original. Consent is bound to its ID.
     observer.store.database.call(|db|{db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('late-run','source','live','now')",[])?;Ok(())}).await.unwrap();
     send.send(UiAction::SendEdited {
+        generation: 0,
+        now: false,
+        snapshot: None,
         draft_id: "edited".into(),
         revision: 4,
         source_thread_id: "source".into(),
@@ -979,6 +1024,9 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .await
         .unwrap();
     send.send(UiAction::SendEdited {
+        generation: 0,
+        now: false,
+        snapshot: None,
         draft_id: "edited".into(),
         revision: 4,
         source_thread_id: "source".into(),
@@ -2108,6 +2156,8 @@ async fn stale_history_navigation_recovers_after_path_change(remove_anchor: bool
     .unwrap();
     next_update(&mut incoming, |update| match update {
         UiUpdate::HistoryWindow {
+            pending: _,
+            read_revision: _,
             thread_id,
             generation,
             view_revision,
@@ -2282,6 +2332,9 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         server,
     ));
     send.send(UiAction::Send {
+        generation: 0,
+        now: false,
+        snapshot: None,
         draft_id: "identity".into(),
         revision: 0,
         thread_id: None,
@@ -2625,6 +2678,9 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
         let attachments = vec![attachment(Some(if bad_position { 1 } else { 4 }))];
         let action = if edited {
             UiAction::SendEdited {
+                generation: 0,
+                now: false,
+                snapshot: None,
                 draft_id: "edited".into(),
                 revision: 0,
                 source_thread_id: "absent".into(),
@@ -2639,6 +2695,9 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
             }
         } else {
             UiAction::Send {
+                generation: 0,
+                now: false,
+                snapshot: None,
                 draft_id: "send".into(),
                 revision: 0,
                 thread_id: None,
@@ -2671,6 +2730,24 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
         .call(|db| {
             assert_eq!(
                 db.query_row("SELECT COUNT(*) FROM node", [], |row| row.get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM receipt", [], |row| row
+                    .get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM model_attempt", [], |row| row
+                    .get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM draft WHERE state IN ('submitting','submitted')",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )?,
                 0
             );
             Ok(())
@@ -2718,6 +2795,9 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
     let server = LocalServer::bind(&owner, rpc).await.unwrap();
     let (send, receive) = shellboy::ui::actions::channel(2);
     send.try_send(UiAction::Send {
+        generation: 0,
+        now: false,
+        snapshot: None,
         draft_id: "queued-before-quit".into(),
         revision: 0,
         thread_id: Some(thread.clone()),
@@ -2778,7 +2858,11 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         .await
         .unwrap();
     reopened.db.call(move |db| {
-        let draft:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1",[&thread],|r|r.get(0))?;
+        let draft:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1 AND state='editing'",[&thread],|r|r.get(0))?;
+        let frozen:String=db.query_row("SELECT body_json FROM draft WHERE thread_id=?1 AND state='submitted'",[&thread],|r|r.get(0))?;
+        let frozen:serde_json::Value=serde_json::from_str(&frozen).unwrap();
+        assert_eq!(frozen["text"],"queued instruction survives");
+        assert_eq!(frozen["_submission"]["source_draft_id"],"queued-before-quit");
         assert_eq!(serde_json::from_str::<DraftSnapshot>(&draft).unwrap().text,"latest unsent draft");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM receipt WHERE target_thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?,1);
         let (kind,body):(String,String)=db.query_row("SELECT n.kind,n.payload_json FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1",[thread],|r|Ok((r.get(0)?,r.get(1)?)))?;
@@ -2791,4 +2875,91 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         Ok(())
     }).await.unwrap();
     reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitted_watermark() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let observer = control.clone();
+    let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(16);
+    let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
+    tokio::spawn(control.clone().serve(rpc_receive));
+    let (send, receive) = tokio::sync::mpsc::channel(8);
+    let (out, incoming) = std::sync::mpsc::sync_channel(128);
+    let mut incoming = incoming;
+    let bridge = tokio::spawn(frontend::run(
+        control,
+        receive,
+        out,
+        root.path().into(),
+        owner,
+        server,
+    ));
+    let snapshot = DraftSnapshot {
+        draft_id: "source-draft".into(),
+        revision: 7,
+        text: "UNSENT_SNAPSHOT_A".into(),
+        cursor: 17,
+        ..Default::default()
+    };
+    send.send(UiAction::Send {
+        generation: 0,
+        now: false,
+        snapshot: Some(Box::new(snapshot)),
+        draft_id: "source-draft".into(),
+        revision: 7,
+        thread_id: None,
+        cwd: root.path().into(),
+        text: "DIFFERENT_SENT_B".into(),
+        attachments: vec![],
+        connection: None,
+        model: None,
+        effort: None,
+    })
+    .await
+    .unwrap();
+    next_update(&mut incoming, |update| match update {
+        UiUpdate::Receipt {
+            status: ReceiptStatus::Failed,
+            message: Some(reason),
+            ..
+        } => {
+            assert!(reason.contains("does not match"));
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+    observer
+        .store
+        .database
+        .call(|db| {
+            for table in ["receipt", "model_attempt", "draft", "thread"] {
+                assert_eq!(
+                    db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
+                        .get::<_, i64>(0))?,
+                    0,
+                    "mismatched source must not be accepted or suppressed: {table}"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    send.send(UiAction::Quit).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(60), bridge)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }

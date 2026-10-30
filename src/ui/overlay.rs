@@ -9,6 +9,7 @@ pub(super) enum Overlay {
     Operations,
     Details,
     Management,
+    Queue,
     Help,
     Threads,
 }
@@ -24,6 +25,8 @@ impl UiState {
             Some(Overlay::Operations)
         } else if self.details.is_some() {
             Some(Overlay::Details)
+        } else if self.queue_popup.visible {
+            Some(Overlay::Queue)
         } else if self.management.is_some() {
             Some(Overlay::Management)
         } else if self.help_visible {
@@ -69,7 +72,17 @@ impl UiState {
         {
             self.management.epoch = self.management.epoch.wrapping_add(1);
         }
+        if !self.composer_active() {
+            self.immediate_chord = false;
+        }
+        let input_owner = self.active.clone();
         let actions = self.event_inner(event);
+        if self.active != input_owner {
+            self.immediate_chord = false;
+        }
+        if !self.composer_active() {
+            self.immediate_chord = false;
+        }
         self.scope_management_actions(actions)
     }
     pub(super) fn scope_management_actions(&mut self, mut actions: Vec<UiAction>) -> Vec<UiAction> {
@@ -184,6 +197,12 @@ impl UiState {
             _ => vec![],
         }
     }
+    fn submit_immediately(&mut self) -> Vec<UiAction> {
+        self.send_now = true;
+        let actions = self.submit();
+        self.send_now = false;
+        actions
+    }
     fn key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         if let Some(actions) = self.global_key(key) {
             return actions;
@@ -263,8 +282,39 @@ impl UiState {
                 _ => {}
             }
         }
+        if self.immediate_chord {
+            self.immediate_chord = false;
+            if key_matches("Ctrl+S", key) {
+                return self.submit_immediately();
+            }
+        }
+        if key_matches("Ctrl+X", key) {
+            self.immediate_chord = true;
+            return vec![];
+        }
+        if key_matches("Ctrl+Enter", key) && !key_matches(&self.config.ui.send_key, key) {
+            return self.submit_immediately();
+        }
         if let Some(actions) = self.composer_key(key) {
             return actions;
+        }
+        if key.code == KeyCode::Esc
+            && self
+                .view()
+                .activity
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.turn_in_progress)
+            && let (Some(thread_id), Some(turn_id)) = (
+                self.view().thread_id.clone(),
+                self.view()
+                    .activity
+                    .snapshot
+                    .as_ref()
+                    .and_then(|s| s.turn_id.clone()),
+            )
+        {
+            return vec![UiAction::InterruptTurn { thread_id, turn_id }];
         }
         if key_matches(&self.config.ui.send_key, key) {
             return self.submit();
@@ -343,6 +393,7 @@ impl UiState {
     }
     fn overlay_key(&mut self, owner: Overlay, key: KeyEvent) -> Vec<UiAction> {
         match owner {
+            Overlay::Queue => self.queue_key(key),
             Overlay::Models => self.models_key(key),
             Overlay::Operations => {
                 let outcome = self.operations.as_mut().unwrap().key(key);
@@ -451,6 +502,7 @@ mod tests {
                 ui.thread_browser.open(String::new(), vec![], None);
             }
             Overlay::Help => ui.help_visible = true,
+            Overlay::Queue => ui.queue_popup.visible = true,
             Overlay::Management => ui.management.open_text(ManagementView {
                 title: "fixture".into(),
                 text: String::new(),
@@ -630,6 +682,8 @@ mod tests {
         let mut ui = state();
         ui.select_thread("thread".into());
         ui.apply(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "thread".into(),
             generation: ui.view().generation,
             nodes: vec![UiNode {

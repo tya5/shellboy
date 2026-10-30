@@ -93,6 +93,11 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         ))?;
         tx.commit()?;
     }
+    if version < 14 {
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(include_str!("../../migrations/0014_turn_interrupt.sql"))?;
+        tx.commit()?;
+    }
     validate_schema(connection)?;
     Ok(())
 }

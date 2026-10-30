@@ -4,7 +4,9 @@ mod foreground;
 pub(crate) mod interruption;
 mod live;
 pub(crate) mod message_delivery;
+pub(crate) mod pending_messages;
 mod runtime;
+mod turn_interrupt;
 mod ui_events;
 pub use foreground::ForegroundRelease;
 use foreground::ForegroundSlot;
@@ -79,6 +81,7 @@ struct DriverSlot {
     stop: CancellationToken,
     nudge: Arc<Notify>,
     foreground: Arc<ForegroundSlot>,
+    turn: Arc<Mutex<Option<turn_interrupt::TurnBinding>>>,
 }
 #[derive(Clone)]
 struct LiveShell {
@@ -449,6 +452,7 @@ impl Control {
             content,
             files,
             args,
+            db::DraftSendOptions::default(),
         )
         .await
     }
@@ -462,6 +466,7 @@ impl Control {
         content: crate::attachments::DraftContent,
         files: Vec<crate::attachments::AttachmentInput>,
         args: ThreadCreateArgs,
+        options: db::DraftSendOptions,
     ) -> Result<Value, ApiError> {
         content.validate(files.len())?;
 
@@ -469,11 +474,14 @@ impl Control {
         let outcome=tokio::spawn(async move{
             let _guard=control.admit(true)?;
             let references:Vec<Value>=files.iter().map(|file|json!({"path":file.path,"kind":file.kind})).collect();
-            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"confirmed_run_id":confirmed_run,"text":content.text,"files":references,"args":args});
+            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"confirmed_run_id":confirmed_run,"text":content.text,"files":references,"args":args,"now":options.now,"submission":options.submission});
             content.fingerprint_positions(&mut intent);
             let reservation=control.store.reserve_internal(operation_id.clone(),intent).await?;
             match reservation{db::RuntimeReservation::Saved(result)=>return result,db::RuntimeReservation::Pending=>return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),db::RuntimeReservation::New=>{}}
             let outcome=async{
+                if let Some(submission)=&options.submission {
+                    control.store.prepare_draft_submission(&operation_id,Some(&thread),submission).await?;
+                }
                 let mut effects=control.store.stop_for_edit(thread.clone(),confirmed_run).await?;
                 // This in-process edit has no shell caller awaiting a stop
                 // receipt. Apply its stop immediately; the accepted edit still
@@ -502,7 +510,7 @@ impl Control {
                 if control.stop.is_cancelled(){return Err(ApiError::new(ErrorCode::InvalidState,"Edit cancelled by shutdown; draft retained"));}
                 let boundary=control.boundary(&thread).await;
                 let _boundary=tokio::select!{biased;_=control.stop.cancelled()=>return Err(ApiError::new(ErrorCode::InvalidState,"Edit cancelled by shutdown")),guard=boundary.lock()=>guard};
-                let effects=control.store.accept_ordered_edit(operation_id.clone(),thread,node,content,files,args).await?;
+                let effects=control.store.accept_ordered_edit(operation_id.clone(),thread,node,content,files,args,options).await?;
                 let value=effects.result.clone();control.apply_effects(Some(effects)).await;Ok(value)
             }.await;
             control.store.finalize_internal(operation_id,outcome.clone()).await?;
@@ -537,9 +545,17 @@ impl Control {
         files: Vec<crate::attachments::AttachmentInput>,
     ) -> Result<Value, ApiError> {
         let content = crate::attachments::DraftContent::appended(text, files.len());
-        self.send_ordered_draft(operation_id, args, thread_id, content, files)
-            .await
+        self.send_ordered_draft(
+            operation_id,
+            args,
+            thread_id,
+            content,
+            files,
+            db::DraftSendOptions::default(),
+        )
+        .await
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn send_ordered_draft(
         self: &Arc<Self>,
         operation_id: String,
@@ -547,6 +563,7 @@ impl Control {
         thread_id: Option<String>,
         content: crate::attachments::DraftContent,
         files: Vec<crate::attachments::AttachmentInput>,
+        options: db::DraftSendOptions,
     ) -> Result<Value, ApiError> {
         content.validate(files.len())?;
 
@@ -554,7 +571,7 @@ impl Control {
         tokio::spawn(async move {
             let _guard = control.admit(true)?;
             control
-                .send_draft_inner(operation_id, args, thread_id, content, files)
+                .send_draft_inner(operation_id, args, thread_id, content, files, options)
                 .await
         })
         .await
@@ -565,6 +582,7 @@ impl Control {
             )
         })?
     }
+    #[allow(clippy::too_many_arguments)]
     async fn send_draft_inner(
         self: &Arc<Self>,
         operation_id: String,
@@ -572,6 +590,7 @@ impl Control {
         thread_id: Option<String>,
         content: crate::attachments::DraftContent,
         files: Vec<crate::attachments::AttachmentInput>,
+        mut options: db::DraftSendOptions,
     ) -> Result<Value, ApiError> {
         if self.stop.is_cancelled() {
             return Err(ApiError::new(
@@ -579,7 +598,22 @@ impl Control {
                 "Owner is shutting down",
             ));
         }
+        let fingerprint =
+            db::draft_send_fingerprint(&args, thread_id.as_deref(), &content, &files, &options)?;
+        if let Some(saved) = self
+            .store
+            .replay_draft_send(&operation_id, &fingerprint)
+            .await?
+        {
+            return Ok(saved.result);
+        }
+        options.request_fingerprint = Some(fingerprint);
         self.start().await?;
+        if let Some(submission) = &options.submission {
+            self.store
+                .prepare_draft_submission(&operation_id, thread_id.as_deref(), submission)
+                .await?;
+        }
         let (files, revision) = if let Some(thread) = &thread_id {
             let plan = self
                 .attachments
@@ -615,9 +649,10 @@ impl Control {
             }).await?;
             (files, None)
         };
+        options.expected_selection_revision = revision;
         match self
             .store
-            .send_draft_content(operation_id, args, thread_id, content, files, revision)
+            .send_draft_content(operation_id, args, thread_id, content, files, options)
             .await
         {
             Ok(effects) => {
@@ -954,7 +989,7 @@ impl Control {
                 // observation and map removal. Recheck after releasing its slot.
                 if !control.stop.is_cancelled() {
                     let thread = thread_id.clone();
-                    let pending=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn t JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND r.state='live' AND t.state IN ('preparing','running','waiting'))",[thread],|row|row.get::<_,bool>(0))?)).await;
+                    let pending=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn t JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND r.state='live' AND (t.state IN ('preparing','running','waiting') OR (t.state='recovery_wait' AND t.interrupt_requested_at IS NOT NULL)))",[thread],|row|row.get::<_,bool>(0))?)).await;
                     match pending {
                         Ok(true) => control.kick_quiet(thread_id).await,
                         Err(_) => control.fail_storage().await,

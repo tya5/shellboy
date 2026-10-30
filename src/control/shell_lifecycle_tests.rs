@@ -108,6 +108,7 @@ pub(super) async fn start(control: &Arc<Control>) -> String {
     rpc(
         control,
         Command::MessageSend(MessageSendArgs {
+            now: false,
             thread_id: Some(thread.clone()),
             text: "shell lifecycle fixture".into(),
         }),

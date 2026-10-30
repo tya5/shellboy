@@ -12,7 +12,9 @@ Simplified display does not delete saved source. Details and typed action forms 
 
 ## Activity display
 
-The existing bottom status line shows processing stages for the current conversation. Immediately after Enter, `送信受付中` (accepting submission) animates. After successful storage, `保存済み・表示待ち` (saved, awaiting display) remains until the corresponding message is observed in history. If response processing has already advanced, its stage becomes primary and pending display is noted on the same line. Multiple pending sends show a count; waits of at least one second show `送信からN秒` (N seconds since submission). This measures elapsed UI time since sending, not API processing time. Failure, cancellation, or holding stops the send animation; no automatic resend occurs.
+Immediately after sending, local `送信受付中` (accepting submission) shows the frozen input. Once committed, one DB snapshot supplies both selected history and saved `反映待ち` (pending) rows above the composer. Saved input appears in one of these projections, never both. Pending rows include CLI/other-conversation senders and distinguish held/uncertain input and immediate delivery. `/queue` opens the full bounded list (128 rows, overflow count); Enter inspects delivery facts, O opens the original, D cancels one selected ID, and A confirms cancellation of only the displayed IDs. New arrivals are excluded from an existing confirmation. Unknown historical admission is not automatically replayed.
+
+The configured send key queues normally at the next boundary. Ctrl+Enter sends immediately unless it is already configured as ordinary send; Ctrl+X then Ctrl+S is always the immediate-delivery chord while the composer owns input. Immediate delivery releases a foreground shell wait and preserves its process; it does not interrupt response generation. Esc first closes popups, completions and selection; in the bare conversation it interrupts the exact observed Turn. Background shells and owned children continue. Ctrl+C or `/stop` stops the whole Run and its owned work. No automatic background timeout is enabled.
 
 `準備中` (preparing), `モデル応答待ち` (awaiting model), `応答受信中` (receiving response), and `ツール処理中` (processing tools) use moving text brightness. `待機中` (waiting), `回答済み背景処理中` (answered, background work active), `実行継続中` (execution continuing), and `停止処理中` (stopping) use a slowly pulsing marker. Completed, interrupted, failed, and recovery-wait states are static; failure and recovery wait use an attention color.
 
@@ -45,7 +47,9 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 
 | Key | Action |
 | --- | --- |
-| Enter | Send draft or execute a manually typed slash action |
+| Enter | Queue draft at the next boundary, or execute a manually typed slash action |
+| Ctrl+Enter / Ctrl+X then Ctrl+S | Immediate delivery; configured ordinary Ctrl+Enter keeps its normal role |
+| Esc | Close the current popup/completion/selection first; otherwise interrupt the active Turn |
 | Ctrl+J / Shift+Enter | Newline |
 | Ctrl+U | Clear current draft text, pastes, and attachment references; preserve sent requests and external files (configured send/newline bindings take precedence) |
 | Ctrl+L | Clear and redraw the whole screen; preserve draft, scroll, selection, and popup (configured send/newline bindings take precedence) |
@@ -63,7 +67,7 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 | F6 | Choose conversation content and inspect details/source |
 | F7 | Links and complete URLs for the current history item |
 | F8 | Action list and typed target/argument forms |
-| Ctrl+C | Interrupt the current Thread; does not quit |
+| Ctrl+C | Stop the current Run and its background/owned work; does not quit |
 | Ctrl+B | Background the current foreground shell |
 | Ctrl+Q | Begin normal shutdown |
 
@@ -99,7 +103,7 @@ Address a block by number:
 
 Both `show` and `edit` expand the block and move the cursor to its start. While folded, Left/Right jump between block boundaries; Backspace/Delete at a boundary removes the whole block. Expand first to edit characters. F3/F4/F5 target the latest block. Copying only the folded display does not recover source text. Pasting beyond `limits.draft_bytes` rejects the entire paste rather than adopting a prefix.
 
-Restore failed/cancelled send snapshots with `/restore REVISION`. Unaccepted or failed slash actions also restore their input; if other editing has begun, that new input is preserved and the old action's restore revision is displayed. Status hints supply the revision. After acceptance, restoration uses immutable message source; a late restore result is not adopted if you edit while waiting.
+Restore failed/cancelled send snapshots with `/restore REVISION`. Unaccepted or failed slash actions also restore their input; if other editing has begun, that new input is preserved and the old action's restore revision is displayed. Status hints supply the revision. After acceptance, restoration uses immutable message source; a late restore result is not adopted if you edit while waiting. Durable `/restore list` also lists cancelled messages and unconfirmed frozen submissions; `/restore draft ID` restores one source. Argumentless `/restore` retains its context-range meaning. Cancellation preserves separate archives; newly cancelled inputs merge in receipt order only if the captured composer remains empty and unchanged and the result fits its byte budget. Otherwise use the individual archives. A successful send's old revision is suppressed after restart, while newer edits remain editable.
 
 ## Slash commands
 
@@ -121,6 +125,8 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/threads [FILTER]` | Threads and unsent drafts |
 | `/switch THREAD_ID` | Switch by ID |
 | `/model` | Current connection, model, and effort |
+| `/queue` | Saved pending/held input; fixed-ID cancellation and original/delivery inspection |
+| `/restore list` / `/restore draft ID` | Durable archived input and frozen submission recovery |
 | `/models [CONNECTION]` | Live model list: type to filter, Up/Down select, Enter changes, Ctrl+R refreshes, Ctrl+Y copies selected ID, Esc returns |
 | `/model CONNECTION MODEL_ID` | Change connection/model |
 | `/effort VALUE`, `/effort none` | Set/clear effort |

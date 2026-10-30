@@ -41,9 +41,21 @@ impl LiveRegistry {
             stop: owner_stop.child_token(),
             nudge: Arc::new(Notify::new()),
             foreground: Arc::new(ForegroundSlot::default()),
+            turn: Arc::new(Mutex::new(None)),
         };
         drivers.insert(thread.to_owned(), slot.clone());
         Some(slot)
+    }
+
+    /// Keep absent/replacement driver publication fenced through the short DB commit.
+    pub(super) async fn admit_turn_interrupt(
+        &self,
+        control: &super::Control,
+        thread: &str,
+        turn: &str,
+    ) -> Result<serde_json::Value, ApiError> {
+        let drivers = self.drivers.lock().await;
+        super::turn_interrupt::admit_locked(control, thread, turn, drivers.get(thread)).await
     }
 
     pub(super) async fn remove_driver_if_current(&self, thread: &str, slot: &str) -> bool {

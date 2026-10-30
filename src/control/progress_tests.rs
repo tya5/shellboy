@@ -177,6 +177,7 @@ async fn in_process_edit_does_not_wait_for_a_shell_caller_reply_grace() {
                     cwd: None,
                     parent_id: None,
                 },
+                db::DraftSendOptions::default(),
             )
             .await
     });

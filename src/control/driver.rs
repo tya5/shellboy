@@ -44,6 +44,7 @@ struct Snapshot {
 enum Next {
     Ready(Box<Snapshot>),
     Idle,
+    Recheck,
     Done,
 }
 fn id() -> String {
@@ -106,7 +107,9 @@ pub(super) async fn drive(
         }
         let _ = slot.nudge.notified().now_or_never();
         let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,guard=boundary.lock()=>guard};
+        super::turn_interrupt::acknowledge(&control, &thread, &slot.run_id).await?;
         let snapshot = match next(&control, &thread, &slot.run_id).await? {
+            Next::Recheck => continue,
             Next::Done => return Ok(()),
             Next::Idle => {
                 instructions.clear();
@@ -116,41 +119,88 @@ pub(super) async fn drive(
             }
             Next::Ready(snapshot) => snapshot,
         };
+        let turn_binding = slot.bind_turn(&control, &snapshot.turn).await?;
+        if turn_binding.cancel.is_cancelled() {
+            continue;
+        }
+        let mut request_slot = slot.clone();
+        request_slot.stop = turn_binding.cancel.clone();
         overflow.observe(&snapshot.turn, snapshot.generation);
         retry_budget.observe(&snapshot.turn, snapshot.generation);
         if let Err(error) = control.gc.require_capacity().await {
             return fail_turn(&control, &snapshot, error).await;
         }
-        let Some(mut snapshot) = instructions.refresh(&control, snapshot, &slot).await? else {
+        let refreshed = instructions
+            .refresh(&control, snapshot, &request_slot)
+            .await;
+        if turn_binding.cancel.is_cancelled() {
+            continue;
+        }
+        let Some(mut snapshot) = refreshed? else {
             continue;
         };
+        let admitted = prepare_attempt(
+            &control,
+            &mut snapshot,
+            &request_slot,
+            instructions.body(),
+            &mut retry_budget,
+        )
+        .await;
+        if turn_binding.cancel.is_cancelled() {
+            continue;
+        }
         let Some(AdmittedRequest {
             client,
             prepared,
             request,
             attempt,
             input_characters,
-        }) = prepare_attempt(
-            &control,
-            &mut snapshot,
-            &slot,
-            instructions.body(),
-            &mut retry_budget,
-        )
-        .await?
+        }) = admitted?
         else {
             continue;
         };
         if slot.stop.is_cancelled() {
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
         }
-        let outcome =
-            stream_response(&control, &thread, &attempt, &client, request, &slot.stop).await;
+        let outcome = stream_response(
+            &control,
+            &thread,
+            &attempt,
+            &client,
+            request,
+            &turn_binding.cancel,
+        )
+        .await;
         // The request has ended, including failure/cancellation. Compaction or
         // shutdown can wait independently and must not retain its replay pin.
         snapshot.input.take();
         if slot.stop.is_cancelled() {
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+        }
+        if turn_binding.cancel.is_cancelled() {
+            let body = match outcome {
+                Ok(response) => {
+                    json!({"reason":"human_turn_interrupted","attempt_id":attempt,"raw_response":response.raw})
+                }
+                Err(failure) => {
+                    json!({"reason":"human_turn_interrupted","attempt_id":attempt,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,"raw_response":failure.raw_response})
+                }
+            };
+            let turn = snapshot.turn.clone();
+            control
+                .store
+                .database
+                .call(move |db| {
+                    let tx = db.transaction()?;
+                    save_received_failure(&tx, &turn, &body)?;
+                    tx.commit()?;
+                    Ok(())
+                })
+                .await
+                .map_err(storage_error)?;
+            control.changed(&thread);
+            continue;
         }
         let response = match outcome {
             Ok(value) => {
@@ -197,7 +247,7 @@ pub(super) async fn drive(
                 retry::retry_or_recover(
                     &control,
                     &snapshot,
-                    &slot,
+                    &request_slot,
                     attempt,
                     failure,
                     input_characters,
@@ -224,6 +274,26 @@ pub(super) async fn drive(
         )
         .await?;
         if !may_execute {
+            let target = snapshot.turn.clone();
+            let body = json!({"reason":"human_turn_interrupted","attempt_id":attempt,"raw_response":response.raw});
+            control
+                .store
+                .database
+                .call(move |db| {
+                    let requested: bool = db.query_row(
+                        "SELECT interrupt_requested_at IS NOT NULL FROM turn WHERE id=?1",
+                        [&target],
+                        |r| r.get(0),
+                    )?;
+                    if requested {
+                        let tx = db.transaction()?;
+                        save_received_failure(&tx, &target, &body)?;
+                        tx.commit()?;
+                    }
+                    Ok(())
+                })
+                .await
+                .map_err(storage_error)?;
             continue;
         }
         retry_budget.succeeded();
@@ -296,6 +366,8 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         let tx=db.transaction()?;
         let run:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND id=?2 AND state='live'",params![thread,run_id],|r|r.get(0)).optional()?;
         let Some(run)=run else{return Ok(Next::Done);};
+        let interrupted:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') AND interrupt_requested_at IS NOT NULL)",[&run],|r|r.get(0))?;
+        if interrupted{return Ok(Next::Recheck);}
         let mut turn:Option<String>=tx.query_row("SELECT id FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting')",[&run],|r|r.get(0)).optional()?;
         let recovering:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state='recovery_wait')",[&run],|r|r.get(0))?;
         if recovering{return Ok(Next::Done);}
@@ -555,6 +627,13 @@ async fn run_shell(
     call_id: &str,
     args: ShellToolArgs,
 ) -> Result<(Value, bool), ApiError> {
+    let turn_binding = slot.bind_turn(&control, &snapshot.turn).await?;
+    if turn_binding.cancel.is_cancelled() && !slot.stop.is_cancelled() {
+        return Ok((
+            json!({"status":"cancelled","executed":false,"reason":"human_turn_interrupted","message":"A human interrupted this Turn before this call started"}),
+            true,
+        ));
+    }
     if control.shell.starts_closed() {
         return Ok((
             json!({"status":"cancelled","reason":"owner_shutdown_before_spawn"}),
@@ -570,11 +649,20 @@ async fn run_shell(
     let shell_config = json!({"command":args.command,"kind":control.store.config.shell.kind});
     let args_copy = args.clone();
     let ready=control.store.database.call(move|db|{let tx=db.transaction()?;
-        let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state='live')",[&current.run],|r|r.get(0))?;if !live{return Ok(false);}
+        let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1 AND u.run_id=?2 AND u.generation=?3 AND u.interrupt_requested_at IS NULL AND u.state IN ('preparing','running','waiting') AND r.state='live')",params![current.turn,current.run,current.generation],|r|r.get(0))?;if !live{return Ok(false);}
         tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,?2,?3,?1,'starting',?4,?5,?6,?7,?8,?9)",params![execution_id,current.run,current.turn,current.cwd.to_string_lossy(),shell_config.to_string(),args_copy.input_encoding,args_copy.output_encoding,if args_copy.stdin_open{"open"}else{"closed"},now()])?;
         super::state::start_tool_call(&tx, &group, &call_id, &execution_id)?;
         tx.commit()?;Ok(true)}).await.map_err(storage_error)?;
+    if !ready {
+        slot.bind_turn(&control, &snapshot.turn).await?;
+    }
     if !ready || slot.stop.is_cancelled() {
+        if turn_binding.cancel.is_cancelled() && !slot.stop.is_cancelled() {
+            return Ok((
+                json!({"status":"cancelled","executed":false,"reason":"human_turn_interrupted","message":"A human interrupted this Turn before this call started"}),
+                true,
+            ));
+        }
         return Err(invalid("Run stopped before shell spawn"));
     }
     if control.shell.starts_closed() {
@@ -651,11 +739,38 @@ async fn run_shell(
     }
     let spawned = match control
         .shell
-        .spawn(execution.clone(), snapshot.cwd.clone(), args.clone(), env)
+        .spawn_guarded(
+            execution.clone(),
+            snapshot.cwd.clone(),
+            args.clone(),
+            env,
+            turn_binding.start_gate.clone(),
+        )
         .await
     {
         Ok(value) => value,
         Err(error) => {
+            if error
+                .details
+                .as_ref()
+                .is_some_and(|details| details["reason"] == "turn_interrupted_before_spawn")
+            {
+                control.origins.lock().await.remove(&origin.token);
+                let execution_copy = execution.clone();
+                control
+                    .store
+                    .database
+                    .call(move |db| {
+                        super::state::cancel_shell_spawn(db, &execution_copy, &now())?;
+                        Ok(())
+                    })
+                    .await
+                    .map_err(storage_error)?;
+                return Ok((
+                    json!({"status":"cancelled","executed":false,"execution_id":execution,"reason":"human_turn_interrupted","message":"A human interrupted this Turn before native process creation"}),
+                    true,
+                ));
+            }
             if error
                 .details
                 .as_ref()
@@ -747,12 +862,14 @@ async fn run_shell(
         loop {
             let turn = snapshot.turn.clone();
             let pending = control.store.database.call(move |db| {
-                Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt WHERE turn_id=?1 AND state='accepted')", [turn], |row| row.get::<_,bool>(0))?)
+                Ok(super::pending_messages::has_immediate_pending_tx(db, &turn)?)
             }).await.map_err(storage_error)?;
+            if turn_binding.cancel.is_cancelled() && !slot.stop.is_cancelled() { return released("human_turn_interrupted"); }
             if pending { return released("additional_input"); }
             tokio::select! {
                 result=&mut done_receive=>{slot.foreground.clear();let completion=result.map_err(|_|invalid("Shell collector exited"))??;let stop_calls=completion.exit_code!=Some(0)||completion.state!=ShellState::Exited||!completion.output_complete;let result=shell_result(&control,&execution,completion).await?;let stop_calls=stop_calls||result.get("wait_release_outcome").is_some_and(|value|!value.is_null());return Ok((result,stop_calls));},
                 _=slot.stop.cancelled()=>{handle.stop();return Ok((json!({"status":"stopping","execution_id":execution,"reason":"run_stopped"}),true));},
+                _=turn_binding.cancel.cancelled()=>{if slot.stop.is_cancelled(){handle.stop();return Ok((json!({"status":"stopping","execution_id":execution,"reason":"run_stopped"}),true));}return released("human_turn_interrupted");},
                 reason=release.recv()=> match reason {
                     Some(ForegroundRelease::Background) => return released("human_backgrounded"),
                     Some(ForegroundRelease::AdditionalInput) => {},

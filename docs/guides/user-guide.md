@@ -20,6 +20,8 @@ Selecting a conversation, stopping current work, and inspecting past results are
 
 In recovery wait, check the reason and target Run before resending a saved request. After addressing the cause, retry the same work with F8's Run retry operation or `shellboy run retry --run RUN_ID`. To stop it, use Ctrl+C or `shellboy run stop --run RUN_ID`. A new human instruction resuming the same recovery Turn differs from retrying the original work. Retry cannot revive a terminal Run after stopping or restarting. See [Recovery and storage](recovery-and-storage.md) for checking saved content and uncertain side effects.
 
+Saved input waiting for the next boundary is visible above the composer and in `/queue`, including CLI/other-conversation input. Ordinary send queues; Ctrl+Enter (unless configured as ordinary send) or Ctrl+X then Ctrl+S requests immediate delivery without interrupting generation. Esc closes a popup first, otherwise interrupts only the Turn; Ctrl+C stops the Run and owned background work. Cancel unread inputs by fixed IDs in `/queue`; recover archived inputs through `/restore list` and `/restore draft ID`. Newer composer edits are preserved. See [TUI controls](tui.md) for limits and confirmation details.
+
 ## 1. Start in a working directory
 
 Use `/status` in the TUI or `shellboy status` in another terminal for an overview of current work. Saved IDs let you track background shells, child Runs, held requests, and model requests. Include terminal work with `/status all` or `shellboy status --all`. See [TUI slash commands](tui.md#slash-commands) and [CLI connection and common syntax](cli-reference.md#common-syntax-and-connection).

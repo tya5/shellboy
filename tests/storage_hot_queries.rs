@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use shellboy::storage::{DbWorker, StorageError};
 
-const DROP_HOT_INDEXES: &str = "DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
+const DROP_HOT_INDEXES: &str = "DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
 
 fn schema(db: &Connection) -> rusqlite::Result<Vec<(String, String, String)>> {
     db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name")?

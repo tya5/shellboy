@@ -56,6 +56,7 @@ async fn historical_image_replays_at_its_source_with_local_luna() {
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            now: false,
             thread_id: Some(thread.into()),
             text: "This turn has no new attachment. Do not call tools. Reply briefly with OK."
                 .into(),

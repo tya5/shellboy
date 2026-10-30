@@ -294,3 +294,11 @@ If `revisit get` reports malformed metadata, its counter is unknown; do not infe
 zero or re-register blindly. Stop the Run or restart the owner to discard the
 unreadable reservation. Optional Run/list projections can omit its Revisit
 summary while other controls remain available.
+
+## Queued messages and human Turn interruption
+
+`shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
+
+Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` exposes its saved delivery/context; applied means path admission, not a successful answer. To cancel unread input explicitly, use `shellboy message cancel --message MESSAGE_ID` (repeat `--message` for up to128 fixed IDs). Humans may cancel any sender's input; models may cancel only input sent by their own Thread. Check each returned outcome: another input may already have been admitted. Same-operation replay returns the saved outcomes. Cancellation does not wake the model. `archive_draft_id` identifies a durable source available to a human through TUI `/restore list` or `/restore draft ID`; restoration does not execute or send anything automatically.
+
+A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background work; a later genuine shell/child completion may wake a Turn after Esc. Revisit reservations are discarded on human interruption. Automatic time-based backgrounding is not enabled.

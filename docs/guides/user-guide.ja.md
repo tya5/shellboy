@@ -25,6 +25,8 @@ IDやreceiptは調査の詳細情報です。普段は状態と理由を読み�
 停止・再起動後の終端Runをretryで復活させることはできません。
 保存済み内容と未確認の副作用を確認する手順は [復旧ガイド](recovery-and-storage.md) にあります。
 
+次の区切りを待つ保存済みの入力は、入力欄の上と `/queue` に表示されます。CLIや別の会話から届いた入力も対象です。通常の送信は区切りまで待ちます。Ctrl+Enter（通常送信に設定済みなら除く）またはCtrl+X、Ctrl+Sの順で「すぐ渡す」を選べますが、応答の生成は中断しません。Escは画面を閉じる操作を優先し、通常の会話画面ではTurnだけを中断します。Ctrl+CはRunと、その背景の作業も停止します。未反映の入力は `/queue` で確認したIDだけを取り消せます。保存した入力は `/restore list` と `/restore draft ID` から復元でき、編集中の新しい入力は保持します。上限と確認操作は [TUI controls](tui.md) を参照してください。
+
 ## 1. 作業フォルダーで起動する
 
 作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、子Run、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.md#slash-commands)と[CLIの作業状態](cli-reference.md#common-syntax-and-connection)を参照してください。

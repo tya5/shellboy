@@ -144,6 +144,7 @@ async fn begin(control: &Arc<Control>, thread: &str) -> MessageAccepted {
         request(
             control,
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(thread.into()),
                 text: "One original user instruction".into(),
             }),
@@ -1060,6 +1061,7 @@ async fn queued_user_input_and_cancel_keep_the_same_run_without_premature_revisi
             request(
                 &control,
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some(thread),
                     text: "FOLLOWUP_ACCEPTED_BEFORE_COMPLETION".into(),
                 }),

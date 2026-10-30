@@ -228,6 +228,7 @@ impl Fixture {
             request(
                 &control,
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some(thread),
                     text: text.into(),
                 }),

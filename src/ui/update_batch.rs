@@ -15,9 +15,14 @@ impl UiUpdate {
             | Self::IncompleteResponses { .. }
             | Self::ViewState { .. }
             | Self::NodeWindow { .. }
-            | Self::EditRequestLoaded { .. } => true,
+            | Self::EditRequestLoaded { .. }
+            | Self::SavedMessage { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
-            Self::AgentsSelected { .. }
+            Self::SendOperation { .. }
+            | Self::DraftRecovery { .. }
+            | Self::RestoreArchives { .. }
+            | Self::SavedMessagePending { .. }
+            | Self::AgentsSelected { .. }
             | Self::ThreadDeletion { .. }
             | Self::ScopedManagement { .. }
             | Self::RecoveryBell
@@ -101,6 +106,8 @@ mod tests {
     use super::*;
     fn history(ui: &UiState, sequence: usize) -> UiUpdate {
         UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "thread".into(),
             generation: ui.view().generation,
             nodes: vec![UiNode {
@@ -241,6 +248,8 @@ mod committed_delivery_tests {
         })
         .unwrap();
         send.send(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "thread".into(),
             generation,
             nodes: vec![UiNode {
@@ -304,6 +313,8 @@ mod committed_source_tests {
             ack: None,
         });
         ui.apply(UiUpdate::History {
+            pending: Default::default(),
+            read_revision: 0,
             thread_id: "thread".into(),
             generation,
             nodes: vec![UiNode {

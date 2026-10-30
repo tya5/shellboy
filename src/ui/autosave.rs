@@ -147,10 +147,13 @@ impl UiState {
         // These mutate drafts outside active_view_mut/view_for. Queue an ID,
         // never a body, and use the current snapshot when the save becomes due.
         let draft = match update {
-            UiUpdate::AgentsSelected { draft_id, .. }
+            UiUpdate::SavedMessage { draft_id, .. }
+            | UiUpdate::SavedMessagePending { draft_id, .. }
+            | UiUpdate::AgentsSelected { draft_id, .. }
             | UiUpdate::Receipt { draft_id, .. }
             | UiUpdate::ClipboardAttachment { draft_id, .. }
             | UiUpdate::RestoredSnapshot { draft_id, .. } => Some(draft_id.as_str()),
+            UiUpdate::DraftRecovery { target, .. } => Some(target.draft_id.as_str()),
             UiUpdate::CommandOutcome { submission, .. } => Some(submission.draft_id.as_str()),
             _ => None,
         };

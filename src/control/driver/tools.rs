@@ -7,6 +7,7 @@ pub(super) async fn run_tool_group(
     group: &str,
     calls: Vec<model::ToolCall>,
 ) -> Result<(), ApiError> {
+    let turn_binding = slot.bind_turn(control, &snapshot.turn).await?;
     let mut cancelled: Option<Value> = None;
     let mut validation_errors = std::collections::HashMap::new();
     // Validate every encoding and initial input before the first OS spawn.
@@ -57,6 +58,12 @@ pub(super) async fn run_tool_group(
             cancelled = Some(cancelled_call(
                 "run_stopped_before_call",
                 "Run stopped before this call",
+                None,
+            ));
+        } else if turn_binding.cancel.is_cancelled() && cancelled.is_none() {
+            cancelled = Some(cancelled_call(
+                "human_turn_interrupted",
+                "A human interrupted this Turn before this call started",
                 None,
             ));
         }
@@ -176,6 +183,10 @@ fn cancelled_after(call_id: &str, result: &Value) -> Value {
         prerequisite["state"] = state.clone();
     }
     let (reason, message) = match result.get("reason").and_then(Value::as_str) {
+        Some("human_turn_interrupted") => (
+            "previous_turn_interrupted",
+            "A human interrupted the previous shell's foreground wait; inspect its execution before repeating work",
+        ),
         Some("additional_input") => (
             "previous_wait_released_by_new_input",
             "New input released the previous shell's foreground wait; inspect its execution before repeating work",

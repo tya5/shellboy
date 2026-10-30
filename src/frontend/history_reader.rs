@@ -77,6 +77,8 @@ impl WindowReply {
                 generation: self.target.generation,
                 view_revision: self.view_revision,
                 nodes,
+                pending: info.pending,
+                read_revision: info.read_revision,
                 first_ordinal: info.first,
                 selection_revision: info.revision,
                 total_nodes: info.total,
@@ -109,6 +111,8 @@ struct HistoryInfo {
     revision: u64,
     total: u64,
     committed: Vec<(String, String)>,
+    pending: PendingMessages,
+    read_revision: u64,
 }
 struct RawHistory {
     rows: Vec<PathNode>,
@@ -150,6 +154,72 @@ impl<'a> HistoryReader<'a> {
             width,
         }
     }
+    pub(super) async fn saved(
+        control: &Control,
+        width: u16,
+        draft_id: String,
+        revision: u64,
+        generation: u64,
+        value: &Value,
+    ) -> Result<UiUpdate, ApiError> {
+        let result = Self::saved_inner(control, width, draft_id, revision, generation, value).await;
+        checked_storage(control, result).await
+    }
+    async fn saved_inner(
+        control: &Control,
+        width: u16,
+        draft_id: String,
+        revision: u64,
+        generation: u64,
+        value: &Value,
+    ) -> Result<UiUpdate, ApiError> {
+        let thread = value["thread_id"]
+            .as_str()
+            .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Accepted input has no Thread"))?
+            .to_owned();
+        let target = thread.clone();
+        let (raw, before_cursor) = control
+            .store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let (mut raw, cursor) = query_page(&tx, &target, None, None)?;
+                let cursor = cursor.map_err(StorageError::from)?;
+                raw.info.pending = message_queue::query(&tx, &target)?;
+                raw.info.read_revision = message_queue::read_revision();
+                tx.commit()?;
+                Ok((raw, cursor))
+            })
+            .await
+            .map_err(storage_error)?;
+        let (mut nodes, info, _) =
+            presentation_work(move || raw.project(width, |_, _| None)).await?;
+        streams::enrich(control, &mut nodes, width).await?;
+        let history = UiUpdate::History {
+            thread_id: thread.clone(),
+            generation,
+            nodes,
+            pending: info.pending,
+            read_revision: info.read_revision,
+            before_cursor,
+            append: false,
+            first_ordinal: info.first,
+            selection_revision: info.revision,
+            total_nodes: info.total,
+        };
+        Ok(UiUpdate::SavedMessage {
+            draft_id,
+            revision,
+            generation,
+            thread_id: thread,
+            status: if value["delivery_status"] == "held" {
+                ReceiptStatus::Held
+            } else {
+                ReceiptStatus::Accepted
+            },
+            history: Box::new(history),
+        })
+    }
     pub(super) async fn rebase(
         &self,
         reply: &WindowReply,
@@ -161,7 +231,14 @@ impl<'a> HistoryReader<'a> {
             .control
             .store
             .database
-            .call(move |db| query_rebase(db, &thread, &anchor))
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let (mut raw, ordinal) = query_rebase(&tx, &thread, &anchor)?;
+                raw.info.pending = message_queue::query(&tx, &thread)?;
+                raw.info.read_revision = message_queue::read_revision();
+                tx.commit()?;
+                Ok((raw, ordinal))
+            })
             .await
             .map_err(storage_error);
         let (raw, ordinal) = checked_storage(self.control, result).await?;
@@ -211,7 +288,14 @@ impl<'a> HistoryReader<'a> {
                 .control
                 .store
                 .database
-                .call(move |db| query_window(db, &thread, &request))
+                .call(move |db| {
+                    let tx = db.transaction()?;
+                    let mut raw = query_window(&tx, &thread, &request)?;
+                    raw.info.pending = message_queue::query(&tx, &thread)?;
+                    raw.info.read_revision = message_queue::read_revision();
+                    tx.commit()?;
+                    Ok(raw)
+                })
                 .await
                 .map_err(storage_error)?;
             let width = self.width;
@@ -261,7 +345,14 @@ impl<'a> HistoryReader<'a> {
                 .control
                 .store
                 .database
-                .call(move |db| query_page(db, &thread, before, db_anchor))
+                .call(move |db| {
+                    let tx = db.transaction()?;
+                    let (mut raw, cursor) = query_page(&tx, &thread, before, db_anchor)?;
+                    raw.info.pending = message_queue::query(&tx, &thread)?;
+                    raw.info.read_revision = message_queue::read_revision();
+                    tx.commit()?;
+                    Ok((raw, cursor))
+                })
                 .await
                 .map_err(storage_error)?;
             let width = self.width;
@@ -289,6 +380,8 @@ impl<'a> HistoryReader<'a> {
                     thread_id: reply.thread.clone(),
                     generation: reply.generation,
                     nodes,
+                    pending: info.pending,
+                    read_revision: info.read_revision,
                     before_cursor,
                     append,
                     first_ordinal: info.first,
@@ -399,6 +492,8 @@ fn query_rebase(
                 revision: revision as u64,
                 total: total as u64,
                 committed,
+                pending: PendingMessages::default(),
+                read_revision: 0,
             },
         },
         ordinal,
@@ -424,6 +519,8 @@ fn query_window(
             revision,
             total,
             committed,
+            pending: PendingMessages::default(),
+            read_revision: 0,
         },
     })
 }
@@ -479,6 +576,8 @@ fn query_page(
                 revision: revision as u64,
                 total: total as u64,
                 committed,
+                pending: PendingMessages::default(),
+                read_revision: 0,
             },
         },
         cursor,

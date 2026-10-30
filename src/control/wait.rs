@@ -880,6 +880,7 @@ mod tests {
                 stop: CancellationToken::new(),
                 nudge: Arc::new(tokio::sync::Notify::new()),
                 foreground: foreground.clone(),
+                turn: Arc::new(tokio::sync::Mutex::new(None)),
             },
         );
         (directory, owner, control, foreground, receive)

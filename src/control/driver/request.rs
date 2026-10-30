@@ -263,7 +263,7 @@ impl Snapshot {
         input_characters: u64,
         history_characters: u64,
     ) -> Result<bool, crate::storage::StorageError> {
-        let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id JOIN thread t ON t.id=u.thread_id WHERE u.id=?1 AND u.generation=?2 AND u.state IN ('preparing','running','waiting') AND r.state='live' AND t.selection_revision=?3 AND t.profile_revision=?4)",params![self.turn,self.generation,self.selection,self.profile_revision],|r|r.get(0))?;
+        let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id JOIN thread t ON t.id=u.thread_id WHERE u.id=?1 AND u.generation=?2 AND u.state IN ('preparing','running','waiting') AND u.interrupt_requested_at IS NULL AND r.state='live' AND t.selection_revision=?3 AND t.profile_revision=?4)",params![self.turn,self.generation,self.selection,self.profile_revision],|r|r.get(0))?;
         if !valid {
             return Ok(false);
         }
@@ -271,6 +271,9 @@ impl Snapshot {
             return Err(ApiError::new(ErrorCode::OperationConflict,"Turn changed before attempt admission").into());
         }
         tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,effort,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'inflight',?9,?10)",params![attempt_id,self.turn,self.generation,self.selection,self.profile,self.model,self.effort,self.epoch,json!({"receipts":self.receipts,"events":self.events,"attachments":attempt_attachments.manifest,"input_characters":input_characters,"history_characters":history_characters}).to_string(),now()])?;
+        for event in &self.events {
+            tx.execute("UPDATE delivery SET included_attempt_id=?3 WHERE event_id=?1 AND recipient_id=?2 AND state='pending'",params![event,self.run,attempt_id])?;
+        }
         crate::attachments::adopt_prepared_tx(tx, attempt_attachments, attempt_id)
             .map_err(crate::storage::StorageError::from)?;
         Ok(true)

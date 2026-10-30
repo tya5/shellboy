@@ -57,6 +57,7 @@ async fn send(store: &Store, thread: &str, text: &str) -> (MessageAccepted, Muta
     let result = execute(
         store,
         Command::MessageSend(MessageSendArgs {
+            now: false,
             thread_id: Some(thread.into()),
             text: text.into(),
         }),
@@ -83,16 +84,23 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
     let (_directory, store) = store().await;
     let thread = create(&store, None).await;
     let req = request(Command::MessageSend(MessageSendArgs {
+        now: false,
         thread_id: Some(thread.thread_id.clone()),
         text: "fixture".into(),
     }));
     let first = store.execute(req.clone(), None).await.unwrap();
     let second = store.execute(req.clone(), None).await.unwrap();
     assert_eq!(first.result, second.result);
-    assert_eq!(first.wake_threads, vec![thread.thread_id]);
     assert!(
-        second.wake_threads.is_empty(),
-        "retransmission must not reschedule effects"
+        first.wake_threads.is_empty(),
+        "ordinary queued send must not release foreground work"
+    );
+    assert_eq!(first.quiet_wake_threads, vec![thread.thread_id]);
+    assert!(
+        second.wake_threads.is_empty()
+            && second.quiet_wake_threads.is_empty()
+            && second.changed_threads.is_empty(),
+        "retransmission must not reschedule foreground, quiet or observation effects"
     );
     let mut conflicting = req.clone();
     if let Command::MessageSend(args) = &mut conflicting.command {
@@ -314,6 +322,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     .unwrap();
     assert_eq!(detail.delivery_status, DeliveryStatus::Cancelled);
     let sending = request(Command::MessageSend(MessageSendArgs {
+        now: false,
         thread_id: Some(thread.thread_id),
         text: "too late".into(),
     }));
@@ -360,6 +369,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         store
             .execute(
                 request(Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some(child.thread_id.clone()),
                     text: "child".into(),
                 })),
@@ -375,6 +385,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     let mechanical = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(child.thread_id.clone()),
                 text: "ordinary parent note".into(),
             })),
@@ -384,11 +395,18 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         .unwrap();
     let mechanical_message: MessageAccepted = serde_json::from_value(mechanical.result).unwrap();
     assert_eq!(mechanical_message.delivery_status, DeliveryStatus::Held);
-    assert!(mechanical.wake_threads.is_empty());
+    assert!(
+        mechanical.wake_threads.is_empty() && mechanical.quiet_wake_threads.is_empty(),
+        "ordinary machine input cannot resume a recovery Turn"
+    );
     let (human, effects) = send(&store, &child.thread_id, "human resume instruction").await;
     assert_eq!(human.turn_id, accepted.turn_id);
     assert_eq!(human.delivery_status, DeliveryStatus::Accepted);
-    assert_eq!(effects.wake_threads, vec![child.thread_id]);
+    assert!(
+        effects.wake_threads.is_empty(),
+        "ordinary human resume does not request foreground release"
+    );
+    assert_eq!(effects.quiet_wake_threads, vec![child.thread_id]);
     let run = human.run_id.unwrap();
     store
         .database
@@ -419,6 +437,7 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let child_result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(child.thread_id.clone()),
                 text: "child".into(),
             })),
@@ -446,6 +465,7 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(new_child.thread_id),
                 text: "forbidden late child".into(),
             })),
@@ -477,6 +497,7 @@ async fn receipt_failure_rolls_back_message_run_turn_and_caches_error_without_ef
     let thread = create(&store, None).await;
     store.database.call(|connection| {connection.execute_batch("CREATE TRIGGER fixture_reject_receipt BEFORE INSERT ON receipt BEGIN SELECT RAISE(ABORT,'fixture save failure'); END;")?;Ok(())}).await.unwrap();
     let req = request(Command::MessageSend(MessageSendArgs {
+        now: false,
         thread_id: Some(thread.thread_id),
         text: "must survive in UI".into(),
     }));
@@ -582,6 +603,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         .await
         .unwrap();
     let restart_request = request(Command::MessageSend(MessageSendArgs {
+        now: false,
         thread_id: Some(thread.thread_id.clone()),
         text: "explicit human restart".into(),
     }));
@@ -889,6 +911,7 @@ async fn model_stop_authority_follows_run_ownership_instead_of_thread_genealogy(
     let accepted = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(owned.thread_id),
                 text: "owned child".into(),
             })),
@@ -933,6 +956,7 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
         started.turn_id.as_deref().unwrap(),
     );
     let req = request(Command::MessageSend(MessageSendArgs {
+        now: false,
         thread_id: None,
         text: "from authenticated shell".into(),
     }));
@@ -1673,11 +1697,13 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 })
             } else {
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some(thread.thread_id.clone()),
                     text: "explicit human recovery".into(),
                 })
             };
-            let result = store.execute(request(command), None).await;
+            let recovery_request = request(command);
+            let result = store.execute(recovery_request.clone(), None).await;
             if suppress {
                 assert_eq!(
                     result.unwrap_err().code,
@@ -1687,15 +1713,31 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                         ErrorCode::OperationConflict
                     }
                 );
+                let replay = store.execute(recovery_request, None).await.unwrap_err();
+                assert_eq!(
+                    replay.code,
+                    if retry {
+                        ErrorCode::InvalidState
+                    } else {
+                        ErrorCode::OperationConflict
+                    },
+                    "a failed zero-row CAS is replayed without trying recovery again"
+                );
             } else {
                 let effects = result.unwrap();
-                if retry {
-                    assert!(effects.wake_threads.is_empty());
-                    assert_eq!(effects.quiet_wake_threads, vec![thread.thread_id.clone()]);
-                } else {
-                    assert_eq!(effects.wake_threads, vec![thread.thread_id.clone()]);
-                    assert!(effects.quiet_wake_threads.is_empty());
-                }
+                assert!(
+                    effects.wake_threads.is_empty(),
+                    "RunRetry and ordinary queued human recovery both use a quiet driver wake"
+                );
+                assert_eq!(effects.quiet_wake_threads, vec![thread.thread_id.clone()]);
+                let replay = store.execute(recovery_request, None).await.unwrap();
+                assert_eq!(replay.result, effects.result);
+                assert!(
+                    replay.wake_threads.is_empty()
+                        && replay.quiet_wake_threads.is_empty()
+                        && replay.changed_threads.is_empty(),
+                    "saved recovery result cannot repeat any wake or change effect"
+                );
             }
             let current_message = accepted.message_id;
             store.database.call(move |db| {
@@ -1712,6 +1754,8 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 assert_eq!(db.query_row("SELECT state FROM turn WHERE id='older-turn'",[],|row|row.get::<_,String>(0))?,"completed");
                 let events:i64=db.query_row("SELECT COUNT(*) FROM event WHERE kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='recovery_resumed'",[],|row|row.get(0))?;
                 assert_eq!(events,i64::from(!suppress));
+                assert_eq!(db.query_row("SELECT count(*) FROM receipt",[],|row|row.get::<_,i64>(0))?,3+i64::from(!retry && !suppress),
+                    "zero-row CAS/replay must not accept an extra message");
                 assert_eq!(db.query_row("SELECT state FROM run WHERE id=?1",[run],|row|row.get::<_,String>(0))?,"live");
                 Ok(())
             }).await.unwrap();

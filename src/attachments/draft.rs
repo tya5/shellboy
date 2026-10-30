@@ -153,7 +153,7 @@ mod tests {
                 None,
                 content.clone(),
                 files.clone(),
-                None,
+                crate::control::db::DraftSendOptions::default(),
             )
             .await
             .unwrap();
@@ -165,7 +165,7 @@ mod tests {
                 None,
                 content,
                 files.clone(),
-                None,
+                crate::control::db::DraftSendOptions::default(),
             )
             .await
             .unwrap();
@@ -181,7 +181,7 @@ mod tests {
                     positions: vec![0],
                 },
                 files.clone(),
-                None,
+                crate::control::db::DraftSendOptions::default(),
             )
             .await
             .unwrap_err();
@@ -197,7 +197,7 @@ mod tests {
                     positions: vec![1],
                 },
                 files,
-                None,
+                crate::control::db::DraftSendOptions::default(),
             )
             .await
             .unwrap_err();

@@ -420,6 +420,9 @@ mod tests {
         for revision in 0..40 {
             sender
                 .try_send(UiAction::Send {
+                    generation: 0,
+                    now: false,
+                    snapshot: None,
                     draft_id: format!("closing-{revision}"),
                     revision,
                     thread_id: Some(format!("closing-thread-{revision}")),

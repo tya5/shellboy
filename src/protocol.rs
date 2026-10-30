@@ -403,7 +403,21 @@ args!(ThreadDeleteArgs {
     descendants: bool
 });
 args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<String> });
-args!(MessageSendArgs { #[serde(default)] thread_id: Option<String>, text: String });
+args!(MessageSendArgs { #[serde(default)] thread_id: Option<String>, text: String, #[serde(default)] now: bool });
+args!(MessageCancelArgs { message_ids: Vec<String> });
+states!(MessageCancelOutcome {
+    Cancelled,
+    AlreadyCancelled,
+    AlreadyAdmitted,
+    NotFound,
+    Forbidden,
+    Unavailable
+});
+args!(MessageCancelItem { message_id: String, outcome: MessageCancelOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] archive_draft_id: Option<String>
+});
+args!(MessageCancelResult { items: Vec<MessageCancelItem> });
 args!(MessageTarget { message_id: String });
 args!(OperationTarget {
     operation_id: String
@@ -553,6 +567,8 @@ pub enum Command {
     MessageSend(MessageSendArgs),
     #[serde(rename = "message.get")]
     MessageGet(MessageTarget),
+    #[serde(rename = "message.cancel")]
+    MessageCancel(MessageCancelArgs),
     #[serde(rename = "operation.get")]
     OperationGet(OperationTarget),
     #[serde(rename = "run.get")]
@@ -638,7 +654,7 @@ impl ShellToolArgs {
         nonempty(&self.output_encoding, "output_encoding")
     }
 }
-args!(MessageAccepted { message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
+args!(MessageAccepted { message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default)] now: bool, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
 impl MessageAccepted {
     pub fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.message_id, "message_id")?;
@@ -881,3 +897,24 @@ args!(IndexSpaceStatus { space_id: String, connection: String, model: String, di
 args!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
 args!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64> });
 args!(Accepted { accepted: bool });
+
+#[cfg(test)]
+mod message_acknowledgement_tests {
+    use super::*;
+    #[test]
+    fn acknowledgement_delivery_mode_is_typed_defaults_false_and_keeps_unknown_field_rejection() {
+        let mut wire = serde_json::json!({"message_id":"message","thread_id":"thread","delivery_status":"accepted","assignment":"new_run","run_id":"run","turn_id":"turn","now":true});
+        let accepted: MessageAccepted = serde_json::from_value(wire.clone()).unwrap();
+        accepted.validate().unwrap();
+        assert!(accepted.now);
+        assert_eq!(serde_json::to_value(&accepted).unwrap(), wire);
+        wire.as_object_mut().unwrap().remove("now");
+        assert!(
+            !serde_json::from_value::<MessageAccepted>(wire.clone())
+                .unwrap()
+                .now
+        );
+        wire["unknown_delivery_flag"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<MessageAccepted>(wire).is_err());
+    }
+}

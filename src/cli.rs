@@ -141,6 +141,8 @@ pub enum MessageCommand {
     )]
     Send(MessageSendOptions),
     Get(MessageOptions),
+    /// Cancel explicit queued messages; admitted history cannot be cancelled.
+    Cancel(MessageCancelOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum OperationCommand {
@@ -376,8 +378,16 @@ pub struct TextOptions {
 pub struct MessageSendOptions {
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
+    /// Release a foreground shell wait; does not interrupt response generation.
+    #[arg(long)]
+    pub now: bool,
     #[command(flatten)]
     pub text: TextOptions,
+}
+#[derive(Debug, Clone, Args)]
+pub struct MessageCancelOptions {
+    #[arg(long = "message", required = true, num_args = 1, action = clap::ArgAction::Append)]
+    pub message_ids: Vec<String>,
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageOptions {
@@ -699,9 +709,13 @@ impl Cli {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,
+                    now: a.now,
                 }),
                 MessageCommand::Get(a) => C::MessageGet(wire::MessageTarget {
                     message_id: a.message_id,
+                }),
+                MessageCommand::Cancel(a) => C::MessageCancel(wire::MessageCancelArgs {
+                    message_ids: a.message_ids,
                 }),
             },
             CliCommand::Operation {

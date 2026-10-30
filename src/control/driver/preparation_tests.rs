@@ -49,6 +49,7 @@ pub(super) async fn fixture(
             Request::new(
                 format!("{}:send", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some(thread),
                     text: "original instruction".into(),
                 }),
@@ -369,6 +370,7 @@ async fn client_initialization_failure_recovers_once_instead_of_rekicking_prepar
         stop: CancellationToken::new(),
         nudge: Arc::new(Notify::new()),
         foreground: Arc::new(ForegroundSlot::default()),
+        turn: Arc::new(tokio::sync::Mutex::new(None)),
     };
     assert_eq!(
         timeout(
@@ -920,6 +922,7 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
             stop: CancellationToken::new(),
             nudge: Arc::new(Notify::new()),
             foreground: Arc::new(ForegroundSlot::default()),
+            turn: Arc::new(tokio::sync::Mutex::new(None)),
         };
         assert_eq!(
             run_shell(
@@ -1049,4 +1052,90 @@ async fn suppressed_turn_start_is_a_conflict_and_keeps_the_saved_request_ready()
     drop(prepared);
     drop(snapshot);
     close(control, owner).await;
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
+    let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let snapshot = ready(&control, &accepted).await;
+    let slot = DriverSlot {
+        id: id(),
+        run_id: accepted.run_id.clone().unwrap(),
+        stop: CancellationToken::new(),
+        nudge: Arc::new(Notify::new()),
+        foreground: Arc::new(ForegroundSlot::default()),
+        turn: Arc::new(Mutex::new(None)),
+    };
+    let binding = slot.bind_turn(&control, &snapshot.turn).await.unwrap();
+    let mut gate = binding.start_gate.lock().await;
+    let turn = snapshot.turn.clone();
+    control.store.database.call(move|db|{
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('gate-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')",[&turn])?;
+        db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('gate-group','gate-attempt',?1,'running','now')",[turn])?;
+        db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('gate-group','gate-call',0,'shell','{}','pending')",[])?;Ok(())
+    }).await.unwrap();
+    let task_control = control.clone();
+    let task_slot = slot.clone();
+    let task = tokio::spawn(async move {
+        let args:ShellToolArgs=serde_json::from_value(json!({"command":if cfg!(windows){"[IO.File]::WriteAllText('must-not-exist','forbidden')"}else{"printf forbidden > must-not-exist"}})).unwrap();
+        run_tool_group(
+            &task_control,
+            &snapshot,
+            &task_slot,
+            "gate-group",
+            vec![model::ToolCall {
+                call_id: "gate-call".into(),
+                item_id: None,
+                args: Ok(args),
+            }],
+        )
+        .await
+    });
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let reserved = control
+                .store
+                .database
+                .call(|db| {
+                    Ok(db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM shell_execution WHERE state='starting')",
+                        [],
+                        |r| r.get::<_, bool>(0),
+                    )?)
+                })
+                .await
+                .unwrap();
+            if reserved {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // Deterministic synthetic interrupt commit while native creation is fenced.
+    let turn = accepted.turn_id.unwrap();
+    control.store.database.call(move|db|{db.execute("UPDATE turn SET interrupt_requested_at='fixture',generation=generation+1 WHERE id=?1",[turn])?;Ok(())}).await.unwrap();
+    *gate = true;
+    binding.cancel.cancel();
+    drop(gate);
+    timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    control.store.database.call(|db|{
+        assert_eq!(db.query_row("SELECT state,end_reason FROM shell_execution",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?,("stopped".into(),"stopped_before_spawn".into()));
+        assert_eq!(db.query_row("SELECT state FROM tool_group WHERE id='gate-group'",[],|r|r.get::<_,String>(0))?,"completed");
+        let body:String=db.query_row("SELECT n.payload_json FROM tool_result r JOIN node n ON n.id=r.node_id WHERE r.group_id='gate-group'",[],|r|r.get(0))?;
+        let body:Value=serde_json::from_str(&body).unwrap();
+        let result:Value=serde_json::from_str(body["item"]["output"].as_str().unwrap()).unwrap();
+        assert_eq!(result["executed"],false);assert_eq!(result["reason"],"human_turn_interrupted");
+        Ok(())
+    }).await.unwrap();
+    assert!(control.origins.lock().await.is_empty());
+    assert!(!root.path().join("must-not-exist").exists());
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
 }

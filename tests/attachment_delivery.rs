@@ -370,6 +370,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
             Request::new(
                 "instance:before",
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some("thread".into()),
                     text: "before attachment".into(),
                 }),
@@ -385,6 +386,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
             Request::new(
                 "instance:after",
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some("thread".into()),
                     text: "after attachment".into(),
                 }),
@@ -432,6 +434,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
             Request::new(
                 "instance:initial",
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some("thread".into()),
                     text: "initial".into(),
                 }),
@@ -469,6 +472,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
             Request::new(
                 "instance:new-run",
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some("thread".into()),
                     text: "new instruction".into(),
                 }),
@@ -518,6 +522,7 @@ async fn terminated_foreign_origin_incomplete_group_does_not_block_live_target()
             Request::new(
                 "instance:target-start",
                 Command::MessageSend(MessageSendArgs {
+                    now: false,
                     thread_id: Some("thread".into()),
                     text: "target".into(),
                 }),

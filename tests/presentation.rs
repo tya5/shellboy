@@ -1340,6 +1340,18 @@ fn structured_cancellation_renders_saved_cause_and_prerequisite_without_own_exec
             "running",
             None,
         ),
+        (
+            "previous_turn_interrupted",
+            "Turnを中断したため未実行",
+            "running",
+            None,
+        ),
+        (
+            "human_turn_interrupted",
+            "利用者がTurnを中断",
+            "running",
+            None,
+        ),
     ] {
         let output = json!({
             "status":"cancelled", "executed":false, "reason":reason,
@@ -1397,6 +1409,21 @@ fn structured_cancellation_does_not_invent_unknown_prerequisite_facts() {
     assert!(!tool.reason.contains("前提:"));
     assert!(tool.execution_id.is_none());
     assert_eq!(projected.blocks[0].text, "Invalid group");
+}
+
+#[test]
+fn human_turn_interruption_keeps_running_shell_distinct_from_run_stop() {
+    let output =
+        json!({"status":"running","execution_id":"continuing","reason":"human_turn_interrupted"});
+    let payload = json!({"item":{"type":"function_call_output","call_id":"foreground","output":output.to_string()}});
+    let projected = project("tool_result", &payload, &text_of_payload(&payload), 0);
+    let tool = projected.blocks[0].tool.as_ref().unwrap();
+    assert_eq!(tool.reason_kind, ToolReasonKind::HumanTurnInterrupted);
+    assert_eq!(tool.status, "running");
+    assert_eq!(tool.execution_id.as_deref(), Some("continuing"));
+    assert!(tool.reason.contains("Turnを中断"));
+    assert!(!tool.reason.contains("作業停止"));
+    assert!(!tool.heading().contains("未実行・取消"));
 }
 
 #[test]

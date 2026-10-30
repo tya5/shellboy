@@ -319,6 +319,23 @@ impl Command {
             Self::ThreadSet(a) => a.validate(),
             Self::MessageSend(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::MessageGet(a) => nonempty(&a.message_id, "message_id"),
+            Self::MessageCancel(a) => {
+                if a.message_ids.is_empty() || a.message_ids.len() > 128 {
+                    return Err(invalid(
+                        "message cancel requires 1..=128 explicit message IDs",
+                    ));
+                }
+                let mut unique = std::collections::HashSet::new();
+                for id in &a.message_ids {
+                    nonempty(id, "message_id")?;
+                    if id.len() > 4096 || !unique.insert(id) {
+                        return Err(invalid(
+                            "message cancel IDs must be unique and at most 4096 bytes",
+                        ));
+                    }
+                }
+                Ok(())
+            }
             Self::OperationGet(a) => nonempty(&a.operation_id, "operation_id"),
             Self::RunGet(a) | Self::RunRetry(a) | Self::RunStop(a) => nonempty(&a.run_id, "run_id"),
             Self::RevisitGet(a) | Self::RevisitCancel(a) => {

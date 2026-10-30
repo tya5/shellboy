@@ -74,6 +74,28 @@ async fn update<T>(
     timeout(Duration::from_secs(5), async {
         loop {
             match receive.try_recv() {
+                Ok(UiUpdate::SavedMessage {
+                    draft_id,
+                    revision,
+                    thread_id,
+                    status,
+                    history,
+                    ..
+                }) => {
+                    // Observe the receipt fact and the paired history carried by the atomic ACK.
+                    if let Some(value) = take(UiUpdate::Receipt {
+                        draft_id,
+                        revision,
+                        thread_id: Some(thread_id),
+                        status,
+                        message: None,
+                    }) {
+                        break value;
+                    }
+                    if let Some(value) = take(*history) {
+                        break value;
+                    }
+                }
                 Ok(value) => {
                     if let Some(value) = take(value) {
                         break value;
@@ -98,6 +120,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
+                now: false,
                 thread_id: Some(thread.into()),
                 text: text.into(),
             }),
@@ -306,6 +329,9 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     assert_eq!(text, snapshot.text);
     actions
         .send(UiAction::SendEdited {
+            generation: 0,
+            now: false,
+            snapshot: None,
             draft_id: "edit".into(),
             revision: 1,
             source_thread_id: thread.clone(),
@@ -357,10 +383,14 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
         })
         .await
         .unwrap();
+    // This is a new unsent edit of the original content. Its already submitted
+    // revision must not be resurrected by a late autosave.
+    let mut unsent = snapshot.clone();
+    unsent.revision += 1;
     actions
         .send(UiAction::SaveDraft {
             thread_id: thread.clone(),
-            draft: snapshot.clone(),
+            draft: unsent.clone(),
             anchor: ViewAnchor::default(),
             follow: false,
         })
@@ -391,7 +421,11 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
         })
         .await
         .unwrap();
-    assert_eq!(saved, snapshot);
+    assert_eq!(saved, unsent);
+    assert_eq!(saved.text, snapshot.text);
+    assert_eq!(saved.cursor, snapshot.cursor);
+    assert_eq!(saved.folds, snapshot.folds);
+    assert_eq!(saved.attachments, snapshot.attachments);
     send(&control, &thread, "再起動後").await;
     let rebuilt = incoming(&mut requests).await;
     assert!(

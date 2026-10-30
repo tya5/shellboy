@@ -19,6 +19,8 @@ fn fixture(nodes: Vec<UiNode>, width: u16, height: u16) -> (UiState, Terminal<Te
     let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
     ui.select_thread("scroll-test".into());
     ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
         thread_id: "scroll-test".into(),
         generation: ui.view().generation,
         total_nodes: nodes.len() as u64,
