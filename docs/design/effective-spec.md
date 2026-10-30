@@ -204,3 +204,8 @@ SQL over saved attempt states/standard usage and saved Run/model/shell timing,
 first measured at synthetic scale. All-time only; unrecorded summary/embedding
 coverage is explicit. No schema, producer observation or persistent totals are
 added unless measured slowness justifies a separately approved minimal follow-up.
+
+Issue #58 adopts [reactive history retention](tui-history-retention.md) before
+the independently reviewable conversation redesign increments tracked in
+[the #41 plan](../development/issue-41-plan.md). Follow ownership, finite visible
+working sets and paid-text hydration remain invariants throughout those changes.

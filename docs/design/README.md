@@ -30,3 +30,5 @@ handling. A design document does not establish successful verification. Check th
 - [Tool cancellation reasons](tool-cancel-reasons.md) (#56)
 
 - [Pending messages and Turn interruption](pending-messages.md) (#52)
+
+- [Reactive history retention (#58)](tui-history-retention.md)
