@@ -2081,6 +2081,24 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
 
 #[tokio::test]
 async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
+    #[derive(Debug, PartialEq, Eq)]
+    struct SavedWork {
+        runs: Vec<(String, String)>,
+        turns: Vec<(String, String, String)>,
+        attempts: Vec<(String, String, String)>,
+    }
+    async fn saved_work(control: &Control, thread: &str) -> SavedWork {
+        let thread = thread.to_owned();
+        control.store.database.call(move |db| {
+            let runs = db.prepare("SELECT id,state FROM run WHERE thread_id=?1 ORDER BY id")?
+                .query_map([&thread], |r| Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            let turns = db.prepare("SELECT id,run_id,state FROM turn WHERE thread_id=?1 ORDER BY id")?
+                .query_map([&thread], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+            let attempts = db.prepare("SELECT a.id,a.turn_id,a.state FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 ORDER BY a.id")?
+                .query_map([&thread], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+            Ok(SavedWork { runs, turns, attempts })
+        }).await.unwrap()
+    }
     fn developer_text(body: &Value) -> Vec<&str> {
         body["input"]
             .as_array()
@@ -2210,7 +2228,13 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     )
     .await;
     std::fs::remove_file(root.path().join("old.md")).unwrap();
-    request(&control, Command::RunRetry(RunTarget { run_id: run })).await;
+    request(
+        &control,
+        Command::RunRetry(RunTarget {
+            run_id: run.clone(),
+        }),
+    )
+    .await;
     let retried = incoming(&mut receive).await;
     assert!(developer_text(&retried.body).contains(&"OLD_EXPLICIT_ROLE"));
     assert_eq!(reference_events(&retried.body).len(), 1);
@@ -2258,7 +2282,13 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         .as_str()
         .unwrap()
         .to_owned();
-    request(&control, Command::RunRetry(RunTarget { run_id: run })).await;
+    request(
+        &control,
+        Command::RunRetry(RunTarget {
+            run_id: run.clone(),
+        }),
+    )
+    .await;
     let notification_retry = incoming(&mut receive).await;
     assert_eq!(
         reference_events(&notification_retry.body)
@@ -2298,7 +2328,33 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         })
         .await
         .unwrap();
-    // An idle settings change does not create work. Later deletion remains allowed.
+    // A completed Turn alone is not idle: await the existing durable Run boundary.
+    let ended = request(
+        &control,
+        Command::Wait(WaitArgs {
+            conditions: vec![WaitCondition::RunEnded { run_id: run }],
+            timeout_ms: 5_000,
+        }),
+    )
+    .await;
+    assert_eq!(ended["status"], "satisfied");
+    let before = saved_work(&control, &thread).await;
+    assert!(!before.runs.is_empty() && !before.turns.is_empty() && !before.attempts.is_empty());
+    assert!(before.runs.iter().all(|(_, state)| state == "completed"));
+    assert!(
+        before
+            .turns
+            .iter()
+            .all(|(_, _, state)| state == "completed")
+    );
+    assert!(
+        before
+            .attempts
+            .iter()
+            .all(|(_, _, state)| matches!(state.as_str(), "completed" | "failed" | "incomplete"))
+    );
+    // Control::request completes apply_effects before returning. Compare all saved
+    // row identities/states after that boundary, not a quiet interval on the proxy.
     std::fs::write(root.path().join("idle.md"), "IDLE_ROLE").unwrap();
     request(
         &control,
@@ -2309,11 +2365,21 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         }),
     )
     .await;
-    assert!(
-        timeout(Duration::from_millis(100), receive.recv())
-            .await
-            .is_err()
+    assert_eq!(
+        saved_work(&control, &thread).await,
+        before,
+        "idle reference selection must not create or change Runs, Turns or attempts"
     );
+    let target = thread.clone();
+    control.store.database.call(move |db| {
+        let (event, run): (String,Option<String>) = db.query_row(
+            "SELECT id,target_run_id FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='agents_reference' ORDER BY rowid DESC LIMIT 1",
+            [target], |r|Ok((r.get(0)?,r.get(1)?)))?;
+        assert!(run.is_none(), "idle reference audit awaits a future Turn");
+        assert_eq!(db.query_row("SELECT count(*) FROM delivery WHERE event_id=?1",[&event],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(db.query_row("SELECT count(*) FROM node WHERE id=?1",[format!("event-{event}")],|r|r.get::<_,i64>(0))?,0);
+        Ok(())
+    }).await.unwrap();
     std::fs::remove_file(root.path().join("idle.md")).unwrap();
     request(
         &control,

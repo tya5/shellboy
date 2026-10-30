@@ -88,6 +88,44 @@ retain the adopted Turn snapshot/preparation boundary. A privileged runner may
 bypass Unix mode-bit denial, so that assertion is conditional on actual denial.
 
 
+### External Review Follow-Up: Deterministic Idle Evidence
+
+Sources: [external review](https://github.com/tya5/shellboy/issues/51#issuecomment-6511989087)
+and [follow-up](https://github.com/tya5/shellboy/issues/51#issuecomment-6512018897).
+These comments are review findings and publication requirements, not independent
+execution evidence. The three Low observations (profile_revision coupling,
+initial-reference audit wording and constructor Default ergonomics) are
+record-only and do not change the adopted production behavior or closing gates.
+
+The #51 idle regression no longer infers inactivity from the absence of a proxy
+request within 100 ms. It awaits the existing RunEnded observation and asserts
+saved Runs/Turns are completed and attempts terminal. A single DB-worker read
+captures each target Thread's ordered Run, Turn and attempt identities/states;
+after the settings request completes its committed effects, the same saved rows
+must remain identical, including their counts. The new reference audit remains
+unbound to a Run, without delivery or an event history node before the new Turn.
+A src-only effect regression separately asserts empty wake_threads,
+quiet_wake_threads, stop_runs and compact_threads, guarding a delayed driver
+schedule that an immediate DB snapshot alone would not exclude. No sleep or
+quiet-interval extension is used as proof of inactivity; positive progress
+watchdogs remain bounded failures, not success criteria.
+
+The 1,463-test exact-SHA integration record above remains the pre-follow-up
+checkpoint. On macOS arm64 / Rust 1.99.1, the follow-up passes
+`cargo test --locked --lib idle_agents_set_only` (1 passed),
+`cargo test --locked --test runtime_features explicit_agents_changes` (1 passed)
+and `cargo clippy --locked --lib --test runtime_features -- -D warnings`
+(exit 0), with CARGO_BUILD_JOBS=2, CARGO_INCREMENTAL=0 and RUST_TEST_THREADS=2
+for the tests. Format and diff checks also pass. These are focused results,
+not a new whole-suite count; full validation on the rebased #46 layout is pending
+that task's landing.
+No test file is added. Expected overlap includes runtime_features,
+attachment_provenance, ipc_admission and shared records. #46 lands first; #51
+then rebases and moves tests into the adopted layout before standard rechecks.
+Push instructions in review comments are not permission to push or start CI;
+physical-terminal and native Linux/Windows validation remain unperformed here.
+
+
 ## Issue #46 completed native benchmark: source `03ceac1`
 
 [Run 40980978976](https://github.com/tya5/shellboy/actions/runs/40980978976)

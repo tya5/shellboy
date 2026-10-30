@@ -29,6 +29,33 @@ push, GitHub posting, installed-binary updates, physical-terminal evaluation
 and three-OS CI remain unperformed in this task's local-only scope.
 
 
+### External Review Follow-Up
+
+The external [review](https://github.com/tya5/shellboy/issues/51#issuecomment-6511989087)
+and [ordering/test follow-up](https://github.com/tya5/shellboy/issues/51#issuecomment-6512018897)
+are read as findings, not independent test execution. Replace the #51 idle
+assertion based on a 100 ms receive timeout with a saved Run-ended boundary and
+Thread-scoped Run/Turn/attempt ID/state comparisons. A src unit regression also
+checks that settings return no driver/retry wake effects and create no delivery
+or history node before the next Turn. Production behavior is unchanged.
+The focused src effect test and loopback runtime test each pass once on macOS
+arm64 / Rust 1.99.1, as does strict lib/runtime Clippy. The earlier exact-SHA
+whole-suite results remain historical checkpoints, not post-rebase evidence.
+
+Three Low observations are recorded only, outside closing conditions: agents-only
+selection increments profile_revision (including same-path selection); initial
+create/fork audits describe default/inherited-to-selected references even when
+the prior reference was never used; adding an optional field spreads constructor
+updates because argument structs do not all implement Default. No production
+changes for these observations are included.
+
+Land #46 first, then rebase #51 onto origin/main and adapt its existing tests to
+#46's final integration-binary layout. Do not transplant or resolve predicted
+conflicts before #46 lands. Re-run standard checks after rebase and retain the
+physical-terminal/native-platform limits. This publication sequence is not push
+authorization; push, main changes and GitHub posting remain on hold.
+
+
 ## Issue #46: measured native test performance completed
 
 The reviewed measurement branch `issue-46/test-performance` is pushed; main is

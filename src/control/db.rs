@@ -2516,6 +2516,45 @@ mod agents_reference_tests {
     }
 
     #[tokio::test]
+    async fn idle_agents_set_only_publishes_metadata_without_work_effects() {
+        let (root, store) = fixture().await;
+        std::fs::write(root.path().join("role.md"), "role").unwrap();
+        let created = store
+            .execute(req(create(None, None, None)), None)
+            .await
+            .unwrap()
+            .result;
+        let thread = created["thread_id"].as_str().unwrap().to_owned();
+        let result = store
+            .execute(
+                req(Command::ThreadSet(ThreadSetArgs {
+                    thread_id: Some(thread.clone()),
+                    agents: Some("role.md".into()),
+                    ..Default::default()
+                })),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.changed_threads, vec![thread.clone()]);
+        assert!(result.wake_threads.is_empty());
+        assert!(result.quiet_wake_threads.is_empty());
+        assert!(result.stop_runs.is_empty());
+        assert!(result.compact_threads.is_empty());
+        // No effect returned to Control can schedule a later driver/retry; this
+        // guards the asynchronous path that a single immediate DB read cannot.
+        store.database.call(move |db| {
+            assert_eq!(db.query_row("SELECT count(*) FROM run WHERE thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?,0);
+            assert_eq!(db.query_row("SELECT count(*) FROM turn WHERE thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?,0);
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?,0);
+            let event:String=db.query_row("SELECT id FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='agents_reference'",[thread],|r|r.get(0))?;
+            assert_eq!(db.query_row("SELECT count(*) FROM delivery WHERE event_id=?1",[&event],|r|r.get::<_,i64>(0))?,0);
+            assert_eq!(db.query_row("SELECT count(*) FROM node WHERE id=?1",[format!("event-{event}")],|r|r.get::<_,i64>(0))?,0);
+            Ok(())
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn agents_preflight_cas_and_real_actor_are_atomic() {
         let (root, store) = fixture().await;
         std::fs::write(root.path().join("one.md"), "one").unwrap();

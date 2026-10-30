@@ -1104,3 +1104,35 @@ releases only the matching draft/generation/request selection. Submitted slash
 text retains its normal restoration behavior. A local UUID identifies each
 pending selection (one bounded value per view) so a stale rejection or result
 cannot release a later selection in the same draft generation.
+
+## #51 external review: deterministic idle checks and deferred Low items
+
+Status: adopted follow-up to public comments
+[6511989087](https://github.com/tya5/shellboy/issues/51#issuecomment-6511989087)
+and [6512018897](https://github.com/tya5/shellboy/issues/51#issuecomment-6512018897).
+
+Idle correctness must not be inferred from a quiet receive timeout. Use the
+existing durable RunEnded boundary, compare target-scoped saved work identities
+and states before/after operation completion, and independently verify the
+settings MutationResult cannot wake a driver/retry. Keep reference-change audit
+pending without delivery/history adoption until a new Turn. No production
+behavior, table, worker, queue or test binary is added for this correction.
+
+The following are record-only Low observations, not closing conditions:
+
+- agents-only and same-path selection still increments profile_revision through
+  the shared settings update, so an admitted preparation may be discarded and
+  rebuilt before POST. Preserve this existing behavior for #51; revisit separate
+  revision domains only in a future scoped change with admission-race coverage.
+- create/fork override audit reports the default/inherited reference as before,
+  even if this new Thread never used it. This is the adopted audit contract;
+  revisit initial-reference wording/delivery only with an explicit UX decision.
+- optional argument fields require changes across constructor literals because
+  not every argument struct implements Default. Defer that ergonomics refactor;
+  it is outside #51's production scope and must not obscure behavioral changes.
+
+Publication dependency: #46 lands before #51 is rebased onto origin/main.
+Adapt existing regressions to #46's resulting layout, then repeat standard
+checks. Do not preemptively transplant or resolve conflicts while #46 is absent.
+This records ordering, not permission to push, post to GitHub, update main or
+replace installed binaries. Physical-terminal verification remains unclaimed.
