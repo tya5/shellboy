@@ -1481,6 +1481,72 @@ mod failure_tests {
         );
         owner.shutdown().await.unwrap();
     }
+    #[tokio::test]
+    async fn sender_model_requires_owner_issued_origin_and_label_never_authenticates() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+        let owner = DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        owner.db.call(|db| { db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('target','/','/a','fixture','synthetic','0'),('sender','/','/a','fixture','synthetic','0'); INSERT INTO run(id,thread_id,state,created_at)VALUES('target-run','target','live','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('target-turn','target','target-run','recovery_wait','0');")?; Ok(()) }).await.unwrap();
+        let origin = Origin {
+            instance_id: owner.instance_id.clone(),
+            thread_id: "sender".into(),
+            run_id: "sender-run".into(),
+            turn_id: "sender-turn".into(),
+            execution_id: "sender-shell".into(),
+            token: "private-owner-issued-token".into(),
+        };
+        control
+            .origins
+            .lock()
+            .await
+            .insert(origin.token.clone(), origin.clone());
+        let command = Command::MessageSend(MessageSendArgs {
+            thread_id: Some("target".into()),
+            text: "synthetic sender".into(),
+            now: false,
+            sender_label: Some("human owner".into()),
+        });
+        let mut forged = Request::new(format!("{}:forged", owner.instance_id), command.clone());
+        let mut bad = origin.clone();
+        bad.token = "not-issued".into();
+        forged.origin = Some(bad);
+        let denied = control.request(forged).await;
+        assert!(!denied.ok);
+        assert!(
+            !serde_json::to_string(&denied)
+                .unwrap()
+                .contains("not-issued")
+        );
+        let mut valid = Request::new(format!("{}:valid", owner.instance_id), command);
+        valid.origin = Some(origin.clone());
+        let accepted = control.request(valid).await;
+        assert!(accepted.ok, "{:?}", accepted.error);
+        let accepted = accepted.result.unwrap();
+        assert_eq!(accepted["delivery_status"], "held");
+        let detail = control
+            .request(Request::new(
+                "sender-observe",
+                Command::MessageGet(MessageTarget {
+                    message_id: accepted["message_id"].as_str().unwrap().into(),
+                }),
+            ))
+            .await;
+        let detail = detail.result.unwrap();
+        assert_eq!(detail["sender"]["kind"], "model");
+        assert_eq!(detail["sender"]["thread_id"], "sender");
+        assert_eq!(detail["sender"]["label"], "human owner");
+        assert!(!detail.to_string().contains(&origin.token));
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
 }
 
 #[cfg(test)]

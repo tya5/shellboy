@@ -134,10 +134,27 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--now] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
-| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, and answer_node_id when available |
+| `message send [--thread THREAD] [--now] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
+| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and answer_node_id when available |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed queued message IDs. Each item reports cancelled/already_cancelled/already_admitted/not_found/forbidden/unavailable and an archive_draft_id when available; admitted history cannot be cancelled. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
+
+`message get` returns `sender.kind`: `model` with verified credential-free
+instance/thread/run/turn/execution IDs, `external_cli` for a new external CLI
+send without Origin, `human` for a recorded in-process TUI submission, or
+`unknown` when saved evidence cannot establish it. A no-Origin CLI is not proof
+of a human. Sender IDs remain readable after the originating Thread is deleted.
+User-node `history get` and `history list` expose the same facts at
+`provenance.sender`, joined by the accepted `message_id`, including later input
+appended to an already-running Run. Legacy null sender records stay unknown.
+
+`--sender-label TEXT` adds an optional self-asserted name: at most 64 Unicode
+characters, without newlines, control characters or line/paragraph separators.
+It is returned as `sender.label`, separate from verified identity. The label
+never grants ownership, stop, retry or cancellation authority. Explicitly
+connecting to another data directory still strips model Origin; only the name
+survives, as `external_cli`. TUI F6 message details display it as `名乗り：…`,
+not as verified identity; conversation rendering is unchanged.
 
 Ordinary sends queue for the next safe boundary. Add `--now` only to request
 urgent delivery by releasing a foreground shell wait: that shell continues under

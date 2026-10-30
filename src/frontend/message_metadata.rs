@@ -131,6 +131,11 @@ fn read(
     } else {
         match serde_json::from_str::<serde_json::Value>(&matches[0]).ok() {
             Some(serde_json::Value::Null) => InputSource::Human,
+            Some(sender)
+                if sender.get("kind").and_then(serde_json::Value::as_str) == Some("human") =>
+            {
+                InputSource::Human
+            }
             Some(sender) => match sender.get("thread_id").and_then(serde_json::Value::as_str) {
                 Some(sender) if Some(sender) == viewed => InputSource::SelfModel,
                 Some(sender) if Some(sender) == parent => InputSource::Parent,
@@ -163,6 +168,18 @@ mod tests {
         let db = fixture();
         for (id, sender, state, expected) in [
             ("human", Some("null"), "applied", InputSource::Human),
+            (
+                "recorded-human",
+                Some(r#"{"kind":"human"}"#),
+                "applied",
+                InputSource::Human,
+            ),
+            (
+                "named-external",
+                Some(r#"{"kind":"external_cli","label":"human"}"#),
+                "applied",
+                InputSource::Unknown,
+            ),
             (
                 "parent",
                 Some("{\"thread_id\":\"parent\"}"),

@@ -49,6 +49,7 @@ pub(super) async fn fixture(
             Request::new(
                 format!("{}:send", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
                     now: false,
                     thread_id: Some(thread),
                     text: "original instruction".into(),

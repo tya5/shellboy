@@ -1,5 +1,32 @@
 # Development status
 
+## #59: saved sender inspection and self-asserted names
+
+`message get` and user-node `history get/list` provenance expose the original
+receipt sender, including additions to an active Run. Verified model Origin IDs
+are credential-free and survive sender-Thread deletion; new external CLI input
+is `external_cli`, trusted in-process TUI submissions are recorded `human`, and
+legacy missing/incomplete evidence is `unknown`. Optional `--sender-label` is
+bounded to 64 Unicode scalar values without controls/line separators, stored in
+existing receipt JSON and displayed as a distinct self-asserted name only in F6
+details. No table/schema migration or label-based authority is added.
+
+The existing source-metadata classifier recognizes recorded `human` objects to
+preserve its established conversation category; it ignores label. Historical
+null's existing conversation convention remains separate from unknown CLI/F6
+sender facts. No renderer/layout/index-refresh redesign or new conversation
+badge is included. CLI, Agent Guide and delegation instructions explain sender
+inspection and cross-data-dir Origin stripping/naming.
+
+Native macOS arm64/Rust1.99.1 standard check passes **1,666 passed / 0 failed /
+32 ignored**, layout88, Python6, format and strict all-target Clippy. Synthetic
+checks cover owner-issued Origin/forgery rejection, appended receipt provenance,
+deleted sender IDs, external labeled/unlabeled input, trusted human submissions,
+legacy unknown, Unicode/control label limits, unchanged cancellation/recovery
+authority, credential exclusion, cross-data-dir real CLI and F6 TestBackend.
+Native Windows/Linux CI and physical-terminal sender-details checks are pending;
+see [acceptance](../validation/acceptance.md#59-sender-inspection-and-labels).
+
 ## #41 B+C: local qualification complete
 
 Runtime/test source342cb6e passes native macOS standard checks: **1,658 passed /

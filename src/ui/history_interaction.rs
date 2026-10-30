@@ -383,6 +383,8 @@ impl UiState {
             self.view().thread_id.clone().map(|thread| {
                 details.request_links(thread, generation, &mut self.next_detail_request)
             })
+        } else if !links {
+            Some(details.load_sender(&mut self.next_detail_request))
         } else {
             None
         };

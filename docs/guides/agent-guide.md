@@ -309,6 +309,24 @@ zero or re-register blindly. Stop the Run or restart the owner to discard the
 unreadable reservation. Optional Run/list projections can omit its Revisit
 summary while other controls remain available.
 
+## Inspect a delegation sender
+
+Retain `message_id` from each send. `shellboy message get --message MESSAGE_ID`
+returns `sender`; `shellboy history get --node MESSAGE_ID` and `history list`
+return the same saved sender at `provenance.sender`, even for input appended to
+an active Run. `kind=model` identifies the verified originating instance,
+Thread, Run, Turn and shell execution IDs, not the receiving Run's owner.
+Deleted sender Threads do not erase those saved IDs. Follow those IDs with the
+ordinary inspection commands; they are facts, not permission to stop/retry work.
+`external_cli` is not necessarily a human, recorded TUI submissions can be
+`human`, and missing historical evidence is `unknown`. No credential is exposed.
+
+An optional `--sender-label 'reviewer'` is a self-asserted name (at most 64 Unicode
+characters, no controls/newlines), not a verified role or authority.
+When sending to another data directory, use `--sender-label` to name yourself;
+Origin is stripped across owners, so the receiver sees `external_cli` plus that
+unverified name, not your authenticated model identity.
+
 ## Queued messages and human Turn interruption
 
 `shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.

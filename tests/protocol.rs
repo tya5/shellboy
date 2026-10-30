@@ -731,7 +731,7 @@ fn current_lifecycle_details_require_observed_context() {
     for (kind, mut value) in [
         (
             "message",
-            json!({"message_id":"m","thread_id":"t","delivery_status":"accepted","assignment":"existing_turn"}),
+            json!({"message_id":"m","thread_id":"t","delivery_status":"accepted","assignment":"existing_turn","sender":{"kind":"unknown"}}),
         ),
         (
             "run",
@@ -757,7 +757,12 @@ fn current_lifecycle_details_require_observed_context() {
             json!({"state":state,"thread_id":"t","created_at":"2026-10-25T00:00:00Z"});
         match kind {
             "message" => {
-                serde_json::from_value::<MessageDetails>(value).unwrap();
+                serde_json::from_value::<MessageDetails>(value.clone()).unwrap();
+                value.as_object_mut().unwrap().remove("sender");
+                assert!(
+                    serde_json::from_value::<MessageDetails>(value).is_err(),
+                    "sender facts are required, never inferred from absent fields"
+                );
             }
             "run" => {
                 serde_json::from_value::<RunDetails>(value).unwrap();

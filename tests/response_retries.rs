@@ -225,6 +225,7 @@ impl Fixture {
             request(
                 &control,
                 Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
                     now: false,
                     thread_id: Some(thread),
                     text: text.into(),

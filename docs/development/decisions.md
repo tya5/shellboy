@@ -1527,3 +1527,21 @@ shown as checking, never known idle. History/send failures remain explicit until
 the next deliberate action; an unrelated older success cannot erase a failure.
 Both new readonly UI actions retire their loading state on UI queue rejection as
 well as reader-slot rejection. No new Core lifecycle, queue or producer is added.
+
+## 2026-10-30: #59 sender facts and existing source presentation
+
+Active. Source: issue #59 body and mandatory comment
+[6517220821](https://github.com/tya5/shellboy/issues/59#issuecomment-6517220821),
+plus implementation-scope approval during review. Store explicit sender kind and
+optional self-asserted label in the existing flat receipt sender JSON, retaining
+top-level Origin IDs for cancellation authorization. Expose an allowlisted,
+credential-free observation; incomplete old evidence is unknown, not repaired.
+No schema migration or Core legacy request-format shim is introduced.
+
+The reviewer identified that the existing conversation metadata classifier would
+map a newly explicit human object to Unknown. Preserve its established Human
+classification with a data-boundary check and regression, ignoring label. Do not
+change render/layout/index refresh or add conversation badges. Historical null
+receipts keep the existing conversation display convention only; CLI/F6 sender
+facts correctly remain unknown. Revisit that historical presentation only under
+separate conversation-design scope, not by inventing identity in sender facts.

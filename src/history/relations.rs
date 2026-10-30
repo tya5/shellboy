@@ -12,9 +12,13 @@ use super::sql_error;
 pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenance, ApiError> {
     connection
         .query_row(
-            "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",
+            "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id),(SELECT sender_json FROM receipt WHERE message_node_id=n.id ORDER BY rowid LIMIT 1) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",
             [node_id],
-            |row| Ok(NodeProvenance {
+            |row| Ok(NodeProvenance { sender: {
+                let kind: String = row.get(0)?;
+                let raw: Option<String> = row.get(6)?;
+                (kind == "user").then(|| crate::protocol::MessageSender::from_saved(raw.as_deref()))
+            },
                 kind: row.get(0)?,
                 created_at: row.get(1)?,
                 source_revision: row.get(2)?,

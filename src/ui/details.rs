@@ -59,6 +59,9 @@ pub(super) fn original_page_lines(body: &HistoryBody) -> Vec<Line<'static>> {
         safe(&body.kind),
         safe(&body.node_id)
     )));
+    if let Some(sender) = &body.provenance.sender {
+        lines.extend(sender_lines(sender));
+    }
     if let Some(reason) = &body.tombstone_reason {
         lines.push(Line::from(format!("原文回収済み: {}", safe(reason))));
     }
@@ -77,6 +80,53 @@ pub(super) fn original_page_lines(body: &HistoryBody) -> Vec<Line<'static>> {
         crate::presentation::expand_tabs(line);
     }
     lines
+}
+fn sender_lines(sender: &crate::protocol::MessageSender) -> Vec<Line<'static>> {
+    sender_fields(sender)
+        .into_iter()
+        .map(|field| Line::from(format!("{}：{}", field.label, safe(&field.value))))
+        .collect()
+}
+fn sender_fields(sender: &crate::protocol::MessageSender) -> Vec<PresentationField> {
+    let kind = match sender.kind {
+        crate::protocol::SenderKind::Model => "model (verified Origin)",
+        crate::protocol::SenderKind::ExternalCli => "external_cli",
+        crate::protocol::SenderKind::Human => "human (TUI)",
+        crate::protocol::SenderKind::Unknown => "unknown",
+    };
+    let mut fields = vec![("sender.kind", "送り手", kind.to_owned())];
+    for (key, value) in [
+        ("instance_id", &sender.instance_id),
+        ("thread_id", &sender.thread_id),
+        ("run_id", &sender.run_id),
+        ("turn_id", &sender.turn_id),
+        ("execution_id", &sender.execution_id),
+    ] {
+        if let Some(value) = value {
+            fields.push((key, key, value.clone()));
+        }
+    }
+    if let Some(label) = &sender.label {
+        fields.push(("sender.label", "名乗り", label.clone()));
+    }
+    fields
+        .into_iter()
+        .map(|(key, label, value)| PresentationField {
+            key: if key.starts_with("sender.") {
+                key.into()
+            } else {
+                format!("sender.{key}")
+            },
+            label: if key.ends_with("_id") {
+                format!("送り手 {label}")
+            } else {
+                label.into()
+            },
+            value,
+            display: None,
+            value_omitted: false,
+        })
+        .collect()
 }
 fn entry(node: &super::UiNode, width: usize) -> (String, String) {
     use crate::presentation::{BlockKind, PresentationKind};
@@ -472,12 +522,28 @@ impl Details {
                 conversation_fields(node)
             });
         }
+        if let Some(sender) = self
+            .original
+            .as_ref()
+            .and_then(|body| body.provenance.sender.as_ref())
+        {
+            fields.extend(sender_fields(sender));
+        }
         fields.sort_by_key(|field| crate::presentation::fields::group(&field.key).0);
         fields
     }
     pub(super) fn open_source(&mut self, node_id: String, next: &mut u64) -> UiAction {
         self.node_id = node_id;
         self.original(None, next)
+    }
+    pub(super) fn load_sender(&mut self, next: &mut u64) -> UiAction {
+        *next = next.wrapping_add(1);
+        self.request_id = *next;
+        UiAction::LoadOriginal {
+            node_id: self.node_id.clone(),
+            cursor: None,
+            request_id: self.request_id,
+        }
     }
     fn original(&mut self, cursor: Option<String>, next: &mut u64) -> UiAction {
         *next = next.wrapping_add(1);
@@ -593,6 +659,7 @@ impl Details {
                         self.scroll.set(0);
                         self.original = None;
                         self.original_lines = Vec::new();
+                        return Outcome::Action(Box::new(self.load_sender(next)));
                     }
                 }
                 Mode::Links => {}
@@ -786,7 +853,16 @@ impl Details {
                     }
                     rows.push(
                         popup::item(
-                            &format!("{}: {}", safe(&field.label), safe(field.displayed())),
+                            &format!(
+                                "{}{}{}",
+                                safe(&field.label),
+                                if field.key == "sender.label" {
+                                    "："
+                                } else {
+                                    ": "
+                                },
+                                safe(field.displayed())
+                            ),
                             body.width,
                         )
                         .preview(4),
@@ -1477,7 +1553,7 @@ mod tests {
             kind: "assistant_response".into(),
             text: (0..100).map(|index| format!("row {index:03}\n")).collect(),
             context: serde_json::from_value(serde_json::json!({"state":"present","node_id":"source-node","created_at":"2026-10-25T00:00:00Z"})).unwrap(),
-            provenance: crate::protocol::NodeProvenance {
+            provenance: crate::protocol::NodeProvenance { sender: None,
                 kind: "assistant_response".into(),
                 created_at: "2026-10-25T00:00:00Z".into(),
                 source_revision: 0,
@@ -1690,7 +1766,7 @@ mod tests {
             kind: "assistant_response".into(),
             text: text.clone(),
             context: serde_json::from_value(serde_json::json!({"state":"present","node_id":"source-node","created_at":"2026-10-25T00:00:00Z"})).unwrap(),
-            provenance: crate::protocol::NodeProvenance {
+            provenance: crate::protocol::NodeProvenance { sender: None,
                 kind: "assistant_response".into(),
                 created_at: "2026-10-25T00:00:00Z".into(),
                 source_revision: 0,
@@ -1738,5 +1814,80 @@ mod tests {
         assert!(
             matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { text: ref copied, .. } if copied == &text))
         );
+    }
+    #[test]
+    fn sender_is_only_added_to_details_and_self_asserted_name_is_distinct() {
+        use crate::protocol::{MessageSender, SenderKind};
+        let ui = state();
+        let mut details = Details::for_node(ui.view(), "source-node".into(), false);
+        let before = serde_json::to_value(&ui.view().nodes()[0].presentation.fields).unwrap();
+        let sender = MessageSender {
+            kind: SenderKind::ExternalCli,
+            label: Some("leader".into()),
+            ..Default::default()
+        };
+        let mut next = 0;
+        let action = details.load_sender(&mut next);
+        assert!(matches!(
+            action,
+            UiAction::LoadOriginal { cursor: None, .. }
+        ));
+        assert!(matches!(details.mode, Mode::Fields));
+        let body: HistoryBody = serde_json::from_value(serde_json::json!({
+            "context":{"state":"present","node_id":"source-node","created_at":"now"},
+            "provenance":{"kind":"user","created_at":"now","source_revision":0,"sender":sender},
+            "node_id":"source-node","kind":"user","text":"source input",
+            "source_node_ids":[],"previous_node_ids":[],"next_node_ids":[]
+        }))
+        .unwrap();
+        let lines = original_page_lines(&body);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_string().contains("名乗り：leader"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_string().contains("external_cli"))
+        );
+        details.accept(next + 1, body.clone(), lines.clone());
+        assert!(
+            details.original.is_none(),
+            "stale replies must not provide sender facts"
+        );
+        details.accept(next, body, lines);
+        let fields = details.fields(ui.view());
+        assert!(
+            fields
+                .iter()
+                .any(|field| field.key == "sender.kind" && field.value == "external_cli")
+        );
+        assert!(fields.iter().any(|field| field.key == "sender.label"
+            && field.label == "名乗り"
+            && field.value == "leader"));
+        assert_eq!(
+            serde_json::to_value(&ui.view().nodes()[0].presentation.fields).unwrap(),
+            before
+        );
+        let mut terminal = Terminal::new(TestBackend::new(100, 35)).unwrap();
+        terminal
+            .draw(|frame| {
+                details.draw(frame, frame.area(), ui.view());
+            })
+            .unwrap();
+        let shown = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // Wide glyph continuation cells are blanks in the TestBackend buffer.
+        let compact = shown
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>();
+        assert!(compact.contains("名乗り：leader"), "{shown}");
     }
 }

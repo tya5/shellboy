@@ -157,6 +157,7 @@ fn create(parent_id: Option<String>) -> Command {
 }
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
+        sender_label: None,
         now: false,
         thread_id: Some(thread.into()),
         text: text.into(),

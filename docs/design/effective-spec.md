@@ -220,3 +220,10 @@ requirements added through6519745314. Adoption does not claim all increments imp
 75k/hint preflight and once-per-Turn policy in older compaction/retry sections.
 Only failure facts activate automatic reduction; all resends share the normal
 consecutive retry budget. Context edit sizes are characters, never token estimates.
+
+## Message sender facts (#59)
+
+Adopt [sender inspection](protocol.md#message-sender-inspection-59): expose
+credential-free receipt provenance and optional bounded self-asserted labels.
+Absent historical evidence stays unknown; new external CLI is not called human.
+Labels have no authority. No schema migration or conversation rendering change.

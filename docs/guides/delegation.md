@@ -24,6 +24,15 @@ shellboy message send --thread CHILD_THREAD_ID --text 'Task: read-only audit of 
 shellboy message get --message MESSAGE_ID
 ```
 
+Use `shellboy message get --message MESSAGE_ID` to inspect the saved sender;
+`history get --node MESSAGE_ID` / `history list` expose the same `provenance.sender`.
+A verified model sender has originating instance/Thread/Run/Turn/execution IDs,
+not merely the receiving Run's starter. A `label` is self-asserted and grants no
+authority; `external_cli` does not prove human input, and legacy missing evidence
+stays `unknown`. When sending across data directories, use `--sender-label` to
+name yourself: Origin is stripped and the receiver sees an external CLI plus
+that unverified name.
+
 Creation, sending, and retrieving the answer are separate steps. Distinguish create's `result.thread_id` as `CHILD_THREAD_ID`, send's `result.message_id` as `CHILD_MESSAGE_ID`, and the assigned `result.turn_id` as `CHILD_TURN_ID`. Do not try to retrieve the receiving model's answer or shell output using the execution ID of the observing shell that ran send.
 
 Use `shellboy status --thread CHILD_THREAD_ID` to list current stored state, then get individual objects using the returned Run/Turn/shell/message IDs. Thread hierarchy and Run ownership differ: do not infer stop or recovery authority from the Thread's appearance.

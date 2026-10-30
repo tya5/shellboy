@@ -300,3 +300,38 @@ resume a Run. Edit results replace token estimates with before_characters,
 after_characters and changed_suffix_characters (replay JSON Unicode scalars).
 No target_tokens field remains. thread get context_usage reports only the last
 successful measured usage, start/end time and next_request_pending after an edit.
+
+## Message sender inspection (#59)
+
+`message.get.sender` and user-node `NodeProvenance.sender` expose saved sender
+facts through `receipt.message_node_id`, not the receiving Run's starter.
+Sender kind is `model` (verified Origin identity, five credential-free IDs),
+`external_cli` (new message.send without Origin), `human` (in-process draft/edit
+submission), or `unknown` (no sufficient saved evidence). Legacy bare complete
+OriginIdentity JSON remains factual model provenance; legacy null/empty or
+incomplete evidence stays unknown. This is a read-only provenance projection,
+not an old Core request-format compatibility path or identity reconstruction.
+Sender IDs do not require the originating Thread to still exist.
+
+`message.send` accepts optional `sender_label` (`--sender-label`): at most 64
+Unicode scalar values, no control characters or Unicode line/paragraph separators.
+Empty labels are allowed. Labels are self-asserted display metadata, never
+identity, authorization, ownership, stop, retry or cancellation authority. Store
+kind/label alongside existing top-level identity fields in `receipt.sender_json`;
+keep the top-level `thread_id` used by queued-message cancellation unchanged.
+No schema/table/migration is added. Input cannot select a sender kind or IDs;
+Control derives them from the authenticated Origin or the trusted internal send
+entry point. Cross-data-dir CLI still strips Origin, retaining only the label.
+
+TUI sender display is confined to F6 message details (including the original
+page), fetched on demand through existing bounded original reads. It labels a
+self-asserted label `名乗り：…`, separate from verified sender kind/IDs. Conversation
+rendering, indexing and refresh scheduling are unchanged. Unknown evidence never
+becomes a claimed human or external CLI merely from message role or absent Origin.
+
+The existing conversation source classifier recognizes newly recorded `human`
+receipts as its established Human category, without adding a new badge or
+reading labels. Its historical null/Human display convention remains unchanged
+by scope; it is not evidence of verified sender identity. Sender inspection in
+CLI/F6 reports such legacy null receipts as unknown. No renderer/layout or
+index-refresh change is part of this preservation adjustment.
