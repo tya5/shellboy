@@ -105,6 +105,17 @@ impl Page {
         );
         page.entry("Esc", "画面を閉じる。通常の会話ではTurnだけ中断");
 
+        page.section("実行中の作業");
+        page.entry(
+            "Shift+Tab / クリック",
+            "入力欄の上にある作業を選ぶ。↑↓で移動",
+        );
+        page.entry(
+            "作業内 Space / F6 / o",
+            "shell出力の開閉／詳細フォーム／子の会話へ",
+        );
+        page.note("Escで入力へ戻ります。回答後も残る作業は保存時刻から経過を表示します。抜粋を開いても実行・停止しません。");
+
         page.section("内容・処理状況を調べる");
         page.entry("F6", "会話の内容を選び、詳細・原文・IDを確認（/details）");
         page.entry("F7", "現在の項目のリンクを確認・完全URLをコピー（/links）");

@@ -122,6 +122,7 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 | Left/Right / Backspace / Delete | Move/delete by character, accounting for combining characters and emoji |
 | Up/Down | Select completion, recall sent text, or move between draft lines; see below |
 | Tab | Complete the selected slash candidate |
+| Shift+Tab | Focus visible owned work above the composer; Up/Down selects, Space toggles shell output, F6 inspects, `o` opens a child, Esc returns |
 | Home / End | Start/end of the current draft line |
 | Mouse wheel | Move history three display rows, measured after wrapping |
 | PgUp / PgDn | Move history by viewport height minus one row |
