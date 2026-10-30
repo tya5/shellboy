@@ -226,7 +226,8 @@ TUI操作もありますが、それは各コマンドを止める安全の関�
 **利用者がすること。** 大事な環境では専用の低権限OSユーザー・コンテナ・
 VMを使い、そこでファイルやネットワークの権限を絞ってください。OSの道具には
 macOSのSeatbelt、Linuxのbubblewrap／Landlock、Windowsの専用ユーザー・
-NTFS権限・Windows Firewallがあります。ここでは未検証のsandbox手順は載せません。
+NTFS権限・Windows Firewallがあります。[OS sandbox wrapper](shell.md#os-sandbox-wrappers)
+に検証済みのmacOS例と、Linux・Windowsで未検証の範囲を記載しています。
 ownerの権限も考慮が必要です。モデルのshellだけを包んでも、`attachment add`
 などowner経由の読み取りは制限されません。不要な秘密を環境変数や読める
 ファイルに置かず、そのOSユーザーが使える資格情報はコマンドからも見えると

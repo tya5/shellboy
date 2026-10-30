@@ -210,3 +210,129 @@ duration, if known. No output or reclaimed output gives last_output_at: null.
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
 
 Ordinary messages wait for the next tool-group/request boundary and do not release the foreground wait. Human Esc interrupts the Turn, backgrounds a running foreground process, and leaves background shells and owned children alive; it does not mean that unread later calls executed. Ctrl+C/Run stop retains full shutdown of owned work. No time-based backgrounding is enabled.
+
+## OS sandbox wrappers
+
+These are optional OS boundaries, not built-in Shellboy security features. A cwd
+or separate worktree is not a permission fence. Wrap **only the model shell** by
+setting `[shell] executable`; start the owner normally, outside that wrapper.
+Use `exec` at the wrapper's final step and pass `"$@"` unchanged so Shellboy's
+Bash arguments and process-group stopping still work. Leave the issued
+`SHELLBOY_SOCKET` and Origin environment intact: the CLI needs the owner's Unix
+socket (Windows uses a named pipe). Never print or copy an Origin token.
+
+For host restrictions, deny direct network access and permit only a separately
+managed **allowlist proxy**. Set `HTTP_PROXY`/`HTTPS_PROXY` for cooperative tools,
+but treat the OS denial, not those environment variables, as the direct-egress
+boundary. The proxy must reject unapproved hosts, ports and tunnels; prevent
+arbitrary CONNECT destinations and proxy-side access to internal services.
+Qualify HTTPS CONNECT/DNS/rebinding behavior with your proxy independently.
+
+**Limits:** this configuration applies to every conversation, not per Thread.
+Owner-mediated operations still have the owner's privileges: for example,
+`attachment add --path` can read outside a shell's read boundary. The example
+below deliberately does not restrict reads or comprehensively harden OS IPC.
+It checks direct writes/network access, not resistance to every malicious-code
+escape. Use a least-privilege account/container/VM for a stronger boundary;
+keep secrets out of readable files and the inherited environment. Keep the
+wrapper, profile and proxy configuration **outside writable work/temp trees**.
+
+### macOS: tested Seatbelt write and network limits
+
+`/usr/bin/sandbox-exec` is deprecated by Apple, but the following mechanics were
+tested on macOS 26.3.1 ARM64. Recheck on your macOS version. First prepare a trusted
+allowlist HTTP proxy listening on loopback port 3128 outside the sandbox. The
+profile opens only that TCP port and the owner's Unix socket; it does not
+implement the proxy's host policy. No production proxy deployment is supplied.
+
+Save the following as a trusted, non-workspace-writable `shell.sb`:
+
+```scheme
+(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write*
+    (subpath (param "WORK"))
+    (subpath (param "TEMP"))
+    (literal "/dev/null"))
+(deny network*)
+(allow network-outbound
+    (remote unix-socket (path (param "SOCKET"))))
+(allow network-outbound (remote tcp "localhost:3128"))
+```
+
+Create the work and scratch directories first. Save this executable wrapper
+outside both directories, replacing the three absolute paths. They must be
+physical paths: for example use `/private/tmp/...`, not the `/tmp` symlink.
+The wrapper resolves the socket directory physically for the same reason.
+
+```sh
+#!/bin/sh
+set -eu
+work='/absolute/physical/project'
+scratch='/absolute/physical/scratch'
+profile='/absolute/trusted/shell.sb'
+: "${SHELLBOY_SOCKET:?This wrapper is for Shellboy model shells}"
+socket_dir=$(CDPATH= cd -P "$(dirname "$SHELLBOY_SOCKET")" && pwd -P)
+socket=$socket_dir/$(basename "$SHELLBOY_SOCKET")
+export TMPDIR="$scratch"
+exec /usr/bin/sandbox-exec \
+    -D WORK="$work" -D TEMP="$scratch" -D SOCKET="$socket" \
+    -f "$profile" /bin/bash "$@"
+```
+
+Select it in the owner's configuration (do not launch the owner through it):
+
+```toml
+[shell]
+kind = "bash"
+executable = "/absolute/trusted/wrapped-bash"
+[shell.env]
+HTTP_PROXY = "http://127.0.0.1:3128"
+HTTPS_PROXY = "http://127.0.0.1:3128"
+NO_PROXY = ""
+```
+
+The local synthetic check used a disposable owner/data-dir and a model fixture,
+not a paid provider: work/scratch writes succeeded, a write outside both failed,
+an allowlist HTTP proxy returned success for `allowed.test` and rejection for
+`denied.test`, and direct TCP to a different loopback service failed. The actual
+model shell successfully called `message send` and `wait` through the owner
+socket. `shell stop` terminated the wrapped shell and its sleep descendant.
+The proxy test is HTTP-only; HTTPS CONNECT and real-provider interoperability
+remain unverified. This profile allows reads elsewhere and writes to `/dev/null`;
+it is not a confidentiality boundary or a hardened general-purpose sandbox.
+
+### Linux: capability probe, complete recipe still unverified
+
+On Ubuntu/Debian, install bubblewrap with `sudo apt-get install bubblewrap`.
+A candidate design is a read-only bind of `/`, writable binds for work/scratch,
+and `--unshare-net`. Preserve access to the directory containing
+`SHELLBOY_SOCKET`; an isolated network namespace also needs a Unix-socket bridge
+to the external allowlist proxy. Merely setting `HTTP_PROXY` cannot restore
+network access or enforce host policy. Landlock is another filesystem-policy
+option, but is not evaluated here.
+
+The complete wrapper, owner IPC, proxy bridge and stopping behavior have not
+been qualified together on Linux, so no executable Linux recipe is provided.
+The separate capability-probe result is recorded in the validation notes; it
+must not be read as a successful full sandbox acceptance check.
+
+### Windows: no lightweight equivalent wrapper supplied
+
+Windows has no comparably simple standard shell-only wrapper for this guide.
+AppContainer needs nontrivial setup; Windows Sandbox is a VM, not a replacement
+for `[shell] executable`. These Windows options are **unverified here**:
+
+- Run Shellboy as a dedicated low-privilege local user, with a data-dir owned by
+  that user, and use NTFS ACLs to limit readable/writable directories. This also
+  restricts the owner, so permit its data-dir, terminal and required API access.
+- Have an administrator design default-deny outbound policy with an approved
+  allowlist-proxy exception, for example on a dedicated VM. Cover child tools,
+  not just `shellboy.exe`; a host denylist or proxy environment alone is not a
+  fence. Windows Firewall is not a general DNS-host allowlist, and explicit
+  block rules take precedence over allow rules: blanket block plus a port allow
+  is not a validated recipe.
+- Use a container/VM for stronger isolation, or evaluate a Linux wrapper in WSL2
+  after qualifying its namespace, IPC and proxy behavior there. No WSL2 or Windows
+  Sandbox networking/ACL recipe has been tested as part of this guide.

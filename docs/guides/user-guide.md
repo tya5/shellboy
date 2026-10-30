@@ -151,7 +151,7 @@ the conversation layout.
 - These are saved-record totals, not a bill or effective work time. The time
   categories overlap; unreported or unrecorded usage is shown as unknown, not zero.
 - If it feels slow, look for `event=usage_totals_slow` in
-  `<data_dir>/logs/shellboy.log`. Only aggregations taking at least100ms appear.
+  `<data_dir>/logs/shellboy.log`. Only aggregations taking at least 100ms appear.
   [TUI details](tui.md#saved-usage-details) explains refresh and snapshot behavior.
 
 ## 4. Change connection or model
@@ -232,8 +232,8 @@ work); those are not a per-command security gate.
 **Your boundary.** For valuable environments, use a dedicated least-privilege
 OS account, container or VM and restrict file/network access there. OS options
 include macOS Seatbelt, Linux bubblewrap/Landlock, and a dedicated Windows user
-with NTFS permissions and Windows Firewall. No unverified sandbox recipe is
-provided here. Include the owner's privileges in your design: wrapping only the
+with NTFS permissions and Windows Firewall. See [OS sandbox wrappers](shell.md#os-sandbox-wrappers)
+for the tested macOS example and the explicitly unverified Linux/Windows remainder. Include the owner's privileges in your design: wrapping only the
 model shell does not restrict owner-mediated reads such as `attachment add`.
 Keep unrelated secrets out of the environment/readable files; assume commands
 can inspect credentials accessible to that account. Conversations and selected
