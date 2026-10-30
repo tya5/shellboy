@@ -939,7 +939,9 @@ impl Store {
                 if let Some(path) = &args.agents {
                     self.set_agents_tx(tx, &id, path, caller, now)?;
                 }
-                MutationResult::value(thread_details(tx, &id)?)
+                let mut result = MutationResult::value(thread_details(tx, &id)?)?;
+                result.changed_threads.push(id);
+                Ok(result)
             }
             Command::ThreadFork(args) => {
                 let id = uuid::Uuid::new_v4().to_string();
@@ -949,7 +951,9 @@ impl Store {
                 if let Some(path) = &args.agents {
                     self.set_agents_tx(tx, &id, path, caller, now)?;
                 }
-                MutationResult::value(thread_details(tx, &id)?)
+                let mut result = MutationResult::value(thread_details(tx, &id)?)?;
+                result.changed_threads.push(id);
+                Ok(result)
             }
             Command::ThreadGet(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
@@ -3949,5 +3953,125 @@ mod driverless_child_stop_notification_tests {
             }
             owner.shutdown().await.unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod browser_creation_notification_tests {
+    use super::*;
+    use crate::{
+        app::DataOwner,
+        control::{Control, EngineEvent},
+    };
+    async fn fixture() -> (tempfile::TempDir, DataOwner, Arc<Control>) {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        std::fs::write(&path,"default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+        let owner = DataOwner::start(
+            Some(path),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        control.start().await.unwrap();
+        (root, owner, control)
+    }
+    fn create() -> Command {
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        })
+    }
+    #[tokio::test]
+    async fn standalone_create_and_fork_publish_exact_postcommit_ids_without_replay_events() {
+        let (_root, owner, control) = fixture().await;
+        let mut events = control.subscribe();
+        let create = Request::new(format!("{}:standalone-create", owner.instance_id), create());
+        let first = control.request(create.clone()).await;
+        assert!(first.ok, "{first:?}");
+        let id = first.result.as_ref().unwrap()["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(matches!(events.try_recv(),Ok(EngineEvent::Changed{thread_id,..})if thread_id==id));
+        let replay = control.request(create).await;
+        assert_eq!(replay.result, first.result);
+        assert!(events.try_recv().is_err());
+        let parent = id.clone();
+        owner
+            .db
+            .call(move |db| {
+                let tx = db.transaction()?;
+                crate::history::append_node(
+                    &tx,
+                    &parent,
+                    "fork-source",
+                    None,
+                    "user",
+                    &json!({"role":"user","content":"source"}),
+                    "now",
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let fork = Request::new(
+            format!("{}:standalone-fork", owner.instance_id),
+            Command::ThreadFork(ThreadForkArgs {
+                agents: None,
+                thread_id: id,
+                node_id: "fork-source".into(),
+                cwd: None,
+            }),
+        );
+        let first = control.request(fork.clone()).await;
+        assert!(first.ok, "{first:?}");
+        let fork_id = first.result.as_ref().unwrap()["thread_id"]
+            .as_str()
+            .unwrap();
+        assert!(
+            matches!(events.try_recv(),Ok(EngineEvent::Changed{thread_id,..})if thread_id==fork_id)
+        );
+        let replay = control.request(fork).await;
+        assert_eq!(replay.result, first.result);
+        assert!(events.try_recv().is_err());
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn rolled_back_standalone_create_does_not_emit_or_retain_a_thread() {
+        let (_root, owner, control) = fixture().await;
+        owner.db.call(|db|{db.execute_batch("CREATE TRIGGER reject_browser_create BEFORE INSERT ON thread BEGIN SELECT RAISE(ABORT,'synthetic create rollback'); END;")?;Ok(())}).await.unwrap();
+        let mut events = control.subscribe();
+        let response = control
+            .request(Request::new(
+                format!("{}:rolled-back-create", owner.instance_id),
+                create(),
+            ))
+            .await;
+        assert!(!response.ok);
+        assert!(events.try_recv().is_err());
+        assert_eq!(
+            owner
+                .db
+                .call(|db| Ok(
+                    db.query_row("SELECT count(*) FROM thread", [], |r| r.get::<_, i64>(0))?
+                ))
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            control.shutdown().await.unwrap_err().code,
+            ErrorCode::SaveFailed
+        );
+        owner.shutdown().await.unwrap();
     }
 }
