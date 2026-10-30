@@ -1,5 +1,24 @@
 # Validation record
 
+## Main Windows Shutdown-Fixture Follow-up (#52)
+
+Main source `1aa591b` CI41016702414 passes Linux1,572/0/28 and
+macOS1,571/0/29, but Windows records1,455 passed/1 failed/21 ignored. The
+failure is `recovery_paths::shutdown_context_save_failure_is_cached_but_wait_and_run_still_drain`
+at its three-second saved-wait-registration barrier, before shutdown begins.
+All new native interruption cases passed. Preserve that failure separately from
+the successful pre-main manual Windows run. No request response was captured at
+the failing barrier, so its cause is not proven to be runner load.
+
+A fixture-only correction explicitly starts Control before synthetic owner facts,
+observes the unchanged durable registration predicate with a60-second watchdog
+and premature-response diagnostics, and keeps the observed wait alive120seconds.
+Its5ms local polling does not add a product observer; initial human registration
+emits no Changed notification. All capture-error caching, stopped reason, wait
+cleanup and restart assertions remain. The fresh macOS standard check passes
+1,571/0/29, layout88, Python6, format and strict all-target Clippy. Native Windows
+qualification of the correction remains pending at this checkpoint.
+
 ## Pending Messages And Human Turn Interruption (#52)
 
 The unchanged product/test tree committed as `74592a9` / `47e6751` passes

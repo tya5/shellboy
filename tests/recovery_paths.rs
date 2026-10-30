@@ -131,6 +131,33 @@ async fn owner(root: &std::path::Path) -> DataOwner {
         .unwrap()
 }
 
+// Human wait registration has no Changed event. Observe the durable predicate,
+// not a short scheduling interval or completion of an unrelated startup worker.
+async fn wait_registered(
+    owner: &DataOwner,
+    operation: &str,
+    task: &mut tokio::task::JoinHandle<Response<Value>>,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let key = format!("wait.pending.{operation}");
+            let registered = owner.db.call(move |db| {
+                Ok(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
+                    [key], |row| row.get::<_, bool>(0),
+                )?)
+            }).await.unwrap();
+            if registered {
+                return;
+            }
+            tokio::select! {
+                result = &mut *task => panic!("wait {operation} completed before registration: {result:?}"),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(5)) => {},
+            }
+        }
+    }).await.unwrap_or_else(|_| panic!("wait {operation} did not persist its registration within the fixture watchdog"));
+}
+
 #[tokio::test]
 async fn connection_loss_preserves_auto_operation_id_and_does_not_resend() {
     let root = tempfile::tempdir().unwrap();
@@ -278,7 +305,7 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
     let root = tempfile::tempdir().unwrap();
     let owner = owner(root.path()).await;
     let control = Control::new(&owner, root.path().into());
-    control.start().await.unwrap();
+    bounded(control.start()).await.unwrap();
     owner.db.call(|db| {
         let tx=db.transaction()?;
         for (thread,run,turn,parent,state) in [("parent","r-parent","u-parent",None,"running"),("child","r-child","u-child",Some("r-parent"),"running"),("recovering","r-recovery","u-recovery",None,"recovery_wait")] {
@@ -291,7 +318,7 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
         tx.commit()?;Ok(())
     }).await.unwrap();
     let operation = format!("{}:shutdown-observation", owner.instance_id);
-    let wait = tokio::spawn({
+    let mut wait = tokio::spawn({
         let control = control.clone();
         let operation = operation.clone();
         async move {
@@ -302,34 +329,13 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
                         conditions: vec![WaitCondition::RunEnded {
                             run_id: "r-parent".into(),
                         }],
-                        timeout_ms: 30000,
+                        timeout_ms: 120000,
                     }),
                 ))
                 .await
         }
     });
-    tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        loop {
-            let key = format!("wait.pending.{operation}");
-            if owner
-                .db
-                .call(move |db| {
-                    Ok(db.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
-                        [key],
-                        |r| r.get::<_, bool>(0),
-                    )?)
-                })
-                .await
-                .unwrap()
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    wait_registered(&owner, &operation, &mut wait).await;
     control.shutdown().await.unwrap();
     assert!(wait.await.unwrap().ok);
     owner.shutdown().await.unwrap();
@@ -388,9 +394,10 @@ async fn shutdown_context_save_failure_is_cached_but_wait_and_run_still_drain() 
     let root = tempfile::tempdir().unwrap();
     let owner = owner(root.path()).await;
     let control = Control::new(&owner, root.path().into());
+    bounded(control.start()).await.unwrap();
     owner.db.call(|db|{db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','','','now'); INSERT INTO run(id,thread_id,state,stop_reason,created_at)VALUES('r','t','live','explicit_stop','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now'); CREATE TRIGGER reject_shutdown_context BEFORE INSERT ON node WHEN NEW.kind='interruption_context' BEGIN SELECT RAISE(ABORT,'fixture capture failed'); END;")?;Ok(())}).await.unwrap();
     let operation = format!("{}:failed-context-wait", owner.instance_id);
-    let wait = tokio::spawn({
+    let mut wait = tokio::spawn({
         let control = control.clone();
         let operation = operation.clone();
         async move {
@@ -399,34 +406,13 @@ async fn shutdown_context_save_failure_is_cached_but_wait_and_run_still_drain() 
                     operation,
                     Command::Wait(WaitArgs {
                         conditions: vec![WaitCondition::RunEnded { run_id: "r".into() }],
-                        timeout_ms: 30000,
+                        timeout_ms: 120000,
                     }),
                 ))
                 .await
         }
     });
-    tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        loop {
-            let key = format!("wait.pending.{operation}");
-            if owner
-                .db
-                .call(move |db| {
-                    Ok(db.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
-                        [key],
-                        |r| r.get::<_, bool>(0),
-                    )?)
-                })
-                .await
-                .unwrap()
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    wait_registered(&owner, &operation, &mut wait).await;
     let failure = control.prepare_shutdown().await.unwrap_err();
     assert_eq!(failure.code, ErrorCode::SaveFailed);
     owner

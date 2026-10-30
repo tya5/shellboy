@@ -149,3 +149,15 @@ confirms that a branches-only push filter excludes tag events.
 [Manual runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow?tool=cli)
 can select a branch with `--ref`; the workflow must remain available on the
 default branch. Preserve that existing entry point.
+
+## Shutdown fixture registration (#52 Windows follow-up)
+
+Main run41016702414 failed before shutdown: the recovery fixture exhausted its
+three-second guard waiting for durable wait registration. Separate explicit
+Control startup from that guard, inspect the same saved app_meta predicate under
+a60-second deadlock watchdog, and surface an early wait response as a failure.
+Initial human wait registration emits no Changed event, so a local5ms fixture
+poll is permitted; it adds no product observer. The fixture's wait expiry must
+exceed the registration watchdog. Retain every capture-failure caching and
+wait/Run-drain assertion. This does not establish runner load as the cause;
+keep the failed native evidence and qualify the correction on Windows again.

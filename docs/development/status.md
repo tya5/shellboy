@@ -2,6 +2,15 @@
 
 ## Pending Message Publication (#52)
 
+Main `1aa591b` contains #52 after the successful pre-main Windows qualification.
+Its main CI41016702414 passes Linux1,572/macOS1,571 but Windows fails a
+three-second shutdown-fixture wait-registration guard before shutdown begins.
+All new Turn-interruption/native-gate cases passed. Keep that failure distinct
+from the earlier successful manual run. A fixture-only readiness/diagnostic
+correction passes a fresh macOS standard check (1,571/0/29, layout88, Python6,
+format and strict Clippy). It must pass manual Windows qualification before
+another main push. Issue #52 remains open.
+
 #53/#56 are published on main `b686ec1`, with successful exact-SHA native CI
 41005281669 (Linux1,527 / macOS1,526 / Windows1,411 passed, zero failures).
 Both issues are closed after review. The installed optimized local binary is

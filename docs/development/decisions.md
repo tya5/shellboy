@@ -1272,3 +1272,20 @@ paid automatic summaries without improving this source-safety boundary. Revisit
 only if a concrete change alters selected/protected source semantics without
 advancing an existing fence. Deterministic Store-only regressions distinguish
 new Run, new Turn and unchanged active Turn instead of racing driver adoption.
+
+
+## Shutdown registration readiness (#52, 2026-10-30)
+
+Main CI41016702414 passes Linux/macOS but fails Windows at the three-second
+wait.pending registration barrier in the shutdown capture-failure fixture,
+before prepare_shutdown runs. The identical product/test tree passed manual
+Windows41015832578. This supports a fixture readiness investigation, not a
+claim that shutdown failed or that runner scheduling is proven responsible.
+
+Start Control explicitly before installing synthetic owner facts; use one
+shared60-second saved-registration watchdog with premature-result diagnostics
+and a120-second observed wait. Initial human wait registration has no Changed
+notification, so use a bounded5ms fixture poll instead of a tight yield/DB loop.
+Keep all failure caching, receipt, Run-stop and drain assertions. No product
+timer, retry, worker or native lifecycle changes. Revisit if the expanded
+diagnostics expose a real request failure or a missing durable registration.
