@@ -1,5 +1,38 @@
 # Validation record
 
+## #61 documentation qualification
+
+Single-conversation docs-only worktree, base16c8934, macOS arm64/Rust1.99.1.
+No child delegation, code/test/workflow/schema/config/dependency or installed
+binary change. Source checks use cli.rs MessageSendOptions/MessageCancelOptions,
+Control pending-message cancellation/foreground-release rules, shell spawning
+and inherited environment, Origin boundaries, existing TUI confirmation paths
+and raw retention/startup recovery contracts.
+
+- Standard `sh scripts/check.sh`: exit0; Rust7groups1611pass/0fail/31ignore,
+  layout88/Python6/fmt/strictClippy. Later wording was checked with a rebuilt
+  candidate; latest-main rebase and full standard are repeated before push.
+- Candidate debug binary `docs get --limit-bytes 65536` reconstructs User Guide,
+  Agent Guide, CLI reference and TUI guide exactly with matching source SHA256,
+  no continuation. This uses the bundled owner-independent docs, not installed
+  old-guide output or a live owner modification. EN/JA usage sections each have
+  exactly three user bullets; both safety sections have the same five topics.
+- Candidate message send/cancel and usage get --help confirm the flags/wording.
+  No real send, cancellation, paid API or user-store mutation is used for help.
+- EN/JA self-review distinguishes shell approval from existing TUI confirmations
+  and CLI state/ownership checks. cwd/worktrees are not sandboxes; stopping is
+  not rollback, output retention is not permanent, and restart does not revive
+  terminal Runs. Origins are not an OS hostile-model boundary. No future #59
+  sender-interface feature is claimed as already implemented.
+- WezTerm Shift+click is a macOS user report in issue61, not new developer or
+  other-terminal validation. Three-OS sandbox recipes/profile/proxy examples
+  are deferred: no current macOS/Linux/Windows sandbox execution or boundary
+  qualification is claimed. Seatbelt/bubblewrap/Landlock and Windows dedicated
+  user/NTFS/Firewall are named only, with owner-mediated read caveats.
+
+Final exact-SHA main CI is reported separately after push. No issue close,
+release, install or #59 work is part of this change.
+
 ## 2026-10-30: #58 diagnostic transition filtering
 
 On main c6397b1 plus this isolated correction, native macOS arm64 with pinned

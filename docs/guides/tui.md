@@ -242,7 +242,7 @@ Ordinary shell results separate stdout/stderr blocks only when verified from ret
 
 F6 returns to the item list; Esc closes details without changing draft or original reading anchor. Reclaimed source shows a reason rather than an empty successful body.
 
-Open links using standard terminal controls; modifiers, tmux, and mouse capture follow terminal settings. If capture interferes, use F2 terminal selection or copy the full URL from F7. Shellboy does not claim to verify browser launch success.
+Open links using standard terminal controls; modifiers, tmux, and mouse capture follow terminal settings. While TUI mouse capture is active, WezTerm normally bypasses it with Shift+click ([`bypass_mouse_reporting_modifiers`](https://wezterm.org/config/lua/config/bypass_mouse_reporting_modifiers.html) default); a user confirmed this on macOS. Other terminals or customized bindings may differ. If capture interferes, use F2 terminal selection or copy the full URL from F7. Shellboy does not claim to verify browser launch success.
 
 ### Recovery wait
 
