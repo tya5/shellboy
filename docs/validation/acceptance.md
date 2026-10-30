@@ -2923,3 +2923,24 @@ config files retain the existing strict loader error; use `config init` with the
 same `--config` before startup. No existing configuration or installed binary
 was changed by these checks. Installer guidance is a source/output change for
 the next release; old v0.3.0 assets are not modified.
+
+### Path-safety follow-up and local rerun history
+
+The initial seven setup tests are followed by a Unix-only non-Unicode path test
+(eight on Unix, six on Windows). A disposable-HOME reproduction found a JSON
+serialization panic when init reported a non-Unicode configuration path.
+`eed67fe` rejects that unsupported path before file I/O and uses display-safe
+UTF-8 for diagnostic directory paths. All eight focused tests pass locally;
+no user path/configuration was used or modified.
+
+The local combined check at `453c5e0` failed the existing unpaused-index repaint
+assertion in `real_tui_accepts_text_renders_proxy_response_and_exits_cleanly`;
+`bb7e29b`, differing only in documentation reconciliation, passed the full
+standard rerun without Rust/test changes. Its exact-source three-OS main CI
+[41077938813](https://github.com/tya5/shellboy/actions/runs/41077938813) also passes.
+The same pre-existing repaint assertion recurred in the default-concurrency
+local full check at `eed67fe`, while setup tests, fmt, Clippy and other tests
+passed. No timeout, assertion or test skip is changed. A bounded full recheck
+uses `RUST_TEST_THREADS=2`; report that environment/result separately and do not
+claim it diagnoses or fixes the repaint issue. Final-source ordinary main CI
+remains a distinct gate for the path-safety follow-up.
