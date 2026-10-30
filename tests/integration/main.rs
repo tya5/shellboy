@@ -39,6 +39,8 @@ mod frontend;
 mod frontend_activity;
 #[path = "../frontend_ordered.rs"]
 mod frontend_ordered;
+#[path = "../frontend_reactivity.rs"]
+mod frontend_reactivity;
 #[path = "../gc.rs"]
 mod gc;
 #[path = "../history.rs"]
