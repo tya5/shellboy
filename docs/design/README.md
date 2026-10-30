@@ -32,3 +32,5 @@ handling. A design document does not establish successful verification. Check th
 - [Pending messages and Turn interruption](pending-messages.md) (#52)
 
 - [Reactive history retention (#58)](tui-history-retention.md)
+
+- [Conversation redesign (#41)](conversation-redesign.md)

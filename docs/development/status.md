@@ -10,10 +10,13 @@ messages and exited results through three held next-response gaps, with tiny
 shared cache; explicit pause/return-to-tail behavior passes. No paid API or
 user-store operation is included. See [acceptance](../validation/acceptance.md).
 
-The implementation is qualified for the user-authorized standalone main admission;
-main three-OS CI remains the next independent gate and is linked from issue58.
+Standalone main e8c1ff2 passes native CI41034892332 on Linux1,615/macOS1,614/
+Windows1,499 with zero failures; artifact SHAs match. Issue58 is closed with final
+results. Its source is the prerequisite for the #41 branch.
 The installed binary remains main1fec7f0, including #47/#52/#53/#56, and is not
-changed by this source work. #41 implementation has not started.
+changed by this source work. #41 design is now adopted on issue-41/conversation;
+complete B+C conversation/inline interaction is next. G's added operation catalogue,
+form clarity, headings and popup-wheel requirements are in the full ledger.
 
 [The #41 delivery plan](issue-41-plan.md) tracks the full body/comments including
 staged-main instruction6518940167. Finish #58 independently first, then adopt

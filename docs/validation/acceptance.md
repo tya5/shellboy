@@ -40,8 +40,10 @@ message/results. Both owners exit0 with no recorded fixture errors.
 
 This is native macOS PTY/cell evidence, not a WezTerm pixel screenshot or physical
 Windows terminal qualification. No external/paid API, user DB/settings or installed
-binary changes are included. Native main CI is a separate publication gate; final
-run links/results are recorded on issue58.
+binary changes are included. Exact main e8c1ff22162cd11c54ed89aa34463ab3b13c57d4 passes native three-OS
+CI41034892332: Linux1,615/0/30, macOS1,614/0/31, Windows1,499/0/23 (threads4).
+All artifact source SHAs match. Issue58 is closed with final run/results. These
+results do not validate later #41 implementation.
 
 ## Review Correction Qualification (#52)
 

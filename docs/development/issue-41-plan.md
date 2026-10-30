@@ -1,6 +1,7 @@
 # Conversation redesign delivery plan (#41)
 
-Baseline: main1fec7f0. Follow the issue body and comments through6518940167.
+Baseline: main e8c1ff2 after independently completed #58. Follow the issue body
+and comments through6519745314.
 The latest user instruction permits independent usable main increments, each
 with complete local standard checks and main three-OS CI. Do not close #41
 until every adopted requirement is delivered. Keep #58 separate and first;
@@ -11,13 +12,14 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 
 | Increment | Scope | State |
 | --- | --- | --- |
-| Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Implemented/locally verified; standalone main CI gate next |
-| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Planned |
+| Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Complete: e8c1ff2, native three-OS CI41034892332 green |
+| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted locally; B+C implementation next |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Planned |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Planned |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Planned |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
+| G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
 
 Each increment must be usable independently. A requirement that crosses these
 boundaries must land with its complete action/read/render path, not a stub.
@@ -63,6 +65,17 @@ Report shipped and remaining scope on the issue after each main admission.
 - [ ] Actual PTY captures80/wide and palette variants, synthetic large history,
   sustained output responsiveness, raw-query/batch/read counters and timing
   comparison. Never claim mock/auto tests establish physical Windows terminal UX.
+
+- [ ] G: Wheel scrolls the top popup only under its painted bounds; outside/edge/no
+  content does not redraw or move history; F2 ignores mouse.
+- [ ] G: F8 section headings are nonselectable separate rows, skipped by arrows/pages;
+  counts remain actions only, residual category is Other, filtering hides headings.
+- [ ] G: One typed catalogue supplies operation meaning/effect, CLI identity, terms,
+  field help/default source/discovery and confirmation policy; complete CLI/TUI
+  coverage includes docs/RAG and attach shorthand. No generic form DSL.
+- [ ] G: Forms explain the exact operation and effect; Enter is display/execute/send
+  as appropriate, read-only RunGet is clear, empty IDs have discovery help; full
+  operation-to-CLI and effect/label tests plus actual PTY form captures.
 
 ## Decisions to settle in adopted design
 

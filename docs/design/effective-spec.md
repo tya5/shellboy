@@ -209,3 +209,7 @@ Issue #58 adopts [reactive history retention](tui-history-retention.md) before
 the independently reviewable conversation redesign increments tracked in
 [the #41 plan](../development/issue-41-plan.md). Follow ownership, finite visible
 working sets and paid-text hydration remain invariants throughout those changes.
+
+Issue #41 adopts [conversation redesign](conversation-redesign.md) in independently
+usable increments following #58. The delivery ledger includes G operation/forms
+requirements added through6519745314. Adoption does not claim all increments implemented.
