@@ -68,6 +68,7 @@
         Write-Output 'First setup: shellboy config init -> edit the reported config path and set api_key_env -> shellboy config check -> shellboy'
         Write-Output 'Keep API key values in the environment, not the config file. Use the same --config path for every step.'
         Write-Output 'Guide: shellboy docs get --id shellboy/configuration'
+        Write-Output 'For older releases without config init/check, follow the bundled configuration guide manually.'
         Write-Output "Read upgrade details: https://github.com/tya5/shellboy/releases/tag/$version"
     } finally {
         Remove-Item -LiteralPath $tmp -Recurse -Force

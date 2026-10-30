@@ -6,6 +6,10 @@ Configuration is TOML read when the owner (`shellboy` without a subcommand) star
 
 ## First setup without an owner
 
+Published v0.3.0 predates these setup commands. With that older binary, create the
+configuration manually using the minimal example below; do not overwrite an
+existing file. The commands apply to a build/release containing this feature.
+
 ```sh
 shellboy config init
 # Edit the config_path printed in the JSON result; choose your API root and model.

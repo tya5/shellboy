@@ -1091,3 +1091,22 @@ no executable Linux recipe is claimed. Windows gives unverified least-privilege
 account/ACL, egress-policy and VM alternatives, not a shell-wrapper recipe.
 See [verified and unverified scope](../validation/acceptance.md#guide-follow-up-67).
 No Rust code, installed binary, real database, real provider or Release changes.
+
+## First-run configuration guidance (#69, 2026-10-30)
+
+Standalone `config init` exclusively creates the bundled commented template at
+the selected path and leaves existing files/symlinks intact. `config check` needs
+no owner/database, strictly loads that path, reports missing defaults/credential
+variable names without values, and only GETs the bounded model catalog. API-root
+suffix errors and 404 explain `/v1` versus `/v1/responses`; exact template
+placeholders remain unfinished setup, not a ready configuration.
+
+The existing empty welcome and send/recovery notices show Japanese setup facts,
+path, minimal example and next steps; the welcome remains visible after a
+rejected unsaved first send. Rendering architecture and source/history semantics
+are unchanged. Guides (including the Japanese User Guide) and installer output
+use init -> edit/set environment -> check -> restart/start. Keyless loopback
+configuration and precedence are documented. AGENTS existence display is deferred
+because it needs worker-fed observations and overlaps #41. No schema, toolchain,
+provider login, interactive wizard, real-provider tests or Release changes.
+See [validation](../validation/acceptance.md#first-run-configuration-69).
