@@ -805,6 +805,13 @@ async fn run_with_delivery(
         ui_subscription.select(selection.active_thread.as_deref());
         actions.enable_cancel(control_tasks.is_empty());
         tokio::select! {
+            _=control.gc.availability_changed()=> {
+                if let Some(thread)=selection.active_thread.as_ref()
+                    && let Some(generation)=selection.generations.get(thread).copied()
+                {
+                    update(&updates,UiUpdate::DetailSourcesChanged {thread_id:thread.clone(),generation}).await;
+                }
+            },
             _=tokio::task::yield_now(),if receipt_batch.active() && updates.main_slot()=> {},
             changed=ipc_failure.changed(),if watch_ipc_failure=> {
                 watch_ipc_failure = false;

@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 mod history;
@@ -31,6 +31,8 @@ pub struct GcService {
     attachments: Arc<AttachmentService>,
     files: BlockingFiles,
     lane: Arc<Mutex<()>>,
+    // One coalesced permit for the existing frontend; never raw data or a task.
+    availability_changed: Arc<Notify>,
 }
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CollectionReport {
@@ -121,7 +123,11 @@ impl GcService {
             data_dir,
             attachments,
             lane: Arc::new(Mutex::new(())),
+            availability_changed: Arc::new(Notify::new()),
         }
+    }
+    pub(crate) async fn availability_changed(&self) {
+        self.availability_changed.notified().await;
     }
     pub async fn wait_idle(&self) -> Result<()> {
         self.files.wait_idle().await
@@ -338,6 +344,10 @@ impl GcService {
                     report.deferred = true;
                     continue;
                 }
+                if !candidate.marked {
+                    // begin_raw has committed its new retention generation.
+                    self.availability_changed.notify_one();
+                }
                 loop {
                     let execution = candidate.id.clone();
                     let step = self
@@ -345,6 +355,9 @@ impl GcService {
                         .call(move |db| Ok(raw_step(db, &execution)))
                         .await
                         .map_err(crate::app::storage_error)??;
+                    if step.0 > 0 || (step.1 && !step.2) {
+                        self.availability_changed.notify_one();
+                    }
                     report.raw_bytes_collected += step.0;
                     total = total.saturating_sub(step.0);
                     if step.1 {
@@ -373,10 +386,15 @@ impl GcService {
     }
     pub async fn history_step(&self, job_id: &str) -> Result<HistoryStep> {
         let job = job_id.to_owned();
-        self.database
+        let step = self
+            .database
             .call(move |db| Ok(history_step(db, &job)))
             .await
-            .map_err(crate::app::storage_error)?
+            .map_err(crate::app::storage_error)??;
+        if step.nodes_tombstoned > 0 {
+            self.availability_changed.notify_one();
+        }
+        Ok(step)
     }
 }
 

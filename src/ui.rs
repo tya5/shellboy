@@ -19,6 +19,7 @@ mod bell;
 mod chrome;
 mod composer;
 mod details;
+pub use details::{DetailSourceFacts, DetailSourceSnapshot};
 pub(crate) mod draft;
 mod help;
 mod history_interaction;
@@ -918,11 +919,15 @@ pub enum UiUpdate {
         anchor: ViewAnchor,
         follow: bool,
     },
+    DetailSourcesChanged {
+        thread_id: String,
+        generation: u64,
+    },
     DetailLinks {
         thread_id: String,
         generation: u64,
         request_id: u64,
-        result: Result<Vec<crate::presentation::PresentationLink>, String>,
+        result: Result<DetailSourceSnapshot, String>,
     },
     ToolPreview {
         thread_id: String,
@@ -1723,12 +1728,43 @@ impl UiState {
         if let Some(action) = self.thread_browser.take_filter_request(now) {
             self.deferred_actions.push(action);
         }
+        // Only the actually visible detail consumer requests saved facts. The
+        // existing UI loop admits its notification-driven 500ms deadline; this
+        // is not a timer that polls the database when nothing has changed.
+        if self.top_overlay() == Some(overlay::Overlay::Details)
+            && let Some(thread) = self.view().thread_id.clone()
+        {
+            let generation = self.view().generation;
+            if let Some(mut details) = self.details.take() {
+                details.reconcile_source_membership(self.view());
+                if let Some(action) =
+                    details.refresh_request(thread, generation, &mut self.next_detail_request, now)
+                {
+                    self.deferred_actions.push(action);
+                }
+                self.details = Some(details);
+            }
+        }
         std::mem::take(&mut self.deferred_actions)
     }
     pub fn take_terminal_requests(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut self.terminal_requests)
     }
     pub fn apply(&mut self, update: UiUpdate) {
+        if let UiUpdate::DetailSourcesChanged {
+            thread_id,
+            generation,
+        } = &update
+        {
+            if self.view().matches(thread_id, *generation) {
+                let visible = self.top_overlay() == Some(overlay::Overlay::Details);
+                if let Some(details) = &mut self.details {
+                    details.invalidate_sources();
+                    self.dirty |= visible;
+                }
+            }
+            return;
+        }
         if matches!(&update, UiUpdate::SavedMessage { .. }) {
             self.touch_save_update(&update);
         }
@@ -2081,6 +2117,9 @@ impl UiState {
             | UiUpdate::ModelReceive { .. } => {
                 unreachable!("activity handled before general updates")
             }
+            UiUpdate::DetailSourcesChanged { .. } => {
+                unreachable!("handled before selected-view updates")
+            }
             UiUpdate::ToolPreview {
                 thread_id,
                 generation,
@@ -2242,10 +2281,14 @@ impl UiState {
                 details,
                 draft,
             } => {
+                let selected = self.view().matches(&details.thread_id, generation);
                 let Some(view) = self.view_for(&details.thread_id, generation) else {
                     return;
                 };
                 view.on_thread(details, draft);
+                if selected && let Some(details) = &mut self.details {
+                    details.invalidate_sources();
+                }
             }
             UiUpdate::History {
                 thread_id,
@@ -2501,11 +2544,15 @@ impl UiState {
                 view_revision,
                 message,
             } => {
+                let selected = self.view().matches(&thread_id, generation);
                 if let Some(view) = self
                     .view_for(&thread_id, generation)
                     .filter(|v| view_revision.is_none_or(|revision| revision == v.view_revision))
                 {
-                    view.on_load_failed(message);
+                    view.on_load_failed(message.clone());
+                    if selected && let Some(details) = &mut self.details {
+                        details.mark_stale(&format!("更新失敗 · 前回の観測値: {message}"));
+                    }
                 }
             }
             UiUpdate::HistoryInvalidated {

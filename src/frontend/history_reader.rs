@@ -417,53 +417,108 @@ impl<'a> HistoryReader<'a> {
         .await;
         checked_storage(self.control, result).await
     }
-    /// Item-scoped link hydration never installs off-page bodies into the
-    /// conversation window and never reads shell raw output.
+    /// Bounded selected-item facts. No off-page body is installed into history
+    /// and no shell output bytes are read. All saved/current facts share one job.
     pub(super) async fn links(
         &self,
         node_ids: Vec<String>,
-    ) -> Result<Vec<crate::presentation::PresentationLink>, ApiError> {
+    ) -> Result<DetailSourceSnapshot, ApiError> {
         if node_ids.is_empty()
             || node_ids.len() > 2
             || node_ids.iter().any(|id| id.is_empty() || id.len() > 256)
         {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
-                "Link source requires one or two bounded node IDs",
+                "Detail source requires one or two bounded node IDs",
             ));
         }
         let result = async {
-            let rows = self.control.store.database.call(move |db| {
+            let (rows, read_revision, observed_at) = self.control.store.database.call(move |db| {
                 let tx = db.transaction()?;
                 let mut rows = Vec::with_capacity(node_ids.len());
                 let mut query = tx.prepare("SELECT id,kind,CASE WHEN length(CAST(payload_json AS BLOB))<=98304 THEN payload_json END,deleted_reason FROM node WHERE id=?1")?;
+                // Node/group identity constrains every call; a matching call ID
+                // elsewhere can never supply current lifecycle facts.
+                let mut tools = tx.prepare(r"
+                    SELECT CASE WHEN length(CAST(c.call_id AS BLOB))<=512 THEN c.call_id END,s.id,s.state,s.exit_code,s.output_complete,
+                           s.retention_generation,
+                           EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id)
+                    FROM tool_call c JOIN tool_group g ON g.id=c.group_id
+                    LEFT JOIN shell_execution s ON s.id=c.operation_id AND s.turn_id=g.turn_id
+                    WHERE c.group_id IN (
+                      SELECT CASE WHEN json_valid(n.payload_json) THEN json_extract(n.payload_json,'$.group_id') END
+                      FROM node n WHERE n.id=?1 AND n.kind='assistant_response'
+                      UNION SELECT r.group_id FROM tool_result r WHERE r.node_id=?1)
+                    AND (EXISTS(SELECT 1 FROM node n WHERE n.id=?1 AND n.kind='assistant_response'
+                         AND json_valid(n.payload_json) AND json_extract(n.payload_json,'$.group_id')=c.group_id)
+                         OR EXISTS(SELECT 1 FROM tool_result r WHERE r.node_id=?1
+                            AND r.group_id=c.group_id AND r.call_id=c.call_id))
+                    ORDER BY c.ordinal,c.call_id LIMIT 17")?;
                 for id in node_ids {
-                    let row = query.query_row([id], |row|Ok(RawNode {
+                    let row = query.query_row([&id], |row|Ok(RawNode {
                         id:row.get(0)?,kind:row.get(1)?,payload:row.get(2)?,reason:row.get(3)?,received_recovery_wait:false,
                     })).optional()?;
-                    let Some(row) = row.filter(|row|row.payload.is_some() && row.reason.is_none()) else {
-                        return Err(StorageError::from(ApiError::new(ErrorCode::TargetUnavailable,"Link source is unavailable, deleted, or larger than the bounded preview allowance; use original access")));
-                    };
-                    rows.push(row);
+                    let current = if row.as_ref().is_some_and(|row|row.payload.is_some() && row.reason.is_none()) { tools.query_map([&id], |row| Ok((
+                        row.get::<_,Option<String>>(0)?,row.get::<_,Option<String>>(1)?,
+                        row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,
+                        row.get::<_,Option<bool>>(4)?,row.get::<_,Option<i64>>(5)?,
+                        row.get::<_,bool>(6)?,
+                    )))?.collect::<Result<Vec<_>,_>>()? } else {Vec::new()};
+                    rows.push((id,row,current));
                 }
                 drop(query);
+                drop(tools);
+                let read_revision=message_queue::read_revision();
+                let observed_at=chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
                 tx.commit()?;
-                Ok(rows)
+                Ok((rows,read_revision,observed_at))
             }).await.map_err(storage_error)?;
             let width=self.width;
             presentation_work(move || {
-                let mut links=Vec::<crate::presentation::PresentationLink>::new();
-                for row in rows {
+                let mut sources=Vec::with_capacity(rows.len());
+                for (node_id,row,current) in rows {
+                    let unavailable = |reason: &str| DetailSourceFacts {
+                        node_id:node_id.clone(),kind:Default::default(),fields:vec![],links:vec![],
+                        unavailable_reason:Some(reason.into()),
+                    };
+                    let Some(row)=row.filter(|row| row.payload.is_some() && row.reason.is_none()) else {
+                        sources.push(unavailable("出典が削除・回収済み、または取得上限を超えています。O 原文で確認"));
+                        continue;
+                    };
                     if row.payload.as_deref().is_none_or(|payload|serde_json::from_str::<Value>(payload).is_err()) {
-                        return Err(ApiError::new(ErrorCode::TargetUnavailable,"Saved link source is malformed; use original access"));
+                        sources.push(unavailable("出典の形式を確認できません。O 原文で確認"));
+                        continue;
                     }
-                    let node=row.into_ui_node(Some(NodePosition::At(0)),width);
-                    for link in node.presentation.links {
-                        if links.len() >= 128 {return Ok(links);}
-                        if !links.iter().any(|old|old.url==link.url) {links.push(link);}
+                    let mut node=row.into_ui_node(Some(NodePosition::At(0)),width);
+                    let mut fields=Vec::new();
+                    let field=|key:String,label:&str,value:String| crate::presentation::PresentationField {
+                        key,label:label.into(),value,display:None,value_omitted:false,
+                    };
+                    fields.push(field("/ui/detail_preview_bounds".into(),"詳細の取得範囲","最大16呼出し・128項目・128リンク、既存metadata上限内 · O原文で確認".into()));
+                    if current.len()>16 {
+                        fields.push(field("/current_tools/truncated".into(),"現在の実行情報","先頭16呼出しまで · 詳細はCLIで確認".into()));
                     }
+                    for (index,(call,execution,state,code,complete,retention,has_output)) in current.into_iter().take(16).enumerate() {
+                        let prefix=format!("/current_tools/{index}");
+                        let mut call_field=field(format!("{prefix}/call_id"),"呼出しID",call.clone().unwrap_or_default());
+                        if call.is_none() {call_field.display=Some("IDが表示上限を超えています · O原文".into());call_field.value_omitted=true;}
+                        fields.push(call_field);
+                        fields.push(field(format!("{prefix}/execution_id"),"実行ID",execution.unwrap_or_else(||"未取得".into())));
+                        fields.push(field(format!("{prefix}/state"),"現在の実行状態",state.unwrap_or_else(||"利用不可・未実行".into())));
+                        fields.push(field(format!("{prefix}/exit_code"),"現在の終了コード",code.map_or("未確定".into(),|v|v.to_string())));
+                        fields.push(field(format!("{prefix}/output_complete"),"出力回収完了",complete.map_or("未取得".into(),|v|v.to_string())));
+                        fields.push(field(format!("{prefix}/retention_generation"),"出力保持世代",retention.map_or("未取得".into(),|v|v.to_string())));
+                        fields.push(field(format!("{prefix}/output_available"),"保存出力あり",has_output.to_string()));
+                    }
+                    fields.extend(node.presentation.fields.into_iter().take(128usize.saturating_sub(fields.len())));
+                    node.presentation.blocks=Vec::new();
+                    node.presentation.fields=fields;
+                    node.presentation.links.truncate(128);
+                    node.presentation.bound_metadata();
+                    sources.push(DetailSourceFacts {node_id,kind:node.presentation.kind,fields:node.presentation.fields,
+                        links:node.presentation.links,unavailable_reason:None});
                 }
-                Ok(links)
+                Ok(DetailSourceSnapshot {read_revision,observed_at,sources})
             }).await?
         }.await;
         checked_storage(self.control, result).await
@@ -756,6 +811,93 @@ mod detail_link_tests {
     use serde_json::json;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn detail_current_execution_and_availability_follow_saved_source_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        owner.db.call(|db| {
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
+            for group in ["g","other"] {
+                let attempt=format!("attempt-{group}");
+                let node=format!("call-{group}");
+                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,'u',0,0,'p','m',0,'completed','{}','now')",[&attempt])?;
+                db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,'u','completed','now')",rusqlite::params![group,attempt])?;
+                db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','assistant_response','now',?2)",rusqlite::params![node,json!({"group_id":group,"text":"[source](https://example.test/source)"}).to_string()])?;
+                db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,'same',0,'shell','{}','completed')",[group])?;
+            }
+            db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('other',?1,1,'shell','{}','completed')",["x".repeat(200_000)])?;
+            db.execute_batch("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('exec','r','u','exec','running','/','{}','UTF-8','UTF-8','closed','now'); UPDATE tool_call SET operation_id='exec' WHERE group_id='g'; INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('exec',0,'stdout',0,X'616263','now');")?;
+            Ok(())
+        }).await.unwrap();
+        let (updates, _) = std::sync::mpsc::sync_channel(8);
+        let reader = HistoryReader::new(&control, &updates, 80);
+        let first = reader
+            .links(vec!["call-g".into(), "call-other".into()])
+            .await
+            .unwrap();
+        let get = |source: &DetailSourceFacts, key: &str| {
+            source
+                .fields
+                .iter()
+                .find(|f| f.key == key)
+                .map(|f| f.value.clone())
+        };
+        assert_eq!(
+            first.sources[0].kind,
+            crate::presentation::PresentationKind::Assistant
+        );
+        let bounded_id = first.sources[1]
+            .fields
+            .iter()
+            .find(|field| field.key == "/current_tools/1/call_id")
+            .unwrap();
+        assert!(bounded_id.value_omitted && bounded_id.value.is_empty());
+        assert!(bounded_id.display.as_deref().unwrap().contains("上限"));
+        assert_eq!(
+            get(&first.sources[0], "/current_tools/0/state").as_deref(),
+            Some("running")
+        );
+        assert_eq!(
+            get(&first.sources[0], "/current_tools/0/output_available").as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            get(&first.sources[1], "/current_tools/0/execution_id").as_deref(),
+            Some("未取得")
+        );
+        owner.db.call(|db| {
+            db.execute_batch("UPDATE shell_execution SET state='exited',exit_code=7,output_complete=1,retention_generation=1 WHERE id='exec'; DELETE FROM output_chunk WHERE execution_id='exec'; UPDATE node SET deleted_reason='gc',payload_json=NULL WHERE id='call-other';")?; Ok(())
+        }).await.unwrap();
+        let second = reader
+            .links(vec!["call-g".into(), "call-other".into()])
+            .await
+            .unwrap();
+        assert!(second.read_revision > first.read_revision);
+        assert_eq!(
+            get(&second.sources[0], "/current_tools/0/state").as_deref(),
+            Some("exited")
+        );
+        assert_eq!(
+            get(&second.sources[0], "/current_tools/0/exit_code").as_deref(),
+            Some("7")
+        );
+        assert_eq!(
+            get(&second.sources[0], "/current_tools/0/output_available").as_deref(),
+            Some("false")
+        );
+        assert_eq!(
+            get(&second.sources[0], "/current_tools/0/retention_generation").as_deref(),
+            Some("1")
+        );
+        assert!(second.sources[1].unavailable_reason.is_some());
+        assert!(second.sources[1].links.is_empty());
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn offwindow_sources_are_bounded_and_unavailable_is_not_an_empty_link_list() {
         let root = tempfile::tempdir().unwrap();
         let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
@@ -773,10 +915,17 @@ mod detail_link_tests {
         }).await.unwrap();
         let (updates, _incoming) = std::sync::mpsc::sync_channel(8);
         let reader = HistoryReader::new(&control, &updates, 80);
-        let links = reader
+        let snapshot = reader
             .links(vec!["call".into(), "result".into()])
             .await
             .unwrap();
+        assert!(snapshot.observed_at.ends_with(" UTC"));
+        assert_eq!(snapshot.sources.len(), 2);
+        let links = snapshot
+            .sources
+            .iter()
+            .flat_map(|source| &source.links)
+            .collect::<Vec<_>>();
         assert!(
             links
                 .iter()
@@ -794,10 +943,13 @@ mod detail_link_tests {
             );
         }
         for id in ["large", "deleted", "absent"] {
-            assert_eq!(
-                reader.links(vec![id.into()]).await.unwrap_err().code,
-                ErrorCode::TargetUnavailable
-            );
+            let snapshot = reader.links(vec!["call".into(), id.into()]).await.unwrap();
+            assert_eq!(snapshot.sources[0].node_id, "call");
+            assert!(snapshot.sources[0].unavailable_reason.is_none());
+            let unavailable = &snapshot.sources[1];
+            assert_eq!(unavailable.node_id, id);
+            assert!(unavailable.unavailable_reason.is_some());
+            assert!(unavailable.fields.is_empty() && unavailable.links.is_empty());
         }
         owner.shutdown().await.unwrap();
     }

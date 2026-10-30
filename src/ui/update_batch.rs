@@ -19,7 +19,8 @@ impl UiUpdate {
             | Self::EditRequestLoaded { .. }
             | Self::SavedMessage { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
-            Self::DetailLinks { .. }
+            Self::DetailSourcesChanged { .. }
+            | Self::DetailLinks { .. }
             | Self::SendOperation { .. }
             | Self::DraftRecovery { .. }
             | Self::RestoreArchives { .. }

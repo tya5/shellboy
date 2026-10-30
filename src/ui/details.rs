@@ -13,7 +13,24 @@ use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
 };
-use std::cell::Cell;
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DetailSourceFacts {
+    pub node_id: String,
+    pub kind: PresentationKind,
+    pub fields: Vec<PresentationField>,
+    pub links: Vec<crate::presentation::PresentationLink>,
+    pub unavailable_reason: Option<String>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DetailSourceSnapshot {
+    pub read_revision: u64,
+    pub observed_at: String,
+    pub sources: Vec<DetailSourceFacts>,
+}
 #[derive(Clone, Copy)]
 enum Mode {
     Nodes,
@@ -24,8 +41,16 @@ enum Mode {
 pub(super) struct Details {
     pub node_id: String,
     source_node_ids: Vec<String>,
+    item_key: Option<super::ItemKey>,
+    item_history_revision: Option<u64>,
     item_scoped: bool,
-    extra_links: Vec<crate::presentation::PresentationLink>,
+    source_kind: PresentationKind,
+    source_snapshot: Option<DetailSourceSnapshot>,
+    sources_dirty: bool,
+    sources_stale: Option<String>,
+    last_sources_request: Option<Instant>,
+    selected_field_key: Option<String>,
+    selected_link_url: Option<String>,
     links_pending: bool,
     links_request_id: u64,
     links_error: Option<String>,
@@ -36,6 +61,7 @@ pub(super) struct Details {
     page: Cell<usize>,
     pub request_id: u64,
     original: Option<HistoryBody>,
+    original_observed_at: Option<String>,
     original_lines: Vec<Line<'static>>,
     revision: u64,
 }
@@ -357,8 +383,20 @@ impl Details {
         let revision = source_revision(view, &node_id);
         Self {
             source_node_ids: vec![node_id.clone()],
+            item_key: None,
+            item_history_revision: None,
             item_scoped: false,
-            extra_links: vec![],
+            source_kind: view
+                .nodes()
+                .get(selected_node)
+                .map(|node| node.presentation.kind.clone())
+                .unwrap_or_default(),
+            source_snapshot: None,
+            sources_dirty: true,
+            sources_stale: None,
+            last_sources_request: None,
+            selected_field_key: None,
+            selected_link_url: None,
             links_pending: false,
             links_request_id: 0,
             links_error: None,
@@ -370,12 +408,19 @@ impl Details {
             page: Cell::new(8),
             request_id: 0,
             original: None,
+            original_observed_at: None,
             original_lines: Vec::new(),
             revision,
         }
     }
     pub(super) fn for_node(view: &ThreadView, node_id: String, links: bool) -> Self {
         let mut details = Self::new(view, links);
+        details.source_kind = view
+            .nodes()
+            .iter()
+            .find(|node| node.node_id == node_id)
+            .map(|node| node.presentation.kind.clone())
+            .unwrap_or_default();
         details.node_id = node_id.clone();
         details.source_node_ids = vec![node_id];
         details.item_scoped = true;
@@ -392,32 +437,128 @@ impl Details {
         }
         self
     }
-    fn links(&self, view: &ThreadView) -> Vec<crate::presentation::PresentationLink> {
-        let mut links = Vec::new();
+    pub(super) fn with_item_key(mut self, key: super::ItemKey) -> Self {
+        self.item_key = Some(key);
+        self.item_history_revision = None;
+        self
+    }
+    pub(super) fn reconcile_source_membership(&mut self, view: &ThreadView) -> bool {
+        let revision = view.history_revision();
+        if self.item_history_revision == Some(revision) {
+            return false;
+        }
+        self.item_history_revision = Some(revision);
+        let Some(super::ItemKey::Tool { group_id, call_id }) = &self.item_key else {
+            return false;
+        };
+        // The active projection is finite. Include the two pinned source nodes
+        // even if a newer tail moved them outside that projection.
+        let (begin, end) = super::presentation::projection_bounds(view);
+        let mut indices = (begin..end).collect::<std::collections::BTreeSet<_>>();
         for id in &self.source_node_ids {
-            if let Some(node) = view.nodes().iter().find(|node| &node.node_id == id) {
-                for link in &node.presentation.links {
-                    if links.len() >= 128 {
-                        return links;
-                    }
-                    if !links
-                        .iter()
-                        .any(|saved: &crate::presentation::PresentationLink| saved.url == link.url)
+            if let Some(index) = view.nodes().iter().position(|node| &node.node_id == id) {
+                indices.insert(index);
+            }
+        }
+        let mut call: Option<(u64, String)> = None;
+        let mut result: Option<(u64, String)> = None;
+        for index in indices {
+            let node = &view.nodes()[index];
+            for block in &node.presentation.blocks {
+                let Some(tool) = &block.tool else {
+                    continue;
+                };
+                if tool.group_id.as_ref() != Some(group_id) || &tool.call_id != call_id {
+                    continue;
+                }
+                for (candidate, selected) in [
+                    (&tool.call_node_id, &mut call),
+                    (&tool.result_node_id, &mut result),
+                ] {
+                    if let Some(id) = candidate
+                        && selected
+                            .as_ref()
+                            .is_none_or(|(read, _)| node.presentation.read_revision > *read)
                     {
-                        links.push(link.clone());
+                        *selected = Some((node.presentation.read_revision, id.clone()));
                     }
                 }
             }
         }
-        for link in &self.extra_links {
-            if links.len() >= 128 {
-                break;
+        let mut ids = Vec::new();
+        for (_, id) in call.into_iter().chain(result) {
+            if !ids.contains(&id) {
+                ids.push(id);
             }
-            if !links.iter().any(|saved| saved.url == link.url) {
-                links.push(link.clone());
+        }
+        if ids.is_empty() {
+            return false;
+        }
+        if !ids.contains(&self.node_id) && ids.len() < 2 {
+            ids.insert(0, self.node_id.clone());
+        }
+        if ids == self.source_node_ids {
+            return false;
+        }
+        self.source_node_ids = ids;
+        self.invalidate_sources();
+        true
+    }
+    fn links(&self, view: &ThreadView) -> Vec<crate::presentation::PresentationLink> {
+        let mut links = Vec::new();
+        for id in &self.source_node_ids {
+            let observed = self
+                .source_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.sources.iter().find(|source| &source.node_id == id));
+            let source = if let Some(source) = observed {
+                if source.unavailable_reason.is_some() {
+                    continue;
+                }
+                source.links.as_slice()
+            } else {
+                view.nodes()
+                    .iter()
+                    .find(|node| &node.node_id == id)
+                    .map_or(&[][..], |node| node.presentation.links.as_slice())
+            };
+            for link in source {
+                if links.len() >= 128 {
+                    return links;
+                }
+                if !links
+                    .iter()
+                    .any(|saved: &crate::presentation::PresentationLink| saved.url == link.url)
+                {
+                    links.push(link.clone());
+                }
             }
         }
         links
+    }
+    pub(super) fn invalidate_sources(&mut self) {
+        self.sources_dirty = true;
+        self.sources_stale = Some("参照元の更新を確認中".into());
+    }
+    pub(super) fn mark_stale(&mut self, reason: &str) {
+        self.sources_stale = Some(safe(reason));
+    }
+    pub(super) fn refresh_request(
+        &mut self,
+        thread_id: String,
+        generation: u64,
+        next: &mut u64,
+        now: Instant,
+    ) -> Option<UiAction> {
+        if !self.sources_dirty
+            || self.links_pending
+            || self.last_sources_request.is_some_and(|last| {
+                now.saturating_duration_since(last) < Duration::from_millis(500)
+            })
+        {
+            return None;
+        }
+        Some(self.request_links_at(thread_id, generation, next, now))
     }
     pub(super) fn request_links(
         &mut self,
@@ -425,9 +566,20 @@ impl Details {
         generation: u64,
         next: &mut u64,
     ) -> UiAction {
+        self.request_links_at(thread_id, generation, next, Instant::now())
+    }
+    fn request_links_at(
+        &mut self,
+        thread_id: String,
+        generation: u64,
+        next: &mut u64,
+        now: Instant,
+    ) -> UiAction {
         *next = next.wrapping_add(1);
         self.links_request_id = *next;
         self.links_pending = true;
+        self.sources_dirty = false;
+        self.last_sources_request = Some(now);
         self.links_error = None;
         UiAction::LoadDetailLinks {
             thread_id,
@@ -439,25 +591,150 @@ impl Details {
     pub(super) fn accept_links(
         &mut self,
         request_id: u64,
-        result: Result<Vec<crate::presentation::PresentationLink>, String>,
+        result: Result<DetailSourceSnapshot, String>,
     ) {
         if self.links_request_id != request_id || !self.links_pending {
             return;
         }
         self.links_pending = false;
-        match result {
-            Ok(links) => self.extra_links = links.into_iter().take(128).collect(),
-            Err(error) => self.links_error = Some(error),
+        if self.sources_dirty {
+            return;
         }
+        match result {
+            Ok(mut snapshot) => {
+                let expected = self
+                    .source_node_ids
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>();
+                let actual = snapshot
+                    .sources
+                    .iter()
+                    .map(|source| &source.node_id)
+                    .collect::<std::collections::BTreeSet<_>>();
+                if snapshot.sources.len() > 2
+                    || snapshot.sources.len() != expected.len()
+                    || actual != expected
+                {
+                    self.links_error = Some("参照元が変わりました。開き直してください".into());
+                    self.sources_stale = self.links_error.clone();
+                    return;
+                }
+                if self
+                    .source_snapshot
+                    .as_ref()
+                    .is_some_and(|old| snapshot.read_revision < old.read_revision)
+                {
+                    self.sources_dirty = true;
+                    self.sources_stale = Some("古い参照元の応答を再取得中".into());
+                    return;
+                }
+                for source in &mut snapshot.sources {
+                    source.fields.truncate(128);
+                    source.links.truncate(128);
+                    if source.unavailable_reason.is_some() {
+                        source.links.clear();
+                    }
+                }
+                self.source_snapshot = Some(snapshot);
+                self.sources_stale = None;
+                self.links_error = None;
+                if matches!(self.mode, Mode::Links)
+                    && let Some(url) = &self.selected_link_url
+                {
+                    let mut links = Vec::new();
+                    for source in &self.source_snapshot.as_ref().unwrap().sources {
+                        if source.unavailable_reason.is_none() {
+                            for link in &source.links {
+                                if !links.iter().any(
+                                    |saved: &&crate::presentation::PresentationLink| {
+                                        saved.url == link.url
+                                    },
+                                ) {
+                                    links.push(link);
+                                }
+                            }
+                        }
+                    }
+                    self.selected = links
+                        .iter()
+                        .position(|link| &link.url == url)
+                        .unwrap_or_else(|| self.selected.min(links.len().saturating_sub(1)));
+                }
+                if matches!(self.mode, Mode::Fields)
+                    && let Some(key) = &self.selected_field_key
+                    && let Some(fields) = self.snapshot_fields()
+                    && let Some(index) = fields.iter().position(|field| &field.key == key)
+                {
+                    self.selected = index;
+                }
+            }
+            Err(error) => {
+                self.links_error = Some(safe(&error));
+                self.sources_stale = Some("取得失敗 · 前回の観測値を表示".into());
+            }
+        }
+    }
+    fn snapshot_fields(&self) -> Option<Vec<PresentationField>> {
+        let snapshot = self.source_snapshot.as_ref()?;
+        let source = snapshot
+            .sources
+            .iter()
+            .find(|source| source.node_id == self.node_id)?;
+        let mut fields = vec![PresentationField {
+            key: "node_id".into(),
+            label: "履歴node ID".into(),
+            value: self.node_id.clone(),
+            display: None,
+            value_omitted: false,
+        }];
+        if let Some(reason) = &source.unavailable_reason {
+            fields.push(PresentationField {
+                key: "/ui/source_unavailable".into(),
+                label: "参照元を取得できません".into(),
+                value: reason.clone(),
+                display: None,
+                value_omitted: false,
+            });
+        } else {
+            let node = UiNode {
+                presentation: crate::presentation::NodePresentation {
+                    kind: if source.kind == PresentationKind::Unknown {
+                        self.source_kind.clone()
+                    } else {
+                        source.kind.clone()
+                    },
+                    fields: source.fields.clone(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            fields.extend(if self.internal_fields {
+                source.fields.clone()
+            } else {
+                conversation_fields(&node)
+            });
+        }
+        fields.sort_by_key(|field| {
+            (
+                !field.key.starts_with("/current_tools/"),
+                crate::presentation::fields::group(&field.key).0,
+            )
+        });
+        Some(fields)
     }
     pub fn accept(&mut self, request_id: u64, body: HistoryBody, display: Vec<Line<'static>>) {
         if request_id == self.request_id && body.node_id == self.node_id {
             self.original = Some(body);
+            self.original_observed_at =
+                Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
             self.original_lines = display;
             self.scroll.set(0);
         }
     }
     fn fields(&self, view: &ThreadView) -> Vec<PresentationField> {
+        if let Some(fields) = self.snapshot_fields() {
+            return fields;
+        }
         let mut fields = vec![PresentationField {
             value_omitted: false,
             display: None,
@@ -476,8 +753,33 @@ impl Details {
         fields
     }
     pub(super) fn open_source(&mut self, node_id: String, next: &mut u64) -> UiAction {
-        self.node_id = node_id;
+        self.change_source(node_id);
         self.original(None, next)
+    }
+    fn change_source(&mut self, node_id: String) {
+        if self.node_id == node_id {
+            return;
+        }
+        self.original = None;
+        self.original_lines.clear();
+        self.original_observed_at = None;
+        self.request_id = 0;
+        self.source_kind = PresentationKind::Unknown;
+        if !self.source_node_ids.contains(&node_id) {
+            self.item_key = None;
+            self.item_history_revision = None;
+            self.source_node_ids = vec![node_id.clone()];
+            self.source_snapshot = None;
+            self.sources_dirty = true;
+            self.sources_stale = Some("参照元の変更を確認中".into());
+            self.links_error = None;
+            self.selected_field_key = None;
+            self.selected_link_url = None;
+            if !self.links_pending {
+                self.links_request_id = 0;
+            }
+        }
+        self.node_id = node_id;
     }
     fn original(&mut self, cursor: Option<String>, next: &mut u64) -> UiAction {
         *next = next.wrapping_add(1);
@@ -493,6 +795,18 @@ impl Details {
         self.sync_node(view);
         match key.code {
             KeyCode::Esc => return Outcome::Close,
+            KeyCode::Char('r') if !matches!(self.mode, Mode::Original) => {
+                self.invalidate_sources();
+                if !self.links_pending
+                    && let Some(thread) = view.thread_id.clone()
+                {
+                    return Outcome::Action(Box::new(self.request_links(
+                        thread,
+                        view.generation,
+                        next,
+                    )));
+                }
+            }
             KeyCode::F(6) => {
                 self.mode = if self.item_scoped {
                     Mode::Fields
@@ -605,8 +919,9 @@ impl Details {
                             return Outcome::Operation(operation);
                         }
                         if key.ends_with("node_id") {
-                            self.node_id = field.value.clone();
-                            return Outcome::Action(Box::new(self.original(None, next)));
+                            return Outcome::Action(Box::new(
+                                self.open_source(field.value.clone(), next),
+                            ));
                         }
                     }
                 }
@@ -621,6 +936,18 @@ impl Details {
             Mode::Original => 1,
         };
         self.selected = self.selected.min(count.saturating_sub(1));
+        if matches!(self.mode, Mode::Fields) {
+            self.selected_field_key = self
+                .fields(view)
+                .get(self.selected)
+                .map(|field| field.key.clone());
+        }
+        if matches!(self.mode, Mode::Links) {
+            self.selected_link_url = self
+                .links(view)
+                .get(self.selected)
+                .map(|link| link.url.clone());
+        }
         self.sync_node(view);
         Outcome::None
     }
@@ -631,12 +958,8 @@ impl Details {
                 .get(self.selected.min(view.nodes().len().saturating_sub(1)))
             && self.node_id != node.node_id
         {
-            self.node_id = node.node_id.clone();
-            self.source_node_ids = vec![self.node_id.clone()];
-            self.links_request_id = 0;
-            self.links_pending = false;
-            self.links_error = None;
-            self.extra_links.clear();
+            self.change_source(node.node_id.clone());
+            self.source_kind = node.presentation.kind.clone();
             self.revision = source_revision(view, &self.node_id);
             self.original = None;
             self.original_lines = Vec::new();
@@ -684,7 +1007,16 @@ impl Details {
                 })
                 .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
         } else if matches!(self.mode, Mode::Original) {
-            format!("node {}", safe(&self.node_id))
+            self.original
+                .as_ref()
+                .map(|body| {
+                    format!(
+                        "保存 {} · 表示受信 {}",
+                        safe(&body.provenance.created_at),
+                        self.original_observed_at.as_deref().unwrap_or("未確認")
+                    )
+                })
+                .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
         } else {
             format!(
                 "{} / {}件 · node {}",
@@ -694,11 +1026,11 @@ impl Details {
             )
         };
         let footer = if matches!(self.mode, Mode::Original) {
-            "Esc 戻る · ↑↓/PgUp/PgDn スクロール\nN 次page · P 先頭 · C 原文copy · F6 項目 · F7 リンク"
+            "Esc 戻る · ↑↓/PgUp/PgDn スクロール\nN 次page · P 先頭再取得 · O 再取得 · C 原文copy · F6 項目 · F7 リンク"
         } else if matches!(self.mode, Mode::Fields) {
-            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nO 原文 · C 値copy · V 要点/内部項目 · A 操作"
+            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nR 再取得 · O 原文 · C 値copy · V 要点/内部項目 · A 操作"
         } else {
-            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nO 原文 · C 値copy · A 操作 · F6 項目 · F7 リンク"
+            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nR 再取得 · O 原文 · C 値copy · A 操作 · F6 項目 · F7 リンク"
         };
         let mut body = popup::panel(frame, area, mode, &context, footer);
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
@@ -710,16 +1042,34 @@ impl Details {
             body.y += 1;
             body.height -= 1;
         }
-        if matches!(self.mode, Mode::Links)
-            && body.height > 1
-            && (self.links_pending || self.links_error.is_some())
+        if body.height > 1
+            && (self.links_pending
+                || self.sources_stale.is_some()
+                || self.links_error.is_some()
+                || self.source_snapshot.is_some())
         {
-            let notice = self
-                .links_error
-                .as_deref()
-                .unwrap_or("出典のリンクを取得中");
+            let mut parts = Vec::new();
+            if self.links_pending {
+                parts.push("参照元を取得中".to_owned());
+            }
+            if let Some(stale) = &self.sources_stale {
+                parts.push(stale.clone());
+            }
+            if let Some(error) = &self.links_error {
+                parts.push(error.clone());
+            }
+            if let Some(snapshot) = &self.source_snapshot {
+                if snapshot
+                    .sources
+                    .iter()
+                    .any(|source| source.unavailable_reason.is_some())
+                {
+                    parts.push("参照元が利用不可 · 原文の表示済みコピーとは別".into());
+                }
+                parts.push(format!("観測 {} · R再取得", snapshot.observed_at));
+            }
             frame.render_widget(
-                ratatui::widgets::Paragraph::new(safe(notice))
+                ratatui::widgets::Paragraph::new(safe(&parts.join(" · ")))
                     .style(Style::default().fg(theme::WARNING)),
                 Rect { height: 1, ..body },
             );
@@ -930,6 +1280,154 @@ mod tests {
         assert!(!details.links_pending);
         assert!(details.links_error.as_ref().unwrap().contains("再試行"));
     }
+    fn snapshot_for(
+        details: &Details,
+        view: &ThreadView,
+        extra: Vec<PresentationLink>,
+        read_revision: u64,
+    ) -> DetailSourceSnapshot {
+        DetailSourceSnapshot {
+            read_revision,
+            observed_at: "2026-10-30T12:34:56Z".into(),
+            sources: details
+                .source_node_ids
+                .iter()
+                .map(|id| {
+                    let node = view.nodes().iter().find(|node| &node.node_id == id);
+                    let mut links =
+                        node.map_or_else(Vec::new, |node| node.presentation.links.clone());
+                    if id == &details.node_id {
+                        links.extend(extra.clone());
+                    }
+                    DetailSourceFacts {
+                        node_id: id.clone(),
+                        kind: node.map_or(PresentationKind::Unknown, |node| {
+                            node.presentation.kind.clone()
+                        }),
+                        links,
+                        fields: node.map_or_else(Vec::new, |node| node.presentation.fields.clone()),
+                        unavailable_reason: None,
+                    }
+                })
+                .collect(),
+        }
+    }
+    #[test]
+    fn refreshed_selection_uses_only_the_current_mode_identity() {
+        let ui = state();
+        let mut details = Details::for_node(ui.view(), "source-node".into(), false);
+        let mut next = 0;
+        let snapshot = || DetailSourceSnapshot {
+            read_revision: 1,
+            observed_at: "UTC".into(),
+            sources: vec![DetailSourceFacts {
+                node_id: "source-node".into(),
+                fields: vec![PresentationField {
+                    key: "special".into(),
+                    label: "saved field".into(),
+                    value: "value".into(),
+                    ..Default::default()
+                }],
+                links: ["https://example.invalid/a", "https://example.invalid/b"]
+                    .into_iter()
+                    .map(|url| PresentationLink {
+                        url: url.into(),
+                        label: url.into(),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            }],
+        };
+        details.request_links("anonymous".into(), ui.view().generation, &mut next);
+        details.accept_links(next, Ok(snapshot()));
+        details.key(
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            ui.view(),
+            &mut next,
+        );
+        assert_eq!(details.selected_field_key.as_deref(), Some("node_id"));
+        details.key(
+            KeyEvent::new(KeyCode::F(7), KeyModifiers::NONE),
+            ui.view(),
+            &mut next,
+        );
+        details.key(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            ui.view(),
+            &mut next,
+        );
+        assert_eq!(details.selected, 1);
+        details.request_links("anonymous".into(), ui.view().generation, &mut next);
+        details.accept_links(next, Ok(snapshot()));
+        assert_eq!(
+            details.selected, 1,
+            "old field key must not override current URL selection"
+        );
+        assert!(
+            matches!(details.key(KeyEvent::new(KeyCode::Char('c'),KeyModifiers::NONE),ui.view(),&mut next),Outcome::Action(action) if matches!(&*action,UiAction::CopyText {text,..} if text=="https://example.invalid/b"))
+        );
+    }
+
+    #[test]
+    fn manual_refresh_during_pending_read_retires_before_one_coalesced_followup() {
+        let ui = state();
+        let mut details = Details::for_node(ui.view(), "source-node".into(), true);
+        let mut next = 0;
+        let now = Instant::now();
+        let first = details
+            .refresh_request("anonymous".into(), ui.view().generation, &mut next, now)
+            .unwrap();
+        let token = match first {
+            UiAction::LoadDetailLinks { request_id, .. } => request_id,
+            _ => unreachable!(),
+        };
+        assert!(matches!(
+            details.key(
+                KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+                ui.view(),
+                &mut next
+            ),
+            Outcome::None
+        ));
+        assert!(details.sources_dirty);
+        assert!(
+            details
+                .refresh_request(
+                    "anonymous".into(),
+                    ui.view().generation,
+                    &mut next,
+                    now + Duration::from_secs(1)
+                )
+                .is_none(),
+            "physical read must retire first"
+        );
+        let old = snapshot_for(&details, ui.view(), vec![], 1);
+        details.accept_links(token, Ok(old));
+        assert!(details.source_snapshot.is_none() && !details.links_pending);
+        assert!(
+            details
+                .refresh_request(
+                    "anonymous".into(),
+                    ui.view().generation,
+                    &mut next,
+                    now + Duration::from_millis(499)
+                )
+                .is_none()
+        );
+        assert!(
+            details
+                .refresh_request(
+                    "anonymous".into(),
+                    ui.view().generation,
+                    &mut next,
+                    now + Duration::from_millis(500)
+                )
+                .is_some()
+        );
+        assert!(next > token);
+    }
+
     #[test]
     fn scoped_offwindow_links_append_without_inserting_source_nodes_and_reject_old_replies() {
         let ui = state();
@@ -955,9 +1453,15 @@ mod tests {
             url: "https://example.invalid/offwindow".into(),
             ..Default::default()
         };
-        details.accept_links(token - 1, Ok(vec![extra.clone()]));
-        assert!(details.links_pending && details.extra_links.is_empty());
-        details.accept_links(token, Ok(vec![extra.clone()]));
+        details.accept_links(
+            token - 1,
+            Ok(snapshot_for(&details, ui.view(), vec![extra.clone()], 1)),
+        );
+        assert!(details.links_pending && details.source_snapshot.is_none());
+        details.accept_links(
+            token,
+            Ok(snapshot_for(&details, ui.view(), vec![extra.clone()], 1)),
+        );
         assert!(!details.links_pending);
         let links = details.links(ui.view());
         assert_eq!(links.len(), 31);
@@ -984,13 +1488,23 @@ mod tests {
         );
         details.accept_links(
             links_token,
-            Ok(vec![PresentationLink {
-                label: "later".into(),
-                url: "https://example.invalid/later".into(),
-                ..Default::default()
-            }]),
+            Ok(snapshot_for(
+                &details,
+                ui.view(),
+                vec![PresentationLink {
+                    label: "later".into(),
+                    url: "https://example.invalid/later".into(),
+                    ..Default::default()
+                }],
+                1,
+            )),
         );
-        assert_eq!(details.extra_links.len(), 1);
+        assert!(
+            details
+                .links(ui.view())
+                .iter()
+                .any(|link| link.url.ends_with("/later"))
+        );
         assert!(!details.links_pending);
         assert!(matches!(details.mode, Mode::Original));
         assert_ne!(details.request_id, details.links_request_id);
@@ -1010,27 +1524,271 @@ mod tests {
         let old = details.links_request_id;
         details.accept_links(
             old,
-            Ok(vec![PresentationLink {
-                url: "https://example.invalid/old".into(),
-                ..Default::default()
-            }]),
+            Ok(snapshot_for(
+                &details,
+                ui.view(),
+                vec![PresentationLink {
+                    url: "https://example.invalid/old".into(),
+                    ..Default::default()
+                }],
+                1,
+            )),
         );
         details.request_links("anonymous".into(), ui.view().generation, &mut next);
         let pending = details.links_request_id;
         details.selected = 1;
         details.sync_node(ui.view());
         assert_eq!(details.node_id, "second");
-        assert!(details.extra_links.is_empty());
-        assert!(!details.links_pending);
-        assert_eq!(details.links_request_id, 0);
+        assert!(details.source_snapshot.is_none());
+        assert!(
+            details.links_pending,
+            "scope changes wait for the physical old reply before another read"
+        );
         details.accept_links(
             pending,
-            Ok(vec![PresentationLink {
-                url: "https://example.invalid/stale".into(),
-                ..Default::default()
-            }]),
+            Ok(DetailSourceSnapshot {
+                read_revision: 2,
+                observed_at: "old".into(),
+                sources: vec![DetailSourceFacts {
+                    node_id: "source-node".into(),
+                    links: vec![PresentationLink {
+                        url: "https://example.invalid/stale".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            }),
         );
         assert!(details.links(ui.view()).is_empty());
+    }
+    #[test]
+    fn accepted_thread_changes_refresh_visible_facts_and_gc_overrides_cached_links() {
+        let mut ui = state();
+        let generation = ui.view().generation;
+        let base = Instant::now();
+        ui.take_deferred_actions();
+        ui.details = Some(Details::for_node(ui.view(), "source-node".into(), false));
+        let request = |ui: &mut UiState, now| {
+            ui.take_deferred_actions_at(now)
+                .into_iter()
+                .find_map(|action| match action {
+                    UiAction::LoadDetailLinks { request_id, .. } => Some(request_id),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let snapshot = |revision, state: &str, unavailable| DetailSourceSnapshot {
+            read_revision: revision,
+            observed_at: format!("2026-10-30T12:34:{revision:02}Z"),
+            sources: vec![DetailSourceFacts {
+                node_id: "source-node".into(),
+                fields: vec![PresentationField {
+                    key: "/current_tools/0/state".into(),
+                    label: "現在の状態".into(),
+                    value: state.into(),
+                    ..Default::default()
+                }],
+                links: vec![PresentationLink {
+                    url: "https://example.invalid/fresh".into(),
+                    label: "fresh".into(),
+                    ..Default::default()
+                }],
+                unavailable_reason: unavailable,
+                ..Default::default()
+            }],
+        };
+        let first = request(&mut ui, base);
+        ui.apply(super::super::UiUpdate::DetailLinks {
+            thread_id: "anonymous".into(),
+            generation,
+            request_id: first,
+            result: Ok(snapshot(1, "running", None)),
+        });
+        assert!(
+            ui.details
+                .as_ref()
+                .unwrap()
+                .fields(ui.view())
+                .iter()
+                .any(|field| field.value == "running")
+        );
+        let changed = || {
+            serde_json::from_value(serde_json::json!({"thread_id":"anonymous","title":"changed","cwd":"/synthetic","connection":"fixture","model":"fixture","agents_path":"","children_count":0,"shells_count":0})).unwrap()
+        };
+        ui.apply(super::super::UiUpdate::Thread {
+            generation,
+            details: changed(),
+            draft: None,
+        });
+        assert!(
+            !ui.take_deferred_actions_at(base + Duration::from_millis(499))
+                .iter()
+                .any(|action| matches!(action, UiAction::LoadDetailLinks { .. }))
+        );
+        let second = request(&mut ui, base + Duration::from_millis(500));
+        ui.apply(super::super::UiUpdate::DetailLinks {
+            thread_id: "anonymous".into(),
+            generation,
+            request_id: second,
+            result: Ok(snapshot(2, "exited", None)),
+        });
+        let mut terminal = Terminal::new(TestBackend::new(90, 28)).unwrap();
+        terminal
+            .draw(|frame| super::super::draw(frame, &mut ui))
+            .unwrap();
+        assert!(screen(&terminal).contains("exited"));
+        ui.apply(super::super::UiUpdate::Thread {
+            generation,
+            details: changed(),
+            draft: None,
+        });
+        let third = request(&mut ui, base + Duration::from_millis(1000));
+        ui.apply(super::super::UiUpdate::DetailLinks {
+            thread_id: "anonymous".into(),
+            generation,
+            request_id: third,
+            result: Ok(snapshot(3, "exited", Some("source collected".into()))),
+        });
+        assert_eq!(
+            ui.view().nodes()[0].presentation.links.len(),
+            30,
+            "underlying cached source remains intentionally untouched"
+        );
+        assert!(
+            ui.details.as_ref().unwrap().links(ui.view()).is_empty(),
+            "fresh unavailability overrides every stale loaded URL"
+        );
+        ui.details.as_mut().unwrap().mode = Mode::Links;
+        terminal
+            .draw(|frame| super::super::draw(frame, &mut ui))
+            .unwrap();
+        let shown = screen(&terminal);
+        assert!(shown.contains("利用不可"));
+        assert!(!shown.contains("example.invalid"));
+    }
+    #[test]
+    fn tool_metadata_membership_growth_refreshes_open_popup_without_retargeting_original() {
+        use crate::presentation::{BlockKind, PresentationBlock, ToolPresentation};
+        let mut ui = state();
+        let generation = ui.view().generation;
+        let base = Instant::now();
+        let tool = ToolPresentation {
+            group_id: Some("saved-group".into()),
+            call_id: "saved-call".into(),
+            call_node_id: Some("source-node".into()),
+            ..Default::default()
+        };
+        ui.view_mut().nodes_mut_for_test()[0].presentation.blocks = vec![PresentationBlock {
+            kind: BlockKind::ToolCall,
+            tool: Some(tool),
+            ..Default::default()
+        }];
+        let key = super::super::ItemKey::Tool {
+            group_id: "saved-group".into(),
+            call_id: "saved-call".into(),
+        };
+        ui.take_deferred_actions();
+        let mut details = Details::for_node(ui.view(), "source-node".into(), true)
+            .with_sources(&["source-node".into()])
+            .with_item_key(key);
+        details.mode = Mode::Original;
+        details.request_id = 41;
+        let body:HistoryBody=serde_json::from_value(serde_json::json!({"node_id":"source-node","kind":"assistant_response","text":"PAID ORIGINAL","context":{"state":"present","node_id":"source-node","created_at":"2026-10-30T00:00:00Z"},"provenance":{"kind":"assistant_response","created_at":"2026-10-30T00:00:00Z","source_revision":0},"source_node_ids":[],"previous_node_ids":[],"next_node_ids":[]})).unwrap();
+        details.accept(41, body, vec![Line::from("PAID ORIGINAL")]);
+        let observed = details.original_observed_at.clone();
+        ui.details = Some(details);
+        ui.next_detail_request = 41;
+        let source_request = |ui: &mut UiState, now| {
+            ui.take_deferred_actions_at(now)
+                .into_iter()
+                .find_map(|action| match action {
+                    UiAction::LoadDetailLinks {
+                        request_id,
+                        node_ids,
+                        ..
+                    } => Some((request_id, node_ids)),
+                    _ => None,
+                })
+        };
+        let (old, ids) = source_request(&mut ui, base).unwrap();
+        assert_eq!(ids, ["source-node"]);
+        let old_snapshot = snapshot_for(ui.details.as_ref().unwrap(), ui.view(), vec![], 10);
+        let before = ui.view().history_revision();
+        let mut fresh = ui.view().nodes()[0].clone();
+        fresh.presentation.blocks[0]
+            .tool
+            .as_mut()
+            .unwrap()
+            .result_node_id = Some("later-result".into());
+        ui.view_mut().tool_refresh = Some(before);
+        ui.apply(super::super::UiUpdate::ToolFacts {
+            thread_id: "anonymous".into(),
+            generation,
+            revision: before,
+            result: Ok(vec![fresh]),
+        });
+        assert!(
+            ui.view().history_revision() > before,
+            "tool-reference-only updates must advance source revision"
+        );
+        assert!(
+            source_request(&mut ui, base + Duration::from_millis(501)).is_none(),
+            "a changed membership cannot overlap its prior physical read"
+        );
+        assert_eq!(
+            ui.details.as_ref().unwrap().source_node_ids,
+            ["source-node", "later-result"]
+        );
+        ui.apply(super::super::UiUpdate::DetailLinks {
+            thread_id: "anonymous".into(),
+            generation,
+            request_id: old,
+            result: Ok(old_snapshot),
+        });
+        assert!(ui.details.as_ref().unwrap().source_snapshot.is_none());
+        let (next, ids) = source_request(&mut ui, base + Duration::from_millis(501)).unwrap();
+        assert_eq!(ids, ["source-node", "later-result"]);
+        let result_link = PresentationLink {
+            url: "https://example.invalid/new-result".into(),
+            ..Default::default()
+        };
+        ui.apply(super::super::UiUpdate::DetailLinks {
+            thread_id: "anonymous".into(),
+            generation,
+            request_id: next,
+            result: Ok(DetailSourceSnapshot {
+                read_revision: 11,
+                observed_at: "2026-10-30T12:34:56Z".into(),
+                sources: vec![
+                    DetailSourceFacts {
+                        node_id: "source-node".into(),
+                        ..Default::default()
+                    },
+                    DetailSourceFacts {
+                        node_id: "later-result".into(),
+                        kind: PresentationKind::ToolResult,
+                        links: vec![result_link.clone()],
+                        ..Default::default()
+                    },
+                ],
+            }),
+        });
+        let details = ui.details.as_ref().unwrap();
+        assert_eq!(details.node_id, "source-node");
+        assert_eq!(details.request_id, 41);
+        assert_eq!(details.original.as_ref().unwrap().text, "PAID ORIGINAL");
+        assert_eq!(details.original_observed_at, observed);
+        assert!(
+            details
+                .links(ui.view())
+                .iter()
+                .any(|link| link.url == result_link.url)
+        );
+        ui.details
+            .as_mut()
+            .unwrap()
+            .open_source("unrelated".into(), &mut 100);
+        assert!(ui.details.as_ref().unwrap().item_key.is_none());
     }
     #[test]
     fn saved_interruption_sections_are_distinguishable_and_keep_their_original_targets() {

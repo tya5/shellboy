@@ -367,7 +367,8 @@ impl UiState {
             .iter()
             .any(|node| node.node_id == source && !node.presentation.body_evicted);
         let mut details = details::Details::for_node(self.view(), source.clone(), links)
-            .with_sources(&item.source_node_ids);
+            .with_sources(&item.source_node_ids)
+            .with_item_key(item.key.clone());
         let generation = self.view().generation;
         let missing_link_source = links
             && item.source_node_ids.iter().any(|id| {
