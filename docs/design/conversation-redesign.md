@@ -357,3 +357,19 @@ for that source without discarding another available source. Every reply carries
 source IDs, monotonic read revision and observed UTC time. This is one visible
 popup consumer job/500ms; consolidating all main-view jobs remains separately
 open in D's shared refresh refactor, and does not gain a false completion claim.
+
+
+Source availability has a notification gap independent of normal Thread Changed:
+raw retention/history GC previously committed without a frontend invalidation.
+Use one crate-private `Notify` owned/cloned with the existing GcService, with a
+single stored permit (`notify_one`) for the one frontend consumer. Signal only
+after a raw/history batch actually commits an availability change, including
+committed batches before a later collection error; a rollback/empty pass does
+not signal. This adds no durable event, task, table, queue or polling timer.
+The frontend forwards a selected-view detail invalidation, not raw bytes or a
+full history reload; UI ignores it when no details are retained, and covered/F2
+details defer the bounded read until visible. Global GC may affect either of the
+at-most2 exact selected sources, so a single coalesced source read is justified;
+unrelated shell output does not use this notification. G can reuse it later for
+mutable storage/attachment management facts. The notification has no shutdown
+task: it drops with GcService/frontend references under existing owner shutdown.

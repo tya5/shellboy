@@ -92,6 +92,10 @@ claim that the final one-job target has been met.
   last-output age uses actual evidence, survives view switching, disappears at end.
 - [ ] Closed live output causes no output DB reads. Open output at most2reads/sec,
   4KiB/read, per-execution cursor/tail skipping, stopped on close/end/view switch.
+- [ ] E producer gap found during B+C audit: external Thread deletion currently
+  returns no changed_threads. Publish exact affected IDs after commit (including
+  cascade targets) before claiming external-delete list reactivity; test rollback
+  and late patches cannot resurrect them. This is not fixed by a manual reload.
 - [ ] Reactive list and watch refresh changed IDs only, bounded batches at most
   once/500ms, preserving selection/tree/filter/viewport; additions/removals/order
   use shared classification. Full reload only open/filter/Ctrl+R/pagination.
