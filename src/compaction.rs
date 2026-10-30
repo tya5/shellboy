@@ -1656,7 +1656,7 @@ mod tests {
 
     #[tokio::test]
     async fn successful_summary_cached_and_adopted_atomically_without_losing_originals() {
-        let(url,server)=summary_proxy(vec![json!({"id":"summary","status":"completed","output":[
+        let(url,server)=summary_proxy(vec![json!({"id":"summary","status":"completed","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"extra":"x".repeat(128*1024)},"output_tokens":10,"attribution":"x".repeat(128*1024)},"output":[
             {"type":"reasoning","summary":[{"type":"summary_text","text":"PRIVATE-REASONING"},{"type":"reasoning_text","text":"PRIVATE-DETAIL"}],"encrypted_content":"OPAQUE-AUDIT"},
             {"type":"message","role":"assistant","content":[{"type":"output_text","text":"## 目的\n"},{"type":"output_text","text":"Remember the task"}]}
         ]})]).await;
@@ -1741,6 +1741,8 @@ mod tests {
                 })?;
             let part: Value = serde_json::from_str(&part).unwrap();
             assert_eq!(part["text"], "## 目的\nRemember the task");
+            assert_eq!(part["raw_response"]["usage"],json!({"input_tokens":100,"input_tokens_details":{"cached_tokens":80},"output_tokens":10}));
+            assert!(part["raw_response"]["usage"].to_string().len()<256);
             assert_eq!(part["sources"], json!(["one", "two"]));
             assert_eq!(
                 part["raw_response"]["output"][0]["encrypted_content"],

@@ -90,3 +90,95 @@ pub(crate) fn normalize_response(response: &mut Value) {
         *usage = StandardUsage::from_value(usage).to_value();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_sql_and_save_validation_agree_at_every_numeric_boundary() {
+        let db = Connection::open_in_memory().unwrap();
+        let sql = format!("SELECT {}", sql_projection("?1"));
+        for (literal, expected) in [
+            ("0", Some(0)),
+            ("123", Some(123)),
+            ("9223372036854775807", Some(i64::MAX as u64)),
+            ("9223372036854775808", None),
+            ("18446744073709551615", None),
+            ("18446744073709551616", None),
+            ("-1", None),
+            ("1.0", None),
+            ("1e0", None),
+            ("true", None),
+            ("false", None),
+            ("\"1\"", None),
+            ("null", None),
+            ("{}", None),
+            ("[]", None),
+        ] {
+            let raw = format!(
+                r#"{{"input_tokens":{literal},"input_tokens_details":{{"cached_tokens":{literal}}},"output_tokens":{literal},"output_tokens_details":{{"reasoning_tokens":{literal}}},"total_tokens":{literal}}}"#
+            );
+            let rust = StandardUsage::from_value(&serde_json::from_str(&raw).unwrap());
+            let expected = StandardUsage {
+                input_tokens: expected,
+                cached_tokens: expected,
+                output_tokens: expected,
+                reasoning_tokens: expected,
+                total_tokens: expected,
+            };
+            assert_eq!(rust, expected, "save: {literal}");
+            let read = db
+                .query_row(&sql, [&raw], |row| StandardUsage::read(row, 0))
+                .unwrap();
+            assert_eq!(read, expected, "SQL: {literal}");
+            assert_eq!(StandardUsage::from_value(&rust.to_value()), expected);
+        }
+        for raw in [
+            None,
+            Some("{"),
+            Some("not JSON"),
+            Some("null"),
+            Some("{}"),
+            Some(r#"{"input_tokens_details":[],"output_tokens_details":"bad"}"#),
+        ] {
+            assert_eq!(
+                db.query_row(&sql, [raw], |row| StandardUsage::read(row, 0))
+                    .unwrap(),
+                StandardUsage::default(),
+                "{raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn whitelist_discards_huge_appendices_but_never_recurses_into_content() {
+        let mut raw = json!({"id":"fixed","usage":{
+            "input_tokens":20,"input_tokens_details":{"cached_tokens":0,"extra":"x".repeat(128*1024)},
+            "output_tokens":5,"output_tokens_details":{"reasoning_tokens":2,"extra":123},
+            "total_tokens":17,"attribution":{"items":["x".repeat(128*1024)]}},
+            "output":[{"usage":{"attribution":"user content"}}],"error":{"message":"preserved"}});
+        let original = raw.clone();
+        normalize_response(&mut raw);
+        assert_eq!(
+            raw["usage"],
+            json!({"input_tokens":20,"input_tokens_details":{"cached_tokens":0},"output_tokens":5,"output_tokens_details":{"reasoning_tokens":2},"total_tokens":17})
+        );
+        assert_eq!(raw["output"], original["output"]);
+        assert_eq!(raw["error"], original["error"]);
+        assert_eq!(raw["id"], original["id"]);
+        normalize_response(&mut raw);
+        assert!(raw["usage"].to_string().len() < 256);
+        let mixed = StandardUsage::from_value(
+            &json!({"input_tokens":-1,"input_tokens_details":{"cached_tokens":0},"output_tokens":5,"total_tokens":null}),
+        );
+        assert_eq!(mixed.input_tokens, None);
+        assert_eq!(mixed.cached_tokens, Some(0));
+        assert_eq!(mixed.output_tokens, Some(5));
+        assert_eq!(mixed.total_tokens, None);
+        assert_ne!(mixed, StandardUsage::default());
+        assert_eq!(StandardUsage::default().to_value(), json!({}));
+    }
+}

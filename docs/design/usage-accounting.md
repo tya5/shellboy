@@ -38,6 +38,12 @@ periodic scan or user-data edit is added. Existing GC owns old usage bytes.
 This normalizer is reusable by #47's separately agreed incremental aggregates;
 #49 itself does not implement aggregates or edit the parallel index/CLI work.
 
+The pre-existing non-2xx HTTP error path is diagnostic-only: it caps its body at
+64KiB and currently exposes no response usage to persistence. #49 does not alter
+its limits, diagnostics or payload exposure. #47 must separately agree how a
+small valid error body supplies typed usage without retaining the whole body;
+oversized, malformed and unreported values stay unknown, not zero.
+
 ## Guidance And Validation
 
 The Agent Guide describes one review at a completed task boundary using the

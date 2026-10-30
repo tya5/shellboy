@@ -1147,3 +1147,60 @@ async fn automatic_session_rejects_invalid_context_before_io_without_echoing_it(
         .unwrap();
     assert!(session_values(&disabled.requests.recv().await.unwrap()).is_empty());
 }
+
+#[tokio::test]
+async fn sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only() {
+    for state in ["completed", "failed", "incomplete"] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = HttpModelClient::new(Connection {
+            base_url: format!("http://{}/v1/", listener.local_addr().unwrap()),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut raw = final_response("unchanged body containing usage/attribution");
+        raw["status"] = state.into();
+        raw["usage"] = json!({"input_tokens":23,"input_tokens_details":{"cached_tokens":0,"extra":"x".repeat(128*1024)},"output_tokens":3,"attribution":"x".repeat(128*1024)});
+        if state != "completed" {
+            raw["error"] = json!({"code":"invalid_request_error","message":"unchanged diagnosis"});
+        }
+        let original = raw.clone();
+        let body = sse(&[json!({"type":format!("response.{state}"),"response":raw})]);
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = timeout(Duration::from_secs(60), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let _ = read_request(&mut stream).await;
+            stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).as_bytes()).await.unwrap();
+            stream.write_all(&body).await.unwrap();
+        });
+        let result = timeout(
+            Duration::from_secs(60),
+            client.response(
+                response_request("fixture", vec![], None, false),
+                CancellationToken::new(),
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        let raw = match result {
+            Ok(response) => {
+                assert_eq!(state, "completed");
+                response.raw
+            }
+            Err(failure) => {
+                assert_ne!(state, "completed");
+                failure.raw_response.unwrap()
+            }
+        };
+        assert_eq!(
+            raw["usage"],
+            json!({"input_tokens":23,"input_tokens_details":{"cached_tokens":0},"output_tokens":3})
+        );
+        assert_eq!(raw["output"], original["output"]);
+        assert_eq!(raw["error"], original["error"]);
+        assert_eq!(raw["id"], original["id"]);
+        server.await.unwrap();
+    }
+}

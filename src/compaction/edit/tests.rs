@@ -931,3 +931,71 @@ async fn activation_uses_the_prepared_request_count_instead_of_resnapshotting_a_
     );
     fixture.close().await;
 }
+
+#[tokio::test]
+async fn legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows() {
+    let fixture = Fixture::new().await;
+    fixture.text("one", "history").await;
+    let raw = json!({"input_tokens":50,"input_tokens_details":{"cached_tokens":12,"extra":"x".repeat(128*1024)},"attribution":"x".repeat(128*1024)}).to_string();
+    let saved = raw.clone();
+    fixture.db.call(move |db| {
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('past','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('past','t','past','completed','now');")?;
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('large','past',0,0,'p','m',0,'completed','{\"input_characters\":100,\"history_characters\":80}',?1,'now')",[raw])?;
+        Ok(())
+    }).await.unwrap();
+    let metrics = fixture.compactor.context_metrics("t").await.unwrap();
+    assert_eq!(metrics["last_successful_attempt"]["input_tokens"], 50);
+    assert_eq!(metrics["last_successful_attempt"]["cached_tokens"], 12);
+    assert_eq!(metrics["estimation_baseline_attempt_id"], "large");
+    let snapshot = fixture.compactor.snapshot("t", false).await.unwrap();
+    assert_eq!(snapshot.estimate.tokens(100), 50);
+    fixture
+        .db
+        .call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT usage_json FROM model_attempt WHERE id='large'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )?,
+                saved
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for raw in [
+        "{",
+        "{}",
+        r#"{"input_tokens":-1,"input_tokens_details":{"cached_tokens":false}}"#,
+        r#"{"input_tokens":1.0,"input_tokens_details":{"cached_tokens":"1"}}"#,
+        r#"{"input_tokens":9223372036854775808,"input_tokens_details":[]}"#,
+    ] {
+        let raw = raw.to_owned();
+        fixture
+            .db
+            .call(move |db| {
+                db.execute(
+                    "UPDATE model_attempt SET usage_json=?1 WHERE id='large'",
+                    [raw],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let metrics = fixture.compactor.context_metrics("t").await.unwrap();
+        assert!(
+            metrics["last_successful_attempt"]["input_tokens"].is_null(),
+            "{metrics}"
+        );
+        assert!(
+            metrics["last_successful_attempt"]["cached_tokens"].is_null(),
+            "{metrics}"
+        );
+        assert!(
+            metrics["estimation_baseline_attempt_id"].is_null(),
+            "{metrics}"
+        );
+    }
+    fixture.close().await;
+}

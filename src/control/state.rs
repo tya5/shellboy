@@ -563,6 +563,69 @@ mod tests {
         .unwrap()
     }
     #[test]
+    fn terminal_usage_is_normalized_atomically_and_replay_does_not_replace_it() {
+        let usage = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0,"extra":"x".repeat(128*1024)},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":-1},"total_tokens":127,"attribution":"x".repeat(128*1024)});
+        let canonical = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0},"output_tokens":4,"total_tokens":127});
+        for operation in [complete_attempt, fail_attempt, incomplete_attempt] {
+            let mut db = fixture("inflight");
+            let body = json!({"id":"response","usage":usage,"raw_response":{"usage":usage,"output":[{"usage":"user content"}]},"error":{"kind":"fixture"}});
+            // Transaction rollback must discard both terminal state and usage.
+            {
+                let tx = db.transaction().unwrap();
+                assert_eq!(
+                    operation(&tx, "attempt", &body, "new").unwrap(),
+                    AttemptTransition::Applied
+                );
+            }
+            let read = |db: &Connection| {
+                db.query_row(
+                    "SELECT state,usage_json,error_json FROM model_attempt WHERE id='attempt'",
+                    [],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .unwrap()
+            };
+            assert_eq!(read(&db).0, "inflight");
+            assert_eq!(read(&db).1.as_deref(), Some("{}"));
+            assert_eq!(
+                operation(&db, "attempt", &body, "new").unwrap(),
+                AttemptTransition::Applied
+            );
+            let saved = read(&db);
+            assert_eq!(
+                serde_json::from_str::<Value>(saved.1.as_deref().unwrap()).unwrap(),
+                canonical
+            );
+            if saved.0 != "completed" {
+                let error: Value = serde_json::from_str(&saved.2).unwrap();
+                assert_eq!(error["raw_response"]["usage"], canonical);
+                assert_eq!(
+                    error["raw_response"]["output"],
+                    body["raw_response"]["output"]
+                );
+                assert_eq!(error["error"], body["error"]);
+            }
+            assert_eq!(
+                operation(
+                    &db,
+                    "attempt",
+                    &json!({"usage":{"input_tokens":999}}),
+                    "late"
+                )
+                .unwrap(),
+                AttemptTransition::AlreadyApplied
+            );
+            assert_eq!(read(&db), saved);
+        }
+    }
+
+    #[test]
     fn late_failures_never_reclassify_completed_or_cancelled_attempts() {
         for state in ["completed", "cancelled"] {
             let db = fixture(state);

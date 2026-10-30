@@ -52,7 +52,7 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
         INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
         INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
         for (id,usage) in [
-            ("old",r#"{"input_tokens":20000,"input_tokens_details":{"cached_tokens":16000},"opaque":{"retain":true}}"#),
+            ("old",&format!(r#"{{"input_tokens":20000,"input_tokens_details":{{"cached_tokens":16000}},"opaque":{{"retain":true}},"attribution":"{}"}}"#,"x".repeat(128*1024))),
             ("new",r#"{"input_tokens_details":{"cached_tokens":0}}"#),
             ("missing",r#"{"input_tokens":123}"#),
             ("invalid",r#"{"input_tokens_details":{"cached_tokens":"9000"}}"#),
