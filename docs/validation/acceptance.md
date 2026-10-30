@@ -2,6 +2,30 @@
 
 ## Issue #48: outbound working-instruction provenance
 
+### Combined Local Integration Checkpoint
+
+Exact `702cef9eacf45ed628fcf8125c37b6eda4287640` applies only #48's two approved
+commits onto approved #51 documentation `f46fa2e`; both patches are identical in
+range-diff to `96454e5` / `120218c`. Independent re-review repeats the header
+unit tests (2 passed) and unified runtime_features suite (22 passed), with no
+findings. The combined worktree's standard command
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+passes layout (82 suites registered once), five Python checks, format, strict
+all-target Clippy and Rust **7 groups / 1,468 passed / 0 failed / 28 ignored**.
+Environment: macOS arm64 / pinned Rust 1.99.1; temporary stores and loopback mocks.
+The background command shell takes 264,078 ms including the preceding ff,
+cherry-picks and range-diff. Its saved initial cwd is the #51 worktree, but the
+command explicitly changes to the isolated #48 integration worktree before any
+integration or checks. `shellboy wait` observes completion; full logs and command
+metadata are independently checked rather than inferring success from acceptance.
+
+The source-specific result is distinct from the coder's earlier `120218c` run.
+Later documentation-only commits do not acquire that exact-SHA test result.
+The two validation-record insertion conflicts preserve both #48 and #51 sections.
+Origin/main is not reconciled, new three-OS CI is not run, and real-model behavior
+or physical-terminal evaluation remains unverified. Future main adoption and a
+separately authorized push still require base comparison and required rechecks.
+
 ### Environment And Exact Source
 
 macOS arm64 / pinned Rust 1.99.1, separate issue-48 worktree. The initial

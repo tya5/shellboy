@@ -2,6 +2,13 @@
 
 ## Issue #48: working-instruction provenance
 
+Combined local integration on the independently approved #51 documentation
+base `f46fa2e` passes at exact `702cef9`: 82-suite layout, five Python checks,
+format, strict Clippy and Rust 7 groups / 1,468 passed / 0 failed / 28 ignored.
+The #48 two-commit range-diff is unchanged, and independent new-SHA review
+repeats the header and full runtime_features suites without findings. This is
+still the #46 branch-based local integration, not origin/main adoption or CI.
+
 The actual instruction developer message now starts with one metadata line:
 JSON-quoted fixed Turn source path, user-editability, new-Turn rereading and
 same-Turn snapshot reuse. The following LF separates the original unmodified
