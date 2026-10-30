@@ -19,10 +19,14 @@ The coder's clean `bfd96f5` macOS standard check passes: format, strict all-targ
 Clippy, 86 test groups / 1,462 passed / 0 failed / 28 ignored. A subsequent
 src-only regression additionally proves child/Control fork overrides select a
 *distinct* file rather than merely inheriting the same path; its focused test
-passes. Final test/documentation review and post-integration full checks remain
-separate from the production-code evidence. See
-[acceptance](../validation/acceptance.md). Push, GitHub posting, installed-binary
-updates and three-OS CI remain unperformed in this task's local-only scope.
+passes and its test/documentation commit `9ddb49d` is independently approved.
+The exact integrated `9ddb49d` also passes the macOS standard check: format,
+strict all-target Clippy, 86 groups / 1,463 passed / 0 failed / 28 ignored.
+This includes the additional distinct-reference test; it is separate from the
+older 1,462-test production-code evidence. See
+[acceptance](../validation/acceptance.md). Main and remotes remain unchanged;
+push, GitHub posting, installed-binary updates, physical-terminal evaluation
+and three-OS CI remain unperformed in this task's local-only scope.
 
 
 ## Issue #46: measured native test performance completed

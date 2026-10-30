@@ -55,8 +55,27 @@ After the production-code approval, one src-only test explicitly distinguishes
 parent `parent.md` from child/fork `child.md`, so ignoring an override cannot
 accidentally pass an inheritance assertion. It passes with
 `cargo test --locked --lib child_and_control_fork` (1 passed); production code
-is unchanged. Final full-suite evidence including this additive test belongs to
-the post-integration check, not the earlier 1,462-test production run.
+is unchanged. Independent review approved the test/documentation commit
+`9ddb49d4609e6874dddcd335b9a05f3f472d6eb7` after repeating that focused test.
+
+### Final Post-Integration Check
+
+Exact integrated SHA `9ddb49d4609e6874dddcd335b9a05f3f472d6eb7`, in the separate
+integration worktree on macOS arm64 / Rust 1.99.1, passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH: format, strict all-target Clippy and all-target
+tests, **86 groups / 1,463 passed / 0 failed / 28 ignored**, exit 0. This result
+includes the additive distinct-reference test and does not replace the earlier
+1,462-test production checkpoint. Integration was fast-forward only, preserving
+reviewed SHAs without conflicts. The complete background shell took 306,042 ms,
+including its prior-check observation and fast-forward steps; this is not an
+isolated test-runtime measurement. Saved execution metadata confirms the actual
+command, integration cwd, exit 0 and complete output; the final standard log's
+counts were independently re-aggregated for this documentation update.
+
+These are local integration results, not three-OS CI or physical-terminal
+success. Main and remotes remain unchanged; no push, GitHub posting or installed
+binary update is authorized by recording this evidence.
 
 Exploratory failures exposed stale JSON fixtures, old path labels/positional
 form assertions, an empty-CLI-value parser expectation, a Unix permission literal
