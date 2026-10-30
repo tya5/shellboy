@@ -1580,3 +1580,12 @@ change render/layout/index refresh or add conversation badges. Historical null
 receipts keep the existing conversation display convention only; CLI/F6 sender
 facts correctly remain unknown. Revisit that historical presentation only under
 separate conversation-design scope, not by inventing identity in sender facts.
+
+## 2026-10-30: bounded first-run setup (#69)
+
+Adopt `config init` / `config check`: noun/verb naming matches existing CLI groups
+and limits the promise to configuration, unlike a general `doctor`. Reuse strict
+loading and model-catalog HTTP bounds rather than add provider templates, login,
+interactive setup or billed chat probes. Keep AGENTS existence display deferred:
+it requires worker-fed filesystem observations and overlaps #41; this task only
+changes empty-state/notification text. Revisit after that UI work is stable.

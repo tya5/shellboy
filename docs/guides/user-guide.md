@@ -26,6 +26,25 @@ Saved input waiting for the next boundary is visible above the composer and in `
 
 ## 1. Start in a working directory
 
+First-time setup, before starting a conversation:
+
+```sh
+shellboy config init
+# Edit the reported config_path: API root, model and api_key_env variable name.
+# Set that environment variable's value in this terminal; never put keys in TOML.
+shellboy config check
+shellboy
+```
+
+This works in PowerShell too. Existing config files are never overwritten. Use
+identical `--config PATH` options throughout if you choose a custom path. Check
+uses only the model catalog, not a conversation request; no owner is required.
+For `base_url`, write the API root (`https://proxy.example/v1`), **not**
+`.../v1/responses`. See [first setup](configuration.md#first-setup-without-an-owner)
+for OS paths, credentials and a keyless local-endpoint example. If an owner was
+already running, restart it after editing the file or its credential environment.
+
+
 Use `/status` in the TUI or `shellboy status` in another terminal for an overview of current work. Saved IDs let you track background shells, child Runs, held requests, and model requests. Include terminal work with `/status all` or `shellboy status --all`. See [TUI slash commands](tui.md#slash-commands) and [CLI connection and common syntax](cli-reference.md#common-syntax-and-connection).
 
 First choose your terminal, OS binary, and model shell combination in [Starting on each platform](configuration.md#starting-on-each-platform). Follow [Configuration and installation](configuration.md) to build or install Shellboy and configure the connection, then run the following in a terminal. These examples use Bash/zsh.

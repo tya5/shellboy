@@ -115,3 +115,23 @@ continues using its durable snapshot.
 #50 removes compact_hint_tokens (unknown-field rejection, no alias). Existing
 auto_trim_on_disconnect gates failure-driven reduction, never pre-POST policy.
 See failure-driven-reduction.md.
+
+## First-run setup (#69)
+
+`config init` and `config check` are standalone noun/verb CLI commands, like
+`thread create` and `model list`, not owner RPCs. Init exclusively creates the
+selected configuration file from the bundled `config.example.toml`; it never
+overwrites a file or symlink, prompts for keys, or starts an owner/database.
+Check loads the same strict configuration and path rules, reports missing
+connection/model/credential-variable names without values, and only sends one
+bounded GET model-catalog request through the existing HTTP client. A model
+absent from the catalog is reported as not advertised, not proven unusable.
+HTTP 404 and endpoint-suffix errors explain API-root syntax (`.../v1`, not
+`.../v1/responses`). No Responses/embedding request is sent by check.
+
+Loaded configuration carries ephemeral source-path/presence metadata even when
+the default file is absent; it is not a TOML field or persistent schema change.
+The existing empty-conversation welcome and submission/recovery notices project
+local setup facts and next actions, with Japanese TUI text. No new dialog,
+conversation renderer, automatic file creation, network probe at startup or
+per-command approval mechanism is added. Configured users see no setup notice.

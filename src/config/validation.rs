@@ -83,7 +83,7 @@ impl Config {
 impl Connection {
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         nonempty(&format!("connections.{name}"), name)?;
-        api_root(&self.base_url).map_err(|_| invalid(format!("connections.{name}.base_url"), "provide an HTTP(S) API root without credentials/query/fragment or /responses or /embeddings suffix"))?;
+        api_root(&self.base_url).map_err(|_| invalid(format!("connections.{name}.base_url"), "provide an HTTP(S) API root, e.g. https://proxy.example/v1, not https://proxy.example/v1/responses; omit credentials/query/fragment and /responses, /embeddings or /models suffix"))?;
         if self.response_header_timeout_ms == 0 {
             return Err(invalid(
                 format!("connections.{name}.response_header_timeout_ms"),
