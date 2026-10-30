@@ -169,3 +169,33 @@ runs, not deterministic speed guarantees. Overall evidence favors a bounded
 four-thread CI default. Preserve explicit two-thread diagnosis and require the
 normal three-OS workflow for the adopted configuration. No main merge or release
 is part of this authorization.
+
+## Second four-thread findings: source `51d2702`
+
+[Normal run 40979048726](https://github.com/tya5/shellboy/actions/runs/40979048726)
+passes Linux/macOS but fails Windows: 577 library and 759 integration successes,
+three integration failures. The failing cases are:
+
+- response_retries::first_large_failure_maximally_trims_before_using_retry_budget
+- response_retries::metadata_and_partial_output_transport_loss_retry_by_default_without_executing_tools
+- response_retries::no_unprotected_groups_follow_ordinary_retries_without_replacement
+
+The first two hit the shared 5s mock-arrival guard; the third hits the shared 5s
+Control-shutdown guard. Preserve this failure and do not use its elapsed time as
+a successful benchmark. The subsequent fixture-only change makes generic arrival,
+request, settlement, retry-persistence and cleanup guards 60s, adds 5s-bounded
+lifecycle diagnostics and actual caller locations, and replaces polling with
+target Changed notifications. Driver retry code publishes Changed after saving
+automatic_retry, so subscribe-before-read observes that boundary without a new
+Core hook. Closed/lagged subscriptions fail/reinspect respectively.
+
+Keep the native HTTP partial-source tests, configured product deadlines,
+Retry-After/retry counts, 50ms absence checks, explicit 2s responsiveness assertions
+and all state predicates unchanged. These fixture guards do not define product
+latency SLAs; correctness remains in the same persisted facts and request counts.
+
+The response fixture repair passes local macOS strict all-target Clippy and
+all 808 integration cases at four threads (zero failed, 16 ignored). The five
+Python failure-gate checks also pass. Its native source-specific verification
+is the next ordinary three-OS run on the measurement branch; no product source
+or test membership changed, and no old failed run is rerun into success.

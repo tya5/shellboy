@@ -1,5 +1,22 @@
 # Validation record
 
+## Issue #46 repeated four-thread guard findings
+
+The adopted four-thread configuration's first ordinary verification at
+`51d2702`, [run 40979048726](https://github.com/tya5/shellboy/actions/runs/40979048726),
+passes Linux/macOS but fails Windows in three response_retries fixture guards:
+two HTTP-arrival 5s watchdogs and a Control-shutdown 5s watchdog. It is failed
+evidence and is not retried into a green old-SHA result. The names and exact
+locations remain in the [investigation](../development/issue-46-ci-performance.md).
+
+The fixture repair keeps product timers, retry counts, terminal predicates,
+negative checks and explicit responsiveness limits unchanged. Common deadlock
+guards allow 60s and emit bounded saved phase facts on failure. Subscribe-before-
+query Changed/lag handling replaces repeated DB reads for settlement and saved
+retry metadata; the existing retry path publishes after the metadata commit.
+There is no Core, schema or dependency change. Source-specific CI results remain
+available from [issue 46](https://github.com/tya5/shellboy/issues/46).
+
 ## Issue #46 native measurements and repaired concurrency
 
 The pulled baseline `0469ca0` passes all three native check jobs in

@@ -14,7 +14,10 @@ retained two Windows test threads. After fixing
 shared runtime_features 5s watchdog/poll helpers, source `8fa0429` passes both two
 and four threads with identical test/ignored sets. Harness sums 350.876s versus
 237.908s favor a bounded four-thread CI default; verify it in the normal three-OS
-workflow and retain explicit two-thread diagnosis. These independent-runner
+workflow and retain explicit two-thread diagnosis. Its first normal verification
+found three response_retries 5s fixture guard failures; repair those with existing
+notifications and bounded saved-phase diagnosis, preserving the failed run and
+all actual product timeout/retry/absence/responsiveness assertions. These independent-runner
 samples are not a latency guarantee. Discard the 405-source index rewrite:
 isolated measurements did not support it, unlike historical-DDL seed batching.
 

@@ -15,8 +15,10 @@ The earlier eight four-thread runtime_features failures are retained in the
 [investigation](issue-46-ci-performance.md); shared helper guards/notifications
 were repaired rather than retrying that sample into success. Its measured
 Windows harness sums 350.876s at two threads and 237.908s at four support adopting
-a bounded four-thread CI default. The normal three-OS workflow verifies that
-configuration; source-specific results remain separate from earlier successes.
+a bounded four-thread CI candidate. Its first normal verification exposed
+three additional response_retries fixture guards; they received the same
+notification/diagnostic repair while product assertions remain unchanged.
+The normal three-OS workflow verifies the repaired configuration; source-specific results remain separate from earlier successes.
 
 Before/after conditions and limits are in [acceptance](../validation/acceptance.md).
 No release or installed-binary update is part of this task; the branch is for
