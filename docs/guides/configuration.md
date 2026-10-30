@@ -31,14 +31,14 @@ credential examples later in this guide. Restart an existing owner after edits.
 connection/model settings and credential-variable presence (never its value).
 It sends only a bounded **GET model catalog** request, like `model list`, and
 checks whether `default_model` is advertised. It sends no conversation or
-embedding request. Success is not proof that a provider supports Responses or
+embedding request. Success is not proof that a provider supports the selected conversation API or
 will accept a billed request. A model absent from the catalog produces a warning but check still succeeds
 (decision D-009): it may be a supported proxy alias; confirm that separately rather than guessing. `config check` is an
 explicit network operation; the startup welcome performs no network probe.
 
 `base_url` must be the **API root**, for example `https://proxy.example/v1`, not
 `https://proxy.example/v1/responses`. Shellboy appends `/models` for catalog checks
-and `/responses` for conversations. A 404 check explains this pitfall without
+and `/responses` (default) or `/chat/completions` for conversations. A 404 check explains this pitfall without
 rewriting your URL; also check your proxy's routing. Unknown fields such as the
 removed `compact_hint_tokens` are errors, not ignored options.
 
@@ -192,13 +192,13 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 
 Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash or `$env:SHELLBOY_PROXY_API_KEY = '…'` in PowerShell. Choose a method appropriate to your environment that avoids leaving secrets in history or shared configuration. The binary does not automatically read `credentials.env`.
 
-`base_url` is the HTTP(S) API root; Shellboy appends `/responses` or `/embeddings`. URLs containing username/password, query, fragment, or an already appended endpoint suffix are rejected. `api_key_env` is the **name** of an environment variable; its value is read immediately before sending a request and used as `Authorization: Bearer ...`. Unset, empty, or newline-containing values are errors.
+`base_url` is the HTTP(S) API root; Shellboy appends the selected conversation path (`/responses` or `/chat/completions`), `/models`, or `/embeddings`. URLs containing username/password, query, fragment, or an already appended endpoint suffix are rejected. `api_key_env` is the **name** of an environment variable; its value is read immediately before sending a request and used as `Authorization: Bearer ...`. Unset, empty, or newline-containing values are errors.
 
 `connections.<name>.headers` is an optional HTTP header dictionary. Names must be unique ignoring case, and invalid control characters in values are rejected. `api_key_env` cannot be combined with an Authorization header. Prefer environment-variable references to writing secrets directly in headers. `default_effort` is an optional nonempty string accepted by the endpoint. There is no built-in catalog of model capacity or effort support.
 
 `ssl_verify` controls HTTPS certificate verification per connection and defaults to `true`. Set `ssl_verify = false` in the same `[connections.proxy]` only when disabling verification for that connection, for example for a self-signed certificate. It applies to conversation, summary, embedding, and model-list requests on the connection, skipping issuer, expiry, and hostname verification. Direct HTTP APIs have no certificate to verify. With an HTTPS forwarding proxy, it also applies to that proxy's certificate. Restart after changing owner settings. Standalone RAG follows the connection configuration read at invocation. No environment-only switch disables verification.
 
-Conversations use Responses; indexing and search queries use the Embeddings API. Omit both `embedding.connection` and `embedding.model`, or specify both. The named connection must exist. Changing embedding settings selects another space and does not silently reindex all historical data. See [history and search](history-and-search.md) for explicit backfill/rebuild and costs. Searches can also incur API usage.
+Conversations use the selected API dialect; indexing and search queries keep using the Embeddings API. Omit both `embedding.connection` and `embedding.model`, or specify both. The named connection must exist. Changing embedding settings selects another space and does not silently reindex all historical data. See [history and search](history-and-search.md) for explicit backfill/rebuild and costs. Searches can also incur API usage.
 
 Optional `embedding.batch_max_inputs` defaults to 1 (range 1..128), retaining
 singleton requests. `embedding.batch_max_chars` defaults to 64000 Unicode
@@ -217,13 +217,72 @@ Fetch models with TUI `/models` or `shellboy model list`; change the current Thr
 
 The owner reuses HTTP clients per connection. Restart after changing TOML or HTTP(S) proxy/NO_PROXY environment settings. Environment-referenced headers such as API keys are read per request, but exporting a value in another shell does not change the running owner's process environment. Only after a successfully completed SSE response does Shellboy try to reuse the connection by draining up to one second / 64KiB of trailing body. Failure of this post-completion cleanup alone does not return the answer to recovery wait. Cancellation takes priority.
 
+## Conversation API dialect
+
+Each connection selects `api = "responses"` (the default) or
+`api = "chat_completions"`. Use an API **root**, not its final endpoint: Shellboy
+appends `/responses` or `/chat/completions` for conversations and summaries.
+Catalog (`/models`) and embedding (`/embeddings`) paths are unchanged. Changing
+the dialect requires an owner restart. No automatic protocol fallback is tried.
+
+```toml
+default_connection = "gemini"
+default_model = "YOUR_GEMINI_MODEL_ID"
+[connections.gemini]
+api = "chat_completions"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+api_key_env = "GEMINI_API_KEY"
+```
+
+This is an **unverified real-provider example**, based on the documented beta
+OpenAI-compatible endpoint, not a tested Gemini connection. No real provider or
+paid request was used for this feature. Check current provider documentation and
+set a model ID you can access. `config check` only GETs a catalog; it cannot prove
+conversation compatibility or actual caching. `shellboy model list --connection
+gemini` (owner required) and `config check` expose `api` and
+`unavailable_features` in their JSON details. These are format-level limits, not
+a provider's advertised model capabilities.
+
+Chat Completions sends the complete available history as `messages`, including
+instructions (developer instructions map to system), images, grouped shell tool
+calls and their results. It reads one streaming choice, concatenates argument
+fragments by tool index, and waits for `finish_reason` plus `[DONE]` before
+adopting a successful answer/tool group. Missing terminal frames, invalid calls,
+length/filter/unknown completion reasons are not silently successful. Ordinary
+transport/cancellation/deadline/retry/reduction/recovery rules stay shared with
+Responses; only explicit context-limit codes trigger that classification.
+
+Responses reasoning items and encrypted reasoning are **not replayed** to Chat.
+Vendor `reasoning_content` is intentionally unused (not saved, displayed or
+replayed), and vendor-specific opaque tool metadata is not supported. Modes
+requiring such replay are outside this first version. `reasoning_effort` is sent
+when an effort is configured, but provider acceptance/meaning is unverified.
+`prompt_cache_key=true` is Responses-only and is rejected with Chat; omit it.
+No provider-specific `extra_body`/`cached_content` control is added in this version.
+
+Chat requests `stream_options.include_usage`. Reported `prompt_tokens`,
+`completion_tokens`, cached-input and reasoning-token details map to the normal
+saved usage fields. Missing values stay unknown; no total or cache hit is
+estimated. Inspect `shellboy usage get --thread THREAD_ID` and F6's saved usage
+and attempt details for actual reported cached tokens versus unknown counts.
+Fixture counts verify the mapping, **not** real-provider cache effectiveness;
+provider caching must be qualified separately with explicit paid-test approval.
+
+Anthropic's OpenAI-compatible facade is **not a supported target**: Anthropic
+states it is mainly for comparison/testing, lacks prompt caching there and does
+not faithfully support the relevant reasoning controls. Long conversations
+without caching can be much slower/more expensive. Use a suitable proxy for the
+native Anthropic API instead; this feature adds neither native Anthropic Messages
+nor native Gemini APIs. References: [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)
+and [Anthropic compatibility limits](https://platform.claude.com/docs/en/api/openai-sdk).
+
 ## Per-Thread session identity
 
-With default `connections.<name>.session_header = true`, conversation and summary Responses requests send the Thread UUID in `x-shellboy-session-id`. It remains stable across retries and model changes in the same conversation; child conversations and forks have different Thread UUIDs. The value contains no conversation body, title, or working directory. It is not automatically attached to embedding or model-list requests.
+With default `connections.<name>.session_header = true`, conversation and summary requests in either dialect send the Thread UUID in `x-shellboy-session-id`. It remains stable across retries and model changes in the same conversation; child conversations and forks have different Thread UUIDs. The value contains no conversation body, title, or working directory. It is not automatically attached to embedding or model-list requests.
 
-When automatic attachment is enabled, the Thread UUID takes precedence on Responses requests even if `headers` contains the same header with different casing. `session_header = false` disables only automatic attachment: explicitly configured fixed headers are still sent. Other fixed headers and their application to embedding/model-list requests are unchanged.
+When automatic attachment is enabled, the Thread UUID takes precedence on conversation requests even if `headers` contains the same header with different casing. `session_header = false` disables only automatic attachment: explicitly configured fixed headers are still sent. Other fixed headers and their application to embedding/model-list requests are unchanged.
 
-Setting `prompt_cache_key = true` in the same connection section additionally sends the Thread UUID as `prompt_cache_key` in conversation and summary request bodies. It defaults to `false` and adds nothing to the body. Keep it disabled for providers that do not accept the field. Restart the owner after changing either setting.
+Setting `prompt_cache_key = true` in the same connection section additionally sends the Thread UUID as `prompt_cache_key` in Responses conversation and summary request bodies (not Chat). It defaults to `false` and adds nothing to the body. Keep it disabled for providers that do not accept the field. Restart the owner after changing either setting.
 
 These settings provide identifiers the endpoint can use; they do not guarantee cache hits, routing to one backend, or recovery from communication failures. With LiteLLM or similar proxies, check endpoint session-routing settings. A fixed `x-litellm-session-id` or trace ID may take priority over Shellboy's Thread identity in some configurations. Do not combine a shared fixed identity header with Thread identity when conversation isolation is the goal.
 
@@ -293,6 +352,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 |---|---|---|
 | root | `data_dir` = OS default, `default_connection` / `default_model` = unset, `connections` = empty | Storage and new-conversation defaults |
 | `connections.<name>` | `ssl_verify=true`; URL/authentication/effort/headers described above | Per-connection TLS verification, enabled by default |
+| `connections.<name>` | `api="responses"` | `"responses"` or `"chat_completions"`; catalog/embedding endpoints stay unchanged |
 | `connections.<name>` | `session_header=true`, `prompt_cache_key=false` | Thread identity header and optional cache identity body field for conversations/summaries |
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
 | `connections.<name>` | `auto_trim_on_disconnect=true` | API-free maximum reduction from the second eligible consecutive failure; no preflight |

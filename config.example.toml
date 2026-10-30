@@ -4,6 +4,7 @@ default_connection = "proxy"
 default_model = "REPLACE_WITH_MODEL_ID"
 
 [connections.proxy]
+# api = "responses" # Or "chat_completions"; stateless history, no reasoning-item replay.
 base_url = "https://proxy.example/v1"
 api_key_env = "SHELLBOY_API_KEY"
 # Set false only to disable certificate verification for this connection.

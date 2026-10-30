@@ -97,6 +97,10 @@ owner RPCs and create no receipt or owner database. Init is an explicit file
 write; check is a read plus a bounded catalog network request. Keep keys out of
 TOML. See [first setup](configuration.md#first-setup-without-an-owner).
 
+`model list` results include the connection `api` and `unavailable_features`;
+`config check` also reports them. These describe dialect limits, not a promise
+that a particular provider/model implements every feature.
+
 ### Saved usage (1 operation)
 
 | Operation and all specific flags | Main result and conditions |

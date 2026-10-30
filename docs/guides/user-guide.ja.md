@@ -2,7 +2,7 @@
 
 [ガイド一覧](README.md) · [設定・導入](configuration.md) · [画面操作](tui.md) · [English](user-guide.md)
 
-Shellboyは端末で会話し、モデルにshell作業を依頼するアプリです。会話の保存先を管理するTUIを一つ起動し、外部の`shellboy` CLIもその起動済みアプリへ接続します。会話には接続先のResponses対応proxy、モデルID、資格情報を設定します。ガイドは設定前でも `shellboy docs list` から閲覧でき、文書検索の `shellboy rag` も独立して使えます。
+Shellboyは端末で会話し、モデルにshell作業を依頼するアプリです。会話の保存先を管理するTUIを一つ起動し、外部の`shellboy` CLIもその起動済みアプリへ接続します。会話には接続先、モデルID、資格情報を設定します。既定はResponsesで、接続ごとにChat Completionsも選べます。ガイドは設定前でも `shellboy docs list` から閲覧でき、文書検索の `shellboy rag` も独立して使えます。
 
 モデルへshell作業を任せる前に、[安全の考え方](#安全の考え方)を確認してください。
 
@@ -73,6 +73,17 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 起動中は設定・DB更新・前回中断した処理の整理など、現在の準備内容を表示します。会話入力は起動完了後に行います。Esc / Ctrl+C / Ctrl+Qで終了を要求すると、開始済みの初期化と保存処理を安全な境界まで進めてから閉じます。DB更新を巻き戻したり、直ちにlockを解放したりする操作ではありません。起動に失敗した場合は表示された理由を確認し、EnterかEscで閉じます。
 
 新しいルートThreadのcwdは起動フォルダーです。保存済みThreadを開くと、そのThreadのcwdを使い、今回の起動フォルダーで上書きしません。`/cwd`、又はF8の「会話 · 詳細」で確認できます。
+
+### 会話の形式を選ぶ
+
+接続の既定は`api = "responses"`です。Chat形式のOpenAI互換の入口では
+`api = "chat_completions"`を指定してownerを起動し直します。[形式のガイド](configuration.md#conversation-api-dialect)
+に**未検証**のGemini例と使えない機能を記載しています。Responsesの推論項目・暗号化
+推論はChatへ持ち回さず、vendorの`reasoning_content`も使いません。確認したのは
+合成SSEとloopback mockだけで、実プロバイダはすべて未検証です。`usage get`とF6の
+キャッシュ使用量は返った値だけで、不明を0にはしません。一覧の確認だけでは
+キャッシュの実効性は分かりません。Anthropicの互換の入口はキャッシュが使えないため
+対象外です。長い会話には本来のAPIに対応するproxyを使ってください。
 
 ## 2. 最初の依頼を送る
 

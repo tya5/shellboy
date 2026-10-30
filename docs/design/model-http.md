@@ -173,3 +173,29 @@ construction tasks are scoped to existing admitted requests. A failed build
 returns an error for that call and leaves the pool empty/retryable, never a
 cached Err that poisons all later calls. Existing in-flight clones retain their
 previous generation. A late failure cannot retire a newer installed generation.
+
+## Conversation dialect boundary (#64)
+
+Adopt connection `api = "responses"` (default) or `"chat_completions"`. A single
+HTTP-edge dialect module translates the shared stateless request/replay and
+stream to the existing normalized response/event contract. Core persistence,
+tool validation/execution, retry/reduction/recovery and schema stay unchanged;
+no table, worker or queue is added. Logical conversation deadlines and session
+headers remain shared; embedding/catalog endpoints are unchanged.
+
+Chat maps system/developer/user/assistant messages, images, grouped shell calls
+and tool results. Developer instructions use system messages for compatibility.
+It requests usage, accumulates tool argument deltas by index, and requires a
+finish reason plus the SSE [DONE] boundary before adopting successful output.
+Length/filter/unknown finish reasons are incomplete, not guessed context errors.
+Only explicit context-limit codes use the existing context-limit classification.
+Map only reported integer prompt/completion/cached/reasoning/total counts to the
+existing usage envelope; missing counters stay unknown, never synthesized.
+
+Responses-only reasoning items/encrypted replay and prompt_cache_key are not
+sent for Chat. Vendor reasoning_content is intentionally unused, not displayed
+or replayed. Reject Chat + prompt_cache_key rather than pretend it works.
+Expose dialect/unavailable features in catalog/check details. Anthropic's OpenAI
+facade is outside qualification because it lacks prompt-cache support. No live
+provider tests are authorized (#68 D-003); Gemini and all real providers remain
+unverified. Provider extra_body/cached_content controls are deferred.

@@ -399,7 +399,7 @@ args!(ContextEditArgs {
     #[serde(default)] to_node_id: Option<String>
 });
 args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String> });
-args!(ModelListResult { connection: String, models: Vec<String> });
+args!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });
 args!(ThreadCreateArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default)] parent_id: Option<String> });
 args!(ThreadForkArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, thread_id: String, node_id: String, #[serde(default)] cwd: Option<String> });
 args!(ThreadDeleteArgs {

@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Configuration and installation](configuration.md) · [TUI controls](tui.md) · [日本語](user-guide.ja.md)
 
-Shellboy is a terminal application for conversations and model-directed shell work. Start one TUI to own a conversation data directory; external `shellboy` CLI commands connect to that running application. Conversations require a Responses-compatible proxy endpoint, model ID, and credentials. You can read guides with `shellboy docs list` before configuring anything, and use the document-search CLI `shellboy rag` independently.
+Shellboy is a terminal application for conversations and model-directed shell work. Start one TUI to own a conversation data directory; external `shellboy` CLI commands connect to that running application. Conversations require a compatible endpoint, model ID, and credentials: Responses by default, or explicit Chat Completions per connection. You can read guides with `shellboy docs list` before configuring anything, and use the document-search CLI `shellboy rag` independently.
 
 Before granting model-directed shell access, read the [safety model](#safety-model).
 
@@ -69,6 +69,18 @@ Starting without a subcommand requires an interactive terminal. You cannot run t
 During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
 
 A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “会話 · 詳細” (conversation details).
+
+### Choosing a conversation format
+
+Connections default to `api = "responses"`; set `api = "chat_completions"` for an
+OpenAI-compatible Chat endpoint, then restart the owner. The [dialect guide](configuration.md#conversation-api-dialect)
+contains an **unverified** Gemini example and the unavailable features. Responses
+reasoning/encrypted replay is not sent to Chat, and vendor reasoning content is
+unused. All real providers remain unverified: only synthetic SSE and loopback
+mocks were used. Cache usage shown by `usage get` and F6 is reported fact, with
+missing details unknown; a catalog check cannot prove caching. Anthropic's
+OpenAI facade is excluded because prompt caching is unavailable there; use a
+suitable native-API proxy rather than assume it supports long cached sessions.
 
 ## 2. Send your first request
 

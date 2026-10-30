@@ -1144,3 +1144,23 @@ configuration and precedence are documented. AGENTS existence display is deferre
 because it needs worker-fed observations and overlaps #41. No schema, toolchain,
 provider login, interactive wizard, real-provider tests or Release changes.
 See [validation](../validation/acceptance.md#first-run-configuration-69).
+
+## Chat Completions conversation dialect (#64, 2026-10-31)
+
+Connections select `api=responses` (default) or `chat_completions`. One HTTP-edge
+adapter maps stateless requests/replay and bounded SSE into the existing Core
+contract. Storage, schema, lifecycle, tools and retry/reduction/recovery remain
+shared; only common input-character diagnostics delegate dialect projection to
+the client. Catalog/check results disclose API and unsupported features.
+
+Synthetic wire and loopback checks cover text, grouped fragmented tools and tool
+results/images, reported/absent cache usage, length/incomplete/EOF, controlled-clock
+timeout, 503/429 retries and explicit context reduction through real Core. Saved
+usage and the shared F6 field projector retain cached-token facts and unknowns.
+Usage received before a missing DONE is retained on failure, without adopting
+incomplete output. The full local standard check (RUST_TEST_THREADS=2) passes,
+including unchanged Responses tests. Ordinary exact-source native CI remains a
+separate integration gate. No provider is live-tested; Gemini/caching and vendor
+reasoning/tool metadata remain unverified/unsupported as documented. Anthropic's
+OpenAI facade, extra_body/cached_content, native vendor APIs and provider login
+are outside this version. No installed binary or real owner/data is changed.

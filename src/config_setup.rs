@@ -23,7 +23,7 @@ pub enum ConfigCommand {
 
 pub const TEMPLATE: &str = include_str!("../config.example.toml");
 pub const MINIMAL: &str = "default_connection = \"proxy\"\ndefault_model = \"REPLACE_WITH_MODEL_ID\"\n[connections.proxy]\nbase_url = \"https://proxy.example/v1\"\napi_key_env = \"SHELLBOY_API_KEY\"";
-pub const ROOT_HINT: &str = "Use the API root, e.g. https://proxy.example/v1, not https://proxy.example/v1/responses; Shellboy appends /models or /responses. Check the proxy's API-root path.";
+pub const ROOT_HINT: &str = "Use the API root, e.g. https://proxy.example/v1, not https://proxy.example/v1/responses; Shellboy appends /models for checks and /responses or /chat/completions for conversations according to api. Check the proxy's API-root path.";
 pub const PRECEDENCE: &str = "config: --config > OS default; data-dir: --data-dir > SHELLBOY_DATA_DIR > TOML data_dir > OS default";
 pub const NEXT: &str = "shellboy config init -> edit the selected file and set its api_key_env variable -> shellboy config check -> restart shellboy; guide: shellboy docs get --id shellboy/configuration (use the same --config/--data-dir options)";
 
@@ -253,7 +253,7 @@ pub async fn execute(
         ]
     };
     Ok(
-        json!({"setup":setup,"connection":name,"model":model,"model_advertised":advertised,"warnings":warnings,"model_count":models.len(),"request":"GET model catalog only","message":"Configuration and model catalog checked; no conversation request sent"}),
+        json!({"setup":setup,"connection":name,"api":config.connections[name].api.as_str(),"unavailable_features":config.connections[name].api.unavailable_features(),"model":model,"model_advertised":advertised,"warnings":warnings,"model_count":models.len(),"request":"GET model catalog only","message":"Configuration and model catalog checked; no conversation request sent"}),
     )
 }
 

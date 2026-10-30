@@ -1,7 +1,8 @@
 //! Responses reception preserves bounded recovery data and reports facts only.
 use super::body::{http_error, read_json, redact};
 use super::*;
-use crate::model::{MAX_RESPONSE_BYTES, ModelResponse, ResponseStream};
+use crate::config::Api;
+use crate::model::{MAX_RESPONSE_BYTES, ModelResponse, ResponseStream, dialect};
 use futures_util::StreamExt;
 use std::collections::BTreeMap;
 const TERMINAL_DRAIN_BYTES: usize = 64 * 1024;
@@ -203,6 +204,7 @@ impl HttpModelClient {
             .get("tools")
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
+        let request = dialect::encode(self.connection.api, request)?;
         let (response, secrets, observation) = self
             .send(
                 ApiEndpoint::Responses,
@@ -246,11 +248,29 @@ impl HttpModelClient {
             .trim()
             .to_ascii_lowercase();
         let outcome = match content_type.as_str() {
-            "application/json" => response_json(response, &mut context, facts, tools_enabled).await,
-            "text/event-stream" => response_sse(response, &mut context, facts, tools_enabled).await,
+            "application/json" => {
+                response_json(
+                    response,
+                    &mut context,
+                    facts,
+                    tools_enabled,
+                    self.connection.api,
+                )
+                .await
+            }
+            "text/event-stream" => {
+                response_sse(
+                    response,
+                    &mut context,
+                    facts,
+                    tools_enabled,
+                    self.connection.api,
+                )
+                .await
+            }
             _ => Err(ModelError::new(
                 "protocol",
-                "Expected text/event-stream or application/json from Responses endpoint",
+                "Expected text/event-stream or application/json from conversation endpoint",
             )
             .into()),
         };
@@ -266,6 +286,7 @@ async fn response_json(
     context: &mut RequestContext<'_>,
     facts: &mut ResponseFacts,
     tools_enabled: bool,
+    api: Api,
 ) -> Result<ModelResponse, AttemptFailure> {
     let body = read_json(
         response,
@@ -276,7 +297,12 @@ async fn response_json(
     )
     .await?;
     facts.terminal_received = true;
-    let raw = body.raw;
+    let raw = if api == Api::Responses {
+        body.raw
+    } else {
+        let original = body.raw;
+        dialect::decode_json(api, original.clone()).map_err(|error| raw_failure(error, original))?
+    };
     let result = match body.provider_error {
         Some(error) => Err(error),
         None => ModelResponse::completed(raw.clone(), tools_enabled),
@@ -307,9 +333,10 @@ async fn response_sse(
     context: &mut RequestContext<'_>,
     facts: &mut ResponseFacts,
     tools_enabled: bool,
+    api: Api,
 ) -> Result<ModelResponse, AttemptFailure> {
     let mut stream = response.bytes_stream();
-    let mut parsed = ResponseStream::default();
+    let mut parsed = dialect::Stream::new(api);
     let mut raw_response = None;
     loop {
         let next = match context
@@ -376,6 +403,7 @@ async fn response_sse(
     if context.cancel.is_cancelled() {
         return Err(failure(cancelled(), &parsed, raw_response));
     }
+    let raw_response = parsed.failed_response().cloned().or(raw_response);
     let partial_text = parsed.partial_text.clone();
     let partial_reasoning = parsed.partial_reasoning.clone();
     let completed_items = parsed.completed_items.clone();

@@ -1,5 +1,6 @@
 //! Bounded Responses SSE parsing and completed-response validation.
 
+pub mod dialect;
 pub mod http;
 mod reconcile;
 
@@ -327,6 +328,14 @@ impl SseDecoder {
         bytes: &[u8],
         mut terminal: impl FnMut(&Value) -> bool,
     ) -> Result<Vec<Value>, DecodeFailure> {
+        self.decode(bytes, &mut terminal, false)
+    }
+    fn decode(
+        &mut self,
+        bytes: &[u8],
+        mut terminal: impl FnMut(&Value) -> bool,
+        stop_done: bool,
+    ) -> Result<Vec<Value>, DecodeFailure> {
         self.total = self
             .total
             .checked_add(bytes.len())
@@ -393,6 +402,10 @@ impl SseDecoder {
                         }
                     } else {
                         self.done_markers += 1;
+                        if stop_done {
+                            self.data.clear();
+                            break;
+                        }
                     }
                     self.data.clear();
                 }

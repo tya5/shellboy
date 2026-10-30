@@ -1,6 +1,6 @@
 //! Strict v1 configuration. File loading is blocking and must run before the UI
 //! event loop or on a bounded file worker, never on the UI main thread.
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fmt,
@@ -55,9 +55,39 @@ pub struct Config {
     pub logging: Logging,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Api {
+    #[default]
+    Responses,
+    ChatCompletions,
+}
+impl Api {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Responses => "responses",
+            Self::ChatCompletions => "chat_completions",
+        }
+    }
+    pub fn unavailable_features(self) -> Vec<String> {
+        match self {
+            Self::Responses => vec![],
+            Self::ChatCompletions => [
+                "reasoning_item_replay",
+                "encrypted_reasoning",
+                "reasoning_content",
+                "prompt_cache_key",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {
+    pub api: Api,
     pub base_url: String,
     pub api_key_env: Option<String>,
     pub default_effort: Option<String>,
@@ -76,6 +106,7 @@ pub struct Connection {
 impl Default for Connection {
     fn default() -> Self {
         Self {
+            api: Api::default(),
             base_url: String::new(),
             api_key_env: None,
             default_effort: None,
@@ -96,6 +127,7 @@ impl Default for Connection {
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Connection")
+            .field("api", &self.api)
             .field("base_url", &"[redacted]")
             .field("api_key_env", &self.api_key_env)
             .field("default_effort", &self.default_effort)
@@ -129,7 +161,10 @@ impl Connection {
     pub fn endpoint(&self, endpoint: ApiEndpoint) -> Result<Url, ConfigError> {
         let mut url = api_root(&self.base_url)?;
         let suffix = match endpoint {
-            ApiEndpoint::Responses => "responses",
+            ApiEndpoint::Responses => match self.api {
+                Api::Responses => "responses",
+                Api::ChatCompletions => "chat/completions",
+            },
             ApiEndpoint::Embeddings => "embeddings",
             ApiEndpoint::Models => "models",
         };
@@ -197,10 +232,13 @@ fn api_root(value: &str) -> Result<Url, ConfigError> {
         .rsplit('/')
         .next()
         .unwrap_or("");
-    if matches!(final_segment, "responses" | "embeddings" | "models") {
+    if matches!(
+        final_segment,
+        "responses" | "embeddings" | "models" | "completions"
+    ) {
         return Err(invalid(
             "base_url",
-            "provide the API root, e.g. https://proxy.example/v1; remove /responses, /embeddings or /models (not https://proxy.example/v1/responses)",
+            "provide the API root, e.g. https://proxy.example/v1; remove /responses, /embeddings, /models or /chat/completions (not https://proxy.example/v1/responses)",
         ));
     }
     Ok(url)

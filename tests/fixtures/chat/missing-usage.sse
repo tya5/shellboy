@@ -1,0 +1,6 @@
+data: {"id":"chat-fixture","choices":[{"index":0,"delta":{"content":"no reported usage"},"finish_reason":null}]}
+
+data: {"id":"chat-fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

@@ -11,6 +11,8 @@ mod attachment_provenance;
 mod attachment_proxy;
 #[path = "../attachments.rs"]
 mod attachments;
+#[path = "../chat_completions.rs"]
+mod chat_completions;
 #[path = "../cli.rs"]
 mod cli;
 #[path = "../cli_process.rs"]

@@ -415,7 +415,17 @@ impl Control {
             result = fetch => result?,
         };
         encode_result(
-            ModelListResult { connection, models },
+            ModelListResult {
+                api: self.store.config.connections[&connection]
+                    .api
+                    .as_str()
+                    .into(),
+                unavailable_features: self.store.config.connections[&connection]
+                    .api
+                    .unavailable_features(),
+                connection,
+                models,
+            },
             ErrorCode::InvalidState,
             "Cannot encode model list",
         )

@@ -2992,3 +2992,59 @@ Thread equality and rejecting a binding table scan. No schema/index is added.
 Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 standard check passes1699/0/32,
 layout90, Python6, fmt and strict all-target Clippy. Native main CI remains
 a separate pending gate; prior #60 results are not substituted.
+
+## Chat Completions dialect (#64)
+
+2026-10-31. Native macOS ARM64, Rust 1.99.1. Six focused integration tests in
+`tests/chat_completions.rs` and synthetic recorded wire traces in
+`tests/fixtures/chat/` pass. `RUST_TEST_THREADS=2 sh scripts/check.sh` passes all
+local tests, layout, Python gates, fmt and strict all-target Clippy, including
+the existing Responses suites. Dependency versions/lockfile are unchanged;
+test-only Tokio test-util enables controlled time rather than a short wall-clock
+negative assertion. Core schema/tables/workers/queues are unchanged.
+
+Observed with no provider credentials and only loopback mocks:
+
+- Request projection preserves instructions, images, assistant text plus grouped
+  calls, associated tool results and effort; reasoning/encrypted replay is absent.
+  Responses projection is unchanged. Default API, strict enum/config validation,
+  API-root suffixes and unchanged catalog/embedding paths are exercised.
+- Literal SSE traces are fed across byte/chunk boundaries; multiple calls arrive
+  interleaved by index and arguments concatenate. Text/JSON success, incomplete
+  length and EOF, explicit context error, invalid JSON message/choice, metadata-only
+  empty text and ignored post-terminal junk retain the correct terminal facts.
+- Actual HTTP requests target /chat/completions with existing Thread session headers.
+  HTTP 400 context codes, 429 and 503 preserve status/classification. A socket held
+  open after a text delta uses a paused/advanced test clock to prove the shared
+  inactivity timeout; 60-second watchdogs and notifications bound waits.
+- A usage footer received before a lost DONE remains on the failed attempt. Valid
+  counts map to existing scalar fields; missing counts and missing usage stay
+  unknown rather than zero or a synthesized total. No catalog/error sentinel is
+  used as a credential or real model.
+- Real Core handles 503/429, executes two harmless echo tools, sends their results,
+  then handles a second Turn's explicit context error via the existing adopted
+  reduction path. Tool groups remain atomic. Saved cached usage is 200 with one
+  unknown completed-attempt counter, as supplied by the fixtures; usage get and
+  the common F6 field projector expose that distinction. Persisted input-character
+  sizes match actual serialized Chat messages, not discarded reasoning items.
+  Model-list output exposes the chosen API and unavailable reasoning features.
+
+No real Gemini, DeepSeek, Mistral or any other provider, paid/cache-effectiveness
+probe, native Anthropic/Gemini API, physical Windows/Linux terminal, or installed
+owner/binary update is performed. Gemini's guide example is unverified. Vendor
+reasoning_content/opaque tool metadata and generic extra_body/cached_content are
+not implemented; only the documented standard shape is qualified. These mocks
+cannot establish real-provider compatibility, caching or billing behavior.
+Final combined-source three-OS main CI remains independent evidence.
+
+### Related #69 reviewed main gate
+
+Review fixes and the path-safety follow-up landed at `bd75c9a`. Main CI
+[41081171111](https://github.com/tya5/shellboy/actions/runs/41081171111) passes:
+macOS/Linux succeeded initially; Windows attempt 1 timed out in three existing
+`revisit.rs:109` waits (`pending_revisit_waits_for_owned_background_shell_then_fires`,
+`registration_racing_normal_completion_is_either_delivered_or_rejected_as_terminal`,
+`stopping_a_held_request_drops_pending_without_firing`). Same-SHA failed-job rerun
+attempt 2 succeeds. No unrelated test/assertion was changed; rerun success does
+not diagnose or fix those failures. Earlier local TUI repaint failures and the
+separate initial main gate are retained in the #69 record.

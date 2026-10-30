@@ -1642,3 +1642,22 @@ and constrain binding.target_thread_id before JSON checks. Reuse receipt_target;
 no migration/new index is needed. EXPLAIN QUERY PLAN must show SEARCH binding
 USING INDEX receipt_target(target_thread_id=?), not SCAN binding. A receipt in
 another Thread is not a watermark for the selected Thread's editable draft.
+
+## 2026-10-31: one conversation wire boundary (#64)
+
+Adopt a connection Api enum and one stateless HTTP-edge adapter, normalizing Chat
+to the current Core response/event/replay contract. Keep lifecycle, storage,
+retry/reduction/recovery and tools common; no new table/worker/queue or provider
+fallback. Developer messages map to system; all consecutive assistant messages
+and calls share one Chat message before their tool results. Skip Responses-only
+reasoning replay; vendor reasoning_content/opaque tool metadata is unused, not
+silently claimed supported. Reject Chat prompt_cache_key; no extra_body/cache
+provider knobs in this first version. Disclose limits in catalog/check output.
+
+Per #68 D-003, real providers including Gemini stay unverified, no paid test.
+Use recorded synthetic fixtures, loopback and a test-only Tokio test-util feature
+(same pinned Tokio version) for a controlled inactivity clock instead of short
+wall-time assertions. No dependency version or production worker is added.
+Core input-character diagnostics ask the common client for actual dialect input
+characters, so discarded Responses-only items are not mislabelled as Chat wire
+input; HTTP body-source byte observations remain actual transmitted source facts.

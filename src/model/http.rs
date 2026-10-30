@@ -76,6 +76,14 @@ pub struct HttpModelClient {
     connection_name: String,
 }
 impl HttpModelClient {
+    /// Count the actual dialect input, not discarded Responses-only replay items.
+    pub(crate) fn input_characters(&self, request: &Value) -> Result<u64, ModelError> {
+        if self.connection.api == crate::config::Api::Responses {
+            return Ok(request["input"].to_string().chars().count() as u64);
+        }
+        let wire = crate::model::dialect::encode(self.connection.api, request.clone())?;
+        Ok(wire["messages"].to_string().chars().count() as u64)
+    }
     pub fn new(connection: Connection) -> Result<Self, ModelError> {
         Self::for_connection("selected", connection)
     }

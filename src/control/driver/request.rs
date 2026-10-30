@@ -76,7 +76,17 @@ pub(super) async fn prepare_attempt(
     // Count the actual serialized input, including system/developer instructions
     // and attachment projections. This is a Unicode scalar count, not UTF-8
     // bytes or a tokenizer claim.
-    let input_characters = request["input"].to_string().chars().count() as u64;
+    let input_characters = match client.input_characters(&request) {
+        Ok(count) => count,
+        Err(error) => {
+            return fail_turn(
+                control,
+                snapshot,
+                ApiError::new(ErrorCode::InvalidState, error.to_string()),
+            )
+            .await;
+        }
+    };
     // Record selected replay size separately from fixed instructions and files.
     let history_characters = snapshot.input.as_ref().map_or(2, |replay| {
         json!(replay.materialize()).to_string().chars().count() as u64

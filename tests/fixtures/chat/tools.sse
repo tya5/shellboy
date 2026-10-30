@@ -1,0 +1,12 @@
+data: {"id":"chat-fixture","choices":[{"index":0,"delta":{"content":"Working."},"finish_reason":null}]}
+
+data: {"id":"chat-fixture","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call-b","type":"function","function":{"name":"shell","arguments":"{\"command\":"}},{"index":0,"id":"call-a","type":"function","function":{"name":"shell","arguments":"{\"command\":"}}]},"finish_reason":null}]}
+
+data: {"id":"chat-fixture","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"echo one\"}"}},{"index":1,"function":{"arguments":"\"echo two\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chat-fixture","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chat-fixture","choices":[],"usage":{"prompt_tokens":42}}
+
+data: [DONE]
+

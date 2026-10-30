@@ -83,7 +83,13 @@ impl Config {
 impl Connection {
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         nonempty(&format!("connections.{name}"), name)?;
-        api_root(&self.base_url).map_err(|_| invalid(format!("connections.{name}.base_url"), "provide an HTTP(S) API root, e.g. https://proxy.example/v1, not https://proxy.example/v1/responses; omit credentials/query/fragment and /responses, /embeddings or /models suffix"))?;
+        if self.api == Api::ChatCompletions && self.prompt_cache_key {
+            return Err(invalid(
+                format!("connections.{name}.prompt_cache_key"),
+                "Responses-only setting; omit it for chat_completions",
+            ));
+        }
+        api_root(&self.base_url).map_err(|_| invalid(format!("connections.{name}.base_url"), "provide an HTTP(S) API root, e.g. https://proxy.example/v1, not https://proxy.example/v1/responses; omit credentials/query/fragment and /responses, /embeddings, /models or /chat/completions suffix"))?;
         if self.response_header_timeout_ms == 0 {
             return Err(invalid(
                 format!("connections.{name}.response_header_timeout_ms"),
