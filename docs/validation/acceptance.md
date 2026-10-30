@@ -1,5 +1,48 @@
 # Validation record
 
+## Reactive History Retention (#58)
+
+Runtime/test source747807450f09cf0f9935d5a8e04327256b7f5d94, including
+post-tool-result notification80de5f0, passes `CARGO_BUILD_JOBS=2
+CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh` on native macOS
+arm64/pinned Rust1.99.1: **1,614 passed / 0 failed / 31 ignored**, layout88,
+Python6, formatting and strict all-target Clippy. Gitleaks8.30.1 finds no leaks.
+Subsequent changes are nonembedded development/validation records only.
+
+Regression coverage includes overlapping follow/non-tail windows, delayed
+canonical body installation, active and paused committed previews, same-source
+stamps independent of queue age, stale rebase retries retaining wheel movement,
+visible mixed-kind protection beyond3nodes and offscreen hydration, disjoint
+protected edges, offscreen committed-preview reclamation, same-predecessor audit
+retention until fresh membership, and postcommit-only tool-result notifications.
+Rollback emits no such notification. Diagnostics use fixed scalar-only records
+and a nonblocking queue; tests verify serialization and contention behavior.
+
+A real80-column PTY candidate exposed a missing notification: its completed
+result stayed absent35seconds while the next HTTP response had not sent a byte.
+The shell collector Changed preceded the result commit, and no notification
+followed that commit. Commit80de5f0 adds the existing coalesced postcommit edge;
+no poller, worker or new business event is added. Earlier candidate failures are
+not overwritten by later successful source checks.
+
+Final debug binary SHA256
+`39738baeca2572b0d1249941dff949c5c15d79329aff60f94a2fce6a9558c871`
+passes actual native PTYs at80x40 and140x40, driven by a private local harness
+against temporary data and a loopback Responses server. Each case uses a250k-char
+prior Turn, three fixed synthetic shells producing about120KiB each, a20KiB
+shared body budget, and five mock API requests with279–333KiB request JSON.
+At each of three next-response gaps, the server withholds all response bytes;
+already-painted current messages and exited tool results persist through four
+250ms steady samples. Full reconstructed cells and raw ANSI are retained outside
+Git. PageUp keeps the exact prior source line across the next request, new-output
+indication appears without following, and Ctrl+End restores the latest final
+message/results. Both owners exit0 with no recorded fixture errors.
+
+This is native macOS PTY/cell evidence, not a WezTerm pixel screenshot or physical
+Windows terminal qualification. No external/paid API, user DB/settings or installed
+binary changes are included. Native main CI is a separate publication gate; final
+run links/results are recorded on issue58.
+
 ## Review Correction Qualification (#52)
 
 Review6517077748 is addressed by582ec70 (unfinished interrupted group uses

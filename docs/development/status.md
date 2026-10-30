@@ -1,5 +1,26 @@
 # Development status
 
+## History retention and conversation redesign (#58 then #41)
+
+#58 runtime/tests at `7478074` (including post-result notification80de5f0)
+pass the macOS arm64/Rust1.99.1 standard check: **1,614 passed / 0 failed /
+31 ignored**, layout88, Python6, formatting and strict all-target Clippy.
+Gitleaks passes. Final real macOS PTYs80x40/140x40 retain already-painted paid
+messages and exited results through three held next-response gaps, with tiny
+shared cache; explicit pause/return-to-tail behavior passes. No paid API or
+user-store operation is included. See [acceptance](../validation/acceptance.md).
+
+The implementation is qualified for the user-authorized standalone main admission;
+main three-OS CI remains the next independent gate and is linked from issue58.
+The installed binary remains main1fec7f0, including #47/#52/#53/#56, and is not
+changed by this source work. #41 implementation has not started.
+
+[The #41 delivery plan](issue-41-plan.md) tracks the full body/comments including
+staged-main instruction6518940167. Finish #58 independently first, then adopt
+and implement complete usable increments. Each receives separate commits,
+standard checks and successful main three-OS CI; partial delivery does not close
+#41. English migration #35 follows it.
+
 ## Pending Message Publication (#52)
 
 The review corrections at `6e62349` pass the complete local standard check

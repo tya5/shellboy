@@ -11,7 +11,7 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 
 | Increment | Scope | State |
 | --- | --- | --- |
-| Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | In progress on separate branch |
+| Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Implemented/locally verified; standalone main CI gate next |
 | A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Planned |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Planned |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Planned |
