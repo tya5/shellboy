@@ -1,10 +1,11 @@
 # Development status
 
-## Issues #42/#43/#55: combined validation pending with `c0f1ad9`
+## Issues #42/#43/#55: combined local validation complete; native CI pending
 
 Origin/main `c0f1ad9`, containing #48/#51, is now merged into the local index
-branch. The combined tree's standard check is pending. The previous 1,482-pass
-result belongs only to `f9d3ee7`; it does not establish merged-tree success.
+branch at merge `80caf38`. The combined tree passes macOS standard checks:
+1,498 passed, zero failed, 28 ignored; formatting and strict all-target Clippy
+also pass. The earlier 1,482-pass result belongs only to pre-merge `f9d3ee7`.
 No native CI or installed-binary verification is claimed for this combination.
 
 Work is isolated on `issue-42-43-55/index`; user data and the installed binary

@@ -1984,3 +1984,27 @@ Not performed: new Linux/Windows native CI for this branch, company proxy/model
 validation, paid APIs, default-user data reindex/GC, installed binary replacement
 or release. Main CI 40987103680 validates #46 at a949688 only. A mock success
 does not establish provider dimension support or retrieval quality.
+
+
+## 2026-10-30: current-main and index combined verification
+
+After the index-only local verification, fetch found origin/main `c0f1ad9`
+containing #48/#51. Merge `80caf38` combines that source with index branch
+`3be41be`. Conflict resolution retains both adopted designs, decision/status
+records and both CLI regressions; no test or instruction-reference behavior is
+discarded. This combined check is separate from either branch's earlier result.
+
+With the same native macOS/pinned-toolchain environment and explicit two-thread
+fixture setting, `sh scripts/check.sh` succeeds: 85 suites registered once, five
+Python failure-gate tests, formatting and all-target strict Clippy; 1,498 passed,
+zero failed, 28 ignored across seven Cargo targets (lib647, integration841,
+termination7, crash-recovery3). The strengthened real PTY pause/retry/status and
+existing animation/stream/input/scroll/repaint/exit test passes in the combined
+suite. `index probe --help` and `index rebuild --help` also succeed without an
+owner or API call. No code changed after this check; subsequent evidence edits
+are development/validation documentation only.
+
+The combined branch has not been pushed; its new three-OS CI is awaiting explicit
+push authorization under AGENTS.md. Do not substitute #46's main CI at a949688
+for this combined source. User data, installed binary and release remain
+unchanged.
