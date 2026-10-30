@@ -71,7 +71,11 @@ handle into the UI. Fixed reasons and scalar counts describe window replacement,
 follow changes and cache eviction. Include Thread/generation/view/read identities
 where available; never log text, commands, titles, output, paths or credentials.
 No I/O, formatting of unbounded bodies, DB work or writer join runs on the UI
-thread. Do not emit one record per animation frame or per output byte.
+thread. Do not emit one record per animation frame or per output byte. Emit a
+history diagnostic only when after_nodes < before_nodes, follow changes, a stale
+reply is rejected, or at least one body is evicted. Ordinary unchanged/growing
+history refreshes are silent. Filter before diagnostic queue admission so normal
+refreshes cannot displace useful records or increment dropped-record counters.
 
 Test follow versus paused views, multiple commits, missing/empty canonical bodies,
 reversed same-generation replies, newer queue facts with older required body
