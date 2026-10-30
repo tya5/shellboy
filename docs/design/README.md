@@ -22,3 +22,5 @@ handling. A design document does not establish successful verification. Check th
 
 - [Per-Thread instruction references](agents-reference.md): explicit selection,
   validation, audit and new-Turn notification (#51).
+
+- [Interrupted message recovery](message-recovery.md) (#53)

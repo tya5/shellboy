@@ -1169,3 +1169,21 @@ The guide explains configured-reference inheritance/override independently of
 cwd and requires explicit permission for edits, without promising automatic
 exceptions to other higher-priority instructions. Model behavior improvement
 requires later dogfood/real-model observation; mocks prove request contents only.
+
+
+## 2026-10-30: recover input without rewriting ownership (#53)
+
+Use explicit-resume path adoption of the same immutable node, rather than a
+second receipt for that message. Existing message/context readers assume one
+receipt per message; duplicating it would expand identity and cursor semantics.
+Keep original assignment and add one persisted admission-fact column instead.
+Normal acknowledgement still follows response adoption; terminal repair can
+settle admitted input without inventing an answer.
+
+Fresh known-unadmitted input follows proposal A. For historical rows lacking
+positive path/attempt admission evidence, prefer explicit restoration (proposal
+B) to silently resurrecting a rewound instruction. The old format cannot prove
+never delivered. Record unknown honestly and expose it in #52's queue. Revisit
+only with additional positive historical evidence, not an absence-based guess.
+A bounded 128-ID resume rejects excess input atomically instead of overtaking
+old messages or adding a recovery scheduler.

@@ -180,3 +180,9 @@ next-new-Turn notification without altering same-Turn snapshots.
 Issue #49 adopts [standard usage measurements](usage-accounting.md): persist
 validated standard numbers only and read legacy large usage through guarded SQL
 scalar extraction. Task-boundary cleanup is Agent Guide guidance, not Core automation.
+
+
+Issue #53 adopts [interrupted message recovery](message-recovery.md): persist
+path-admission facts, share terminal repair, and recover known unadmitted input
+only at an authorized explicit resume. Ambiguous historical admission remains
+visible and requires explicit restoration; original assignments remain immutable.

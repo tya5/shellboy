@@ -384,3 +384,12 @@ the header. A missing file still has no instruction developer message; unreadabl
 invalid UTF-8 or oversized content retains existing preparation recovery.
 No new snapshot, permission engine, table, worker, queue or dependency is added.
 Mock requests establish factual transmission, not improved model/user behavior.
+
+
+## Interrupted input and cancelled tool prerequisites
+
+Adopt [message recovery](message-recovery.md) for the distinction between receipt
+acknowledgement and selected-path admission, shared terminal repair and explicit
+resume provenance. Adopt [tool cancellation reasons](tool-cancel-reasons.md) for
+saved causes and observed prerequisites; neither change authorizes replay of
+OS side effects or a new automatic foreground timeout.

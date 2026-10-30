@@ -118,3 +118,12 @@ operation receiptの終端結果には通常のSavedOutcome objectのほか、�
 ## Schema v11 (Issue #33 review)
 
 Startup-only `0011_current_index_metadata` drops the unused `receipt_turn_source` index and removes non-current `index.common_failures.*` counters. A valid counter must be a JSON object with a string cause and a nonnegative integer count; JSON scalar `0` is not a current counter. This derived reset preserves jobs, source data, saved pauses, and all current counters. It neither repairs missing query-profile identity nor authorizes embedding work. Fresh databases omit the dropped index and include ledger v11. Historic SQL stays in `migrations/`, referenced only by the startup migration module and explicit migration tests; ordinary Core fixtures use the current schema.
+
+
+## Message path admission (schema13, #53)
+
+Receipt gains constrained path_admission (unadmitted/admitted/unknown), separate
+from response acknowledgement and original immutable assignment. Startup-only
+migration13 uses saved positive admission evidence and marks other prior facts
+unknown; Core reads the current column only. The existing state machine, tables,
+worker ownership and payload accounting remain. See [message recovery](message-recovery.md).
