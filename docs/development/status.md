@@ -151,21 +151,12 @@ or Core cleanup automation is added. Task-boundary cleanup is Agent Guide guidan
 real-model dogfood and new exact-source native CI are unverified. Independent
 review and latest-main integration checks are separate gates.
 
-The existing non-2xx HTTP path remains diagnostic-only with a 64KiB body limit;
-its usage is unknown in #49. #47 must separately agree and implement its typed
-small-error-body usage boundary before claiming complete failure accounting.
-#47 incremental aggregate design requires separate agreement before implementation;
-the latest issue comment supersedes its original read-time scan proposal.
-Parallel index/index-CLI files are outside this worktree's edit scope.
-The latest #47 scope excludes all embedding/standalone RAG accounting and its
-previous hook plan; expose out_of_scope/not_recorded, not zero. Only normal/
-summary requests and separate Run/model/shell time remain. The B aggregate-only direction replaces A/future-reservation proposals. The final
-candidate retains aggregate rows until scope deletion, uses existing storage
-limits/terminal exceptions and proposes fair small-batch initialization on the
-existing lifecycle. The leader adopts the completed B specification including observer cleanup,
-both-table byte accounting and precise page coverage. Independent design review
-must resolve P1/P2 findings before implementation. No #47 code, schema or tests
-are implemented; #50 remains separately queued.
+The existing non-2xx HTTP path remains diagnostic-only in #49. #47's latest
+measurement-first scope reads saved states/numbers only and does not extend it.
+The former write-time/period design is superseded. Current work is a short
+read-only query/scale fixture, with performance and correctness not yet verified.
+No schema, producer/state/driver hooks or period API are being added. Unrecorded
+summary/embedding coverage is explicit; #50 remains queued after #47.
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 

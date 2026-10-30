@@ -199,9 +199,8 @@ one reactive saved queue with paired history reads, per-message cancellation,
 durable draft correlation, explicit foreground release and a Turn-only human
 interrupt. Full Run stop remains separate; automatic timed backgrounding is deferred.
 
-Issue #47 adopts [model usage aggregates](usage-aggregates.md): normal/summary
-usage and separate Run/model/shell time, independent accounting CAS, all-time/day/
-exact-instant aggregate-only reads with honest bounded coverage, existing logical
-capacity and scope-lifetime retention. Embedding/standalone RAG are not recorded,
-not zero. Independent design review resolves P1/P2 before implementation; no #50
-or parallel index work is included.
+Issue #47 adopts [saved usage totals](usage-aggregates.md): indexed read-time
+SQL over saved attempt states/standard usage and saved Run/model/shell timing,
+first measured at synthetic scale. All-time only; unrecorded summary/embedding
+coverage is explicit. No schema, producer observation or persistent totals are
+added unless measured slowness justifies a separately approved minimal follow-up.

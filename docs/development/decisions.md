@@ -2,86 +2,20 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
-## Unobserved Finish Distribution (#47, 2026-10-30, Active)
+## Measure Saved Totals First (#47, 2026-10-30, Active)
 
-The leader adopts TerminalTime Observed/Unknown. Pending/observed/unknown ledger
-shape separates NULL finish from known epoch0/negative finish; cleanup/startup
-clock must never be invented as HTTP finish. Only observed finish is immutable.
-One idempotent unknown settlement contributes all-time only, retaining known token
-fields with independently unknown duration/invocation evidence. No day/instant
-row is assigned. A checked all-time terminal_time_unknown_count means scope-wide
-unattributable observations, not failures known inside the queried period.
+[Latest comment 6515082156](https://github.com/tya5/shellboy/issues/47#issuecomment-6515082156)
+withdraws the earlier arbitrary-period/write-time additions (comments6513644118/
+6513653608) and the complex approved design through308dfef. Preserve those sources
+in archive refs; do not carry their schema/observer/ledger/period gates forward.
+The started, untested schema-only WIP is isolated at protected archive commit
+ff2d0cd and is not part of the current branch or an integration candidate.
 
-Period queries use a bounded all-time coverage phase within the same 4,096-row
-budget. They disclose time_unattributable/partial and add no guessed amounts to
-any window. Phase/full-key cursor progress and per-scope accumulator state prevent
-coverage rows being counted again across pages; page deltas and cumulative state
-are distinct. This conservative uncertainty can affect other periods indefinitely
-until scope deletion. Do not silently infer membership or optimize it away.
-Quantity counters/bytes/durations are nonnegative; UTC epoch seconds are signed
-i64 and may be negative. Independent design P2 recheck still precedes implementation.
-
-
-## Adopted Aggregate Accounting And Observation (#47, 2026-10-30, Active)
-
-Adopt the [B specification](../design/usage-aggregates.md), subject to independent
-design P1/P2 resolution before schema/production work. Both aggregate and minimal
-summary-only ledger payloads, plus small usage coverage/revision metadata, enter
-existing logical history via covering scalar indexes; no generated-field cycle,
-boolean double count or physical-page accounting. Owner composite FKs have an
-explicit UNIQUE target; soft deletion clears all owned metrics in the same TX.
-
-Accounting CAS is independent from Core terminal/generation/adoption predicates.
-Capture returned typed measurements and client finish time before cancellation
-returns, persist once, and never revive Core state/audit/output. Existing producer
-cleanup/join prefers captured facts; unobserved abort/restart consumption stays
-unknown with pending/orphan coverage and no new metrics runtime pin/observer job.
-No normal-HTTP duplicate ledger, new worker/queue/timer or repeat HTTP is added.
-
-Period paging seeks full scope/phase/time/purpose/outcome keys with one global
-4,096+sentinel budget. Same-instant fragments and per-child coverage are explicit;
-page totals are not full-period totals. Conservative revision invalidation is
-adopted even though continuous updates can prevent pagination completing for a
-closed past period; do not silently add mixed snapshots or imply eventual success.
-No new age/pressure policy, reservation manager, embedding recording or #50 work.
-
-
-## Aggregate-Only Period Direction (#47, 2026-10-30, Active Direction)
-
-The latest instruction chooses B: all-time/coarse UTC buckets plus exact terminal-
-instant additive totals; all public reads use saved aggregate rows. Do not adopt
-A's unapproved typed-source edge exception, minute-only boundaries or prefix-tree
-write amplification. Preserve arbitrary RFC3339 half-open periods without coarse
-rounding. One global 4,096-row budget plus sentinel across periods/children returns
-honest partial coverage and continuation. Distinct instants can cost one aggregate
-row per request/scope in the worst case; verify linear bytes and bounded query work.
-
-Withdraw the generic future-reservation and warning-triggered GC proposals.
-The candidate keeps existing storage guard/terminal exceptions, charges metrics
-payload to existing logical usage and retains aggregates until scope deletion,
-without a new age/pressure policy. The former [schema candidate](issue-47-design-proposal.md) is superseded by the
-adopted specification above. Independent P1/P2 design review remains the
-pre-implementation gate.
-
-
-## Model-Only Accounting Scope (#47, 2026-10-30, Active)
-
-The latest user-approved scope excludes all embedding usage recording from #47.
-Cover normal/summary model requests, successful/non-successful/unknown usage,
-separate Run/model/shell time and Turn/Run/Thread/child-Thread totals. Expose
-embedding and standalone RAG coverage as out_of_scope/not_recorded, never known
-zero or a fake empty aggregate. Do not create unused embedding rows/columns or
-combine standalone RAG's separate DB with owner statistics. Keep categories
-extensible without implementing an unrequested producer.
-
-Do not edit index/index-CLI files. The embedding hook plan and measured embedding
-HTTP API are withdrawn; a separate small follow-up waits for parallel #42/#43/#55
-main adoption. Keep only the proposed model non-2xx typed extension, preserving
-shared diagnostic wrappers, error classification, redaction and body limits.
-This isolates integration risk without disguising missing measurements. Revisit
-only with explicit follow-up authorization. Arbitrary-period precision/partial
-coverage, fact retention, exact schema/budget and the full #47 design still need
-leader approval; this scope decision alone is not implementation authorization.
+Use existing saved state/standard usage/timing and measure indexed SQL first.
+Roughly100ms is a measurement goal, not an absolute CI correctness threshold.
+Only measured slowness warrants a separately approved simple Run/Thread total.
+This limits scope without pretending missing usage is zero. No period filters,
+client-invocation observation, summary accounting or new GC policy in version1.
 
 
 ## Standard Usage Scalar Boundary (#49, 2026-10-30, Active)

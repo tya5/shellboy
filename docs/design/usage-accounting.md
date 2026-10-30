@@ -59,22 +59,10 @@ completed/failed/incomplete/summary responses, null/invalid values and signed
 64-bit boundaries. Model behavior at task boundaries requires later real-model
 dogfood; mocks and guide wording cannot establish it.
 
-## Adopted #47 Model-Only Aggregates
+## #47 Read-Time Totals
 
-The latest explicit scope decision limits #47 to normal/summary model-request
-usage (success, non-success and per-field unknown), separate Run/model/shell time,
-and existing Turn/Run/Thread/child-Thread totals. All embedding indexing/query
-and standalone RAG recording are out_of_scope/not_recorded, never known-zero
-usage/counts or unused aggregate rows. No index/index-CLI or #50 work is included.
-
-Adopt [Model Usage Aggregates](usage-aggregates.md): all-time/day/exact-instant
-saved totals, aggregate-only bounded period reads, independent source-marker
-accounting CAS, both new tables in existing logical-history byte accounting,
-existing-limit admission/terminal rollback, scope-lifetime retention, and fair
-bounded initialization on the existing maintenance lifecycle. No generic future
-reservation, new timer, fixed age or warning-triggered pressure GC is introduced.
-
-The leader approves implementation only after independent design review resolves
-P1/P2 findings. The model-only non-2xx typed extension preserves existing <=64KiB
-diagnostics/redaction and catalog/embedding APIs. Its producer cleanup and paging
-coverage contracts are part of the adopted specification, not implemented proof.
+[Saved Usage Totals](usage-aggregates.md) reuses the standard scalar readings for
+indexed SQL totals of saved attempts and saved timing values. Measure the actual
+queries first; no storage or producer change follows merely from this document.
+Unrecorded summary/embedding coverage remains explicit. Non-2xx HTTP behavior
+and existing #49 data remain unchanged; this version adds no observation hooks.

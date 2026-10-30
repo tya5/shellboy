@@ -182,61 +182,19 @@ planned #52 behavior require fresh combined checks.
 
 
 
-## #47 Model-Only Scope: Not Implemented Or Validated
+## #47 Read-Time Totals: Measurement Pending
 
+Latest comment6515082156 supersedes the former design/synthetic-DDL evidence.
+Current acceptance concerns saved-state SQL totals, per-field unknown/overflow,
+active separately, bounded Thread lineage, same public query across scopes and
+DB-worker/detail-cache behavior. No runtime/schema result is claimed yet.
 
-The leader-adopted [aggregate design](../design/usage-aggregates.md) now specifies
-both generated payload-byte expressions/history lookup, composite owner targets,
-full-key scope/phase paging with same-instant fragments and per-child watermarks,
-and retained completion ownership/abort/restart handling. Independent design
-review of those P1/P2 points remains required before implementation.
-
-A design-only Python SQLite 3.51.0 in-memory smoke parses the documented summary
-DDL and checks payload bytes, terminal update, rollback, mismatched-owner rejection,
-Turn/Thread cascade and covering-index SUM without payload Function opcodes. It
-uses a deterministic UTF-8 octet_length shim, not the bundled Rust database, and
-is not schema implementation or native validation. An initial toy fixture tried
-to delete Thread before existing non-cascading Core Run/Turn owners; correcting
-the fixture to respect those owners preserves Core FK semantics. No user DB is
-used and no production/migration files change.
-
-
-The explicitly approved scope covers normal/summary model-request usage and
-Run/model/shell time across Turn/Run/Thread/children. All embedding recording and
-standalone RAG are excluded; acceptance must verify out_of_scope/not_recorded
-coverage with no known-zero token totals, request counts or unused aggregate
-rows. The index/index-CLI hook plan and embedding-side shared HTTP wiring are
-withdrawn. Those producers require a later separately authorized follow-up.
-
-The model non-2xx extension still requires known/partial/unknown tests with
-unchanged diagnostic classification, redaction and 64KiB limit, including shared
-catalog/embedding caller regressions without changing their APIs. Period-edge
-precision/partial coverage, fact reclamation, missing-finish-after-GC, bounded
-initialization/fair maintenance, exact-once terminal updates and large indexed
-query/VM-step checks remain planned, not passed. The leader has adopted the specification; independent design review must resolve
-remaining P1/P2 findings before implementation. No #47 production, schema or
-regression implementation is claimed.
-#49's exact native gate is separate (main5350fc8 passed three OS run40997452704,
-reported independently by the integrator). The B-only candidate now withdraws
-source-fact edge reads, generic future reservations, fixed-age/new-pressure GC
-and warning-trigger conversion. Pending design validation must cover only saved
-aggregate reads for arbitrary boundaries, the common 4,096+sentinel budget, linear
-fine-instant storage, existing-limit admission/terminal rollback, scope deletion,
-separate attempt/client-request counts and completion-observer CAS. No #47 schema
-or implementation result is claimed. The adopted unknown-finish policy adds
-required regressions for observed epoch0/negative versus SQL NULL Unknown,
-all-time-only exact-once restart/abort distribution, retained known tokens,
-unknown duration/invocation, no period assignment with time_unattributable partial,
-coverage-phase page deltas versus cumulative state, overflow and deleted/missing
-callback fencing. UTC seconds must not inherit quantity nonnegative checks.
-The updated design-only SQLite smoke also passes ledger pending/observed/unknown
-CHECK shapes, epoch0 and negative known finish versus NULL Unknown, generated-byte
-changes, duplicate settlement fencing and a pure coverage keyset page model
-(deltas2/1/0, cumulative3). It is not a production aggregate/parallel-race test;
-those remain required after implementation. The draft negative-day assertion was
-corrected to multiply the floor quotient by day width before comparison. #50 remains queued separately.
-
-
+Measure synthetic100k attempts/10k shells/1k Runs/100 children with documented
+layout, standard versus legacy JSON, indexes/EXPLAIN/VM steps, SQLite/build/OS,
+cold/warm definitions and repeated median/p95. Compare the approximate100ms goal
+without a brittle CI timing assertion. Existing #49 evidence below is unchanged.
+No user DB/paid API, schema, observer, summary ledger or GC-policy work is part of
+this first version. Missing summary/embedding recording is coverage, not zero.
 
 ## Standard Usage Persistence And Scalar Reads (#49)
 
