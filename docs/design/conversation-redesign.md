@@ -307,3 +307,53 @@ admission measurements, not claims inferred from passing functional tests:
 
 If a target requires adjustment based on native baseline evidence, record that
 reason and measured impact before admission; do not silently drop the requirement.
+
+
+### B+C freshness follow-up after first-unit review6523314574
+
+The b0e3c29 admission establishes the structural/interaction subset only.
+BC-R1–R6 in the delivery plan remain B+C ownership; do not infer freshness
+from request-ID tests or structural PTYs. Qualify real external-mutation routes
+and their commit-to-visible latency separately before completing those rows.
+
+Snapshot timestamps use an explicit UTC label, captured once when a bounded
+read succeeds (or F2 freezes the painted display), never recalculated on draw
+or animation tick. Finished explicit tool previews retain that read time in
+the existing budgeted notice string and show close/reopen to read again.
+Original pages retain a per-accepted-page read time; O refreshes the selected
+source and P requests its first page. F2 shows frozen-at time plus F2/Esc to
+resume. These local display timestamps are observations, not saved source
+creation times or guarantees that mutable lifecycle facts are current.
+
+Changing detail source identity resets unrelated source IDs, cached links and
+original pages, invalidates their request tokens, and starts new reads only for
+the current selected source. Paging the same source does not invalidate an
+independent current links request. Source/availability revisions must invalidate
+cached links even when rendered prose is unchanged. Keep mutable lifecycle
+fields distinct from immutable saved call/result JSON and preserve selection
+identity while updating facts. Failed refreshes retain evidence with an explicit
+stale/unavailable notice rather than presenting cached facts as current.
+
+
+The B+C follow-up reuses the existing item-scoped detail reader/action and read
+slots for both fields and links. A selected Thread metadata refresh invalidates
+the visible detail consumer; its one dirty flag and one in-flight token coalesce
+at500ms. No further reads occur without opening/navigating, an explicit refresh,
+or another accepted change notification. F2/covered/closed details do not request
+reads. An invalidation during a pending read marks that reply obsolete; retirement
+precedes the next read so bounded admission is preserved. Errors remain labelled
+stale and await another change or explicit refresh, rather than retrying on ticks.
+
+One detail DB job uses a short transaction for at most2 exact node IDs,96KiB
+payload per source, and a bounded current-tool relation lookup per source. No
+raw output bytes are read; current state/code/output-complete/retention generation
+and saved-output presence come from exact group/call/Turn relationships. Limit
+current execution detail to16 calls/source and expose truncation, then cap the
+combined fields at128 and links at128 per source within existing presentation
+metadata bounds. Decode/Markdown/sanitize on the existing presentation workers;
+retain only prepared fields/links, not off-page bodies. Missing/tombstoned/oversized
+sources are explicit per-source unavailable results; they invalidate cached facts
+for that source without discarding another available source. Every reply carries
+source IDs, monotonic read revision and observed UTC time. This is one visible
+popup consumer job/500ms; consolidating all main-view jobs remains separately
+open in D's shared refresh refactor, and does not gain a false completion claim.
