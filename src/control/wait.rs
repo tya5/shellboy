@@ -61,6 +61,28 @@ impl Drop for Guard {
             .remove(&self.id);
     }
 }
+
+impl Control {
+    /// Bounded in-process ownership witnesses; the frontend joins these exact
+    /// operations to their committed pending records in its normal read snapshot.
+    pub(crate) fn pending_wait_sources(&self) -> Option<Vec<(String, String)>> {
+        let entries = self.waits.entries.lock().expect("wait graph poisoned");
+        if entries.len() > 128 {
+            return None;
+        }
+        let mut sources = entries
+            .iter()
+            .filter_map(|(operation, registration)| {
+                registration
+                    .source
+                    .strip_prefix("shell:")
+                    .map(|execution| (operation.clone(), execution.to_owned()))
+            })
+            .collect::<Vec<_>>();
+        sources.sort_unstable();
+        Some(sources)
+    }
+}
 struct Observation {
     matched: Vec<WaitCondition>,
     snapshot: Value,
@@ -103,14 +125,14 @@ pub(super) async fn observe(
             let tx = db.transaction()?;
             let key = WaitKeys::new(&cleanup_id).pending();
             let generation: Option<i64> = tx.query_row("SELECT json_extract(value,'$.turn_wait_generation') FROM app_meta WHERE key=?1",[&key],|r|r.get(0)).optional()?.flatten();
-            tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
+            let removed = tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
             let changed = if let (Some(origin),Some(foreground),Some(generation)) = (cleanup_caller,foreground,generation) {
                 foreground.with_current(&origin.execution_id, || {
                     tx.execute("UPDATE turn SET state='running' WHERE id=?1 AND generation=?2 AND state='waiting' AND EXISTS(SELECT 1 FROM run WHERE id=?3 AND state='live') AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key>='wait.pending.' AND key<'wait.pending/' AND json_extract(value,'$.caller.turn_id')=?1 AND json_extract(value,'$.caller.execution_id')=?4 AND json_extract(value,'$.turn_wait_generation')=?2)",rusqlite::params![origin.turn_id,generation,origin.run_id,origin.execution_id])
                 }).unwrap_or(Ok(0))?
             } else { 0 };
             tx.commit()?;
-            Ok(changed > 0)
+            Ok(removed > 0 || changed > 0)
         })
         .await
         .map_err(crate::app::storage_error)?;
@@ -224,6 +246,15 @@ async fn observe_inner(
                 entries: control.waits.entries.clone(),
                 id: operation_id.clone(),
             });
+        }
+        if initial
+            && guard.is_some()
+            && let Some(origin) = &caller
+        {
+            // The initial pending record committed before installing the first
+            // registration. Background observers have no Turn state transition
+            // that could otherwise make this newly owned wait visible.
+            control.changed(&origin.thread_id);
         }
         initial = false;
         if disconnected.is_cancelled() {
@@ -554,6 +585,222 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+    #[tokio::test]
+    async fn pending_source_snapshot_is_exact_bounded_and_guard_owned() {
+        let (_dir, owner, control) = fixture().await;
+        assert_eq!(control.pending_wait_sources(), Some(vec![]));
+        {
+            let mut entries = control.waits.entries.lock().unwrap();
+            entries.insert(
+                "z:operation".into(),
+                Registration {
+                    source: "shell:execution:日本".into(),
+                    targets: vec!["run:other".into()],
+                },
+            );
+            entries.insert(
+                "a:operation".into(),
+                Registration {
+                    source: "shell:shell:nested".into(),
+                    targets: vec![],
+                },
+            );
+        }
+        assert_eq!(
+            control.pending_wait_sources(),
+            Some(vec![
+                ("a:operation".into(), "shell:nested".into()),
+                ("z:operation".into(), "execution:日本".into())
+            ])
+        );
+        let guard = Guard {
+            entries: control.waits.entries.clone(),
+            id: "a:operation".into(),
+        };
+        drop(guard);
+        assert_eq!(control.pending_wait_sources().unwrap().len(), 1);
+        {
+            let mut entries = control.waits.entries.lock().unwrap();
+            for index in 0..127 {
+                entries.insert(
+                    format!("operation-{index}"),
+                    Registration {
+                        source: format!("shell:execution-{index}"),
+                        targets: vec![],
+                    },
+                );
+            }
+        }
+        assert_eq!(control.pending_wait_sources().unwrap().len(), 128);
+        control.waits.entries.lock().unwrap().insert(
+            "overflow".into(),
+            Registration {
+                source: "shell:last".into(),
+                targets: vec![],
+            },
+        );
+        assert!(
+            control.pending_wait_sources().is_none(),
+            "overflow is unavailable, never a partial/global-prefix snapshot"
+        );
+        control.waits.entries.lock().unwrap().remove("overflow");
+        assert_eq!(control.pending_wait_sources().unwrap().len(), 128);
+        control.waits.entries.lock().unwrap().clear();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn background_wait_creation_and_cleanup_notify_committed_facts_without_turn_changes() {
+        let (_dir, owner, control) = fixture().await;
+        let mut events = control.subscribe();
+        let cancel = CancellationToken::new();
+        let task = spawn_wait(
+            &control,
+            "background-visible",
+            Some(origin("a", "ra", "ta", "sa")),
+            cancel.clone(),
+        );
+        assert!(
+            matches!(tokio::time::timeout(Duration::from_secs(3),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
+        );
+        assert_eq!(
+            control.pending_wait_sources(),
+            Some(vec![("background-visible".into(), "sa".into())])
+        );
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM app_meta WHERE key='wait.pending.background-visible'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )?,
+                    1
+                );
+                assert_eq!(
+                    db.query_row("SELECT state FROM turn WHERE id='ta'", [], |row| row
+                        .get::<_, String>(0))?,
+                    "running"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        cancel.cancel();
+        assert_eq!(task.await.unwrap().unwrap()["status"], "interrupted");
+        assert!(
+            matches!(events.try_recv(),Ok(super::super::EngineEvent::Changed {thread_id,recovery:false}) if thread_id=="a")
+        );
+        assert_eq!(control.pending_wait_sources(), Some(vec![]));
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM app_meta WHERE key='wait.pending.background-visible'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                assert_eq!(
+                    db.query_row("SELECT state FROM turn WHERE id='ta'", [], |row| row
+                        .get::<_, String>(0))?,
+                    "running"
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT state FROM shell_execution WHERE id='sa2'",
+                        [],
+                        |row| row.get::<_, String>(0)
+                    )?,
+                    "running"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_pending_insert_or_delete_does_not_publish_a_rolled_back_fact() {
+        for fail_insert in [true, false] {
+            let (_dir, owner, control) = fixture().await;
+            let mut events = control.subscribe();
+            if fail_insert {
+                owner.db.call(|db| {db.execute_batch("CREATE TRIGGER reject_pending BEFORE INSERT ON app_meta WHEN NEW.key LIKE 'wait.pending.%' BEGIN SELECT RAISE(ABORT,'synthetic pending insertion failure'); END;")?;Ok(())}).await.unwrap();
+                let error = observe(
+                    control.clone(),
+                    "failed-pending".into(),
+                    args(
+                        WaitCondition::ShellEnded {
+                            execution_id: "sa2".into(),
+                        },
+                        30_000,
+                    ),
+                    Some(origin("a", "ra", "ta", "sa")),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(error.code, ErrorCode::SaveFailed);
+            } else {
+                let cancel = CancellationToken::new();
+                let task = spawn_wait(
+                    &control,
+                    "failed-pending",
+                    Some(origin("a", "ra", "ta", "sa")),
+                    cancel.clone(),
+                );
+                assert!(
+                    matches!(tokio::time::timeout(Duration::from_secs(3),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
+                );
+                owner.db.call(|db| {db.execute_batch("CREATE TRIGGER reject_pending BEFORE DELETE ON app_meta WHEN OLD.key LIKE 'wait.pending.%' BEGIN SELECT RAISE(ABORT,'synthetic pending cleanup failure'); END;")?;Ok(())}).await.unwrap();
+                cancel.cancel();
+                assert_eq!(task.await.unwrap().unwrap_err().code, ErrorCode::SaveFailed);
+            }
+            assert!(matches!(
+                events.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ));
+            assert_eq!(
+                control.pending_wait_sources(),
+                Some(vec![]),
+                "Guard cleanup is independent of the failed DB mutation"
+            );
+            owner
+                .db
+                .call(move |db| {
+                    assert_eq!(
+                        db.query_row(
+                            "SELECT count(*) FROM app_meta WHERE key='wait.pending.failed-pending'",
+                            [],
+                            |row| row.get::<_, i64>(0)
+                        )?,
+                        i64::from(!fail_insert)
+                    );
+                    assert_eq!(
+                        db.query_row("SELECT state FROM turn WHERE id='ta'", [], |row| row
+                            .get::<_, String>(0))?,
+                        "running"
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            owner.shutdown().await.unwrap();
+        }
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn owner_and_sibling_wait_cycles_reject_but_same_run_other_shell_can_timeout() {
