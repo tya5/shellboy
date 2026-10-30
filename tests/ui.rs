@@ -2088,11 +2088,9 @@ fn derived_tool_excerpt_moves_by_visible_rows() {
     });
     assert!(ui.event(key(KeyCode::Esc)).is_empty());
     assert!(
-        ui.event(Event::Key(KeyEvent::new(
-            KeyCode::End,
-            KeyModifiers::CONTROL
-        )))
-        .is_empty()
+        matches!(ui.event(Event::Key(KeyEvent::new(KeyCode::End,KeyModifiers::CONTROL))).as_slice(),
+        [UiAction::LoadHistory{thread_id,before_cursor:None,..}] if thread_id=="scroll-fixture"),
+        "return-to-tail requests the ordinary latest page while preserving known output"
     );
     let before = scroll_cells(&mut ui, &mut terminal);
     assert!(

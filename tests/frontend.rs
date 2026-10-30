@@ -1610,9 +1610,9 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
             thread_id,
             generation,
             key,
-            request_revision,
+            request_revision: 17,
             result,
-        } if request_revision == 17 => {
+        } => {
             assert_eq!(thread_id, "source");
             assert_eq!(generation, 3);
             assert_eq!(
