@@ -1491,3 +1491,17 @@ representative source references. Preserve the full canonical frontier and all
 immutable original records; F6 DAG navigation reaches individual observations.
 Counts are displayed-window facts, not invented whole-Thread totals. Model text,
 received paid previews and actionable failures are not quiet observations.
+
+
+## #41 projection bounds and preview admission (2026-10-30)
+
+Painted quiet summaries can follow later prose, so their physical first row does
+not identify the canonical beginning of the bounded projection. Reuse the same
+128-node/192KiB range calculation for backward navigation; preserve actual
+Unicode row anchors for body hydration. Do not infer source order from paint
+order or introduce a second navigation cache.
+
+Inline preview limits include key/entry/block/vector metadata and conservative
+map overhead. Retire a matching in-flight preview when its source/outcome is no
+longer current; do not leave its finite admission slot permanently occupied.
+Token checks still prevent that old response from cancelling a newer request.

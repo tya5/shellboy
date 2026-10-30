@@ -103,6 +103,7 @@ impl ItemState {
             .iter()
             .map(|(key, entry)| {
                 key.retained_bytes()
+                    + 48 // Conservative BTree links/allocation overhead.
                     + std::mem::size_of::<Entry>()
                     + entry.outcome.capacity()
                     + entry.preview.as_ref().map_or(0, Preview::bytes)
@@ -223,14 +224,8 @@ impl ItemState {
         true
     }
     fn trim_preview_budget(&mut self, budget: usize) {
-        while self
-            .entries
-            .values()
-            .filter_map(|entry| entry.preview.as_ref())
-            .map(Preview::bytes)
-            .sum::<usize>()
-            > budget
-        {
+        // Include entry/key/vector metadata, not only the copied strings.
+        while self.retained_bytes() > budget {
             let oldest = self
                 .entries
                 .iter()
@@ -442,6 +437,10 @@ mod tests {
             assert!(
                 payload <= budget,
                 "128 open items must never pin 128 raw copies"
+            );
+            assert!(
+                state.retained_bytes() <= budget,
+                "entry/key/block metadata belongs to the same budget"
             );
         }
         assert!(state.preview(&first).is_none());

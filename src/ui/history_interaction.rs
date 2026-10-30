@@ -435,6 +435,15 @@ impl UiState {
                 .as_deref()
                 .is_none_or(|outcome| !view.items.matches_outcome(&key, outcome))
             {
+                // Retire only this matching in-flight token. A source/outcome
+                // change cannot strand one of the three preview slots, and an
+                // older reply must not cancel a newer request for the same key.
+                self.dirty |= view.items.accept_failed_preview(
+                    &key,
+                    request_revision,
+                    "表示対象が更新されました。閉じて開くと再取得できます".into(),
+                    budget,
+                );
                 return;
             }
             let changed = match result {
@@ -629,6 +638,56 @@ mod tests {
         assert_eq!(notice.kind, NoticeKind::Failure);
         key(&mut ui, KeyCode::Char('x'));
         assert!(ui.view().operation_notice.is_none());
+    }
+    #[test]
+    fn stale_outcome_releases_its_preview_slot_without_cancelling_a_new_request() {
+        use crate::presentation::{BlockKind, PresentationBlock, ToolPresentation};
+        let mut ui = fixture();
+        let tool = ToolPresentation {
+            group_id: Some("g".into()),
+            call_id: "c".into(),
+            status: "completed".into(),
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        let key = ItemKey::tool(&tool, "source", 0);
+        let current_outcome = presentation::tool_outcome(&tool);
+        ui.view_mut().nodes_mut_for_test()[0].presentation.blocks = vec![PresentationBlock {
+            kind: BlockKind::ToolResult,
+            tool: Some(tool),
+            ..Default::default()
+        }];
+        let old = ui.view_mut().items.request(&key, "running:None");
+        assert_eq!(ui.view().items.pending_previews(), 1);
+        let generation = ui.view().generation;
+        ui.accept_tool_preview(
+            "thread",
+            generation,
+            key.clone(),
+            old,
+            Ok(Preview::default()),
+        );
+        assert_eq!(
+            ui.view().items.pending_previews(),
+            0,
+            "stale source must release its own slot"
+        );
+        let next = ui.view_mut().items.request(&key, &current_outcome);
+        ui.accept_tool_preview(
+            "thread",
+            generation,
+            key.clone(),
+            old,
+            Ok(Preview::default()),
+        );
+        assert_eq!(
+            ui.view().items.pending_previews(),
+            1,
+            "an older token cannot cancel its replacement"
+        );
+        ui.accept_tool_preview("thread", generation, key, next, Ok(Preview::default()));
+        assert_eq!(ui.view().items.pending_previews(), 0);
+        assert_eq!(ui.view().nodes()[0].text, "Visible original body");
     }
     #[test]
     fn tab_selects_visible_continuation_without_requiring_its_first_row() {
