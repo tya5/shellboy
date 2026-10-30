@@ -324,3 +324,85 @@ fn terminal_admission_is_not_answered_or_cancelled_and_keeps_late_source_binding
     source(&mut ui, &id, rev, "original-message");
     assert!(!ui.view().pending.contains_key(&rev));
 }
+
+#[test]
+fn send_progress_does_not_become_a_stale_operation_notice() {
+    let mut ui = ui();
+    ui.insert("synthetic request", false);
+    let id = ui.view().draft.draft_id.clone();
+    let revision = ui.view().draft.revision;
+    let actions = ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    )));
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, UiAction::Send { .. }))
+    );
+    assert!(ui.view().operation_notice.is_none());
+    assert!(footer(&ui).contains("送信受付中"));
+    receipt(&mut ui, &id, revision, ReceiptStatus::Accepted);
+    source(&mut ui, &id, revision, "m1");
+    history(&mut ui, "m1", 1);
+    receipt(&mut ui, &id, revision, ReceiptStatus::Completed);
+    let generation = ui.view().generation;
+    ui.apply(UiUpdate::Activity {
+        thread_id: "t".into(),
+        generation,
+        epoch: 1,
+        observed_at: Instant::now(),
+        snapshot: activity::ActivitySnapshot {
+            phase: activity::ActivityPhase::Completed,
+            ..Default::default()
+        },
+    });
+    ui.event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+    assert!(
+        ui.view().operation_notice.is_none(),
+        "navigation cannot announce an old receipt again"
+    );
+    assert!(!footer(&ui).contains("送信要求を受け付け中"));
+}
+#[test]
+fn history_failure_remains_visible_in_quiet_footer() {
+    let mut ui = ui();
+    ui.select_thread("t".into());
+    let generation = ui.view().generation;
+    ui.apply(UiUpdate::LoadFailed {
+        thread_id: "t".into(),
+        generation,
+        view_revision: None,
+        message: "synthetic history read failed".into(),
+    });
+    assert_eq!(
+        ui.view().operation_notice.as_ref().unwrap().kind,
+        history_interaction::NoticeKind::Failure
+    );
+    assert!(footer(&ui).contains("synthetic history read failed"));
+    ui.apply(UiUpdate::Status {
+        thread_id: Some("t".into()),
+        text: "background status".into(),
+    });
+    assert!(footer(&ui).contains("synthetic history read failed"));
+}
+#[test]
+fn unknown_activity_is_not_displayed_as_known_idle() {
+    let mut ui = ui();
+    ui.select_thread("t".into());
+    assert!(footer(&ui).contains("状態を確認中"));
+    assert!(!footer(&ui).contains("入力できます"));
+    let generation = ui.view().generation;
+    ui.apply(UiUpdate::Activity {
+        thread_id: "t".into(),
+        generation,
+        epoch: 1,
+        observed_at: Instant::now(),
+        snapshot: activity::ActivitySnapshot {
+            phase: activity::ActivityPhase::Idle,
+            ..Default::default()
+        },
+    });
+    assert!(footer(&ui).contains("入力できます"));
+    assert!(!footer(&ui).contains("状態を確認中"));
+}

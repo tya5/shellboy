@@ -69,6 +69,7 @@ impl UiState {
             self.input_notice = None;
             self.active_view_mut().clear_operation_notice();
         }
+        let status_before = self.view().status.clone();
         let usage_before = self.management.usage_snapshot;
         let owner_before = self.management.owner.clone();
         let epoch_before = self.management.epoch;
@@ -120,7 +121,7 @@ impl UiState {
                 epoch: self.management.epoch,
             });
         }
-        if self.active == input_owner {
+        if self.active == input_owner && self.view().status != status_before {
             self.active_view_mut()
                 .promote_status_notice(history_interaction::NoticeKind::Info);
         }

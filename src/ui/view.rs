@@ -1236,6 +1236,7 @@ impl ThreadView {
         self.scroll.pending = 0;
         self.scroll.request = None;
         self.status = message;
+        self.promote_status_notice(history_interaction::NoticeKind::Failure);
     }
     pub(super) fn on_node_window(&mut self, view_revision: u64, mut node: UiNode) {
         let node_id_for_reply = node.node_id.clone();
@@ -1563,6 +1564,9 @@ impl ThreadView {
             && (pending.send.is_none() || pending.source_node_id.is_some())
         {
             self.pending.remove(&revision);
+        }
+        if status == ReceiptStatus::Failed {
+            self.promote_status_notice(history_interaction::NoticeKind::Failure);
         }
         true
     }

@@ -50,6 +50,16 @@ impl ThreadView {
         }
     }
     pub(super) fn promote_status_notice(&mut self, kind: NoticeKind) {
+        // Send/receipt progress already has typed, reactive footer ownership.
+        if kind == NoticeKind::Info
+            && self.sending().is_some()
+            && matches!(
+                self.status.as_str(),
+                "送信要求を受け付け中" | "受付処理中です"
+            )
+        {
+            return;
+        }
         if self.status.is_empty()
             || self.status == self.state
             || self.status == self.footer_phase().label()
@@ -687,6 +697,39 @@ mod tests {
         );
         ui.accept_tool_preview("thread", generation, key, next, Ok(Preview::default()));
         assert_eq!(ui.view().items.pending_previews(), 0);
+        assert_eq!(ui.view().nodes()[0].text, "Visible original body");
+    }
+    #[test]
+    fn rejected_preview_action_releases_its_pending_slot() {
+        use crate::presentation::{BlockKind, PresentationBlock, ToolPresentation};
+        let mut ui = fixture();
+        let tool = ToolPresentation {
+            group_id: Some("g".into()),
+            call_id: "c".into(),
+            status: "completed".into(),
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        let key = ItemKey::tool(&tool, "source", 0);
+        let outcome = presentation::tool_outcome(&tool);
+        ui.view_mut().nodes_mut_for_test()[0].presentation.blocks = vec![PresentationBlock {
+            kind: BlockKind::ToolResult,
+            tool: Some(tool),
+            ..Default::default()
+        }];
+        let request_revision = ui.view_mut().items.request(&key, &outcome);
+        let action = UiAction::LoadToolPreview {
+            thread_id: "thread".into(),
+            generation: ui.view().generation,
+            key: key.clone(),
+            request_revision,
+            source_node_id: "source".into(),
+            group_id: Some("g".into()),
+            call_id: "c".into(),
+        };
+        ui.action_rejected(&action);
+        assert_eq!(ui.view().items.pending_previews(), 0);
+        assert!(ui.view().items.preview_failed(&key, &outcome));
         assert_eq!(ui.view().nodes()[0].text, "Visible original body");
     }
     #[test]

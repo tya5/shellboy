@@ -2801,7 +2801,13 @@ impl UiState {
         match result {
             Ok(()) => {
                 view.pending.remove(&submission.revision);
-                view.operation_notice = None;
+                if view
+                    .operation_notice
+                    .as_ref()
+                    .is_none_or(|notice| notice.kind != history_interaction::NoticeKind::Failure)
+                {
+                    view.operation_notice = None;
+                }
             }
             Err(error) => {
                 pending.status = ReceiptStatus::Failed;
@@ -2880,6 +2886,38 @@ impl UiState {
             // The frontend has not accepted shutdown. Keep editing and retry
             // available; a later rejected duplicate cannot undo an accepted one.
             self.lifecycle.reject_unaccepted();
+        }
+        if let UiAction::LoadToolPreview {
+            thread_id,
+            generation,
+            key,
+            request_revision,
+            ..
+        } = action
+        {
+            self.apply(UiUpdate::ToolPreview {
+                thread_id: thread_id.clone(),
+                generation: *generation,
+                key: key.clone(),
+                request_revision: *request_revision,
+                result: Err("出力の取得キューが満杯です。閉じて開くと再試行できます".into()),
+            });
+            return;
+        }
+        if let UiAction::LoadDetailLinks {
+            thread_id,
+            generation,
+            request_id,
+            ..
+        } = action
+        {
+            self.apply(UiUpdate::DetailLinks {
+                thread_id: thread_id.clone(),
+                generation: *generation,
+                request_id: *request_id,
+                result: Err("リンクの取得キューが満杯です。閉じて開くと再試行できます".into()),
+            });
+            return;
         }
         if let UiAction::RefreshTools {
             thread_id,
@@ -4361,6 +4399,8 @@ impl UiState {
     fn command_error(&mut self, message: &str) -> Vec<UiAction> {
         self.command_rejected = true;
         self.active_view_mut().status = format!("コマンドエラー: {message}");
+        self.active_view_mut()
+            .promote_status_notice(history_interaction::NoticeKind::Failure);
         vec![]
     }
     fn thread_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
@@ -4808,11 +4848,20 @@ fn draw_input(
 fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let view = state.view();
     let phase = view.footer_phase();
-    let spans = state.animation.spans(
-        phase,
-        Style::default().fg(state.palette.muted()),
-        Instant::now(),
-    );
+    let spans =
+        if view.thread_id.is_some() && view.activity.snapshot.is_none() && view.sending().is_none()
+        {
+            vec![Span::styled(
+                "状態を確認中",
+                Style::default().fg(state.palette.muted()),
+            )]
+        } else {
+            state.animation.spans(
+                phase,
+                Style::default().fg(state.palette.muted()),
+                Instant::now(),
+            )
+        };
     let recovery = view
         .activity
         .snapshot

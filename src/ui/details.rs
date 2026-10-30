@@ -918,6 +918,19 @@ mod tests {
             .join("\n")
     }
     #[test]
+    fn rejected_link_action_exits_loading_with_an_actionable_error() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let mut details = Details::for_node(ui.view(), "source".into(), true);
+        let mut next = 0;
+        let action = details.request_links("t".into(), ui.view().generation, &mut next);
+        ui.details = Some(details);
+        ui.action_rejected(&action);
+        let details = ui.details.as_ref().unwrap();
+        assert!(!details.links_pending);
+        assert!(details.links_error.as_ref().unwrap().contains("再試行"));
+    }
+    #[test]
     fn scoped_offwindow_links_append_without_inserting_source_nodes_and_reject_old_replies() {
         let ui = state();
         let before = ui.view().nodes().to_vec();

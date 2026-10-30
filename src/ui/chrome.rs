@@ -29,14 +29,21 @@ pub(super) fn header_line(
     }
     let width = usize::from(width);
     let phase = view.footer_phase();
-    let marker = match phase {
-        super::activity::ActivityPhase::Recovery | super::activity::ActivityPhase::Failed => {
-            format!("! {}", phase.column_label())
+    let marker = if view.thread_id.is_some()
+        && view.activity.snapshot.is_none()
+        && view.sending().is_none()
+    {
+        "?".into()
+    } else {
+        match phase {
+            super::activity::ActivityPhase::Recovery | super::activity::ActivityPhase::Failed => {
+                format!("! {}", phase.column_label())
+            }
+            super::activity::ActivityPhase::Stopped => "■".into(),
+            super::activity::ActivityPhase::Completed => "✓".into(),
+            super::activity::ActivityPhase::Idle => "·".into(),
+            _ => "◌".into(),
         }
-        super::activity::ActivityPhase::Stopped => "■".into(),
-        super::activity::ActivityPhase::Completed => "✓".into(),
-        super::activity::ActivityPhase::Idle => "·".into(),
-        _ => "◌".into(),
     };
     let marker = fit(&marker, width, false);
     let model = view.model.as_deref().unwrap_or("");
