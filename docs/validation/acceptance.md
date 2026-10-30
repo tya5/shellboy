@@ -184,6 +184,23 @@ planned #52 behavior require fresh combined checks.
 
 ## #47 Model-Only Scope: Not Implemented Or Validated
 
+
+The leader-adopted [aggregate design](../design/usage-aggregates.md) now specifies
+both generated payload-byte expressions/history lookup, composite owner targets,
+full-key scope/phase paging with same-instant fragments and per-child watermarks,
+and retained completion ownership/abort/restart handling. Independent design
+review of those P1/P2 points remains required before implementation.
+
+A design-only Python SQLite 3.51.0 in-memory smoke parses the documented summary
+DDL and checks payload bytes, terminal update, rollback, mismatched-owner rejection,
+Turn/Thread cascade and covering-index SUM without payload Function opcodes. It
+uses a deterministic UTF-8 octet_length shim, not the bundled Rust database, and
+is not schema implementation or native validation. An initial toy fixture tried
+to delete Thread before existing non-cascading Core Run/Turn owners; correcting
+the fixture to respect those owners preserves Core FK semantics. No user DB is
+used and no production/migration files change.
+
+
 The explicitly approved scope covers normal/summary model-request usage and
 Run/model/shell time across Turn/Run/Thread/children. All embedding recording and
 standalone RAG are excluded; acceptance must verify out_of_scope/not_recorded
@@ -196,8 +213,9 @@ unchanged diagnostic classification, redaction and 64KiB limit, including shared
 catalog/embedding caller regressions without changing their APIs. Period-edge
 precision/partial coverage, fact reclamation, missing-finish-after-GC, bounded
 initialization/fair maintenance, exact-once terminal updates and large indexed
-query/VM-step checks remain planned, not passed. The complete design is pending
-leader approval; no #47 production, schema or regression implementation is claimed.
+query/VM-step checks remain planned, not passed. The leader has adopted the specification; independent design review must resolve
+remaining P1/P2 findings before implementation. No #47 production, schema or
+regression implementation is claimed.
 #49's exact native gate is separate (main5350fc8 passed three OS run40997452704,
 reported independently by the integrator). The B-only candidate now withdraws
 source-fact edge reads, generic future reservations, fixed-age/new-pressure GC

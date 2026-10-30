@@ -2,6 +2,30 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Adopted Aggregate Accounting And Observation (#47, 2026-10-30, Active)
+
+Adopt the [B specification](../design/usage-aggregates.md), subject to independent
+design P1/P2 resolution before schema/production work. Both aggregate and minimal
+summary-only ledger payloads, plus small usage coverage/revision metadata, enter
+existing logical history via covering scalar indexes; no generated-field cycle,
+boolean double count or physical-page accounting. Owner composite FKs have an
+explicit UNIQUE target; soft deletion clears all owned metrics in the same TX.
+
+Accounting CAS is independent from Core terminal/generation/adoption predicates.
+Capture returned typed measurements and client finish time before cancellation
+returns, persist once, and never revive Core state/audit/output. Existing producer
+cleanup/join prefers captured facts; unobserved abort/restart consumption stays
+unknown with pending/orphan coverage and no new metrics runtime pin/observer job.
+No normal-HTTP duplicate ledger, new worker/queue/timer or repeat HTTP is added.
+
+Period paging seeks full scope/phase/time/purpose/outcome keys with one global
+4,096+sentinel budget. Same-instant fragments and per-child coverage are explicit;
+page totals are not full-period totals. Conservative revision invalidation is
+adopted even though continuous updates can prevent pagination completing for a
+closed past period; do not silently add mixed snapshots or imply eventual success.
+No new age/pressure policy, reservation manager, embedding recording or #50 work.
+
+
 ## Aggregate-Only Period Direction (#47, 2026-10-30, Active Direction)
 
 The latest instruction chooses B: all-time/coarse UTC buckets plus exact terminal-
@@ -15,10 +39,9 @@ row per request/scope in the worst case; verify linear bytes and bounded query w
 Withdraw the generic future-reservation and warning-triggered GC proposals.
 The candidate keeps existing storage guard/terminal exceptions, charges metrics
 payload to existing logical usage and retains aggregates until scope deletion,
-without a new age/pressure policy. The [revised schema candidate](issue-47-design-proposal.md)
-is not fully adopted: observer/CAS integration, exact logical-byte expressions and
-fair small-batch initialization still need final design confirmation. No schema
-or production implementation is authorized before that gate.
+without a new age/pressure policy. The former [schema candidate](issue-47-design-proposal.md) is superseded by the
+adopted specification above. Independent P1/P2 design review remains the
+pre-implementation gate.
 
 
 ## Model-Only Accounting Scope (#47, 2026-10-30, Active)

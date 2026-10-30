@@ -198,7 +198,10 @@ Issue #52 adopts [pending messages and human Turn interruption](pending-messages
 one reactive saved queue with paired history reads, per-message cancellation,
 durable draft correlation, explicit foreground release and a Turn-only human
 interrupt. Full Run stop remains separate; automatic timed backgrounding is deferred.
-Issue #47's [adopted scope only](usage-accounting.md#adopted-47-scope-pending-aggregate-design)
-covers model requests and Run/model/shell time, excluding all embedding and
-standalone RAG accounting. Report excluded coverage as not recorded, not zero.
-Aggregate implementation and period/retention details are not yet adopted.
+
+Issue #47 adopts [model usage aggregates](usage-aggregates.md): normal/summary
+usage and separate Run/model/shell time, independent accounting CAS, all-time/day/
+exact-instant aggregate-only reads with honest bounded coverage, existing logical
+capacity and scope-lifetime retention. Embedding/standalone RAG are not recorded,
+not zero. Independent design review resolves P1/P2 before implementation; no #50
+or parallel index work is included.

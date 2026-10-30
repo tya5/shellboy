@@ -162,8 +162,10 @@ previous hook plan; expose out_of_scope/not_recorded, not zero. Only normal/
 summary requests and separate Run/model/shell time remain. The B aggregate-only direction replaces A/future-reservation proposals. The final
 candidate retains aggregate rows until scope deletion, uses existing storage
 limits/terminal exceptions and proposes fair small-batch initialization on the
-existing lifecycle. Full schema/observer/budget review remains required. No #47
-code, schema or tests are implemented; #50 remains separately queued.
+existing lifecycle. The leader adopts the completed B specification including observer cleanup,
+both-table byte accounting and precise page coverage. Independent design review
+must resolve P1/P2 findings before implementation. No #47 code, schema or tests
+are implemented; #50 remains separately queued.
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 
