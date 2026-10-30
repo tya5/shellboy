@@ -131,7 +131,7 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
             "storage.collect",
         ),
     ];
-    assert_eq!(cases.len(), 43);
+    assert_eq!(cases.len(), 44);
     for (args, name) in cases {
         let command = convert(args).await;
         assert_eq!(serde_json::to_value(command).unwrap()["command"], *name);
