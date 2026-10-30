@@ -256,6 +256,39 @@ fn result(
             .or_else(|| value.get("error").filter(|value| !value.is_null()))
             .map(display_reason)
             .unwrap_or_default();
+        if value.get("executed").and_then(Value::as_bool) == Some(false)
+            && let Some(prerequisite) = value.get("prerequisite").and_then(Value::as_object)
+        {
+            let mut facts = Vec::new();
+            if let Some(call) = prerequisite.get("call_id").and_then(Value::as_str) {
+                facts.push(format!("呼出し {}", sanitize_plain(&short(call, 48), 0).0));
+            }
+            if let Some(execution) = prerequisite.get("execution_id").and_then(Value::as_str) {
+                facts.push(format!(
+                    "実行 {}",
+                    sanitize_plain(&short(execution, 48), 0).0
+                ));
+            }
+            if let Some(state) = prerequisite.get("state").and_then(Value::as_str) {
+                facts.push(tool_state_text(
+                    state,
+                    prerequisite.get("exit_code").and_then(Value::as_i64),
+                ));
+            }
+            if let Some(outcome) = prerequisite
+                .get("wait_release_outcome")
+                .and_then(Value::as_str)
+            {
+                facts.push(format!(
+                    "待機結果 {}",
+                    sanitize_plain(&short(outcome, 48), 0).0
+                ));
+            }
+            if !facts.is_empty() {
+                tool.reason.push_str(" · 前提: ");
+                tool.reason.push_str(&facts.join(" · "));
+            }
+        }
         tool.elapsed_ms = value.get("elapsed_ms").and_then(Value::as_u64);
         tool.exit_code = value.get("exit_code").and_then(Value::as_i64);
         if value
@@ -300,11 +333,21 @@ fn result(
         }
     }
     if streams.is_empty() {
-        b.text = match value.get("status").and_then(Value::as_str) {
+        b.text = if value.get("status").and_then(Value::as_str) == Some("cancelled")
+            && value.get("executed").and_then(Value::as_bool) == Some(false)
+        {
+            value
+                .get("message")
+                .and_then(Value::as_str)
+                .map(|message| sanitize_plain(&short(message, 512), 0).0)
+                .unwrap_or_else(|| "この呼出しは実行されていません。".into())
+        } else {
+            match value.get("status").and_then(Value::as_str) {
             Some("not_started") => "前回の終了時点では未開始でした。自動再実行はしていません。",
             Some("interrupted") => "前回の終了により結果は不確かです。再実行前に保存済みの出力と副作用を確認してください。",
             _ => "実行結果 · 詳細",
-        }.into();
+        }.into()
+        };
         b.stream = None;
     } else {
         let (stream, text) = streams.remove(0);

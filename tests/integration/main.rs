@@ -141,6 +141,8 @@ mod thread_browser;
 mod thread_exit_marker;
 #[path = "../thread_titles.rs"]
 mod thread_titles;
+#[path = "../tool_cancel_reasons.rs"]
+mod tool_cancel_reasons;
 #[path = "../tool_group_attachment_recovery.rs"]
 mod tool_group_attachment_recovery;
 #[path = "../tool_repair_isolation.rs"]

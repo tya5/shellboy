@@ -1311,3 +1311,89 @@ fn revisit_event_names_the_continuation_and_shows_instruction_without_changing_s
             .any(|f| f.key == "/change/revisits/detail_node_ids/0" && f.value == "revisit-details")
     );
 }
+
+#[test]
+fn structured_cancellation_renders_saved_cause_and_prerequisite_without_own_execution() {
+    for (reason, label, state, exit_code) in [
+        (
+            "previous_call_failed",
+            "失敗により未実行",
+            "exited",
+            Some(7),
+        ),
+        (
+            "previous_output_incomplete",
+            "出力が不完全",
+            "exited",
+            Some(0),
+        ),
+        (
+            "previous_wait_released_by_new_input",
+            "追加の指示",
+            "running",
+            None,
+        ),
+        (
+            "previous_wait_released_by_human_background",
+            "利用者が",
+            "running",
+            None,
+        ),
+    ] {
+        let output = json!({
+            "status":"cancelled", "executed":false, "reason":reason,
+            "message":"Saved explanation: later call was not executed.",
+            "prerequisite":{"call_id":"prior-call","execution_id":"prior-execution","state":state,"exit_code":exit_code},
+        });
+        let payload = json!({"item":{"type":"function_call_output","call_id":"cancelled-call","output":output.to_string()}});
+        let before = payload.clone();
+        let text = text_of_payload(&payload);
+        let projected = project("tool_result", &payload, &text, 0);
+        let block = &projected.blocks[0];
+        let tool = block.tool.as_ref().unwrap();
+        assert_eq!(tool.call_id, "cancelled-call");
+        assert_eq!(tool.reason_code, reason);
+        assert!(tool.reason.contains(label), "{}", tool.reason);
+        assert!(tool.reason.contains("prior-call"));
+        assert!(tool.reason.contains("prior-execution"));
+        assert!(
+            tool.execution_id.is_none(),
+            "a prerequisite execution is not the cancelled call's execution"
+        );
+        assert!(tool.heading().contains("未実行・取消"));
+        assert_eq!(
+            block.text,
+            "Saved explanation: later call was not executed."
+        );
+        if state == "running" {
+            assert!(tool.reason.contains("返却時"));
+            assert!(!tool.reason.contains("失敗"));
+        } else {
+            assert!(
+                tool.reason
+                    .contains(&format!("終了 {}", exit_code.unwrap()))
+            );
+        }
+        assert!(
+            projected
+                .fields
+                .iter()
+                .any(|f| f.key == "/prerequisite/execution_id" && f.value == "prior-execution")
+        );
+        assert_eq!(payload, before);
+        assert_eq!(text_of_payload(&payload), text);
+        assert!(projected.metadata_bytes() <= MAX_METADATA_BYTES);
+    }
+}
+
+#[test]
+fn structured_cancellation_does_not_invent_unknown_prerequisite_facts() {
+    let output = json!({"status":"cancelled","executed":false,"reason":"tool_group_validation_failed","message":"Invalid group"});
+    let payload = json!({"item":{"type":"function_call_output","call_id":"unstarted","output":output.to_string()}});
+    let projected = project("tool_result", &payload, &text_of_payload(&payload), 0);
+    let tool = projected.blocks[0].tool.as_ref().unwrap();
+    assert_eq!(tool.reason_kind, ToolReasonKind::GroupValidation);
+    assert!(!tool.reason.contains("前提:"));
+    assert!(tool.execution_id.is_none());
+    assert_eq!(projected.blocks[0].text, "Invalid group");
+}

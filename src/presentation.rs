@@ -103,6 +103,12 @@ pub enum ToolReasonKind {
     Unknown,
     RunStopped,
     PriorCallInterrupted,
+    PriorCallFailed,
+    PriorOutputIncomplete,
+    PriorWaitNewInput,
+    PriorWaitHumanBackground,
+    PriorWaitReleased,
+    OwnerShutdown,
     GroupValidation,
     AdditionalInput,
     HumanBackgrounded,
@@ -112,9 +118,18 @@ pub enum ToolReasonKind {
 impl ToolReasonKind {
     pub fn from_saved(value: &str) -> Self {
         match value {
-            "Run stopped before this call" | "run_stopped" => Self::RunStopped,
+            "Run stopped before this call" | "run_stopped" | "run_stopped_before_call" => {
+                Self::RunStopped
+            }
             "Previous tool failed or foreground wait was interrupted" => Self::PriorCallInterrupted,
             "Tool group validation failed before any side effect" => Self::GroupValidation,
+            "previous_call_failed" => Self::PriorCallFailed,
+            "previous_output_incomplete" => Self::PriorOutputIncomplete,
+            "previous_wait_released_by_new_input" => Self::PriorWaitNewInput,
+            "previous_wait_released_by_human_background" => Self::PriorWaitHumanBackground,
+            "previous_wait_released" => Self::PriorWaitReleased,
+            "owner_shutdown_before_call" => Self::OwnerShutdown,
+            "tool_group_validation_failed" => Self::GroupValidation,
             "additional_input" => Self::AdditionalInput,
             "human_backgrounded" => Self::HumanBackgrounded,
             "foreground_wait_timeout" => Self::ForegroundTimeout,
@@ -300,6 +315,16 @@ fn tool_reason(value: &str) -> String {
         ToolReasonKind::PriorCallInterrupted => {
             "先行する呼出しの失敗、または前景待機の中断により取消".into()
         }
+        ToolReasonKind::PriorCallFailed => "先行する呼出しの失敗により未実行".into(),
+        ToolReasonKind::PriorOutputIncomplete => "先行する呼出しの出力が不完全なため未実行".into(),
+        ToolReasonKind::PriorWaitNewInput => {
+            "追加の指示で先行する呼出しの待機を解除したため未実行".into()
+        }
+        ToolReasonKind::PriorWaitHumanBackground => {
+            "利用者が先行する呼出しを背景へ移したため未実行".into()
+        }
+        ToolReasonKind::PriorWaitReleased => "先行する呼出しの待機結果により未実行".into(),
+        ToolReasonKind::OwnerShutdown => "アプリ終了処理のため未実行".into(),
         ToolReasonKind::GroupValidation => "呼出し群の検証失敗により未実行".into(),
         ToolReasonKind::AdditionalInput => "追加の指示を受けて背景へ移行".into(),
         ToolReasonKind::HumanBackgrounded => "利用者の操作で背景へ移行".into(),

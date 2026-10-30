@@ -7,7 +7,7 @@ pub(super) async fn run_tool_group(
     group: &str,
     calls: Vec<model::ToolCall>,
 ) -> Result<(), ApiError> {
-    let mut cancelled: Option<String> = None;
+    let mut cancelled: Option<Value> = None;
     let mut validation_errors = std::collections::HashMap::new();
     // Validate every encoding and initial input before the first OS spawn.
     for call in &calls {
@@ -38,20 +38,32 @@ pub(super) async fn run_tool_group(
         }
     }
     if !validation_errors.is_empty() {
-        cancelled = Some("Tool group validation failed before any side effect".into());
+        cancelled = Some(cancelled_call(
+            "tool_group_validation_failed",
+            "Tool group validation failed before any side effect",
+            None,
+        ));
     }
     let mut cancelled_count = 0usize;
     let mut foreground_release = None;
     for call in calls {
         if control.shell.starts_closed() {
-            cancelled = Some("Owner shutdown started before this call".into());
+            cancelled = Some(cancelled_call(
+                "owner_shutdown_before_call",
+                "Owner shutdown started before this call",
+                None,
+            ));
         } else if slot.stop.is_cancelled() {
-            cancelled = Some("Run stopped before this call".into());
+            cancelled = Some(cancelled_call(
+                "run_stopped_before_call",
+                "Run stopped before this call",
+                None,
+            ));
         }
         let result = if let Some(error) = validation_errors.get(&call.call_id) {
             json!({"status":"error","error":error})
         } else if let Some(reason) = &cancelled {
-            json!({"status":"cancelled","reason":reason})
+            reason.clone()
         } else {
             match run_shell(
                 control.clone(),
@@ -65,14 +77,7 @@ pub(super) async fn run_tool_group(
             {
                 Ok((result, halt)) => {
                     if halt {
-                        cancelled = Some(
-                            if result.get("output_complete").and_then(Value::as_bool) == Some(false)
-                            {
-                                "Previous shell output is incomplete".into()
-                            } else {
-                                "Previous tool failed or foreground wait was interrupted".into()
-                            },
-                        );
+                        cancelled = Some(cancelled_after(&call.call_id, &result));
                     }
                     result
                 }
@@ -86,7 +91,11 @@ pub(super) async fn run_tool_group(
                     if error.code == ErrorCode::OperationConflict {
                         return Err(error);
                     }
-                    cancelled = Some(error.to_string());
+                    cancelled = Some(cancelled_call(
+                        "previous_call_failed",
+                        &error.to_string(),
+                        Some(json!({"call_id":call.call_id,"state":"error"})),
+                    ));
                     json!({"status":"error","error":error})
                 }
             }
@@ -140,4 +149,94 @@ pub(super) async fn run_tool_group(
         });
     }
     Ok(())
+}
+
+fn cancelled_call(reason: &str, message: &str, prerequisite: Option<Value>) -> Value {
+    let mut result =
+        json!({"status":"cancelled","executed":false,"reason":reason,"message":message});
+    if let Some(prerequisite) = prerequisite {
+        result["prerequisite"] = prerequisite;
+    }
+    result
+}
+
+fn cancelled_after(call_id: &str, result: &Value) -> Value {
+    let mut prerequisite = json!({"call_id":call_id});
+    for field in [
+        "execution_id",
+        "exit_code",
+        "output_complete",
+        "wait_release_outcome",
+    ] {
+        if let Some(value) = result.get(field).filter(|value| !value.is_null()) {
+            prerequisite[field] = value.clone();
+        }
+    }
+    if let Some(state) = result.get("status").filter(|value| value.is_string()) {
+        prerequisite["state"] = state.clone();
+    }
+    let (reason, message) = match result.get("reason").and_then(Value::as_str) {
+        Some("additional_input") => (
+            "previous_wait_released_by_new_input",
+            "New input released the previous shell's foreground wait; inspect its execution before repeating work",
+        ),
+        Some("human_backgrounded") => (
+            "previous_wait_released_by_human_background",
+            "A human released the previous shell's foreground wait; inspect its execution before repeating work",
+        ),
+        _ if result.get("output_complete").and_then(Value::as_bool) == Some(false) => (
+            "previous_output_incomplete",
+            "Previous shell output is incomplete",
+        ),
+        _ if result
+            .get("wait_release_outcome")
+            .is_some_and(|value| !value.is_null()) =>
+        {
+            (
+                "previous_wait_released",
+                "The previous shell recorded a wait release outcome; inspect that outcome before continuing",
+            )
+        }
+        _ => (
+            "previous_call_failed",
+            "Previous shell did not complete successfully",
+        ),
+    };
+    cancelled_call(reason, message, Some(prerequisite))
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_output_has_its_own_reason_and_keeps_known_zero_exit() {
+        let result = cancelled_after(
+            "prerequisite",
+            &json!({
+                "status":"exited", "execution_id":"execution", "exit_code":0,
+                "output_complete":false,
+            }),
+        );
+        assert_eq!(result["reason"], "previous_output_incomplete");
+        assert_eq!(result["executed"], false);
+        assert_eq!(result["prerequisite"]["exit_code"], 0);
+        assert_eq!(result["prerequisite"]["state"], "exited");
+        assert_eq!(result["prerequisite"]["output_complete"], false);
+        assert!(result["prerequisite"].get("wait_release_outcome").is_none());
+    }
+
+    #[test]
+    fn saved_cli_wait_outcome_is_not_fabricated_as_a_process_failure() {
+        let result = cancelled_after(
+            "wait-call",
+            &json!({
+                "status":"exited", "execution_id":"wait-execution", "exit_code":0,
+                "output_complete":true, "wait_release_outcome":"timeout",
+            }),
+        );
+        assert_eq!(result["reason"], "previous_wait_released");
+        assert_eq!(result["prerequisite"]["wait_release_outcome"], "timeout");
+        assert_eq!(result["prerequisite"]["exit_code"], 0);
+    }
 }

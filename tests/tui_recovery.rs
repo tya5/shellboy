@@ -422,11 +422,33 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     );
     let next = request_with_ui(&mut requests, &incoming, &mut ui, &sender).await;
     assert!(next.body.to_string().contains("cancelled"));
-    assert!(
-        next.body
-            .to_string()
-            .contains("Previous tool failed or foreground wait was interrupted")
+    let outputs = next.body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["type"] == "function_call_output")
+        .map(|item| {
+            (
+                item["call_id"].as_str().unwrap(),
+                serde_json::from_str::<Value>(item["output"].as_str().unwrap()).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let running = &outputs.iter().find(|(call, _)| *call == "two").unwrap().1;
+    let cancelled = &outputs.iter().find(|(call, _)| *call == "three").unwrap().1;
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(cancelled["executed"], false);
+    assert_eq!(
+        cancelled["reason"],
+        "previous_wait_released_by_human_background"
     );
+    assert_eq!(cancelled["prerequisite"]["call_id"], "two");
+    assert_eq!(
+        cancelled["prerequisite"]["execution_id"],
+        running["execution_id"]
+    );
+    assert_eq!(cancelled["prerequisite"]["state"], "running");
+    assert!(cancelled["prerequisite"].get("exit_code").is_none());
     next.reply.send((200,json!({"id":"answer","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"tools returned"}]}]}))).unwrap();
     // Reload the same saved nodes through the frontend, including DB source correlation.
     timeout(Duration::from_secs(15), async {
@@ -597,7 +619,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         "現在 背景で継続中",
         "利用者の操作で背景へ移行",
         "未実行・取消",
-        "先行する呼出しを利用者が背景へ移したため未実行",
+        "利用者が先行する呼出しを背景へ移したため未実行",
     ] {
         assert!(shown.contains(wanted), "missing {wanted}: {shown}");
     }
