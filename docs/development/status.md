@@ -9,7 +9,11 @@ b16f414 run41063015359 attempts1/2 remain failed evidence; the long-Turn arrival
 guard was already60s, so its cause is not established. Its third attempt passed;
 the two preceding failures remain evidence. Native macOS standard checks pass
 1666/0/32. Exact source3b45c3c passed two independent manual Windows four-thread
-runs,41067174706 and41067200942, both first attempts. Final main CI is pending.
+runs,41067174706 and41067200942, both first attempts. After #41 main integration,
+combined d72155f also passes two Windows runs41069488710/41069483605; the latter
+needed a same-SHA failed-job rerun for an unrelated clients test. Local combined
+check passed1679/0/32 after an unchanged PTY footer failure. Both failure histories
+are retained in acceptance; final main CI is pending.
 
 ## #59: saved sender inspection and self-asserted names
 

@@ -2850,3 +2850,14 @@ Python6, formatting and strict all-target Clippy. The exact test/document tree
 first attempts, including both named failures. No product source or workflow
 changed. Original b16f414 attempt3 succeeded; that does not erase attempts1/2.
 This follow-up changes validation prose only; final main CI remains pending.
+
+After conflict-free rebase onto main17c4271 (#41), exact combined source d72155f
+passes Windows four-thread runs41069488710 (attempt1) and41069483605 (attempt2).
+The latter's attempt1 failed an unrelated existing lib fixture,
+model::http::clients::tests::control_conversations_reuse_owner_client_for_chunked_sse,
+at its saved five-second shutdown guard (clients/tests.rs:589); its original log
+is retained and only that same-SHA failed job was rerun. The fixture was not
+changed. Local full check on d72155f first failed unchanged tui_process at its
+post-index model-wait footer, then passed without source changes:1679/0/32,
+layout89, Python6, fmt and strict Clippy. Neither failure is claimed fixed.
+Final main CI remains a separate gate.
