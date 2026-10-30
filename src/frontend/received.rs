@@ -180,22 +180,42 @@ pub(super) struct Scope {
     pub(super) selection_revision: u64,
     pub(super) view_revision: Option<u64>,
 }
-pub(super) async fn refresh(
-    control: &Control,
-    updates: &dyn UpdateTarget,
+pub(super) struct RawSnapshot {
+    rows: Vec<PreviewRow>,
+    selection_revision: u64,
+    root_revision: u64,
+}
+
+pub(super) struct Prepared {
+    pub(super) nodes: Vec<(String, UiNode)>,
+    pub(super) selection_revision: u64,
+    pub(super) root_revision: u64,
+}
+
+/// Read in the caller's transaction; at most two bounded saved responses.
+pub(super) fn query_tx(
+    db: &rusqlite::Connection,
     thread: &str,
-    generation: u64,
-    width: u16,
     scope: Scope,
-) -> Result<(), ApiError> {
-    let target = thread.to_owned();
-    let snapshot=control.store.database.call(move|db|{
-        let selection=crate::history::selection_revision(db,&target,crate::history::ThreadScope::Live)?;
-        if selection as u64 != scope.selection_revision {return Ok(None);}
-        let root_revision=db.query_row("SELECT value FROM app_meta WHERE key='root_revision'",[],|row|row.get::<_,String>(0))?
-            .parse::<i64>().ok().and_then(|revision|u64::try_from(revision).ok())
-            .ok_or_else(||crate::storage::StorageError::Schema("root revision metadata is malformed".into()))?;
-        let mut statement=db.prepare(r#"SELECT n.id,n.kind,
+) -> Result<Option<RawSnapshot>, crate::storage::StorageError> {
+    let selection =
+        crate::history::selection_revision(db, thread, crate::history::ThreadScope::Live)?;
+    if selection as u64 != scope.selection_revision {
+        return Ok(None);
+    }
+    let root_revision = db
+        .query_row(
+            "SELECT value FROM app_meta WHERE key='root_revision'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?
+        .parse::<i64>()
+        .ok()
+        .and_then(|revision| u64::try_from(revision).ok())
+        .ok_or_else(|| {
+            crate::storage::StorageError::Schema("root revision metadata is malformed".into())
+        })?;
+    let mut statement=db.prepare(r#"SELECT n.id,n.kind,
           coalesce(substr(json_extract(n.payload_json,'$.partial_text'),1,16384),''),
           coalesce(substr(json_extract(n.payload_json,'$.partial_reasoning'),1,16384),''),
           coalesce(length(json_extract(n.payload_json,'$.partial_text')),0)+coalesce(length(json_extract(n.payload_json,'$.partial_reasoning')),0),
@@ -210,15 +230,36 @@ pub(super) async fn refresh(
             AND n.kind IN ('incomplete_response','model_stream_observation')
             AND n.deleted_reason IS NULL AND json_valid(n.payload_json)
           ORDER BY n.rowid DESC LIMIT 2"#)?;
-        let rows=statement.query_map(rusqlite::params![target,SAVED_BYTES as i64],|r|Ok(PreviewRow{
-            id:r.get(0)?,after:r.get(8)?,kind:r.get(1)?,partial:r.get(2)?,reasoning:r.get(3)?,total:r.get(4)?,saved:r.get(5)?,differences:r.get(6)?,delta_differences:r.get(7)?,recovery_wait:r.get(9)?
-        }))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(Some((rows,root_revision)))
-    }).await.map_err(storage_error)?;
-    let Some((rows, root_revision)) = snapshot else {
-        return Ok(());
-    };
-    let nodes=presentation_work(move||rows.into_iter().rev().filter_map(|row|{
+    let rows = statement
+        .query_map(rusqlite::params![thread, SAVED_BYTES as i64], |r| {
+            Ok(PreviewRow {
+                id: r.get(0)?,
+                after: r.get(8)?,
+                kind: r.get(1)?,
+                partial: r.get(2)?,
+                reasoning: r.get(3)?,
+                total: r.get(4)?,
+                saved: r.get(5)?,
+                differences: r.get(6)?,
+                delta_differences: r.get(7)?,
+                recovery_wait: r.get(9)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(Some(RawSnapshot {
+        rows,
+        selection_revision: selection as u64,
+        root_revision,
+    }))
+}
+
+pub(super) fn prepare(snapshot: RawSnapshot, width: u16) -> Prepared {
+    let RawSnapshot {
+        rows,
+        selection_revision,
+        root_revision,
+    } = snapshot;
+    let nodes = rows.into_iter().rev().filter_map(|row|{
         let after=row.after?;
         let full_saved=row.saved.is_some();
         let payload=row.saved.and_then(|s|serde_json::from_str::<Value>(&s).ok()).unwrap_or_else(||serde_json::json!({"classification":if row.kind=="model_stream_observation"{"stream_difference"}else{"incomplete_response"},"partial_text":row.partial,"partial_reasoning":row.reasoning,"differences":row.differences.and_then(|s|serde_json::from_str::<Value>(&s).ok()),"delta_differences":row.delta_differences.and_then(|s|serde_json::from_str::<Value>(&s).ok())}));
@@ -232,19 +273,55 @@ pub(super) async fn refresh(
         if omitted{node.presentation.body_omitted_chars=(row.total as usize).saturating_sub(known);}
         streams::seal_node(&mut node);
         Some((after,node))
-    }).collect()).await?;
+    }).collect();
+    Prepared {
+        nodes,
+        selection_revision,
+        root_revision,
+    }
+}
+
+pub(super) async fn apply(
+    updates: &dyn UpdateTarget,
+    thread: &str,
+    generation: u64,
+    scope: Scope,
+    prepared: Prepared,
+) {
     update(
         updates,
         UiUpdate::IncompleteResponses {
             thread_id: thread.into(),
             generation,
-            selection_revision: scope.selection_revision,
+            selection_revision: prepared.selection_revision,
             view_revision: scope.view_revision,
-            root_revision,
-            nodes,
+            root_revision: prepared.root_revision,
+            nodes: prepared.nodes,
         },
     )
     .await;
+}
+
+pub(super) async fn refresh(
+    control: &Control,
+    updates: &dyn UpdateTarget,
+    thread: &str,
+    generation: u64,
+    width: u16,
+    scope: Scope,
+) -> Result<(), ApiError> {
+    let target = thread.to_owned();
+    let snapshot = control
+        .store
+        .database
+        .call(move |db| query_tx(db, &target, scope))
+        .await
+        .map_err(storage_error)?;
+    let Some(snapshot) = snapshot else {
+        return Ok(());
+    };
+    let prepared = presentation_work(move || prepare(snapshot, width)).await?;
+    apply(updates, thread, generation, scope, prepared).await;
     Ok(())
 }
 
@@ -260,6 +337,42 @@ pub(super) async fn list(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn prepared_saved_response_retains_snapshot_fences_and_paid_body() {
+        let prepared = prepare(
+            RawSnapshot {
+                selection_revision: 7,
+                root_revision: 11,
+                rows: vec![PreviewRow {
+                    id: "saved-response".into(),
+                    after: Some("anchor".into()),
+                    kind: "incomplete_response".into(),
+                    partial: "bounded fallback".into(),
+                    reasoning: String::new(),
+                    total: 100_000,
+                    saved: Some(
+                        json!({"partial_text":"保存済み回答🦀","partial_reasoning":"保存済み理由"})
+                            .to_string(),
+                    ),
+                    differences: None,
+                    delta_differences: None,
+                    recovery_wait: true,
+                }],
+            },
+            80,
+        );
+        assert_eq!(
+            (prepared.selection_revision, prepared.root_revision),
+            (7, 11)
+        );
+        assert_eq!(prepared.nodes.len(), 1);
+        let (anchor, node) = &prepared.nodes[0];
+        assert_eq!(anchor, "anchor");
+        assert_eq!(node.node_id, "saved-response");
+        assert_eq!(node.text, "保存済み理由\n保存済み回答🦀");
+        assert!(!node.presentation.body_extent_unknown);
+        assert!(node.presentation.requires_attention());
+    }
     #[test]
     fn paid_channels_choose_one_source_and_never_show_tool_or_encrypted_metadata() {
         let payload = json!({"partial_reasoning":"考え","partial_text":"回答","raw_response":{"output":[{"type":"message","content":[{"type":"output_text","text":"回答"}]},{"type":"function_call","arguments":"PRIVATE_TOOL"},{"type":"reasoning","encrypted_content":"PRIVATE_OPAQUE","summary":[{"type":"summary_text","text":"考え"}]}]}});

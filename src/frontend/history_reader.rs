@@ -106,19 +106,39 @@ impl WindowRequest {
         }
     }
 }
-struct HistoryInfo {
-    first: u64,
-    revision: u64,
-    total: u64,
-    committed: Vec<(String, String)>,
-    pending: PendingMessages,
-    read_revision: u64,
+pub(super) struct HistoryInfo {
+    pub(super) first: u64,
+    pub(super) revision: u64,
+    pub(super) total: u64,
+    pub(super) committed: Vec<(String, String)>,
+    pub(super) pending: PendingMessages,
+    pub(super) read_revision: u64,
 }
-struct RawHistory {
+pub(super) struct RawHistory {
     rows: Vec<PathNode>,
     info: HistoryInfo,
 }
 impl RawHistory {
+    /// Borrow only the identities in this bounded page, without cloning payloads.
+    #[cfg(test)]
+    pub(super) fn source_ids(&self) -> impl Iterator<Item = &str> {
+        self.rows.iter().map(|row| row.node.id.as_str())
+    }
+
+    /// Project on the existing finite presentation worker, never the DB worker.
+    pub(super) fn project_page(
+        self,
+        width: u16,
+        anchor: Option<ViewAnchor>,
+    ) -> (Vec<UiNode>, HistoryInfo, Option<ViewAnchor>) {
+        self.project(width, |_, row| {
+            anchor
+                .as_ref()
+                .filter(|anchor| anchor.node_id.as_deref() == Some(&row.node.id))
+                .map(|anchor| NodePosition::At(anchor.char_offset))
+        })
+    }
+
     // Called only on the existing finite presentation worker. Choose an offset
     // before consuming each row, then normalize the resulting canonical anchor.
     fn project(
@@ -185,17 +205,14 @@ impl<'a> HistoryReader<'a> {
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
-                let (mut raw, cursor) = query_page(&tx, &target, None, None)?;
+                let (raw, cursor) = query_page_tx(&tx, &target, None, None)?;
                 let cursor = cursor.map_err(StorageError::from)?;
-                raw.info.pending = message_queue::query(&tx, &target)?;
-                raw.info.read_revision = message_queue::read_revision();
                 tx.commit()?;
                 Ok((raw, cursor))
             })
             .await
             .map_err(storage_error)?;
-        let (mut nodes, info, _) =
-            presentation_work(move || raw.project(width, |_, _| None)).await?;
+        let (mut nodes, info, _) = presentation_work(move || raw.project_page(width, None)).await?;
         message_metadata::enrich(control, Some(&thread), &mut nodes).await?;
         streams::enrich(control, &mut nodes, width).await?;
         stamp_sources(&mut nodes, info.read_revision);
@@ -355,24 +372,15 @@ impl<'a> HistoryReader<'a> {
                 .database
                 .call(move |db| {
                     let tx = db.transaction()?;
-                    let (mut raw, cursor) = query_page(&tx, &thread, before, db_anchor)?;
-                    raw.info.pending = message_queue::query(&tx, &thread)?;
-                    raw.info.read_revision = message_queue::read_revision();
+                    let (raw, cursor) = query_page_tx(&tx, &thread, before, db_anchor)?;
                     tx.commit()?;
                     Ok((raw, cursor))
                 })
                 .await
                 .map_err(storage_error)?;
             let width = self.width;
-            let (mut nodes, info, _) = presentation_work(move || {
-                raw.project(width, |_, row| {
-                    anchor
-                        .as_ref()
-                        .filter(|anchor| anchor.node_id.as_deref() == Some(&row.node.id))
-                        .map(|anchor| NodePosition::At(anchor.char_offset))
-                })
-            })
-            .await?;
+            let (mut nodes, info, _) =
+                presentation_work(move || raw.project_page(width, anchor)).await?;
             message_metadata::enrich(self.control, Some(&reply.thread), &mut nodes).await?;
             streams::enrich(self.control, &mut nodes, self.width).await?;
             stamp_sources(&mut nodes, info.read_revision);
@@ -661,7 +669,9 @@ fn query_window(
         },
     })
 }
-fn query_page(
+/// Read one bounded history page and its pending-message projection in the
+/// caller's existing transaction. The caller owns commit and presentation work.
+pub(super) fn query_page_tx(
     db: &Connection,
     thread: &str,
     before: Option<String>,
@@ -713,8 +723,8 @@ fn query_page(
                 revision: revision as u64,
                 total: total as u64,
                 committed,
-                pending: PendingMessages::default(),
-                read_revision: 0,
+                pending: message_queue::query(db, thread)?,
+                read_revision: message_queue::read_revision(),
             },
         },
         cursor,
@@ -970,6 +980,60 @@ mod read_stamping_tests {
             ordinal:ordinal as i64,
             node:RawNode{id:id.into(),kind:kind.into(),payload:Some(payload.to_string()),reason:None,received_recovery_wait:false},
         }).collect()
+    }
+
+    #[tokio::test]
+    async fn shared_page_query_pairs_pending_and_keeps_bounded_borrowed_source_identities() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (raw, cursor) = owner.db.call(|db| {
+            let tx = db.transaction()?;
+            for ordinal in 0..51 {
+                crate::history::append_node(
+                    &tx, "thread", &format!("source-{ordinal}"), None, "user",
+                    &json!({"role":"user","content":[{"type":"input_text","text":format!("body-{ordinal}")}]}), "now",
+                )?;
+            }
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES('pending','user','now',?1)", [json!({"role":"user","content":[{"type":"input_text","text":"waiting"}]}).to_string()])?;
+            tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,updated_at,path_admission)VALUES('receipt','operation','null','thread','pending','held','now','now','unadmitted')", [])?;
+            let page = query_page_tx(&tx, "thread", None, None)?;
+            tx.commit()?;
+            Ok(page)
+        }).await.unwrap();
+        assert!(cursor.unwrap().is_some());
+        assert_eq!(raw.info.first, 1);
+        assert_eq!(raw.info.total, 51);
+        assert_eq!(raw.info.pending.total, 1);
+        assert_eq!(raw.info.pending.items[0].message_id, "pending");
+        assert!(raw.info.read_revision > 0);
+        let ids = raw.source_ids().collect::<Vec<_>>();
+        assert_eq!(ids.len(), 50);
+        assert_eq!(ids.first().copied(), Some("source-1"));
+        assert_eq!(ids.last().copied(), Some("source-50"));
+        assert!(std::ptr::eq(ids[0].as_ptr(), raw.rows[0].node.id.as_ptr()));
+        let revision = raw.info.read_revision;
+        let (nodes, info, anchor) = presentation_work(move || {
+            raw.project_page(
+                80,
+                Some(ViewAnchor {
+                    node_id: Some("source-25".into()),
+                    char_offset: 2,
+                }),
+            )
+        })
+        .await
+        .unwrap();
+        assert_eq!(nodes.len(), 50);
+        assert_eq!(anchor.unwrap().node_id.as_deref(), Some("source-25"));
+        assert_eq!(info.read_revision, revision);
+        assert_eq!(info.pending.items[0].message_id, "pending");
+        assert!(
+            nodes
+                .iter()
+                .all(|node| node.presentation.read_revision == revision)
+        );
+        control.shutdown().await.unwrap();
+        server.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[test]
