@@ -2,6 +2,22 @@
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 
+Repair-branch CI run `40991269818` at `0cf9c405` clears the earlier two lib failures
+and completes all harnesses with failed-name diagnostics, but Windows exposes
+one further mixed-separator expectation in the persistence-only history fork
+test. Its expected inherited path now joins `project` and `AGENTS.md` as separate
+components; full path equality, explicit-override rejection and atomicity checks
+remain intact. A read-only search of all #51/#48 added Rust test path comparisons
+finds no other unresolved same-kind expectation. Raw CLI/form relative strings,
+fixed mock response paths and filesystem-write inputs intentionally stay unchanged.
+The focused history test and pre-commit standard check pass locally on macOS:
+layout82, Python6, format, strict Clippy and Rust 7 groups / 1,468 passed /
+0 failed / 28 ignored. No runner or production change is added. The current #57 publication rule supersedes the earlier branch-CI gate:
+after independent review, fetch/rebase onto latest origin/main and pass the local
+standard check before a normal main push; then verify exact-SHA main three-OS CI.
+Branch dispatch is optional for platform-specific concern, not a required gate.
+Do not admit unrelated work while main CI is red. Workflow changes are out of scope.
+
 Main source `c0f1ad984be7a5d64d9dfbab4189cd3ba0438151` failed Windows in both
 attempts of run `40988162209`. The two native failures are portable-expectation
 bugs in `explicit_agents_resolution_inheritance_validation_and_receipt_replay`
@@ -22,10 +38,11 @@ Focused macOS fixture tests and six Python self-checks pass. The clean exact
 repair `ff84d81682e477db91aa34be751609081cdb535b` also passes the local standard
 check: layout82, Python6, format, strict all-target Clippy, Rust 7 groups /
 1,468 passed / 0 failed / 28 ignored. Independent review approves `ff84d81`;
-exact repair-branch three-OS CI remains a separate gate. Neither failed c0f
-attempt is relabeled successful. Required publication order is reviewed local
-checks, normal repair-branch push, exact-SHA three-OS success, latest-main
-reconciliation/necessary rebase and recheck, then normal main push and main CI.
+repair-branch native CI was not yet verified at that checkpoint. Neither failed
+c0f attempt is relabeled successful. The earlier publication order required
+reviewed local checks, repair-branch CI,
+then latest-main reconciliation and main CI. That mandatory branch-CI gate is
+superseded by the #57 rule above; the failed runs remain failed evidence.
 The integrator alone handles authorized pushes. No force push, issue close,
 release, installed-binary update or GitHub post is authorized.
 

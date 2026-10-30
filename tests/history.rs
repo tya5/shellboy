@@ -752,7 +752,11 @@ async fn persistence_fork_returns_inherited_agents_and_rejects_explicit_override
         .unwrap();
     assert_eq!(
         fork.agents_path,
-        root.path().join("project/AGENTS.md").to_str().unwrap()
+        root.path()
+            .join("project")
+            .join("AGENTS.md")
+            .to_str()
+            .unwrap()
     );
     database.shutdown().await.unwrap();
 }
