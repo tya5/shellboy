@@ -131,3 +131,29 @@ Earlier candidate native checks alone do not prove public bytes execute.
 This public-byte smoke does not qualify physical terminals or real providers on
 every OS, nor rerun the candidate's synthetic migration on every public binary.
 Installed binaries and real user data are unchanged.
+
+## Installer assets (#63; releases after v0.3.0)
+
+Starting with the next release, assembly includes `install.sh` and `install.ps1`
+as standalone Release assets alongside the three archives and `SHA256SUMS`.
+The scripts in the repository are templates: assembly replaces their single
+`__SHELLBOY_RELEASE_VERSION__` marker with the release tag, so both the latest
+and version-specific asset URLs select matching archives, even after a later
+release. `SHELLBOY_VERSION` explicitly overrides that default. Do not distribute
+raw main URLs. Do not add assets to the already published v0.3.0 Release.
+
+Before publication, run the manual **Release binaries** workflow on the proposed
+branch with `installer_checks=true` and `release_tag=v0.3.0` (leave
+`candidate_ref` empty). It downloads public v0.3.0 archives without authentication, uses temporary
+`SHELLBOY_INSTALL_DIR` directories, and checks fresh/replacement installation on
+macOS ARM64, Linux x64 (dash), Windows PowerShell 5.1 and PowerShell 7. Negative
+checks use local download mocks for corrupt checksums and unsupported CPUs.
+They do not update an installed binary or start an owner/database. This workflow
+is validation only and must never publish a Release. Review its run results;
+a written procedure is not evidence of a passing run.
+
+For the next candidate release, inspect the `candidate-assets` artifact: expect
+three archives, two version-bound scripts, and `SHA256SUMS` covering all five.
+Check the scripts contain the proposed tag and no template marker, and run them
+against the matching public release after publication using a temporary install
+directory. The ordinary three-OS Rust CI gate still applies independently.

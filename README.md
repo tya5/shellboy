@@ -18,10 +18,59 @@ The [development status](docs/development/status.md) and [verification record](d
 
 ## Download
 
+One-line install (available starting with the next release after v0.3.0):
+
+```sh
+# macOS Apple Silicon / Linux x64
+curl -fsSL https://github.com/tya5/shellboy/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows x64: Windows PowerShell 5.1 or PowerShell 7
+irm https://github.com/tya5/shellboy/releases/latest/download/install.ps1 | iex
+```
+
+The installer verifies SHA-256, installs without sudo, and keeps an existing
+binary as `.backup-<timestamp>-<suffix>`. The default directory is `~/.local/bin`
+on macOS/Linux and `%LOCALAPPDATA%\Programs\shellboy` on Windows. Override it
+with `SHELLBOY_INSTALL_DIR`. Set `SHELLBOY_VERSION` (for example, `v0.3.0`) to
+select an archive version, or replace `latest/download` in the script URL with
+`download/vX.Y.Z` to use that release's script and matching binary. v0.3.0 itself
+has archives but no installer assets. The installer does not edit PATH or shell
+profiles; it prints instructions when needed. Read [Upgrading](#upgrading) before
+replacing an existing installation.
+
+To inspect the script before running it, download and read it first:
+
+```sh
+curl -fsSL https://github.com/tya5/shellboy/releases/latest/download/install.sh -o install.sh
+cat install.sh
+sh install.sh
+```
+
+```powershell
+Invoke-WebRequest -UseBasicParsing https://github.com/tya5/shellboy/releases/latest/download/install.ps1 -OutFile install.ps1
+Get-Content .\install.ps1
+.\install.ps1
+```
+
+### Manual Download
+
 Download the archive for your OS and CPU from the [latest Release](https://github.com/tya5/shellboy/releases/latest).
 Windows x64, macOS Apple Silicon, and Linux x64 archives include the executable
 and offline documentation; `SHA256SUMS` lets you verify the download. Extract the
 archive before running `shellboy` (`shellboy.exe` on Windows).
+Download `SHA256SUMS` beside the archive and check it before extracting:
+
+```sh
+# Linux; on macOS use: shasum -a 256 --ignore-missing -c SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+```
+
+```powershell
+Get-FileHash .\shellboy-vX.Y.Z-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+# Compare with the matching filename's hash in SHA256SUMS.
+```
 
 Set a connection and model as described in [configuration](docs/guides/configuration.md).
 See [known limitations](docs/development/known-limitations.md) for current limits.
