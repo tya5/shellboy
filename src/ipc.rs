@@ -518,6 +518,7 @@ mod frame_delivery_tests {
                 thread_id: Some("t".into()),
             }),
             Command::IndexStatus(crate::protocol::IndexArgs {
+                dimensions: None,
                 scope: None,
                 space_id: None,
                 thread_ids: Vec::new(),

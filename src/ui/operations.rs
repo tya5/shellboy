@@ -1317,6 +1317,7 @@ impl Form {
     }
     fn index_args(&self) -> Result<IndexArgs, String> {
         Ok(IndexArgs {
+            dimensions: None,
             scope: match self.value("scope")? {
                 "" => None,
                 value => Some(IndexScope::parse(value).ok_or("scopeを選択してください")?),

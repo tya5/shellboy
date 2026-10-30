@@ -492,7 +492,7 @@ args!(ShellWriteArgs {
 });
 args!(AttachmentAddArgs { #[serde(default)] thread_id: Option<String>, path: String, kind: AttachmentKind });
 args!(AttachmentRemoveArgs { #[serde(default)] thread_id: Option<String>, attachment_id: String });
-args!(#[derive(Default)] IndexArgs { #[serde(default)] scope: Option<IndexScope>, #[serde(default)] space_id: Option<String>, #[serde(default)] thread_ids: Vec<String>, #[serde(default)] source_ids: Vec<String> });
+args!(#[derive(Default)] IndexArgs { #[serde(default, skip_serializing_if = "Option::is_none")] dimensions: Option<usize>, #[serde(default)] scope: Option<IndexScope>, #[serde(default)] space_id: Option<String>, #[serde(default)] thread_ids: Vec<String>, #[serde(default)] source_ids: Vec<String> });
 args!(StorageArgs { #[serde(default)] category: Option<StorageCategory> });
 args!(StatusArgs { #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] since: Option<String>, #[serde(default)] state: Vec<String>, #[serde(default)] all: bool, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 impl Default for StatusArgs {
@@ -609,6 +609,8 @@ pub enum Command {
     IndexRetry(IndexArgs),
     #[serde(rename = "index.rebuild")]
     IndexRebuild(IndexArgs),
+    #[serde(rename = "index.probe")]
+    IndexProbe(IndexProbeArgs),
     #[serde(rename = "storage.status")]
     StorageStatus(StorageArgs),
     #[serde(rename = "storage.collect")]
@@ -873,6 +875,9 @@ states!(ManagedFileState {
     Deleted,
     Failed
 });
-args!(IndexStatus { #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> });
+args!(#[derive(Default)] IndexProbeArgs { #[serde(default, skip_serializing_if = "Option::is_none")] dimensions: Option<usize> });
+args!(IndexStatus { #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, paused_at: Option<String>, pause_id: Option<String>, spaces: Vec<IndexSpaceStatus>, spaces_total: u64, spaces_truncated: bool, probes: Vec<IndexProbeObservation> });
+args!(IndexSpaceStatus { space_id: String, connection: String, model: String, dimension: usize, requested_dimensions: Option<usize>, segments: u64, vector_payload_bytes: u64, state: String, selected: bool });
+args!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
 args!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64> });
 args!(Accepted { accepted: bool });

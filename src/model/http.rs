@@ -372,12 +372,26 @@ impl HttpModelClient {
         model: &str,
         input: &[String],
         expected_dimension: Option<usize>,
+        requested_dimensions: Option<usize>,
         cancel: CancellationToken,
     ) -> Result<EmbeddingResponse, ModelError> {
-        if model.trim().is_empty() || input.is_empty() || expected_dimension == Some(0) {
+        if model.trim().is_empty()
+            || input.is_empty()
+            || expected_dimension == Some(0)
+            || requested_dimensions == Some(0)
+        {
             return Err(ModelError::new(
                 "input_invalid",
                 "Embedding model/input must be nonempty and dimension positive",
+            ));
+        }
+        if expected_dimension
+            .zip(requested_dimensions)
+            .is_some_and(|(expected, requested)| expected != requested)
+        {
+            return Err(ModelError::new(
+                "input_invalid",
+                "Requested embedding dimension conflicts with expected dimension",
             ));
         }
         let mut deadline = Deadline::new(
@@ -385,7 +399,10 @@ impl HttpModelClient {
             &self.connection,
             &self.connection_name,
         )?;
-        let request = json!({"model":model,"input":input,"encoding_format":"float"});
+        let mut request = json!({"model":model,"input":input,"encoding_format":"float"});
+        if let Some(dimension) = requested_dimensions {
+            request["dimensions"] = json!(dimension);
+        }
         let (response, secrets, _observation) = self
             .send(
                 ApiEndpoint::Embeddings,
@@ -422,7 +439,7 @@ impl HttpModelClient {
             ));
         }
         let mut vectors = vec![None; input.len()];
-        let mut dimension = expected_dimension;
+        let mut dimension = expected_dimension.or(requested_dimensions);
         for item in data {
             let index = item
                 .get("index")
@@ -438,10 +455,13 @@ impl HttpModelClient {
                 .and_then(Value::as_array)
                 .filter(|v| !v.is_empty())
                 .ok_or_else(|| ModelError::new("protocol", "Empty or non-array embedding"))?;
-            if dimension.is_some_and(|d| d != values.len()) {
+            if let Some(expected) = dimension.filter(|expected| *expected != values.len()) {
                 return Err(ModelError::new(
                     "dimension_mismatch",
-                    "Embedding dimension does not match the active space",
+                    format!(
+                        "Embedding vector length {} does not match expected dimension {expected}",
+                        values.len()
+                    ),
                 ));
             }
             dimension = Some(values.len());

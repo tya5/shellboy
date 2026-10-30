@@ -173,6 +173,10 @@ all native test identities and assertions while reducing repeated integration
 linking and fixture-only commits. Keep native timing evidence distinct from
 policy tests and do not add product machinery for the test runner.
 
+Issues #42/#43/#55 adopt [index operations](index-operations.md): saved pause
+observations and recovery UI, deterministic bounded embedding batches, and
+explicit dimension rebuild/probe using existing spaces/app_meta/workers.
+
 Issue #51 adopts [explicit instruction references](agents-reference.md): one
 reference per Thread, strict explicit-path validation, atomic settings and
 next-new-Turn notification without altering same-Turn snapshots.

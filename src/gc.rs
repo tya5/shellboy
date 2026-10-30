@@ -45,6 +45,7 @@ pub struct CollectionReport {
     pub managed_failures: Vec<(String, String)>,
     pub managed_protected_bytes: u64,
     pub index_sources_collected: u64,
+    pub inactive_index_spaces_collected: u64,
     pub summary_cache_parts_collected: u64,
     pub summary_cache_bytes_collected: u64,
     pub deferred: bool,
@@ -239,6 +240,20 @@ impl GcService {
                 }).await.map_err(crate::app::storage_error)??;
                 report.index_sources_collected += removed;
                 if removed < BATCH as u64 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        }
+        if matches!(category, StorageCategory::All | StorageCategory::Index) {
+            loop {
+                let removed = self
+                    .database
+                    .call(crate::index::collect_inactive_spaces)
+                    .await
+                    .map_err(crate::app::storage_error)?;
+                report.inactive_index_spaces_collected += removed;
+                if removed < 32 {
                     break;
                 }
                 tokio::task::yield_now().await;

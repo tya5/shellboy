@@ -340,6 +340,7 @@ pub(super) async fn semantic(
         id: key,
         name: name.into(),
         model: model.into(),
+        requested_dimensions: descriptor.requested_dimensions,
         endpoint_hash: hash(connection.base_url.as_bytes()),
         client: crate::model::http::HttpModelClient::for_connection(name, connection.clone())
             .map_err(|_| {

@@ -693,3 +693,20 @@ fn revisit_limit_is_unset_by_default_and_zero_explicitly_disables_registration()
         assert!(Config::parse(&format!("[limits]\nrevisit_max_per_run={value}\n")).is_err());
     }
 }
+
+#[test]
+fn embedding_batch_caps_preserve_singleton_defaults_and_reject_invalid_bounds() {
+    let config = Config::parse("").unwrap();
+    assert_eq!(config.embedding.batch_max_inputs, 1);
+    assert_eq!(config.embedding.batch_max_chars, 64000);
+    for body in [
+        "[embedding]\nbatch_max_inputs=0",
+        "[embedding]\nbatch_max_inputs=129",
+        "[embedding]\nbatch_max_chars=0",
+        "[embedding]\nbatch_max_chars=1048577",
+        "[embedding]\nbatch_max_inputs=2\nbatch_max_chars=1",
+    ] {
+        assert!(Config::parse(body).is_err(), "{body}");
+    }
+    assert!(Config::parse("[embedding]\nbatch_max_inputs=128\nbatch_max_chars=1048576").is_ok());
+}

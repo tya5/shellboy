@@ -102,6 +102,7 @@ async fn embeddings_deadline_bounds_headers_empty_partial_and_error_bodies() {
                             "fixture",
                             &["synthetic".into()],
                             None,
+                            None,
                             CancellationToken::new(),
                         )
                         .await

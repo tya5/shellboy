@@ -86,6 +86,18 @@ section declaration macro distinguishes optional fields from the existing
 positive numeric fields; it does not add a validation registry. See
 [Revisit](revisit.md) for the `revisit_limit_reached` rejection and counter.
 
+
+## Deterministic history embedding batches (#43)
+
+`embedding.batch_max_inputs` defaults to 1 and accepts 1..128.
+`embedding.batch_max_chars` defaults to 64000 and accepts 1..1048576 Unicode
+characters. For multiple inputs it must cover `indexing.split_chars`. The
+default preserves singleton requests; configured limits are user-selected
+bounds, not inferred provider limits. Requests share one space/request mode
+and a stable saved-work ordering. Queries remain singleton. No dimension
+setting is added; explicit rebuild mode is saved with its space. See
+[index operations](index-operations.md).
+
 ## Explicit instruction references (#51)
 
 The [per-Thread instruction reference contract](agents-reference.md) supersedes

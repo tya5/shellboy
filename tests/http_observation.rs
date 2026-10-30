@@ -339,6 +339,7 @@ async fn model_list_and_embedding_transport_errors_do_not_retire_responses_pool(
                 "fixture",
                 &["synthetic".into()],
                 None,
+                None,
                 CancellationToken::new()
             )
             .await

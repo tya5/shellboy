@@ -32,7 +32,9 @@ mod coverage;
 mod queue;
 mod search;
 mod source;
+mod space_gc;
 mod split;
+pub(crate) use space_gc::collect_inactive_spaces;
 mod store;
 use coverage::{covered_ranges, range_covered};
 use queue::{AutoAdmission, Work, bootstrap_key, job_id_for, queue_job};
@@ -47,11 +49,15 @@ use store::{
     maybe_activate_candidate, meta, set_json_meta, set_meta, space_for_group, update_json_meta,
     valid_table, witness_valid,
 };
+mod batch;
 mod claim;
 mod failure;
 use claim::{claim, claim_valid, discard_claim};
+mod dimensions;
 mod identity;
 mod keys;
+mod observations;
+mod pause;
 pub(crate) use keys::IndexKeys;
 #[cfg(test)]
 use store::ensure_space;
@@ -110,6 +116,7 @@ pub struct IndexHit {
 }
 #[derive(Clone, Debug)]
 struct Claimed {
+    requested_dimensions: Option<usize>,
     job_id: Option<String>,
     bootstrap_key: Option<String>,
     space: Option<Space>,
@@ -118,7 +125,7 @@ struct Claimed {
 enum ClaimResult {
     Idle,
     Progress,
-    Ready(Box<Claimed>),
+    Ready(Vec<Claimed>),
 }
 #[derive(Clone, Copy, Serialize)]
 struct StorageDiagnosticStop {
@@ -388,6 +395,9 @@ impl IndexService {
         self.enqueue_new(&[node_id.to_owned()]).await
     }
     pub async fn preview(&self, args: IndexArgs) -> Result<FeePreview, ApiError> {
+        if args.scope.is_none() && args.source_ids.is_empty() && args.thread_ids.is_empty() {
+            return self.retry_preview(args).await;
+        }
         let ids = self.selected_sources(&args).await?;
         let mut result = FeePreview::default();
         let write_space = self.write_space(&args).await?;
@@ -472,6 +482,9 @@ impl IndexService {
             .map(|s| s.model.clone())
             .or_else(|| self.config.embedding.model.clone());
         let mut pause_keys = self.identity_keys();
+        if let Some(family) = self.failure_key() {
+            pause_keys.insert(0, family.to_owned());
+        }
         if let Some(key) = space
             .as_ref()
             .and_then(|s| s.splitter.strip_prefix(&format!("{SPLITTER}:")))
@@ -480,8 +493,13 @@ impl IndexService {
             pause_keys.push(key.to_owned());
         }
         let mut pause = None;
+        let mut paused_at = None;
+        let mut pause_id = None;
         for key in pause_keys {
             if let Some(value) = meta(tx, &IndexKeys::new(&key).pause()).map_err(db_error)? {
+                let (at, id) = pause::facts(&IndexKeys::new(&key).pause(), &value);
+                paused_at = at;
+                pause_id = Some(id);
                 pause = Some(value);
                 break;
             }
@@ -503,7 +521,7 @@ impl IndexService {
         "model":model,
         "dimension":space.as_ref().map(|s|s.dimension),
         "active_state":space.as_ref().map(|s|s.state.as_str()),
-        "paused":pause.is_some(),
+        "paused":pause.is_some(), "paused_at":paused_at, "pause_id":pause_id,
         "pause_kind":pause_kind}
         );
 
@@ -540,7 +558,18 @@ impl IndexService {
     }
     pub async fn rebuild(&self, args: IndexArgs) -> Result<FeePreview, ApiError> {
         let key = self.key()?.to_owned();
+        if args
+            .dimensions
+            .is_some_and(|n| !(1..=crate::storage::MAX_VECTOR_DIMENSIONS).contains(&n))
+        {
+            return Err(err(
+                ErrorCode::InvalidArgument,
+                "dimensions must be in 1..=8192",
+            ));
+        }
         self.write_space(&args).await?;
+        let requested = args.dimensions;
+        let config = self.config.clone();
         let ids = self.selected_sources(&args).await?;
         if ids.is_empty() {
             return Ok(FeePreview::default());
@@ -557,6 +586,50 @@ impl IndexService {
                         "UPDATE index_space SET state='inactive' WHERE id=?1 AND state<>'active'",
                         [space],
                     )?;
+                }
+                let requested = match requested {
+                    Some(n) => Some(n),
+                    None => {
+                        if let Some(space) = meta(&tx, IndexKeys::ACTIVE_SPACE)?
+                            .map(|id| load_space(&tx, &id))
+                            .transpose()?
+                            .flatten()
+                        {
+                            let marker = meta(&tx, &IndexKeys::query_profile(&space.id))?;
+                            if config.embedding.connection.as_deref()
+                                == Some(space.profile.as_str())
+                                && config.embedding.model.as_deref() == Some(space.model.as_str())
+                                && identity::query_profile_key(
+                                    &config,
+                                    &space.profile,
+                                    &space.model,
+                                    marker.as_deref().unwrap_or(""),
+                                )
+                                .is_some()
+                            {
+                                space.requested_dimensions
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                };
+                let mode_key = dimensions::candidate_key(IndexKeys::new(&key));
+                if let Some(dimensions) = requested {
+                    set_json_meta(
+                        &tx,
+                        &mode_key,
+                        &dimensions::CandidateMode {
+                            group: group_copy.clone(),
+                            dimensions,
+                            error: None,
+                            paused_at: None,
+                        },
+                    )?;
+                } else {
+                    tx.execute("DELETE FROM app_meta WHERE key=?1", [mode_key])?;
                 }
                 set_meta(&tx, &IndexKeys::new(&key).rebuild(), &group_copy)?;
                 tx.commit()?;
@@ -694,7 +767,11 @@ impl IndexService {
                         Ok(true)
                     }
                     Err(error) if error.code == ErrorCode::StorageLimit => {
-                        set_meta(&tx, &IndexKeys::new(&key).pause(), &encode_json(&error)?)?;
+                        pause::save(
+                            &tx,
+                            &IndexKeys::new(&key).pause(),
+                            &serde_json::to_value(&error).map_err(|_| serde_error())?,
+                        )?;
                         tx.commit()?;
                         Ok(false)
                     }
@@ -718,7 +795,7 @@ impl IndexService {
                 "kind":"index_worker_error",
                 "message":"Index processing failed; result adoption may be incomplete. Inspect storage and retry explicitly",
                 "error":error,
-            }).to_string();
+            });
             let paused = self
                 .database
                 .call(move |db| {
@@ -726,7 +803,7 @@ impl IndexService {
                     for key in keys {
                         let pause = IndexKeys::new(&key).pause();
                         if meta(&tx, &pause)?.is_none() {
-                            set_meta(&tx, &pause, &reason)?;
+                            pause::save(&tx, &pause, &reason)?;
                         }
                     }
                     tx.commit()?;
@@ -778,114 +855,20 @@ impl IndexService {
             return Ok(true);
         }
         let key_copy = key.clone();
+        let max_inputs = self.config.embedding.batch_max_inputs;
+        let max_chars = self.config.embedding.batch_max_chars;
         let claimed = self
             .database
-            .call(move |db| claim(db, IndexKeys::new(&key_copy)))
+            .call(move |db| claim(db, IndexKeys::new(&key_copy), max_inputs, max_chars))
             .await
             .map_err(db_error)?;
-        let claimed = match claimed {
+        let claims = match claimed {
             ClaimResult::Idle => return Ok(false),
             ClaimResult::Progress => return Ok(true),
-            ClaimResult::Ready(claimed) => *claimed,
+            ClaimResult::Ready(claims) => claims,
         };
-        if !self.capacity_allowed(&key).await? {
-            self.fail_work(
-                &key,
-                claimed,
-                ModelError::new(
-                    "storage_limit",
-                    "Logical data limit reached before embedding; retry after collection",
-                ),
-                false,
-            )
-            .await?;
-            return Ok(true);
-        }
-        let connection_name = claimed
-            .space
-            .as_ref()
-            .map(|s| s.profile.as_str())
-            .or(self.config.embedding.connection.as_deref())
-            .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding connection missing"))?;
-        let model = claimed
-            .space
-            .as_ref()
-            .map(|s| s.model.as_str())
-            .or(self.config.embedding.model.as_deref())
-            .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding model missing"))?;
-        let result = if self.config.connections.contains_key(connection_name) {
-            match self.clients.get(connection_name) {
-                Ok(client) => {
-                    client
-                        .embeddings(
-                            model,
-                            std::slice::from_ref(&claimed.work.segment.text),
-                            claimed.space.as_ref().map(|s| s.dimension),
-                            cancel.clone(),
-                        )
-                        .await
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Err(ModelError::new(
-                "config_missing",
-                "Embedding connection no longer exists",
-            ))
-        };
-        if cancel.is_cancelled() {
-            self.fail_work(
-                &key,
-                claimed,
-                ModelError::new("cancelled", "Embedding cancelled; retry explicitly"),
-                true,
-            )
-            .await?;
-            return Ok(true);
-        }
-        match result {
-            Ok(mut response) => {
-                if response.dimension > crate::storage::MAX_VECTOR_DIMENSIONS {
-                    self.fail_work(&key, claimed, ModelError::new("dimension_mismatch", "sqlite-vec v0.1.9 supports at most8192 dimensions; choose a supported embedding profile"), false).await?;
-                    return Ok(true);
-                }
-                let vector = response.vectors.remove(0);
-                let embedding = identity::EmbeddingIdentity::configured(&self.config, key.clone());
-                let failure_key = self.failure_key().unwrap_or(&key).to_owned();
-                let recovery_claim = claimed.clone();
-                let adoption = store::EmbeddingAdoption {
-                    failure_key,
-                    claimed,
-                    embedding,
-                    dimension: response.dimension,
-                    vector,
-                };
-                let adopted = self
-                    .database
-                    .call(move |db| {
-                        let tx = db.transaction()?;
-                        adoption.adopt_embedding_tx(&tx)?;
-                        tx.commit()?;
-                        Ok(())
-                    })
-                    .await;
-                if let Err(error) = adopted {
-                    let error = error.into_api_error();
-                    let kind = serde_json::to_value(error.code)
-                        .ok()
-                        .and_then(|value| value.as_str().map(str::to_owned))
-                        .unwrap_or_else(|| "invalid_state".into());
-                    self.fail_work(
-                        &key,
-                        recovery_claim,
-                        ModelError::new(&kind, error.message),
-                        false,
-                    )
-                    .await?;
-                }
-            }
-            Err(error) => self.fail_work(&key, claimed, error, false).await?,
-        }
+        self.process_claims(&key, claims, cancel).await?;
+        self.wake();
         Ok(true)
     }
 }
@@ -1062,6 +1045,7 @@ mod error_tests {
                     profile: "profile".into(),
                     model: "model".into(),
                     query_key: "query-key".into(),
+                    requested_dimensions: None,
                 },
                 "candidate",
                 3,
@@ -1081,6 +1065,7 @@ mod error_tests {
                         profile: "profile".into(),
                         model: "model".into(),
                         query_key: "query-key".into(),
+                        requested_dimensions: None,
                     },
                     "candidate",
                     4,
@@ -1103,6 +1088,7 @@ mod error_tests {
                         profile: "profile".into(),
                         model: "model".into(),
                         query_key: "query-key".into(),
+                        requested_dimensions: None,
                     },
                     "new-candidate",
                     0,

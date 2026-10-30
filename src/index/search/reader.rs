@@ -311,7 +311,7 @@ mod tests {
             .unwrap();
         let space = worker.call(|db| {
             let tx = db.transaction()?;
-            let embedding = identity::EmbeddingIdentity { key:"fixture-key".into(), profile:"fixture".into(), model:"synthetic".into(), query_key:"fixture-query".into() };
+            let embedding = identity::EmbeddingIdentity { requested_dimensions: None, key:"fixture-key".into(), profile:"fixture".into(), model:"synthetic".into(), query_key:"fixture-query".into() };
             let space = ensure_space(&tx, &embedding, "active", 2)?;
             tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('thread','/','/a','fixture','synthetic','now'); INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES('first','user','now','{}','body'),('second','user','now','{}','body'); INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('thread',0,'first'),('thread',1,'second');")?;
             for (ordinal, id) in [(1, "first"), (2, "second")] {

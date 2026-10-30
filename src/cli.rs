@@ -231,7 +231,9 @@ pub enum IndexCommand {
     Backfill(IndexOptions),
     Retry(IndexOptions),
     /// Build a candidate index; embedding API costs may apply. Check preview first.
-    Rebuild(IndexOptions),
+    Rebuild(IndexRebuildOptions),
+    /// Send one fixed embedding input (may incur charges) and retain its result.
+    Probe(IndexProbeOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum StorageCommand {
@@ -562,9 +564,30 @@ pub struct IndexOptions {
     #[arg(long = "source")]
     pub source_ids: Vec<String>,
 }
+#[derive(Debug, Clone, Args)]
+pub struct IndexRebuildOptions {
+    #[command(flatten)]
+    pub selection: IndexOptions,
+    #[arg(long)]
+    pub dimensions: Option<usize>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct IndexProbeOptions {
+    #[arg(long)]
+    pub dimensions: Option<usize>,
+}
+impl From<IndexRebuildOptions> for wire::IndexArgs {
+    fn from(value: IndexRebuildOptions) -> Self {
+        Self {
+            dimensions: value.dimensions,
+            ..value.selection.into()
+        }
+    }
+}
 impl From<IndexOptions> for wire::IndexArgs {
     fn from(value: IndexOptions) -> Self {
         Self {
+            dimensions: None,
             scope: value.scope,
             space_id: value.space_id,
             thread_ids: value.thread_ids,
@@ -815,6 +838,9 @@ impl Cli {
                 IndexCommand::Backfill(a) => C::IndexBackfill(a.into()),
                 IndexCommand::Retry(a) => C::IndexRetry(a.into()),
                 IndexCommand::Rebuild(a) => C::IndexRebuild(a.into()),
+                IndexCommand::Probe(a) => C::IndexProbe(wire::IndexProbeArgs {
+                    dimensions: a.dimensions,
+                }),
             },
             CliCommand::Storage { command } => match command {
                 StorageCommand::Status(a) => C::StorageStatus(a.into()),

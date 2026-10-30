@@ -237,6 +237,7 @@ impl Fixture {
 }
 fn args() -> IndexArgs {
     IndexArgs {
+        dimensions: None,
         scope: None,
         space_id: None,
         thread_ids: vec![],
@@ -263,6 +264,7 @@ async fn newly_finalized_only_no_implicit_backfill_and_real_vec_search() {
     let preview = f
         .service
         .backfill(IndexArgs {
+            dimensions: None,
             scope: Some(IndexScope::All),
             ..args()
         })
@@ -430,6 +432,7 @@ async fn explicit_length_error_splits_finitely_and_rebuild_failure_preserves_old
     f.proxy.push(Reply::Error(400, "unknown_provider_failure"));
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
         })
@@ -452,6 +455,7 @@ async fn rebuild_success_switches_once_and_all_space_vector_gc_rolls_back_atomic
     let old = f.service.status(args()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
         })
@@ -603,6 +607,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     let old_space = f.service.status(args()).await.unwrap().space_id;
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
         })
@@ -763,6 +768,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     let management = f
         .service
         .management_status(IndexArgs {
+            dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
         })
@@ -907,6 +913,7 @@ async fn raw_retention_during_inflight_embedding_does_not_resurrect_vectors() {
     let management = f
         .service
         .management_status(IndexArgs {
+            dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
         })
@@ -932,6 +939,7 @@ async fn partially_failed_candidate_is_visible_and_retry_completes_before_switch
     f.proxy.push(Reply::Error(400, "unknown_failure"));
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["cat-source".into(), "dog-source".into()],
             ..args()
         })
@@ -1074,6 +1082,7 @@ async fn new_finalized_sources_during_rebuild_are_caught_up_before_switch() {
     let old = f.service.status(args()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["old".into()],
             ..args()
         })
@@ -1142,6 +1151,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     let selected = f
         .service
         .management_status(IndexArgs {
+            dimensions: None,
             thread_ids: vec!["view".into()],
             ..args()
         })
@@ -1157,6 +1167,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     let preview = f
         .service
         .preview(IndexArgs {
+            dimensions: None,
             scope: Some(IndexScope::All),
             ..args()
         })
@@ -1177,6 +1188,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     let status = f
         .service
         .management_status(IndexArgs {
+            dimensions: None,
             source_ids: vec!["done".into()],
             ..args()
         })
@@ -1188,6 +1200,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     assert_eq!(
         f.service
             .preview(IndexArgs {
+                dimensions: None,
                 source_ids: vec!["done".into()],
                 ..args()
             })
@@ -1218,6 +1231,7 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
     assert_eq!(f.proxy.count(), calls);
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
         })
@@ -1237,6 +1251,7 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
     let explicit = f
         .service
         .management_status(IndexArgs {
+            dimensions: None,
             space_id: Some(old.clone()),
             source_ids: vec!["raw-node".into()],
             ..args()
@@ -1264,6 +1279,7 @@ async fn fee_preview_credits_completed_length_split_children_without_api_or_new_
     let preview = f
         .service
         .preview(IndexArgs {
+            dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
         })
@@ -1290,6 +1306,7 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     let active = f.service.status(args()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
         })
@@ -1445,6 +1462,7 @@ async fn decoding_change_atomically_invalidates_all_spaces_without_touching_raw_
     f.drain().await;
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
         })
@@ -2056,6 +2074,7 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
         "configuration changes do not authorize historical work"
     );
     let selected = IndexArgs {
+        dimensions: None,
         source_ids: vec!["source".into()],
         ..args()
     };
@@ -2401,6 +2420,7 @@ async fn real_thread_delete_hides_path_only_sources_until_gc_reclaims_payload_an
     let preview = f
         .service
         .preview(IndexArgs {
+            dimensions: None,
             thread_ids: vec!["deleted".into()],
             ..args()
         })
@@ -2519,6 +2539,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         let alternate = if inactive {
             f.service
                 .rebuild(IndexArgs {
+                    dimensions: None,
                     source_ids: vec!["seed".into()],
                     ..args()
                 })
@@ -2576,6 +2597,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
             assert!(
                 f.service
                     .retry(IndexArgs {
+                        dimensions: None,
                         space_id: Some(old.clone()),
                         ..args()
                     })
@@ -2586,6 +2608,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         }
         f.service
             .retry(IndexArgs {
+                dimensions: None,
                 space_id: Some(old.clone()),
                 source_ids: vec!["target".into()],
                 ..args()
@@ -2627,6 +2650,7 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     f.node("rebuild", "abcdefghijklmnop").await;
     f.service
         .rebuild(IndexArgs {
+            dimensions: None,
             source_ids: vec!["rebuild".into()],
             ..args()
         })
@@ -2680,6 +2704,7 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     assert_eq!(f.proxy.count(), before + 1);
     f.service
         .retry(IndexArgs {
+            dimensions: None,
             space_id: Some(candidate.clone()),
             ..args()
         })
@@ -3126,3 +3151,6 @@ async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_wo
     assert_eq!((status.done, status.failed, status.pending), (3, 0, 0));
     f.close().await;
 }
+
+#[path = "index/pause.rs"]
+mod pause_regressions;

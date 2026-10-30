@@ -1,5 +1,99 @@
 # Development status
 
+## Reviewed index integration into main5350fc8
+
+Reviews #42/#43/#55 have no Medium findings. Merge51a819f preserves current
+main usage changes and index changes; native macOS standard checks pass with
+1,504 passed, zero failed, 28 ignored, six Python tests and strict Clippy/fmt.
+The #43 batch deadline guidance is added without changing defaults/algorithms.
+See [review dispositions](index-review-follow-up.md). Main publication is
+authorized; exact new main CI is the closure gate. Prior branch-native results
+remain separately identified historical checkpoints. #53/#56/#52 work is on
+a separate branch and is not included here.
+
+## Current integration: index operations and main usage accounting
+
+The reviewed index branch at `e12ab8f` is being combined with origin/main
+`5350fc8`, which includes the usage-accounting work recorded below. Latest
+reviews for #42/#43/#55 report no Medium findings. The combined tree's standard
+checks are pending; the earlier three-OS index result validates `ae9bc19`, not
+this new combination. Both sets of earlier checkpoint records are retained below.
+
+The user has authorized main push after integration and verification. Issue
+closure still waits for successful main CI on the integrated source. No tag,
+release, paid provider test or default-user-store operation is implied.
+
+## Previous index-branch checkpoint: implemented, pushed and native-verified
+
+The reviewed index branch `issue-42-43-55/index` is pushed. Exact source
+`ae9bc19` passes [manual CI40996181881](https://github.com/tya5/shellboy/actions/runs/40996181881)
+on all three OSes: Linux1,499 / macOS1,498 / Windows1,386 passed, zero failed;
+ignored27/28/20. Windows uses four test threads. All baseline16fe4aa test identities
+and ignored sets remain, with 30 additional active cases per OS. Native macOS
+standard checks also pass (1,498/0/28, six Python gates, 85 registered suites,
+formatting and strict all-target Clippy). See [acceptance](../validation/acceptance.md).
+
+Main contains #57 at `16fe4aa`, with
+[push CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000)
+successful on all three OSes. Branch push of ae9bc19 started no automatic run;
+explicit workflow_dispatch selected that branch and completed all three jobs.
+CI runs automatically only on main push; retained manual inputs/jobs are unchanged.
+Tags/releases require an exact green main SHA and separate user authorization.
+
+The index code includes canonical Windows repairs from main5234f94. The earlier
+failed b22a30a Windows run is retained; the duplicate local alternative34ca8d3
+was abandoned and not published. Index implementation/tests and UI are split
+across meaningful commits, followed by current-main integration. Remaining work
+is review and separately authorized main integration of the index changes.
+During final handoff, origin/main advanced to `5350fc8` with another session's
+usage-accounting work (CI40997452704 still in progress). That later feature is
+outside the native-verified index branch. Integrating index into current main
+remains a separate review/combined-check step; do not attribute its success to
+the already verified ae9bc19 baseline.
+
+No paid provider test, default-user reindex/GC, installed-binary update, tag or
+release is included. Subsequent evidence-only updates do not change the verified
+Rust, bundled guides or workflow source and do not trigger automatic branch CI.
+
+## Issues #42/#43/#55: pre-main-repair combined local checkpoint
+
+Origin/main `c0f1ad9`, containing #48/#51, is now merged into the local index
+branch at merge `80caf38`. The combined tree passes macOS standard checks:
+1,498 passed, zero failed, 28 ignored; formatting and strict all-target Clippy
+also pass. The earlier 1,482-pass result belongs only to pre-merge `f9d3ee7`.
+No native CI or installed-binary verification is claimed for this combination.
+
+Work is isolated on `issue-42-43-55/index`; user data and the installed binary
+are unchanged. The adopted [index operation design](../design/index-operations.md)
+covers saved pause observations/recovery preview, deterministic bounded batches,
+explicit dimension candidates/probes and space payload facts. Existing workers,
+spaces and app_meta own the work; no table, queue, dependency or poller is added.
+
+The pre-merge implementation tree at `f9d3ee7` passed macOS standard
+checks: 1,482 passed, zero failed, 28 ignored; all-target strict Clippy and
+formatting succeeded on that tree. Real PTY recovery verified saved stop time, target counts,
+Y confirmation and S status refresh. Mock HTTP covers deterministic batches,
+first-dimension validation, refusal/transient/late replies, persisted query/ingest
+mode, probe receipts and explicit inactive-space GC. Tests are split by issue;
+Core request-mode/claim plumbing is shared because batching must carry the
+space's frozen mode. See [acceptance](../validation/acceptance.md).
+
+The default batch count remains one; users opt in with documented caps. No paid
+API calls, user-store rebuild/GC, installed-binary update or release was performed.
+At this checkpoint the index branch had not been pushed and native CI
+authorization was pending. Later b22a30a results and current manual-CI permission
+are recorded above; main's successful #46 CI does not validate index changes.
+
+Separately, the reviewed #46 measurement branch was fast-forwarded into main at
+`a949688` and pushed on user instruction. Main CI
+[40987103680](https://github.com/tya5/shellboy/actions/runs/40987103680) succeeded
+on all three OSes; #46 is closed.
+The three index issues were not included in that push.
+
+The #48/#51 sections below retain their original local integration and review
+checkpoints. Their historical publication restrictions and base descriptions
+record those stages; current combined integration is described above.
+
 ## #49 Then #47: Standard Usage And Accounting
 
 #49 implements the shared five-number whitelist, guarded SQL scalar reads for
@@ -180,8 +274,9 @@ authorization; push, main changes and GitHub posting remain on hold.
 
 ## Issue #46: measured native test performance completed
 
-The reviewed measurement branch `issue-46/test-performance` is pushed; main is
-unchanged. Ordinary integration links fall from 82 to 3; registration, normalized
+The reviewed measurement branch `issue-46/test-performance` was pushed and
+subsequently fast-forwarded into main at `a949688` on user instruction. Main
+three-OS CI 40987103680 succeeds; #46 is closed. Ordinary integration links fall from 82 to 3; registration, normalized
 identity and ignored-set checks retain every original test. Historical schema
 fixture setup is batched, while unproven index seed batching was discarded.
 Shared runtime/retry fixture guards now use bounded phase diagnostics and
@@ -199,8 +294,7 @@ failed evidence.
 
 The [acceptance record](../validation/acceptance.md) records exact sources,
 runner/measurement limits and the final benchmark. The evidence update is docs
-only; subsequent workflow results must be identified by their own SHA. No main
-merge, release or installed-binary update is part of this task.
+only; subsequent workflow results must be identified by their own SHA. No release or installed-binary update is part of this task.
 
 ## Issue #44 review follow-up: readable activity column
 

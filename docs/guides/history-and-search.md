@@ -168,7 +168,7 @@ Specify a target in the TUI:
 | `t` | Retry failures / explicitly resume from pause |
 | `r` | Rebuild |
 
-`b/t/r` require a preview matching the explicit target and confirmation with Y that costs may occur. Preview calls no API and reports counts as observed at that time. It does not assert a price when unit pricing is unknown, nor reserve/freeze later source updates. Obtain another preview after execution.
+`b/r` require an explicit source target and matching preview, followed by confirmation with Y that costs may occur. Without a target, `p` explains how to select one. `t` can also preview already-authorized failed work globally; it shows source/segment/character counts and asks for Y before retrying. It does not authorize untouched old history. Preview calls no API and reports counts as observed at that time. It does not assert a price when unit pricing is unknown, nor reserve/freeze later source updates. Obtain another preview after execution.
 
 The CLI also supports explicit scope selection. It has no TUI confirmation screen; the mutation commands below are accepted directly. First read source/segment/character counts with `index preview`, then verify cost and scope before executing a mutation. Preview itself calls no embedding API and submits no jobs.
 
@@ -180,9 +180,33 @@ shellboy index retry --scope threads --thread THREAD_ID
 shellboy index rebuild --scope all
 ```
 
-Select targets with `--scope all`, `--scope threads --thread ID`, `--source NODE_ID`, and `--space SPACE_ID`. A space alone does not substitute for historical scope selection in backfill/rebuild. CLI `index retry` also accepts omitted targets, resuming failed jobs and similar work in that connection's active/candidate spaces. To limit targets, explicitly provide Thread/source as above. This differs from the TUI's pre-execution preview requirement. See [CLI reference](cli-reference.md) for detailed conditions.
+Select targets with `--scope all`, `--scope threads --thread ID`, `--source NODE_ID`, and `--space SPACE_ID`. A space alone does not substitute for historical scope selection in backfill/rebuild. CLI `index retry` also accepts omitted targets, resuming failed jobs and similar work in that connection's active/candidate spaces. To limit targets, explicitly provide Thread/source as above. Omitting the scope on CLI `index preview` previews that retry-eligible work without sending an API request. The TUI performs this read before its retry confirmation. See [CLI reference](cli-reference.md) for detailed conditions.
 
 `pending/running/done/failed` are job states; `paused` and reason describe why a space stopped. Individual temporary failures receive bounded retries. Shared failures such as authentication pause indexing without halting new conversations. Explicitly retry after fixing the cause. Already successful portions are not processed again.
+
+A pause notice in conversation history is a saved **stop record**, not a current request waiting or a conversation failure. It leads to `/index` → `t`, shows the original `paused_at` and reason, and remains in history after recovery. Missing historical time stays unknown. Unchanged pause observations are not repeated every Turn. Fresh `s` status reflects resumption; there is no continuous background status poller. Fix the underlying authentication, credit, or provider problem before explicitly retrying. Existing vectors may still be searchable while updates are paused, and query embeddings can still incur charges.
+
+### Inspecting and explicitly changing embedding dimensions
+
+Read `shellboy index status` first. Each retained space reports its connection/model, measured `dimension`, optional `requested_dimensions`, resident segment count and `vector_payload_bytes`. The latter is only `segments × dimension × 4` bytes of float32 vector payload. It is not the SQLite file, WAL, allocation, reclaimable capacity, or an exact disk-space saving. Candidate rebuilds temporarily coexist with the active space. Old vectors remain until explicit GC is permitted; a smaller dimension may reduce search quality.
+
+If the user authorizes a support test, run one explicit probe:
+
+```sh
+shellboy index probe --dimensions 768
+```
+
+A probe sends one small embedding request and may cost money. The result is an observation for that endpoint/model/requested dimension, not a capability catalogue. A model alias does not prove dimension support. On refusal/mismatch, inspect the saved failure; do not try other dimensions or native defaults automatically.
+
+Before a paid dimension change, preview the intended source scope and obtain explicit consent for its count/characters, possible quality loss, API charges and temporary extra storage. For example, after authorization:
+
+```sh
+shellboy index preview --scope threads --thread THREAD_ID
+shellboy index rebuild --scope threads --thread THREAD_ID --dimensions 768
+shellboy index status
+```
+
+The dimension is frozen for the candidate and subsequent active-space ingestion/query requests; returned vector lengths must match. The first real authorized source validates the candidate without an extra hidden probe. Refusal stops that candidate, preserving the old active vectors. Rebuild without `--dimensions` retains the current matching active space's request mode; a changed endpoint/model defaults to native mode. Status includes up to 200 retained spaces and the newest 32 probe observations, so inspect total/truncation fields instead of assuming the lists are exhaustive.
 
 IndexSpaces are separated by connection, embedding model, observed dimensions, and related settings. Configuration changes do not silently delete old spaces; failed rebuild candidates preserve the old active space. Historical content needs explicit backfill/rebuild to enter the new space. Automatically detecting a changed model behind an alias is not guaranteed.
 

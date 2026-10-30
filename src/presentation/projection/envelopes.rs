@@ -85,7 +85,9 @@ fn event(
             _ => EventClass::Unknown,
         };
         p.title = events::title(event_kind, event);
-        let (states, body) = if event_kind == "revisit" {
+        let (states, body) = if let Some((_, body)) = events::index_pause_notice(event) {
+            (Vec::new(), body)
+        } else if event_kind == "revisit" {
             (
                 Vec::new(),
                 events::revisit_preview(event).into_iter().collect(),

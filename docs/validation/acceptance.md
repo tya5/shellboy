@@ -2061,3 +2061,205 @@ debug-binary result and does not claim physical terminal pixel/IME/clipboard,
 company Windows proxy or paid-model validation. Provider retry-count/prefill
 measurements and the original intermittent attachment cause remain the explicit
 follow-ups above.
+
+
+## 2026-10-30: #46 main integration verification
+
+After the latest review reported no Medium findings, the user authorized main
+integration. Fast-forwarded `0469ca0..a949688` (15 commits) without rewriting the
+measured commits and pushed main. Exact main source `a94968898c704b4ee7b78be1cda860ee6d057b04`
+succeeds on macOS, Linux and Windows in
+[CI 40987103680](https://github.com/tya5/shellboy/actions/runs/40987103680).
+Commented on #46 and closed it after that result, as required by the review.
+The #42/#43/#55 working changes remain on a separate local branch and were not
+included. No release or installed-binary update was performed. The original
+benchmark and deliberately deferred timer/sleep cleanup remain separate evidence.
+
+
+## 2026-10-30: #42/#43/#55 local index acceptance
+
+The tested implementation tree was committed as `7a8e547` (shared Core/request
+modes), `930786e` (batch regressions), `83d2be7` (dimension/probe regressions),
+`31a8f31` (explicit inactive-space GC), and `f9d3ee7` (TUI recovery). The adopted
+design is `37d2d78`. Later guide/evidence changes are recorded separately.
+
+On native macOS, with pinned Rust 1.99.1, `CARGO_BUILD_JOBS=2`,
+`CARGO_INCREMENTAL=0` and `RUST_TEST_THREADS=2`, `sh scripts/check.sh` succeeds:
+85 suites registered exactly once, five Python failure-gate tests, formatting,
+all-target Clippy with `-D warnings`, and 1,482 passed / zero failed / 28 ignored
+across seven Cargo targets. Breakdown: lib636, integration836, termination7,
+crash-recovery3. Ignored tests were not counted as verified.
+
+Verified with fresh synthetic stores and loopback HTTP:
+
+- Saved pause timestamps/identity survive reads and service recreation; unchanged
+  per-Thread observations deduplicate; absent historical time remains unknown.
+  Explicit retry clears current state without deleting the historical notice.
+- Six batch regressions verify identical snapshot grouping, Unicode/count caps,
+  request reduction, default singleton JSON, full-response index/count/vector
+  validation, recorded per-input fallback even with zero retry budget, preserved
+  singleton length-split children, auth pause and vector-transaction rollback.
+  Retry preview mirrors actual current targets and marks unread admissions
+  unavailable without file/API reads or new source authorization.
+- Seven dimension/probe regressions verify one real first candidate input even
+  with concurrent workers, first-vector reuse, old active search during build,
+  rejection/wrong-length stopping, transient retry with the same N, changed-model
+  native reset, persisted query/ingest mode after reopen, inherited rebuild mode,
+  superseded failure fencing, one probe request, bounded32 tuple observations,
+  and operation replay/conflict without another HTTP request. Four HTTP boundary
+  regressions also check exact native/explicit wire shape and malformed arrays.
+- Three GC regressions verify multiple bounded32-space transactions, active/
+  candidate/running-work protection, invalid identifier rejection and atomic
+  rollback including vector-table DDL. Payload counts are float32 arithmetic;
+  physical file/WAL shrink is not asserted.
+- Native PTY uses the real binary, temporary durable401 pause and local proxies.
+  It opens the saved stop record, shows time/action, gives P-without-target
+  guidance, obtains global T preview, displays source1/character29 in one full
+  repaint, requires Y, refreshes S to unpaused and completes a normal conversation.
+  Existing streaming animation/input/scroll/manual-repaint/idle/shutdown checks
+  still pass. Full paint uses existing Ctrl+L; no terminal emulator was invented.
+
+Earlier checks failed on stale test fixtures (wrong management mode, old command
+counts, missing synthetic Thread cursor, and assertions over terminal diff cells).
+They were corrected rather than accepted as passing evidence. The PTY also found
+a real S-key collision with generic output navigation; Index mode now routes S
+to IndexStatus, with regressions for default/all/explicit-space scopes. Read-only
+review found mutable request-mode lookup and superseded failure adoption races;
+claims now freeze the mode inside their DB transaction and late errors recheck
+the rebuild group before changing pause/failure state.
+
+Not performed: new Linux/Windows native CI for this branch, company proxy/model
+validation, paid APIs, default-user data reindex/GC, installed binary replacement
+or release. Main CI 40987103680 validates #46 at a949688 only. A mock success
+does not establish provider dimension support or retrieval quality.
+
+
+## 2026-10-30: current-main and index combined verification
+
+After the index-only local verification, fetch found origin/main `c0f1ad9`
+containing #48/#51. Merge `80caf38` combines that source with index branch
+`3be41be`. Conflict resolution retains both adopted designs, decision/status
+records and both CLI regressions; no test or instruction-reference behavior is
+discarded. This combined check is separate from either branch's earlier result.
+
+With the same native macOS/pinned-toolchain environment and explicit two-thread
+fixture setting, `sh scripts/check.sh` succeeds: 85 suites registered once, five
+Python failure-gate tests, formatting and all-target strict Clippy; 1,498 passed,
+zero failed, 28 ignored across seven Cargo targets (lib647, integration841,
+termination7, crash-recovery3). The strengthened real PTY pause/retry/status and
+existing animation/stream/input/scroll/repaint/exit test passes in the combined
+suite. `index probe --help` and `index rebuild --help` also succeed without an
+owner or API call. No code changed after this check; subsequent evidence edits
+are development/validation documentation only.
+
+The combined branch has not been pushed; its new three-OS CI is awaiting explicit
+push authorization under AGENTS.md. Do not substitute #46's main CI at a949688
+for this combined source. User data, installed binary and release remain
+unchanged.
+
+
+## 2026-10-30: canonical Windows repair and #57 in the index branch
+
+Another session published the canonical Windows repairs `509daa5`, `ff84d81` and
+`5234f94` before the proposed isolated recovery push. The non-fast-forward push
+was rejected without changing main. Adopted the published source, whose
+[main CI40992985197](https://github.com/tya5/shellboy/actions/runs/40992985197)
+succeeds on all three OSes. The duplicate local alternative `34ca8d3` was not
+merged or published. Keep it only as an abandoned local investigation source.
+
+Only #57's five-file policy was reapplied to repaired main, producing `16fe4aa`.
+That exact proposed tree passed macOS standard checks (1,468 passed, zero failed,
+28 ignored; six Python tests, formatting and strict Clippy). User-authorized
+main push fast-forwarded 5234f94 to16fe4aa and created
+[push CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000).
+All three OS jobs actually started; its Windows result remains pending at this
+checkpoint. No index feature was included in that main push.
+
+Index merge `5341512` combines b22a30a with canonical16fe4aa, rather than the
+duplicate fixes. `sh scripts/check.sh` on native macOS with Rust1.99.1 and
+the same two-thread fixture setting succeeds: 85 suites, six Python gates,
+formatting, all-target Clippy -D warnings and 1,498 passed / zero failed /
+28 ignored (lib647, integration841, termination7, crash-recovery3). No source
+changed after that check; the next commit updates development/validation records
+only. Existing real-PTY recovery remains included.
+
+Next publish the authorized index branch, observe that #57 does not automatically
+start its push CI, then explicitly dispatch the retained three-OS workflow for
+that exact branch. Record source/event/run and per-OS results separately from
+b22's failed Windows result and main's baseline successes. No default data,
+paid provider API, installed binary, tag or release is changed by these checks.
+
+
+## 2026-10-30: final native index verification and #57 trigger observations
+
+Exact main source `16fe4aa27ec41ef05c803fb12808557117618e0f` succeeds in
+[push CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000):
+Linux1,469 / macOS1,468 / Windows1,356 passed, zero failed; ignored27/28/20.
+Artifacts match that SHA and have empty failure arrays. This verifies #57's
+main-push event actually starts and completes the ordinary three-OS matrix.
+Canonical Windows fixture/Unicode runner repairs remain those from main5234f94;
+the unpublished duplicate34ca8d3 was never used as publication evidence.
+
+User-authorized branch push advanced b22a30a to exact
+`ae9bc193947882ce1d4b99ac4765c7056a45565e`. Multiple run-list observations
+before manual dispatch show no push-triggered run for this SHA; only the prior
+failed b22a30a push run exists. Explicit `gh workflow run ci.yml --ref
+issue-42-43-55/index` then starts
+[workflow_dispatch CI40996181881](https://github.com/tya5/shellboy/actions/runs/40996181881)
+with diagnostics=false, performance=false, windows_test_threads=default and
+baseline_ref5234f94. All retained inputs are accepted and all three native jobs
+complete successfully:
+
+| OS | Passed | Failed | Ignored | Recorded test threads |
+| --- | ---: | ---: | ---: | --- |
+| Linux | 1,499 | 0 | 27 | libtest default |
+| macOS | 1,498 | 0 | 28 | libtest default |
+| Windows | 1,386 | 0 | 20 | 4 |
+
+Downloaded timing artifacts match ae9bc19 and contain no failures. For each OS,
+compare full normalized identities against the main16fe4aa artifact: every
+baseline identity is retained, exactly30 active cases are added, and ignored
+sets are identical. Windows now runs and passes the complete integration
+harness, including dimension/probe/batch/GC regressions previously not reached
+when b22's lib diagnostics aborted. Native OS success does not claim physical
+company-terminal/IME/clipboard or actual provider dimension/quality support.
+
+#57 is therefore verified for main push, branch push with no automatic CI, and
+explicit branch dispatch. Optional enabled diagnostics/performance workloads
+were not rerun solely for this trigger edit: their inputs/matrix/job bodies
+are byte-identical to the previously adopted workflow. No test tag or release
+was created; tag exclusion is verified by the branches-only configuration and
+GitHub's documented filter semantics.
+
+Post-result changes are development/status and acceptance records only, beyond
+the exact native-verified ae9bc19 code. Verify their links/diff/secrets before
+publishing; no Rust, bundled-guide, dependency or workflow source changes and
+no duplicate native run are needed for that evidence update. Index features
+remain on the work branch; main contains the authorized CI policy/repairs only.
+No user data, paid API, installed binary or release was changed.
+
+
+Final fetch also observes origin/main5350fc8, containing another session's usage
+work after the verified main16fe4aa. Its run40997452704 is still in progress at
+this checkpoint. It is not merged into the index branch merely to chase a moving
+main during review. The 30-case inventory comparison and native successes above
+are explicitly against16fe4aa/ae9bc19, not that later combination. A future main
+integration must reconcile and validate the then-current main; index remains
+unmerged and publication authorization does not include that future integration.
+
+
+## 2026-10-30: index review integration with main5350fc8
+
+Reviewed #42/#43/#55 contain no Medium findings. The Low dispositions are recorded
+in [the review follow-up](../development/index-review-follow-up.md). Main usage
+work5350fc8 is merged at51a819f, retaining both model HTTP test groups and both
+documentation histories. The configuration guide now explicitly couples larger
+batches with review of the whole-request timeout and proxy caps.
+
+Native macOS `sh scripts/check.sh` with Rust1.99.1, build jobs2, incremental0 and
+test threads2 succeeds: 1,504 passed / zero failed / 28 ignored, six Python gates,
+85 registered suites, formatting and all-target strict Clippy. This is the new
+combined source result; do not substitute ae9bc19's earlier native CI for it.
+Subsequent changes here are development/validation records only. The user
+authorizes main push; confirm its exact-source three-OS CI before issue closure.
+#53/#56/#52 code and any user-data operations are excluded.

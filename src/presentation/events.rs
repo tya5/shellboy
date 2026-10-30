@@ -56,8 +56,30 @@ pub(super) fn routine_index_ready(event: &serde_json::Value) -> bool {
         })
 }
 
+/// A saved observation is historical, even while the same pause remains current.
+pub(super) fn index_pause_notice(event: &serde_json::Value) -> Option<(String, Vec<String>)> {
+    let after = event.pointer("/change/after")?;
+    if event["kind"] != "index_state" || after["paused"] != true {
+        return None;
+    }
+    let reason = after["pause_kind"].as_str().unwrap_or("理由不明");
+    let stopped = after["paused_at"].as_str().unwrap_or("時刻不明");
+    let mut body = vec![
+        format!("停止記録: {stopped} · 理由: {reason}"),
+        "索引更新の停止記録です。現在の状態確認と再試行: /index → T。会話は続行できます。".into(),
+    ];
+    body.extend(changes(event));
+    Some((
+        format!("/index → T · 索引更新の停止記録 · {}", short(reason, 80)),
+        body,
+    ))
+}
+
 pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
     use serde_json::Value;
+    if let Some((title, _)) = index_pause_notice(event) {
+        return title;
+    }
     if kind == "revisit" {
         return event
             .pointer("/payload/consumed_count")

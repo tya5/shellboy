@@ -26,13 +26,30 @@ struct ManagementFrame {
     view: ManagementView,
     structured: Option<StructuredManagementState>,
 }
+#[derive(Default)]
+pub(super) enum IndexPreviewState {
+    #[default]
+    Idle,
+    Loading(IndexArgs),
+    Ready(IndexArgs, String),
+    Failed(IndexArgs, String),
+    Hint(String),
+}
+impl IndexPreviewState {
+    fn ready(&self, args: &IndexArgs) -> Option<&str> {
+        match self {
+            Self::Ready(selected, text) if selected == args => Some(text),
+            _ => None,
+        }
+    }
+}
 pub struct ManagementPopup {
     frame: Option<ManagementFrame>,
     pub(super) owner: Option<ManagementContext>,
     pub(super) mode: ManagementMode,
     pub(super) epoch: u64,
     pub(super) scope: Option<IndexArgs>,
-    pub(super) preview: Option<(IndexArgs, String)>,
+    pub(super) preview: IndexPreviewState,
     pub(super) pending: Option<Command>,
 }
 impl Default for ManagementPopup {
@@ -43,7 +60,7 @@ impl Default for ManagementPopup {
             mode: ManagementMode::General,
             epoch: 0,
             scope: None,
-            preview: None,
+            preview: IndexPreviewState::Idle,
             pending: None,
         }
     }
@@ -153,7 +170,7 @@ impl ManagementPopup {
         self.owner = None;
         self.mode = ManagementMode::General;
         self.scope = None;
-        self.preview = None;
+        self.reset_preview();
         self.pending = None;
     }
     pub(super) fn accepts(
@@ -168,6 +185,113 @@ impl ManagementPopup {
                 .owner_thread
                 .as_deref()
                 .map_or(context.owner_draft == draft, |owner| Some(owner) == thread)
+    }
+    pub(super) fn reset_preview(&mut self) {
+        self.preview = IndexPreviewState::Idle;
+    }
+    fn matches_preview(&self, args: &IndexArgs) -> bool {
+        self.mode == ManagementMode::Index
+            && self
+                .scope
+                .as_ref()
+                .map_or_else(|| args == &IndexArgs::default(), |scope| scope == args)
+    }
+    pub(super) fn begin_preview(&mut self, args: IndexArgs) {
+        if self.matches_preview(&args) {
+            self.preview = IndexPreviewState::Loading(args);
+        }
+    }
+    pub(super) fn accept_preview(&mut self, args: IndexArgs, text: String) -> bool {
+        if !self.matches_preview(&args) {
+            return false;
+        }
+        self.preview = IndexPreviewState::Ready(args, text);
+        true
+    }
+    pub(super) fn fail_preview(&mut self, args: IndexArgs, message: String) {
+        if self.matches_preview(&args) {
+            self.pending = None;
+            self.preview = IndexPreviewState::Failed(args, message);
+        }
+    }
+    fn preview_lines(&self, width: u16) -> Vec<Line<'static>> {
+        if self.mode != ManagementMode::Index
+            || self
+                .structured()
+                .is_some_and(|value| value.detail.is_some())
+        {
+            return vec![];
+        }
+        let (title, text) = match &self.preview {
+            IndexPreviewState::Idle => return vec![],
+            IndexPreviewState::Loading(args) => (
+                if explicit_index_targets(args) {
+                    "費用preview · 取得中"
+                } else {
+                    "再試行preview · 取得中"
+                },
+                "件数と文字数を確認中 · API未送信",
+            ),
+            IndexPreviewState::Ready(args, text) => (
+                if explicit_index_targets(args) {
+                    "費用preview · 取得済み"
+                } else {
+                    "再試行preview · 取得済み"
+                },
+                text.as_str(),
+            ),
+            IndexPreviewState::Failed(args, text) => (
+                if explicit_index_targets(args) {
+                    "費用preview · 取得失敗"
+                } else {
+                    "再試行preview · 取得失敗"
+                },
+                text.as_str(),
+            ),
+            IndexPreviewState::Hint(text) => ("索引操作 · 未受付", text.as_str()),
+        };
+        let mut lines =
+            vec![Line::from(title.to_owned()).style(Style::default().fg(theme::EMPHASIS))];
+        let safe: String = crate::presentation::sanitize_plain(text, 0)
+            .0
+            .chars()
+            .take(4096)
+            .collect();
+        lines.extend(safe.lines().map(|line| Line::from(line.to_owned())));
+        presentation::hanging_wrap(lines, width.max(1))
+    }
+    fn preview_height(&self, area: Rect) -> u16 {
+        let count = self.preview_lines(area.width).len();
+        if count == 0 || area.height == 0 {
+            return 0;
+        }
+        u16::try_from(count)
+            .unwrap_or(u16::MAX)
+            .min(area.height.saturating_sub(3).max(1))
+            .min(12)
+    }
+    fn draw_preview(&self, frame: &mut Frame<'_>, area: Rect) -> Rect {
+        let height = self.preview_height(area);
+        if height == 0 {
+            return area;
+        }
+        let mut lines = self.preview_lines(area.width);
+        if lines.len() > usize::from(height) {
+            lines.truncate(usize::from(height));
+            if let Some(last) = lines.last_mut() {
+                last.spans.push(Span::raw(" …"));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines),
+            Rect::new(area.x, area.y, area.width, height),
+        );
+        Rect::new(
+            area.x,
+            area.y.saturating_add(height),
+            area.width,
+            area.height.saturating_sub(height),
+        )
     }
     pub(super) fn index_label(&self) -> String {
         let target = match &self.scope {
@@ -230,8 +354,9 @@ impl ManagementPopup {
         } else {
             self.hints()
         };
-        popup::body_area(viewport, context, footer, None)
-            .height
+        let body = popup::body_area(viewport, context, footer, None);
+        body.height
+            .saturating_sub(self.preview_height(body))
             .saturating_sub(1)
             .max(1)
     }
@@ -268,35 +393,40 @@ impl ManagementPopup {
         if self.mode == ManagementMode::Index
             && let KeyCode::Char(action @ ('b' | 't' | 'r')) = key.code
         {
-            let Some(args) = self.scope.clone().filter(explicit_index_targets) else {
-                if let Some(view) = self.view_mut() {
-                    view.text.push_str("\n未受付: 対象を明示してください。Esc後 /index all または /index threads ID...");
+            let args = self.scope.clone().unwrap_or_default();
+            if action != 't' && !explicit_index_targets(&args) {
+                self.pending = None;
+                self.preview = IndexPreviewState::Hint(
+                    "対象を明示してください。Esc後 /index all または /index thread".into(),
+                );
+                return Outcome::Actions(vec![]);
+            }
+            let preview = self.preview.ready(&args).map(str::to_owned);
+            let Some(preview) = preview else {
+                if action == 't' {
+                    self.pending = Some(Command::IndexRetry(args.clone()));
+                    self.begin_preview(args.clone());
+                    return Outcome::Actions(vec![UiAction::IndexPreview(args)]);
                 }
+                self.preview = IndexPreviewState::Hint(
+                    "現在の対象のpreviewが必要です。Pで取得してください。".into(),
+                );
                 return Outcome::Actions(vec![]);
             };
-            let Some((_, preview)) = self
-                .preview
-                .as_ref()
-                .filter(|(preview_args, _)| preview_args == &args)
-            else {
-                if let Some(view) = self.view_mut() {
-                    view.text.push_str(
-                        "\n未受付: 現在の対象のpreview取得完了が必要です。Pで再取得してください。",
-                    );
-                }
-                return Outcome::Actions(vec![]);
-            };
-            let preview = preview.clone();
             let command = match action {
-                'b' => Command::IndexBackfill(args),
-                't' => Command::IndexRetry(args),
-                _ => Command::IndexRebuild(args),
+                'b' => Command::IndexBackfill(args.clone()),
+                't' => Command::IndexRetry(args.clone()),
+                _ => Command::IndexRebuild(args.clone()),
             };
             Outcome::Confirm {
                 command,
                 detail: format!(
                     "費用対象: {}\n{preview}\n外部embedding APIへ送信し費用が発生します。見積りは取得時点の対象数で、金額未見積です。",
-                    self.index_label()
+                    if action == 't' && !explicit_index_targets(&args) {
+                        "失敗した許可済み索引作業（全体）".into()
+                    } else {
+                        self.index_label()
+                    }
                 ),
             }
         } else {
@@ -305,11 +435,12 @@ impl ManagementPopup {
     }
     fn navigate(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Vec<UiAction> {
         let is_status = self.mode == ManagementMode::Status;
+        let is_index = self.mode == ManagementMode::Index;
         if let Some(structured) = self.structured_mut() {
             if structured.detail.is_none() {
                 let mode = match key.code {
                     KeyCode::Char('o') => Some(ManagementFollow::Inspect),
-                    KeyCode::Char('s') => Some(ManagementFollow::Read),
+                    KeyCode::Char('s') if !is_index => Some(ManagementFollow::Read),
                     KeyCode::Char('r') if is_status => Some(ManagementFollow::Refresh),
                     KeyCode::Char('n') if is_status => Some(ManagementFollow::Next),
                     _ => None,
@@ -452,12 +583,15 @@ impl ManagementPopup {
                 let args = self.scope.clone().unwrap_or_default();
                 vec![UiAction::Manage(Command::IndexStatus(args))]
             }
-            KeyCode::Char('p') => self
-                .scope
-                .clone()
-                .filter(explicit_index_targets)
-                .map(|args| vec![UiAction::IndexPreview(args)])
-                .unwrap_or_default(),
+            KeyCode::Char('p') => {
+                let Some(args) = self.scope.clone().filter(explicit_index_targets) else {
+                    self.pending = None;
+                    self.preview = IndexPreviewState::Hint("対象を明示してください。Esc後 /index all または /index thread。失敗分の再試行はTで確認できます。".into());
+                    return vec![];
+                };
+                self.begin_preview(args.clone());
+                vec![UiAction::IndexPreview(args)]
+            }
             _ => vec![],
         }
     }
@@ -498,6 +632,7 @@ impl ManagementPopup {
                         }
                     );
                     let body = popup::panel(frame, area, &view.title, &context, hints);
+                    let body = self.draw_preview(frame, body);
                     let mut items = Vec::new();
                     let mut selected_row = 0;
                     let mut previous_group = "";
@@ -544,6 +679,7 @@ impl ManagementPopup {
                     _ => status.to_owned(),
                 };
                 let body = popup::panel(frame, area, &view.title, &context, hints);
+                let body = self.draw_preview(frame, body);
                 let lines = crate::presentation::sanitize_plain(&view.text, 0)
                     .0
                     .lines()

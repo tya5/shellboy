@@ -178,6 +178,7 @@ async fn repeated_registry_lookups_share_tcp_across_catalog_embedding_and_json_r
             "synthetic",
             &["synthetic".into()],
             Some(2),
+            None,
             CancellationToken::new(),
         )
         .await

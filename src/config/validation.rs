@@ -11,6 +11,23 @@ impl Config {
         self.io.validate_positive()?;
         self.workers.validate_positive()?;
         self.indexing.validate_positive()?;
+        if !(1..=128).contains(&self.embedding.batch_max_inputs) {
+            return Err(invalid("embedding.batch_max_inputs", "must be in 1..=128"));
+        }
+        if !(1..=1_048_576).contains(&self.embedding.batch_max_chars) {
+            return Err(invalid(
+                "embedding.batch_max_chars",
+                "must be in 1..=1048576",
+            ));
+        }
+        if self.embedding.batch_max_inputs > 1
+            && self.embedding.batch_max_chars < self.indexing.split_chars
+        {
+            return Err(invalid(
+                "embedding.batch_max_chars",
+                "must cover indexing.split_chars when batching is enabled",
+            ));
+        }
         let max_workers = tokio::sync::Semaphore::MAX_PERMITS.min(u32::MAX as usize);
         self.workers.validate_capacity(max_workers)?;
         self.indexing.validate_capacity(max_workers)?;

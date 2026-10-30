@@ -218,7 +218,7 @@ HistoryListのsinceは原契約のoffset付きRFC3339をprotocolの事前検証�
 
 ## 索引の候補preview（G3）
 
-`index.preview` / `shellboy index preview` は既存IndexArgsとFeePreviewを公開する追加のread-only操作。scope/Thread/sourceの明示対象を必須とし、spaceだけでは全体選択しない。既存runtime routeへ通し、ファイル読取りを含むためshutdown取消可、changes_context=falseとする。既存一時pinは維持し、receiptを作らず、embedding API/job投入/candidate作成/過去分許可は行わない。previewは同IDでも最新候補を再観測する。確認tokenや長期snapshotを発行せず、backfill/rebuildの公開構文と非対話受付を維持する。
+`index.preview` / `shellboy index preview` は既存IndexArgsとFeePreviewを公開する追加のread-only操作。An omitted scope/Thread/source previews currently failed authorized work for global retry; explicit selections retain source preview semantics. A space alone restricts retry preview rather than authorizing backfill/rebuild.既存runtime routeへ通し、ファイル読取りを含むためshutdown取消可、changes_context=falseとする。既存一時pinは維持し、receiptを作らず、embedding API/job投入/candidate作成/過去分許可は行わない。previewは同IDでも最新候補を再観測する。確認tokenや長期snapshotを発行せず、backfill/rebuildの公開構文と非対話受付を維持する。
 
 ## 観測の再照会と結果失効（Issue #3）
 
@@ -245,6 +245,23 @@ at read time from the saved start and wall clock, not a process-liveness
 check or monotonic measurement. For terminal shells it is the saved completion
 duration, if known. No output or reclaimed output gives last_output_at: null.
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
+
+
+## Index operation additions (#42/#43/#55)
+
+`index.probe` is a cancellable runtime mutation with ordinary operation receipts.
+Its optional `dimensions` is an integer in 1..8192. It sends exactly one fixed
+input and records success or failure; it does not enqueue indexing or retry
+with another dimension. `index.rebuild` accepts the same optional field; all
+other IndexArgs commands reject it. There is no dimension configuration default.
+
+Index status exposes saved `paused_at`/`pause_id`, up to 200 `spaces` with
+`spaces_total`/`spaces_truncated`, and the newest 32 `probes`. Each space carries
+its connection/model, observed `dimension`, optional `requested_dimensions`,
+segment count, state/selection and `vector_payload_bytes`. Payload bytes mean
+float32 values only, not database/WAL or reclaimable storage. Missing historical
+pause time remains unknown. Probe observations are per endpoint/model/request
+mode, not a provider capability catalogue. See [index operations](index-operations.md).
 
 ## Instruction references (#51)
 

@@ -18,6 +18,7 @@ pub(super) struct Profile {
     pub id: String,
     pub name: String,
     pub model: String,
+    pub requested_dimensions: Option<usize>,
     pub endpoint_hash: String,
     pub client: HttpModelClient,
 }
@@ -64,6 +65,7 @@ pub(super) fn embedding_profile(context: &Context) -> Result<Profile> {
         id,
         name: name.clone(),
         model: model.clone(),
+        requested_dimensions: None,
         endpoint_hash: hash(connection.base_url.as_bytes()),
         client,
     })
@@ -75,7 +77,13 @@ pub(super) async fn embed(
 ) -> Result<crate::model::http::EmbeddingResponse> {
     let response = profile
         .client
-        .embeddings(&profile.model, texts, dimension, CancellationToken::new())
+        .embeddings(
+            &profile.model,
+            texts,
+            dimension,
+            profile.requested_dimensions,
+            CancellationToken::new(),
+        )
         .await
         .map_err(|error| {
             let failure = error.embedding_failure();

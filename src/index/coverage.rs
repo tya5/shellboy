@@ -300,7 +300,10 @@ impl IndexService {
                 &mut coverage,
             );
         }
+        let status = self.status(args.clone()).await?;
         Ok(json!({
+            "status":status,
+            "paused_at":status.paused_at,"pause_id":status.pause_id,
             "spaces":spaces, "preparation":preparation,
             "active_space":active, "selected_space":selected,
             "scope":{"scope":args.scope,"thread_ids":args.thread_ids,"source_ids":args.source_ids},

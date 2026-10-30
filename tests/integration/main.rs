@@ -55,6 +55,10 @@ mod http_header_measurement;
 mod http_observation;
 #[path = "../index.rs"]
 mod index;
+#[path = "../index_batch.rs"]
+mod index_batch;
+#[path = "../index_dimensions.rs"]
+mod index_dimensions;
 #[path = "../input_history_backend.rs"]
 mod input_history_backend;
 #[path = "../instructions.rs"]
@@ -163,3 +167,6 @@ mod ui_scroll_stream;
 mod ui_thread_deletion;
 #[path = "../work_status.rs"]
 mod work_status;
+
+#[path = "../index_space_gc.rs"]
+mod index_space_gc;

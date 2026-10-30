@@ -139,6 +139,19 @@ Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash o
 
 Conversations use Responses; indexing and search queries use the Embeddings API. Omit both `embedding.connection` and `embedding.model`, or specify both. The named connection must exist. Changing embedding settings selects another space and does not silently reindex all historical data. See [history and search](history-and-search.md) for explicit backfill/rebuild and costs. Searches can also incur API usage.
 
+Optional `embedding.batch_max_inputs` defaults to 1 (range 1..128), retaining
+singleton requests. `embedding.batch_max_chars` defaults to 64000 Unicode
+characters (range 1..1048576); when batching, it must cover
+`indexing.split_chars`. Choose caps supported by your endpoint; these settings
+do not detect provider limits. Batching reduces requests, not the billed token
+volume by definition. A rejected batch records its members and falls back to
+individual requests; authentication/configuration failures keep normal pause
+rules. The connection's `request_timeout_ms` is one deadline for the entire
+batch. When raising `batch_max_inputs`, also review that timeout and the proxy's
+accepted input/character caps; a larger batch must still finish within the
+configured whole-request deadline. Search query embeddings remain singleton.
+Restart the owner after changing settings.
+
 Fetch models with TUI `/models` or `shellboy model list`; change the current Thread model by selecting in `/models` or running `shellboy thread set --model MODEL_ID`. Available models depend on the endpoint's configuration.
 
 The owner reuses HTTP clients per connection. Restart after changing TOML or HTTP(S) proxy/NO_PROXY environment settings. Environment-referenced headers such as API keys are read per request, but exporting a value in another shell does not change the running owner's process environment. Only after a successfully completed SSE response does Shellboy try to reuse the connection by draining up to one second / 64KiB of trailing body. Failure of this post-completion cleanup alone does not return the answer to recovery wait. Cancellation takes priority.
@@ -223,7 +236,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
 | `connections.<name>` | `auto_trim_on_disconnect=true`, `compact_hint_tokens` unset | One maximum safe reduction at the first eligible large-input failure; explicit hint also permits pre-POST reduction |
 | `connections.<name>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | Consecutive temporary conversation failure retries (0–20, 0 disables), backoff cap (1–300000ms), and retry after partial reception |
-| `embedding` | `connection` / `model` = unset | Indexing and search API |
+| `embedding` | `connection` / `model` = unset; `batch_max_inputs=1`, `batch_max_chars=64000` | Indexing and search API; bounded synchronous history batches |
 | `shell` | `kind` = Unix `bash` / Windows `powershell`, `executable` = automatic, `env` = empty dictionary | Shell kind, executable, additional environment; not direct WSL startup |
 | `retention` | `tool_raw_days=7`, `tool_raw_bytes=1073741824`, `clipboard_days=7`, `clipboard_bytes=268435456` | Raw output seven days/1GiB; managed images seven days/256MiB. Active pins/selections/drafts protected |
 | `limits` | `attachment_file_bytes=20971520`, `attachment_request_bytes=41943040` | 20MiB per attachment, 40MiB per request |

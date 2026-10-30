@@ -392,7 +392,27 @@ fn tree(value: &Value, path: &str, labels: Option<&Value>, emit: &mut impl FnMut
         _ => emit(&format!("{label}: {value}\n")),
     }
 }
-pub(super) fn preview_text(value: &Value) -> String {
+pub(super) fn index_preview_text(value: &Value) -> String {
+    let mut lines = Vec::new();
+    for (key, label) in [
+        ("sources", "資料数"),
+        ("segments", "区間数"),
+        ("characters", "対象文字数"),
+        ("already_indexed", "索引済み"),
+        ("unavailable", "取得不能"),
+    ] {
+        let count = value
+            .get(key)
+            .and_then(Value::as_u64)
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "未取得".into());
+        lines.push(format!("{label}: {count}"));
+    }
+    lines.push("API未送信 · 金額は未見積".into());
+    lines.join("\n")
+}
+#[cfg(test)]
+fn preview_text(value: &Value) -> String {
     let mut text = String::new();
     tree(value, "", Some(value), &mut |part| text.push_str(part));
     text
@@ -489,6 +509,9 @@ mod tests {
     fn fee_preview_uses_human_structure_while_raw_detail_keeps_pointer_and_values() {
         let value = serde_json::json!({"coverage":{"eligible_sources":3},"sources":5,"segments":7,"characters":0,"already_indexed":2,"unavailable":1});
         let preview = preview_text(&value);
+        let index_preview = index_preview_text(&value);
+        assert!(index_preview.starts_with("資料数: 5\n区間数: 7\n対象文字数: 0"));
+        assert!(index_preview.contains("API未送信 · 金額は未見積"));
         assert!(preview.contains("索引状況 › 対象資料数: 3"), "{preview}");
         for text in [
             "資料数: 5",

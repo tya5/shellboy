@@ -347,16 +347,21 @@ impl Command {
             Self::ShellWrite(a) => a.validate(),
             Self::AttachmentAdd(a) => a.validate(),
             Self::AttachmentRemove(a) => a.validate(),
+            Self::IndexProbe(a) => validate_dimensions(a.dimensions),
             Self::IndexStatus(a)
             | Self::IndexPreview(a)
             | Self::IndexBackfill(a)
             | Self::IndexRetry(a)
             | Self::IndexRebuild(a) => {
                 a.validate_targets()?;
-                if matches!(
-                    self,
-                    Self::IndexPreview(_) | Self::IndexBackfill(_) | Self::IndexRebuild(_)
-                ) && a.scope.is_none()
+                validate_dimensions(a.dimensions)?;
+                if a.dimensions.is_some() && !matches!(self, Self::IndexRebuild(_)) {
+                    return Err(invalid(
+                        "dimensions is only supported by index rebuild/probe",
+                    ));
+                }
+                if matches!(self, Self::IndexBackfill(_) | Self::IndexRebuild(_))
+                    && a.scope.is_none()
                     && a.thread_ids.is_empty()
                     && a.source_ids.is_empty()
                 {
@@ -369,4 +374,11 @@ impl Command {
             Self::StorageStatus(_) | Self::StorageCollect(_) => Ok(()),
         }
     }
+}
+
+fn validate_dimensions(dimensions: Option<usize>) -> Result<(), ApiError> {
+    if dimensions.is_some_and(|n| !(1..=crate::storage::MAX_VECTOR_DIMENSIONS).contains(&n)) {
+        return Err(invalid("dimensions must be in 1..=8192"));
+    }
+    Ok(())
 }
