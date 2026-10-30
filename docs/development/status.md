@@ -1,5 +1,18 @@
 # Development status
 
+## #61: current user and agent guidance
+
+Documentation-only, single-conversation update: CLI reference includes send
+--now and fixed-ID message cancellation, EN/JA User Guide usage is three user
+points, and both languages explain the same safety assumptions, rationale,
+application guarantees/limits, user responsibilities and prompt-injection risk.
+Agent Guide adds safety reminders and usage get; TUI guide records user-confirmed
+macOS WezTerm Shift+click. Existing refresh details stay in the TUI guide.
+No runtime/CLI/schema/test changes or root README edits. Defer three-OS sandbox
+recipes until actually validated; tools and owner-mediated-access limits are
+named without untested profiles or network rules. Local checks and guide-source
+hash verification pass; post-rebase standard/main CI are separate final gates.
+
 ## #58 diagnostic review follow-up
 
 Ordinary history/window refreshes are filtered before diagnostic queue admission.
