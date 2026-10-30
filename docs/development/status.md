@@ -1,5 +1,28 @@
 # Development status
 
+## Issue #48: working-instruction provenance
+
+The actual instruction developer message now starts with one metadata line:
+JSON-quoted fixed Turn source path, user-editability, new-Turn rereading and
+same-Turn snapshot reuse. The following LF separates the original unmodified
+body. JSON/control/Unicode line-separator escaping prevents a path from adding
+another header line. Snapshot body/hash/size/storage, roles, precedence and
+permissions remain unchanged, including empty/missing/read-failure behavior.
+The Agent Guide explains configured references and authorized conflict handling
+without implying every file lives in cwd or promising automatic exceptions.
+
+Coder validation at exact `120218c` on the approved #51/#46 local base `872c4b8`
+passes layout82, Python5, format, strict all-target Clippy and the full Rust
+suite: 7 groups / 1,468 passed / 0 failed / 28 ignored. Header unit tests pass
+2/2 and the unified runtime_features suite passes 22/22, including #51 tests
+strengthened to parse the heading/path and assert byte-exact original bodies.
+Independent review approves `120218c` with the same focused results; integration
+on the newer #51 documentation base is a separate exact-SHA gate. This is not a claim
+of origin/main tracking, new three-OS CI, physical-terminal verification or
+improved real-model/user behavior. No push, GitHub post or installed-owner
+replacement is performed. See [acceptance](../validation/acceptance.md).
+
+
 ## Issue #51: local integration on the completed #46 branch
 
 The original nine-commit series through `7f425e8` is preserved. A separate

@@ -1,5 +1,66 @@
 # Validation record
 
+## Issue #48: outbound working-instruction provenance
+
+### Environment And Exact Source
+
+macOS arm64 / pinned Rust 1.99.1, separate issue-48 worktree. The initial
+provisional #51-on-#46 base `144721f` was fast-forwarded, before #48 edits, to
+`872c4b8af5bda81801a077a4217b5e9b25f2a9fa` with the integrator's approval.
+That base fixes six #51 fixture calls for #46's helper signature and was later
+independently reapproved. #48 commits remain separate from #51. This is local
+integration on the exact #46 branch, not a claim that origin/main already
+contains #46/#51. No other role's worktree or earlier evidence was modified.
+
+At exact clean implementation SHA `120218cb79063bc97012cb809d422ec837b5a507`,
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH passes: layout **82 suites**, Python **5 passed**,
+format, strict all-target Clippy and Rust **7 groups / 1,468 passed / 0 failed /
+28 ignored**, exit 0. The background shell took 131,067 ms including its preceding
+local commit/status preparation; this is not an isolated test-runtime measure.
+Saved command/cwd/exit metadata and complete output were checked and
+`shellboy wait` observed completion. Sources stayed unchanged during the check.
+
+### Focused Evidence
+
+- `cargo test --locked --lib instruction_header_tests`: 2 passed. The formatter
+  preserves every body byte after the first LF, quotes/round-trips path data and
+  escapes quotes, backslashes, CR/LF/tab, DEL, C1 and Unicode U+2028/U+2029. A
+  present empty file retains an empty body after its metadata line.
+- `cargo test --locked --test integration runtime_features::`: 22 passed using
+  synthetic temporary stores and loopback providers. #51's existing assertions
+  now parse the metadata line, decode and compare the exact path, and compare
+  original body bytes; they were not weakened to substring checks. Same-Turn
+  later requests/retries retain old header/path/body despite file deletion or
+  reference changes; the next new Turn uses the new selected source.
+- Additional mock requests verify empty and nonempty file bodies, saved raw body/
+  hash/observed-size (including Some(0)), same-source edits reread on a new Turn,
+  and immutable prior snapshot bytes. Missing instructions produce no instruction
+  message; invalid UTF-8 retains recovery and repaired-source retry behavior.
+  On Unix where mode bits deny reading, unreadable instructions retain io_failed
+  recovery with no snapshot/attempt/HTTP. Privileged mode-bit bypass is explicitly
+  conditional, not reported as denial success on every runner.
+- The adopted #46 unified harness and existing runtime_features module are used;
+  no test binary/file, table, worker, queue or dependency was added. The only
+  production change is outbound developer-message presentation.
+
+### Remaining Gates
+
+Independent review approved exact `120218cb79063bc97012cb809d422ec837b5a507`
+after separately passing the two header tests, all 22 runtime_features tests,
+layout82 and Python5, and confirming the standard log's counts and shell facts.
+Post-integration validation on the newer #51 documentation base remains a
+separate exact-SHA gate. If the #51/#46 base changes,
+review/check the resulting exact SHA again. Main reconciliation and explicit
+push authorization remain pending; no GitHub post, new CI run or installed
+binary update is performed. Native Linux/Windows, physical terminals, paid/real
+providers and improved human/model conflict-handling behavior were not tested.
+Mocks establish factual request transmission only; a later authorized dogfood
+exercise must establish whether real replies identify the path, constraint and
+safe next-Turn edit procedure accurately. No new priority/permission rule or
+automatic exception to higher-priority instructions is claimed.
+
+
 ## Issue #51: advance integration on exact #46 source
 
 Base: `a94968898c704b4ee7b78be1cda860ee6d057b04`, from the completed #46
