@@ -1,5 +1,30 @@
 # Validation record
 
+## Combined Main Verification For #53 And #56
+
+Exact combined source `b6621bf` (including main `343c2d6`) passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+on macOS arm64 / Rust 1.99.1, using the primary target cache from an isolated
+worktree: layout87, Python6, format, strict all-target Clippy, Rust **1,526 passed /
+0 failed / 29 ignored**. Gitleaks8.30.1 scans origin/main..HEAD without findings.
+This source excludes #52 queue/cancel/now/Turn-interrupt implementation.
+
+Temporary stores, synthetic attachments and loopback HTTP exercise admission
+facts, actual Unix owner death, repeated startup, explicit recovery authority and
+ordering, immutable assignments, operation replay, legacy uncertain evidence,
+transaction rollback and source loss. Real Store draft sends test zero/one file
+and stale selection CAS. Frontend tests preserve applied versus answered versus
+held facts. Three real-shell vertical cases compare committed cancellation facts
+to model replay and prove later cancelled calls did not start executions.
+Incomplete-output and saved CLI-wait reasons use unit tests, not full vertical
+replay. Existing candidate test/Clippy failures were fixed before this result.
+
+The later documentation-only publication commit does not add #52. This macOS
+check is not a Windows/Linux result for #53/#56; fresh main CI remains a separate
+gate. #52 specifically requires manual native Windows CI before main admission.
+No real credentials/user data, paid API or installed binary is used.
+
+
 
 ## Standard Usage Persistence And Scalar Reads (#49)
 

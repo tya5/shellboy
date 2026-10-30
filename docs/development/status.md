@@ -1,5 +1,31 @@
 # Development status
 
+## Interrupted Input And Tool Cancellation (#53, #56)
+
+Latest verified index main `343c2d6` is integrated with #53/#56 as `b6621bf`.
+The combined source passes macOS arm64 / pinned Rust 1.99.1 standard checks:
+layout87, Python6, format, strict all-target Clippy and **1,526 passed /
+0 failed / 29 ignored**. Gitleaks8.30.1 finds no leak in the new commit range.
+This verification uses an isolated worktree containing no #52 implementation.
+
+#53 saves admission facts, repairs interrupted deliveries, and recovers known
+unadmitted input only at an authorized explicit resume. Original assignments
+stay immutable. Unknown historical admission requires explicit restoration.
+The real TUI attachment-registration revision is refreshed after recovery without
+weakening the caller's selection CAS. Saved applied input is distinct from an
+answered request; held input is retained rather than inferred cancelled.
+
+#56 saves stable cancellation causes and factual prerequisites for later
+unexecuted shell calls, preserving execution/replay policy. Timed automatic
+backgrounding is deferred. Real loopback/shell tests cover failure, new input and
+human backgrounding; incomplete-output/CLI-wait cases have classifier coverage.
+
+This checkpoint precedes the requested main push and its new native CI results.
+#52 remains separate local work: it must receive a manual native Windows CI run
+before admission to main, followed by its own publication. No installed binary,
+release, paid API or default-data change is part of this checkpoint.
+
+
 ## Reviewed index integration into main5350fc8
 
 Reviews #42/#43/#55 have no Medium findings. Merge51a819f preserves current
