@@ -71,3 +71,57 @@ than making recursive metadata-only commits that change the chosen SHA. A later
 rebuild can produce different archive bytes; never substitute it for qualified
 assets without checking that new set. Tags/publication, unauthenticated v0.3.0
 asset download, installed-binary updates and release completion remain later gates.
+
+## v0.3.0 publication (2026-10-30)
+
+[Shellboy v0.3.0](https://github.com/tya5/shellboy/releases/tag/v0.3.0) is public,
+published at **2026-10-30T12:38:45Z**. Tag source is
+`8fb885d843a39069aac80fa63708b5c70df0531c`. The
+[retained release-body file](release-v0.3.0-draft.md) is an exact copy of the
+published GitHub release body, retrieved with `gh release view v0.3.0 --json body`;
+the old filename is retained for existing references.
+
+### Public download verification
+
+On 2026-10-30, anonymous HTTPS `curl --disable --fail --location` downloads
+retrieved [SHA256SUMS](https://github.com/tya5/shellboy/releases/download/v0.3.0/SHA256SUMS)
+and all three public archives, without GitHub credentials or curl configuration.
+Every archive matches its entry in the downloaded manifest, and all three
+archives extract successfully. These are **published archive hashes**, not the
+earlier candidate hashes; rebuilt archives differ from the candidate artifacts.
+
+| Public file | SHA-256 |
+| --- | --- |
+| `SHA256SUMS` | `c8a139f704027220fd51bc173e54aa0e2fbb67fd35e0f9b4eb3859714b447611` |
+| `shellboy-v0.3.0-aarch64-apple-darwin.tar.gz` | `1e0010db3a34cd6c159e591d92ffac64062ce793f767972f0518346522d8f5d4` |
+| `shellboy-v0.3.0-x86_64-pc-windows-msvc.zip` | `f708987b51106c347d9039cd8012daa5e26284f4f266c836131ac5c9f2c93046` |
+| `shellboy-v0.3.0-x86_64-unknown-linux-gnu.tar.gz` | `d3ff9508b2b835f446b9d7285c9ff78f2eeb8fab292a04430ae4c8f04c0754d9` |
+
+The executable extracted from the public macOS archive reports
+`shellboy 0.3.0` on native macOS 26.3.1 arm64.
+[Native public-byte smoke run 41058668366](https://github.com/tya5/shellboy/actions/runs/41058668366)
+passes on all three OSes at isolated validation SHA
+`fd8530ef95c31091b349c3442574a9f8056a0ac8`. The read-only manual workflow
+anonymously downloads public `SHA256SUMS` and each native archive, verifies
+independently pinned hashes, extracts it and runs its executable's `--version`.
+It performs no build or publication, and its branch-only workflow is not merged
+into main. Each native result is exactly `shellboy 0.3.0`:
+
+| Runner observed | Public executable SHA-256 |
+| --- | --- |
+| Windows Server 2025 / AMD64 | `60053ea6f41524584d4786434bfb9eddca726b7ecc7e1984a8f61d55c763f94a` |
+| Ubuntu 22.04 / x86_64 / glibc 2.35 | `a583930def92fe801da013d531a7d73008c38585f81569acff8c830a6bef15ac` |
+| macOS 15.8.2 / arm64 | `2e9b1c76b6cb959852eaf2f7283051f186f6ca19acf7e4b2168f0b52e09372bb` |
+
+Cleanup standard check (`sh scripts/check.sh`, native macOS arm64,
+Rust1.99.1) passes: 1,658 passed / 0 failed / 32 ignored, layout88, Python6,
+format and strict all-target Clippy. An earlier local check failed the existing
+`tui_process::real_tui_accepts_text_renders_proxy_response_and_exits_cleanly`
+repaint assertion for the index retry confirmation. Fresh validation-branch and
+cleanup checks pass that test unchanged; the cause remains unresolved, not
+claimed fixed or suppressed.
+
+Earlier candidate native checks alone do not prove public bytes execute.
+This public-byte smoke does not qualify physical terminals or real providers on
+every OS, nor rerun the candidate's synthetic migration on every public binary.
+Installed binaries and real user data are unchanged.

@@ -19,23 +19,37 @@ D–G and their reactivity/performance gates remain open in the
 [delivery plan](issue-41-plan.md). #41 is not complete. The installed binary
 remains1fec7f0; no user data, paid API, release or tag was changed.
 
-## v0.3.0 preparation (#62), not publication
+## v0.3.0 published (#62)
 
-Cargo/lock package version is 0.3.0; dependency versions are unchanged. README is
-version-independent and links to the latest Release. Release notes are a draft
-for issue62 review, including removed compact_hint_tokens startup rejection and
-the partial-upload retry-budget change. Candidate validation adds a read-only
-exact-SHA path to the release workflow; its publish job is skipped in that mode.
-No v0.3.0 tag, GitHub Release or installed binary update is authorized/performed.
+[v0.3.0](https://github.com/tya5/shellboy/releases/tag/v0.3.0) was published
+2026-10-30 at 12:38:45Z with tag source
+`8fb885d843a39069aac80fa63708b5c70df0531c`. The retained
+[release-body file](release-v0.3.0-draft.md) now matches the published body;
+its historical filename does not mean the release is still a draft.
+Cargo/lock version is 0.3.0; README remains version-independent.
 
-A public checksum-verified v0.2.0 macOS binary created a schema11 synthetic store
-via owned PTYs/mock API, including indexed conversation, held input and recovery
-wait. Candidate0.3.0 opens a consistent backup at schema14; searches/usage/new
-work pass, standalone RAG stays3, old history reader rejects14, and invalid old
-configuration blocks startup before migration. See acceptance for method/limits.
-Local standard check passes1611/0/31. Exact main three-OS CI and native packaged
-archives/SHA256SUMS are later fixed-SHA gates, reported on issue62 rather than
-changing the chosen SHA recursively. Stop before tags/publication pending approval.
+Anonymous HTTPS downloads of public `SHA256SUMS` and all three archives pass
+SHA-256 verification; all three archives extract. The public macOS arm64 binary
+reports `shellboy 0.3.0` on macOS 26.3.1. The isolated
+[native public-byte smoke](https://github.com/tya5/shellboy/actions/runs/41058668366)
+passes on Windows Server 2025 x64, Ubuntu 22.04 x64 and macOS 15.8.2 arm64:
+each anonymously downloads the public manifest/archive, verifies pinned hashes,
+extracts and runs `--version` with the exact result `shellboy 0.3.0`. Candidate
+build/launch evidence is separate because the published archive hashes differ. See
+[publication evidence](publication.md#v030-publication-2026-10-30) for exact hashes.
+No installed binary or real user data was changed by this cleanup.
+
+Earlier synthetic qualification used the public checksum-verified v0.2.0 macOS
+binary to create a schema11 store via owned PTYs/local mock API, then tested a
+candidate0.3.0 backup upgrade to schema14, searches/usage/new work and RAG3.
+That candidate qualification does not establish migration success for every
+public OS binary or real providers/terminals. See acceptance for method/limits.
+Cleanup standard check on native macOS arm64/Rust1.99.1 passes **1,658 passed /
+0 failed / 32 ignored**, layout88, Python6, format and strict all-target Clippy.
+The prior PTY repaint failure passed unchanged in fresh validation and cleanup
+checks; its cause is unresolved, not claimed fixed. The isolated validation
+workflow is not a main CI change. Physical-terminal and real-provider checks
+on every OS remain untested.
 
 ## #61: current user and agent guidance
 

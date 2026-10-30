@@ -1,99 +1,90 @@
 # Shellboy v0.3.0
 
-Long-conversation recovery based on observed failures, durable pending messages,
-working-instruction provenance, saved usage totals and more stable terminal history.
+More reliable long conversations, recoverable messages, saved usage totals,
+and clearer guides for model-directed shell work.
 
 ## Upgrade notes — breaking before 1.0
 
-- **Stop the owner and back up the complete data-dir before the first start.**
-  The conversation database advances from schema 11 to 14 on its first
-  write-capable open. Older binaries, including v0.2.0, cannot reopen schema 14.
-  Roll back by restoring a consistent backup into a separate data directory,
-  not by pointing the old binary at the upgraded store. Keep any backup files
-  and managed data together. Standalone RAG remains schema 3.
-- **Remove `connections.<name>.compact_hint_tokens` from your configuration
-  before upgrading.** It is removed, not ignored: a file still containing the
-  key produces a configuration error and the owner does not start. The sample
-  configuration and guides describe the new behavior.
-- **Use matching owner and CLI binaries and restart the owner.** The local
-  protocol remains version 2; an unchanged protocol number is not a promise
-  that an old CLI knows every new operation. Replacing a file does not update
-  a process that is already running.
-- Stop/restart does not undo tools or automatically restart terminal Runs.
-  Inspect retained work, interrupted reasons and pending input before resending;
-  another model request may incur another charge.
+- **Stop the owner and back up the complete data-dir before upgrading.** The
+  conversation DB advances from schema 11 to 14 at the first write-capable start.
+  v0.2.0 cannot open it afterward. To roll back, restore your backup into a
+  separate data directory; do not use an old binary on the upgraded store.
+  Standalone RAG remains schema 3.
+- **Remove `connections.<name>.compact_hint_tokens` before the first start.**
+  The key is no longer supported. If it remains, startup reports a configuration
+  error rather than ignoring it.
+- **Use the same version for owner and CLI, and restart the owner.** The local
+  protocol stays at version 2, but old CLIs do not know the new commands.
+  Replacing the executable does not update an already-running owner.
 
 ## Long conversations and recovery
 
-- Core no longer estimates tokens, calibrates a token/character ratio, uses a
-  fixed 75k threshold, or reduces before POST. `thread get` shows the last
-  successful measured usage and its time. Context edit sizes are characters,
-  not token or prompt-cache estimates; the former estimate fields are removed.
-- The first eligible transient failure retries unchanged. From the second
-  consecutive eligible header/5xx/disconnect failure, safe context can be reduced
-  without a summary API. Explicit context-capacity rejection reduces immediately;
-  if no reduction can be adopted, it enters recovery instead of resending the
-  same explicitly rejected input. The existing final spill/summary stage remains.
-- **Interrupted uploads no longer have the old two-partial-upload stop rule.**
-  They use the configured normal consecutive retry budget (eight resends by
-  default), with eligible reduction from the second failure. Reduced resends
-  consume that same budget; success resets it. A long Turn can reduce again
-  after subsequent growth. Partial-output opt-out, stop and Retry-After limits
-  remain. Source-byte consumption is not proof of provider delivery.
-- `/compact-max` / `compact --maximal` requests maximum safe API-free reduction
-  without node IDs; retry remains a separate explicit action. Protected work,
-  immutable originals, restoration provenance and attachment caveats remain.
-  Recovery shows saved failure/size/retry facts and applicable actions without
-  predicting causes or ranking remedies.
-- Interrupted tool groups recover retained results without repeating side
-  effects. SIGTERM/SIGHUP use orderly shutdown on Unix. Interrupted latest Runs
-  and factual cancellation reasons are visible. Optional Revisit supplies one
-  bounded self-instruction when work would otherwise finish; explicit stop wins.
+- Reduction follows actual failures, not token estimates or a fixed 75k limit.
+  There is no automatic reduction before sending. The first eligible temporary
+  failure retries unchanged; the second can reduce safe history without a model
+  call. Explicit context-limit errors reduce immediately. If no further reduction
+  is available, work waits for your decision instead of repeatedly resending it.
+- **Interrupted sends now use the normal retry budget**, instead of stopping
+  after two partial uploads. The default is eight resends, including reduced
+  requests. Successful responses reset that budget, and a long Turn can reduce
+  again if it grows. An interrupted send may not have reached the server.
+- `/compact-max` or `compact --maximal` reduces safe history without asking a
+  model to summarize it. `/retry` is separate and may incur another charge.
+  The current request and unfinished work stay protected; `/restore` can recover
+  omitted text. Stopping or restoring does not undo commands already executed.
+- Missing tool results after a crash are reconciled without executing tools
+  again. Unix SIGTERM/SIGHUP use orderly shutdown. Optional Revisit can request
+  a bounded follow-up when work would otherwise finish; explicit stop wins.
 
-## Input, instructions and terminal history
+## Messages, instructions and display
 
-- Inspect saved pending input, cancel fixed unread message IDs and restore its
-  archived text without automatically sending it. `message send --now` requests
-  foreground-wait release without cancelling the shell or model generation.
-- Esc interrupts the current Turn after dismissing open UI surfaces; Ctrl+C
-  stops its Run and owned background work. Saved/held input and received partial
-  responses remain inspectable; cancelled or unreconciled tools are not invented.
-- Select an AGENTS.md reference when creating/forking a conversation or change
-  it later. Its source path is shown; each new Turn rereads it, while retries
-  keep that Turn's snapshot. Changing cwd alone does not move the reference.
-- Already-painted history and completed tool results remain available during
-  asynchronous reloads and next-response gaps. Follow/reading anchors and bounded
-  retention are preserved; history diagnostics avoid ordinary-refresh log spam.
+- **Messages left behind after stopping or a forced exit are visible and can
+  be restored for review and sending** (#53). They are not silently discarded
+  or automatically sent again. Pending input can also be inspected, cancelled
+  by fixed message IDs and restored to a draft without sending it.
+- `message send --now` releases the foreground shell wait so input can be
+  delivered sooner; the shell continues and model generation is not cancelled.
+  Esc interrupts the current Turn after closing open UI surfaces; Ctrl+C stops
+  the Run and its background work.
+- **The conversation list and conversation view now agree on work status**,
+  including background work still running after an answer (#44).
+- Choose or change a conversation's AGENTS.md reference. Its source is shown;
+  changes take effect on a new Turn, while retries keep the saved instructions.
+  Changing the working directory alone does not change that reference.
+- Already-painted messages and completed tool results remain visible during
+  reloads and next-response waits. Reading positions and tail following are more
+  stable, without filling logs with ordinary refresh records.
 
-## Usage, search and guides
+## Usage, indexing and guides
 
-- `usage get` and F8 show saved Turn/Run/conversation totals, optionally including
-  bounded child conversations. Success and non-success usage, unknown counts and
-  separate Run/model/shell time are explicit. These are not a bill or additive
-  effective work time. Summary/embedding usage is not recorded in these totals;
-  arbitrary period filters are not part of this first version.
-- Standard usage survives provider appendices larger than 64KiB. New writes keep
-  standard numeric fields only. Existing large rows remain stored and SQLite
-  still parses them when read; this release does not rewrite/reclaim those rows.
-- Shell observations expose start/duration/latest retained output time. Index
-  operations give clearer pause/retry causes, bounded embedding batches and
-  explicit dimension probe/rebuild selection. Embedding/probe/rebuild operations
-  may incur API costs; inspect the target and preview first.
-- Guides cover current message controls and usage, and explain the actual safety
-  model: commands inherit the owner's OS access, with no built-in command sandbox
-  or per-command approval. Use OS isolation where needed. This explanation is
-  not a new security boundary. English guides include a Japanese User Guide.
+- `usage get` and F8 show saved usage for a Turn, Run, conversation or its child
+  conversations. Unknown values stay unknown. Run, model-request and shell times
+  are separate and overlap: these totals are neither a bill nor effective work
+  time. Summary/embedding usage and arbitrary period filters are not included.
+- Standard usage stays readable even with large provider extras. New records
+  keep only standard numeric fields. Old large rows are not reclaimed by this
+  release and still cost SQLite parsing time when read.
+- Index pause/retry messages are clearer. Embedding requests can be batched, and
+  dimension changes have explicit probe/rebuild controls. Preview the scope and
+  possible API costs before indexing, probing or rebuilding.
+- Guides cover current messaging and usage, explain the safety model and prompt
+  injection risks, and include an English/Japanese User Guide. Model commands
+  still use the owner's OS access by default; this is not a new sandbox.
 
-## Downloads and known limits
+## Downloads and verification
 
-The prepared archives target Windows x64, macOS Apple Silicon and Linux x64,
-with `SHA256SUMS`, the executable, LICENSE, generic README, sample configuration
-and offline guides. Verify the checksums and extract before running.
+Windows x64, macOS Apple Silicon and Linux x64 archives contain the executable,
+LICENSE, configuration example and offline guides. Extract and verify them
+against `SHA256SUMS` before use.
 
-Synthetic upgrade validation uses the public checksum-verified v0.2.0 macOS
-binary, owned PTYs and a loopback Responses/embedding server, never a user's DB
-or paid API. It covers schema 11→14, retained conversation/index/pending facts,
-new work and usage totals, history search, standalone RAG keyword search and the
-removed configuration key. This is not real-provider or physical-terminal
-qualification on every OS. Platform sandbox recipes remain deferred until
-actually validated; the guides name tools and limitations only.
+Source: `8fb885d843a39069aac80fa63708b5c70df0531c`.
+[Main CI](https://github.com/tya5/shellboy/actions/runs/41051520063) passed on all
+three OSes. [Candidate builds](https://github.com/tya5/shellboy/actions/runs/41052577239)
+also passed, including launching each extracted archive's binary.
+
+The public checksum-verified v0.2.0 macOS binary created synthetic conversations,
+indexes, pending input and recovery-wait work. The packaged 0.3.0 binary upgraded
+that copy to DB14 and passed conversation/search/usage/RAG checks; RAG stayed3.
+All API calls used a local mock, not user data or a paid provider. This is not
+physical-terminal or real-provider qualification on every OS. Sandbox recipes
+remain deferred until tested on their respective OSes.
