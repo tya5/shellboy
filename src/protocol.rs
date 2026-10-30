@@ -467,7 +467,10 @@ args!(HistoryListArgs { #[serde(default = "history_excerpt_chars")] excerpt_char
     #[serde(default, skip_serializing_if = "Option::is_none")] since: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<String>
 });
-args!(HistoryGetArgs { node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+args!(HistoryGetArgs { #[serde(default, skip_serializing_if = "is_false")] final_answer_only: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
 args!(HistorySearchArgs {
     query: String,
     #[serde(default = "search_limit")]

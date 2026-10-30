@@ -235,3 +235,12 @@ Adopt the body-free receipt binding and terminal-copy lifecycle in
 [pending messages](pending-messages.md#terminal-submission-copy-retention-60).
 Conversation schema stays14. Unknown/submitting copies and cancellation archives
 remain protected; autosave/restore fences survive admitted/cancelled copy disposal.
+
+
+## Noninteractive exec client (#65)
+
+Adopt [exec](cli.md#noninteractive-saved-work-exec-65) as a composition of existing
+owner operations and local bounded subset validation. No Core execution engine,
+owner auto-start, provider structured-output dependency, table/worker/queue or new
+crate. Ordinary history.get stays unchanged; its optional final-only read projection
+has an independent cursor scope and supports exact saved answer validation.

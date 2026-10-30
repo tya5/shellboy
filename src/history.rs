@@ -467,10 +467,21 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
     } else {
         args.encoding.as_str()
     };
+    let cursor_scope = if args.final_answer_only {
+        if row.kind != "assistant_response" {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "Final-answer projection requires an assistant response node",
+            ));
+        }
+        "history.get.final_answer"
+    } else {
+        "history.get"
+    };
     let start = if let Some(token) = &args.cursor {
         PageCursor::decode(
             token,
-            "history.get",
+            cursor_scope,
             &args.node_id,
             row.revision as u64,
             Some(encoding),
@@ -501,7 +512,16 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
                     "stored history payload is malformed",
                 )
             })?;
-            text_of_payload(&value)
+            if args.final_answer_only {
+                final_answer_text(&value).ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::TargetUnavailable,
+                        "No final assistant message is saved in this node",
+                    )
+                })?
+            } else {
+                text_of_payload(&value)
+            }
         }
     } else {
         String::new()
@@ -527,7 +547,7 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
         Some(
             PageCursor {
                 version: 1,
-                scope: "history.get".into(),
+                scope: cursor_scope.into(),
                 filter: args.node_id.clone(),
                 last_sort_key: end.to_string(),
                 watermark: text.len() as u64,
@@ -591,7 +611,38 @@ fn reference_ids(connection: &Connection, sql: &str, id: &str) -> Result<Vec<Str
     Ok(ids)
 }
 
-/// Extract only known natural-language fields. Opaque reasoning is never text.
+/// A read projection only: never treats reasoning/commentary as a final answer.
+fn final_answer_text(payload: &Value) -> Option<String> {
+    let output = payload.get("output")?.as_array()?;
+    let messages = || {
+        output.iter().filter(|item| {
+            item["type"] == "message" && matches!(item["role"].as_str(), None | Some("assistant"))
+        })
+    };
+    let message = messages()
+        .rev()
+        .find(|item| item["phase"] == "final_answer")
+        .or_else(|| {
+            messages()
+                .rev()
+                .find(|item| item.get("phase").is_none() || item["phase"].is_null())
+        })?;
+    let content = message.get("content")?.as_array()?;
+    let mut text = Vec::new();
+    for part in content {
+        let leaf = match part["type"].as_str() {
+            Some("output_text" | "text") => part["text"].as_str(),
+            Some("refusal") => part["refusal"].as_str(),
+            _ => None,
+        };
+        if let Some(leaf) = leaf {
+            text.push(leaf);
+        }
+    }
+    Some(text.join("\n"))
+}
+
+/// Extract known natural-language fields; opaque reasoning is never text.
 pub fn text_of_payload(payload: &Value) -> String {
     let mut text = String::new();
     let mut seen = false;

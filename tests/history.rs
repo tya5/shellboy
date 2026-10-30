@@ -36,6 +36,7 @@ async fn append(database: &DbWorker, id: &str, kind: &str, payload: Value) {
 
 fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryGetArgs {
     HistoryGetArgs {
+        final_answer_only: false,
         node_id: node.into(),
         limit_bytes: limit,
         cursor,
@@ -759,4 +760,62 @@ async fn persistence_fork_returns_inherited_agents_and_rejects_explicit_override
             .unwrap()
     );
     database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_scope() {
+    let (_root, db, history) = repository().await;
+    let answer = "{\"value\":\"\u{65e5}\u{672c}\"}";
+    append(&db,"final-node","assistant_response",json!({"output":[
+        {"type":"reasoning","summary":[{"type":"summary_text","text":"private reasoning"}]},
+        {"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"earlier commentary"}]},
+        {"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":answer}]},
+        {"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"later commentary"}]}
+    ]})).await;
+    let default = history.get(body("final-node", 65536, None)).await.unwrap();
+    assert!(default.text.contains("private reasoning"));
+    assert!(default.text.contains("later commentary"));
+    let request = HistoryGetArgs {
+        final_answer_only: true,
+        ..body("final-node", 8, None)
+    };
+    let first = history.get(request.clone()).await.unwrap();
+    let token = first.next_cursor.clone().unwrap();
+    let mut complete = first.text;
+    let mut cursor = Some(token.clone());
+    while let Some(next) = cursor {
+        let part = history
+            .get(HistoryGetArgs {
+                cursor: Some(next),
+                ..request.clone()
+            })
+            .await
+            .unwrap();
+        complete.push_str(&part.text);
+        cursor = part.next_cursor;
+    }
+    assert_eq!(complete, answer);
+    assert!(
+        history
+            .get(body("final-node", 8, Some(token)))
+            .await
+            .is_err()
+    );
+    let ordinary = history.get(body("final-node", 8, None)).await.unwrap();
+    assert!(
+        history
+            .get(HistoryGetArgs {
+                cursor: ordinary.next_cursor,
+                ..request
+            })
+            .await
+            .is_err()
+    );
+    assert!(
+        serde_json::to_value(body("final-node", 8, None))
+            .unwrap()
+            .get("final_answer_only")
+            .is_none()
+    );
+    db.shutdown().await.unwrap();
 }

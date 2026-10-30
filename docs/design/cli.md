@@ -133,3 +133,87 @@ path/missing-credential-name facts, and only GETs the existing bounded model
 catalog. It never starts an owner, opens a conversation database or calls
 Responses/embeddings. Native subprocess tests isolate HOME/APPDATA/XDG paths and
 exercise only loopback mocks. See [configuration](config.md#first-run-setup-69).
+
+## Noninteractive saved work: exec (#65)
+
+`exec --schema FILE [--thread ID] [TEXT | --text-stdin]` is a thin owner client:
+create a saved Thread by default, send a user request, wait for its immutable
+assigned Turn, read its saved final answer, and validate locally. New Threads
+accept the existing thread-create options; default cwd is the caller's cwd and
+Threads/history are not automatically deleted. Existing --thread conflicts with
+new-Thread options. No table, worker, queue, scheduler, provider request format,
+AGENTS change or Core execution path is added. `run` remains lifetime management;
+`exec` means noninteractive work, not a tool-free ask or a raw shell command.
+
+The default unverified sender label is `shellboy exec`; existing Origin scoping
+and permissions remain authoritative. --operation-id is rejected because the
+client performs several RPCs. It probes through an existing read RPC to learn
+the current owner instance, then allocates and reports known per-step operation
+IDs. Never automatically resubmit a transport-uncertain mutation.
+
+Append the final JSON contract and compact Schema to the user text. Default
+--max-repairs=2 (allowed0..5) adds corrective user messages in the same Thread,
+not invisible HTTP retries; they are saved and may incur ordinary model/tool
+costs. Ask corrections not to repeat completed side effects. Existing active
+Runs can accept queued input; never return an answer unless the message was
+applied and its assigned Turn completed with an answer. Held/unassigned,
+recovery_wait, stopped/failed or missing answers are explicit execution failures.
+A dedicated new Thread is the safe default for concurrent automation.
+
+stdout contains one validated JSON value and newline only. A JSON diagnostic on
+stderr carries known Thread/message/Run/Turn/answer IDs, per-step operation IDs,
+and repair count. Failure stdout is empty. Exit codes:0 success;2 input/unsupported
+Schema;3 invalid JSON/Schema after the repair cap (raw answer and errors on stderr);
+4 recovery/held/stopped/failed/no usable answer;5 overall execution timeout;
+6 owner/transport/protocol/output failure. Timeout never sends stop/retry or
+starts an owner. Known IDs permit inspection; an uncertain send must be inspected
+by operation ID before resubmission. The timeout begins after input/Schema reads,
+covers all RPCs/repairs and defaults300000ms (1..86400000); owner waits are bounded
+chunks of at most30000ms under that monotonic deadline.
+
+First-version Schema validation uses serde_json only, not a new dependency. The
+accepted bounded subset is boolean schemas and object schemas using `$schema`
+(2020-12 or draft-07 URI), title/description, a single type from object/array/
+string/integer/number/boolean/null, properties, required, boolean additionalProperties,
+single-schema items, minItems/maxItems and minLength/maxLength. Counts are literal
+nonnegative integers<=1000000; length counts Unicode scalar values. Type-specific
+keywords apply only to matching JSON instance types. All other keywords, union
+types/tuple items/schema-valued additionalProperties, including $ref/$defs,
+combinators, format, pattern and numeric constraints are rejected before owner
+contact. This is not general JSON Schema draft conformance. Bounds: Schema64KiB,
+32 Schema levels,2048 Schema nodes, composed user input128KiB, history payload4MiB,
+final answer1MiB,100000 validation steps and8 bounded diagnostics. Exceeding a bound
+is explicit failure, never silently accepting or truncating a validated result.
+
+
+Final-answer retrieval needs one additive read projection: existing history.get
+normally flattens reasoning and natural text together. Optional final_answer_only
+(default false and omitted on ordinary serialized requests) selects the last
+final_answer assistant message, or the last unphased assistant message if no
+final phase exists. Commentary/reasoning are excluded. CLI history get exposes
+--final-answer-only for exact diagnosis. Normal text projection and cursor scope
+remain unchanged; the final projection has its own cursor scope and node/revision
+binding. This does not add a Core execution path or change model output storage.
+
+A bounded local index over serde_json-validated scalar spans preserves numeric lexemes. Integer
+checks compare decimal fraction/exponent/trailing zeros exactly, without f64
+rounding or a new crate; numeric spellings remain intact in stdout. The validation-step cap must report failure before any
+unchecked tail can be accepted. Repair limits count corrective messages, not all
+ordinary Core requests/tools/retries, and timeout can leave billable work running.
+
+
+Diagnostic turn_usage is a bounded list (at most six completed answer Turns) of
+existing Turn usage facts, not a per-exec total or a bill; unknown stays null.
+An already active Turn may include other input. Completion means its final answer,
+not necessarily Run/background-work termination. Oversize/pagination failures are
+output failures (exit6) with answer IDs, not schema-cap failures missing a raw answer.
+
+
+Return the validated raw JSON spelling (outer whitespace trimmed), not a serde
+Value reserialization, so large decimal number spellings are not rounded by the
+client. Parsing remains bounded and type checks enforce the documented numeric
+subset. Model-result validity is shape evidence only, not factual correctness.
+
+
+JSON instance indexing is limited to100000 nodes/depth128. Numeric parsing uses
+the existing serde_json supported range; out-of-range numeric inputs fail explicitly.

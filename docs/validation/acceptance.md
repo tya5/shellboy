@@ -3048,3 +3048,31 @@ macOS/Linux succeeded initially; Windows attempt 1 timed out in three existing
 attempt 2 succeeds. No unrelated test/assertion was changed; rerun success does
 not diagnose or fix those failures. Earlier local TUI repaint failures and the
 separate initial main gate are retained in the #69 record.
+
+## #65 noninteractive exec qualification
+
+Nine native CLI loopback-owner/mock cases pass locally on macOS ARM64 using
+only temporary stores: stdout exact UTF-8 JSON with stdin/Schema instruction,
+reasoning excluded, default external_cli sender label, two saved repairs and raw
+failure, repair success, recovery without implicit retry, timeout leaving the
+pre-existing Run and queued input alive, and input appended before a real shell
+tool boundary on an active Turn. Absent owner and invalid/unsupported Schema
+have distinct stderr-only failures and create no owner data directory.
+Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 full standard check passes
+1713/0/32, layout91, Python6, fmt and strict all-target Clippy. Four Schema unit
+regressions cover unsupported semantics/depth, shape/Unicode constraints, exact
+integer lexemes, escaped keys/duplicate semantics and work exhaustion. Final-only
+pagination/cursor separation and unchanged ordinary history/serialized defaults
+pass. The native UTF-8 case checks the complete70KiB exec output while ordinary
+history get remains64KiB-paged. An earlier expanded fixture incorrectly compared
+that first ordinary page to the whole answer; its corrected assertion requires
+the true prefix/cursor while retaining complete exec JSON equality.
+
+Numeric spelling is preserved verbatim instead of reserializing through f64.
+A temporary local raw_value-feature experiment was discarded to avoid affecting
+Core serde behavior; Cargo.toml/Cargo.lock are unchanged. The final bounded
+scalar-span index follows complete existing serde_json syntax validation and
+checks decimal integrality exactly. Out-of-range parser numbers/resource limits
+fail explicitly; no unresolved Schema keyword is silently accepted.
+No real provider or physical-terminal execution is used. PowerShell7 example is
+documented; native Windows/Linux qualification and exact main CI remain pending.

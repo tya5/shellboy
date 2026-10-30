@@ -90,7 +90,16 @@ fn main() -> ExitCode {
             let _ = error.print();
             return ExitCode::SUCCESS;
         }
-        Err(error) => return print_error(cli_parse_error(&error), None),
+        Err(error) => {
+            if invoking_exec() {
+                let error = cli_parse_error(&error);
+                let mut outcome = shellboy::exec_client::Outcome::input(&error.message);
+                outcome.diagnostics["error"] =
+                    serde_json::to_value(error).expect("argument error JSON");
+                return emit_exec(outcome);
+            }
+            return print_error(cli_parse_error(&error), None);
+        }
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -98,6 +107,13 @@ fn main() -> ExitCode {
     {
         Ok(value) => value,
         Err(_) => {
+            if matches!(&cli.command, Some(CliCommand::Exec(_))) {
+                return emit_exec(shellboy::exec_client::Outcome {
+                    code: 6,
+                    result: None,
+                    diagnostics: serde_json::json!({"command":"exec","status":"client_error","message":"Cannot start async runtime"}),
+                });
+            }
             return print_error(
                 ApiError::new(ErrorCode::IoFailed, "Cannot start async runtime"),
                 cli.operation_id,
@@ -110,6 +126,11 @@ fn main() -> ExitCode {
         match std::env::current_dir() {
             Ok(value) => value,
             Err(_) => {
+                if matches!(&cli.command, Some(CliCommand::Exec(_))) {
+                    return emit_exec(shellboy::exec_client::Outcome::input(
+                        "Cannot determine startup cwd",
+                    ));
+                }
                 return print_error(
                     ApiError::new(ErrorCode::IoFailed, "Cannot determine startup cwd"),
                     cli.operation_id,
@@ -133,6 +154,27 @@ fn main() -> ExitCode {
         );
     }
     match cli.command.take() {
+        Some(CliCommand::Exec(options)) => {
+            let data = match resolve_cli_data_dir(
+                cli.data_dir.as_deref(),
+                &PathEnvironment::current(),
+                &cwd,
+            ) {
+                Ok(data) => data,
+                Err(_) => {
+                    return emit_exec(shellboy::exec_client::Outcome::input(
+                        "Cannot resolve owner data directory",
+                    ));
+                }
+            };
+            emit_exec(runtime.block_on(shellboy::exec_client::execute(
+                options,
+                &data,
+                &cwd,
+                origin(&data),
+                cli.operation_id,
+            )))
+        }
         Some(CliCommand::Config { command }) => {
             match runtime.block_on(shellboy::config_setup::execute(
                 command,
@@ -156,6 +198,35 @@ fn main() -> ExitCode {
         }
         None => run_tui(cli, runtime),
     }
+}
+fn invoking_exec() -> bool {
+    let mut args = std::env::args_os().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--data-dir" || arg == "--config" || arg == "--operation-id" {
+            let _ = args.next();
+            continue;
+        }
+        if arg.to_string_lossy().starts_with('-') {
+            continue;
+        }
+        return arg == "exec";
+    }
+    false
+}
+fn emit_exec(outcome: shellboy::exec_client::Outcome) -> ExitCode {
+    use std::io::Write;
+    let mut code = outcome.code;
+    let mut diagnostics = outcome.diagnostics;
+    if let Some(value) = outcome.result {
+        let body = format!("{}\n", value.trim());
+        if std::io::stdout().lock().write_all(body.as_bytes()).is_err() {
+            code = 6;
+            diagnostics["status"] = serde_json::json!("output_error");
+            diagnostics["message"] = serde_json::json!("Cannot write validated result to stdout");
+        }
+    }
+    let _ = writeln!(std::io::stderr().lock(), "{diagnostics}");
+    ExitCode::from(code)
 }
 fn docs_response(command: shellboy::docs::DocsCommand) -> serde_json::Value {
     match shellboy::docs::execute(command) {

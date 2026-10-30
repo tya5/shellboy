@@ -2261,7 +2261,7 @@ async fn run_with_delivery(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             match request(
                                 &control,
-                                Command::HistoryGet(HistoryGetArgs {
+                                Command::HistoryGet(HistoryGetArgs { final_answer_only: false,
                                     node_id,
                                     cursor,
                                     limit_bytes: MAX_BODY_BYTES,
@@ -3540,7 +3540,7 @@ pub async fn copy_source(
 ) -> Result<String, ApiError> {
     let result = async {
     let body = crate::history::History::new(control.store.database.clone())
-        .get(HistoryGetArgs {
+        .get(HistoryGetArgs { final_answer_only: false,
             node_id,
             limit_bytes: MAX_BODY_BYTES,
             cursor: None,

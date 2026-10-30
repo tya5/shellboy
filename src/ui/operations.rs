@@ -928,6 +928,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::HistoryGet(HistoryGetArgs {
+                        final_answer_only: false,
                         node_id: form.owned("node")?,
                         limit_bytes: form.number("limit")?,
                         cursor: form.optional("cursor")?,

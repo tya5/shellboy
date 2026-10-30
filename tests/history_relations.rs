@@ -79,6 +79,7 @@ async fn provenance_records_actual_origin_without_inventing_turns_or_thread_memb
     }).await.unwrap();
     let body = History::new(db.clone())
         .get(HistoryGetArgs {
+            final_answer_only: false,
             node_id: "owned".into(),
             limit_bytes: 65536,
             cursor: None,
@@ -122,6 +123,7 @@ async fn summary_and_spill_source_pages_preserve_ordinals_and_recorded_witness_a
     }).await.unwrap();
     let tombstone = History::new(db.clone())
         .get(HistoryGetArgs {
+            final_answer_only: false,
             node_id: "source-000".into(),
             limit_bytes: 65536,
             cursor: None,

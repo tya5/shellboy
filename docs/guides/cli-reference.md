@@ -412,3 +412,79 @@ resume a Run. Edit results replace token estimates with before_characters,
 after_characters and changed_suffix_characters (replay JSON Unicode scalars).
 No target_tokens field remains. thread get context_usage reports only the last
 successful measured usage, start/end time and next_request_pending after an edit.
+
+## Noninteractive work with a JSON answer
+
+An owner must already be running. `exec` saves ordinary conversation history and
+allows normal model tool use; it is not a tool-free transform or a sandbox.
+
+```sh
+shellboy exec --schema result.schema.json "Inspect the repository and report its TODO items" 2>exec.metadata.json
+shellboy exec --schema result.schema.json --thread THREAD --max-repairs 0 "Report the result"
+cat request.txt | shellboy exec --schema result.schema.json --text-stdin
+```
+
+Without --thread it creates a new saved conversation (caller cwd by default).
+New conversations accept --cwd/--agents/--connection/--model/--effort/--parent;
+these conflict with --thread. Existing Thread settings/AGENTS are not changed.
+--sender-label defaults to `shellboy exec`, a self-asserted name only. Single-RPC
+--operation-id is rejected; the stderr diagnostic reports known per-step IDs.
+
+stdout is the validated raw JSON value (outer whitespace trimmed) plus newline; stderr is a JSON
+metadata/error object with Thread, message, Run, Turn, answer-node, operation IDs
+and repair count, plus saved Turn-scoped usage (unknown stays null). These are
+owner facts, not a per-exec bill; an existing active Turn can include other input.
+Exit codes are0 success,2 invalid input/unsupported Schema,
+3 JSON/Schema mismatch after repairs,4 recovery/held/stopped/failed/unavailable
+answer,5 timeout,6 owner/transport/protocol/output failure. Schema mismatch after the repair cap includes the raw answer and bounded
+validation errors. Output-size/page limits exit6 with answer IDs for inspection,
+not a silently truncated successful result. Inspect saved targets before
+resending an uncertain mutation. `--timeout-ms` defaults300000 (1..86400000),
+starts after input reads and covers all RPCs/repairs; timeout never stops work.
+Use existing run stop explicitly if needed. The command does not start an owner.
+Default --max-repairs2 (0..5) sends corrections in the same saved conversation;
+ordinary model/tool/index costs and Core retry policy still apply. Work can keep
+running after the client times out. Prefer a dedicated Thread for automation;
+concurrent human stop/recovery/configuration edits are not an isolated job API.
+
+This initial validator adds no crate and supports only boolean/object schemas
+with `$schema` (2020-12 or draft-07 URI), title/description, single type
+(object,array,string,integer,number,boolean,null), properties, required, boolean
+additionalProperties, single-schema items and minItems/maxItems/minLength/maxLength.
+Counts must be integer literals0..1000000; string length counts Unicode scalars.
+Integer checks use exact decimal lexemes, not f64 rounding; exponent forms and
+large integer literals keep their spelling.
+All unlisted keywords/shapes reject before owner contact, including $ref/$defs,
+oneOf/anyOf/allOf, enum/const, pattern/format, numeric bounds, union types, tuple
+items and schema-valued additionalProperties. Do not assume full draft support.
+Schema64KiB/depth32/nodes2048, composed request128KiB, answer1MiB and100000
+validation steps are bounded; excess is explicit failure, not accepted truncation.
+
+To inspect exactly what was validated, use `history get --node ANSWER_NODE_ID
+--final-answer-only`. Normal history reads still include the original natural
+text/reasoning. Final-only cursors cannot be reused for the ordinary projection.
+Use an owner matching this CLI version for that additive read option.
+
+PowerShell 7 example (stdout remains separate from diagnostic stderr):
+
+```powershell
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $OutputEncoding
+$json = & shellboy exec --schema result.schema.json 'Inspect the repository and report its TODO items' 2>exec.metadata.json
+if ($LASTEXITCODE -ne 0) { throw "shellboy exec failed: $LASTEXITCODE" }
+$result = $json | ConvertFrom-Json
+```
+
+
+Do not synchronously exec against your own currently blocked foreground model
+Turn: existing wait-cycle protection can reject that wait after message acceptance.
+Inspect the reported message/operation IDs rather than resending. Prefer the new
+saved Thread default or a separate conversation. A timeout is not cancellation.
+
+Completion means a saved final answer for the assigned Turn, not proof that all
+background shells/child Runs have drained. Inspect run get/status for continuing
+work. Schema validation guarantees supported shape only, not factual correctness.
+
+
+JSON instance indexing is limited to100000 nodes/depth128. Numeric parsing uses
+the existing serde_json supported range; out-of-range numeric inputs fail explicitly.

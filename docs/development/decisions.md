@@ -1661,3 +1661,33 @@ wall-time assertions. No dependency version or production worker is added.
 Core input-character diagnostics ask the common client for actual dialect input
 characters, so discarded Responses-only items are not mislabelled as Chat wire
 input; HTTP body-source byte observations remain actual transmitted source facts.
+
+## 2026-10-31: exec and deliberately limited local Schema validation (#65)
+
+Active. Name the client `exec`, not the reserved `run`: it communicates
+noninteractive saved work, unlike tool-free ask or shell start. Default to a new
+saved Thread with caller cwd; keep history and do not auto-delete it. Existing
+Threads reject new-Thread configuration overrides. Send the final contract as
+ordinary user text, preserving AGENTS and owner/model configuration.
+
+No validator dependency is added. Use existing serde_json for a documented
+bounded shape subset; recursively reject every unsupported keyword/shape before
+owner contact, with no remote $ref resolver. Supporting full drafts, combinators,
+patterns or numeric constraints later requires a separate dependency/validation
+decision. Bound input, depth/nodes, validation work and diagnostics. Integer-float precision and exhausted-work tails have regression coverage.
+Use a bounded local scalar-span index after existing serde_json syntax parsing
+to preserve exact numeric lexemes for integer checks. No dependency feature or
+package is changed; Core Value parsing/storage semantics remain unchanged.
+
+stdout is validated JSON only; stderr carries IDs/repair metadata or raw invalid
+answer/errors. Exit0/2/3/4/5/6 distinguish success/input/schema/recovery/timeout/
+owner failures. Default two corrections (cap five) are ordinary saved user messages,
+not transport replay. A read probe obtains the existing instance so every later
+RPC has a known, reported operation ID even if its reply is lost. Deadline expiry
+never issues stop/retry. A new read-only history projection is necessary because
+ordinary history text includes reasoning; isolate its cursor scope and preserve
+all ordinary defaults/storage. There is no new Core execution mechanism.
+
+
+JSON instance indexing is limited to100000 nodes/depth128. Numeric parsing uses
+the existing serde_json supported range; out-of-range numeric inputs fail explicitly.

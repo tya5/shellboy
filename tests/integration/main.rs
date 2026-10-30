@@ -178,3 +178,6 @@ mod work_status;
 
 #[path = "../index_space_gc.rs"]
 mod index_space_gc;
+
+#[path = "../exec_client.rs"]
+mod exec_client;

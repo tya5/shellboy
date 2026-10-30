@@ -466,6 +466,7 @@ mod tests {
         assert!(list(&control, "t".into(), 0).await.is_err());
         let raw = crate::history::History::new(owner.db.clone())
             .get(crate::protocol::HistoryGetArgs {
+                final_answer_only: false,
                 node_id: "n0".into(),
                 limit_bytes: 65536,
                 cursor: None,

@@ -1858,6 +1858,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await;
     assert!(canonical.starts_with(&(first.text.clone() + &second.text)));
     send.send(UiAction::Manage(Command::HistoryGet(HistoryGetArgs {
+        final_answer_only: false,
         node_id: "long".into(),
         cursor: None,
         limit_bytes: MAX_BODY_BYTES,

@@ -344,6 +344,7 @@ pub(super) fn follow(
         "execution_id" => Ok(Command::ShellGet(ExecutionTarget { execution_id: id })),
         "node_id" | "answer_node_id" | "request_node_id" | "result_node_id" => {
             Ok(Command::HistoryGet(HistoryGetArgs {
+                final_answer_only: false,
                 node_id: id,
                 cursor: None,
                 encoding: DEFAULT_ENCODING.into(),

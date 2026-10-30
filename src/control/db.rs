@@ -3015,6 +3015,7 @@ mod agents_reference_tests {
                     let body = history::get_node(
                         db,
                         &HistoryGetArgs {
+                            final_answer_only: false,
                             node_id: node.clone(),
                             limit_bytes: MAX_BODY_BYTES,
                             cursor: None,

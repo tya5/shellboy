@@ -346,3 +346,16 @@ all conversation rendering is unchanged would be inaccurate. CLI provenance and
 F6 remain evidence-based unknown for old null receipts; the human band is not a
 sender fact. This follow-up changes documentation and F6 explanation only, not
 source classification, bands or #41 rendering.
+
+
+## Final-answer read projection (#65)
+
+history.get accepts optional final_answer_only (false by default; omitted from
+ordinary serialized requests). It applies only to assistant_response originals,
+selects the last assistant message with phase final_answer or the last unphased
+assistant message, and excludes reasoning/commentary. Its history.get.final_answer
+cursor scope is distinct from the unchanged ordinary history.get scope; node,
+revision and UTF-8 cursor binding still apply. Missing final messages are explicit
+unavailability, not fabricated answers. No provider/API execution format or
+stored payload changes. The exec client uses this projection for local Schema
+validation rather than parsing reasoning as an answer.

@@ -29,6 +29,8 @@ pub struct Cli {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum CliCommand {
+    /// Run saved work noninteractively; validate only its final JSON answer locally.
+    Exec(crate::exec_client::ExecOptions),
     /// Inspect recorded work; no model call or persistent job engine.
     Status(StatusOptions),
     /// Create a configuration template or check it without an owner.
@@ -483,6 +485,9 @@ pub struct HistoryListOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct HistoryGetOptions {
+    /// Read only the saved final assistant message; exclude reasoning and commentary.
+    #[arg(long)]
+    pub final_answer_only: bool,
     #[arg(long = "node")]
     pub node_id: String,
     #[arg(long,default_value_t=wire::MAX_BODY_BYTES)]
@@ -697,7 +702,10 @@ impl Cli {
                 turn_id: a.turn_id,
                 include_children: a.include_children,
             }),
-            CliCommand::Docs { .. } | CliCommand::Rag(_) | CliCommand::Config { .. } => {
+            CliCommand::Exec(_)
+            | CliCommand::Docs { .. }
+            | CliCommand::Rag(_)
+            | CliCommand::Config { .. } => {
                 return Ok(None);
             }
             CliCommand::Model {
@@ -801,6 +809,7 @@ impl Cli {
                     state: a.state,
                 }),
                 HistoryCommand::Get(a) => C::HistoryGet(wire::HistoryGetArgs {
+                    final_answer_only: a.final_answer_only,
                     node_id: a.node_id,
                     limit_bytes: a.limit_bytes,
                     cursor: a.cursor,

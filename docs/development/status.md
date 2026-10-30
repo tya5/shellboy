@@ -1,5 +1,22 @@
 # Development status
 
+## #65 exec client: local qualification complete
+
+A thin noninteractive client composes existing Thread/message/wait/answer reads,
+with local bounded Schema-subset validation, at most two default corrective
+messages, stdout-result/stderr-metadata separation and explicit failure codes.
+Default creates a saved Thread; existing active Runs accept queued input. No new
+Core execution mechanism/table/worker/queue/dependency or owner auto-start.
+A final-only history read projection excludes reasoning without changing ordinary
+history text and binds its own cursor scope. Unhandled Schema features reject
+before contact. Nine loopback native CLI cases pass locally (paged70KiB UTF-8/stdin,
+reasoning exclusion, bounded repairs/history, recovery, non-stopping timeout,
+active-Turn tool boundary, missing Thread/owner/input and exact numeric spelling).
+Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 full standard check passes
+**1713 passed / 0 failed / 32 ignored**, layout91, Python6, fmt and strict Clippy.
+Four Schema unit regressions and final-only/default cursor preservation pass.
+No dependency/feature changes remain. Native main CI is pending.
+
 ## #60 Medium follow-up: indexed Thread-scoped receipt fences
 
 Autosave, selection and archive fences now constrain receipt.target_thread_id to
