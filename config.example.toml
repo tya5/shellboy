@@ -25,10 +25,9 @@ api_key_env = "SHELLBOY_API_KEY"
 # response_retry_max_delay_ms = 60000
 # Retry interrupted partial streams; false keeps partial failures for manual recovery.
 # response_retry_partial = true
-# At the first eligible large-input failure, reduce maximally once per Turn/generation.
+# From the second eligible consecutive failure, maximally reduce safe context.
 # auto_trim_on_disconnect = true
-# Optional positive trigger threshold; also enables pre-POST reduction.
-# Without a hint, the failure threshold is >75000 and no pre-POST reduction occurs.
+# No input-size threshold or pre-POST reduction; all resends share the retry budget.
 # default_effort = "YOUR_PROVIDER_SUPPORTED_VALUE"
 
 # Embeddings are optional. Enabling them indexes newly finalized conversation

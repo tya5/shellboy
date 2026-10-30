@@ -187,8 +187,7 @@ Repeated reads do not consume operation-receipt budget. Pending reservations for
 At a task boundary, after the push or report, review your own conversation once.
 Use `thread get`'s `context_usage.last_successful_attempt.input_tokens` (the last
 actual input, if reported) and `history list`'s large ranges as evidence. Do not
-use `estimated_input_tokens` to decide this cleanup or start a new conversation
-as a substitute. Spill large tool outputs from completed work that are no longer
+start a new conversation as a substitute for this cleanup. Spill large tool outputs from completed work that are no longer
 needed with `compact --spill --from NODE --to NODE`; summarize a completed range
 with `compact --summary --from NODE --to NODE` when only its key facts are needed.
 Leave unfinished work, unapplied user instructions and information required for
