@@ -589,6 +589,17 @@ fn d010_does_not_accept_incomplete_calls_or_guess_missing_response_identity() {
         .push(format!("data: {}\n\n", json!({"id":"x".repeat(1025),"choices":[]})).as_bytes())
         .unwrap_err();
     assert_eq!(error.kind, "input_limit");
+    let mut oversized_reason = Stream::new(Api::ChatCompletions);
+    let error = oversized_reason
+        .push(
+            format!(
+                "data: {}\n\n",
+                json!({"choices":[{"index":0,"delta":{},"finish_reason":"x".repeat(65)}]})
+            )
+            .as_bytes(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "input_limit");
 
     let fragments = REPEATED_NAME.replacen("\"name\":\"shell\"", "\"name\":\"s\"", 1);
     let result = jitter_trace(&fragments, 3);

@@ -321,6 +321,12 @@ impl Chat {
                 }
             }
             if let Some(reason) = choice["finish_reason"].as_str() {
+                if reason.len() > 64 {
+                    return Err(ModelError::new(
+                        "input_limit",
+                        "Chat finish reason exceeds byte limit",
+                    ));
+                }
                 if self.finish.is_some() {
                     return Err(protocol("Duplicate Chat finish_reason"));
                 }
