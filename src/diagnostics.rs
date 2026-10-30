@@ -27,6 +27,31 @@ pub enum DiagnosticEvent {
     StorageLimit,
     IndexPaused,
     UsageTotalsSlow,
+    UiHistory,
+}
+
+/// Fixed frontend observations; never accepts history or shell content.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiHistoryReason {
+    #[default]
+    WindowApplied,
+    StaleWindow,
+    UserFollow,
+    BodyEviction,
+}
+/// Ephemeral presentation identities and counts on the existing bounded queue.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct UiHistoryTrace {
+    pub reason: UiHistoryReason,
+    pub generation: u64,
+    pub view_revision: u64,
+    pub read_revision: u64,
+    pub before_nodes: u64,
+    pub after_nodes: u64,
+    pub evicted_bodies: u64,
+    pub follow_before: bool,
+    pub follow_after: bool,
 }
 pub(crate) const USAGE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(100);
 #[derive(Debug, Default, Clone, Copy, Serialize)]
@@ -182,6 +207,8 @@ struct Entry {
     tool_repair: Option<ToolRepairFailure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     usage_slow: Option<UsageSlowTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ui_history: Option<UiHistoryTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -258,6 +285,7 @@ struct Record {
     shutdown: Option<ShutdownTrace>,
     tool_repair: Option<ToolRepairFailure>,
     usage_slow: Option<UsageSlowTrace>,
+    ui_history: Option<UiHistoryTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -295,6 +323,7 @@ impl Diagnostics {
                     shutdown,
                     tool_repair,
                     usage_slow,
+                    ui_history,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -309,6 +338,7 @@ impl Diagnostics {
                         shutdown,
                         tool_repair,
                         usage_slow,
+                        ui_history,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -459,6 +489,20 @@ impl Diagnostics {
             None,
         );
     }
+    /// Nonblocking observation only: no I/O, DB access or content formatting.
+    pub fn record_ui_history(&self, trace: UiHistoryTrace, ids: DiagnosticIds) {
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::UiHistory,
+            ids,
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: Some(trace),
+        });
+    }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
         failure.thread_id = sanitize_id(&failure.thread_id);
         failure.group_id = failure.group_id.as_deref().map(sanitize_id);
@@ -474,6 +518,7 @@ impl Diagnostics {
             shutdown: None,
             tool_repair: Some(failure),
             usage_slow: None,
+            ui_history: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -495,6 +540,7 @@ impl Diagnostics {
             shutdown: None,
             tool_repair: None,
             usage_slow: Some(usage_slow),
+            ui_history: None,
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -571,6 +617,7 @@ impl Diagnostics {
             shutdown,
             tool_repair: None,
             usage_slow: None,
+            ui_history: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -583,6 +630,7 @@ impl Diagnostics {
             shutdown,
             tool_repair,
             usage_slow,
+            ui_history,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -611,6 +659,7 @@ impl Diagnostics {
                     shutdown,
                     tool_repair,
                     usage_slow,
+                    ui_history,
                 })
                 .is_err()
         }) {
@@ -678,6 +727,82 @@ fn sanitize_id(id: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || "-_:".contains(*c))
         .take(128)
         .collect()
+}
+
+#[cfg(test)]
+mod ui_history_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn history_observations_are_fixed_bounded_and_nonblocking() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        {
+            let _busy = diagnostics.shared.sender.lock().unwrap();
+            diagnostics.record_ui_history(UiHistoryTrace::default(), DiagnosticIds::default());
+            assert_eq!(diagnostics.pending_dropped(), 1);
+        }
+        for reason in [
+            UiHistoryReason::WindowApplied,
+            UiHistoryReason::StaleWindow,
+            UiHistoryReason::UserFollow,
+            UiHistoryReason::BodyEviction,
+        ] {
+            diagnostics.record_ui_history(
+                UiHistoryTrace {
+                    reason,
+                    generation: 7,
+                    view_revision: 8,
+                    read_revision: 9,
+                    before_nodes: 50,
+                    after_nodes: 49,
+                    evicted_bodies: 1,
+                    follow_before: true,
+                    follow_after: false,
+                },
+                DiagnosticIds {
+                    thread_id: Some(format!("thread-{}\n\u{1b}", "x".repeat(1000))),
+                    ..Default::default()
+                },
+            );
+        }
+        diagnostics.record(DiagnosticEvent::Startup, DiagnosticIds::default());
+        diagnostics.shutdown().await;
+        assert!(!diagnostics.has_failed());
+        let log = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let entries = log
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 5);
+        for (entry, reason) in entries.iter().zip([
+            "window_applied",
+            "stale_window",
+            "user_follow",
+            "body_eviction",
+        ]) {
+            assert_eq!(entry["event"], "ui_history");
+            assert_eq!(entry["ui_history"]["reason"], reason);
+            assert_eq!(entry["ui_history"]["generation"], 7);
+            assert_eq!(entry["ui_history"]["view_revision"], 8);
+            assert_eq!(entry["ui_history"]["read_revision"], 9);
+            assert_eq!(entry["ui_history"]["before_nodes"], 50);
+            assert_eq!(entry["ui_history"]["after_nodes"], 49);
+            assert_eq!(entry["ui_history"]["evicted_bodies"], 1);
+            assert_eq!(entry["ui_history"]["follow_before"], true);
+            assert_eq!(entry["ui_history"]["follow_after"], false);
+            assert_eq!(entry["ui_history"].as_object().unwrap().len(), 9);
+            let id = entry["ids"]["thread_id"].as_str().unwrap();
+            assert_eq!(id.len(), 128);
+            assert!(
+                id.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_:".contains(c))
+            );
+            assert_eq!(entry.as_object().unwrap().len(), 5);
+        }
+        assert_eq!(entries[0]["dropped"], 1);
+        assert!(entries[4].get("ui_history").is_none());
+    }
 }
 
 #[cfg(test)]
