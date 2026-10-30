@@ -605,7 +605,376 @@ async fn marker_explicitly_reports_current_turn_work_after_the_retained_request(
     assert!(!text.contains("--mode hybrid") && !text.contains("--mode semantic"));
     assert!(text.contains("Original data is retained and can stay omitted"));
     assert!(text.contains("--max-chars 20000 --max-percent 5"));
-    assert!(text.contains("can enlarge context"));
     assert!(text.contains(
         "restoring or summarizing omitted history can enlarge context and reproduce the failure"
     ));
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn middle_omission_attachment_notice_and_warning_only_describe_new_exclusions() {
+    for attachment_state in [None, Some("active"), Some("excluded")] {
+        let fixture = Fixture::new().await;
+        for id in ["a", "b", "c", "d"] {
+            fixture.text(id, id).await;
+        }
+        if let Some(state) = attachment_state {
+            fixture.attachment("b").await;
+            if state == "excluded" {
+                fixture.db.call(|db| {db.execute("UPDATE attachment_selection SET state='excluded',reason='explicit_user_exclusion'",[])?;Ok(())}).await.unwrap();
+            }
+        }
+        let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+        let result = fixture
+            .compactor
+            .omit_range(snapshot, 1..3, CancellationToken::new())
+            .await
+            .unwrap();
+        let active = attachment_state == Some("active");
+        assert_eq!(result.warnings.len(), usize::from(active));
+        let marker = result.marker_node_id.unwrap();
+        let payload = fixture
+            .db
+            .call(move |db| {
+                let raw: String = db.query_row(
+                    "SELECT payload_json FROM node WHERE id=?1",
+                    [marker],
+                    |row| row.get(0),
+                )?;
+                Ok(serde_json::from_str::<Value>(&raw).unwrap())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            payload["context_trim"]["excluded_attachment_refs"],
+            if active { 1 } else { 0 }
+        );
+        let text = payload["item"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("a middle range of the selected history was omitted"));
+        assert_eq!(
+            text.contains("active attachment references were excluded"),
+            active
+        );
+        if active {
+            assert!(result.warnings[0].contains("1 active attachment"));
+        }
+        fixture.close().await;
+    }
+}
+
+#[tokio::test]
+async fn restore_from_first_omitted_source_targets_that_marker_instead_of_the_latest_edit() {
+    let fixture = Fixture::new().await;
+    for id in ["a", "b", "c", "d", "e", "f", "g"] {
+        fixture.text(id, id).await;
+    }
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let old = fixture
+        .compactor
+        .omit_range(snapshot, 1..3, CancellationToken::new())
+        .await
+        .unwrap()
+        .marker_node_id
+        .unwrap();
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let selected = range::from_nodes(&snapshot, "e", "e").unwrap();
+    let newer = fixture
+        .compactor
+        .omit_range(snapshot, selected, CancellationToken::new())
+        .await
+        .unwrap()
+        .marker_node_id
+        .unwrap();
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let result = fixture
+        .compactor
+        .restore_marker(snapshot, Some("b"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result.marker_node_id, Some(old));
+    assert_eq!(
+        fixture.path().await,
+        vec![
+            "a".to_owned(),
+            "b".into(),
+            "c".into(),
+            "d".into(),
+            newer,
+            "f".into(),
+            "g".into()
+        ]
+    );
+    assert!(result.warnings.is_empty());
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn ambiguous_first_source_restore_requires_an_explicit_marker_id_without_editing_the_path() {
+    let fixture = Fixture::new().await;
+    for id in ["a", "b", "c", "d", "e", "f"] {
+        fixture.text(id, id).await;
+    }
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    fixture
+        .compactor
+        .omit_range(snapshot, 1..2, CancellationToken::new())
+        .await
+        .unwrap();
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let selected = range::from_nodes(&snapshot, "d", "d").unwrap();
+    let marker = fixture
+        .compactor
+        .omit_range(snapshot, selected, CancellationToken::new())
+        .await
+        .unwrap()
+        .marker_node_id
+        .unwrap();
+    fixture.db.call(move|db| {
+        db.execute("UPDATE node SET payload_json=json_set(payload_json,'$.context_trim.first_node_id','b'),payload_revision=payload_revision+1 WHERE id=?1",[marker])?;Ok(())
+    }).await.unwrap();
+    let before = fixture.path().await;
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let error = fixture
+        .compactor
+        .restore_marker(snapshot, Some("b"), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(error.message.contains("multiple selected markers"));
+    assert_eq!(
+        error.details.unwrap()["marker_node_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(fixture.path().await, before);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn changed_attachment_selection_aborts_without_a_false_exclusion_notice_or_path_change() {
+    let fixture = Fixture::new().await;
+    for id in ["a", "b", "c"] {
+        fixture.text(id, id).await;
+    }
+    fixture.attachment("a").await;
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    fixture.db.call(|db| {db.execute("UPDATE attachment_selection SET state='excluded',reason='explicit_user_exclusion',revision=revision+1",[])?;Ok(())}).await.unwrap();
+    let before = fixture.path().await;
+    let error = fixture
+        .compactor
+        .omit_range(snapshot, 0..1, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidState);
+    assert!(error.message.contains("attachment selection changed"));
+    assert_eq!(fixture.path().await, before);
+    assert_eq!(fixture.replacement_count().await, 0);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn maximum_trim_adopts_a_small_safe_reduction_even_when_retained_suffix_exceeds_half() {
+    let fixture = Fixture::new().await;
+    fixture.text("old", &"x".repeat(20_000)).await;
+    fixture.text("latest", &"y".repeat(400_000)).await;
+    let result = fixture
+        .compactor
+        .trim_activated("t", CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(!result.compact.no_target);
+    assert_eq!(result.omitted_nodes, 1);
+    assert!(result.after_characters < result.before_characters);
+    assert!(
+        result.after_characters > result.before_characters / 2,
+        "max omission must not require reaching half"
+    );
+    assert_eq!(fixture.path().await.last().unwrap(), "latest");
+    fixture
+        .db
+        .call(|db| {
+            assert!(db.query_row(
+                "SELECT payload_json IS NOT NULL FROM node WHERE id='old'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn no_unprotected_groups_leave_history_unchanged() {
+    let fixture = Fixture::new().await;
+    fixture.text("latest", &"y".repeat(400_000)).await;
+    let before = fixture.path().await;
+    let result = fixture
+        .compactor
+        .trim_activated("t", CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.compact.no_target);
+    assert_eq!(result.omitted_nodes, 0);
+    assert_eq!(fixture.path().await, before);
+    assert_eq!(fixture.replacement_count().await, 0);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn latest_complete_tool_group_survives_even_with_a_later_assistant_group() {
+    let fixture = Fixture::new().await;
+    fixture.tools().await;
+    fixture.text("latest-answer", "last answer").await;
+    let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    let result = fixture
+        .compactor
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
+        .await
+        .unwrap();
+    assert_eq!(result.omitted_nodes, 2);
+    let path = fixture.path().await;
+    assert!(!path.contains(&"g-old-call".to_owned()));
+    assert!(path.contains(&"g-new-call".to_owned()));
+    assert!(path.contains(&"g-new-result".to_owned()));
+    assert_eq!(path.last().unwrap(), "latest-answer");
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn pending_protection_and_incomplete_groups_are_never_automatic_omission_candidates() {
+    let fixture = Fixture::new().await;
+    fixture.text("pending", &"p".repeat(20_000)).await;
+    fixture.text("incomplete", &"i".repeat(20_000)).await;
+    fixture.text("latest", "retain latest").await;
+    let before = fixture.path().await;
+    let mut snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+    snapshot.protected.insert("pending".into());
+    snapshot.groups[1].complete = false;
+    let result = fixture
+        .compactor
+        .trim_maximal(snapshot, CancellationToken::new(), "failure")
+        .await
+        .unwrap();
+    assert!(result.compact.no_target);
+    assert_eq!(fixture.path().await, before);
+    assert_eq!(fixture.replacement_count().await, 0);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows() {
+    let fixture = Fixture::new().await;
+    fixture.text("one", "history").await;
+    let raw = json!({"input_tokens":50,"input_tokens_details":{"cached_tokens":12,"extra":"x".repeat(128*1024)},"attribution":"x".repeat(128*1024)}).to_string();
+    let saved = raw.clone();
+    fixture.db.call(move |db| {
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('past','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('past','t','past','completed','now');")?;
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('large','past',0,0,'p','m',0,'completed','{\"input_characters\":100,\"history_characters\":80}',?1,'now')",[raw])?;
+        Ok(())
+    }).await.unwrap();
+    let metrics = fixture.compactor.context_metrics("t").await.unwrap();
+    assert_eq!(metrics["last_successful_attempt"]["input_tokens"], 50);
+    assert_eq!(metrics["last_successful_attempt"]["cached_tokens"], 12);
+    assert!(metrics.get("estimated_input_tokens").is_none());
+    assert!(metrics.get("estimation_baseline_attempt_id").is_none());
+    fixture
+        .db
+        .call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT usage_json FROM model_attempt WHERE id='large'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )?,
+                saved
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for raw in [
+        "{",
+        "{}",
+        r#"{"input_tokens":-1,"input_tokens_details":{"cached_tokens":false}}"#,
+        r#"{"input_tokens":1.0,"input_tokens_details":{"cached_tokens":"1"}}"#,
+        r#"{"input_tokens":9223372036854775808,"input_tokens_details":[]}"#,
+    ] {
+        let raw = raw.to_owned();
+        fixture
+            .db
+            .call(move |db| {
+                db.execute(
+                    "UPDATE model_attempt SET usage_json=?1 WHERE id='large'",
+                    [raw],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let metrics = fixture.compactor.context_metrics("t").await.unwrap();
+        assert!(
+            metrics["last_successful_attempt"]["input_tokens"].is_null(),
+            "{metrics}"
+        );
+        assert!(
+            metrics["last_successful_attempt"]["cached_tokens"].is_null(),
+            "{metrics}"
+        );
+        assert!(
+            metrics["estimation_baseline_attempt_id"].is_null(),
+            "{metrics}"
+        );
+    }
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn search_hints_follow_embedding_settings_for_explicit_and_maximal_omission() {
+    use clap::Parser;
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        for embeddings in [false, true] {
+            for maximal in [false, true] {
+                let mut fixture = Fixture::new().await;
+                if embeddings {
+                    let config = Config::parse("[connections.p]\nbase_url='http://127.0.0.1:1/v1'\n[embedding]\nconnection='p'\nmodel='fixture-embedding'").unwrap();
+                    fixture.compactor = Compactor::new(fixture.db.clone(), Arc::new(config));
+                }
+                fixture.text("old", &"x".repeat(20_000)).await;
+                fixture.text("latest", "retained").await;
+                let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
+                let result = if maximal {
+                    fixture.compactor.trim_maximal(snapshot, CancellationToken::new(), "failure").await.unwrap()
+                } else {
+                    fixture.compactor.omit_range(snapshot, 0..1, CancellationToken::new()).await.unwrap()
+                };
+                let marker = result.marker_node_id.unwrap();
+                let payload = fixture.db.call(move |db| {
+                    let raw: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [marker], |r| r.get(0))?;
+                    Ok(serde_json::from_str::<Value>(&raw).unwrap())
+                }).await.unwrap();
+                let text = payload["item"]["content"][0]["text"].as_str().unwrap();
+                let keyword = "shellboy rag search --scope history:t --mode keyword --query TEXT";
+                let semantic = "shellboy history search --thread t --query TEXT";
+                assert!(text.contains(keyword));
+                assert_eq!(text.contains(semantic), embeddings);
+                assert_eq!(text.contains("query-embedding API request"), embeddings);
+                assert_eq!(text.contains("may incur cost"), embeddings);
+                assert_eq!(text.contains("do not guarantee index coverage"), embeddings);
+                assert!(!text.contains("--mode hybrid") && !text.contains("--mode semantic"));
+                for hint in [keyword, semantic] {
+                    if text.contains(hint) {
+                        crate::cli::Cli::try_parse_from(hint.split_whitespace()).unwrap();
+                    }
+                }
+                assert_eq!(payload["context_trim"]["first_node_id"], "old");
+                assert_eq!(payload["context_trim"]["last_node_id"], "old");
+                assert!(text.contains("have NOT been undone"));
+                fixture.close().await;
+            }
+        }
+    }).await.expect("context notice watchdog");
+}

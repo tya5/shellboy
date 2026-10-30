@@ -3444,3 +3444,21 @@ those cases. Later full checks pass; these are not suppressed or ignored tests.
 Native Windows/Linux results are tracked in issue #73 separately from local checks. Real-provider
 summary accuracy, very large real histories and actual paid request billing are
 not qualified by these loopback mocks.
+
+
+After rebase onto `a5a08b1` (#71), the full standard check passes locally again:
+**1,749 passed / 0 failed / 32 ignored**, layout 93/Python 9/fmt/strict Clippy.
+Config check retains both auto_history and compaction facts. Omission guidance
+retains #71's keyword baseline, conditional semantic hint/cost/coverage warning,
+and new #73 capped opt-in summary. All old conditional-guidance tests remain.
+Append-only documentation conflicts and adjacent single-line output/notice
+conflicts were resolved by keeping both contracts. The first integration edit
+accidentally removed file tails; parse checks caught this before push. Complete
+upstream files were restored with only scoped #73 changes; the successful full
+integration check follows that repair. No truncated code or tests are accepted.
+
+Record audit against the new base `a5a08b1`: status 1289 -> 1298
+(+9/-0), acceptance 3400 -> 3464 (+64/-0).
+The complete previous status body and byte-for-byte acceptance prefix remain;
+no historical evidence or role heading is replaced. Exact-source native CI is
+recorded in issue #73 separately from these local checks.

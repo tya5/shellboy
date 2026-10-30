@@ -491,6 +491,8 @@ in addition to before/after context sizes. Cached successful parts can be reused
 on explicit retry, so model_requests counts requests actually made this time.
 Automatic failure compaction and argument-free `compact` are unchanged.
 
-Omitted history can stay omitted. Use bounded `history search`/`history get` first;
-only summarize it to reintroduce key facts. Summarizing an omitted range can
+Omitted history can stay omitted. Use bounded keyword RAG/`history get` first;
+when embeddings are configured, `history search` can help with differently worded
+facts but sends a potentially paid query embedding. Only summarize omitted
+history to reintroduce key facts. Summarizing an omitted range can
 increase the selected context even when it is much shorter than its originals.
