@@ -261,7 +261,7 @@ PowerShell native JSON argument passing differs from Bash. Reading a UTF-8 file 
 |---|---|
 | `history list --thread THREAD [--excerpt-chars N] [--run RUN] [--since RFC3339] [--status STATE] [--limit N] [--cursor C]` | `items` (node_id/kind/excerpt/payload_chars/provenance/context/selection/executions), next_cursor. Status filters saved related-shell state. Selected path, default 50/max 200. excerpt-chars default 512/range 0–4096; zero retrieves no body and returns empty excerpt. payload_chars counts stored JSON characters, null if reclaimed. Up to eight execution links with total/truncation |
 | `history get --node NODE [--limit-bytes N] [--cursor C] [--encoding UTF-8]` | node_id/kind/text/provenance/context, source_node_ids/previous_node_ids/next_node_ids, next_cursor, tombstone_reason; display text excludes encrypted reasoning |
-| `history search --query TEXT [--limit N] [--thread THREAD] [--kind KIND]... [--exclude-kind KIND]... [--from RFC3339] [--to RFC3339]` | Array of node_id/excerpt/distance/spans/provenance and optional thread_scope; default 10/max 50. Filters before active-embedding-space ranking; no active space yields empty array |
+| `history search --query TEXT [--limit N] [--thread THREAD] [--kind KIND]... [--exclude-kind KIND]... [--from RFC3339] [--to RFC3339]` | Object with items (node_id/excerpt/distance/spans/provenance and optional thread_scope), auto_history, degraded and scope_status; default 10/max 50. Filters before active-space ranking; no active space yields empty items. Disabled automatic ingestion warns of potentially missing newer sources |
 | `history relations --node NODE --relation previous\|next\|sources\|replacements [--limit N] [--cursor C]` | `items` (node_id/provenance and, for replacements, replacement_id/source_revision/source_hash), next_cursor; direct relations, default 50/max 200 |
 
 Without `--thread`, search is global and never implicitly fills in the model's Thread. With it, eligible nodes are the Thread's current selected path plus recursively followed completed summary/spill replacement sources, not every branch of a fork origin. A global hit need not be on the currently selected path. `--kind` values combine with OR; Thread/time/exclusion combine with AND. Kinds identify nodes (`user` / `assistant` / `tool_result`); exclude tools with `--exclude-kind tool_result`. Include/exclude lists each allow at most 32 kinds, each at most 64 characters. `--from` inclusive and `--to` exclusive filter node creation time using offset-bearing RFC3339; together require from < to.
@@ -500,3 +500,9 @@ and recommending ordinary history get --node ANSWER_NODE_ID without the new flag
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
 not an old-Core format shim or automatic answer/protocol downgrade.
+
+
+`index status` and `config check` include `auto_history` (default true). Setting
+`indexing.auto_history=false` only disables automatic conversation embedding;
+it does not remove existing vectors or disable standalone RAG. Semantic history
+RAG reports disabled coverage in its existing degraded/scope_status/warnings.

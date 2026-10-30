@@ -654,8 +654,12 @@ pub(super) async fn search(
                             "Provider failure paused semantic search; no request was sent",
                         ));
                     }
-                    lists.push(history::semantic(context, query, thread).await?);
+                    let (hits, automatic) = history::semantic(context, query, thread).await?;
+                    lists.push(hits);
                     semantic = "ok";
+                    if !automatic {
+                        warnings.entry("auto_history_disabled".into()).or_insert_with(||json!({"code":"auto_history_disabled","message":"Automatic history indexing is off; newer sources may be missing. Semantic search covers retained indexed sources only; explicitly backfill or use keyword search"}));
+                    }
                 }
                 return Ok(());
             }
@@ -694,6 +698,15 @@ pub(super) async fn search(
         .await;
         let mut status =
             json!({"scope":scope,"source":source_id,"keyword":keyword,"semantic":semantic});
+        if history_scope(scope).is_some()
+            && mode != SearchMode::Keyword
+            && semantic == "ok"
+            && warnings.contains_key("auto_history_disabled")
+        {
+            status["auto_history"] = json!(false);
+            status["coverage"] = json!("indexed_sources_only");
+            status["reason"] = json!("auto_history_disabled");
+        }
         if duplicate {
             status["duplicate_of"] = json!(format!(
                 "source:{}",

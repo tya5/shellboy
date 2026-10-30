@@ -3,6 +3,21 @@ use super::*;
 mod reader;
 
 impl IndexService {
+    pub async fn search_report(
+        &self,
+        args: &HistorySearchArgs,
+        cancel: CancellationToken,
+    ) -> Result<Value, ApiError> {
+        let items = self.search_filtered_cancellable(args, cancel).await?;
+        let automatic = self.config.indexing.auto_history;
+        Ok(
+            json!({"items":items,"auto_history":automatic,"degraded":!automatic,
+            "scope_status":[{"scope":args.thread_id.as_ref().map_or_else(||"history".to_owned(),|id|format!("history:{id}")),
+            "coverage":"indexed_sources_only","auto_history":automatic,
+            "reason":if automatic {None} else {Some("auto_history_disabled")},
+            "message":if automatic {"Only retained indexed sources are searched; coverage is not guaranteed complete"} else {"Automatic history indexing is off; newer sources may be missing. Only retained indexed sources are searched; explicitly backfill or use keyword search"}}]}),
+        )
+    }
     pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchMatch>, ApiError> {
         Ok(self
             .search_detailed(query, limit)

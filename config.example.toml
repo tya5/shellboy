@@ -52,3 +52,8 @@ clipboard_bytes = 268435456
 palette = "dark"
 # Notify once when a new recovery wait needs attention (terminal bell).
 bell = true
+
+# Stop automatic conversation embeddings without disabling standalone RAG.
+# Explicit index backfill/rebuild/probe can still incur API cost.
+[indexing]
+auto_history = true

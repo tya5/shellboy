@@ -150,3 +150,10 @@ filesystem resolution. This adds no credential value to diagnostic output.
 without querying the terminal, using the existing UI writer between frames.
 No conversation/status-row renderer, lifecycle state or Core table is changed.
 See the terminal-status design for selection, limits and lifetime semantics.
+
+## Automatic conversation indexing (#71)
+
+`indexing.auto_history` is a strict boolean, default true, independent of the
+embedding connection/model. False disables automatic history authorization and
+holds automatic pending work; explicitly selected indexing and standalone RAG
+remain available. Restart the owner to change the immutable runtime setting.

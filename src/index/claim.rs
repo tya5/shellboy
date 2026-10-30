@@ -12,6 +12,7 @@ pub(super) fn claim(
     keys: IndexKeys<'_>,
     max_inputs: usize,
     max_chars: usize,
+    auto_history: bool,
 ) -> Result<ClaimResult, StorageError> {
     let tx = db.transaction()?;
     if meta(&tx, &keys.pause())?.is_some() {
@@ -20,8 +21,8 @@ pub(super) fn claim(
     // One due cutoff for this serialized claim snapshot, never a fill window.
     let cutoff = now();
     let candidate: Option<(String, String, i64)> = tx.query_row(
-        "SELECT j.id,j.space_id,j.attempts FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND s.state IN ('active','candidate') AND s.splitter_version=?1 AND (j.next_attempt_at IS NULL OR j.next_attempt_at<=?2) ORDER BY j.next_attempt_at,j.id LIMIT 1",
-        params![keys.splitter(),cutoff], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        "SELECT j.id,j.space_id,j.attempts FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND s.state IN ('active','candidate') AND s.splitter_version=?1 AND (?3 OR COALESCE(json_extract(j.authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%') AND (j.next_attempt_at IS NULL OR j.next_attempt_at<=?2) ORDER BY j.next_attempt_at,j.id LIMIT 1",
+        params![keys.splitter(),cutoff,auto_history], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
     ).optional()?;
     if let Some((job, space_id, attempts)) = candidate {
         let mut work: Work = json_meta(&tx, &IndexKeys::input(&job))?.ok_or_else(serde_error)?;
@@ -67,6 +68,9 @@ pub(super) fn claim(
                 }
                 let mut work: Work =
                     json_meta(&tx, &IndexKeys::input(&job))?.ok_or_else(serde_error)?;
+                if !auto_history && work.authorization.starts_with("new-finalized") {
+                    continue;
+                }
                 let next = Claimed {
                     requested_dimensions: space.requested_dimensions,
                     job_id: Some(job.clone()),
@@ -100,9 +104,9 @@ pub(super) fn claim(
         tx.commit()?;
         return Ok(ClaimResult::Ready(claims));
     }
-    let mut statement = tx.prepare("SELECT key,value FROM app_meta WHERE key LIKE ?1 AND json_extract(value,'$.state')='pending' ORDER BY key LIMIT 128")?;
+    let mut statement = tx.prepare("SELECT key,value FROM app_meta WHERE key LIKE ?1 AND json_extract(value,'$.state')='pending' AND (?2 OR json_extract(value,'$.authorization') NOT LIKE 'new-finalized%') ORDER BY key LIMIT 128")?;
     let rows = statement
-        .query_map([keys.bootstrap_pattern()], |row| {
+        .query_map(params![keys.bootstrap_pattern(), auto_history], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -244,7 +248,7 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
             CREATE TABLE index_space(id TEXT,splitter_version TEXT,state TEXT);
-            CREATE TABLE embedding_job(id TEXT,space_id TEXT,attempts INTEGER,state TEXT,next_attempt_at TEXT);
+            CREATE TABLE embedding_job(id TEXT,space_id TEXT,attempts INTEGER,state TEXT,next_attempt_at TEXT,authorized_watermark TEXT);
             CREATE TABLE node(id TEXT,payload_revision INTEGER,body_hash TEXT,payload_json TEXT,deleted_reason TEXT);
             INSERT INTO node VALUES('source',1,NULL,'{}',NULL);").unwrap();
         let keys = IndexKeys::new("profile");
@@ -279,7 +283,7 @@ mod tests {
         );
         set_json_meta(&tx, &keys.bootstrap("input"), &work).unwrap();
         tx.commit().unwrap();
-        let ClaimResult::Ready(claims) = claim(&mut db, keys, 4, 64000).unwrap() else {
+        let ClaimResult::Ready(claims) = claim(&mut db, keys, 4, 64000, true).unwrap() else {
             panic!("expected claim")
         };
         let tx = db.transaction().unwrap();

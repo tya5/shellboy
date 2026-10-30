@@ -734,7 +734,7 @@ async fn history_search_ipc_disconnect_closes_embedding_http_and_next_observatio
     .unwrap()
     .unwrap();
     assert!(next.ok, "{:?}", next.error);
-    assert_eq!(next.result.unwrap().as_array().unwrap().len(), 1);
+    assert_eq!(next.result.unwrap()["items"].as_array().unwrap().len(), 1);
     owner
         .db
         .call(|db| {

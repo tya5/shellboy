@@ -47,6 +47,17 @@ pub(super) fn queue_job(
     if inserted > 0 {
         set_json_meta(tx, &IndexKeys::input(&job), work)?;
     }
+    if inserted == 0
+        && !work.authorization.starts_with("new-finalized")
+        && let Some(job) = job_id_for(tx, space, work)?
+        && let Some(mut prior) = json_meta::<Work>(tx, &IndexKeys::input(&job))?
+        && prior.state == "pending"
+        && prior.authorization.starts_with("new-finalized")
+    {
+        prior.authorization.clone_from(&work.authorization);
+        set_json_meta(tx, &IndexKeys::input(&job), &prior)?;
+        tx.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization',?2) WHERE id=?1 AND state='pending'", params![job,work.authorization])?;
+    }
     Ok(inserted > 0)
 }
 pub(super) fn job_id_for(
@@ -135,6 +146,14 @@ impl IndexService {
                             "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
                             params![bootstrap, encode_json(&work)?],
                         )?;
+                        if !work.authorization.starts_with("new-finalized")
+                            && let Some(mut prior) = json_meta::<Work>(&tx, &bootstrap)?
+                            && prior.state == "pending"
+                            && prior.authorization.starts_with("new-finalized")
+                        {
+                            prior.authorization.clone_from(&work.authorization);
+                            set_json_meta(&tx, &bootstrap, &prior)?;
+                        }
                     }
                 }
                 tx.commit()?;

@@ -157,6 +157,7 @@ impl IndexService {
             .call(move |db| read_status(db, args, keys, family))
             .await
             .map_err(db_error)?;
+        status.auto_history = self.config.indexing.auto_history;
         if let Some(reason) = self.storage_stop_reason() {
             status.paused = true;
             status.reason = Some(match status.reason.take() {
@@ -177,8 +178,9 @@ impl IndexService {
     pub(super) async fn next_delay(&self) -> Result<Duration, ApiError> {
         let keys = self.identity_keys();
         let family = self.failure_key().map(str::to_owned);
+        let auto_history = self.config.indexing.auto_history;
         self.database
-            .call(move |db| read_next_delay(db, keys, family))
+            .call(move |db| read_next_delay(db, keys, family, auto_history))
             .await
             .map_err(db_error)
     }
@@ -284,7 +286,12 @@ fn retry_tx(
             if filter.as_ref().is_none_or(|ids| ids.contains(&node))
                 && meta(tx, &IndexKeys::input(&job))?.is_some()
             {
-                tx.execute(embedding_job_sql_2, [job])?;
+                tx.execute(embedding_job_sql_2, [&job])?;
+                if let Some(mut work) = json_meta::<Work>(tx, &IndexKeys::input(&job))? {
+                    work.authorization = "explicit-retry".into();
+                    set_json_meta(tx, &IndexKeys::input(&job), &work)?;
+                    tx.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization','explicit-retry') WHERE id=?1",[job])?;
+                }
             }
         }
         tx.execute(index_space_sql, [space_id])?;
@@ -337,6 +344,7 @@ fn retry_tx(
                     .is_none_or(|ids| ids.contains(&work.witness.node_id))
             {
                 work.state = "pending".into();
+                work.authorization = "explicit-retry".into();
                 work.attempts = 0;
                 work.next_at = None;
                 work.error = None;
@@ -394,6 +402,7 @@ fn read_status(
     let selected = args.space_id.or(meta(db, IndexKeys::ACTIVE_SPACE)?);
     let mut status = IndexStatus {
         space_id: selected.clone(),
+        auto_history: true,
         pending: 0,
         running: 0,
         done: 0,
@@ -512,8 +521,9 @@ fn read_next_delay(
     db: &Connection,
     keys: Vec<String>,
     family: Option<String>,
+    auto_history: bool,
 ) -> Result<Duration, StorageError> {
-    let embedding_job_sql = "SELECT MIN(j.next_attempt_at) FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND j.next_attempt_at IS NOT NULL AND s.state IN ('active','candidate') AND s.splitter_version=?1";
+    let embedding_job_sql = "SELECT MIN(j.next_attempt_at) FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND j.next_attempt_at IS NOT NULL AND s.state IN ('active','candidate') AND s.splitter_version=?1 AND (?2 OR COALESCE(json_extract(j.authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%')";
     if let Some(family) = family
         && meta(db, &IndexKeys::new(&family).pause())?.is_some()
     {
@@ -523,10 +533,11 @@ fn read_next_delay(
         .iter()
         .map(|key| IndexKeys::new(key).splitter())
         .collect();
-    let next: Option<String> =
-        db.query_row(embedding_job_sql, params![splitters.first()], |row| {
-            row.get(0)
-        })?;
+    let next: Option<String> = db.query_row(
+        embedding_job_sql,
+        params![splitters.first(), auto_history],
+        |row| row.get(0),
+    )?;
     let mut earliest = next.and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok());
     for key in keys {
         let mut statement = db.prepare("SELECT value FROM app_meta WHERE key LIKE ?1")?;
@@ -535,6 +546,7 @@ fn read_next_delay(
         })? {
             let work: Work = decode_json(&value?)?;
             if work.state == "pending"
+                && (auto_history || !work.authorization.starts_with("new-finalized"))
                 && let Some(next) = work
                     .next_at
                     .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())

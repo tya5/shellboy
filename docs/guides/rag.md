@@ -148,3 +148,10 @@ rank vote. The best rank contributes once per retrieval method; keyword and
 semantic remain independent methods in hybrid search. If the selected Thread is
 deleted while a query embedding is in flight, the scope reports
 `thread_not_found`; this is not a transient index-change hint to retry.
+
+
+`indexing.auto_history=false` controls automatic conversation indexing only;
+it does not disable standalone source indexing or semantic/hybrid queries.
+History-scoped semantic/hybrid queries still search retained vectors, but report
+`degraded=true` and `scope_status.reason=auto_history_disabled` because newer
+conversation nodes may be absent. Keyword history retrieval is unchanged.

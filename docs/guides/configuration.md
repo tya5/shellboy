@@ -408,7 +408,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `io` | `term_grace_ms=2000`, `drain_timeout_ms=1000`, `self_reply_grace_ms=250`, `shutdown_grace_ms=5000` | Termination grace, pipe drain, self-stop reply, shutdown UI grace |
 | `io` | `output_buffer_bytes=8388608`, `output_batch_bytes=65536`, `output_batch_ms=25` | Raw collection buffer 8MiB, DB batch 64KiB/25ms |
 | `workers` | `attachment=2`, `control_file=1` | Bounded file-worker counts |
-| `indexing` | `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
+| `indexing` | `auto_history=true`, `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
 | `ui` | `max_fps=30`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"` | Rendering, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait |
 | `logging` | `file_bytes=5242880`, `files=3` | Diagnostic logs, 5MiB ×3 |
 
@@ -437,3 +437,20 @@ from the second eligible consecutive failure; false leaves ordinary retries.
 a reduced request. `compact_hint_tokens` is removed and rejected as an unknown
 field; remove it from configuration before restarting. There is no pre-POST
 activation or token estimate. See [failure-driven reduction](recovery-and-storage.md#failure-driven-reduction-50).
+
+
+## Stop only automatic history indexing
+
+Set `[indexing] auto_history = false` (a TOML boolean; default `true`) and restart
+the owner. Keep `[embedding]` to preserve standalone RAG semantic/hybrid search.
+New conversation nodes and finalized shell raw do not authorize automatic
+embeddings; automatic pending work is held, not deleted. Existing vectors stay
+queryable. Already in-flight requests are not undone. Explicit backfill/rebuild,
+retry of prepared failures, and probe can still incur costs. Re-enabling does not
+backfill sources skipped while off: preview and explicitly select them if needed.
+`index status` and `config check` expose `auto_history`. History semantic results
+flag disabled automatic coverage via `degraded` / `scope_status`; keyword reads
+still cover retained original text, including newer unindexed nodes.
+
+`storage collect --category index` collects eligible inactive spaces only; turning automatic indexing off does not free active-index bytes.
+There is no CLI to erase all active vectors while retaining history; do not delete SQLite tables or the database manually.

@@ -241,7 +241,10 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         });
         std::fs::write(
             &path,
-            configuration(&format!("http://{address}/v1"), key_enabled),
+            format!(
+                "{}\n[indexing]\nauto_history=false\n",
+                configuration(&format!("http://{address}/v1"), key_enabled)
+            ),
         )
         .unwrap();
         let home = root.path().to_path_buf();
@@ -256,6 +259,9 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         .await
         .unwrap();
         assert_eq!(ok, status == 200 && body.starts_with('{'), "{text}");
+        if ok {
+            assert_eq!(value["result"]["auto_history"], false);
+        }
         if ok && !advertised {
             assert_eq!(value["result"]["model_advertised"], false);
             assert_eq!(value["result"]["warnings"].as_array().unwrap().len(), 1);
@@ -301,6 +307,14 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
 #[test]
 fn setup_report_is_pure_and_minimal_template_matches_bundled_defaults() {
     use shellboy::{config::Config, config_setup};
+    assert!(Config::default().indexing.auto_history);
+    assert!(
+        !Config::parse("[indexing]\nauto_history=false")
+            .unwrap()
+            .indexing
+            .auto_history
+    );
+    assert!(Config::parse("[indexing]\nauto_history='off'").is_err());
     let config = Config::parse(MINIMAL).unwrap();
     let full = Config::parse(TEMPLATE).unwrap();
     assert_eq!(config.default_connection, full.default_connection);

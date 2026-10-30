@@ -262,9 +262,7 @@ impl Control {
                 "Cannot encode collection result",
             ),
             Command::HistorySearch(args) => encode_result(
-                self.index
-                    .search_filtered_cancellable(&args, disconnected)
-                    .await?,
+                self.index.search_report(&args, disconnected).await?,
                 ErrorCode::InvalidState,
                 "Cannot encode search result",
             ),

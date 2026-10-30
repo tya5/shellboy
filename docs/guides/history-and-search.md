@@ -120,7 +120,7 @@ Changing connection or model advances the outgoing reasoning epoch and excludes 
 
 ## Search requires a separate index
 
-After configuring an embedding connection/model, newly finalized conversation content is registered for automatic indexing. Startup or configuration changes alone do not automatically backfill all history. Search results are not automatically injected into every model input either.
+After configuring an embedding connection/model, newly finalized conversation content is registered for automatic indexing when `indexing.auto_history=true` (default). Startup or configuration changes alone do not automatically backfill all history. Search results are not automatically injected into every model input either.
 
 ```text
 /search error handling for the current task
@@ -270,3 +270,18 @@ all safe context outside protected work, without a model call or node IDs.
 It does not retry or resume the Run. Inspect the saved edit outcome, then choose
 `/retry` explicitly (another model request may be charged). `/restore` can bring
 omitted text back. `/compact` without flags still requests a model summary.
+
+
+## Automatic history indexing policy
+
+`indexing.auto_history=false` holds automatic ingestion without removing existing
+vectors or disabling standalone knowledge RAG. Restart the owner after changing
+it. Explicit `index backfill` / `rebuild` / `probe` remain available and may cost
+money. `index status` and `config check` report `auto_history`.
+`history search` returns an object with `items`, `auto_history`, `degraded` and
+`scope_status`, not a bare hit array. With automatic ingestion off, it warns that
+newer nodes may be absent and searches only retained indexed sources, even if
+`items` is empty. This is not an exact missing-node count. Keyword search remains
+available for retained originals; existing coverage is never a completeness claim.
+For storage cleanup, `storage collect --category index` removes eligible inactive
+spaces; no existing CLI removes the active index alone while keeping all history.

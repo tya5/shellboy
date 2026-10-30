@@ -164,7 +164,9 @@ impl Fixture {
         config.embedding.connection = Some("embed".into());
         config.embedding.model = Some("embedding-fixture".into());
         let temp = tempfile::tempdir().unwrap();
-        let db = DbWorker::open(temp.path().join("db.sqlite")).await.unwrap();
+        let db = DbWorker::open(temp.path().join("shellboy.db"))
+            .await
+            .unwrap();
         let config = Arc::new(config);
         let service = IndexService::new(db.clone(), config.clone());
         Self {
@@ -3025,7 +3027,7 @@ async fn old_integer_reset_migrates_before_real_workers_and_exhausted_failures_t
         f.node(&id, "dog").await;
         f.service.enqueue_new(&[id]).await.unwrap();
     }
-    let path = f._temp.path().join("db.sqlite");
+    let path = f._temp.path().join("shellboy.db");
     f.db.shutdown().await.unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10; INSERT OR REPLACE INTO app_meta(key,value) SELECT 'index.common_failures.'||value,'0' FROM app_meta WHERE key GLOB 'index.query_profile.*';").unwrap();
@@ -3154,3 +3156,113 @@ async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_wo
 
 #[path = "index/pause.rs"]
 mod pause_regressions;
+
+#[tokio::test]
+async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag() {
+    use shellboy::rag::{IndexMode, RagCommand, RagOptions, SearchMode, SourceCommand};
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        let f = Fixture::new(Config::default()).await;
+        f.node("old", "cat historical evidence").await;
+        f.service.enqueue_new(&["old".into()]).await.unwrap();
+        f.drain().await;
+        assert_eq!(f.proxy.count(), 1);
+        f.node("held", "cat queued before restart").await;
+        f.service.enqueue_new(&["held".into()]).await.unwrap();
+        let mut config = (*f.config).clone();
+        config.indexing.auto_history = false;
+        let off = IndexService::new(f.db.clone(), Arc::new(config));
+        f.node("new", "cat new unindexed evidence").await;
+        let service = off.clone();
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            service.authorize_new_tx(&tx, &["new".into()]).unwrap();
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(off.enqueue_new(&["new".into()]).await.unwrap().sources, 0);
+        assert_eq!(off.enqueue_tool_raw("new").await.unwrap().sources, 0);
+        assert!(!off.process_one(CancellationToken::new()).await.unwrap());
+        assert_eq!(f.proxy.count(), 1, "off must not embed new or previously pending automatic inputs");
+        let status = off.status(args()).await.unwrap();
+        assert!(!status.auto_history);
+        assert_eq!(status.done, 1);
+        assert_eq!(status.pending, 1);
+        let report = off.search_report(&shellboy::protocol::HistorySearchArgs { query:"cat".into(), ..Default::default() }, CancellationToken::new()).await.unwrap();
+        assert_eq!(report["auto_history"], false);
+        assert_eq!(report["degraded"], true);
+        assert_eq!(report["scope_status"][0]["reason"], "auto_history_disabled");
+        assert_eq!(report["items"].as_array().unwrap().len(), 1);
+        assert_eq!(f.proxy.count(), 2, "existing vectors remain queryable");
+        let mut selected = args(); selected.source_ids=vec!["held".into(),"new".into()];
+        off.backfill(selected).await.unwrap();
+        while off.process_one(CancellationToken::new()).await.unwrap() {}
+        assert_eq!(off.status(args()).await.unwrap().done, 3);
+        assert_eq!(f.proxy.count(), 4, "explicit backfill reauthorizes held work and indexes selected new nodes");
+        off.probe(shellboy::protocol::IndexProbeArgs::default()).await.unwrap();
+        assert_eq!(f.proxy.count(), 5);
+
+        let root = f._temp.path();
+        let cfg = root.join("config.toml");
+        std::fs::write(&cfg, format!("[connections.embed]\nbase_url='{}'\n[embedding]\nconnection='embed'\nmodel='embedding-fixture'\n[indexing]\nauto_history=false\n", f.proxy.url)).unwrap();
+        let call = |command| shellboy::rag::execute(RagOptions { db:Some(root.join("knowledge.db")), command },Some(cfg.clone()),Some(root.to_path_buf()),root);
+        assert_eq!(call(RagCommand::Init).await["ok"], true);
+        std::fs::write(root.join("notes.md"), "cat standalone knowledge").unwrap();
+        assert_eq!(call(RagCommand::Source {command:SourceCommand::Add {path:root.join("notes.md"),name:"notes".into(),exclude:vec![],clear_excludes:false}}).await["ok"], true);
+        let indexed = call(RagCommand::Index {source:Some("notes".into()),dry_run:false,mode:IndexMode::Semantic}).await;
+        assert_eq!(indexed["ok"], true, "{indexed}");
+        let result = call(RagCommand::Search {query:"cat".into(),scope:vec!["source:notes".into()],mode:SearchMode::Semantic,limit:5}).await;
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["result"]["degraded"], false);
+        assert!(!result["result"]["items"].as_array().unwrap().is_empty());
+        let history = call(RagCommand::Search {query:"cat".into(),scope:vec!["history".into()],mode:SearchMode::Hybrid,limit:5}).await;
+        assert_eq!(history["ok"], true,"{history}");
+        assert_eq!(history["result"]["degraded"], true);
+        assert_eq!(history["result"]["scope_status"][0]["reason"], "auto_history_disabled");
+        assert_eq!(f.proxy.count(), 8, "standalone indexing, standalone search and history search each send one explicit request");
+        let old_space = off.status(args()).await.unwrap().space_id;
+        let mut rebuild = args(); rebuild.scope=Some(IndexScope::All);
+        off.rebuild(rebuild).await.unwrap();
+        while off.process_one(CancellationToken::new()).await.unwrap() {}
+        let rebuilt = off.status(args()).await.unwrap();
+        assert_ne!(rebuilt.space_id, old_space);
+        assert!(rebuilt.spaces_total >= 2, "rebuild must preserve old vectors");
+        f.close().await;
+    }).await.expect("automatic-history policy watchdog");
+}
+
+#[tokio::test]
+async fn auto_history_off_holds_bootstrap_until_explicit_backfill() {
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        let f = Fixture::new(Config::default()).await;
+        f.node("held", "cat bootstrap").await;
+        f.service.enqueue_new(&["held".into()]).await.unwrap();
+        let mut config = (*f.config).clone();
+        config.indexing.auto_history = false;
+        let off = IndexService::new(f.db.clone(), Arc::new(config));
+        assert!(!off.process_one(CancellationToken::new()).await.unwrap());
+        assert_eq!(f.proxy.count(), 0);
+        assert_eq!(off.status(args()).await.unwrap().pending, 1);
+        let empty = off
+            .search_report(
+                &shellboy::protocol::HistorySearchArgs {
+                    query: "cat".into(),
+                    ..Default::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(empty["items"].as_array().unwrap().is_empty());
+        assert_eq!(empty["degraded"], true);
+        assert_eq!(f.proxy.count(), 0);
+        let mut selected = args();
+        selected.source_ids = vec!["held".into()];
+        off.backfill(selected).await.unwrap();
+        while off.process_one(CancellationToken::new()).await.unwrap() {}
+        assert_eq!(f.proxy.count(), 1);
+        assert_eq!(off.status(args()).await.unwrap().done, 1);
+        f.close().await;
+    })
+    .await
+    .expect("held bootstrap watchdog");
+}

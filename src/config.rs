@@ -358,7 +358,7 @@ section!(positive "workers", Workers {
     attachment: usize = 2,
     control_file: usize = 1
 });
-section!(Indexing { concurrency: usize = 1, split_chars: usize = 2_000, retries: usize = 2, common_failure_pause_count: usize = 3, retry_delays_ms: Vec<u64> = vec![1_000, 4_000] });
+section!(Indexing { auto_history: bool = true, concurrency: usize = 1, split_chars: usize = 2_000, retries: usize = 2, common_failure_pause_count: usize = 3, retry_delays_ms: Vec<u64> = vec![1_000, 4_000] });
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CopyBackend {

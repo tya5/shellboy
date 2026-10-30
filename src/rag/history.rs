@@ -295,7 +295,7 @@ pub(super) async fn semantic(
     context: &search::Context,
     query: &str,
     thread: Option<&str>,
-) -> Result<Vec<search::Hit>> {
+) -> Result<(Vec<search::Hit>, bool)> {
     let descriptor = {
         let db = open_connection(&context.history)?;
         validate_thread(&db, thread)?;
@@ -444,7 +444,7 @@ pub(super) async fn semantic(
             hits.push(hit);
         }
     }
-    Ok(hits)
+    Ok((hits, loaded.config.indexing.auto_history))
 }
 pub(super) fn get(path: &Path, reference: &Reference) -> Result<(String, Value)> {
     let store_id = identity(path)?;

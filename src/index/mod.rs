@@ -296,6 +296,9 @@ impl IndexService {
         tx: &Transaction<'_>,
         node_ids: &[String],
     ) -> Result<(), ApiError> {
+        if !self.config.indexing.auto_history {
+            return Ok(());
+        }
         let Some(key) = &self.profile_key else {
             return Ok(());
         };
@@ -319,6 +322,9 @@ impl IndexService {
         self.notify.notify_one();
     }
     async fn drain_authorization(&self, key: &str) -> Result<bool, ApiError> {
+        if !self.config.indexing.auto_history {
+            return Ok(false);
+        }
         let prefix = IndexKeys::new(key).auto_pattern();
         let admission = self
             .database
@@ -385,7 +391,7 @@ impl IndexService {
         Ok(true)
     }
     pub async fn enqueue_new(&self, node_ids: &[String]) -> Result<FeePreview, ApiError> {
-        if self.profile_key.is_none() {
+        if self.profile_key.is_none() || !self.config.indexing.auto_history {
             return Ok(FeePreview::default());
         }
         self.enqueue(node_ids, "active", "new-finalized").await
@@ -729,6 +735,16 @@ impl IndexService {
                     }
                 }
             }
+            if !self.config.indexing.auto_history && !authorization.starts_with("new-finalized") {
+                let record = IndexKeys::new(&key).auto(node);
+                self.database
+                    .call(move |db| {
+                        db.execute("DELETE FROM app_meta WHERE key=?1", [record])?;
+                        Ok(())
+                    })
+                    .await
+                    .map_err(db_error)?;
+            }
         }
         if barrier_required {
             let key = key.clone();
@@ -857,9 +873,18 @@ impl IndexService {
         let key_copy = key.clone();
         let max_inputs = self.config.embedding.batch_max_inputs;
         let max_chars = self.config.embedding.batch_max_chars;
+        let auto_history = self.config.indexing.auto_history;
         let claimed = self
             .database
-            .call(move |db| claim(db, IndexKeys::new(&key_copy), max_inputs, max_chars))
+            .call(move |db| {
+                claim(
+                    db,
+                    IndexKeys::new(&key_copy),
+                    max_inputs,
+                    max_chars,
+                    auto_history,
+                )
+            })
             .await
             .map_err(db_error)?;
         let claims = match claimed {

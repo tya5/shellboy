@@ -259,3 +259,19 @@ wire names as search error details, rather than Rust Debug variant names.
 particular public status now includes bounded space/probe facts, saved pause
 time is historical, and explicit request dimensions belong to a group/space.
 Batch defaults remain singleton; no deferred provider Batch API is added.
+
+## Independent automatic-history switch (#71)
+
+`[indexing] auto_history = true` is the default. False prevents automatic node
+and full-raw authorization/admission, and holds pre-existing automatic pending
+inputs without deleting vectors, jobs or source data. Owner configuration is
+immutable until restart; already in-flight requests are not unbilled or undone.
+Explicit backfill/rebuild can reauthorize matching held inputs using their
+existing authorization fields; no new queue/table/worker is added. Existing
+embedding settings, explicit probe and standalone RAG indexing/search remain
+independent. Re-enabling does not backfill sources skipped while disabled.
+Index status and config check report auto_history. History search returns an
+object with items, auto_history, degraded and scope_status; when disabled it
+warns that only already-indexed sources are searched and newer sources may be
+missing, even for empty results. History-scoped semantic/hybrid RAG similarly
+warns via its existing degraded/scope_status fields. Keyword search is unchanged.

@@ -359,3 +359,10 @@ revision and UTF-8 cursor binding still apply. Missing final messages are explic
 unavailability, not fabricated answers. No provider/API execution format or
 stored payload changes. The exec client uses this projection for local Schema
 validation rather than parsing reasoning as an answer.
+
+## History-index policy visibility (#71)
+
+HistorySearch now returns `{items, auto_history, degraded, scope_status}` instead
+of a bare hit array. Disabled automatic ingestion is an explicit partial-coverage
+warning, not a claim of measured missing counts. Existing IndexHit provenance and
+span semantics remain unchanged. IndexStatus adds the required auto_history bool.
