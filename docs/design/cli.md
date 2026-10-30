@@ -86,3 +86,20 @@ fingerprints; get is read-only and receipt-free. Set accepts nonblank text of
 at most 8192 UTF-8 bytes, checked in both CLI and wire validation. Its stdin
 reader consumes at most 8193 bytes and rejects overflow without truncation.
 See [Revisit](revisit.md) for ownership, lifecycle and replacement semantics.
+
+
+## Explicit index operations (#42/#55)
+
+`shellboy index preview` without a selection previews failed authorized work
+for global `index retry`. Backfill and rebuild still require an explicit source
+selection. `shellboy index rebuild --scope all --dimensions N` creates an
+explicit-dimension candidate and validates its first real input once before
+continuing. It never falls back to a different N and preserves the old active
+space on failure. Omitting N preserves the matching current active request mode.
+
+`shellboy index probe [--dimensions N]` sends one fixed short input exactly once
+and saves its observation. Both operations can incur API charges; a probe is
+not permission for a subsequent rebuild. N must be in 1..8192; endpoint support
+and retrieval quality are not inferred from a model alias. Status reports saved
+space dimensions, segment counts, float32 payload bytes and bounded probe facts.
+See [index operations](index-operations.md).

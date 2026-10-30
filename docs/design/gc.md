@@ -68,3 +68,17 @@ sweepの既存node batch内でtombstone確定と同transactionに当該nodeの�
 ## 履歴収集の段分離（R2-8）
 
 history_stepの既存単一write transaction内でroots/provenance/sweepをprivate関数へ分け、破壊的tombstone手順を一箇所にまとめる。TEMP marks/session、BATCH、有限horizon、root revision変更時とlate pinの到達性再検証、cursor進捗、全space vector削除→node tombstone→所有証拠解放→output_item→incomplete attemptの順序は不変。段分離はGC再開状態やworkerを増やさず、Stageの保存済みsnake_case bytesを維持する。
+
+
+## Explicit inactive index-space collection (#55)
+
+`storage collect --category index` (also `all`) collects inactive derived spaces
+in existing DB-worker transactions of at most 32 spaces, yielding between
+batches. Current active pointers, current rebuild candidate pointers and any
+running embedding job protect a space even if its state says inactive. Validate
+generated vector-table identifiers before DDL. Drop vectors and associated
+chunks/jobs/input/preview/query/request-mode metadata in the same transaction;
+rollback retains the whole batch. Report `inactive_index_spaces_collected`
+separately from reclaimed source vectors. This does not delete conversation
+originals, promise physical SQLite/WAL shrink or automatically collect a space
+when switching. See [index operations](index-operations.md).

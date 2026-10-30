@@ -252,3 +252,10 @@ persistent state or recovery engine.
 
 Status stop reasons render both error codes using the same snake_case serde
 wire names as search error details, rather than Rust Debug variant names.
+
+## Current index operation extensions (#42/#43/#55)
+
+[Index operations](index-operations.md) extends the current contract. In
+particular public status now includes bounded space/probe facts, saved pause
+time is historical, and explicit request dimensions belong to a group/space.
+Batch defaults remain singleton; no deferred provider Batch API is added.

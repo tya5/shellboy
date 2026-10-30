@@ -19,3 +19,6 @@ handling. A design document does not establish successful verification. Check th
 
 - [Measured CI test performance](ci-test-performance.md): integration layout,
   coverage inventories, native measurements and watchdog boundaries (#46).
+
+- [Index operations](index-operations.md): actionable pause history, deterministic
+  batches and explicit dimensions/probe (#42/#43/#55).
