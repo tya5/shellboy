@@ -2,7 +2,65 @@
 
 [Guide index](README.md) · [User Guide](user-guide.md) · [CLI reference](cli-reference.md)
 
-Configuration is TOML read when the owner (`shellboy` without a subcommand) starts. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner.
+Configuration is TOML read when the owner (`shellboy` without a subcommand) starts, or when `config check` runs. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner.
+
+## First setup without an owner
+
+```sh
+shellboy config init
+# Edit the config_path printed in the JSON result; choose your API root and model.
+# Set the environment variable named by api_key_env in this terminal.
+shellboy config check
+shellboy
+```
+
+These commands also work in PowerShell. `init` creates the complete commented
+`config.example.toml` template, without keys, and never overwrites an existing
+file or symlink. Both commands work without a running owner. They do not create
+an owner database. Use the same `--config PATH` for init, check and startup when
+choosing a custom location. Init leaves endpoint/model placeholders for you to
+edit. Do not paste credential values into TOML: keep `api_key_env` as a variable
+**name**, and set its value in the shell that will launch Shellboy. See the
+credential examples later in this guide. Restart an existing owner after edits.
+
+`config check` reads the same strict TOML and reports the resolved paths, missing
+connection/model settings and credential-variable presence (never its value).
+It sends only a bounded **GET model catalog** request, like `model list`, and
+checks whether `default_model` is advertised. It sends no conversation or
+embedding request. Success is not proof that a provider supports Responses or
+will accept a billed request. A model absent from the catalog may be a supported
+proxy alias; confirm that separately rather than guessing. `config check` is an
+explicit network operation; the startup welcome performs no network probe.
+
+`base_url` must be the **API root**, for example `https://proxy.example/v1`, not
+`https://proxy.example/v1/responses`. Shellboy appends `/models` for catalog checks
+and `/responses` for conversations. A 404 check explains this pitfall without
+rewriting your URL; also check your proxy's routing. Unknown fields such as the
+removed `compact_hint_tokens` are errors, not ignored options.
+
+Precedence: config `--config` > OS default; owner/check data directory
+`--data-dir` > `SHELLBOY_DATA_DIR` > TOML `data_dir` > OS default.
+Owner-RPC CLI commands still use their separate data-directory rules below.
+The empty-conversation welcome shows missing setup facts, the actual selected
+configuration path and a minimal example. A fully configured local setup shows
+no setup notice; that does not establish network reachability.
+
+### A keyless local Responses-compatible endpoint
+
+If a local server implements **both** the model catalog and Responses API and
+requires no authentication, omit `api_key_env` (do not set it to an empty string):
+
+```toml
+default_connection = "local"
+default_model = "YOUR_LOCAL_MODEL_ID"
+[connections.local]
+base_url = "http://127.0.0.1:1234/v1"
+```
+
+Check the actual server port and advertised model ID. Keyless GET behavior is
+verified with a loopback mock, not a particular Ollama/LM Studio release; their
+Responses compatibility is not established here. Do not weaken authentication
+on a remotely exposed endpoint to copy this local-only example.
 
 ## Starting on each platform
 

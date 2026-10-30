@@ -143,16 +143,17 @@ impl DataOwner {
     ) -> Result<Self, ApiError> {
         progress(StartupStage::Configuration);
         let loaded = tokio::task::spawn_blocking(move || {
-            Config::load_with_overrides(
-                config_path.as_deref(),
-                data_dir.as_deref(),
-                &cwd,
-                &PathEnvironment::current(),
-            )
+            let env = PathEnvironment::current();
+            let selected = crate::config_setup::selected_path(config_path.as_deref(), &cwd, &env)?;
+            Config::load_with_overrides(config_path.as_deref(), data_dir.as_deref(), &cwd, &env)
+                .map_err(|error| {
+                    ApiError::new(ErrorCode::ConfigInvalid, error.to_string())
+                        .hint(crate::config_setup::NEXT)
+                        .details(serde_json::json!({"config_path":selected}))
+                })
         })
         .await
-        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Configuration worker failed"))?
-        .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Configuration worker failed"))??;
         progress(StartupStage::OwnerLock);
         let directory = loaded.data_dir.clone();
         let lock = tokio::task::spawn_blocking(move || OwnerLock::acquire(&directory))

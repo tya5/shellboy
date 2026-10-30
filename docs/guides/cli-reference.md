@@ -37,7 +37,7 @@ shellboy <group> <operation> --help
 shellboy --version
 ```
 
-Global flags may also follow subcommands. `--data-dir` selects owner storage, not work cwd; `--config` selects TUI startup settings or standalone RAG embedding connection settings. CLI connection resolution is `--data-dir` > `SHELLBOY_DATA_DIR` > OS default; it does not read TOML. See [OS paths](configuration.md#locations-and-precedence).
+Global flags may also follow subcommands. `--data-dir` selects owner storage, not work cwd; `--config` selects TUI startup settings, standalone config init/check, or standalone RAG embedding connection settings. CLI connection resolution is `--data-dir` > `SHELLBOY_DATA_DIR` > OS default; it does not read TOML. See [OS paths](configuration.md#locations-and-precedence).
 
 The CLI automatically uses `SHELLBOY_*` context injected into the model shell. Do not display, copy, or manually generate origin tokens. Choosing another data directory does not inherit this context. Even when `--thread` is optional, external terminals have no current Thread: specify it. Omission resolves to the authenticated caller's Thread, never silently to the TUI's selected Thread.
 
@@ -80,6 +80,18 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
+
+### Standalone configuration (2 commands)
+
+| Command | Behavior |
+|---|---|
+| `config init` | Create the bundled commented template at `--config PATH` or the OS default; existing files/symlinks are never overwritten. `result.created=false` means an existing path was left intact |
+| `config check` | Strictly read that file, resolve defaults, check key-variable presence and GET the model catalog once. No owner or conversation/embedding request. A missing/unadvertised setting, HTTP/network error or invalid TOML exits 1 with path/facts in `error.details` |
+
+Both commands return ordinary JSON and reject `--operation-id`: they are not
+owner RPCs and create no receipt or owner database. Init is an explicit file
+write; check is a read plus a bounded catalog network request. Keep keys out of
+TOML. See [first setup](configuration.md#first-setup-without-an-owner).
 
 ### Saved usage (1 operation)
 

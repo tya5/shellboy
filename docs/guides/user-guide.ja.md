@@ -31,6 +31,24 @@ IDやreceiptは調査の詳細情報です。普段は状態と理由を読み�
 
 ## 1. 作業フォルダーで起動する
 
+初めて使うときは、会話の前に次の順で設定します（PowerShellでも同じです）。
+
+```sh
+shellboy config init
+# 表示されたconfig_pathを編集: API root、モデル、api_key_envの変数名を指定。
+# keyの値はこの端末の環境変数に設定し、TOMLには書かない。
+shellboy config check
+shellboy
+```
+
+既存の設定ファイルは上書きしません。独自の場所なら全操作に同じ`--config PATH`を
+指定してください。`check`はownerなしで使え、モデル一覧だけを要求し、会話の要求は
+送りません。`base_url`は`https://proxy.example/v1`のようなAPI rootまでで、
+`.../v1/responses`までは書きません。[初回設定](configuration.md#first-setup-without-an-owner)
+にOS別の場所、資格情報とkeyなしのローカル接続の例があります。起動済みownerには
+設定が自動反映されないため、設定やkeyの環境変数を直したらownerを起動し直します。
+
+
 作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、子Run、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.md#slash-commands)と[CLIの作業状態](cli-reference.md#common-syntax-and-connection)を参照してください。
 
 まず[環境別の起動方法](configuration.md#starting-on-each-platform)で、端末・OS版binary・モデル用shellの組合せを選びます。[設定・導入](configuration.md) に従ってビルド・インストールと接続設定を行った後、ターミナルで次を実行します。例はBash/zsh用です。

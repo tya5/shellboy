@@ -233,6 +233,19 @@ pub(super) fn welcome(
         style::{Modifier, Style},
         text::{Line, Span},
     };
+    let setup = crate::config_setup::report(
+        config,
+        view.connection.as_deref(),
+        view.model.as_deref(),
+        crate::config_setup::credential_set,
+    );
+    if !setup.missing.is_empty() {
+        return setup
+            .japanese(true)
+            .lines()
+            .map(|line| Line::from(crate::presentation::sanitize_plain(line, 0).0))
+            .collect();
+    }
     let cwd = if view.cwd.as_os_str().is_empty() {
         "取得待ち".to_owned()
     } else {
@@ -345,7 +358,7 @@ mod tests {
     }
     #[test]
     fn empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents() {
-        let mut config = Config::default();
+        let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
         config.ui.send_key = "Ctrl+Enter".into();
         config.ui.newline_keys = vec!["Enter".into()];
         let cwd = PathBuf::from("/synthetic/missing-workspace");
@@ -362,6 +375,54 @@ mod tests {
             assert!(shown.contains(expected), "{expected}: {shown}");
         }
         assert!(!shown.contains("AGENTS.md: あり") && !shown.contains("AGENTS.md: なし"));
+    }
+    #[test]
+    fn first_run_welcome_shows_source_missing_facts_template_and_next_steps() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("chosen.toml");
+        let mut config = Config::default();
+        config.source = Some(crate::config::ConfigSource {
+            path: path.clone(),
+            present: false,
+        });
+        let mut ui = UiState::new(&config, root.path().into());
+        let shown = frame_text(&mut ui, 150, 32);
+        for expected in [
+            "接続が未設定",
+            "モデルが未設定",
+            path.to_str().unwrap(),
+            "default_connection",
+            "base_url",
+            "api_key_env",
+            "config init",
+            "config check",
+            "shellboy/configuration",
+        ] {
+            assert!(shown.contains(expected), "{expected}: {shown}");
+        }
+        ui.active_view_mut().draft.text = "hello".into();
+        ui.send_current(None);
+        let (&revision, pending) = ui.view().pending.iter().next().unwrap();
+        let draft_id = pending.snapshot.draft_id.clone();
+        ui.apply(UiUpdate::Receipt {
+            draft_id,
+            revision,
+            thread_id: None,
+            status: crate::ui::ReceiptStatus::Failed,
+            message: Some("configuration failure".into()),
+        });
+        let rejected = frame_text(&mut ui, 150, 32);
+        for expected in [
+            path.to_str().unwrap(),
+            "config init",
+            "config check",
+            "接続が未設定",
+        ] {
+            assert!(rejected.contains(expected), "{expected}: {rejected}");
+        }
+        let configured = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        let mut ui = UiState::new(&configured, root.path().into());
+        assert!(!frame_text(&mut ui, 150, 32).contains("設定が必要"));
     }
     #[test]
     fn selection_fixed_header_is_visible_and_exit_preserves_the_source_anchor() {

@@ -62,3 +62,8 @@ printf '%s\n' \
     'Before first startup: stop the owner and back up the data directory.' \
     'First startup may upgrade databases; older versions cannot open them.' \
     "Read upgrade details: https://github.com/tya5/shellboy/releases/tag/$version"
+
+printf '%s\n' \
+    'First setup: shellboy config init -> edit the reported config path and set api_key_env -> shellboy config check -> shellboy' \
+    'Keep API key values in the environment, not the config file. Use the same --config path for every step.' \
+    'Guide: shellboy docs get --id shellboy/configuration'

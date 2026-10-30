@@ -1203,15 +1203,29 @@ impl Store {
             .or_else(|| inherited.as_ref().map(|p| p.2.clone()))
             .or_else(|| self.config.default_connection.clone())
             .ok_or_else(|| {
-                error(
-                    ErrorCode::ConfigInvalid,
-                    "set a default connection or choose --connection",
+                crate::config_setup::enrich(
+                    &self.config,
+                    None,
+                    args.model
+                        .as_deref()
+                        .or(self.config.default_model.as_deref()),
+                    error(
+                        ErrorCode::ConfigInvalid,
+                        "set a default connection or choose --connection",
+                    ),
                 )
             })?;
         let connection = self.config.connections.get(&profile).ok_or_else(|| {
-            error(
-                ErrorCode::ConfigInvalid,
-                "selected connection is not configured",
+            crate::config_setup::enrich(
+                &self.config,
+                Some(&profile),
+                args.model
+                    .as_deref()
+                    .or(self.config.default_model.as_deref()),
+                error(
+                    ErrorCode::ConfigInvalid,
+                    "selected connection is not configured",
+                ),
             )
         })?;
         let model = args
@@ -1220,9 +1234,14 @@ impl Store {
             .or_else(|| inherited.as_ref().map(|p| p.3.clone()))
             .or_else(|| self.config.default_model.clone())
             .ok_or_else(|| {
-                error(
-                    ErrorCode::ConfigInvalid,
-                    "set a default model or choose --model",
+                crate::config_setup::enrich(
+                    &self.config,
+                    Some(&profile),
+                    None,
+                    error(
+                        ErrorCode::ConfigInvalid,
+                        "set a default model or choose --model",
+                    ),
                 )
             })?;
         let effort = args

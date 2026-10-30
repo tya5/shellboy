@@ -2721,7 +2721,7 @@ async fn run_with_delivery(
                                 revision,
                                 thread_id: None,
                                 status: ReceiptStatus::Failed,
-                                message: Some(error.to_string()),
+                                message: Some(crate::config_setup::tui_error(&error)),
                             },
                         )
                         .await;

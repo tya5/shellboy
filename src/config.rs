@@ -36,6 +36,9 @@ fn invalid(key: impl Into<String>, message: impl Into<String>) -> ConfigError {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Startup-only source facts; never accepted from TOML or persisted.
+    #[serde(skip)]
+    pub source: Option<ConfigSource>,
     pub data_dir: Option<PathBuf>,
     pub default_connection: Option<String>,
     pub default_model: Option<String>,
@@ -194,10 +197,10 @@ fn api_root(value: &str) -> Result<Url, ConfigError> {
         .rsplit('/')
         .next()
         .unwrap_or("");
-    if matches!(final_segment, "responses" | "embeddings") {
+    if matches!(final_segment, "responses" | "embeddings" | "models") {
         return Err(invalid(
             "base_url",
-            "provide the API root; remove /responses or /embeddings",
+            "provide the API root, e.g. https://proxy.example/v1; remove /responses, /embeddings or /models (not https://proxy.example/v1/responses)",
         ));
     }
     Ok(url)
@@ -391,10 +394,7 @@ impl Config {
         if !startup_cwd.is_absolute() {
             return Err(invalid("startup_cwd", "must be absolute"));
         }
-        let path = match config_path {
-            Some(path) => absolute(path, startup_cwd),
-            None => env.default_config_path()?,
-        };
+        let path = resolve_config_path(config_path, startup_cwd, env)?;
         let (mut config, actual_path) = match std::fs::read_to_string(&path) {
             Ok(source) => (Self::parse(&source)?, Some(path.clone())),
             Err(error) if config_path.is_none() && error.kind() == std::io::ErrorKind::NotFound => {
@@ -414,6 +414,10 @@ impl Config {
             parent,
         )?;
         config.data_dir = Some(data_dir.clone());
+        config.source = Some(ConfigSource {
+            path,
+            present: actual_path.is_some(),
+        });
         Ok(LoadedConfig {
             config,
             config_path: actual_path,
@@ -507,6 +511,12 @@ fn valid_key(key: &str) -> bool {
             .strip_prefix('F')
             .and_then(|v| v.parse::<u8>().ok())
             .is_some_and(|n| (1..=24).contains(&n))
+}
+
+#[derive(Clone, Debug)]
+pub struct ConfigSource {
+    pub path: PathBuf,
+    pub present: bool,
 }
 
 #[derive(Debug)]
@@ -614,6 +624,20 @@ fn absolute(path: &Path, base: &Path) -> PathBuf {
         path.to_owned()
     } else {
         base.join(path)
+    }
+}
+/// Resolve the selected file even when it has not been created yet.
+pub fn resolve_config_path(
+    path: Option<&Path>,
+    cwd: &Path,
+    env: &PathEnvironment,
+) -> Result<PathBuf, ConfigError> {
+    if !cwd.is_absolute() {
+        return Err(invalid("startup_cwd", "must be absolute"));
+    }
+    match path {
+        Some(path) => Ok(absolute(path, cwd)),
+        None => env.default_config_path(),
     }
 }
 /// Owner precedence: CLI > SHELLBOY_DATA_DIR > TOML (relative to config) > OS.

@@ -122,3 +122,14 @@ envelope. It never means all messages arriving before execution. See the
 [pending-input contract](pending-messages.md) and protocol for authority/replay.
 No CLI Turn-interrupt option is introduced; TUI Esc and full Run stop remain
 distinct operations.
+
+## Standalone configuration commands (#69)
+
+`config init` and `config check` are dispatched before owner RPC conversion and
+reject `--operation-id`, like other standalone command families. Init uses
+exclusive file creation of the bundled full template and returns `created=false`
+without changing an existing path. Check uses strict loading, returns structured
+path/missing-credential-name facts, and only GETs the existing bounded model
+catalog. It never starts an owner, opens a conversation database or calls
+Responses/embeddings. Native subprocess tests isolate HOME/APPDATA/XDG paths and
+exercise only loopback mocks. See [configuration](config.md#first-run-setup-69).

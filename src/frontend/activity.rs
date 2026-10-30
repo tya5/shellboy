@@ -147,7 +147,7 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::stora
             let error = serde_json::from_str::<ApiError>(&reason).ok();
             let mut message = error
                 .as_ref()
-                .map(|error| error.message.clone())
+                .map(crate::config_setup::tui_error)
                 .unwrap_or_else(|| "保存された復旧理由を詳細で確認してください".into());
             let mut stage = "処理（段階の記録なし）".to_owned();
             if let Some(SavedAttempt {
