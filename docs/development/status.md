@@ -1,10 +1,11 @@
 # Development status
 
-## Index integration with main `16fe4aa`: combined local check pending
+## Index integration with main `16fe4aa`: local check passed; manual native CI next
 
-The index branch is merging canonical main `16fe4aa`. Its resulting combined
-local standard check is pending; previous checks do not establish this tree's
-success. After that local gate, manual index-branch CI is already authorized.
+The index branch merged canonical main `16fe4aa` at `5341512`. This combined
+source passes macOS standard checks: 1,498 passed, zero failed, 28 ignored;
+six Python gate tests, formatting and all-target strict Clippy also pass.
+Manual index-branch CI is already authorized and is the remaining native gate.
 Automatic branch CI is now disabled under #57; native branch verification needs
 an explicit workflow dispatch. No release or installed-binary update is included.
 

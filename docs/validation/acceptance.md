@@ -2106,3 +2106,35 @@ The combined branch has not been pushed; its new three-OS CI is awaiting explici
 push authorization under AGENTS.md. Do not substitute #46's main CI at a949688
 for this combined source. User data, installed binary and release remain
 unchanged.
+
+
+## 2026-10-30: canonical Windows repair and #57 in the index branch
+
+Another session published the canonical Windows repairs `509daa5`, `ff84d81` and
+`5234f94` before the proposed isolated recovery push. The non-fast-forward push
+was rejected without changing main. Adopted the published source, whose
+[main CI40992985197](https://github.com/tya5/shellboy/actions/runs/40992985197)
+succeeds on all three OSes. The duplicate local alternative `34ca8d3` was not
+merged or published. Keep it only as an abandoned local investigation source.
+
+Only #57's five-file policy was reapplied to repaired main, producing `16fe4aa`.
+That exact proposed tree passed macOS standard checks (1,468 passed, zero failed,
+28 ignored; six Python tests, formatting and strict Clippy). User-authorized
+main push fast-forwarded 5234f94 to16fe4aa and created
+[push CI40995235000](https://github.com/tya5/shellboy/actions/runs/40995235000).
+All three OS jobs actually started; its Windows result remains pending at this
+checkpoint. No index feature was included in that main push.
+
+Index merge `5341512` combines b22a30a with canonical16fe4aa, rather than the
+duplicate fixes. `sh scripts/check.sh` on native macOS with Rust1.99.1 and
+the same two-thread fixture setting succeeds: 85 suites, six Python gates,
+formatting, all-target Clippy -D warnings and 1,498 passed / zero failed /
+28 ignored (lib647, integration841, termination7, crash-recovery3). No source
+changed after that check; the next commit updates development/validation records
+only. Existing real-PTY recovery remains included.
+
+Next publish the authorized index branch, observe that #57 does not automatically
+start its push CI, then explicitly dispatch the retained three-OS workflow for
+that exact branch. Record source/event/run and per-OS results separately from
+b22's failed Windows result and main's baseline successes. No default data,
+paid provider API, installed binary, tag or release is changed by these checks.
