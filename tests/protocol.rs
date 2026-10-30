@@ -19,6 +19,8 @@ fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
         (ContextEditAction::Restore, None, Some("b"), false),
     ] {
         let command = Command::ContextEdit(ContextEditArgs {
+            max_chars: None,
+            max_percent: None,
             thread_id: Some("t".into()),
             action,
             from_node_id: from.map(str::to_owned),
@@ -30,6 +32,8 @@ fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
     for id in [" ".into(), "x".repeat(1025)] {
         assert!(
             Command::ContextEdit(ContextEditArgs {
+                max_chars: None,
+                max_percent: None,
                 thread_id: None,
                 action: ContextEditAction::Restore,
                 from_node_id: Some(id),
@@ -876,4 +880,27 @@ fn index_dimensions_are_explicit_bounded_and_rebuild_only() {
         assert!(Command::IndexStatus(args.clone()).validate().is_err());
         assert!(Command::IndexPreview(args).validate().is_err());
     }
+}
+
+#[test]
+fn summary_limits_are_checked_at_the_owner_boundary() {
+    let mut a = ContextEditArgs {
+        thread_id: None,
+        action: ContextEditAction::Summary,
+        from_node_id: Some("a".into()),
+        to_node_id: Some("b".into()),
+        max_chars: Some(1),
+        max_percent: None,
+    };
+    assert!(a.validate().is_ok());
+    a.max_chars = Some(0);
+    assert!(a.validate().is_err());
+    a.max_chars = None;
+    for p in [0.0, -1.0, 100.1, f64::NAN, f64::INFINITY] {
+        a.max_percent = Some(p);
+        assert!(a.validate().is_err());
+    }
+    a.max_percent = Some(5.0);
+    a.action = ContextEditAction::Omit;
+    assert!(a.validate().is_err());
 }

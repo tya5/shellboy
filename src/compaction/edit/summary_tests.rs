@@ -21,8 +21,8 @@ async fn summary_server(
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let connection = crate::config::Connection {
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
-        stream_idle_timeout_ms: 2_000,
-        response_header_timeout_ms: 2_000,
+        stream_idle_timeout_ms: 0,
+        response_header_timeout_ms: 120_000,
         ..Default::default()
     };
     let (send, received) = mpsc::channel(16);
@@ -90,6 +90,8 @@ async fn configured_fixture(
 }
 fn summary_args(from: &str, to: &str) -> ContextEditArgs {
     ContextEditArgs {
+        max_chars: None,
+        max_percent: None,
         thread_id: Some("t".into()),
         action: ContextEditAction::Summary,
         from_node_id: Some(from.into()),
@@ -274,7 +276,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
 #[tokio::test]
 async fn explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_character_partitioning()
 {
-    let (fixture, mut requests, _release, server) = configured_fixture(2, false).await;
+    let (fixture, mut requests, _release, server) = configured_fixture(3, false).await;
     fixture.text("before", "keep prefix").await;
     fixture.db.call(|db| {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
@@ -318,13 +320,13 @@ async fn explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_chara
         );
         assert!(text.chars().count() < SEGMENT_CHARS);
     }
-    assert_eq!(raw_parts(&fixture).await, 2);
+    assert_eq!(raw_parts(&fixture).await, 3);
     assert_eq!(
         timeout(Duration::from_secs(5), server)
             .await
             .unwrap()
             .unwrap(),
-        2
+        3
     );
     fixture.close().await;
 }

@@ -454,3 +454,43 @@ still cover retained original text, including newer unindexed nodes.
 
 `storage collect --category index` collects eligible inactive spaces only; turning automatic indexing off does not free active-index bytes.
 There is no CLI to erase all active vectors while retaining history; do not delete SQLite tables or the database manually.
+
+## Explicit summary size limits
+
+`compact --summary` maps chronological parts and consolidates them into one
+summary. It removes repeated goals/constraints, requests the latest confirmed
+state, and retains decisions/reasons, uncertainty, unresolved work and references.
+These prompts are not a guarantee of factual correctness; inspect sources when needed.
+
+```toml
+[compaction]
+summary_max_chars = 20000
+summary_max_percent = 5
+```
+
+Without this section, both limits above apply. In a present section, specify
+one or both keys: omitted keys impose no additional limit. With both, use the
+smaller of the absolute limit and percentage of the original range's projected
+characters, floored at 2,000 Unicode characters. Character limits must be positive;
+percentages must be finite and in (0, 100], including fractional values. An empty
+section is invalid. This floor does not permit a summary to enlarge its original
+source projection: such a result is rejected too.
+
+`compact --summary --from FIRST --to LAST --max-chars 6000 --max-percent 2.5`
+replaces the corresponding configured limits for that invocation; unspecified
+limits keep their configured values. Run `config check` to validate the section
+and inspect its resolved values in `result.compaction`, then restart the owner
+to apply changed settings. Checking still uses only the model catalog, not a chat.
+
+Each invocation allows at most 64 model requests across map, context-limit splits
+and reduce, and at most four reduce rounds. Over-limit summaries are reduced more
+strongly, never truncated to fit. On failure, no replacement is adopted; inspect
+`source_characters`, `summary_characters`, `summary_limit` and `model_requests`
+in the error details. Successful downstream results expose these under `compact`
+in addition to before/after context sizes. Cached successful parts can be reused
+on explicit retry, so model_requests counts requests actually made this time.
+Automatic failure compaction and argument-free `compact` are unchanged.
+
+Omitted history can stay omitted. Use bounded `history search`/`history get` first;
+only summarize it to reintroduce key facts. Summarizing an omitted range can
+increase the selected context even when it is much shorter than its originals.

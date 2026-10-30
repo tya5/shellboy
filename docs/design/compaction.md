@@ -204,3 +204,35 @@ remains keyword-only. Keep source IDs, restoration/summary commands, side-effect
 warnings and immutable provenance unchanged. Agent guidance also explains
 cross-conversation semantic retrieval and verification of historical evidence;
 usage observation is a manual read of existing records, not new telemetry.
+
+## Bounded explicit summaries (#73 / D-015)
+
+Explicit range summaries use map/reduce, not concatenated part summaries. Keep
+map inputs chronological and group-atomic; reduce chronological batches of at
+most 64,000 characters, then consolidate again until one final summary remains.
+Prompts deduplicate goals/constraints, keep only the latest confirmed state,
+retain decisions/reasons, unresolved work, uncertainty and source node IDs.
+Original payloads, replacement sources, cancellation and transactional CAS
+adoption remain unchanged. Automatic overflow compaction is outside this change.
+
+`[compaction] summary_max_chars` and `summary_max_percent` select the smaller
+limit, floored at 2,000 Unicode characters. An absent section defaults to 20,000
+and 5%; a present section may specify either or both (not neither). Percent is
+finite, greater than zero and at most 100; character limits must be positive.
+Explicit `--max-chars`/`--max-percent` replace their respective configured values.
+Source size is the selected original replay projection, including when a marker
+is virtually expanded. Count final summary text, not retained out-of-band source
+metadata. Reject a summary exceeding its limit or failing to shrink its original
+source projection; omitted information can still enlarge the currently selected
+marker and must be reported as such. Never truncate a model answer to pass.
+
+Use at most 64 model requests per invocation (map, context splits, reduce and
+stronger retries combined), and at most four reduce rounds. Successful parts and
+reduce responses use existing summary.part metadata with bounded-policy-specific
+keys, model/profile/effort/epoch/input/limit identity and raw-response validation.
+No new table, worker, queue, timer or automatic transport retry is added. Refusal
+or empty responses remain auditable and cannot be adopted. If budgets/limits
+fail, preserve the selected path and return source/summary/limit/request facts.
+Successful results expose those facts too. Omission notices recommend leaving
+history omitted and bounded history search/get first; a capped summary explicitly
+reintroduces key facts rather than undoing the side effects of earlier work.

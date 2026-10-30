@@ -1718,3 +1718,22 @@ claim; titles/history are projected only for retained children. Wire diffing
 compares final encoded bytes; root clear is normal-exit only and off emits none.
 Only UI metadata admission and frame-boundary IO are changed, not #41 draw/layout
 or status-row code. Keep real receiver qualification separate from mock success.
+
+## #73 bounded explicit summary decisions (2026-10-31)
+
+Active, implementing user-approved [D-015 in issue #68](https://github.com/tya5/shellboy/issues/68)
+and [issue #73](https://github.com/tya5/shellboy/issues/73). Defaults are 20,000
+characters and 5% (smaller, effective floor 2,000). A present configuration section
+may select just one limit; each CLI override replaces its matching configured
+value, not the other limit. Source size uses replay-projected original characters.
+
+Use a fixed 64-request per-invocation budget across map/split/reduce and four
+reduce rounds. This bounds paid requests and nonconverging reductions without
+adding a table/worker/queue. Existing validated part caches allow explicit retry;
+revisit these bounds only with concrete workloads, never automatically run past
+them. Reduction prompts increasingly favor shorter output and latest state;
+semantic accuracy still needs source inspection. Reject over-limit or nonshrinking
+source replacements without truncation. An explicitly summarized omission may
+reintroduce information and increase selected context; report that caveat.
+Automatic overflow behavior is unchanged. No actual provider call is authorized
+or required by this implementation's loopback tests.

@@ -6,6 +6,12 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Keep first-error precedence: numeric bounds, local relationships,
         // connection contents/references, then environment/path/key checks.
+        if !self.compaction.valid() {
+            return Err(invalid(
+                "compaction",
+                "set a positive summary_max_chars and/or finite summary_max_percent in (0,100]",
+            ));
+        }
         self.retention.validate_positive()?;
         self.limits.validate_positive()?;
         self.io.validate_positive()?;

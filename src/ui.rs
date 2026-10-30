@@ -3619,6 +3619,8 @@ impl UiState {
             }
             "/switch" if !argument.is_empty() => self.select_thread(argument.into()),
             "/compact-max" => vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
+                max_chars: None,
+                max_percent: None,
                 thread_id: thread_id.clone(),
                 action: ContextEditAction::Maximal,
                 from_node_id: None,
@@ -3933,6 +3935,8 @@ impl UiState {
                     return self.command_error("入力範囲の復元は保存済み会話で /restore を実行してください。下書きの復元は /restore 番号です");
                 };
                 vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
+                    max_chars: None,
+                    max_percent: None,
                     thread_id: Some(thread_id),
                     action: ContextEditAction::Restore,
                     from_node_id: None,

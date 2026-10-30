@@ -313,6 +313,12 @@ pub struct ThreadOptions {
 #[derive(Debug, Clone, Args)]
 #[command(group(clap::ArgGroup::new("edit_action").args(["spill", "summary", "trim", "omit", "restore", "maximal"]).multiple(false)))]
 pub struct CompactOptions {
+    /// Override the absolute summary limit (minimum effective limit: 2000 characters).
+    #[arg(long, requires = "summary")]
+    pub max_chars: Option<u64>,
+    /// Override the summary limit as a percentage of the original range (0 < P <= 100).
+    #[arg(long, requires = "summary")]
+    pub max_percent: Option<f64>,
     /// Maximum API-free reduction outside protected work; no node IDs.
     #[arg(long)]
     pub maximal: bool,
@@ -873,6 +879,9 @@ impl Cli {
                 kind: a.kind,
             }),
             CliCommand::Compact(a) => {
+                if (a.max_chars.is_some() || a.max_percent.is_some()) && !a.summary {
+                    return Err(invalid("summary limits require --summary"));
+                }
                 let action = if a.maximal {
                     Some(wire::ContextEditAction::Maximal)
                 } else if a.spill {
@@ -894,6 +903,8 @@ impl Cli {
                         action,
                         from_node_id: a.from_node_id,
                         to_node_id: a.to_node_id,
+                        max_chars: a.max_chars,
+                        max_percent: a.max_percent,
                     }),
                     None => C::Compact(wire::ThreadTarget {
                         thread_id: a.thread_id,

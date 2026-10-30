@@ -1,5 +1,14 @@
 # Development status
 
+## #73 bounded explicit summaries
+
+Range summaries now consolidate chronological parts into one bounded text,
+with D-015 defaults, per-call overrides and finite shared map/reduce requests.
+Oversize/nonshrinking results retain the original path; omission notices favor
+bounded source lookup. Config check and guides expose the new settings.
+Local loopback and standard checks pass; see issue #73 for exact-source main CI. See the
+[validation evidence](../validation/acceptance.md#73-bounded-explicit-summary-qualification).
+
 ## v0.4.0 published (#70)
 
 v0.4.0 is public from the approved annotated tag at `dae2ba1` (2026-10-31 JST).

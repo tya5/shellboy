@@ -396,7 +396,9 @@ args!(ContextEditArgs {
     #[serde(default)] thread_id: Option<String>,
     action: ContextEditAction,
     #[serde(default)] from_node_id: Option<String>,
-    #[serde(default)] to_node_id: Option<String>
+    #[serde(default)] to_node_id: Option<String>,
+    #[serde(default)] max_chars: Option<u64>,
+    #[serde(default)] max_percent: Option<f64>
 });
 args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String> });
 args!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });

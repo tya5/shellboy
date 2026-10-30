@@ -179,6 +179,8 @@ async fn compact_edit_modes_keep_exact_range_and_reject_ambiguous_arguments() {
         assert_eq!(
             convert(&args).await,
             Command::ContextEdit(ContextEditArgs {
+                max_chars: None,
+                max_percent: None,
                 thread_id: Some("t".into()),
                 action,
                 from_node_id: from.map(str::to_owned),
@@ -1016,5 +1018,49 @@ async fn sender_label_is_optional_bounded_display_metadata_not_origin() {
             .await
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgument);
+    }
+}
+
+#[tokio::test]
+async fn compact_summary_limit_overrides_are_typed_and_summary_only() {
+    let command = convert(&[
+        "compact",
+        "--summary",
+        "--from",
+        "a",
+        "--to",
+        "b",
+        "--max-chars",
+        "6000",
+        "--max-percent",
+        "2.5",
+    ])
+    .await;
+    let Command::ContextEdit(args) = command else {
+        panic!("expected context edit")
+    };
+    assert_eq!(args.max_chars, Some(6000));
+    assert_eq!(args.max_percent, Some(2.5));
+    assert!(args.validate().is_ok());
+    for arguments in [
+        vec!["compact", "--max-chars", "6000"],
+        vec![
+            "compact",
+            "--omit",
+            "--from",
+            "a",
+            "--to",
+            "b",
+            "--max-percent",
+            "2.5",
+        ],
+    ] {
+        if let Ok(cli) = Cli::try_parse_from(std::iter::once("shellboy").chain(arguments)) {
+            assert!(
+                cli.into_command_with_stdin(cwd(), &mut &b""[..])
+                    .await
+                    .is_err()
+            );
+        }
     }
 }

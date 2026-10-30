@@ -1202,6 +1202,8 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
         .request(Request::new(
             format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
             Command::ContextEdit(ContextEditArgs {
+                max_chars: None,
+                max_percent: None,
                 thread_id: Some(thread.clone()),
                 action: ContextEditAction::Maximal,
                 from_node_id: None,

@@ -47,7 +47,7 @@ fn argumentless_restore_edits_only_the_current_saved_threads_input_range() {
     assert!(
         matches!(&actions[0], UiAction::Command(Command::ContextEdit(ContextEditArgs {
         thread_id: Some(thread), action: ContextEditAction::Restore,
-        from_node_id: None, to_node_id: None,
+        from_node_id: None, to_node_id: None, max_chars: None, max_percent: None,
     })) if thread == "current-thread")
     );
 

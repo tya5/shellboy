@@ -49,6 +49,21 @@ impl ThreadListArgs {
 
 impl ContextEditArgs {
     pub fn validate(&self) -> Result<(), ApiError> {
+        if self.max_chars.is_some() || self.max_percent.is_some() {
+            if self.action != ContextEditAction::Summary {
+                return Err(invalid("summary limits require the summary action"));
+            }
+            if !(crate::config::Compaction {
+                summary_max_chars: self.max_chars,
+                summary_max_percent: self.max_percent,
+            })
+            .valid()
+            {
+                return Err(invalid(
+                    "summary limits require positive characters and/or a finite percent in (0,100]",
+                ));
+            }
+        }
         for (name, value) in [
             ("thread_id", &self.thread_id),
             ("from_node_id", &self.from_node_id),

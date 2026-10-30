@@ -243,6 +243,8 @@ mod tests {
 
     fn edit() -> ContextEditArgs {
         ContextEditArgs {
+            max_chars: None,
+            max_percent: None,
             thread_id: Some("thread".into()),
             action: ContextEditAction::Spill,
             from_node_id: Some("first".into()),

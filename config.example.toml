@@ -57,3 +57,9 @@ bell = true
 # Explicit index backfill/rebuild/probe can still incur API cost.
 [indexing]
 auto_history = true
+
+# Explicit compact --summary limits; either key may be used alone in this section.
+# The smaller limit wins, with an effective floor of 2000 Unicode characters.
+# [compaction]
+# summary_max_chars = 20000
+# summary_max_percent = 5

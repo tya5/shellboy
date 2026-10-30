@@ -244,3 +244,11 @@ owner operations and local bounded subset validation. No Core execution engine,
 owner auto-start, provider structured-output dependency, table/worker/queue or new
 crate. Ordinary history.get stays unchanged; its optional final-only read projection
 has an independent cursor scope and supports exact saved answer validation.
+
+Issue #73 adopts bounded explicit-summary map/reduce and optional `[compaction]`
+limits per D-015: smaller of 20,000 characters and 5%, floored at 2,000, with
+summary-only CLI overrides. Consolidation, source/size/request facts, rejection
+before atomic adoption and safer omission guidance follow
+[compaction](compaction.md#bounded-explicit-summaries-73--d-015). Existing automatic
+failure compaction and model selection do not change; no new persistent table,
+worker or queue is added.

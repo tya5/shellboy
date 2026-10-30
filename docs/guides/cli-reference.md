@@ -506,3 +506,16 @@ not an old-Core format shim or automatic answer/protocol downgrade.
 `indexing.auto_history=false` only disables automatic conversation embedding;
 it does not remove existing vectors or disable standalone RAG. Semantic history
 RAG reports disabled coverage in its existing degraded/scope_status/warnings.
+
+### Bounded explicit summaries (#73)
+
+`compact --summary --from FIRST --to LAST [--thread ID]` also accepts
+`--max-chars N` and `--max-percent P` (summary mode only). Each overrides its
+corresponding `[compaction]` setting; omitted overrides preserve the configuration.
+Defaults are the smaller of 20,000 characters and 5% of original projected input,
+floored at 2,000. Explicit summaries consolidate parts into one bounded text,
+with at most 64 model requests and four reduce rounds, or fail without adoption.
+The downstream `result.compact` adds `source_characters`, `summary_characters`,
+`summary_limit` and `model_requests`; size/budget failure details expose the same
+facts. Read [configuration](configuration.md#explicit-summary-size-limits) for
+single-limit settings, retry caching, and omitted-history caveats.

@@ -3398,3 +3398,49 @@ are reused; no new telemetry, queue, worker, dependency or user-data modificatio
 Final record audit against base fcb8d78: status1258 -> 1289 (+31/-0);
 acceptance3335 -> 3400 (+65/-0). The old files remain byte-for-byte
 prefixes; role headings and all prior histories are retained.
+
+## #73 bounded explicit summary qualification
+
+2026-10-31, native macOS 26.3.1 arm64/Rust 1.99.1. Full standard check
+`sh scripts/check.sh` passes: **1,745 passed / 0 failed / 32 ignored**,
+layout93, Python9, format and strict all-target Clippy. New configuration, CLI
+mapping/owner validation and config-check diagnostics pass in the normal suites.
+Only temporary synthetic stores, local HTTP mock responses and disposable
+JSONL request logs are used. No user data/configuration or real provider call.
+
+Verified explicit-summary boundaries:
+
+- Four chronological source parts (about 248,000 source text characters) become
+  one summary via three intermediate reduce batches and one final reduce.
+  The mock JSONL record grows from 0 to 8 lines (four map + four reduce); result
+  model_requests is 8, final purpose/constraints appear once, latest published
+  state/decision/reason/reference n3 survive, and replay input shrinks. Each
+  reduce input is at most 64,000 Unicode characters. Semantic behavior here is
+  the mock contract and inspected prompts, not proof about a real model.
+- A 2,001-character nonconverging response with effective 2,000 limit is retried
+  through four stronger reduce rounds, then rejected with original path and
+  source/summary/limit/request facts. Log 0->5 lines; identical explicit retry
+  reuses validated raw audits, log stays 5 and model_requests is 0. No truncation
+  or partial adoption. A nonshrinking tiny-source summary is also rejected.
+- Both 65 map segments and 63 map segments followed by an over-limit reduce
+  stop at exactly 64 calls/log lines. The shared budget includes map and reduce;
+  original paths remain selected. No 65th request is sent.
+- Default 20,000/5% minimum, absolute-only, percent-only, combined limits,
+  fractional percentage, 2,000 floor, Unicode character-vs-byte accounting and
+  per-call overrides are checked. Zero/negative/nonfinite/out-of-range/unknown
+  settings are rejected; limits on nonsummary actions cannot be silently ignored.
+  Config check exposes resolved values and rejects invalid limits before a
+  catalog request. No paid chat probe is added.
+- Existing hidden-source provenance/late-adoption cancellation tests pass; the
+  whole-tool-group fixture now includes its final reduce request. Omission
+  notice tests assert leave-omitted guidance, bounded history lookup, capped
+  opt-in summary and the context-expansion warning. Automatic policy is unchanged.
+
+New summary tests use only watchdog deadlines, no elapsed-time thresholds or
+sleep-based correctness claims. Development checks caught stale old notice-text
+expectations and a CLI Boolean-group requirement that alone did not enforce
+summary-only flags; explicit local and owner checks plus updated assertions fix
+those cases. Later full checks pass; these are not suppressed or ignored tests.
+Native Windows/Linux results are tracked in issue #73 separately from local checks. Real-provider
+summary accuracy, very large real histories and actual paid request billing are
+not qualified by these loopback mocks.

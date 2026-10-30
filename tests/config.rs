@@ -687,3 +687,44 @@ fn embedding_batch_caps_preserve_singleton_defaults_and_reject_invalid_bounds() 
     }
     assert!(Config::parse("[embedding]\nbatch_max_inputs=128\nbatch_max_chars=1048576").is_ok());
 }
+
+#[test]
+fn explicit_summary_limits_defaults_single_knobs_minimum_and_rejections() {
+    use shellboy::config::Config;
+    let defaults = Config::parse("").unwrap().compaction;
+    assert_eq!(defaults.summary_limit(1_000_000), 20_000);
+    assert_eq!(defaults.summary_limit(100_000), 5000);
+    assert_eq!(defaults.summary_limit(10), 2000);
+    let absolute = Config::parse("[compaction]\nsummary_max_chars=7000")
+        .unwrap()
+        .compaction;
+    assert_eq!(absolute.summary_max_percent, None);
+    assert_eq!(absolute.summary_limit(1_000_000), 7000);
+    let percent = Config::parse("[compaction]\nsummary_max_percent=2.5")
+        .unwrap()
+        .compaction;
+    assert_eq!(percent.summary_max_chars, None);
+    assert_eq!(percent.summary_limit(200_000), 5000);
+    assert_eq!(
+        Config::parse("[compaction]\nsummary_max_chars=1")
+            .unwrap()
+            .compaction
+            .summary_limit(100_000),
+        2000
+    );
+    for body in [
+        "",
+        "summary_max_chars=0",
+        "summary_max_chars=-1",
+        "summary_max_percent=0",
+        "summary_max_percent=101",
+        "summary_max_percent=nan",
+        "summary_max_percent=inf",
+        "summary_max_char=3",
+    ] {
+        assert!(
+            Config::parse(&format!("[compaction]\n{body}")).is_err(),
+            "{body}"
+        );
+    }
+}

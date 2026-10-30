@@ -53,6 +53,7 @@ pub struct Config {
     pub indexing: Indexing,
     pub ui: Ui,
     pub logging: Logging,
+    pub compaction: Compaction,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -720,4 +721,38 @@ pub fn resolve_cli_data_dir(
     startup_cwd: &Path,
 ) -> Result<PathBuf, ConfigError> {
     resolve_data_dir(cli, env, None, startup_cwd, startup_cwd)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Compaction {
+    #[serde(default)]
+    pub summary_max_chars: Option<u64>,
+    #[serde(default)]
+    pub summary_max_percent: Option<f64>,
+}
+impl Default for Compaction {
+    fn default() -> Self {
+        Self {
+            summary_max_chars: Some(20_000),
+            summary_max_percent: Some(5.0),
+        }
+    }
+}
+impl Compaction {
+    pub fn valid(&self) -> bool {
+        (self.summary_max_chars.is_some() || self.summary_max_percent.is_some())
+            && self.summary_max_chars != Some(0)
+            && self
+                .summary_max_percent
+                .is_none_or(|p| p.is_finite() && p > 0.0 && p <= 100.0)
+    }
+    pub fn summary_limit(&self, source: u64) -> u64 {
+        let absolute = self.summary_max_chars.unwrap_or(u64::MAX);
+        let relative = self
+            .summary_max_percent
+            .map(|p| (source as f64 * (p / 100.0)).floor() as u64)
+            .unwrap_or(u64::MAX);
+        absolute.min(relative).max(2_000)
+    }
 }

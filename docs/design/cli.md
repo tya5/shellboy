@@ -229,3 +229,12 @@ and recommending ordinary history get --node ANSWER_NODE_ID without the new flag
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
 not an old-Core format shim or automatic answer/protocol downgrade.
+
+## Bounded range-summary overrides (#73)
+
+Only `compact --summary` accepts `--max-chars N` / `--max-percent P`.
+They map to optional `ContextEditArgs.max_chars` / `max_percent`; owner-side
+validation rejects nonpositive characters, nonfinite/out-of-range percentages
+and limits on non-summary actions. Existing safety-boundary queue, operation
+receipts and immutable source adoption are unchanged. See the bounded-summary
+contract in [compaction](compaction.md).

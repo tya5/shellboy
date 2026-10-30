@@ -17,7 +17,7 @@ pub struct ContextEditResult {
     pub warnings: Vec<String>,
 }
 mod measure;
-pub(super) use measure::{history_characters, suffix_characters};
+pub(super) use measure::{history_characters, projection_characters, suffix_characters};
 fn required_endpoint(value: Option<&str>) -> Result<&str, ApiError> {
     value.ok_or_else(|| edit_error("Context edit requires complete node endpoints"))
 }
@@ -57,6 +57,13 @@ impl Compactor {
         cancel: CancellationToken,
     ) -> Result<ContextEditResult, ApiError> {
         args.validate()?;
+        let mut limits = self.config.compaction.clone();
+        if let Some(value) = args.max_chars {
+            limits.summary_max_chars = Some(value);
+        }
+        if let Some(value) = args.max_percent {
+            limits.summary_max_percent = Some(value);
+        }
         let snapshot = self
             .snapshot(
                 thread,
@@ -99,7 +106,7 @@ impl Compactor {
                     Ok(selected) => selected,
                     Err(error) if matches!(args.action, ContextEditAction::Summary) => {
                         return self
-                            .summarize_hidden_marker(snapshot, from, to, cancel, error)
+                            .summarize_hidden_marker(snapshot, from, to, cancel, error, limits)
                             .await;
                     }
                     Err(error) => return Err(error),
@@ -116,6 +123,7 @@ impl Compactor {
                             to,
                             cancel,
                             edit_error("Selected marker cannot be summarized"),
+                            limits,
                         )
                         .await;
                 }
@@ -124,7 +132,8 @@ impl Compactor {
                     self.spill_snapshot(snapshot, vec![selected], cancel)
                         .await?
                 } else {
-                    self.summarize_snapshot(snapshot, selected, cancel).await?
+                    self.summarize_with_policy(snapshot, selected, cancel, Some(limits))
+                        .await?
                 };
                 let after = history_characters(&self.snapshot(thread, false).await?);
                 Ok(ContextEditResult {
@@ -190,6 +199,7 @@ impl Compactor {
         to: &str,
         cancel: CancellationToken,
         original_error: ApiError,
+        limits: crate::config::Compaction,
     ) -> Result<ContextEditResult, ApiError> {
         let before = history_characters(&snapshot);
         let markers = snapshot
@@ -241,7 +251,7 @@ impl Compactor {
             snapshot.groups.splice(index..index + 1, groups);
             let thread = snapshot.thread.clone();
             let compact = self
-                .summarize_snapshot(snapshot, index..index + count, cancel)
+                .summarize_with_policy(snapshot, index..index + count, cancel, Some(limits))
                 .await?;
             let after = history_characters(&self.snapshot(&thread, false).await?);
             return Ok(ContextEditResult {
@@ -249,6 +259,7 @@ impl Compactor {
                 before_characters: before,
                 after_characters: after,
                 changed_suffix_characters: invalidated,
+                warnings: vec!["This summary reintroduces omitted information and can enlarge the selected context; leave it omitted if those facts are not needed".into()],
                 ..Default::default()
             });
         }
@@ -479,3 +490,6 @@ mod summary_tests;
 
 #[cfg(test)]
 mod user_send_tests;
+
+#[cfg(test)]
+mod bounded_tests;
