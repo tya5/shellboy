@@ -29,9 +29,9 @@ pub const NEXT: &str = "shellboy config init -> edit the selected file and set i
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SetupReport {
-    pub config_path: Option<PathBuf>,
+    pub config_path: Option<String>,
     pub config_file_present: bool,
-    pub data_dir: Option<PathBuf>,
+    pub data_dir: Option<String>,
     pub missing: Vec<String>,
     pub credential_env: Option<String>,
     pub credential_set: Option<bool>,
@@ -71,9 +71,15 @@ pub fn report(
         ));
     }
     SetupReport {
-        config_path: config.source.as_ref().map(|source| source.path.clone()),
+        config_path: config
+            .source
+            .as_ref()
+            .map(|source| source.path.to_string_lossy().into_owned()),
         config_file_present: config.source.as_ref().is_some_and(|source| source.present),
-        data_dir: config.data_dir.clone(),
+        data_dir: config
+            .data_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
         missing,
         credential_env,
         credential_set,
@@ -106,7 +112,7 @@ impl SetupReport {
         let path = self
             .config_path
             .as_ref()
-            .map(|p| p.display().to_string())
+            .cloned()
             .unwrap_or_else(|| "--config で指定した設定ファイル".into());
         let mut text = format!(
             "設定が必要です: {}\n設定ファイル: {path}\n",
@@ -163,8 +169,16 @@ pub fn selected_path(
     cwd: &Path,
     env: &PathEnvironment,
 ) -> Result<PathBuf, ApiError> {
-    crate::config::resolve_config_path(path, cwd, env)
-        .map_err(|error| ApiError::new(ErrorCode::ConfigInvalid, error.to_string()))
+    let path = crate::config::resolve_config_path(path, cwd, env)
+        .map_err(|error| ApiError::new(ErrorCode::ConfigInvalid, error.to_string()))?;
+    if path.to_str().is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "Configuration path must be Unicode",
+        )
+        .details(json!({"field":"config_path"})));
+    }
+    Ok(path)
 }
 
 pub async fn execute(

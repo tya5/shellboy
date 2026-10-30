@@ -138,3 +138,8 @@ per-command approval mechanism is added. Configured users see no setup notice.
 
 The exact bundled example model/API-root placeholders are reported as unfinished
 setup too; syntactically valid template values are not presented as ready.
+
+Setup command paths must be Unicode so JSON diagnostics cannot panic after a
+file-system error or file creation. Reject unsupported config paths before I/O;
+diagnostic data-directory paths use display-safe UTF-8, without changing their
+filesystem resolution. This adds no credential value to diagnostic output.

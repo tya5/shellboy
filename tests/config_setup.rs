@@ -486,3 +486,27 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_setup_paths_return_json_before_io_and_diagnostics_cannot_panic() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+    let root = tempfile::tempdir().unwrap();
+    let invalid = root.path().join(OsStr::from_bytes(b"bad-\xff.toml"));
+    let (ok, value, _) = run(command(root.path())
+        .arg("--config")
+        .arg(&invalid)
+        .args(["config", "init"]));
+    assert!(!ok && value["error"]["code"] == "invalid_argument");
+    assert!(!invalid.exists());
+    let file = root.path().join("config.toml");
+    std::fs::write(&file, "").unwrap();
+    let (ok, value, _) = run(command(root.path())
+        .arg("--config")
+        .arg(&file)
+        .arg("--data-dir")
+        .arg(&invalid)
+        .args(["config", "check"]));
+    assert!(!ok && value["error"]["details"]["setup"]["data_dir"].is_string());
+    assert!(!invalid.exists());
+}
