@@ -303,6 +303,13 @@ async fn response_json(
         let original = body.raw;
         dialect::decode_json(api, original.clone()).map_err(|error| raw_failure(error, original))?
     };
+    if raw
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|output| !output.is_empty())
+    {
+        facts.received = ResponseReceived::Output;
+    }
     let result = match body.provider_error {
         Some(error) => Err(error),
         None => ModelResponse::completed(raw.clone(), tools_enabled),

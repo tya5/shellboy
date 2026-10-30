@@ -20,6 +20,7 @@ const UNKNOWN: &str = include_str!("fixtures/chat/missing-usage.sse");
 const CONTEXT: &str = include_str!("fixtures/chat/context-error.sse");
 const WATCH: Duration = Duration::from_secs(60);
 const JSON_REPLY: &str = r#"{"id":"json-fixture","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2}}"#;
+const JSON_LENGTH: &str = r#"{"id":"json-length","choices":[{"index":0,"message":{"role":"assistant","content":"partial"},"finish_reason":"length"}],"usage":{"completion_tokens":3}}"#;
 const PARTIAL: &str = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"part\"},\"finish_reason\":null}]}\n\n";
 fn request() -> Value {
     response_request(
@@ -241,6 +242,7 @@ async fn loopback_transport_headers_error_facts_and_partial_usage_share_the_exis
         for (status, body, kind) in [
             (200, TEXT, "text/event-stream"),
             (200, JSON_REPLY, "application/json"),
+            (200, JSON_LENGTH, "application/json"),
             (200, PARTIAL, "text/event-stream"),
             (200, usage_cutoff, "text/event-stream"),
             (200, LENGTH, "text/event-stream"),
@@ -288,7 +290,8 @@ async fn loopback_transport_headers_error_facts_and_partial_usage_share_the_exis
                 if status == 400 {
                     assert!(failure.error.is_context_limit());
                 }
-                if status == 200 && body == LENGTH {
+                if status == 200 && (body == LENGTH || body == JSON_LENGTH) {
+                    assert_eq!(failure.facts.received, shellboy::model::http::ResponseReceived::Output);
                     assert!(failure.facts.terminal_received);
                     assert_eq!(failure.raw_response.as_ref().unwrap()["usage"]["output_tokens"], 3);
                 }
