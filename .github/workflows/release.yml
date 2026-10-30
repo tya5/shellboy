@@ -273,7 +273,7 @@ jobs:
               binary = dest / 'shellboy'
               assert subprocess.check_output([str(binary), '--version'], text=True).strip() == 'shellboy 0.3.0'
               original = binary.read_bytes()
-              # A release-bound script must not resolve latest when no override is set.
+              # A release-bound script works without an environment override.
               pinned_env = env.copy()
               pinned_env.pop('SHELLBOY_VERSION')
               run(source.replace('__SHELLBOY_RELEASE_VERSION__', 'v0.3.0'), environment=pinned_env)

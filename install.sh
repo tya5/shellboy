@@ -10,14 +10,10 @@ case "$(uname -s):$(uname -m)" in
     *) fail "Unsupported OS/CPU: $(uname -s)/$(uname -m). No release archive is available." ;;
 esac
 command -v curl >/dev/null 2>&1 || fail 'curl is required.'
-if [ "${version#_}" != "$version" ]; then
-    latest=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/tya5/shellboy/releases/latest)
-    version=${latest##*/}
-fi
 case "$version" in v*) ;; *) version=v$version ;; esac
 # Restrict the tag before using it in URLs and archive paths.
-case "$version" in *[!v0-9.]*) fail 'Use a stable version such as v0.3.0.' ;; esac
-printf '%s\n' "$version" | LC_ALL=C grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'Use a stable version such as v0.3.0.'
+case "$version" in *[!v0-9.]*) fail 'Use a release installer asset or set SHELLBOY_VERSION to a stable version such as v0.3.0.' ;; esac
+printf '%s\n' "$version" | LC_ALL=C grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'Use a release installer asset or set SHELLBOY_VERSION to a stable version such as v0.3.0.'
 archive=shellboy-$version-$target.tar.gz
 base=https://github.com/tya5/shellboy/releases/download/$version
 tmp=$(mktemp -d)

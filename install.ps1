@@ -10,11 +10,8 @@
         throw "Unsupported OS/CPU: $([Environment]::OSVersion.Platform)/$arch. No release archive is available."
     }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    if ($version.StartsWith('_')) {
-        $version = (Invoke-RestMethod 'https://api.github.com/repos/tya5/shellboy/releases/latest').tag_name
-    }
     if ($version -notmatch '^v') { $version = "v$version" }
-    if ($version -cnotmatch '\Av[0-9]+\.[0-9]+\.[0-9]+\z') { throw 'Use a stable version such as v0.3.0.' }
+    if ($version -cnotmatch '\Av[0-9]+\.[0-9]+\.[0-9]+\z') { throw 'Use a release installer asset or set SHELLBOY_VERSION to a stable version such as v0.3.0.' }
     $archive = "shellboy-$version-x86_64-pc-windows-msvc.zip"
     $base = "https://github.com/tya5/shellboy/releases/download/$version"
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())

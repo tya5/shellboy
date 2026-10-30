@@ -139,7 +139,8 @@ as standalone Release assets alongside the three archives and `SHA256SUMS`.
 The scripts in the repository are templates: assembly replaces their single
 `__SHELLBOY_RELEASE_VERSION__` marker with the release tag, so both the latest
 and version-specific asset URLs select matching archives, even after a later
-release. `SHELLBOY_VERSION` explicitly overrides that default. Do not distribute
+release. `SHELLBOY_VERSION` explicitly overrides that default. Unprocessed repository
+scripts require this variable; they do not resolve latest independently. Do not distribute
 raw main URLs. Do not add assets to the already published v0.3.0 Release.
 
 Before publication, run the manual **Release binaries** workflow on the proposed
