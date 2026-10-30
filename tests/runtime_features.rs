@@ -13,6 +13,39 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::timeout,
 };
+fn working_instructions(body: &Value) -> Option<(String, &str)> {
+    let messages: Vec<_> = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["role"] == "developer")
+        .flat_map(|item| item["content"].as_array().into_iter().flatten())
+        .filter_map(|part| part["text"].as_str())
+        .filter(|text| text.starts_with("Working instructions from "))
+        .collect();
+    assert!(
+        messages.len() <= 1,
+        "instructions must have one developer message"
+    );
+    messages.first().map(|text| {
+        let (header, original) = text.split_once('\n').expect("one header LF before original body");
+        assert!(!header.chars().any(|ch| ch.is_control() || matches!(ch,'\u{2028}'|'\u{2029}')));
+        let quoted = header.strip_prefix("Working instructions from ").unwrap()
+            .strip_suffix(" (user-editable; re-read at each new Turn start; same-Turn retries use the saved snapshot):").unwrap();
+        (serde_json::from_str(quoted).expect("header path is a JSON string"), original)
+    })
+}
+fn assert_working_instructions(body: &Value, path: &std::path::Path, original: &str) {
+    let (source, actual) =
+        working_instructions(body).expect("present instruction developer message");
+    assert_eq!(source, path.to_str().unwrap());
+    assert_eq!(
+        actual.as_bytes(),
+        original.as_bytes(),
+        "original body must remain exact"
+    );
+}
+
 struct Incoming {
     body: Value,
     session: Option<String>,
@@ -292,11 +325,10 @@ async fn preparation_failure_preserves_accepted_message_and_retry_reuses_its_tur
         .filter(|item| item["role"] == "user" && item["content"][0]["text"] == original)
         .collect();
     assert_eq!(messages.len(), 1, "retry must reuse the accepted original");
-    assert!(
-        retry
-            .body
-            .to_string()
-            .contains("valid repaired instructions")
+    assert_working_instructions(
+        &retry.body,
+        &root.path().join("AGENTS.md"),
+        "valid repaired instructions",
     );
     retry.reply.send((200, answer("recovered"))).unwrap();
     settled(&control, &thread).await;
@@ -1600,14 +1632,25 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
     let instruction = "A01_CREATED_AGENTS 日本語\nUse the saved Thread cwd.\n";
     // Inspect only developer instruction text: the tool arguments intentionally
     // carry the same bytes later and are not evidence of instruction loading.
-    let count_instruction = |body: &Value, expected: &str| {
+    let instruction_path = original_paths.1.clone();
+    let count_instruction = move |body: &Value, expected: &str| {
         body["input"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|item| item["role"] == "developer")
             .flat_map(|item| item["content"].as_array().into_iter().flatten())
-            .filter(|part| part["type"] == "input_text" && part["text"] == expected)
+            .filter(|part| {
+                part["type"] == "input_text"
+                    && part["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Working instructions from "))
+            })
+            .filter(|_| {
+                let (path, original) = working_instructions(body).unwrap();
+                assert_eq!(path, instruction_path);
+                original.as_bytes() == expected.as_bytes()
+            })
             .count()
     };
     let accepted: MessageAccepted = serde_json::from_value(
@@ -2146,7 +2189,11 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     )
     .await;
     let first = incoming(&control, &mut receive).await;
-    assert!(developer_text(&first.body).contains(&"OLD_EXPLICIT_ROLE"));
+    assert_working_instructions(
+        &first.body,
+        &root.path().join("old.md"),
+        "OLD_EXPLICIT_ROLE",
+    );
     let first_events = reference_events(&first.body);
     assert_eq!(
         first_events.len(),
@@ -2183,8 +2230,11 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
                 && t.contains("brief")),
         "unrelated settings must not defer"
     );
-    assert!(developer_text(&after_tool.body).contains(&"OLD_EXPLICIT_ROLE"));
-    assert!(!developer_text(&after_tool.body).contains(&"NEW_EXPLICIT_ROLE"));
+    assert_working_instructions(
+        &after_tool.body,
+        &root.path().join("old.md"),
+        "OLD_EXPLICIT_ROLE",
+    );
     assert!(
         developer_text(&after_tool.body)
             .iter()
@@ -2236,7 +2286,11 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     )
     .await;
     let retried = incoming(&control, &mut receive).await;
-    assert!(developer_text(&retried.body).contains(&"OLD_EXPLICIT_ROLE"));
+    assert_working_instructions(
+        &retried.body,
+        &root.path().join("old.md"),
+        "OLD_EXPLICIT_ROLE",
+    );
     assert_eq!(reference_events(&retried.body).len(), 1);
     retried
         .reply
@@ -2252,8 +2306,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     )
     .await;
     let next = incoming(&control, &mut receive).await;
-    assert!(developer_text(&next.body).contains(&"NEW_EXPLICIT_ROLE"));
-    assert!(!developer_text(&next.body).contains(&"OLD_EXPLICIT_ROLE"));
+    assert_working_instructions(&next.body, &root.path().join("new.md"), "NEW_EXPLICIT_ROLE");
     let events = reference_events(&next.body);
     assert_eq!(events.len(), 3);
     let changed = events.last().unwrap()["event_id"]
@@ -2297,7 +2350,11 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
             .count(),
         1
     );
-    assert!(developer_text(&notification_retry.body).contains(&"NEW_EXPLICIT_ROLE"));
+    assert_working_instructions(
+        &notification_retry.body,
+        &root.path().join("new.md"),
+        "NEW_EXPLICIT_ROLE",
+    );
     notification_retry
         .reply
         .send((200, answer("new snapshot adopted")))
@@ -2390,12 +2447,141 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     )
     .await;
     let absent = incoming(&control, &mut receive).await;
-    assert!(!developer_text(&absent.body).contains(&"NEW_EXPLICIT_ROLE"));
+    assert!(working_instructions(&absent.body).is_none());
     absent
         .reply
         .send((200, answer("absent instructions allowed")))
         .unwrap();
     settled(&control, &thread).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn working_instruction_header_preserves_empty_and_original_snapshots() {
+    use sha2::{Digest, Sha256};
+    for original in ["", "original 日本語\r\nnext line\n"] {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("AGENTS.md");
+        std::fs::write(&source, original).unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = owner(root.path(), &url).await;
+        let control = Control::new(&owner, root.path().into());
+        let thread = thread(&control).await;
+        let first = request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(thread.clone()),
+                text: "first snapshot".into(),
+            }),
+        )
+        .await;
+        let turn = first["turn_id"].as_str().unwrap().to_owned();
+        let sent = incoming(&control, &mut receive).await;
+        assert_working_instructions(&sent.body, &source, original);
+        let id = turn.clone();
+        let expected_body = original.to_owned();
+        let expected_hash: String = Sha256::digest(original.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let expected_path = source.to_str().unwrap().to_owned();
+        control.store.database.call(move |db| {
+            let (path, body, hash, size):(String,String,String,Option<i64>) = db.query_row(
+                "SELECT s.source_path,s.body,s.content_hash,s.observed_size FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            assert_eq!(path,expected_path);
+            assert_eq!(body.as_bytes(),expected_body.as_bytes());
+            assert_eq!(hash,expected_hash);
+            assert_eq!(size,Some(expected_body.len() as i64));
+            Ok(())
+        }).await.unwrap();
+        sent.reply.send((200, answer("first done"))).unwrap();
+        settled(&control, &thread).await;
+        std::fs::write(&source, "edited at the same source").unwrap();
+        let next = request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(thread.clone()),
+                text: "next Turn observes edit".into(),
+            }),
+        )
+        .await;
+        assert_ne!(next["turn_id"], first["turn_id"]);
+        let sent = incoming(&control, &mut receive).await;
+        assert_working_instructions(&sent.body, &source, "edited at the same source");
+        control.store.database.call(move |db| {
+            let body:String=db.query_row("SELECT s.body FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.id=?1",[turn],|r|r.get(0))?;
+            assert_eq!(body,original,"later file edits cannot alter the saved original snapshot");
+            Ok(())
+        }).await.unwrap();
+        sent.reply.send((200, answer("new snapshot done"))).unwrap();
+        settled(&control, &thread).await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unreadable_working_instructions_recover_without_an_outbound_header() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("AGENTS.md");
+    std::fs::write(&source, "unreadable fixture").unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o0)).unwrap();
+    if std::fs::File::open(&source).is_ok() {
+        // Privileged runners can bypass mode bits; do not claim denial there.
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+        return;
+    }
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    let sent = request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "permission failure".into(),
+        }),
+    )
+    .await;
+    let id = sent["turn_id"].as_str().unwrap().to_owned();
+    settled(&control, &thread).await;
+    control
+        .store
+        .database
+        .call(move |db| {
+            let (state, reason, snapshot): (String, String, Option<String>) = db.query_row(
+                "SELECT state,recovery_reason_json,instruction_snapshot_id FROM turn WHERE id=?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            assert_eq!(state, "recovery_wait");
+            assert_eq!(
+                serde_json::from_str::<ApiError>(&reason).unwrap().code,
+                ErrorCode::IoFailed
+            );
+            assert!(snapshot.is_none());
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM model_attempt WHERE turn_id=?1",
+                    [id],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        receive.try_recv().is_err(),
+        "preparation failure precedes any HTTP request"
+    );
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
