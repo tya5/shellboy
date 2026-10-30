@@ -1,5 +1,32 @@
 # Development status
 
+## Issue #51: local integration on the completed #46 branch
+
+The original nine-commit series through `7f425e8` is preserved. A separate
+`issue-51/on-46` branch rebases it onto exact #46 source `a949688`, whose native
+CI [40982193189](https://github.com/tya5/shellboy/actions/runs/40982193189)
+passes all three OS check jobs. This is local advance integration, not completed
+origin/main adoption: remote main was still `0469ca0` when the base was chosen.
+
+The nine commits retain their meanings. Four documentation insertion conflicts
+retain both designs and validation histories. Existing test files are already
+registered as modules in #46's single integration harness; no new target/file is
+needed. The first rebased source `144721f` fails Clippy because six new runtime
+calls lack the Control argument added by #46's diagnostic helper. Test-only
+`872c4b8` supplies that argument without changing production behavior or assertions.
+
+At exact `872c4b8`, macOS arm64 / Rust 1.99.1 standard checks with four test
+threads pass layout registration (82 suites), five Python checks, format, strict
+Clippy and Rust tests: 7 harness groups / 1,464 passed / 0 failed / 28 ignored.
+Independent post-rebase approval is tracked separately. These grouped counts
+are not missing suites; the added idle-effects unit test explains the extra pass
+relative to the historical 1,463 checkpoint. See [acceptance](../validation/acceptance.md).
+
+Push, new CI dispatch and installed-binary updates remain unauthorized. Once #46
+lands on main, compare the actual origin/main base and determine whether another
+rebase/review/check is required. The overlapping #48 change has separate
+worktrees and commits and is not included in this #51 result.
+
 ## Issue #51: explicit instruction references
 
 Control/CLI thread create, set and fork support `--agents`; TUI create/fork/

@@ -1,5 +1,44 @@
 # Validation record
 
+## Issue #51: advance integration on exact #46 source
+
+Base: `a94968898c704b4ee7b78be1cda860ee6d057b04`, from the completed #46
+measurement branch, not origin/main. Existing native CI run
+[40982193189](https://github.com/tya5/shellboy/actions/runs/40982193189)
+was checked through the current API: exact source matches and Linux/macOS/Windows
+check jobs succeed; optional measurement is skipped. That run does not validate
+#51's rebased changes. No new CI or push was requested for this local integration.
+
+The old `0469ca0..7f425e8` series is preserved and maps one-to-one onto
+`a949688..144721f`. Only documentation insertion contexts differ in range-diff;
+source patches retain their original content. However, textual patch equivalence
+was not build compatibility: the first post-rebase standard check at `144721f`
+failed Clippy with six E0061 errors in `runtime_features` incoming calls. #46's
+helper now requires Control for bounded diagnostic facts. Test-only `872c4b8`
+adds that argument at those six calls, preserving request assertions and the
+Changed-notification guards. IPC/attachment overlap is only constructor fields;
+#46's pending-wait and attachment fixture changes remain intact.
+
+Environment: macOS arm64, Rust 1.99.1, isolated integration worktree. At exact
+`872c4b8af5bda81801a077a4217b5e9b25f2a9fa`, the background command
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+completes with exit 0. Layout requires each of 82 suites exactly once; five
+Python failure-gate self-checks, format and strict all-target Clippy pass.
+Rust all-target results: **7 harness groups / 1,464 passed / 0 failed / 28 ignored**.
+The command shell elapsed 154,417 ms, including local log setup/result summation;
+this is not a native CI timing benchmark. It was observed with `shellboy wait`.
+The earlier failed source and later successful source are separate evidence.
+
+The ordinary test files remain in place and are imported by
+`tests/integration/main.rs`; #51 does not introduce an extra integration binary.
+Historical 86-group evidence below remains attributed to its original sources.
+The additional idle-effects unit test raises the historical 1,463 passes to 1,464;
+independent inventory/list review is separate from the full integration command.
+No real-provider, physical-terminal or new native Linux/Windows execution is
+established here. Reconcile with origin/main after #46 lands, re-review any
+changed SHA and rerun the required checks before a separately authorized push.
+#48 is a separate worktree/commit boundary and is absent from this source.
+
 ## Issue #51: selectable per-Thread instruction references
 
 Environment: macOS arm64, pinned Rust/Cargo 1.99.1; isolated worktree based on
