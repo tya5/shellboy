@@ -1,0 +1,8 @@
+{
+  "install.ps1": "d455157f547f84a28aca5dce86a36402da0300e5e5e3c560b3b2fe5d7569894e",
+  "install.sh": "2e276b412ed5994cd96ae252230d049df58ce547416323fc406c142cbf791422",
+  "SHA256SUMS": "00d3240ee45fede7f6725925943e7efc83aee57b3f2853cf178e2c934ae872aa",
+  "shellboy-v0.4.0-aarch64-apple-darwin.tar.gz": "5e37608162d526825d15af945e418a54cd7b09e4c6234c9c3f209c6f181dcb34",
+  "shellboy-v0.4.0-x86_64-pc-windows-msvc.zip": "02ce9a8b47e38dd354f3f72f3162de181100a0adb2e7c5b80ee7bfa5b81b6c12",
+  "shellboy-v0.4.0-x86_64-unknown-linux-gnu.tar.gz": "846bc435a1802d024eb881feb854f5b78bc48bec6f7e1e5b753998a4eaa76689"
+}
