@@ -31,3 +31,5 @@ pub mod terminal_links;
 pub mod ui;
 
 mod usage;
+
+pub mod usage_totals;
