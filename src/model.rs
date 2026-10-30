@@ -185,7 +185,8 @@ pub struct StreamObservation {
     pub completed_items: BTreeMap<u64, Value>,
 }
 impl ModelResponse {
-    pub fn completed(raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
+    pub fn completed(mut raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
+        crate::usage::normalize_response(&mut raw);
         if raw.get("status").and_then(Value::as_str) != Some("completed") {
             return Err(ModelError::new("incomplete", "Response was not completed"));
         }

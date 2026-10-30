@@ -119,6 +119,9 @@ impl HttpModelClient {
         )
         .await
         .map_err(|mut failure| {
+            if let Some(raw) = &mut failure.raw_response {
+                crate::usage::normalize_response(raw);
+            }
             if let Some(observation) = facts
                 .http_observation
                 .or_else(|| failure.error.http_observation.as_deref().copied())

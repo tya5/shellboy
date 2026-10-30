@@ -40,21 +40,26 @@ impl TokenEstimate {
         model: &str,
     ) -> Result<Self, StorageError> {
         let mut estimate = Self::default();
-        // Cap both rows and document size. Legacy/missing measurements are
-        // unknown; do not invent a token count or propagate malformed metadata.
-        let rows = db.prepare("SELECT a.id,CASE WHEN length(CAST(a.usage_json AS BLOB))<=65536 THEN a.usage_json END,CASE WHEN length(CAST(a.input_manifest_json AS BLOB))<=65536 THEN a.input_manifest_json END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND a.profile_id=?2 AND a.model_id=?3 ORDER BY a.rowid DESC LIMIT 64")?
-            .query_map(params![thread,profile,model], |row| Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?)))?
+        // Bound candidate rows and manifests; extract only standard usage scalars.
+        let sql = format!(
+            "SELECT a.id,{},CASE WHEN length(CAST(a.input_manifest_json AS BLOB))<=65536 THEN a.input_manifest_json END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND a.profile_id=?2 AND a.model_id=?3 ORDER BY a.rowid DESC LIMIT 64",
+            crate::usage::sql_projection("a.usage_json")
+        );
+        let rows = db
+            .prepare(&sql)?
+            .query_map(params![thread, profile, model], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    crate::usage::StandardUsage::read(row, 1)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         for (attempt, usage, manifest) in rows {
             let Some((input, history)) = manifest.as_deref().and_then(manifest_counts) else {
                 continue;
             };
-            let Some(tokens) = usage
-                .as_deref()
-                .and_then(|body| serde_json::from_str::<Value>(body).ok())
-                .and_then(|usage| usage.get("input_tokens").and_then(Value::as_u64))
-                .filter(|tokens| *tokens > 0)
-            else {
+            let Some(tokens) = usage.input_tokens.filter(|tokens| *tokens > 0) else {
                 continue;
             };
             estimate.ratio = Some((tokens, input));

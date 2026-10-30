@@ -8,47 +8,10 @@ use serde_json::json;
 
 #[test]
 fn cached_usage_never_turns_missing_or_invalid_counts_into_zero() {
-    for (raw, expected) in [
-        (None, "未報告"),
-        (Some("null"), "未報告"),
-        (Some("{}"), "未報告"),
-        (
-            Some(r#"{"input_tokens_details":{"cached_tokens":null}}"#),
-            "未報告",
-        ),
-        (Some(r#"{"input_tokens_details":{"cached_tokens":0}}"#), "0"),
-        (
-            Some(r#"{"input_tokens_details":{"cached_tokens":12345}}"#),
-            "12345",
-        ),
-        (
-            Some(r#"{"input_tokens_details":{"cached_tokens":18446744073709551615}}"#),
-            "18446744073709551615",
-        ),
-        (
-            Some(r#"{"input_tokens_details":{"cached_tokens":-1}}"#),
-            "未報告（値が不正）",
-        ),
-        (
-            Some(r#"{"input_tokens_details":{"cached_tokens":"0"}}"#),
-            "未報告（値が不正）",
-        ),
-        (
-            Some(r#"{"input_tokens_details":{"cached_tokens":1.5}}"#),
-            "未報告（値が不正）",
-        ),
-        (Some("{"), "未報告（使用量の形式不正）"),
-    ] {
-        assert_eq!(cached_tokens(raw, false), expected, "{raw:?}");
+    assert_eq!(cached_tokens(None), "未報告");
+    for count in [0, 12345, i64::MAX as u64] {
+        assert_eq!(cached_tokens(Some(count)), count.to_string());
     }
-    assert_eq!(
-        cached_tokens(Some("{}"), true),
-        "未報告（使用量が表示上限を超過）"
-    );
-    assert_eq!(
-        cached_tokens(Some(&" ".repeat(MAX_USAGE_BYTES + 1)), false),
-        "未報告（使用量が表示上限を超過）"
-    );
 }
 
 fn node(id: &str) -> UiNode {
@@ -93,7 +56,7 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
             ("new",r#"{"input_tokens_details":{"cached_tokens":0}}"#),
             ("missing",r#"{"input_tokens":123}"#),
             ("invalid",r#"{"input_tokens_details":{"cached_tokens":"9000"}}"#),
-            ("oversized",&format!(r#"{{"input_tokens_details":{{"cached_tokens":999}},"extra":"{}"}}"#,"x".repeat(MAX_USAGE_BYTES))),
+            ("oversized",&format!(r#"{{"input_tokens_details":{{"cached_tokens":999}},"extra":"{}"}}"#,"x".repeat(128 * 1024))),
         ] {
             db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,'u',0,0,'p','m',0,'completed','{}',?2,'now')",rusqlite::params![id,usage])?;
             db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,'u','assistant_response','now','{}',2)",[id])?;
@@ -132,11 +95,8 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
     );
     assert_eq!(field(&nodes[1], FIELD), Some("0"));
     assert_eq!(field(&nodes[2], FIELD), Some("未報告"));
-    assert_eq!(field(&nodes[3], FIELD), Some("未報告（値が不正）"));
-    assert_eq!(
-        field(&nodes[4], FIELD),
-        Some("未報告（使用量が表示上限を超過）")
-    );
+    assert_eq!(field(&nodes[3], FIELD), Some("未報告"));
+    assert_eq!(field(&nodes[4], FIELD), Some("999"));
     assert_eq!(
         field(&nodes[5], FIELD),
         Some("未報告（要求との対応が一意でない）")

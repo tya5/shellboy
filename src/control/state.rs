@@ -76,13 +76,14 @@ pub(super) fn fail_attempt(
     error: &Value,
     at: &str,
 ) -> Result<AttemptTransition, StorageError> {
+    let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='failed',error_json=?2,ended_at=?3
+        "UPDATE model_attempt SET state='failed',error_json=?2,ended_at=?3,usage_json=COALESCE(?4,usage_json)
          WHERE id=?1 AND state IN ('preparing','inflight')
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state IN ('preparing','running','waiting') AND r.state='live')",
-        params![attempt, error.to_string(), at],
+        params![attempt, error.to_string(), at, usage.map(|u| u.to_value().to_string())],
     )?;
     attempt_outcome(db, attempt, AttemptState::Failed, changed)
 }
@@ -101,12 +102,26 @@ pub(super) fn complete_attempt(
         params![
             attempt,
             response.get("id").and_then(Value::as_str),
-            response.get("usage").map(Value::to_string),
+            response
+                .get("usage")
+                .map(crate::usage::StandardUsage::from_value)
+                .map(|u| u.to_value().to_string()),
             at
         ],
     )?;
     attempt_outcome(db, attempt, AttemptState::Completed, changed)
 }
+fn normalized_failure(error: &Value) -> (Value, Option<crate::usage::StandardUsage>) {
+    let mut error = error.clone();
+    let usage = error
+        .pointer("/raw_response/usage")
+        .map(crate::usage::StandardUsage::from_value);
+    if let Some(raw) = error.get_mut("raw_response") {
+        crate::usage::normalize_response(raw);
+    }
+    (error, usage)
+}
+
 fn failed_context_limit(body: Option<&str>) -> bool {
     #[derive(serde::Deserialize)]
     struct SavedFailure {
@@ -134,13 +149,14 @@ pub(super) fn incomplete_attempt(
     let permitted_failure = saved_failure
         .flatten()
         .filter(|body| failed_context_limit(Some(body)));
+    let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3
+        "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3,usage_json=COALESCE(?5,usage_json)
          WHERE id=?1 AND (state IN ('preparing','inflight') OR (state='failed' AND error_json=?4))
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state IN ('preparing','running','waiting','recovery_wait') AND r.state='live')",
-        params![attempt, error.to_string(), at, permitted_failure],
+        params![attempt, error.to_string(), at, permitted_failure, usage.map(|u| u.to_value().to_string())],
     )?;
     attempt_outcome(db, attempt, AttemptState::Incomplete, changed)
 }

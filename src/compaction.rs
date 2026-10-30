@@ -126,7 +126,11 @@ impl CachedPart {
     }
     fn encode(&self) -> String {
         // Keep potentially large raw-response encoding outside the DB job.
-        serde_json::to_string(self).expect("summary part")
+        let mut part = self.clone();
+        if let Some(raw) = &mut part.raw_response {
+            crate::usage::normalize_response(raw);
+        }
+        serde_json::to_string(&part).expect("summary part")
     }
     async fn save(&self, database: &DbWorker, lookup: String) -> Result<(), ApiError> {
         let saved = self.encode();

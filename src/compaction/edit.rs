@@ -168,11 +168,11 @@ impl Compactor {
         let profile = snapshot.profile.clone();
         let model = snapshot.model.clone();
         let latest=self.database.call(move|db| {
-            let result=db.query_row("SELECT a.id,CASE WHEN length(CAST(a.usage_json AS BLOB))<=65536 THEN a.usage_json END,CASE WHEN length(CAST(a.input_manifest_json AS BLOB))<=65536 THEN a.input_manifest_json END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND a.profile_id=?2 AND a.model_id=?3 ORDER BY a.rowid DESC LIMIT 1",params![thread,profile,model],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?))).optional()?;
+            let sql = format!("SELECT a.id,{},CASE WHEN length(CAST(a.input_manifest_json AS BLOB))<=65536 THEN a.input_manifest_json END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND a.profile_id=?2 AND a.model_id=?3 ORDER BY a.rowid DESC LIMIT 1",crate::usage::sql_projection("a.usage_json"));
+            let result=db.query_row(&sql,params![thread,profile,model],|row|Ok((row.get::<_,String>(0)?,crate::usage::StandardUsage::read(row,1)?,row.get::<_,Option<String>>(6)?))).optional()?;
             Ok(result.map(|(attempt,usage,manifest)| {
-                let usage=usage.filter(|body|body.len()<=64*1024).and_then(|body|serde_json::from_str::<Value>(&body).ok()).unwrap_or(Value::Null);
                 let manifest=manifest.and_then(|body|serde_json::from_str::<Value>(&body).ok()).unwrap_or(Value::Null);
-                json!({"attempt_id":attempt,"input_tokens":usage.get("input_tokens").and_then(Value::as_u64),"cached_tokens":usage.pointer("/input_tokens_details/cached_tokens").and_then(Value::as_u64),"input_characters":manifest.get("input_characters").and_then(Value::as_u64)})
+                json!({"attempt_id":attempt,"input_tokens":usage.input_tokens,"cached_tokens":usage.cached_tokens,"input_characters":manifest.get("input_characters").and_then(Value::as_u64)})
             }))
         }).await.map_err(storage_error)?;
         Ok(
