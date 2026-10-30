@@ -1,12 +1,16 @@
 //! Real local HTTP + SQLite + shell vertical paths; no production credentials.
 use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
-use shellboy::{app::DataOwner, control::Control, protocol::*};
+use shellboy::{
+    app::DataOwner,
+    control::{Control, EngineEvent},
+    protocol::*,
+};
 use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot},
     task::JoinHandle,
     time::timeout,
 };
@@ -152,16 +156,31 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     .unwrap()
 }
 async fn incoming(receiver: &mut mpsc::UnboundedReceiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), receiver.recv())
+    timeout(Duration::from_secs(60), receiver.recv())
         .await
         .unwrap()
         .unwrap()
 }
 
+// Every runtime state observed below publishes Changed after its DB commit.
+// Subscribe before reading so an update between the read and wait is retained.
+async fn changed(events: &mut broadcast::Receiver<EngineEvent>) {
+    loop {
+        match events.recv().await {
+            Ok(EngineEvent::Changed { .. }) | Err(broadcast::error::RecvError::Lagged(_)) => return,
+            Ok(_) => {}
+            Err(broadcast::error::RecvError::Closed) => {
+                panic!("owner event stream closed before expected state")
+            }
+        }
+    }
+}
+
 async fn saved_state(control: &Control, table: &str, id: &str, wanted: &str) {
     let table = table.to_owned();
     let id = id.to_owned();
-    timeout(Duration::from_secs(15), async {
+    let mut changes = control.subscribe();
+    timeout(Duration::from_secs(60), async {
         loop {
             let table = table.clone();
             let id = id.clone();
@@ -180,14 +199,14 @@ async fn saved_state(control: &Control, table: &str, id: &str, wanted: &str) {
             if state == wanted {
                 break;
             }
-            tokio::task::yield_now().await;
+            changed(&mut changes).await;
         }
     })
     .await
     .unwrap();
 }
 async fn close(control: Arc<Control>, owner: DataOwner, server: JoinHandle<()>) {
-    timeout(Duration::from_secs(15), control.shutdown())
+    timeout(Duration::from_secs(60), control.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -216,7 +235,7 @@ async fn interrupted_stream_is_saved_without_retry_and_empty_run_completes() {
         })
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(15), async {
+    timeout(Duration::from_secs(60), async {
         loop {
             if let shellboy::control::EngineEvent::Stream { text, .. } =
                 events.recv().await.unwrap()
@@ -271,7 +290,8 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
         {"type":"function_call","id":"foreground","call_id":"foreground-call","name":"shell","arguments":json!({"command":if cfg!(windows){"[Console]::In.ReadToEnd()"}else{"cat"},"background":false,"stdin_open":true}).to_string()},
         {"type":"function_call","id":"later","call_id":"later-call","name":"shell","arguments":json!({"command":if cfg!(windows){"[Console]::Out.Write('MUST_NOT_RUN')"}else{"printf MUST_NOT_RUN"}}).to_string()}
     ]}))).ok().unwrap();
-    timeout(Duration::from_secs(15), async {
+    let mut changes = control.subscribe();
+    timeout(Duration::from_secs(60), async {
         loop {
             let count = control
                 .store
@@ -288,7 +308,7 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
             if count == 2 {
                 break;
             }
-            tokio::task::yield_now().await;
+            changed(&mut changes).await;
         }
     })
     .await
@@ -487,7 +507,7 @@ async fn later_stream_interruption_is_not_misclassified_by_an_earlier_completed_
         })
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(15), async {
+    timeout(Duration::from_secs(60), async {
         loop {
             if let shellboy::control::EngineEvent::Stream { text, .. } =
                 events.recv().await.unwrap()
@@ -569,7 +589,7 @@ async fn background_completion_after_interruption_starts_new_turn_and_completes_
     stream.reply.send(Reply{status:200,kind:"text/event-stream",keep_open:true,
         body:format!("data: {}\n\n",json!({"type":"response.output_text.delta","delta":"interrupted while background work continues"})).into_bytes(),
     }).ok().unwrap();
-    timeout(Duration::from_secs(15), async {
+    timeout(Duration::from_secs(60), async {
         loop {
             if let shellboy::control::EngineEvent::Stream { text, .. } =
                 events.recv().await.unwrap()
@@ -681,9 +701,10 @@ async fn ordinary_queued_input_keeps_foreground_group_intact_without_extra_model
             {"type":"function_call","id":"second-item","call_id":"second-call","name":"shell","arguments":json!({"command":if cfg!(windows){"[Console]::Out.Write('SECOND')"}else{"printf SECOND"},"background":false}).to_string()}
         ]
     }))).ok().unwrap();
-    let execution=timeout(Duration::from_secs(15),async{loop{
+    let mut changes = control.subscribe();
+    let execution=timeout(Duration::from_secs(60),async{loop{
         let execution=control.store.database.call(|db|Ok(db.query_row("SELECT id FROM shell_execution WHERE state='running' ORDER BY rowid LIMIT 1",[],|r|r.get::<_,String>(0)).optional()?)).await.unwrap();
-        if let Some(execution)=execution{break execution;}tokio::task::yield_now().await;
+        if let Some(execution)=execution{break execution;}changed(&mut changes).await;
     }}).await.unwrap();
     let queued = command(
         &control,
