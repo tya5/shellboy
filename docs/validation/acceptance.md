@@ -3297,3 +3297,39 @@ rehashed-but-unbound/template script sets. Ordinary local checks pass1735/0/32,
 layout92, Python9, format and strict Clippy on the initial staging tree; the final
 rebased source, packaged upgrade, three native installer OSes and exact main CI
 remain pending. No tag/GitHub Release/publication/installed-binary change occurs.
+
+## v0.4.0 publication verification (#70)
+
+2026-10-31 JST. Source/tag target is exactly
+`dae2ba1fcc46c635edf1b88973ad306dd80960d4`; ordinary three-OS CI 41115910158
+and tag-triggered build/publication 41138064021 both pass without reruns.
+User-approved issue #70 revised notes equal the published body and retained file.
+
+Native macOS 26.3.1 arm64/Rust 1.99.1 `sh scripts/check.sh` passes before the tag
+push: 1,737 passed / 0 failed / 32 ignored, layout 93/Python 9, fmt and strict
+all-target Clippy. Isolated validation branch also passes the full standard check
+before push. It changes only the read-only manual workflow and public smoke
+fixtures, not runtime code, and is not merged into main.
+
+Anonymous curl downloads with curl configuration disabled retrieve all six
+public files and match the manifest and independently pinned hashes. All three
+archives extract (ZIP integrity checked); the local public macOS binary reports
+0.4.0. The actual latest shell installer passes fresh/replacement installation
+in a temporary directory with spaces; its backup matches previous binary bytes.
+Both latest install scripts equal version-specific v0.4.0 assets.
+
+Native public-byte CI 41139816831 at isolated source
+`b28fa7b0d1f8f55f83272bf502d510c49990db86` passes Linux x64, macOS ARM64,
+Windows PowerShell 5.1 and PowerShell 7. Each job downloads all six public files
+anonymously, verifies pinned SHA-256 plus manifest, extracts its native archive,
+runs --version/--help/docs list, checks latest scripts, and invokes the actual
+public one-line installer twice in a disposable install path. Every installed
+and extracted native version is shellboy 0.4.0, and replacement preserves a
+byte-identical backup. There are no failed jobs or reruns.
+
+Exact hashes and observed environments are retained in the
+[publication record](../development/publication.md#v040-publication-2026-10-31-jst).
+No owner is started/restarted, no real database/configuration is accessed and
+no paid provider is called. These public-byte checks are not three-OS synthetic
+upgrade tests or qualification of all physical terminals/real providers.
+A later separately authorized user installation must not restart the live owner.

@@ -203,7 +203,10 @@ left, and the held process is still live. The fixture kills and reaps its own
 processes before removing its temporary installation.
 
 
-## v0.4.0 preparation only (#70 / D-012)
+## Historical v0.4.0 preparation (#70 / D-012, superseded)
+
+This is the retained pre-approval procedure, not current release status. It is
+superseded by the [publication evidence](#v040-publication-2026-10-31-jst) below.
 
 Authorized scope stops at issue70 step8: version/notes/README, synthetic upgrade,
 exact-source native CI, candidate archives/installers/checksums and isolated
@@ -239,3 +242,75 @@ Keep exact candidate SHA/run links, all six SHA-256 values and installer/upgrade
 results in issue70 and outside-Git artifact evidence rather than changing the
 qualified SHA recursively. The retained release-note draft is review text, not
 a created GitHub Release. Stop at step8 for review and publication authorization.
+
+## v0.4.0 publication (2026-10-31 JST)
+
+[Shellboy v0.4.0](https://github.com/tya5/shellboy/releases/tag/v0.4.0) is public,
+published at **2026-10-30T22:36:57Z** (2026-10-31 JST), following explicit user
+approval recorded in issue #70. Annotated tag object
+`05a718c2c1306f069b945b906ffa8a31d11a192c` targets exactly
+`dae2ba1fcc46c635edf1b88973ad306dd80960d4`; the tag has not been moved.
+That exact main SHA passed ordinary three-OS
+[Rust checks 41115910158](https://github.com/tya5/shellboy/actions/runs/41115910158).
+[Tag-triggered release run 41138064021](https://github.com/tya5/shellboy/actions/runs/41138064021)
+built and smoke-tested all three native archives, assembled three archives,
+`install.sh`, `install.ps1` and `SHA256SUMS`, and published them through the
+workflow's write-permission job. The pre-created draft held the approved issue70
+[revised body](https://github.com/tya5/shellboy/issues/70#issuecomment-6532218780)
+so workflow publication preserved that text rather than generated notes.
+The [retained body file](release-v0.4.0-draft.md) exactly matches the published
+Release body; its old filename is kept for existing references.
+
+### Public-byte verification
+
+Anonymous `curl --disable --fail --location` downloads retrieved all six public
+files, without GitHub credentials or curl configuration. All five assets match
+the downloaded `SHA256SUMS`; all three archives extract, including ZIP integrity
+checking. These are **published hashes**, not the earlier candidate archive
+hashes: the release rebuild produced a new archive set.
+
+| Public file | SHA-256 |
+| --- | --- |
+| `install.ps1` | `d455157f547f84a28aca5dce86a36402da0300e5e5e3c560b3b2fe5d7569894e` |
+| `install.sh` | `2e276b412ed5994cd96ae252230d049df58ce547416323fc406c142cbf791422` |
+| `SHA256SUMS` | `00d3240ee45fede7f6725925943e7efc83aee57b3f2853cf178e2c934ae872aa` |
+| `shellboy-v0.4.0-aarch64-apple-darwin.tar.gz` | `5e37608162d526825d15af945e418a54cd7b09e4c6234c9c3f209c6f181dcb34` |
+| `shellboy-v0.4.0-x86_64-pc-windows-msvc.zip` | `02ce9a8b47e38dd354f3f72f3162de181100a0adb2e7c5b80ee7bfa5b81b6c12` |
+| `shellboy-v0.4.0-x86_64-unknown-linux-gnu.tar.gz` | `846bc435a1802d024eb881feb854f5b78bc48bec6f7e1e5b753998a4eaa76689` |
+
+Both `releases/latest/download/install.sh` and `install.ps1` return the exact
+v0.4.0 script bytes above, with the version marker replaced by `v0.4.0`.
+On native macOS 26.3.1 arm64, the publicly downloaded executable reports
+`shellboy 0.4.0` and hashes to
+`286f9d1701aae742ea02f82afa5cdd99b36a5c44000ea49215b0f6972b49b19f`.
+The public latest one-line command succeeds with `SHELLBOY_VERSION` removed and
+`SHELLBOY_INSTALL_DIR` pointing to a disposable directory containing spaces;
+a second invocation leaves one byte-identical backup and a runnable 0.4.0 binary.
+These checks do not start an owner or access a user database or paid provider.
+
+[Public-byte native run 41139816831](https://github.com/tya5/shellboy/actions/runs/41139816831)
+succeeds on all three OSes, with both Windows PowerShell 5.1 and PowerShell 7,
+at isolated validation SHA `b28fa7b0d1f8f55f83272bf502d510c49990db86`.
+The read-only manual workflow anonymously downloads all six public files,
+checks independently pinned hashes and the manifest, runs the extracted native
+binary's `--version`, `--help` and `docs list`, compares both latest scripts, then
+runs the actual public one-line installer twice in a temporary path with spaces.
+It checks fresh/replacement installation and the byte-identical backup. Every
+native version is `shellboy 0.4.0`; no build or publication is performed.
+The validation-only workflow is not merged into main.
+
+| Native environment / shell | Published executable SHA-256 |
+| --- | --- |
+| macOS-15.8.2-arm64-arm-64bit / sh | `286f9d1701aae742ea02f82afa5cdd99b36a5c44000ea49215b0f6972b49b19f` |
+| Linux-6.8.0-1070-azure-x86_64-with-glibc2.35 / sh | `7b184bed2bdc4c54b6af422efa6f49e1de0f115bcaa057fbd7c6085380ed23dc` |
+| Windows-2025Server-10.0.26100-SP0 / powershell | `c2a3860b205af1fc6d512b3bdac639b862547ba46671c5a19c5d8aff966bf44b` |
+| Windows-2025Server-10.0.26100-SP0 / pwsh | `c2a3860b205af1fc6d512b3bdac639b862547ba46671c5a19c5d8aff966bf44b` |
+
+No release/native-public validation job failed or required a rerun. The complete
+pre-tag standard check also passes on native macOS arm64/Rust 1.99.1:
+1,737 passed / 0 failed / 32 ignored, layout93, Python9, fmt and strict Clippy.
+Publication checks do not rerun the synthetic upgrade on every OS or qualify
+real providers or every physical terminal. Candidate synthetic-upgrade evidence
+remains in issue #70. User installation is separately authorized after this
+publication task; none of these public-byte tests touches that installation,
+its running owner, its configuration or real data.
