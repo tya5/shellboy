@@ -13,8 +13,12 @@ before contact. Nine loopback native CLI cases pass locally (paged70KiB UTF-8/st
 reasoning exclusion, bounded repairs/history, recovery, non-stopping timeout,
 active-Turn tool boundary, missing Thread/owner/input and exact numeric spelling).
 Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 full standard check passes
-**1713 passed / 0 failed / 32 ignored**, layout91, Python6, fmt and strict Clippy.
+**1713 passed / 0 failed / 32 ignored** before Chat integration, layout91, Python6,
+fmt and strict Clippy.
 Four Schema unit regressions and final-only/default cursor preservation pass.
+After rebase onto Chat sourcee65baaa, exact source6b2f5c9 passes **1719/0/32**,
+layout92, Python6, fmt and strict Clippy in the same environment. Only appended
+document histories conflicted; both are retained and runtime patches unchanged.
 No dependency/feature changes remain. Native main CI is pending.
 
 ## #60 Medium follow-up: indexed Thread-scoped receipt fences
