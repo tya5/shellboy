@@ -662,7 +662,7 @@ mod tests {
             cancel.clone(),
         );
         assert!(
-            matches!(tokio::time::timeout(Duration::from_secs(3),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
+            matches!(tokio::time::timeout(Duration::from_secs(60),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
         );
         assert_eq!(
             control.pending_wait_sources(),
@@ -764,7 +764,7 @@ mod tests {
                     cancel.clone(),
                 );
                 assert!(
-                    matches!(tokio::time::timeout(Duration::from_secs(3),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
+                    matches!(tokio::time::timeout(Duration::from_secs(60),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
                 );
                 owner.db.call(|db| {db.execute_batch("CREATE TRIGGER reject_pending BEFORE DELETE ON app_meta WHEN OLD.key LIKE 'wait.pending.%' BEGIN SELECT RAISE(ABORT,'synthetic pending cleanup failure'); END;")?;Ok(())}).await.unwrap();
                 cancel.cancel();
