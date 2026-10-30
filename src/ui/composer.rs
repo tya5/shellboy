@@ -612,10 +612,24 @@ mod contract_tests {
     #[test]
     fn agents_slash_displays_reference_and_selects_saved_or_new_thread() {
         let cwd = std::env::temp_dir();
+        let mut form_ui = UiState::new(&Config::default(), cwd.clone());
+        assert!(matches!(
+            form_ui
+                .execute_operation(Command::ThreadCreate(crate::protocol::ThreadCreateArgs {
+                    agents: Some("role.md".into()),
+                    cwd: None,
+                    connection: None,
+                    model: None,
+                    effort: None,
+                    parent_id: None,
+                }))
+                .as_slice(),
+            [UiAction::SelectAgents { .. }]
+        ));
         let mut ui = UiState::new(&Config::default(), cwd.clone());
         assert!(ui.slash("/agents").is_empty());
         assert!(matches!(ui.slash("/agents role.md").as_slice(),
-            [UiAction::Command(Command::ThreadCreate(a))] if a.agents.as_deref()==Some("role.md")));
+            [UiAction::SelectAgents {args:a,..}] if a.agents.as_deref()==Some("role.md")));
         ui.active_view_mut().thread_id = Some("saved".into());
         ui.active_view_mut().agents_path = "original.md".into();
         assert!(matches!(ui.slash("/agents role.md").as_slice(),
@@ -629,6 +643,49 @@ mod contract_tests {
             matches!(ui.slash("/cwd elsewhere").as_slice(),[UiAction::Command(Command::ThreadSet(a))] if a.agents.is_none())
         );
         assert_eq!(ui.view().agents_path, "original.md");
+    }
+    #[test]
+    fn agents_selection_reply_preserves_newer_text_and_rejects_stale_generation() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let actions = ui.slash("/agents role.md");
+        let [
+            UiAction::SelectAgents {
+                draft_id,
+                generation,
+                ..
+            },
+        ] = actions.as_slice()
+        else {
+            panic!("selection action");
+        };
+        let (draft_id, generation) = (draft_id.clone(), *generation);
+        ui.insert("newer draft text", false);
+        let details:ThreadDetails=serde_json::from_value(serde_json::json!({"agents_path":"/role.md","thread_id":"created","title":"","cwd":"/","connection":"fixture","model":"fixture","children_count":0,"shells_count":0})).unwrap();
+        ui.apply(UiUpdate::AgentsSelected {
+            draft_id: draft_id.clone(),
+            generation: generation + 1,
+            result: Ok(details.clone()),
+        });
+        assert!(ui.view().thread_id.is_none());
+        assert_eq!(ui.view().draft.text, "newer draft text");
+        ui.apply(UiUpdate::AgentsSelected {
+            draft_id: draft_id.clone(),
+            generation,
+            result: Ok(details.clone()),
+        });
+        assert_eq!(ui.view().thread_id.as_deref(), Some("created"));
+        assert_eq!(ui.view().agents_path, "/role.md");
+        assert_eq!(ui.view().draft.text, "newer draft text");
+        ui.take_deferred_actions();
+        ui.apply(UiUpdate::AgentsSelected {
+            draft_id,
+            generation,
+            result: Ok(details),
+        });
+        assert!(
+            ui.take_deferred_actions().is_empty(),
+            "duplicate result must not readopt"
+        );
     }
     #[cfg(unix)]
     #[test]

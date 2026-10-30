@@ -17,7 +17,8 @@ impl UiUpdate {
             | Self::NodeWindow { .. }
             | Self::EditRequestLoaded { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
-            Self::ThreadDeletion { .. }
+            Self::AgentsSelected { .. }
+            | Self::ThreadDeletion { .. }
             | Self::ScopedManagement { .. }
             | Self::RecoveryBell
             | Self::CommandOutcome { .. }

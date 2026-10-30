@@ -1012,6 +1012,21 @@ async fn run_with_delivery(
                                 .await;
                         });
                     }
+                    UiAction::SelectAgents { draft_id, generation, args } => {
+                        let Ok(permit) = command_slots.clone().try_acquire_owned() else {
+                            let error=ApiError::new(ErrorCode::InvalidState,"設定の変更キューが満杯です");
+                            command_outcome::<()>(&updates,submission,&Err(error.clone())).await;
+                            update(&updates,UiUpdate::AgentsSelected { draft_id,generation,result:Err(error) }).await;
+                            continue;
+                        };
+                        let control=control.clone();
+                        let sender=updates.worker();
+                        spawn_work(&mut workers,permit,async move {
+                            let result=request(&control,Command::ThreadCreate(args)).await.and_then(|v|serde_json::from_value::<ThreadDetails>(v).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Invalid Thread creation response")));
+                            command_outcome(&sender,submission,&result).await;
+                            update(&sender,UiUpdate::AgentsSelected {draft_id,generation,result}).await;
+                        });
+                    }
                     UiAction::Command(Command::ThreadSet(args)) => {
                         let target = args
                             .thread_id

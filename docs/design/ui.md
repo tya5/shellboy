@@ -125,3 +125,10 @@ The [per-Thread instruction reference contract](agents-reference.md) supersedes
 previous fixed-reference wording: explicit create/set/fork selection is allowed,
 while cwd changes alone never rediscover instructions and same-Turn retry
 continues using its durable snapshot.
+
+Unsaved instruction selection uses draft/generation-bound UI action/result
+projection through the existing bounded command workers and ordered outbox.
+Adopt only into that unsaved draft, preserving edits made during selection.
+While selection is pending, normal send retains its draft rather than creating
+a second default Thread. An inactive origin can adopt its own result without
+switching the current view. Generic management success alone is not adoption.

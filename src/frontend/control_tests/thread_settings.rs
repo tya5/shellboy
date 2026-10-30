@@ -154,3 +154,139 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
     sender.try_send(UiAction::Quit).unwrap();
     super::finish_bridge(bridge, &incoming).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    for switch_away in [false, true] {
+        let (root, owner, control, server) = super::fixture().await;
+        std::fs::write(root.path().join("role.md"), "SELECTED_DRAFT_ROLE").unwrap();
+        let mut ui = UiState::new(&control.store.config, root.path().into());
+        let (sender, receiver) = actions::channel(32);
+        let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+        let bridge = tokio::spawn(frontend::run(
+            control.clone(),
+            receiver,
+            updates,
+            root.path().into(),
+            owner,
+            server,
+        ));
+        // Process startup before issuing a draft-bound selection.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(update) = incoming.try_recv() {
+                    let initialized = matches!(update, UiUpdate::Initialize { .. });
+                    ui.apply(update);
+                    if initialized {
+                        break;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let origin = ui.view().draft.draft_id.clone();
+        sender
+            .try_send(UiAction::ActivateDraft {
+                draft_id: origin.clone(),
+            })
+            .unwrap();
+        ui.insert("/agents role.md", false);
+        for action in ui.event(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ))) {
+            sender.try_send(action).unwrap();
+        }
+        ui.insert("kept while reference is selected", false);
+        assert!(
+            ui.event(Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE
+            )))
+            .is_empty(),
+            "normal send cannot race unsaved Thread creation"
+        );
+        let selected = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(update) = incoming.try_recv() {
+                    if matches!(update, UiUpdate::AgentsSelected { .. }) {
+                        break update;
+                    }
+                    ui.apply(update);
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let thread = match &selected {
+            UiUpdate::AgentsSelected {
+                draft_id,
+                result: Ok(details),
+                ..
+            } => {
+                assert_eq!(draft_id, &origin);
+                details.thread_id.clone()
+            }
+            other => panic!("{other:?}"),
+        };
+        if switch_away {
+            for action in ui.new_chat() {
+                sender.try_send(action).unwrap();
+            }
+            ui.insert("unrelated draft", false);
+        }
+        ui.apply(selected);
+        for action in ui.take_deferred_actions() {
+            sender.try_send(action).unwrap();
+        }
+        if switch_away {
+            assert!(ui.view().thread_id.is_none());
+            assert_eq!(ui.view().draft.text, "unrelated draft");
+            for action in ui.select_thread(format!("draft:{origin}")) {
+                sender.try_send(action).unwrap();
+            }
+        }
+        assert_eq!(ui.view().thread_id.as_deref(), Some(thread.as_str()));
+        assert_eq!(
+            ui.view().agents_path,
+            root.path().join("role.md").to_str().unwrap()
+        );
+        assert_eq!(ui.view().draft.text, "kept while reference is selected");
+        let send = ui.event(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+        assert!(
+            send.iter()
+                .any(|a| matches!(a,UiAction::Send{thread_id:Some(id),..} if id==&thread))
+        );
+        for action in send {
+            sender.try_send(action).unwrap();
+        }
+        let target = thread.clone();
+        tokio::time::timeout(std::time::Duration::from_secs(5),async {
+            loop {
+                let target=target.clone();
+                if control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND n.payload_json LIKE '%kept while reference%')",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}
+                while let Ok(update)=incoming.try_recv(){ui.apply(update);}
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        let count: i64 = control
+            .store
+            .database
+            .call(|db| Ok(db.query_row("SELECT count(*) FROM thread", [], |r| r.get(0))?))
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 3,
+            "first send must reuse the selected Thread, not create a default one"
+        );
+        sender.try_send(UiAction::Quit).unwrap();
+        super::finish_bridge(bridge, &incoming).await;
+    }
+}

@@ -6,6 +6,7 @@ pub struct ThreadView {
     pub thread_id: Option<String>,
     pub cwd: PathBuf,
     pub agents_path: String,
+    pub(super) selecting_agents: bool,
     pub connection: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -178,6 +179,7 @@ impl ThreadView {
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
         Self {
             agents_path: cwd.join("AGENTS.md").to_string_lossy().into_owned(),
+            selecting_agents: false,
             activity: Default::default(),
             thread_id: None,
             cwd,
