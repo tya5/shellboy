@@ -1,5 +1,16 @@
 # Validation record
 
+## #41 conversation structure and inline interaction
+
+Source7fbf20b qualifies B+C on native macOS arm64/Rust1.99.1: standard checks
+**1,653 passed / zero failed / 32 ignored**, plus real PTYs80x40/140x40 across
+dark/light/NO_COLOR. Source identities, Unicode/wheel boundaries, bounded true
+raw suffixes, stale replies and shared preview accounting are covered.
+
+The [detailed record](conversation-redesign-bc.md) separates P1/P3/P7 measurements,
+private synthetic fixtures, main CI still pending and untested physical/real-API
+cases. D–G remain open; these successes do not qualify the entire #41 scope.
+
 ## #61 documentation qualification
 
 Single-conversation docs-only worktree, base16c8934, macOS arm64/Rust1.99.1.

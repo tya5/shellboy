@@ -13,9 +13,9 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | Increment | Scope | State |
 | --- | --- | --- |
 | Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Complete: e8c1ff2, native three-OS CI41034892332 green |
-| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted locally; B+C implementation in progress |
-| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | In progress; validation and main admission pending |
-| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | In progress with B; validation and main admission pending |
+| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C locally qualified, main CI pending |
+| B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Local standard/PTY/P1/P3/P7 qualified; main admission/CI pending |
+| C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Local qualification complete with B; main admission/CI pending |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Planned |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
@@ -25,13 +25,12 @@ Each increment must be usable independently. A requirement that crosses these
 boundaries must land with its complete action/read/render path, not a stub.
 Report shipped and remaining scope on the issue after each main admission.
 
-B+C are one usable implementation unit. The current source/documentation changes
-are under integration; no B/C checkbox below denotes a verified or shipped result.
-Focused tests, full standard checks and actual PTY observations for this revision
-remain to be recorded before main admission. D–G remain pending; B+C do not add
-the fixed live-work region, background-work timers, watch mode, reactive browser
-patches, descendant counts, operation catalogue or popup wheel support. Existing
-background management and F8 controls remain available until those increments.
+B+C are one usable implementation unit. Source7fbf20b passes the native standard
+check and six actual PTY conditions; P1/P3/P7 results and limits are in
+[the qualification record](../validation/conversation-redesign-bc.md). Main
+admission/three-OS CI remain pending, so shipment checkboxes are not yet marked.
+D–G remain pending. Existing background management and F8 controls remain available
+until the new live/watch/form increments are delivered.
 
 ## Complete requirement ledger
 

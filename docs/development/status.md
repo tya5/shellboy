@@ -1,5 +1,24 @@
 # Development status
 
+## #41 B+C: local qualification complete
+
+Runtime/test source7fbf20b passes native macOS standard checks: **1,653 passed /
+zero failed / 32 ignored**, layout88, Python6, format and strict all-target Clippy.
+Conversation bands/header, stable collapsed tool rows, real failure tails, inline
+focus/open/original/copy and bounded off-page links are implemented. Shared
+preview accounting includes metadata; stale reads release only their own slots.
+Quiet facts coalesce without losing canonical backward navigation.
+
+The exact debug binary passes actual PTYs80x40/140x40 in dark/light/NO_COLOR
+(all six cases). UI p95 is3.175ms against baseline~1.7ms;50 closed successful
+tools reduce actual shared DB jobs per refresh656→7. See the detailed
+[qualification record](../validation/conversation-redesign-bc.md).
+
+B+C are ready for the authorized main admission; main three-OS CI is pending.
+D–G and their reactivity/performance gates remain open in the
+[delivery plan](issue-41-plan.md). #41 is not complete. The installed binary
+remains1fec7f0; no user data, paid API, release or tag was changed.
+
 ## #61: current user and agent guidance
 
 Documentation-only, single-conversation update: CLI reference includes send
