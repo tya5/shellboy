@@ -3209,3 +3209,56 @@ metadata-record rebase; final rebased check and ordinary three-OS main CI remain
 independent gates. No new package/version, schema, worker/poller/process or queue
 is added to production. All request/owner/data fixtures are synthetic; no real
 provider, installed shellboy binary, real owner or private conversation is used.
+
+
+## OSC7501 persistence isolation and failure retry (#54 review)
+
+Native macOS ARM64, Rust 1.99.1, 2026-10-31; source based on main fdaec1c.
+`RUST_TEST_THREADS=2 cargo test --locked --lib frontend::program_status -- --nocapture`
+passes all three tests. This includes the existing overflow/priority/seen test
+and two new regressions:
+
+- A read-only open failure does not create a missing database, preserves seen
+  identities, emits no replacement snapshot and marks status dirty. Retrying at
+  the next simulated coalescing admission, without a Changed event, publishes
+  the repaired store and prunes obsolete seen identities. The production result
+  arm uses this same acceptance helper; existing tick admission remains intact.
+- A temporary WAL store contains exactly 10,000 nondeleted Threads: 9,992 historical
+  completions plus live/stopping/recovery/failed/fresh/seen/stopped/never-run cases.
+  There are 9,999 Runs, Turns and model attempts. With the real persistence worker
+  deliberately occupied by an uncommitted Run update, ten production read-only
+  projections complete. Each returns working 2 / blocked 1 / error 1 / done 1 / idle 9995,
+  five child records and the exact acknowledged completion identity. The
+  uncommitted update is never seen; after release/commit, the next read returns
+  working 1 / error 2. Writer shutdown and a subsequent TRUNCATE checkpoint return
+  successfully with no retained reader. A oneshot and a channel delimit the
+  writer hold; 60-second watchdogs, not sleeps or negative timing windows, guard
+  the flow. Holding a writer job open is a synthetic test technique only.
+
+The ten observed per-read durations in microseconds are 100828, 109280, 109936,
+112886, 106621, 110635, 110225, 115314, 120397, 111846: mean 110796us, minimum 100828us,
+maximum 120397us. The timer includes presentation admission/scheduling, read-only
+connection open, transaction, full SQL/projection, retained-child title reads,
+commit and connection close. This is the ordinary debug test profile, repeated
+against the same temporary database, with concurrent local compilation activity;
+it is not a cold-disk or release-binary benchmark and no strict timing threshold
+is asserted. It still inspects 10,000 Thread rows per projection (O(Thread count));
+this fix chooses the review's read-only-connection alternative rather than a
+candidate-index migration. It removes that scan from the persistence queue, not
+all CPU/I/O contention. The existing two-slot blocking-pool permit stays with
+admitted work until it completes, even if its async observer is cancelled.
+
+Projection uses SQLITE_OPEN_READ_ONLY plus query_only, a 250ms busy timeout and
+one deferred read transaction; there is no writer-pool call, migration or new
+worker/queue/process/poller. Existing classifier, output encoder, frame boundary,
+conversation/status-row rendering and off-mode admission are unchanged. All
+fixtures use temporary data; no real provider, private conversation, installed
+binary or user settings are used. Physical terminal receivers remain unverified.
+The full local standard check and final rebased three-OS CI are separate gates.
+
+On source 2b9bd88, `RUST_TEST_THREADS=2 sh scripts/check.sh` passes all targets:
+1,737 passed / 0 failed / 32 ignored, integration layout 93 suites, Python 7,
+fmt and strict all-target Clippy. The native disposable-PTY on/off/model-shell
+OSC isolation regression passes again through the new read path. The final
+rebased full standard check and ordinary three-OS main CI are still independent
+gates, not inferred from these local observations.

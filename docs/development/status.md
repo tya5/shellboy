@@ -1223,3 +1223,25 @@ selection acknowledgment and model-shell OSC isolation. tmux3.6a isolated-parser
 smoke ignores a valid OSC report without corrupting printable text. This does
 not qualify receiver GUI behavior: kitty/cmux/herdr, Terminal.app and WezTerm
 visual acceptance remain unverified. Standard/rebased native gates are separate.
+
+
+## OSC7501 review follow-up (#54, 2026-10-31)
+
+The projection now opens a short-lived read-only SQLite connection inside the
+existing two-slot presentation blocking pool, under existing frontend read
+admission. It does not enqueue projection SQL on the persistence worker. One
+read transaction keeps aggregate rows, retained titles and seen pruning on a
+single snapshot; the connection closes after each read. A failed projection
+preserves the last published snapshot/seen identities and marks status dirty
+for retry at the existing coalescing opportunity, without another Changed event.
+No schema, lifecycle classifier, worker, poller or frame/drawing change is added.
+
+Focused native regressions pass for failure/retry and 10,000 synthetic Threads
+with 9,999 Runs/Turns/model attempts while the persistence worker holds an
+uncommitted update. Ten read-only projections take 100.828-120.397ms each
+(mean 110.796ms) on native macOS ARM64/Rust 1.99.1 debug; these are observations,
+not latency gates. The full metadata scan remains O(Thread count), now off the
+writer queue. The full local standard check passes 1,737/0/32, layout 93, Python 7,
+fmt and strict all-target Clippy; the disposable-PTY on/off/shell-OSC regression
+passes through this reader. Final rebased/native CI remain separate gates.
+Physical receiver behavior is not newly qualified by this fix.
