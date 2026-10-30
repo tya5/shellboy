@@ -31,6 +31,11 @@ pub struct Cli {
 pub enum CliCommand {
     /// Inspect recorded work; no model call or persistent job engine.
     Status(StatusOptions),
+    /// Read saved model usage and separate timing totals; no model call.
+    Usage {
+        #[command(subcommand)]
+        command: UsageCommand,
+    },
     /// Read and search the guides bundled with this executable; no owner or API needed.
     Docs {
         #[command(subcommand)]
@@ -105,6 +110,22 @@ pub enum CliCommand {
         command: StorageCommand,
     },
 }
+#[derive(Debug, Clone, Subcommand)]
+pub enum UsageCommand {
+    Get(UsageOptions),
+}
+#[derive(Debug, Clone, Args)]
+pub struct UsageOptions {
+    #[arg(long="thread", conflicts_with_all=["run_id","turn_id"])]
+    pub thread_id: Option<String>,
+    #[arg(long = "run", conflicts_with = "turn_id")]
+    pub run_id: Option<String>,
+    #[arg(long = "turn")]
+    pub turn_id: Option<String>,
+    #[arg(long="include-children", conflicts_with_all=["run_id","turn_id"])]
+    pub include_children: bool,
+}
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum ModelCommand {
     List(ModelListOptions),
@@ -656,6 +677,14 @@ impl Cli {
                 all: a.all,
                 limit: a.limit,
                 cursor: a.cursor,
+            }),
+            CliCommand::Usage {
+                command: UsageCommand::Get(a),
+            } => C::UsageGet(wire::UsageGetArgs {
+                thread_id: a.thread_id,
+                run_id: a.run_id,
+                turn_id: a.turn_id,
+                include_children: a.include_children,
             }),
             CliCommand::Docs { .. } | CliCommand::Rag(_) => return Ok(None),
             CliCommand::Model {

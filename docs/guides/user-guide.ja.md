@@ -114,3 +114,10 @@ Ctrl+Cは現在Threadの中断、Ctrl+Bは現在のforeground shellを背景へ�
 次に使う機能は[添付](attachments.md)、[履歴と検索](history-and-search.md)、[全CLI参照](cli-reference.md)から確認できます。
 
 削除前にF8の「会話 · 削除影響」で、動作中Run・子孫・共有や出典・添付参照を確認できます。照会だけでは削除せず、容量の回収見積もりは未対応です。受付や圧縮結果を見失った場合はF8の「操作 · 受付結果」で対象operationを照会し、後続状態も確認します。詳しくは[復旧・保存](recovery-and-storage.md)を参照してください。
+
+## 保存済み使用量の確認
+
+F8の「使用量 · 合計」で、保存されたモデル要求の使用量とRun・モデル要求・shellの時間を別々に確認できます。子会話を含めることもできます。
+CLIは `shellboy usage get --thread THREAD_ID --include-children`、または子を含めず `--run` / `--turn` を指定します。既存のgetにも `usage_totals` が付きます。
+未報告の値を0とはみなしません。summary・embeddingの未記録はcoverageに明示します。実行中の読取時点の値は完了分と別で、重複する3種類の時間を実働時間として足しません。
+詳細はDB workerで開いた時と変更通知時に読み、描画中はキャッシュを使います。

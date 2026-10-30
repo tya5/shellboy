@@ -36,8 +36,8 @@ impl Number {
         }
     }
 }
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Attempts {
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+struct Attempts {
     pub count: u64,
     pub input_tokens: Number,
     pub cached_tokens: Number,
@@ -45,6 +45,17 @@ pub struct Attempts {
     pub reasoning_tokens: Number,
     pub total_tokens: Number,
     pub duration_ms: Number,
+    #[serde(
+        rename = "first_known_started_at",
+        serialize_with = "serialize_start_key"
+    )]
+    first_start_key: Option<String>,
+    #[serde(
+        rename = "last_known_started_at",
+        serialize_with = "serialize_start_key"
+    )]
+    last_start_key: Option<String>,
+    pub unknown_start_count: u64,
 }
 impl Attempts {
     fn fields(&mut self) -> [&mut Number; 6] {
@@ -71,6 +82,28 @@ fn saved_ms(start: Option<&str>, end: Option<&str>) -> Option<i64> {
     let end = DateTime::parse_from_rfc3339(end?).ok()?;
     (end >= start).then(|| end.signed_duration_since(start).num_milliseconds())
 }
+fn start_key(raw: Option<&str>) -> Option<String> {
+    let value = DateTime::parse_from_rfc3339(raw?).ok()?;
+    // Fixed-width biased seconds also order pre-epoch and expanded-year values.
+    let shifted = value.timestamp() as i128 - i64::MIN as i128;
+    Some(format!(
+        "{shifted:020}{:010}|{}",
+        value.timestamp_subsec_nanos(),
+        value
+            .with_timezone(&chrono::Utc)
+            .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+    ))
+}
+fn start_value(key: Option<&str>) -> Option<&str> {
+    key.and_then(|key| key.split_once('|').map(|(_, v)| v))
+}
+fn serialize_start_key<S: serde::Serializer>(
+    key: &Option<String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    start_value(key.as_deref()).serialize(serializer)
+}
+
 fn register(db: &Connection) -> rusqlite::Result<()> {
     db.create_scalar_function(
         "usage_saved_ms",
@@ -82,6 +115,12 @@ fn register(db: &Connection) -> rusqlite::Result<()> {
                 ctx.get_raw(1).as_str().ok(),
             ))
         },
+    )?;
+    db.create_scalar_function(
+        "usage_saved_start",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| Ok(start_key(ctx.get_raw(0).as_str().ok())),
     )
 }
 struct Selection {
@@ -175,9 +214,10 @@ fn model_sql(s: &Selection, wide: bool) -> String {
             select.push_str(&format!(",sum({field}),count(*)-count({field})"));
         }
     }
+    select.push_str(",min(start_key),max(start_key),count(*)-count(start_key)");
     let block = if wide { ",block" } else { "" };
     format!(
-        "WITH docs AS MATERIALIZED (SELECT a.rowid/65536 block,a.state,{} standard_values,CASE WHEN a.state IN ('preparing','inflight') THEN usage_saved_ms(a.started_at,?2) ELSE usage_saved_ms(a.started_at,a.ended_at) END duration_ms FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.state IN ('completed','failed','incomplete','preparing','inflight')),values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms) AS MATERIALIZED (SELECT block,state,{projected},duration_ms FROM docs) SELECT {select} FROM values_read GROUP BY state{block}",
+        "WITH docs AS MATERIALIZED (SELECT a.rowid/65536 block,a.state,{} standard_values,CASE WHEN a.state IN ('preparing','inflight') THEN usage_saved_ms(a.started_at,?2) ELSE usage_saved_ms(a.started_at,a.ended_at) END duration_ms,CASE WHEN a.state IN ('completed','failed','incomplete') THEN usage_saved_start(a.started_at) END start_key FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.state IN ('completed','failed','incomplete','preparing','inflight')),values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms,start_key) AS MATERIALIZED (SELECT block,state,{projected},duration_ms,start_key FROM docs) SELECT {select} FROM values_read GROUP BY state{block}",
         standard_values_sql(),
         turn_source(s)
     )
@@ -214,6 +254,23 @@ fn models(
                 let unknown: i64 = row.get(offset + if wide { 2 } else { 1 })?;
                 number.add(sum, unknown as u64);
             }
+            let meta = 2 + 6 * if wide { 3 } else { 2 };
+            let first: Option<String> = row.get(meta)?;
+            let last: Option<String> = row.get(meta + 1)?;
+            if let Some(first) = first
+                && group
+                    .first_start_key
+                    .as_ref()
+                    .is_none_or(|old| first < *old)
+            {
+                group.first_start_key = Some(first);
+            }
+            if let Some(last) = last
+                && group.last_start_key.as_ref().is_none_or(|old| last > *old)
+            {
+                group.last_start_key = Some(last);
+            }
+            group.unknown_start_count += row.get::<_, i64>(meta + 2)? as u64;
         }
     }
     trace
@@ -342,12 +399,52 @@ fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, A
             total_model_time.known_sum = None;
         }
     }
+    let first = attempts
+        .values()
+        .filter_map(|v| v.first_start_key.as_deref())
+        .min();
+    let last = attempts
+        .values()
+        .filter_map(|v| v.last_start_key.as_deref())
+        .max();
+    let unknown_starts = attempts
+        .values()
+        .map(|v| v.unknown_start_count)
+        .sum::<u64>();
+    let own_turn_lifetime = if let Scope::Turn(id) = scope {
+        let sql = "SELECT usage_saved_ms(created_at,ended_at) FROM turn WHERE id=?1";
+        let mut st = db.prepare(sql).map_err(error)?;
+        let value = st
+            .query_row([id], |r| r.get::<_, Option<i64>>(0))
+            .map_err(error)?;
+        trace
+            .statements
+            .push((sql.into(), st.get_status(StatementStatus::VmStep) as u64));
+        value
+    } else {
+        None
+    };
+    let scope_id = match scope {
+        Scope::Turn(id) | Scope::Run(id) | Scope::Thread { id, .. } => id,
+    };
+    let active_observed = if !active.is_empty()
+        || active_run.get("count").and_then(Value::as_u64).unwrap_or(0) > 0
+        || active_shell
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            > 0
+    {
+        Some(observed)
+    } else {
+        None
+    };
     Ok(
-        json!({"scope":s.kind,"selected_threads":s.threads.len(),"coverage":{"complete":s.complete,"descendants":if s.complete{"complete"}else{"thread_limit"},"summary":"not_recorded","embedding":"out_of_scope","rag":"out_of_scope","excluded_attempt_states":["cancelled"]},"model_attempts":attempts,"model_duration_ms":total_model_time,"run":run,"shell":shell,"active":{"observed_at":observed,"model_attempts":active,"run":active_run,"shell":active_shell}}),
+        json!({"scope":s.kind,"scope_id":scope_id,"thread_id":s.threads.first(),"include_children":matches!(scope,Scope::Thread{children:true,..}),"turn_lifetime_ms":own_turn_lifetime,"attempt_period":{"first_known_started_at":start_value(first),"last_known_started_at":start_value(last),"unknown_start_count":unknown_starts},"selected_threads":s.threads.len(),"coverage":{"scope_complete":s.complete,"descendants":if s.complete{"complete"}else{"thread_limit"},"summary":"not_recorded","embedding":"out_of_scope","rag":"out_of_scope","excluded_attempt_states":["cancelled"]},"model_attempts":attempts,"model_duration_ms":total_model_time,"run":run,"shell":shell,"active":{"observed_at":active_observed,"model_attempts":active,"run":active_run,"shell":active_shell}}),
     )
 }
 
-/// One saved snapshot; no provider calls, storage mutation, receipt or file I/O.
+/// One saved snapshot on the owner DB worker; no provider calls, writes or receipt.
 pub fn read(db: &Connection, scope: &Scope) -> Result<Value, ApiError> {
     if db.is_autocommit() {
         let tx = db.unchecked_transaction().map_err(error)?;

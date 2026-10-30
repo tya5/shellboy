@@ -71,7 +71,7 @@ For important changes, explicitly retain an ID in the already known same-instanc
 
 `operation get` `state/outcome` is the saved acceptance-operation result. `replay_policy=return_saved_outcome` returns the original result; `do_not_reexecute` means pending effects are not restarted. `result_uncertain=true` is not evidence of nonexecution. `targets` includes only IDs in the saved result; `downstream` shows compaction processing or current message delivery. Otherwise follow targets to get commands; inspect indexing per space with `index status`. The query itself creates no receipt and rereads current values under one query ID. `result_expired=true` / `replay_policy=operation_expired` means the original outcome body was collected and that mutation ID will not execute again.
 
-## Operation dictionary (40 operations)
+## Operation dictionary
 
 Brackets mean optional; `|` means alternatives. Add common global flags and `--help` to the operation-specific flags listed here.
 
@@ -80,6 +80,26 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
+
+### Saved usage (1 operation)
+
+| Operation and all specific flags | Main result and conditions |
+|---|---|
+| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children]` | All-time saved model usage and separate Run/model/shell durations. At most one scope ID. Default is the authenticated caller's Thread; external callers supply an ID. Children apply only to Thread scope. No provider call, receipt or period flags. |
+
+`thread get`, `run get` and `turn get` also include `usage_totals`. Counts use saved
+completed/failed/incomplete model attempts, not proof of client transmission.
+Each number has known_sum/unknown_count/overflow; unreported values are not zero.
+The attempt period reports first/last known saved start times and unknown count.
+Active saved rows are separate read-time values; observed_at is null when none
+are active. Run/model/shell durations overlap and must not be added as work time.
+A Turn has its own lifetime but does not repeat its parent Run's full lifetime.
+
+`coverage.scope_complete` concerns selected saved scopes, not knowledge of every
+numeric value. Child traversal uses the existing 200-item read safety bound,
+excluding deleted Threads; a limit reports thread_limit and a partial scope total.
+Summary/embedding/RAG usage is not recorded in these totals and has explicit
+coverage rather than a guessed zero. Repeating a read ID evaluates current data.
 
 ### Models (1 operation)
 

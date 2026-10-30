@@ -89,7 +89,7 @@ fn saved_state_totals_are_exact_read_only_and_missing_is_not_zero() {
     )
     .unwrap();
     assert_eq!(all["selected_threads"], 101);
-    assert_eq!(all["coverage"]["complete"], true);
+    assert_eq!(all["coverage"]["scope_complete"], true);
 }
 #[test]
 fn overflow_falls_back_to_exact_integer_chunks() {
@@ -191,7 +191,7 @@ fn measure_public_saved_totals() {
                     let tx = db.unchecked_transaction().unwrap();
                     let v = inspect(&tx, scope, &mut trace).unwrap();
                     let elapsed = started.elapsed().as_secs_f64() * 1000.;
-                    assert!(v["coverage"]["complete"].as_bool().unwrap());
+                    assert!(v["coverage"]["scope_complete"].as_bool().unwrap());
                     let n = if *label == "children" || (*label == "thread" && !spread) {
                         100_000
                     } else if *label == "thread" {
@@ -478,7 +478,15 @@ fn active_saved_records_and_cancelled_rows_do_not_pollute_terminal_totals() {
     assert_eq!(v["run"]["count"], 1);
     assert_eq!(v["active"]["shell"]["count"], 1);
     assert_eq!(v["shell"]["count"], 10);
-    assert!(v["active"]["shell"]["duration_ms"]["known_sum"].is_number());
+    let expected = saved_ms(Some(START), v["active"]["observed_at"].as_str());
+    assert_eq!(
+        v["active"]["shell"]["duration_ms"]["known_sum"],
+        json!(expected)
+    );
+    assert_eq!(
+        v["active"]["shell"]["duration_ms"]["unknown_count"],
+        u64::from(expected.is_none())
+    );
 }
 
 #[test]
@@ -503,7 +511,7 @@ fn descendant_limit_deleted_bridge_and_cycles_are_honest() {
     }
     let v = read(&db, &scope).unwrap();
     assert_eq!(v["selected_threads"], MAX_LIST_LIMIT);
-    assert_eq!(v["coverage"]["complete"], false);
+    assert_eq!(v["coverage"]["scope_complete"], false);
     assert_eq!(v["coverage"]["descendants"], "thread_limit");
 }
 
@@ -525,4 +533,37 @@ fn saved_shell_sum_can_exceed_i64_without_wrapping_or_failing() {
     let v = read(&db, &scope).unwrap();
     assert_eq!(v["shell"]["duration_ms"]["known_sum"], json!(u64::MAX - 1));
     assert_eq!(v["shell"]["duration_ms"]["overflow"], false);
+}
+
+#[test]
+fn first_and_last_known_start_preserve_offsets_subseconds_and_negative_epoch_order() {
+    let mut db = db();
+    seed(&mut db, 1, false);
+    db.execute(
+        "DELETE FROM model_attempt WHERE id NOT IN ('a0-2','a0-3','a0-4')",
+        [],
+    )
+    .unwrap();
+    db.execute("UPDATE model_attempt SET started_at='1970-01-01T01:00:00.000000001+01:00',ended_at='1970-01-01T00:00:01Z' WHERE id='a0-2'",[]).unwrap();
+    db.execute("UPDATE model_attempt SET started_at='1969-12-31T23:59:59.999999999Z',ended_at='1970-01-01T00:00:01Z' WHERE id='a0-3'",[]).unwrap();
+    db.execute(
+        "UPDATE model_attempt SET started_at='bad' WHERE id='a0-4'",
+        [],
+    )
+    .unwrap();
+    let v = read(&db, &Scope::Turn("u0".into())).unwrap();
+    assert_eq!(
+        v["attempt_period"]["first_known_started_at"],
+        "1969-12-31T23:59:59.999999999Z"
+    );
+    assert_eq!(
+        v["attempt_period"]["last_known_started_at"],
+        "1970-01-01T00:00:00.000000001Z"
+    );
+    assert_eq!(v["attempt_period"]["unknown_start_count"], 1);
+    assert_eq!(v["turn_lifetime_ms"], 10);
+    assert!(
+        !v.to_string().contains('|'),
+        "internal sort keys are not public metadata"
+    );
 }

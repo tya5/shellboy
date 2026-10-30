@@ -388,6 +388,9 @@ pub enum UiAction {
         cursor: Option<String>,
     },
     CancelWait,
+    CloseUsageDetails {
+        epoch: u64,
+    },
 
     CancelMessages {
         message_ids: Vec<String>,

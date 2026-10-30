@@ -32,6 +32,7 @@ macro_rules! operation_kinds {
 operation_kinds! {
 ThreadList,
     ThreadGet,
+    UsageGet,
     ThreadCreate,
     ThreadFork,
     ThreadDelete,
@@ -121,6 +122,7 @@ impl OpKind {
         match self {
             Self::ThreadList => "会話 · 一覧",
             Self::ThreadGet => "会話 · 詳細",
+            Self::UsageGet => "使用量 · 合計",
             Self::ThreadCreate => "会話 · 作成",
             Self::ThreadFork => "会話 · 分岐",
             Self::ThreadDelete => "会話 · 削除",
@@ -161,6 +163,7 @@ impl OpKind {
         match self {
             Self::ThreadList => "thread.list",
             Self::ThreadGet => "thread.get",
+            Self::UsageGet => "usage.get",
             Self::ThreadCreate => "thread.create",
             Self::ThreadFork => "thread.fork",
             Self::ThreadDelete => "thread.delete",
@@ -705,6 +708,20 @@ impl Form {
             OpKind::ThreadGet => (vec![thread()], |form, _cwd| {
                 Ok(Command::ThreadGet(form.thread_target()?))
             }),
+            OpKind::UsageGet => (
+                vec![
+                    thread(),
+                    f("children", "子会話を含む", "false".into(), Boolean),
+                ],
+                |form, _cwd| {
+                    Ok(Command::UsageGet(UsageGetArgs {
+                        thread_id: form.thread_target()?.thread_id,
+                        run_id: None,
+                        turn_id: None,
+                        include_children: form.boolean("children")?,
+                    }))
+                },
+            ),
             OpKind::ThreadCreate => (
                 vec![
                     f("cwd", "作業場所（空=継承/既定）", String::new(), Text),
@@ -1358,6 +1375,7 @@ mod tests {
     fn human_terms_do_not_replace_cli_operation_identity() {
         for (kind, label, wire) in [
             (OpKind::ThreadGet, "会話 · 詳細", "thread.get"),
+            (OpKind::UsageGet, "使用量 · 合計", "usage.get"),
             (OpKind::RunGet, "作業 · 詳細", "run.get"),
             (OpKind::TurnGet, "応答処理 · 詳細", "turn.get"),
         ] {
@@ -1390,6 +1408,11 @@ mod tests {
                 json!({"limit":20,"query":"synthetic text"}),
             ),
             (OpKind::ThreadGet, "thread.get", json!({"thread_id":id(1)})),
+            (
+                OpKind::UsageGet,
+                "usage.get",
+                json!({"thread_id":id(1),"run_id":null,"turn_id":null,"include_children":false}),
+            ),
             (
                 OpKind::ThreadCreate,
                 "thread.create",
@@ -1656,6 +1679,7 @@ mod tests {
                         | "model.list"
                         | "thread.list"
                         | "thread.get"
+                        | "usage.get"
                         | "thread.delete_preview"
                         | "message.get"
                         | "operation.get"
@@ -2199,10 +2223,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 36);
+        assert_eq!(rows.len(), 37);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            36
+            37
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -2214,7 +2238,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 36);
+        assert_eq!(operations.rows().len(), 37);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

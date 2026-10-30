@@ -19,8 +19,8 @@ Summary and embedding/RAG requests are not recorded here; disclose that coverage
 rather than synthesizing requests from summary caches or returning known zero.
 No since/until filtering is part of this version.
 
-Execute indexed SQL in the existing DB worker. The existing get projections and
-read-only usage query use the same aggregation implementation. Descendants follow
+Execute indexed SQL in the existing DB worker. Explicit get projections and `usage get` use the same aggregation implementation;
+internal metadata helpers used by writes/ordinary history refresh do not aggregate. Descendants follow
 parent_thread_id, exclude deleted Threads, and respect existing bounded traversal
 safety. Any limit/degraded coverage is explicit, never a complete total. Counts
 and numeric overflow stay distinguishable from reported values. No receipts are
@@ -51,3 +51,8 @@ markers, client observer, summary ledger, new GC/retention policy or period sche
 Index/index-CLI/RAG and parallel #53/#56 lifecycle changes are outside the edit
 scope. #50 is queued after #47 completion. Independent review, latest-main
 fetch/rebase and required rechecks precede normal main push and exact three-OS CI.
+
+Current UI read-cache contract: one scoped request is refreshed on Changed using
+existing worker admission; Esc/new operation/Thread switch closes it. Close carries
+an epoch through the existing bounded control mailbox so a saturated ordinary
+queue cannot rearm an older request. No Core cancellation/producer path changes.

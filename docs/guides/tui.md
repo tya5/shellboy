@@ -10,6 +10,21 @@ A new conversation without history shows send/newline keys and working directory
 
 Simplified display does not delete saved source. Details and typed action forms provide full IDs, before/after values, remaining source, provenance, and complete URLs. Use `/cwd` or `/model` to inspect current settings as well.
 
+## Saved usage details
+
+F8's `使用量 · 合計` reads the selected conversation's saved model usage and
+separate Run/model/shell time; enable children to include its bounded descendants.
+Conversation, Run and Turn detail results also include these saved totals. Missing
+usage is marked unknown and unrecorded summary/embedding coverage is explicit.
+These values are not a bill, provider-receipt proof or a sum of effective work.
+
+Details query the existing DB worker on open and relevant Changed notification,
+coalescing one in-flight refresh. Rendering uses cached fields only. Esc, a new
+operation or conversation selection stops that refresh; stale generations cannot
+replace another view. A refreshed result changes its detail identity, so links
+selected from an older result must be selected again. F6 field pages inspect the
+cached response. No per-frame database read or permanent footer total is added.
+
 ## Activity display
 
 Immediately after sending, local `送信受付中` (accepting submission) shows the frozen input. Once committed, one DB snapshot supplies both selected history and saved `反映待ち` (pending) rows above the composer. Saved input appears in one of these projections, never both. Pending rows include CLI/other-conversation senders and distinguish held/uncertain input and immediate delivery. `/queue` opens the full bounded list (128 rows, overflow count); Enter inspects delivery facts, O opens the original, D cancels one selected ID, and A confirms cancellation of only the displayed IDs. New arrivals are excluded from an existing confirmation. Unknown historical admission is not automatically replayed.

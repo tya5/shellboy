@@ -932,10 +932,31 @@ impl Store {
                 }
                 MutationResult::value(thread_details(tx, &id)?)
             }
-            Command::ThreadGet(args) => MutationResult::value(thread_details(
-                tx,
-                &target(args.thread_id.as_deref(), caller)?,
-            )?),
+            Command::ThreadGet(args) => {
+                let id = target(args.thread_id.as_deref(), caller)?;
+                let mut details = thread_details(tx, &id)?;
+                details.usage_totals = Some(crate::usage_totals::read(
+                    tx,
+                    &crate::usage_totals::Scope::Thread {
+                        id,
+                        children: false,
+                    },
+                )?);
+                MutationResult::value(details)
+            }
+            Command::UsageGet(args) => {
+                let scope = if let Some(id) = &args.turn_id {
+                    crate::usage_totals::Scope::Turn(id.clone())
+                } else if let Some(id) = &args.run_id {
+                    crate::usage_totals::Scope::Run(id.clone())
+                } else {
+                    crate::usage_totals::Scope::Thread {
+                        id: target(args.thread_id.as_deref(), caller)?,
+                        children: args.include_children,
+                    }
+                };
+                MutationResult::value(crate::usage_totals::read(tx, &scope)?)
+            }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
             Command::ThreadSet(args) => self.set_thread(tx, args, caller, now),
             Command::ThreadDelete(args) => delete_thread(tx, args, now),
@@ -979,8 +1000,22 @@ impl Store {
                     ..Default::default()
                 })
             }
-            Command::RunGet(args) => MutationResult::value(run_details(tx, &args.run_id)?),
-            Command::TurnGet(args) => MutationResult::value(turn_details(tx, &args.turn_id)?),
+            Command::RunGet(args) => {
+                let mut details = run_details(tx, &args.run_id)?;
+                details.usage_totals = Some(saved_usage_for_detail(
+                    tx,
+                    &crate::usage_totals::Scope::Run(args.run_id.clone()),
+                )?);
+                MutationResult::value(details)
+            }
+            Command::TurnGet(args) => {
+                let mut details = turn_details(tx, &args.turn_id)?;
+                details.usage_totals = Some(saved_usage_for_detail(
+                    tx,
+                    &crate::usage_totals::Scope::Turn(args.turn_id.clone()),
+                )?);
+                MutationResult::value(details)
+            }
             Command::RunStop(args) => stop_run(tx, &args.run_id, caller, now),
             Command::RunRetry(args) => retry_run(tx, &args.run_id, caller, now),
             Command::Compact(args) => {
@@ -1519,7 +1554,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails{ agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails{ usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection
@@ -1827,6 +1862,21 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     })
 }
 
+fn saved_usage_for_detail(db: &Connection, scope: &crate::usage_totals::Scope) -> Result<Value> {
+    match crate::usage_totals::read(db, scope) {
+        Ok(value) => Ok(value),
+        Err(e)
+            if matches!(
+                e.code,
+                ErrorCode::TargetUnavailable | ErrorCode::ThreadNotFound
+            ) =>
+        {
+            Ok(json!({"available":false,"reason":"scope_deleted_or_unavailable"}))
+        }
+        Err(e) => Err(e),
+    }
+}
+
 pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
     let row = connection
         .query_row(
@@ -1851,6 +1901,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
             (Some(id), answer, reason)
         });
     Ok(RunDetails {
+        usage_totals: None,
         revisit: super::revisit::summary(connection, id)?,
         context: crate::context::for_run(connection, id)?,
         run_id: id.into(),
@@ -1874,7 +1925,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
 }
 
 pub fn turn_details(connection: &Connection, id: &str) -> Result<TurnDetails> {
-    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,answer_node_id:row.3,recovery_hint:row.4}))
+    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{usage_totals:None,context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,answer_node_id:row.3,recovery_hint:row.4}))
 }
 
 pub(super) fn authorize_owned_run(

@@ -25,6 +25,7 @@ async fn convert(args: &[&str]) -> Command {
 async fn all_public_cli_operations_map_to_shared_typed_contracts() {
     let cases: &[(&[&str], &str)] = &[
         (&["status"], "status"),
+        (&["usage", "get", "--thread", "t"], "usage.get"),
         (&["model", "list"], "model.list"),
         (&["thread", "list"], "thread.list"),
         (&["thread", "get", "--thread", "t"], "thread.get"),
@@ -955,4 +956,30 @@ async fn agents_paths_remain_relative_until_target_cwd_is_known() {
         assert_eq!(value["args"]["cwd"], "project");
     }
     assert!(Cli::try_parse_from(["shellboy", "thread", "set", "--agents", ""]).is_err());
+}
+
+#[tokio::test]
+async fn saved_usage_cli_scopes_are_read_only_and_exclude_period_filters() {
+    for (args, kind) in [
+        (vec!["usage", "get", "--turn", "u"], "turn_id"),
+        (vec!["usage", "get", "--run", "r"], "run_id"),
+        (
+            vec!["usage", "get", "--thread", "t", "--include-children"],
+            "thread_id",
+        ),
+    ] {
+        let command = convert(&args).await;
+        assert_eq!(command.name(), "usage.get");
+        assert!(command.is_read_only());
+        command.validate().unwrap();
+        let value = serde_json::to_value(command).unwrap();
+        assert!(value["args"][kind].is_string());
+    }
+    for args in [
+        vec!["usage", "get", "--thread", "t", "--run", "r"],
+        vec!["usage", "get", "--turn", "u", "--include-children"],
+        vec!["usage", "get", "--thread", "t", "--since", "now"],
+    ] {
+        assert!(Cli::try_parse_from(std::iter::once("shellboy").chain(args)).is_err());
+    }
 }

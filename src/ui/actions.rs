@@ -20,6 +20,7 @@ struct Controls {
     interrupts: BTreeSet<(String, String)>,
     active_cancel: Option<String>,
     cancel_wait: bool,
+    close_usage: Option<u64>,
     wait: bool,
     force: bool,
     alive: bool,
@@ -119,6 +120,7 @@ impl ActionSender {
                 | UiAction::Cancel { .. }
                 | UiAction::InterruptTurn { .. }
                 | UiAction::CancelWait
+                | UiAction::CloseUsageDetails { .. }
                 | UiAction::WaitForShutdown
                 | UiAction::ForceQuit
         ) {
@@ -166,6 +168,14 @@ impl ActionSender {
                 controls.interrupts.insert((thread_id, turn_id));
             }
             UiAction::CancelWait => controls.cancel_wait = true,
+            UiAction::CloseUsageDetails { epoch } => {
+                if controls
+                    .close_usage
+                    .is_none_or(|old| epoch.wrapping_sub(old) < (1_u64 << 63))
+                {
+                    controls.close_usage = Some(epoch);
+                }
+            }
             UiAction::WaitForShutdown => controls.wait = true,
             UiAction::ForceQuit => controls.force = true,
             _ => unreachable!(),
@@ -248,6 +258,9 @@ impl ActionReceiver {
         if (!self.closing || self.quit_returned) && controls.force {
             controls.force = false;
             return Some(UiAction::ForceQuit);
+        }
+        if let Some(epoch) = controls.close_usage.take() {
+            return Some(UiAction::CloseUsageDetails { epoch });
         }
         if controls.cancel_wait {
             controls.cancel_wait = false;
@@ -390,6 +403,24 @@ mod output_admission_tests {
         assert!(matches!(
             receiver.recv_with_admission(false).await,
             Some(UiAction::Quit)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod usage_close_tests {
+    use super::*;
+    #[tokio::test]
+    async fn closing_usage_details_is_coalesced_and_survives_full_normal_admission() {
+        let (send, mut receive) = channel(1);
+        send.try_send(UiAction::RenderWidth { width: 80 }).unwrap();
+        send.try_send(UiAction::CloseUsageDetails { epoch: 5 })
+            .unwrap();
+        send.try_send(UiAction::CloseUsageDetails { epoch: 4 })
+            .unwrap();
+        assert!(matches!(
+            receive.recv_with_admission(false).await,
+            Some(UiAction::CloseUsageDetails { epoch: 5 })
         ));
     }
 }

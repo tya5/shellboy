@@ -68,20 +68,27 @@ impl UiState {
         {
             self.input_notice = None;
         }
-        if matches!(&event,Event::Key(key) if key.code==KeyCode::Esc) && self.top_popup().is_none()
-        {
+        let closes_management = matches!(&event,Event::Key(key) if key.code==KeyCode::Esc)
+            && self.top_popup().is_none();
+        if closes_management {
             self.management.epoch = self.management.epoch.wrapping_add(1);
         }
         if !self.composer_active() {
             self.immediate_chord = false;
         }
         let input_owner = self.active.clone();
-        let actions = self.event_inner(event);
+        let close_usage = closes_management && self.management.owner.is_some();
+        let mut actions = self.event_inner(event);
         if self.active != input_owner {
             self.immediate_chord = false;
         }
         if !self.composer_active() {
             self.immediate_chord = false;
+        }
+        if close_usage {
+            actions.push(UiAction::CloseUsageDetails {
+                epoch: self.management.epoch,
+            });
         }
         self.scope_management_actions(actions)
     }

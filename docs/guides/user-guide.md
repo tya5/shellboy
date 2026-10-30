@@ -69,6 +69,17 @@ The conversation view distinguishes messages, execution results, and state chang
 
 Reading older history pauses following the tail and shows “新着あり” (new content). Ctrl+End resumes tail following. [History and search](history-and-search.md) explains forks, request editing, search filters, provenance, and direct relationships.
 
+### Inspect saved usage
+
+F8 `使用量 · 合計` shows all-time saved model usage and separate Run/model/shell
+durations, with an option for child conversations. CLI users can run
+`shellboy usage get --thread THREAD_ID --include-children`, or select `--run` or
+`--turn` without children. Existing get commands include `usage_totals` too.
+Unknown measurements are not zero; summary/embedding recording is outside this
+version. Active observations are separate and these overlapping durations are
+not effective work time. Details refresh through the DB worker, not rendering.
+See [CLI reference](cli-reference.md#saved-usage-1-operation).
+
 ## 4. Change connection or model
 
 `/model` alone shows the current selection. `/models` retrieves the current connection's model list. Type to filter, select with Up/Down, and press Enter to change the current conversation's model. Esc only closes the list. Use `/models CONNECTION` for another connection. To set values directly:

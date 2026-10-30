@@ -1561,3 +1561,85 @@ async fn quit_before_initial_draft_restore_cannot_mask_an_existing_saved_draft()
         "saved before startup"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results() {
+    use crate::{
+        control::EngineEvent,
+        protocol::{Command, UsageGetArgs},
+        ui::{ManagementContext, UiUpdate},
+    };
+    let (root, owner, control, server) = fixture().await;
+    owner.db.call(|db|{
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('usage-ui','target-run',0,0,'fixture','fixture-model',0,'completed','{}','{\"input_tokens\":10}','2026-10-30T00:00:00Z','2026-10-30T00:00:00.010Z')",[])?;Ok(())
+    }).await.unwrap();
+    let (send, receive) = actions::channel(32);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(super::run(
+        control.clone(),
+        receive,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+    ));
+    let context = ManagementContext {
+        epoch: 1,
+        owner_draft: "usage-ui".into(),
+        owner_thread: Some("thread".into()),
+    };
+    send.try_send(UiAction::ManagementIntent {
+        context: context.clone(),
+        action: Box::new(UiAction::Command(Command::UsageGet(UsageGetArgs {
+            thread_id: Some("thread".into()),
+            ..Default::default()
+        }))),
+    })
+    .unwrap();
+    async fn number(incoming: &std::sync::mpsc::Receiver<UiUpdate>, expected: &str) -> u64 {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    if let UiUpdate::ScopedManagement { context, update } = update
+                        && let UiUpdate::StructuredManagement {
+                            request_id, fields, ..
+                        } = *update
+                        && fields.iter().any(|f| {
+                            f.key == "/model_attempts/completed/input_tokens/known_sum"
+                                && f.value == expected
+                        })
+                    {
+                        assert_eq!(context.epoch, 1);
+                        return request_id;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+    let first = number(&incoming, "10").await;
+    control
+        .store
+        .database
+        .call(|db| {
+            db.execute(
+                "UPDATE model_attempt SET usage_json='{\"input_tokens\":20}' WHERE id='usage-ui'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    control.emit_test_event(EngineEvent::Changed {
+        thread_id: "thread".into(),
+        recovery: false,
+    });
+    let next = number(&incoming, "20").await;
+    assert_ne!(first, next, "refresh invalidates old field-follow identity");
+    send.try_send(UiAction::CloseUsageDetails { epoch: 2 })
+        .unwrap();
+    send.try_send(UiAction::Quit).unwrap();
+    finish_bridge(bridge, &incoming).await;
+}

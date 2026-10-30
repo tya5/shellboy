@@ -306,6 +306,12 @@ enum BackgroundResult {
         title: String,
         result: Result<management::Report, ApiError>,
     },
+    UsageRefresh {
+        context: ManagementContext,
+        generation: u64,
+        title: String,
+        result: Result<management::Report, ApiError>,
+    },
     IndexPreview {
         context: Option<ManagementContext>,
         args: IndexArgs,
@@ -330,6 +336,7 @@ fn command_title(command: &Command) -> String {
         Command::ModelList(_) => "モデル一覧",
         Command::ThreadList(_) => "会話一覧",
         Command::ThreadGet(_) => "会話の詳細",
+        Command::UsageGet(_) => "使用量の合計",
         Command::ThreadCreate(_) => "会話の作成",
         Command::ThreadFork(_) => "会話の分岐",
         Command::ThreadDelete(_) => "会話の削除",
@@ -709,6 +716,29 @@ async fn run_with_delivery(
             receipt_batch.drain(&mut pending, &updates);
         }
         draft_saver.pump_delivery(&mut draft_failure, &updates);
+        if let Some(watch) = management.usage_ready()
+            && let Ok(permit) = command_slots.clone().try_acquire_owned()
+        {
+            management.usage_begin_refresh(watch.generation);
+            let control = control.clone();
+            let sender = background_tx.clone();
+            spawn_work(&mut workers, permit, async move {
+                let title = command_title(&watch.command);
+                let response =
+                    management_request(&control, watch.command, CancellationToken::new()).await;
+                let result =
+                    prepare_management(response, control.store.config.cache.body_bytes).await;
+                let _ = sender
+                    .send(BackgroundResult::UsageRefresh {
+                        context: watch.context,
+                        generation: watch.generation,
+                        title,
+                        result,
+                    })
+                    .await;
+            });
+        }
+
         while !updates.backpressured() {
             let Some(thread) = dirty_threads
                 .iter()
@@ -1227,6 +1257,7 @@ async fn run_with_delivery(
                             continue;
                         };
                         let generation = management.next_generation();
+                        management.watch_usage(&command,context.as_ref(),generation);
                         let stop = matches!(command, Command::RunStop(_));
                         let work_status = management::work_status(&command);
                         let control = control.clone();
@@ -1676,6 +1707,7 @@ async fn run_with_delivery(
                         known_view,
                         preview_sources,
                     } => {
+                        management.close_usage();
                         selection.select_thread(thread_id.clone(), generation);
                         ui_subscription.select(Some(&thread_id));
                         streams.clear();
@@ -2118,6 +2150,7 @@ async fn run_with_delivery(
                             }
                         });
                     }
+                    UiAction::CloseUsageDetails { epoch } => management.close_usage_at(epoch),
                     UiAction::CancelWait => {
                         management.cancel_wait();
                         status(
@@ -2668,6 +2701,21 @@ async fn run_with_delivery(
                 Some(BackgroundResult::Copied {
                     result: Err(error), ..
                 }) => status(&updates, None, error).await,
+                Some(BackgroundResult::UsageRefresh{context,generation,title,result})=>{
+                    if !management.accepts(generation) || !management.usage_accepts(generation){continue;}
+                    match result {
+                        Ok(report)=>{
+                            management.usage_finished(generation,report.detail.as_ref());
+                            let request_id=management.begin_result();
+                            management.detail=report.detail.map(Arc::new);
+                            management_update(&updates,Some(context),UiUpdate::StructuredManagement{work_status:false,request_id,title,fields:report.fields,omitted:report.omitted}).await;
+                        },
+                        Err(error)=>{
+                            management.usage_finished(generation,None);
+                            management_status(&updates,Some(context),error).await;
+                        },
+                    }
+                },
                 Some(BackgroundResult::Command {
                     work_status,
                     context,
@@ -2678,9 +2726,11 @@ async fn run_with_delivery(
                     if !management.accepts(generation) {
                         continue;
                     }
+                    management.usage_finished(generation,None);
                     let management_id = management.begin_result();
                     match result {
                         Ok(report) => {
+                            management.usage_finished(generation,report.detail.as_ref());
                             management.detail = report.detail.map(Arc::new);
                             management_update(
                                 &updates,
@@ -2766,6 +2816,7 @@ async fn run_with_delivery(
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
                     }
+                    management.usage_changed(&thread_id);
                     streams.invalidate(&thread_id);
                     selection.changed(&thread_id);
                     receipt_delivery::changed(&mut pending, &thread_id);

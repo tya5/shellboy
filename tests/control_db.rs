@@ -1931,3 +1931,109 @@ async fn fresh_observations_can_reuse_a_mutation_id_without_replacing_its_saved_
     );
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_changes() {
+    let (_root, store) = store().await;
+    let parent = create(&store, None).await;
+    let child = create(&store, Some(parent.thread_id.clone())).await;
+    let p = parent.thread_id.clone();
+    let c = child.thread_id.clone();
+    store.database.call(move|db|{
+        for (id,thread) in [("usage-parent",p),("usage-child",c)] {
+            db.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed','2026-10-30T00:00:00Z','2026-10-30T00:00:01Z')",rusqlite::params![id,thread])?;
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,?2,?1,'completed','2026-10-30T00:00:00Z','2026-10-30T00:00:01Z')",rusqlite::params![id,thread])?;
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?1,0,0,'test','fixture',0,'completed','{}','{\"input_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":0}}','2026-10-30T00:00:00Z','2026-10-30T00:00:00.010Z')",[id])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    let before = store
+        .database
+        .call(|db| {
+            Ok((
+                db.query_row("SELECT count(*) FROM operation_receipt", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+            ))
+        })
+        .await
+        .unwrap();
+    let own = execute(
+        &store,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(parent.thread_id.clone()),
+        }),
+    )
+    .await
+    .result;
+    assert_eq!(
+        own["usage_totals"]["model_attempts"]["completed"]["input_tokens"]["known_sum"],
+        10
+    );
+    let run = execute(
+        &store,
+        Command::RunGet(RunTarget {
+            run_id: "usage-parent".into(),
+        }),
+    )
+    .await
+    .result;
+    assert_eq!(run["usage_totals"]["run"]["duration_ms"]["known_sum"], 1000);
+    let turn = execute(
+        &store,
+        Command::TurnGet(TurnTarget {
+            turn_id: "usage-parent".into(),
+        }),
+    )
+    .await
+    .result;
+    assert_eq!(turn["usage_totals"]["run"]["status"], "not_applicable");
+    assert_eq!(turn["usage_totals"]["turn_lifetime_ms"], 1000);
+    let req = request(Command::UsageGet(UsageGetArgs {
+        thread_id: Some(parent.thread_id),
+        include_children: true,
+        ..Default::default()
+    }));
+    let first = store.execute(req.clone(), None).await.unwrap().result;
+    assert_eq!(first["selected_threads"], 2);
+    assert_eq!(
+        first["model_attempts"]["completed"]["input_tokens"]["known_sum"],
+        20
+    );
+    store
+        .database
+        .call(|db| {
+            db.execute(
+                "UPDATE model_attempt SET usage_json=NULL WHERE id='usage-child'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let second = store.execute(req, None).await.unwrap().result;
+    assert_eq!(
+        second["model_attempts"]["completed"]["input_tokens"]["known_sum"],
+        10
+    );
+    assert_eq!(
+        second["model_attempts"]["completed"]["input_tokens"]["unknown_count"], 1,
+        "read reuse must not replay a cached receipt"
+    );
+    let after = store
+        .database
+        .call(|db| {
+            Ok((
+                db.query_row("SELECT count(*) FROM operation_receipt", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+    assert_eq!(after.1, shellboy::storage::SCHEMA_VERSION);
+    store.database.shutdown().await.unwrap();
+}

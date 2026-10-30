@@ -305,6 +305,26 @@ impl Command {
     pub fn validate(&self) -> Result<(), ApiError> {
         match self {
             Self::Status(a) => a.validate(),
+            Self::UsageGet(a) => {
+                if [
+                    a.thread_id.is_some(),
+                    a.run_id.is_some(),
+                    a.turn_id.is_some(),
+                ]
+                .into_iter()
+                .filter(|v| *v)
+                .count()
+                    > 1
+                    || (a.include_children && (a.run_id.is_some() || a.turn_id.is_some()))
+                {
+                    return Err(invalid(
+                        "usage.get needs one scope; children apply only to Thread scope",
+                    ));
+                }
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                optional_nonempty(a.run_id.as_deref(), "run_id")?;
+                optional_nonempty(a.turn_id.as_deref(), "turn_id")
+            }
             Self::ModelList(a) => a.validate(),
             Self::ThreadList(a) => a.validate(),
             Self::ThreadGet(a) | Self::AttachmentList(a) | Self::Compact(a) => {
