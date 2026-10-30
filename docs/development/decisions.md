@@ -2,6 +2,27 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Standard Usage Scalar Boundary (#49, 2026-10-30, Active)
+
+The leader adopts five independent optional u64 measurements, restricted to
+`0..=i64::MAX` so Rust saves and SQLite reads have identical exact-number
+semantics. Check JSON integer type and SQLite extraction type before accepting
+legacy data; never cast REAL overflow to integer. Missing/invalid fields are
+unknown, including when all fields are unknown; explicit zero is known. Do not
+repair totals, cache or reasoning by inference. Keep the normalized Rust value
+available to future #47 writers rather than reparsing saved JSON.
+
+Normalize only known provider-envelope usage members, including summary and
+failure/stream audit response copies. This closes the second persistence path
+for attribution; do not recursively remove user-content keys named usage or
+alter output, error diagnostics or HTTP request bodies. Historical raw and usage
+rows remain unchanged, with SQL scalar reads supporting large legacy usage.
+The alternative full-document cap loses reported numbers and the alternative
+unbounded document load retains provider appendices. SQLite must still parse old
+large documents internally. No special rewrite migration is justified. Revisit
+only if the provider standard fields or exact numeric storage contract changes.
+
+
 ## Measured CI test layout and failure bounds (#46)
 
 Use the [adopted performance design](../design/ci-test-performance.md) and

@@ -176,3 +176,7 @@ policy tests and do not add product machinery for the test runner.
 Issue #51 adopts [explicit instruction references](agents-reference.md): one
 reference per Thread, strict explicit-path validation, atomic settings and
 next-new-Turn notification without altering same-Turn snapshots.
+
+Issue #49 adopts [standard usage measurements](usage-accounting.md): persist
+validated standard numbers only and read legacy large usage through guarded SQL
+scalar extraction. Task-boundary cleanup is Agent Guide guidance, not Core automation.

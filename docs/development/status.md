@@ -1,5 +1,15 @@
 # Development status
 
+## #49 Then #47: Standard Usage And Accounting
+
+#49 design adopts one shared standard-number whitelist and guarded SQL scalar
+reads for large saved usage. Implementation and synthetic regression validation
+are pending. No existing usage rewrite migration or Core cleanup automation is
+planned; task-boundary cleanup is Agent Guide guidance, with real-model dogfood
+unverified. #47 incremental aggregate design requires separate agreement before
+implementation; the latest issue comment supersedes its original read-time scan
+proposal. Parallel index/index-CLI files are outside this worktree's edit scope.
+
 ## #51/#48: Windows CI fixture and diagnostic repair
 
 Repair-branch CI run `40991269818` at `0cf9c405` clears the earlier two lib failures
