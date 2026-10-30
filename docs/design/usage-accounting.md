@@ -72,9 +72,12 @@ DB into owner statistics. A later small follow-up may add hooks after parallel
 
 Only the model non-2xx typed measurement extension remains proposed, preserving
 existing error diagnostics, redaction and the 64KiB limit. Wiring shared HTTP
-measurements into embedding is withdrawn from this scope. Period precision/
-partial coverage, measurement retention and the complete aggregate design remain
-pending leader approval; this scope decision does not authorize implementation.
+measurements into embedding is withdrawn from this scope. B (saved fine-grained additive aggregates) is now the only period direction:
+all-time plus UTC coarse buckets plus exact-instant aggregate rows, with shared
+4,096-row query budget and explicit partial coverage/continuation. A's typed-fact
+edge exception, minute-only filtering and prefix/Fenwick amplification are withdrawn.
+The full minimal DDL, capacity, retention and initialization candidate still needs
+leader and independent design review; this does not authorize implementation.
 See the [revised proposal](../development/issue-47-design-proposal.md), which
 separates accepted directions from open tradeoffs. #49 native success is a separate
 gate before any #47 change can join main.

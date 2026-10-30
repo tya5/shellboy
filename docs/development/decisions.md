@@ -2,6 +2,25 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Aggregate-Only Period Direction (#47, 2026-10-30, Active Direction)
+
+The latest instruction chooses B: all-time/coarse UTC buckets plus exact terminal-
+instant additive totals; all public reads use saved aggregate rows. Do not adopt
+A's unapproved typed-source edge exception, minute-only boundaries or prefix-tree
+write amplification. Preserve arbitrary RFC3339 half-open periods without coarse
+rounding. One global 4,096-row budget plus sentinel across periods/children returns
+honest partial coverage and continuation. Distinct instants can cost one aggregate
+row per request/scope in the worst case; verify linear bytes and bounded query work.
+
+Withdraw the generic future-reservation and warning-triggered GC proposals.
+The candidate keeps existing storage guard/terminal exceptions, charges metrics
+payload to existing logical usage and retains aggregates until scope deletion,
+without a new age/pressure policy. The [revised schema candidate](issue-47-design-proposal.md)
+is not fully adopted: observer/CAS integration, exact logical-byte expressions and
+fair small-batch initialization still need final design confirmation. No schema
+or production implementation is authorized before that gate.
+
+
 ## Model-Only Accounting Scope (#47, 2026-10-30, Active)
 
 The latest user-approved scope excludes all embedding usage recording from #47.

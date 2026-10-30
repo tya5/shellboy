@@ -198,7 +198,14 @@ precision/partial coverage, fact reclamation, missing-finish-after-GC, bounded
 initialization/fair maintenance, exact-once terminal updates and large indexed
 query/VM-step checks remain planned, not passed. The complete design is pending
 leader approval; no #47 production, schema or regression implementation is claimed.
-#49's exact native gate is independent and must succeed before #47 joins main.
+#49's exact native gate is separate (main5350fc8 passed three OS run40997452704,
+reported independently by the integrator). The B-only candidate now withdraws
+source-fact edge reads, generic future reservations, fixed-age/new-pressure GC
+and warning-trigger conversion. Pending design validation must cover only saved
+aggregate reads for arbitrary boundaries, the common 4,096+sentinel budget, linear
+fine-instant storage, existing-limit admission/terminal rollback, scope deletion,
+separate attempt/client-request counts and completion-observer CAS. No #47 schema
+or implementation result is claimed. #50 remains queued separately.
 
 
 

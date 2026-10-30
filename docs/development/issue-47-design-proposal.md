@@ -1,392 +1,304 @@
-# Usage Aggregates Proposal (#47)
+# Model Usage Aggregates: Final Design Candidate (#47)
 
-Status: revised proposal, not adopted and not implementation authorization.
-Source: issue #47, especially comments 6513644118 and 6513653608, and the
-leader's subsequent design directions. #49 is reviewed separately. Do not mix
-#47 into main before #49's exact native gate succeeds. No index/CLI edit is
-part of this proposal. Endorsed directions below are not blanket approval of
-storage, period or shared-API details that remain open.
+Status: B direction approved; this complete schema/implementation candidate still
+requires leader and independent design review. No production/schema implementation
+is authorized by this document. Source: issue #47 and its latest comments plus
+subsequent explicit scope/design decisions. Base is main 5350fc8 after #49's
+successful three-OS gate. #50 is queued separately and is not included.
 
-## Adopted Scope Only
+## Scope And Withdrawn Alternatives
 
-The latest explicitly approved scope excludes all embedding accounting and
-standalone RAG. Complete this change for normal/summary model requests, success/
-non-success/unknown usage, Run/model/shell time and Turn/Run/Thread/child-Thread
-scopes. Publish embedding coverage as out_of_scope with reason not_recorded;
-never create zero aggregates, empty numeric totals or fake request counts for it.
-Do not add unused embedding columns/rows or owner accounting solely for embedding.
-A small follow-up may add hooks after the parallel #42/#43/#55 index work lands.
-`src/index/mod.rs`, `src/index/store.rs`, `src/index/search.rs` and index CLI remain
-outside the edit scope. The previously proposed embedding HTTP wrappers/hooks and
-origin attribution plan are withdrawn, not deferred requirements of this change.
+Cover normal/summary model requests and separate Run/model/shell time, at
+Turn/Run/Thread/child-Thread scopes. Exclude every embedding producer and
+standalone RAG: coverage is out_of_scope/not_recorded, with no zero usage,
+request counts, unused embedding rows/columns or owner totals. Index/index-CLI
+files are not edited. A later separately authorized follow-up owns those hooks.
 
-## Endorsed Directions, Not Complete Design Adoption
+B is the only period design: all-time totals, coarse UTC-day totals and exact
+terminal-instant additive totals. Reads select aggregate rows only. Withdraw A's
+measurement-fact edge exception, minute-aligned restrictions, prefix/Fenwick
+amplification, the generic future-byte reservation system, fixed-age metrics GC,
+and any automatic reclamation triggered by the existing warning setting.
 
-- Typed dedicated aggregates, with bounded constant categories per scope;
-  independent known sums, per-field unknown counts, overflow and request counts.
-- Separate Run, model-request and shell time; never add them as effective work.
-- Only a successful terminal CAS applies accounting in the same transaction.
-  Repeated/obsolete results and receipt replay add nothing; rollback applies neither.
-- One HTTP request remains one measurement across failed/incomplete reclassification.
-- Small schema migration; indexed, bounded initialization on the existing
-  maintenance DB worker, partial coverage until complete and GC protection.
-- Separate bounded active observations and Thread-lineage child traversal;
-  do not duplicate an entire parent Run lifetime into each Turn.
-- Unrecoverable historical summary attempts are coverage unknown,
-  not known zero. Do not infer them from overwritten/reused caches.
-- Read-only CLI totals and generation-bound detail-screen caches updated through
-  the existing DB worker on open/change, never on each render.
+## Typed Schema Candidate
 
-Still open: exact table/column budget, period implementation, point-fact lifetime,
-source-marker duplication, outcome-correction mechanics and the complete
-implementation plan. Commit an adopted
-specification and decision record only after the leader confirms these details.
+Two new tables, not a general job framework:
 
-## Proposed Typed Aggregates And Ownership
+1. `usage_aggregate`: typed sums/counts, fixed purpose/outcome categories, three
+   grains. It holds every public numeric total; no request JSON or body.
+2. `usage_summary_attempt`: minimal begin/finish identity and active/restart
+   observation only for actual summary requests, which have no model_attempt.
+   Normal HTTP never gets a duplicate ledger row.
 
-`usage_total` has a key of scope kind/id, measurement category/purpose and
-outcome. Scope is Thread, Run or Turn. Categories separate normal Responses,
-summary requests, Run lifetime and shell duration.
-There is a fixed category set, not one total row per attempt. Avoid a Cartesian
-product of unused categories. A nullable sum plus an explicit overflow flag is
-not the same as a reported zero; keep field-specific known/unknown counts.
+`usage_aggregate` proposed key and ownership columns:
 
-Each sum/count uses checked arithmetic. Stored exact values are nonnegative
-signed-64-bit integers; overflow publishes null plus overflow, never a clamped
-number advertised as exact. The five #49 counts remain independent. Do not infer
-cached/reasoning/total tokens or fill absent fields from other counts. A failed
-request with some known fields contributes those fields and unknown counts for
-others, in a separate non-success category. All-unknown is distinguishable from
-all-reported-zero. Track first/last request start and fixed first terminal time.
-
-The reason for a dedicated typed table instead of many Run/Thread columns is
-localizing purpose/outcome/period dimensions and query projection. It is not a
-new job framework. The conversation writer owns it; the existing DB worker owns
-transactions. Thread/Run/Turn keys need explicit FK ownership or separate typed
-key tables/checks, not an unchecked polymorphic string that silently orphans
-rows. Exact DDL is pending. Thread deletion removes its totals, periods, point
-facts and open measurement rows in the deletion transaction; deleted scopes are
-excluded from backfill and descendant reads. No owner embedding totals are part
-of this change.
-
-### Existing Storage Facts And Proposed Admission
-
-Verified current sources: `src/config.rs` defines limits.data_warning_bytes =
-8 GiB and limits.data_max_bytes = 10 GiB by default; user configuration overrides
-these values. `src/gc.rs::require_capacity_tx` currently rejects new work when
-logical_usage.total() >= data_max_bytes. It does not reserve future result bytes.
-Terminal recording, stops, observations and GC remain available at the limit.
-`src/gc/usage.rs` sums scalar covering-index measurements of retained payloads;
-SQLite B-tree/index page overhead is physical, not logical payload bytes.
-Receipt-specific reservation/counter semantics are not a generic data quota and
-must not be silently reused for model accounting.
-
-Proposed extension, pending minimal DDL: define exact metrics logical payload
-bytes from stored identifiers/timestamps/purpose and typed scalar fields, with
-SQL-derived byte expressions/covering indexes, not an unchecked cached estimate.
-Do not claim those logical bytes equal physical SQLite pages. Add these payload
-bytes to existing logical history usage, not a new quota setting/category cap.
-All-time/coarse bucket/coverage metadata count too. Do not count shared identifiers
-or reservation bytes twice in the same accounting definition.
-
-For a begin transaction let U be current logical usage including existing pending
-metrics reservations, B the exact new begin/fact bytes, and R a proven upper bound
-on additional metrics bytes at any allowed terminal outcome (including newly
-created scope/category/coarse-bucket rows). Admit only if checked U+B+R <= the
-configured data_max_bytes; otherwise return existing storage_limit before HTTP.
-Store the pending R on the begun source/measurement so concurrent begins cannot
-reuse the same headroom. At finish atomically release R, persist actual typed
-facts/totals and commit the source result. No new fixed per-request quota is
-invented. Exact B/R formulas await the chosen schema; no fabricated numeric
-reservation can be approved before its field widths/keys/nulls are specified.
-
-This reservation is for new metrics writes only, not a promise to reserve every
-future response/shell payload byte or avoid OS disk-full errors. Other existing
-terminal writers are allowed to exceed the logical threshold. Terminal accounting
-must not be refused merely because logical usage has since crossed the limit;
-if actual DB persistence fails, source/aggregate/reservation changes roll back
-together and existing uncertain-storage handling applies. Begin-side admission,
-terminal over-limit recording and actual storage failure require separate tests.
-
-### Pressure Reclamation Proposal, Not A New Retention Age
-
-Retain all-time/coarse-bucket totals until scope deletion. No fixed-age metrics
-expiry is proposed. Existing retention.tool_raw_days = 7 and tool_raw_bytes =
-1 GiB apply to raw shell output only; do not reuse them for measurement facts.
-Reclaim only terminal, already-accounted edge facts, oldest first by indexed
-(first_terminal_at,id). Never reclaim active/uninitialized/unsettled facts.
-
-Trigger choice still needs leader confirmation: use the configured logical
-warning threshold as proactive pressure, with data_max_bytes as the hard admission
-threshold, rather than inventing a third numeric watermark. This would be a new,
-explicit metrics-GC policy attached to an existing warning setting, not a claim
-that warning currently performs this reclamation. If warning remains display-only,
-max/projected-admission pressure instead needs an explicitly agreed wake/pending
-pressure signal so refusal just below max does not permanently prevent recovery.
-Do not silently add a polling loop or assume receipt cleanup solves this case.
-
-Proposed GC work budget reuses the existing bounded collection scale: at most
-128 point facts / 1 MiB measured logical payload in one transaction, oldest first;
-then yield. These are work limits, not new retained-data quotas. Mark each affected
-coarse bucket's edge coverage incomplete in the same transaction as fact deletion;
-leave all-time/coarse numeric totals unchanged. A later duplicate finish for the
-missing id is obsolete and cannot INSERT/UPSERT it. If protected totals or other
-retained history still fill the logical limit, stop reclaiming when eligible
-facts are exhausted and report pressure/deferred; never delete aggregate totals
-or pretend capacity was recovered. Physical free space need not increase.
-
-
-## Exactly Once And Outcome Corrections
-
-Proposed outcome mapping for model attempts:
-
-| Source Transition | Accounting Action |
-| --- | --- |
-| preparing/inflight -> completed | First measurement: success. |
-| preparing/inflight -> failed/incomplete/cancelled | First measurement: non-success; unknown fields remain unknown. |
-| failed -> incomplete for the same received request | No new request; both map to non-success, so no category movement. |
-| terminal -> same terminal / obsolete generation | No addition or replacement. |
-| persisted result reclassified across success/non-success, if later explicitly supported | Correct the same measurement atomically; do not keep the old outcome total. |
-
-The adopted counting direction is separate attempt_count and http_request_count.
-A successful CAS records the HTTP-start fact immediately before the client call,
-not before preparation/admission; it is an attempted HTTP invocation, not proof
-of provider receipt. The authoritative HTTP completion observer claims settlement
-once for a begun started id. Not-started and missing/obsolete results must be
-separate outcomes, not generic zero-usage successful requests. Coordination with
-Core cancellation/obsolete adoption remains to be specified without adopting a
-late response or losing an already-started request's observation.
-
-The current model_attempt preparing state can fail before an HTTP call. The
-final schema must distinguish attempt/pre-request failures from actual attempted
-HTTP requests rather than reporting an invented provider request count. Existing
-model_attempt.started_at-to-first-terminal duration follows that saved attempt's
-clock, not proof of server processing or receipt. The separate count names are adopted; pre-request time treatment and the
-completion/adoption CAS relationship still require a final transition design. Summary begin is immediately before its actual client
-call, after preparation and storage admission.
-
-Current completion CAS does not permit failed -> completed. Do not invent that
-transition for accounting. If cross-outcome correction becomes possible, subtract
-the saved typed contribution from the previous outcome and add it to the new one
-in the same transaction, retaining id and first_terminal_at. Because an overflow
-marker cannot be reversed into an exact sum by subtraction, either retain an
-exact wider accumulator or disallow that correction until a bounded rebuild of
-the affected aggregates is agreed. Never clear overflow by guessing. This is a
-remaining design choice, not an implemented promise.
-
-`first_terminal_at` is immutable for filtering and duration of that HTTP attempt;
-later diagnostic reclassification does not extend the HTTP time or create a
-second measurement. New actual retries have new ids. Run and shell terminal
-CAS, stop-before-spawn, shutdown fallback and startup bulk interruption must be
-covered, not just the ordinary completion callback. Unknown restart-recovered
-shell duration is not synthesized from wall clock. Active values stay separate.
-
-## Initialization, Maintenance And GC
-
-Migration creates schema/indexes and initialization metadata only, with no
-large source scan. Verified `src/control.rs` maintenance currently performs receipt
-collection, GC All, then a 60-second sleep; shutdown joins its existing handle.
-Adding at most 256 old records per existing pass can therefore take hours for a
-100k-record backfill. Preserve explicit initializing coverage rather than hiding
-that throughput or adding a new timer. Tests drive bounded steps/notifications,
-not a many-hour wall-clock wait. The existing maintenance tick performs at most one batch of
-256 eligible records, with a bounded work/byte budget and one short transaction;
-it yields to normal DB work instead of looping to completion on startup/read.
-No new worker, timer, poller or generic persistent work queue is introduced.
-The existing maintenance owner and cancellation/join lifecycle remain responsible.
-
-An indexed unaccounted predicate selects old terminal sources. New terminal
-writes set their accounting marker together with aggregates; batch initialization
-uses the same guard/transaction. Do not rely only on rowid/high-water cursors that
-can miss concurrent writes. Reads return aggregate rows plus initializing/partial
-coverage; they do not initialize an unbounded history or present a partial sum as
-complete. Notifications must not turn every tick into an unbounded UI refresh.
-
-Before GC removes a source or strips its only remaining old raw usage, account
-it in the same GC transaction or defer its reclamation. Deleted Thread sources
-are excluded, not resurrected into metrics. The legacy initialization path alone
-may use #49's guarded SQL scalar extraction, with no large usage document loaded
-into Rust. New terminal writes pass typed #49 values directly, not parsed JSON.
-Historical summary requests without durable attempt facts remain
-coverage unknown; cache counts cannot reconstruct lost retries or failures.
-
-## Arbitrary Periods: Revised Alternatives (Decision Required)
-
-The minute-aligned-only proposal is withdrawn. Accept arbitrary RFC3339 instants
-with a half-open interval `since <= first_terminal_at < until`; do not round the
-user's boundaries. Define representation/comparison at full accepted timestamp
-precision before implementation. Coarse UTC buckets must handle offset input by
-normalizing instants, not comparing different RFC3339 spellings lexicographically.
-Run/model/shell duration is wholly assigned by first terminal time, not clipped
-at range boundaries; a crossing interval is either included or excluded.
-
-### A: Coarse Buckets With Bounded Typed Edge Facts (Recommended For Review)
-
-Persist UTC day (or hour, pending measurement) aggregate rows in the same terminal
-transaction. Entirely contained buckets read these aggregates only. At most two
-partially intersected buckets read typed per-measurement facts through indexes
-on `(scope_id, first_terminal_at, measurement_id)`. Their fields are already
-validated numbers, outcome/purpose and durations, not raw usage JSON or response
-bodies. If both boundaries fall in one bucket, read that interval once.
-
-Apply one common query budget across interior buckets, both edges and all
-children: proposed 4,096 aggregate/point rows plus one sentinel. Indexed seeks
-and bounded stepping replace unrestricted SUM/source scan. A 100k-request edge
-can therefore return partial; it cannot secretly scan 100k rows. Expose requested
-range, covered bucket/edge intervals, per-scope completeness, initialization/GC/
-row-budget reasons and continuation. A page sum is explicitly a page sum, not
-the entire requested-period total. Cursors bind filters and aggregate revision;
-concurrent backfill/correction invalidates the cursor rather than silently
-mixing snapshots. All-time reads remain fixed aggregate-row lookups.
-
-This preserves exact timestamps for the rows covered and requires far less
-write amplification than a prefix tree. It does NOT guarantee a complete answer
-in one bounded query for a dense edge. It is an explicit narrow exception to the
-latest comment's aggregate-only read rule: edge readers add typed measurement
-facts, never source usage JSON. The leader must approve this exception; it must
-not be smuggled in as equivalent to reading only total rows.
-
-### B: Fine-Grained Additive Edge Aggregates
-
-Replace individual edge facts with pre-summed rows keyed by exact terminal
-instant/scope/category/outcome. Their read rules and global budget are the same.
-This adheres more literally to aggregate-only reads. Identical timestamps can
-coalesce, but arbitrary provider activity may give every request a distinct
-instant, making storage and edge stepping effectively one row per measurement.
-It has no worst-case constant-time full-precision guarantee and still needs
-partial/continuation. Using a fixed minute granularity instead would lose strict
-boundary precision and is not an approved alternative.
-
-### C: Prefix/Fenwick Time Aggregates
-
-Bounded prefix/range decomposition can give complete exact-range reads with
-roughly a fixed number of indexed nodes, but updates touch approximately 64
-nodes per scope/category and may retain very many nodes. Neither that write/
-storage multiplier nor a precision/range restriction is adopted by default.
-This is the alternative if complete dense-edge answers under a fixed read budget
-are required. Compare VM steps, new bytes and terminal-write work, not just a
-single read wall time.
-
-The unavoidable choice is strict arbitrary-boundary precision + bounded work +
-compact storage, with partial answers (A/B), versus greater persistent/write
-cost for complete bounded reads (C). Full source scans are not an alternative.
-
-## Measurement Facts, Dedupe And Lifetime (Decision Required)
-
-Normal model attempts already own lifecycle ids. Compare adding typed scalar/
-first-terminal/accounting columns directly to model_attempt, Run and shell rows
-against one minimal metrics sidecar. The former avoids a redundant normal-request
-ledger, but A's edge read then accesses typed source columns and requires that
-explicit exception. The latter supplies uniform edge indexes while duplicating
-a small amount of fact storage. A source backfill marker may still be necessary
-for indexed pending initialization; it is not a second copy of five numbers.
-
-Summary requests lack a complete durable HTTP-attempt ledger today. They
-need a minimal begin/finish record for active observation, exact once, interruption
-and period facts. It contains generated id, owning Thread/Run/Turn ids and purpose, start/first end,
-outcome and typed values only, never raw bodies/vectors/appendices. Cached summary
-reuse creates no HTTP record. Rejected/empty/failed/aborted attempts still settle
-their actual request record, without claiming provider usage if absent.
-
-`begin_request_tx` generates a fresh internal id after quota admission; callers
-cannot request recreation of a historical id. `finish_request_tx` only updates an
-existing begun active id and applies aggregates in that same transaction. Missing,
-deleted or terminal ids return obsolete/already-applied without INSERT/UPSERT.
-Consequently a repeated finish after GC cannot recreate a row or add usage.
-Startup settles active records as interrupted/unknown; it never repeats HTTP.
-
-Proposed reclamation: retain all-time and coarse bucket totals while a scope
-exists; reclaim terminal edge facts only under the agreed existing logical-storage
-pressure policy, not a new fixed age. Before pruning a point, mark the affected
-coarse bucket's edge coverage incomplete in the same transaction. A full-bucket query still has
-its exact total; a historical partial-bucket query reports boundary_facts_pruned
-and unknown missing count, not zero. All-time totals survive point GC. Never
-forget coverage metadata while claiming an exact historical edge. The pressure
-trigger, exact byte expressions and reservation size require leader agreement.
-
-## Active Values, Lineage And UI
-
-Read active-only indexes with a separate budget (proposed 256 plus sentinel).
-Expose active counts and read-time elapsed in a separate object with observed_at;
-do not persist them into terminal totals. Time is an observation, not proof of
-process liveness. Turn.run_ms is null/not_applicable with a reason; Turn's own
-lifetime_ms remains separately labeled. Run/Thread totals contain actual Run
-lifetimes once, never multiplied by Turn count.
-
-Children follow a live parent_thread_id index, not owner_run_id. Track visited
-ids, maximum depth 64 and at most 100 Threads including root, excluding deleted
-Threads. Cycles and limits are partial coverage reasons. The global period row
-budget spans all these scopes, not 4,096 per child. No-period totals read only a
-bounded number of fixed aggregate rows per visited Thread.
-
-Proposed CLI: existing turn/run/thread get exposes all-time own totals; a separate
-read-only usage get handles children/period options without adding unrelated
-flags to every command sharing ThreadTarget. Reads create no operation receipt.
-F6/F8 detail-open and relevant Changed notifications query the existing DB worker,
-with generation/revision validation and cached rendering only. No footer polling,
-DB work on the UI OS thread or per-frame recomputation is added.
-
-## Model-Only Shared HTTP APIs (Not Yet Authorized To Implement)
-
-Minimal conceptual signatures, with actual names/visibility to be reviewed:
-
-```rust
-struct HttpFailureMeasurement {
-    error: ModelError,
-    usage: Option<StandardUsage>,
-}
-async fn http_error_measured(response: Response, context: &mut RequestContext<'_>)
-    -> HttpFailureMeasurement;
-// Existing diagnostic-only wrapper remains source-compatible.
-async fn http_error(response: Response, context: &mut RequestContext<'_>) -> ModelError;
-
-// Add an internal typed field, without exposing new protocol error-body fields.
-struct AttemptFailure { /* existing fields */ usage: Option<StandardUsage> }
-
-fn begin_request_tx(tx: &Transaction<'_>, scope: UsageScope, purpose: Purpose,
-    started_at: &str) -> Result<RequestId>;
-fn finish_request_tx(tx: &Transaction<'_>, id: &RequestId,
-    usage: StandardUsage, outcome: Outcome, at: &str) -> Result<FinishOutcome>;
+```sql
+thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+run_id TEXT REFERENCES run(id) ON DELETE CASCADE,
+turn_id TEXT REFERENCES turn(id) ON DELETE CASCADE,
+scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL,
+grain TEXT NOT NULL, terminal_sec INTEGER NOT NULL, terminal_fraction TEXT NOT NULL,
+purpose TEXT NOT NULL, outcome TEXT NOT NULL,
+PRIMARY KEY(scope_kind,scope_id,grain,terminal_sec,terminal_fraction,purpose,outcome)
 ```
 
-Parse the already acquired <=64KiB non-2xx body once, keeping the existing
-status/classification, redaction, diagnostic text and limit behavior. Extract
-known provider-envelope usage numbers only; never return/persist the whole error
-body. Exact-cap complete JSON is eligible; truncated, interrupted, malformed or
-unreported usage is unknown. Preserve partial known fields. No extra HTTP read,
-retry or large-body load. The internal typed failure must not accidentally expose
-new error-body fields in serialized protocol diagnostics.
+Checks restrict scope_kind to thread/run/turn and derive scope_id from its actual
+owning FK: Thread rows have run_id/turn_id null, Run rows have run_id and no turn,
+Turn rows have both. A composite `(run_id,thread_id)` FK uses existing Run ownership;
+Turn ownership is verified by primary-key lookup in the writer transaction.
+Do not invent unchecked polymorphic owners. Thread cascade alone reclaims all its
+aggregate scopes even when run/turn metadata survives. Current Thread deletion
+is soft: its existing deletion transaction explicitly deletes these rows and
+summary attempts; SQL cascade also protects physical deletion. Forks inherit no
+consumption counters from shared history nodes.
 
-Direct model-only call changes: `src/model/http/body.rs` adds the measured internal
-result and retains the diagnostic wrapper; `src/model/http/response.rs` consumes
-it for non-2xx Responses and attaches typed usage to its internal failure.
-`src/control/driver/retry.rs`, `src/control/driver/overflow.rs`,
-`src/control/driver/trim.rs` and `src/control/state.rs` pass the typed observation
-to the terminal writer instead of reading saved JSON. Summary request settlement
-in `src/compaction.rs` consumes the same failure measurement. Success and 200/SSE
-failure envelopes use #49's same validated five fields.
+Grains: all_time uses zero/empty instant sentinel, day uses normalized UTC day
+start and empty fraction, instant uses exact normalized terminal instant.
+Purposes: normal, summary_manual, summary_automatic, shell, run_lifetime. Outcomes:
+success, non_success, not_started (normal/summary only); duration-only categories
+use their explicit terminal outcome, without creating token-unknown counts.
+No Cartesian product of empty categories is materialized.
 
-Indirect shared callers remain unchanged: catalog/embedding use `read_json` and
-its existing diagnostic-only `http_error` wrapper in `src/model/http.rs`.
-No embeddings_measured API, typed embedding field, index hookup or RAG accounting
-is introduced. This intentionally does not solve embedding failure accounting;
-coverage is out_of_scope/not_recorded, not zero. Regression tests must establish
-that shared catalog/embedding error classification, body limits and redaction
-are unchanged without altering their caller APIs. Index and index-CLI files
-remain untouched; their parallel coder does not need a new hook in this change.
+Wide typed payload columns, rather than one row per metric:
 
-## Planned Independent Validation
+- attempt_count, client_request_count, client_request_unknown_count,
+  pre_request_failure_count, and an explicit count-overflow flag.
+- Each of the five #49 token fields: known_sum (nullable), unknown_count,
+  overflow flag. Explicit reported zero is known; all unknown is not known zero.
+- elapsed_ms_sum, elapsed_ms_unknown_count and elapsed_ms_overflow for the
+  category's own clock. Run/model/shell remain separate categories, not added.
+- First/last attempt-start instants and aggregate revision/coverage metadata.
 
-Use synthetic temporary stores and loopback only. Validate same-TX original/
-aggregate changes, every terminal producer, duplicate/replay/rollback/storage
-failure, startup interruption, init concurrent with new writes and GC, missing
-finish after GC, scope deletion, reclassification, overflow and per-field unknown.
-Non-2xx tests include fully known/partially known/unknown, exact 64KiB/+1,
-truncation/transport failure and unchanged diagnostic redaction.
+Concrete payload column families for the DDL review (not JSON blobs):
 
-Use 100k model attempts, 10k shells, 1k Runs and 100 children. Assert EXPLAIN
-indexed seeks, bounded VM steps/returned rows and explicit coverage/continuations;
-do not use timers as correctness or hide dense-edge scans behind period flags.
-Prove all-time reads independent of attempt/shell/Run history size and verify
-UI cache/query generation through DB state and notifications with long watchdogs.
-Native CI and real-model dogfood are separate evidence, not inferred from mocks.
+```text
+attempt_count, client_request_count, client_request_unknown_count,
+pre_request_failure_count: nullable INTEGER; count_overflow: INTEGER boolean
+input_sum, cached_sum, output_sum, reasoning_sum, total_sum: nullable INTEGER
+input_unknown, cached_unknown, output_unknown, reasoning_unknown, total_unknown: INTEGER
+input_overflow, cached_overflow, output_overflow, reasoning_overflow, total_overflow: INTEGER boolean
+elapsed_ms_sum: nullable INTEGER; elapsed_ms_unknown: INTEGER; elapsed_ms_overflow: INTEGER boolean
+first_start_sec, last_start_sec: nullable INTEGER
+first_start_fraction, last_start_fraction: nullable TEXT
+revision: INTEGER; logical_payload_bytes: generated INTEGER
+```
+
+Numeric totals start null until a known observation, not fabricated zero. Each
+unknown counter starts zero; a known zero observation establishes sum=0. If the
+shared count-overflow flag is set, publish those counts as unknown/overflow rather
+than expose any saturated value. Text and enum checks restrict writer-generated
+keys/fractions; counts/sums have nonnegative checks. The logical-byte expression
+is exactly 8 times the number of non-null INTEGER payloads (excluding the generated
+byte field), plus 1 per non-null boolean flag, plus the sum of octet_length over
+stored TEXT payloads including keys/identifiers/timestamps. Treat booleans only
+once, not also as integers. These named fields plus the ownership/key fields
+fully define that expression; physical indexes/pages are not in this logical sum.
+
+Each scalar is a nonnegative signed-64-bit SQL value with CHECK constraints;
+Rust uses checked arithmetic. Overflow publishes null plus overflow, never a
+clamped exact number. Unknowns are field-specific; do not infer cached, reasoning
+or total tokens. Empty-but-complete scopes may report known empty request counts;
+initializing or excluded scope/categories cannot masquerade as complete zero.
+
+Indexes: the primary aggregate key supports scope/grain/time seeks; add a
+Thread-owned deletion lookup and live `thread(parent_thread_id,id)` traversal
+index. Source pending/active indexes below are partial. A declared/generated
+logical-byte expression has its own covering index. Exact migration number is
+assigned with the integrator against latest main; do not collide with parallel
+migrations or alter their fixtures speculatively.
+
+## Source Markers And Summary Ledger
+
+Normal requests reuse model_attempt id and lifecycle; add a small accounting
+marker (legacy_pending / observer_pending / accounted), not another normal HTTP
+ledger. Run and shell sources add accounted markers for terminal initialization
+and exact once. Preserve source terminal state/error/output/CAS semantics.
+The metrics writer receives typed StandardUsage directly from the completion
+observation; only old-row initialization uses #49's SQL scalar extraction.
+
+Summary-only ledger columns: generated id, Thread and optional actual Run/Turn
+FKs, purpose, start instant, nullable first terminal instant, state (active or
+settled). Begin inserts one admitted active row with a fresh internal UUID; the
+caller cannot recreate an old id. Finish only updates an existing begun active
+id, adds the same typed values to aggregates, then settles the marker in the same
+transaction. No INSERT/UPSERT on missing, deleted or settled finish. Cached summary
+reuse has no HTTP attempt and no charge. Empty/refused/failed summary attempts
+still record actual reported consumption. At startup, abandoned active records
+settle interrupted/unknown, never repeat the request. Scope deletion cascades;
+no independent age/pressure deletion is introduced in this candidate.
+
+## Terminal And Client-Observation Rules
+
+Counts distinguish admitted attempts from client invocations. Pre-request
+failures are not client calls. `client_request_count` means a client invocation
+whose execution was observed, never proof of POST bytes or provider receipt.
+A crash in an unobserved admission-to-call gap yields unknown invocation, not an
+invented zero or definite call. Preparation failures without an admitted
+model_attempt/summary id are not invented model-request rows.
+
+After stream_response returns, capture its typed usage and terminal observation
+before the current driver cancellation early return discards it. The completion
+observer owns a single observer_pending -> accounted CAS. Normal adoption/failure
+and metrics finalization share their existing DB transaction whenever they settle
+together. A request that actually ran must not disappear merely because output
+adoption becomes obsolete; a metrics-only finalization may record consumption
+without adopting late output or rewriting settled Core audit fields. A deleted
+scope/missing source is obsolete and is never recreated.
+
+Candidate finalization table (requires explicit review alongside #53/#56):
+
+| Observation | Accounting |
+| --- | --- |
+| admitted but definitely no client invocation | attempt + not_started; client count 0; no invented token usage |
+| client completed and Core completion adopted | one success with reported typed usage |
+| client failure/cancellation/received-incomplete | one non_success, retaining any reported fields |
+| client finished but Core adoption is obsolete/cancelled | one non_success/discarded observation; consumption retained, no late adoption |
+| failed -> incomplete after the same observation | same non_success, no second request or period movement |
+| duplicate finish or obsolete/missing source | no additions; no row recreation |
+| restart before client invocation/usage is established | invocation/usage unknown, never inferred zero |
+
+first_terminal_at is fixed by that observation, not a later trim/adoption delay.
+Retries are new ids; cross-success/non_success correction is outside current
+source semantics and is not added. Do not subtract from overflowed sums and guess
+an exact replacement. Observer-pending live work is excluded from initialization
+and protected from source GC until its actual completion settles it. On restart
+its owning observer no longer exists and it may be settled unknown. Active
+observations remain separate from terminal totals.
+
+Run/shell terminal Applied CAS updates their sums in the same transaction,
+including stop-before-spawn, bulk cancellation, shutdown fallback and restart.
+Unknown restarted shell elapsed is unknown; never synthesize monotonic duration
+from wall clock. Turn.run_ms is null/not_applicable with reason; its own lifetime
+is separately labeled. Run lifetime is counted once at Run/Thread, not per Turn.
+
+## Aggregate-Only Arbitrary Periods
+
+Accept arbitrary RFC3339 half-open intervals without minute/day rounding:
+`since <= first_terminal_at < until`. Normalize UTC whole seconds and canonical
+decimal fraction (remove trailing zeros; zero is empty). Keep full accepted
+fractional precision in boundary comparisons, not an unconditional millisecond
+cast. Scope/time index comparisons must be equivalent for offset spellings and
+same-instant fractions; explicit parse/ordering tests precede implementation.
+
+Read fully contained UTC-day aggregate rows and instant aggregates for the at-most
+two partially included days. An interval within one day reads that interval once.
+Same-instant/scope/purpose/outcome contributions add to the saved instant row.
+No model_attempt/shell/Run scan, JSON extraction, measurement-ledger read, or
+fallback from a dense edge occurs in a public totals query.
+
+One shared budget covers interior/edges/all children: 4,096 aggregate rows plus
+one sentinel. Fetch/step bounded rows before adding; an unbounded SQL SUM behind
+LIMIT is prohibited. Dense boundaries return partial, requested and covered time
+ranges, per-scope coverage reasons and continuation. Page totals are not presented
+as full-period totals. Cursor binds scope/filter/revision; new historical
+initialization or concurrent changes expire it rather than mixing snapshots.
+
+Worst case: every request has a distinct terminal instant, so instant-row storage
+and the work needed for a complete paged answer grow linearly. Do not claim a
+complete exact answer in one bounded query. This cost is explicit and verified
+with logical bytes, physical/index bytes and VM steps, not just wall time.
+All-time reads use fixed aggregate category rows, independent of event history.
+
+## Minimal Capacity And Retention Policy
+
+Use existing limits.data_max_bytes (default 10 GiB) and the existing storage_limit
+admission/terminal exceptions. data_warning_bytes (default 8 GiB) stays a warning,
+not a new metrics-GC trigger. No new quota, global reservation manager, fixed age,
+watermark or timer. Existing tool_raw retention applies to raw shell output only.
+
+Define metrics logical payload bytes from actual stored text bytes and typed
+scalar widths in a generated SQL expression; index it for existing logical-history
+accounting. The candidate convention counts non-null INTEGER payloads as 8 bytes,
+boolean flags as 1 byte and TEXT as octet_length, excluding SQLite record/page/
+index overhead. This is an explicit logical definition, not physical file size.
+Final DDL enumerates the exact column expression; tests compare it after inserts,
+updates, cascades and rollback. Do not trust an application-maintained stale byte
+counter or load large payloads to compute it.
+
+At begin, apply the existing guard in the source/summary admission transaction,
+including the newly inserted immediate payload in its logical check, before a
+client invocation. If it reaches the configured limit, roll back begin and return
+storage_limit. Do not reserve all possible future aggregate rows or promise a
+strict future-result byte ceiling. Terminal recording may grow logical usage over
+max, just as existing terminal writers may; source/metrics updates are atomic.
+Actual DB persistence failure rolls both back and invokes existing storage-failure
+handling. Over-limit state prevents later new work, not stop/terminal/GC/read.
+
+Retain all-time, coarse and instant aggregate rows while their scope exists;
+summary markers live with their scope. Deletion transaction removes them together.
+No pressure reclamation is introduced now: this avoids undefined historical
+boundary coverage loss and policy changes. Consequence: a long-lived scope's
+metrics can eventually help fill the existing limit, and arbitrary-old exact
+periods stay available only while data remains and queries finish pagination.
+Any future pressure compaction needs separate coverage/atomicity policy approval.
+
+## Bounded Initialization Without A New Worker
+
+Migration is schema/index/empty metadata only. Old terminal model/Run/shell rows
+use indexed pending markers. A small app_meta coverage/revision record identifies
+initialization and historical summary coverage start; it is not another job queue.
+Fresh scopes have no invented historical requests. Old scopes with unrecoverable
+summary history expose its coverage boundary even after normal-source backfill. Every batch (at most 256 sources) marks and aggregates
+in one short DB transaction; new terminal writes use the same exclusion guard.
+GC accounts a pending source before clearing its only usage or defers that source;
+never race backfill with deletion. Historical summary attempts absent from durable
+records remain coverage_unknown, not reconstructed from overwritten cache.
+
+The existing Control maintenance task and handle own initialization. Instead of
+one batch per its 60-second collection cycle, its initialization phase repeatedly
+submits one bounded DB job and awaits it, then yields to the existing runtime/DB
+FIFO before submitting the next; check owner stop each batch. No new OS worker,
+poller, interval, queue, detached task or synchronous startup/read loop. Startup
+only starts the existing task, and reads use aggregates plus initializing/partial.
+Receipt collection and existing maintenance work get explicit turns between small
+sets of batches, not starvation until all initialization completes. Final review
+must pin that interleaving (proposed one existing receipt/GC turn per 16 batches)
+and byte-bound legacy rows without hiding SQL parsing cost: probe source byte
+lengths first and process at most 256 records / 1 MiB source documents per DB
+transaction. As with existing raw batching, a single older oversized row may
+occupy its own transaction so initialization cannot starve forever. This is a
+bounded-row progress exception, not a hard per-row parsing-time guarantee; #49's
+recorded legacy SQLite parsing cost remains. Never load that document into Rust.
+
+Test deterministic steps, queue fairness and notification generations, not elapsed
+latency. A continuously nonempty DB queue and slow legacy parsing must not imply
+an invented throughput guarantee. Shutdown cancels further submissions and joins
+the existing maintenance handle; admitted DB transactions finish normally.
+
+## Read Surface, Active Values And Validation
+
+Existing Turn/Run/Thread get includes own all-time usage. Read-only usage get
+handles children/period; no receipt. Children follow live parent_thread_id index,
+visited set, depth64, at most 100 Threads including root. Deleted/cyclic/limited
+branches produce honest partial reasons. Shared period budget is not per child.
+Active-only source indexes have a separate cap256 plus sentinel; read-time counts/
+elapsed and observed_at are separate from terminal sums. TUI F6/F8 open/Changed
+queries the DB worker and caches by generation/revision; render never queries DB.
+
+Model-only non-2xx extension: body.rs returns existing redacted ModelError plus
+optional StandardUsage from its already acquired complete <=64KiB JSON body.
+Preserve the existing diagnostic-only http_error call for read_json/catalog/
+embedding without adding an unused compatibility framework or changing their APIs.
+Responses/summary failure settlement receives typed values. Malformed, truncated,
+interrupted and absent fields remain unknown; no raw error body/appendix storage,
+new HTTP, retry or enlarged limit. Test exact cap/+1, partial fields and unchanged
+shared diagnostics. Index/embedding wiring remains excluded.
+
+Design/implementation review must check rollback, duplicate/replay, live cancellation,
+obsolete adoption, observer initialization races, source GC, soft/physical deletion,
+summary cache reuse/retry, unknown/overflow, exact fractional boundaries, page gaps,
+children cycles/limits and UI query generations. Synthetic scale: 100k attempts,
+10k shells, 1k Runs, 100 children. Assert EXPLAIN seeks, VM-step/row budgets and
+logical/physical growth; no timing correctness assertions or paid/user DB tests.
+
+## Integration And Remaining Gate
+
+The schema, accounting module and regression code have not been implemented.
+Leader confirmation is still required on this candidate, especially source observer
+CAS vs obsolete Core adoption, exact byte expression and bounded initialization
+interleaving. No additional age/pressure/embedding policy is requested here.
+Coordinate edits touching control/state.rs, db.rs, driver.rs and driver/tools.rs
+with parallel #53/#56; keep helpers local to accounting and do not rework their
+cancel/ownership semantics. Before push the integrator fetches/rebases current
+main, checks diff/range-diff, obtains needed new-SHA review and runs the standard
+check again, then normal main push and exact three-OS CI. #50 stays queued.

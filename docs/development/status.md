@@ -159,10 +159,11 @@ the latest issue comment supersedes its original read-time scan proposal.
 Parallel index/index-CLI files are outside this worktree's edit scope.
 The latest #47 scope excludes all embedding/standalone RAG accounting and its
 previous hook plan; expose out_of_scope/not_recorded, not zero. Only normal/
-summary requests and separate Run/model/shell time remain. The revised proposal
-is explicitly unadopted; period-edge precision/partial coverage, fact lifetime,
-schema/budgets and full implementation still need leader approval. No #47 code,
-schema or tests are implemented.
+summary requests and separate Run/model/shell time remain. The B aggregate-only direction replaces A/future-reservation proposals. The final
+candidate retains aggregate rows until scope deletion, uses existing storage
+limits/terminal exceptions and proposes fair small-batch initialization on the
+existing lifecycle. Full schema/observer/budget review remains required. No #47
+code, schema or tests are implemented; #50 remains separately queued.
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 
