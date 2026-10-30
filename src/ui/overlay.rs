@@ -82,7 +82,22 @@ impl UiState {
             self.immediate_chord = false;
         }
         let input_owner = self.active.clone();
+        let follow_before = self.view().follow;
         let mut actions = self.event_inner(event);
+        if self.active == input_owner && self.view().follow != follow_before {
+            let view = self.view();
+            self.trace_history(crate::diagnostics::UiHistoryTrace {
+                reason: crate::diagnostics::UiHistoryReason::UserFollow,
+                generation: view.generation,
+                view_revision: view.view_revision,
+                read_revision: view.delivery_read_revision,
+                follow_before,
+                follow_after: view.follow,
+                before_nodes: view.nodes().len() as u64,
+                after_nodes: view.nodes().len() as u64,
+                ..Default::default()
+            });
+        }
         if self.active != input_owner {
             self.immediate_chord = false;
         }

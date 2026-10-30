@@ -2450,7 +2450,7 @@ fn forward_page_loads_the_first_unknown_neighbor_before_using_later_rows() {
 }
 #[test]
 fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth() {
-    let all = (0..10)
+    let all = (0..80)
         .map(|i| {
             scroll_fixture_node(
                 i,
@@ -2481,9 +2481,9 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
         append: false,
         first_ordinal: 0,
         selection_revision: 7,
-        total_nodes: 10,
+        total_nodes: 80,
     });
-    let mut expected = scroll_fixture(all.clone(), 0, 10);
+    let mut expected = scroll_fixture(all.clone(), 0, 80);
     expected.view_mut().follow = false;
     expected.view_mut().anchor = ViewAnchor {
         node_id: Some("scroll-0".into()),
@@ -2491,7 +2491,12 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
     };
     let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
     let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
-    scroll_cells(&mut actual, &mut a);
+    let painted_body_rows = scroll_cells(&mut actual, &mut a).len();
+    // Even a one-line source consumes a visible row. Retention may protect
+    // that actual viewport plus the three-node source neighborhood, never the
+    // whole 80-node history or a growing sequence of prior viewports.
+    let retained_node_bound = painted_body_rows + 3;
+    assert!(all.len() > retained_node_bound);
     scroll_cells(&mut expected, &mut b);
     let mut requests = std::collections::VecDeque::new();
     for _ in 0..17 {
@@ -2546,7 +2551,7 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
                     nodes,
                     first_ordinal: first as u64,
                     selection_revision,
-                    total_nodes: 10,
+                    total_nodes: 80,
                     anchor: ViewAnchor {
                         node_id: Some(node.node_id.clone()),
                         char_offset: if from_end {
@@ -2560,8 +2565,8 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
             _ => continue,
         }
         assert!(
-            actual.view().nodes().len() <= 3,
-            "only the fixed viewport working set is exempt from the zero budget"
+            actual.view().nodes().len() <= retained_node_bound,
+            "only the finite painted viewport plus source neighbors is exempt from the zero budget"
         );
         requests.extend(actual.take_deferred_actions());
     }

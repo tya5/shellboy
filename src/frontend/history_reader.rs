@@ -127,13 +127,15 @@ impl RawHistory {
         mut position: impl FnMut(usize, &PathNode) -> Option<NodePosition>,
     ) -> (Vec<UiNode>, HistoryInfo, Option<ViewAnchor>) {
         let mut anchor = None;
+        let read_revision = self.info.read_revision;
         let nodes = self
             .rows
             .into_iter()
             .enumerate()
             .map(|(index, row)| {
                 let wanted = position(index, &row);
-                let node = row.node.into_ui_node(wanted, width);
+                let mut node = row.node.into_ui_node(wanted, width);
+                stamp_source(&mut node, read_revision);
                 if let Some(wanted) = wanted {
                     anchor = Some(ViewAnchor {
                         node_id: Some(node.node_id.clone()),
@@ -195,6 +197,7 @@ impl<'a> HistoryReader<'a> {
         let (mut nodes, info, _) =
             presentation_work(move || raw.project(width, |_, _| None)).await?;
         streams::enrich(control, &mut nodes, width).await?;
+        stamp_sources(&mut nodes, info.read_revision);
         let history = UiUpdate::History {
             thread_id: thread.clone(),
             generation,
@@ -257,6 +260,7 @@ impl<'a> HistoryReader<'a> {
         .await?;
         let enriched = streams::enrich(self.control, &mut nodes, self.width).await;
         checked_storage(self.control, enriched).await?;
+        stamp_sources(&mut nodes, info.read_revision);
         let selection_revision = info.revision;
         reply
             .deliver(self.updates, nodes, info, anchor.unwrap_or_default())
@@ -306,6 +310,7 @@ impl<'a> HistoryReader<'a> {
             })
             .await?;
             streams::enrich(self.control, &mut nodes, self.width).await?;
+            stamp_sources(&mut nodes, info.read_revision);
             let anchor = anchor.ok_or_else(|| {
                 ApiError::new(
                     ErrorCode::TargetUnavailable,
@@ -366,6 +371,7 @@ impl<'a> HistoryReader<'a> {
             })
             .await?;
             streams::enrich(self.control, &mut nodes, self.width).await?;
+            stamp_sources(&mut nodes, info.read_revision);
             let before_cursor = before_cursor?;
             stream_commits(
                 self.updates,
@@ -409,13 +415,13 @@ impl<'a> HistoryReader<'a> {
     }
     pub(super) async fn node(&self, node_id: String, offset: usize) -> Result<UiNode, ApiError> {
         let result = async {
-            let row = self
+            let (row, read_revision) = self
                 .control
                 .store
                 .database
                 .call(move |db| {
-                    Ok(db
-                        .query_row(
+                    let tx = db.transaction()?;
+                    let row = tx.query_row(
                             "SELECT n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END FROM node n WHERE n.id=?1",
                             [&node_id],
                             |r| {
@@ -428,11 +434,14 @@ impl<'a> HistoryReader<'a> {
                                 })
                             },
                         )
-                        .optional()?)
+                        .optional()?;
+                    let read_revision = message_queue::read_revision();
+                    tx.commit()?;
+                    Ok((row, read_revision))
                 })
                 .await
-                .map_err(storage_error)?
-                .ok_or_else(|| {
+                .map_err(storage_error)?;
+            let row = row.ok_or_else(|| {
                     ApiError::new(ErrorCode::TargetUnavailable, "History node is unavailable")
                 })?;
             let width = self.width;
@@ -440,10 +449,21 @@ impl<'a> HistoryReader<'a> {
                 presentation_work(move || row.into_ui_node(Some(NodePosition::At(offset)), width))
                     .await?;
             streams::enrich(self.control, std::slice::from_mut(&mut node), self.width).await?;
+            stamp_source(&mut node, read_revision);
             Ok(node)
         }
         .await;
         checked_storage(self.control, result).await
+    }
+}
+// Enrichment can rebuild a presentation; freshness and eviction remain source facts.
+fn stamp_source(node: &mut UiNode, read_revision: u64) {
+    node.presentation.read_revision = read_revision;
+    node.presentation.body_evicted = false;
+}
+fn stamp_sources(nodes: &mut [UiNode], read_revision: u64) {
+    for node in nodes {
+        stamp_source(node, read_revision);
     }
 }
 fn live_thread_revision(db: &Connection, thread: &str) -> Result<i64, StorageError> {
@@ -666,4 +686,156 @@ fn raw_node_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PathNode> {
             received_recovery_wait: row.get(5)?,
         },
     })
+}
+
+#[cfg(test)]
+mod read_stamping_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn rows() -> Vec<PathNode> {
+        [
+            ("text", "user", json!({"role":"user","content":[{"type":"input_text","text":"synthetic source"}]})),
+            ("tool", "tool_result", json!({"item":{"type":"function_call_output","call_id":"synthetic-call","output":json!({"status":"cancelled","executed":false,"reason":"human_turn_interrupted","message":"Not executed"}).to_string()}})),
+            ("tool_finished", "tool_result", json!({"item":{"type":"function_call_output","call_id":"finished-call","output":json!({"status":"exited","exit_code":0,"output":"synthetic tool output"}).to_string()}})),
+            ("empty", "event", json!({"text":""})),
+        ].into_iter().enumerate().map(|(ordinal,(id,kind,payload))|PathNode {
+            ordinal:ordinal as i64,
+            node:RawNode{id:id.into(),kind:kind.into(),payload:Some(payload.to_string()),reason:None,received_recovery_wait:false},
+        }).collect()
+    }
+
+    #[test]
+    fn projected_source_windows_inherit_the_paired_snapshot_and_empty_is_not_evicted() {
+        let raw = RawHistory {
+            rows: rows(),
+            info: HistoryInfo {
+                first: 0,
+                revision: 1,
+                total: 4,
+                committed: vec![],
+                pending: PendingMessages::default(),
+                read_revision: 73,
+            },
+        };
+        let (nodes, info, _) = raw.project(80, |_, _| None);
+        assert_eq!(nodes.len(), 4);
+        assert_eq!(info.read_revision, 73);
+        for node in &nodes {
+            assert_eq!(node.presentation.read_revision, 73);
+            assert!(!node.presentation.body_evicted);
+        }
+        assert_eq!(
+            nodes[3].total_chars, 0,
+            "a known empty canonical body remains a successful read"
+        );
+    }
+
+    #[test]
+    fn ephemeral_window_facts_do_not_change_serialized_content_or_projection_identity() {
+        let mut node = UiNode {
+            node_id: "source".into(),
+            role: "assistant".into(),
+            text: "retained text".into(),
+            total_chars: 13,
+            presentation: crate::presentation::project(
+                "assistant_response",
+                &json!({"text":"retained text"}),
+                "retained text",
+                0,
+            ),
+            ..Default::default()
+        };
+        streams::seal_node(&mut node);
+        let before = node.presentation.projection_stamp;
+        let serialized = serde_json::to_value(&node).unwrap();
+        node.presentation.read_revision = 901;
+        node.presentation.body_evicted = true;
+        streams::seal_node(&mut node);
+        assert_eq!(node.presentation.projection_stamp, before);
+        assert_eq!(serde_json::to_value(&node).unwrap(), serialized);
+        let decoded: UiNode = serde_json::from_value(serialized).unwrap();
+        assert_eq!(decoded.presentation.read_revision, 0);
+        assert!(!decoded.presentation.body_evicted);
+    }
+
+    #[tokio::test]
+    async fn node_hydration_and_enriched_pages_share_the_existing_serialized_read_sequence() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        owner
+            .db
+            .call(|db| {
+                let tx = db.transaction()?;
+                for row in rows() {
+                    crate::history::append_node(
+                        &tx,
+                        "thread",
+                        &row.node.id,
+                        None,
+                        &row.node.kind,
+                        &serde_json::from_str::<Value>(row.node.payload.as_ref().unwrap()).unwrap(),
+                        "now",
+                    )?;
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let (updates, incoming) = std::sync::mpsc::sync_channel(32);
+        let reader = HistoryReader::new(&control, &updates, 80);
+        reader
+            .page(&Reply::new("thread", 1), None, None)
+            .await
+            .unwrap();
+        let first = loop {
+            match incoming.try_recv().unwrap() {
+                UiUpdate::History {
+                    nodes,
+                    read_revision,
+                    ..
+                } => {
+                    assert_eq!(nodes.len(), 4);
+                    for node in nodes {
+                        assert_eq!(node.presentation.read_revision, read_revision);
+                        assert!(!node.presentation.body_evicted);
+                    }
+                    break read_revision;
+                }
+                _ => continue,
+            }
+        };
+        assert!(first > 0);
+        let hydrated = reader.node("tool_finished".into(), 0).await.unwrap();
+        assert!(hydrated.presentation.read_revision > first);
+        assert!(!hydrated.presentation.body_evicted);
+        let empty = reader.node("empty".into(), 0).await.unwrap();
+        assert!(empty.presentation.read_revision > hydrated.presentation.read_revision);
+        assert_eq!(empty.total_chars, 0);
+        assert!(!empty.presentation.body_evicted);
+        reader
+            .page(&Reply::new("thread", 1), None, None)
+            .await
+            .unwrap();
+        let last = loop {
+            match incoming.try_recv().unwrap() {
+                UiUpdate::History {
+                    nodes,
+                    read_revision,
+                    ..
+                } => {
+                    for node in nodes {
+                        assert_eq!(node.presentation.read_revision, read_revision);
+                        assert!(!node.presentation.body_evicted);
+                    }
+                    break read_revision;
+                }
+                _ => continue,
+            }
+        };
+        assert!(last > empty.presentation.read_revision);
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
 }

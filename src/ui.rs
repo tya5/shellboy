@@ -255,7 +255,14 @@ impl UiNode {
     fn evict_body(&mut self) {
         self.text = String::new();
         self.reasoning_ranges = Vec::new();
+        let kind = self.presentation.kind.clone();
+        let event_class = self.presentation.event_class;
+        let read_revision = self.presentation.read_revision;
         self.presentation.clear();
+        self.presentation.kind = kind;
+        self.presentation.event_class = event_class;
+        self.presentation.read_revision = read_revision;
+        self.presentation.body_evicted = true;
     }
     fn cached_bytes(&self) -> usize {
         self.presentation
@@ -1204,6 +1211,7 @@ impl Confirmation {
     }
 }
 pub struct UiState {
+    diagnostics: Option<crate::diagnostics::Diagnostics>,
     bell: bell::Bell,
     autosave: autosave::Autosave,
     batching_updates: bool,
@@ -1236,6 +1244,8 @@ pub struct UiState {
     terminal_requests: Vec<Vec<u8>>,
     layout_cache: HistoryLayoutCache,
     visible_links: Vec<crate::terminal_links::LinkRegion>,
+    // Last actually painted source IDs; bounded by the 128-node projection.
+    painted_body_nodes: Option<(String, u64, Vec<String>)>,
     render_width: u16,
     render_pending: BTreeSet<(String, u64, u64, String, u16, usize)>,
     details: Option<details::Details>,
@@ -1294,6 +1304,7 @@ impl UiState {
         let active = view.draft.draft_id.clone();
         let initialized = cwd.is_absolute();
         Self {
+            diagnostics: None,
             bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
             views: BTreeMap::from([(active.clone(), view)]),
@@ -1321,6 +1332,7 @@ impl UiState {
             terminal_requests: Vec::new(),
             layout_cache: HistoryLayoutCache::default(),
             visible_links: vec![],
+            painted_body_nodes: None,
             render_width: 0,
             render_pending: BTreeSet::new(),
             details: None,
@@ -1340,6 +1352,20 @@ impl UiState {
             next_input_request: 0,
             next_thread_deletion_request: 0,
             thread_deletions_inflight: BTreeMap::new(),
+        }
+    }
+    pub fn set_diagnostics(&mut self, diagnostics: crate::diagnostics::Diagnostics) {
+        self.diagnostics = Some(diagnostics);
+    }
+    fn trace_history(&self, trace: crate::diagnostics::UiHistoryTrace) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.record_ui_history(
+                trace,
+                crate::diagnostics::DiagnosticIds {
+                    thread_id: self.view().thread_id.clone(),
+                    ..Default::default()
+                },
+            );
         }
     }
     pub fn view(&self) -> &ThreadView {
@@ -1432,7 +1458,8 @@ impl UiState {
                     && (offset < node.base_char_offset
                         || (offset >= node.base_char_offset + node.text.chars().count()
                             && offset < node.total_chars));
-                let needed = outside
+                let needed = node.presentation.body_evicted
+                    || outside
                     || node.presentation.blocks.iter().any(|block| {
                         matches!(
                             block.kind,
@@ -1447,7 +1474,13 @@ impl UiState {
                                 && offset > block.source_start
                                 && offset < block.source_end))
                     });
-                needed.then(|| (node.node_id.clone(), offset, outside))
+                needed.then(|| {
+                    (
+                        node.node_id.clone(),
+                        offset,
+                        outside || node.presentation.body_evicted,
+                    )
+                })
             })
             .collect::<Vec<_>>();
         requests.sort_by_key(|(node, _, _)| !working.contains(node));
@@ -1552,8 +1585,71 @@ impl UiState {
             return;
         }
 
+        let history_trace = match &update {
+            UiUpdate::History {
+                thread_id,
+                generation,
+                read_revision,
+                ..
+            }
+            | UiUpdate::HistoryWindow {
+                thread_id,
+                generation,
+                read_revision,
+                ..
+            } => self
+                .views
+                .values()
+                .find(|v| v.matches(thread_id, *generation))
+                .map(|v| {
+                    (
+                        thread_id.clone(),
+                        *generation,
+                        *read_revision,
+                        v.view_revision,
+                        v.follow,
+                        v.nodes().len(),
+                        v.delivery_read_revision,
+                    )
+                }),
+            _ => None,
+        };
         let retains = update.needs_retention();
         self.apply_inner(update);
+        if let Some((
+            thread,
+            generation,
+            read_revision,
+            view_revision,
+            follow_before,
+            before_nodes,
+            previous_read,
+        )) = history_trace
+            && let Some(view) = self.views.values().find(|v| v.matches(&thread, generation))
+            && let Some(diagnostics) = &self.diagnostics
+        {
+            diagnostics.record_ui_history(
+                crate::diagnostics::UiHistoryTrace {
+                    reason: if read_revision < previous_read {
+                        crate::diagnostics::UiHistoryReason::StaleWindow
+                    } else {
+                        crate::diagnostics::UiHistoryReason::WindowApplied
+                    },
+                    generation,
+                    view_revision,
+                    read_revision,
+                    before_nodes: before_nodes as u64,
+                    after_nodes: view.nodes().len() as u64,
+                    follow_before,
+                    follow_after: view.follow,
+                    ..Default::default()
+                },
+                crate::diagnostics::DiagnosticIds {
+                    thread_id: Some(thread),
+                    ..Default::default()
+                },
+            );
+        }
         self.retention_pending |= retains;
         if !self.batching_updates {
             self.finish_retention();
@@ -1693,6 +1789,7 @@ impl UiState {
                 .map(|(key, _)| key.clone()),
             _ => None,
         };
+        let mut retry_window = false;
         match update {
             UiUpdate::SendOperation {
                 draft_id,
@@ -2229,13 +2326,17 @@ impl UiState {
                 if let Some(view) = self.view_for(&thread_id, generation).filter(|v| {
                     v.view_revision == view_revision
                         && selection_revision >= v.selection_revision
-                        && read_revision >= v.delivery_read_revision
+                        && (read_revision >= v.delivery_read_revision
+                            || (window_reply.is_some()
+                                && selection_revision == v.selection_revision))
                 }) {
-                    view.delivery_read_revision = read_revision;
-                    view.pending_messages = pending;
-                    view.reconcile_saved_inputs();
+                    if read_revision >= view.delivery_read_revision {
+                        view.delivery_read_revision = read_revision;
+                        view.pending_messages = pending;
+                        view.reconcile_saved_inputs();
+                    }
                     view.received_window_revision = Some(view_revision);
-                    view.on_history_window(
+                    let refresh_tail = view.on_history_window(
                         nodes,
                         first_ordinal,
                         selection_revision,
@@ -2243,6 +2344,17 @@ impl UiState {
                         anchor,
                         window_reply.is_some(),
                     );
+                    if refresh_tail {
+                        self.deferred_actions.push(UiAction::LoadHistory {
+                            thread_id,
+                            generation,
+                            before_cursor: None,
+                        });
+                    }
+                } else if window_reply.is_some() {
+                    // A newer paired read may own queue facts while this
+                    // required rebase still owns the older visible frame.
+                    retry_window = true;
                 }
             }
             UiUpdate::Receipt {
@@ -2426,8 +2538,25 @@ impl UiState {
         if let Some(key) = window_reply {
             let budget = usize::try_from(self.config.cache.layout_bytes).unwrap_or(usize::MAX);
             let view = self.views.get_mut(&key).expect("matched navigation owner");
+            view.loading = false;
             let amount = view.finish_navigation_reply();
-            if amount != 0 {
+            if retry_window {
+                // Keep the user's unconsumed movement until fresh ordinals
+                // arrive; never apply it against the rejected snapshot.
+                view.scroll.pending = amount;
+                view.history_rebase_pending = true;
+                view.loading = true;
+                view.scroll.request = Some((view.view_revision, None));
+                self.deferred_actions.push(UiAction::RebaseHistory {
+                    thread_id: view
+                        .thread_id
+                        .clone()
+                        .expect("navigation target has Thread"),
+                    generation: view.generation,
+                    view_revision: view.view_revision,
+                    anchor: view.anchor.clone(),
+                });
+            } else if amount != 0 {
                 let actions = view.scroll(amount, &key, &mut self.layout_cache, budget);
                 self.deferred_actions.extend(actions);
             }
@@ -4024,6 +4153,41 @@ impl UiState {
             .expect("active view exists")
             .scroll(amount, &self.active, &mut self.layout_cache, budget)
     }
+    fn remember_painted_bodies(&mut self, visible: &BTreeSet<usize>) {
+        let view = self.view();
+        let ids = visible
+            .iter()
+            .take(128)
+            .filter_map(|index| view.nodes().get(*index).map(|node| node.node_id.clone()))
+            .collect();
+        self.painted_body_nodes = Some((self.active.clone(), view.generation, ids));
+    }
+    fn retained_working_node_ids(&mut self) -> Vec<String> {
+        if self
+            .painted_body_nodes
+            .as_ref()
+            .is_some_and(|(active, generation, _)| {
+                active != &self.active || *generation != self.view().generation
+            })
+        {
+            self.painted_body_nodes = None;
+        }
+        let mut working = working_node_ids(self.view());
+        if let Some((_, _, painted)) = &self.painted_body_nodes {
+            working.extend(
+                painted
+                    .iter()
+                    .filter(|id| self.view().nodes().iter().any(|node| &node.node_id == *id))
+                    .cloned(),
+            );
+        }
+        // settle_other_streams leaves one current unsaved source. It cannot
+        // be hydrated from history by its attempt ID until a commit exists.
+        working.extend(self.view().current_uncommitted_preview());
+        working.sort();
+        working.dedup();
+        working
+    }
     fn trim_bodies(&mut self) {
         #[cfg(test)]
         {
@@ -4035,7 +4199,8 @@ impl UiState {
         }
         // Determine the viewport working set once. These same nodes are exempt
         // from both payload and metadata retention, including at either edge.
-        let working = working_node_ids(self.view());
+        let working = self.retained_working_node_ids();
+        let mut evicted_bodies = 0u64;
         let mut retained = self
             .views
             .iter()
@@ -4063,11 +4228,16 @@ impl UiState {
                 break;
             }
             let view = self.views.get_mut(&key).expect("known inactive view");
+            let before = view.nodes().len();
+            retained = retained.saturating_sub(view.discard_committed_previews_except(&[]));
+            evicted_bodies += before.saturating_sub(view.nodes().len()) as u64;
             for index in 0..view.nodes().len() {
                 if retained <= budget {
                     break;
                 }
-                retained = retained.saturating_sub(view.evict_node_body(index));
+                let freed = view.evict_node_body(index);
+                evicted_bodies += u64::from(freed > 0);
+                retained = retained.saturating_sub(freed);
             }
             if retained > budget {
                 retained = retained.saturating_sub(retained_body_bytes(view, &[]));
@@ -4075,6 +4245,11 @@ impl UiState {
             }
         }
         let view = self.active_view_mut();
+        if retained > budget {
+            let before = view.nodes().len();
+            retained = retained.saturating_sub(view.discard_committed_previews_except(&working));
+            evicted_bodies += before.saturating_sub(view.nodes().len()) as u64;
+        }
         let protected = viewport_node_index(view);
         let mut candidates = (0..view.nodes().len())
             .filter(|index| !working.contains(&view.nodes()[*index].node_id))
@@ -4084,9 +4259,25 @@ impl UiState {
             if retained <= budget {
                 break;
             }
-            retained = retained.saturating_sub(view.evict_node_body(index));
+            let freed = view.evict_node_body(index);
+            evicted_bodies += u64::from(freed > 0);
+            retained = retained.saturating_sub(freed);
         }
         view.trim_page_edges(&working, &mut retained, budget);
+        if evicted_bodies > 0 {
+            let view = self.view();
+            self.trace_history(crate::diagnostics::UiHistoryTrace {
+                reason: crate::diagnostics::UiHistoryReason::BodyEviction,
+                generation: view.generation,
+                view_revision: view.view_revision,
+                read_revision: view.delivery_read_revision,
+                after_nodes: view.nodes().len() as u64,
+                evicted_bodies,
+                follow_before: view.follow,
+                follow_after: view.follow,
+                ..Default::default()
+            });
+        }
     }
 }
 fn merge_navigation_window(view: &mut ThreadView, incoming: &mut Vec<UiNode>, first: &mut u64) {
@@ -4193,7 +4384,7 @@ pub fn cursor_position(text: &str, byte_cursor: usize, width: u16) -> (u16, u16)
 }
 /// Render a cached source window without changing canonical text or offsets.
 fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize) -> String {
-    if node.text.is_empty() && node.total_chars > 0 {
+    if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
         return "[本文未キャッシュ · スクロールで原文を再取得]".into();
     }
     let start = start.max(node.base_char_offset);
@@ -4610,6 +4801,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         body_area.height.saturating_sub(2),
         state.view().nodes().len(),
     );
+    state.remember_painted_bodies(&visible);
     state.prepare_visible_render_width(
         body_area.width.saturating_sub(4).max(1),
         &visible,
@@ -4720,8 +4912,12 @@ pub struct TerminalSession {
     terminal: Terminal<crate::terminal_links::HyperlinkBackend<io::Stdout>>,
     link_snapshot: std::rc::Rc<std::cell::RefCell<crate::terminal_links::LinkSnapshot>>,
     _guard: TerminalGuard,
+    diagnostics: Option<crate::diagnostics::Diagnostics>,
 }
 impl TerminalSession {
+    pub fn set_diagnostics(&mut self, diagnostics: crate::diagnostics::Diagnostics) {
+        self.diagnostics = Some(diagnostics);
+    }
     pub fn enter() -> io::Result<Self> {
         let guard = TerminalGuard::new();
         terminal::enable_raw_mode()?;
@@ -4742,6 +4938,7 @@ impl TerminalSession {
             terminal,
             link_snapshot,
             _guard: guard,
+            diagnostics: None,
         })
     }
 }
@@ -4773,6 +4970,9 @@ fn run_session(
     let terminal = &mut session.terminal;
     let link_snapshot = &session.link_snapshot;
     let mut state = UiState::new(config, PathBuf::new());
+    if let Some(diagnostics) = &session.diagnostics {
+        state.set_diagnostics(diagnostics.clone());
+    }
     state.viewport = terminal.get_frame().area();
     let frame_time = Duration::from_secs_f64(1.0 / config.ui.max_fps.max(1) as f64);
     let mut last_draw = Instant::now() - frame_time;
@@ -5567,6 +5767,157 @@ mod layout_cache_tests {
         assert!(cache.entries.is_empty());
     }
     #[test]
+    fn painted_viewport_protects_all_visible_kinds_beyond_three_nodes() {
+        use crate::presentation::{BlockKind, PresentationBlock, PresentationKind};
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("inactive".into());
+        history(&mut ui, "inactive", &"old ".repeat(4096));
+        let inactive = ui.active.clone();
+        ui.select_thread("visible".into());
+        let nodes = (0..24)
+            .map(|index| {
+                let mut value = node(&format!("visible-{index}"), &format!("VISIBLE{index:02}"));
+                value.presentation.kind = match index % 3 {
+                    0 => PresentationKind::Assistant,
+                    1 => PresentationKind::ToolResult,
+                    _ => PresentationKind::Event,
+                };
+                value.presentation.blocks.push(PresentationBlock {
+                    kind: BlockKind::Prose,
+                    text: value.text.clone(),
+                    ..Default::default()
+                });
+                if index % 3 == 2 {
+                    value.presentation.event_class = crate::presentation::EventClass::Attention;
+                }
+                value
+            })
+            .collect();
+        let generation = ui.view().generation;
+        ui.apply(UiUpdate::History {
+            thread_id: "visible".into(),
+            generation,
+            nodes,
+            pending: Default::default(),
+            read_revision: 1,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 1,
+            total_nodes: 24,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(90, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let painted = ui.painted_body_nodes.as_ref().unwrap().2.clone();
+        assert!(
+            painted.len() > 3,
+            "fixture must paint beyond the old working set"
+        );
+        assert!(painted.len() <= 128);
+        ui.config.cache.body_bytes = 0;
+        ui.trim_bodies();
+        for id in &painted {
+            let value = ui
+                .view()
+                .nodes()
+                .iter()
+                .find(|node| &node.node_id == id)
+                .unwrap();
+            assert!(!value.presentation.body_evicted, "painted body lost: {id}");
+            assert!(!value.text.is_empty(), "painted source lost: {id}");
+        }
+        assert!(
+            ui.views[&inactive].nodes().is_empty()
+                || ui.views[&inactive]
+                    .nodes()
+                    .iter()
+                    .all(|node| node.text.is_empty())
+        );
+        // This is a viewport lease, never a growing Turn lease.
+        ui.remember_painted_bodies(&BTreeSet::from([0]));
+        assert_eq!(ui.painted_body_nodes.as_ref().unwrap().2.len(), 1);
+        ui.view_mut().generation += 1;
+        ui.retained_working_node_ids();
+        assert!(ui.painted_body_nodes.is_none());
+    }
+    #[test]
+    fn evicted_empty_tool_and_event_windows_reload_without_prose_blocks() {
+        use crate::presentation::{BlockKind, PresentationBlock, PresentationKind};
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        let mut original = vec![];
+        for (id, kind) in [
+            ("tool", PresentationKind::ToolResult),
+            ("event", PresentationKind::Event),
+        ] {
+            let mut value = node(id, "");
+            value.presentation.kind = kind;
+            value.presentation.read_revision = 7;
+            value.presentation.blocks.push(PresentationBlock {
+                kind: BlockKind::ToolResult,
+                text: format!("restored {id}"),
+                ..Default::default()
+            });
+            original.push(value);
+        }
+        ui.apply(UiUpdate::History {
+            thread_id: "t".into(),
+            generation,
+            nodes: original.clone(),
+            pending: Default::default(),
+            read_revision: 7,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 1,
+            total_nodes: 2,
+        });
+        ui.take_deferred_actions();
+        for (index, original_node) in original.iter().enumerate().take(2) {
+            ui.view_mut().evict_node_body(index);
+            let value = &ui.view().nodes()[index];
+            assert!(value.presentation.body_evicted);
+            assert_eq!(value.presentation.read_revision, 7);
+            assert_eq!(value.presentation.kind, original_node.presentation.kind);
+        }
+        let layout = ui.history_layout(80, 20);
+        assert!(
+            layout.text.contains("本文未キャッシュ"),
+            "all evicted kinds need a visible placeholder"
+        );
+        let preflight = RenderPreflight::new(ui.view());
+        ui.prepare_visible_render_width(80, &BTreeSet::from([0, 1]), preflight);
+        let requests = ui
+            .take_deferred_actions()
+            .into_iter()
+            .filter_map(|action| match action {
+                UiAction::LoadNodeWindow { node_id, .. } => Some(node_id),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(requests, BTreeSet::from(["event".into(), "tool".into()]));
+        assert!(ui.render_pending.len() <= 3);
+        let view_revision = ui.view().view_revision;
+        for mut value in original {
+            value.presentation.read_revision = 8;
+            ui.apply(UiUpdate::NodeWindow {
+                thread_id: "t".into(),
+                generation,
+                view_revision,
+                node: value,
+            });
+        }
+        assert!(
+            ui.view()
+                .nodes()
+                .iter()
+                .all(|node| !node.presentation.body_evicted)
+        );
+        assert!(!ui.history_layout(80, 20).text.contains("本文未キャッシュ"));
+    }
+    #[test]
     fn body_budget_excludes_working_nodes_and_evicts_oldest_inactive_first() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("old".into());
@@ -6066,3 +6417,148 @@ mod performance_stream;
 
 #[cfg(test)]
 mod stream_performance;
+
+#[cfg(test)]
+mod stale_rebase_retry_tests {
+    use super::*;
+
+    fn node(text: &str, read: u64) -> UiNode {
+        let mut presentation =
+            crate::presentation::project("user", &serde_json::json!({"text":text}), text, 0);
+        presentation.read_revision = read;
+        UiNode {
+            node_id: "anchor".into(),
+            role: "user".into(),
+            text: text.into(),
+            total_chars: text.chars().count(),
+            presentation,
+            ..Default::default()
+        }
+    }
+    fn setup() -> (UiState, u64, u64, String) {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("thread".into());
+        let generation = ui.view().generation;
+        let text = (0..200)
+            .map(|i| format!("retained line {i:03}\n"))
+            .collect::<String>();
+        ui.apply(UiUpdate::History {
+            thread_id: "thread".into(),
+            generation,
+            nodes: vec![node(&text, 9)],
+            pending: Default::default(),
+            read_revision: 9,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 5,
+            total_nodes: 1,
+        });
+        let view = ui.view_mut();
+        view.follow = false;
+        view.anchor = ViewAnchor {
+            node_id: Some("anchor".into()),
+            char_offset: 0,
+        };
+        view.history_rebase_pending = true;
+        view.loading = true;
+        view.scroll.pending = 7;
+        view.scroll.request = Some((view.view_revision, None));
+        let revision = view.view_revision;
+        ui.take_deferred_actions();
+        (ui, generation, revision, text)
+    }
+
+    #[test]
+    fn newer_paired_tail_then_older_required_rebase_retries_without_losing_frame_or_wheel() {
+        let (mut ui, generation, revision, text) = setup();
+        let anchor = ui.view().anchor.clone();
+        ui.apply(UiUpdate::History {
+            thread_id: "thread".into(),
+            generation,
+            nodes: vec![node("not the preserved frame", 20)],
+            pending: crate::ui::message_queue::PendingMessages {
+                total: 7,
+                ..Default::default()
+            },
+            read_revision: 20,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 7,
+            total_nodes: 1,
+        });
+        assert_eq!(ui.view().selection_revision, 5);
+        assert_eq!(ui.view().delivery_read_revision, 20);
+        assert_eq!(ui.view().nodes()[0].text, text);
+        ui.apply(UiUpdate::HistoryWindow {
+            thread_id: "thread".into(),
+            generation,
+            view_revision: revision,
+            nodes: vec![node("rejected intermediate snapshot", 10)],
+            pending: Default::default(),
+            read_revision: 10,
+            first_ordinal: 0,
+            selection_revision: 6,
+            total_nodes: 1,
+            anchor: anchor.clone(),
+        });
+        assert_eq!(ui.view().nodes()[0].text, text);
+        assert_eq!(ui.view().pending_messages.total, 7);
+        assert_eq!(ui.view().delivery_read_revision, 20);
+        assert_eq!(ui.view().scroll.pending, 7);
+        assert_eq!(ui.view().scroll.request, Some((revision, None)));
+        assert!(ui.view().history_rebase_pending && ui.view().loading);
+        assert!(
+            matches!(ui.take_deferred_actions().as_slice(),[UiAction::RebaseHistory{thread_id,generation:g,view_revision:r,anchor:a}] if thread_id=="thread"&&*g==generation&&*r==revision&&a==&anchor)
+        );
+        ui.apply(UiUpdate::HistoryWindow {
+            thread_id: "thread".into(),
+            generation,
+            view_revision: revision,
+            nodes: vec![node(&text, 21)],
+            pending: crate::ui::message_queue::PendingMessages {
+                total: 2,
+                ..Default::default()
+            },
+            read_revision: 21,
+            first_ordinal: 0,
+            selection_revision: 7,
+            total_nodes: 1,
+            anchor,
+        });
+        assert_eq!(ui.view().selection_revision, 7);
+        assert_eq!(ui.view().delivery_read_revision, 21);
+        assert_eq!(ui.view().pending_messages.total, 2);
+        assert!(!ui.view().history_rebase_pending);
+        assert!(!ui.view().loading);
+        assert!(ui.view().scroll.request.is_none());
+        assert_eq!(ui.view().scroll.pending, 0);
+        assert!(!ui.view().follow);
+        assert_eq!(ui.view().nodes()[0].text, text);
+        assert!(ui.take_deferred_actions().is_empty());
+    }
+
+    #[test]
+    fn obsolete_generation_or_view_does_not_reissue_or_consume_current_navigation() {
+        let (mut ui, generation, revision, text) = setup();
+        for (g, r) in [(generation + 1, revision), (generation, revision + 1)] {
+            ui.apply(UiUpdate::HistoryWindow {
+                thread_id: "thread".into(),
+                generation: g,
+                view_revision: r,
+                nodes: vec![node("obsolete", 10)],
+                pending: Default::default(),
+                read_revision: 10,
+                first_ordinal: 0,
+                selection_revision: 6,
+                total_nodes: 1,
+                anchor: ViewAnchor::default(),
+            });
+            assert_eq!(ui.view().nodes()[0].text, text);
+            assert_eq!(ui.view().scroll.request, Some((revision, None)));
+            assert_eq!(ui.view().scroll.pending, 7);
+            assert!(ui.take_deferred_actions().is_empty());
+        }
+    }
+}

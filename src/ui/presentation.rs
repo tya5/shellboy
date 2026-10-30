@@ -123,7 +123,7 @@ fn node_lines_inner(
             ))]
         };
     let mut out = NodeLines::new(header);
-    if node.text.is_empty() && node.total_chars > 0 {
+    if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
         out.push(Line::from("本文未キャッシュ · 詳細から原文を取得"));
         return out;
     }
@@ -594,6 +594,7 @@ fn node_lines(
 fn quiet_event(node: &UiNode) -> bool {
     // Received audit previews retain their paid body even after recovery ends.
     node.role != "received_response"
+        && !node.presentation.body_evicted
         && node.presentation.kind == PresentationKind::Event
         && !node.presentation.requires_attention()
 }

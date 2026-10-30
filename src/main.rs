@@ -298,6 +298,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         cwd,
     } = prepared;
     termination.bind_diagnostics(owner.diagnostics.clone());
+    session.set_diagnostics(owner.diagnostics.clone());
     termination.bind_shell(control.shell_shutdown_handle());
     termination.configure_shutdown(&owner.loaded.config);
     let config = owner.loaded.config.clone();

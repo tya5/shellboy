@@ -686,6 +686,12 @@ pub struct NodePresentation {
     /// Worker-derived display identity; never persisted or a source/provenance hash.
     #[serde(skip)]
     pub projection_stamp: Option<[u8; 32]>,
+    /// Ephemeral cache state, distinct from a legitimately empty source body.
+    #[serde(skip)]
+    pub body_evicted: bool,
+    /// Serialized DB-read ordering for this source window; not semantic identity.
+    #[serde(skip)]
+    pub read_revision: u64,
     #[serde(skip)]
     pub provisional_stream: bool,
     #[serde(default)]

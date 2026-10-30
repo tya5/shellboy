@@ -754,21 +754,28 @@ impl ThreadView {
             .enumerate()
             .map(|(index, node)| (*first + index as u64, node))
             .collect::<BTreeMap<_, _>>();
-        for (index, node) in std::mem::take(&mut self.nodes)
-            .into_iter()
-            .filter(|node| !self.provisional_nodes.contains(&node.node_id))
-            .enumerate()
-        {
-            let ordinal = old_start + index as u64;
+        let mut ordinal = old_start;
+        for mut node in std::mem::take(&mut self.nodes) {
+            if self.provisional_nodes.contains(&node.node_id) {
+                self.nodes.push(node);
+                continue;
+            }
             if let Some(loaded) = ordered.get_mut(&ordinal) {
-                if !node.text.is_empty() {
+                if !node.presentation.body_evicted
+                    && !node.text.is_empty()
+                    && (loaded.presentation.body_evicted
+                        || node.presentation.read_revision >= loaded.presentation.read_revision)
+                {
                     let total = node.total_chars.max(loaded.total_chars);
                     *loaded = node;
                     loaded.total_chars = total;
+                } else {
+                    loaded.preserve_preview_on_transient_failure(&mut node);
                 }
             } else {
                 ordered.insert(ordinal, node);
             }
+            ordinal += 1;
         }
         *first = old_start.min(*first);
         *incoming = ordered.into_values().collect();
@@ -840,7 +847,7 @@ impl ThreadView {
     }
     pub(super) fn on_history(
         &mut self,
-        nodes: Vec<UiNode>,
+        mut nodes: Vec<UiNode>,
         before_cursor: Option<String>,
         append: bool,
         first_ordinal: u64,
@@ -849,6 +856,26 @@ impl ThreadView {
     ) -> bool {
         if selection_revision < self.selection_revision {
             return false;
+        }
+        for incoming in &mut nodes {
+            if let Some(existing) = self
+                .nodes
+                .iter_mut()
+                .find(|old| old.node_id == incoming.node_id)
+            {
+                if !existing.presentation.body_evicted
+                    && (incoming.presentation.body_evicted
+                        || incoming.presentation.read_revision
+                            < existing.presentation.read_revision)
+                {
+                    *incoming = existing.clone();
+                } else if existing.same_projection(incoming) {
+                    existing.presentation.read_revision = existing
+                        .presentation
+                        .read_revision
+                        .max(incoming.presentation.read_revision);
+                }
+            }
         }
         let mut source_changed = false;
         if self.follow && !self.history_rebase_pending {
@@ -918,7 +945,18 @@ impl ThreadView {
             // and layout; UI compares finite witnesses, never full bodies.
         } else {
             source_changed = true;
+            let received_bindings = self.received_anchor_bindings();
+            let received = self.take_received_previews(&received_bindings);
             let mut nodes = nodes;
+            for incoming in &mut nodes {
+                if let Some(existing) = self
+                    .nodes
+                    .iter_mut()
+                    .find(|old| old.node_id == incoming.node_id)
+                {
+                    incoming.preserve_preview_on_transient_failure(existing);
+                }
+            }
             let preview = self
                 .nodes
                 .drain(..)
@@ -931,6 +969,7 @@ impl ThreadView {
             self.nodes = nodes;
             self.provisional_nodes
                 .retain(|id| self.nodes.iter().any(|node| &node.node_id == id));
+            self.on_incomplete_responses(received);
             self.first_ordinal = first_ordinal;
             self.selection_revision = selection_revision;
         }
@@ -1047,6 +1086,10 @@ impl ThreadView {
         if !self.provisional_nodes.contains(&attempt_id) {
             return None;
         }
+        // Paused and following previews share the same durable-source binding.
+        // Rebase must not discard or duplicate the preview before hydration.
+        self.committed_nodes
+            .insert(attempt_id.clone(), node_id.clone());
         if !self.follow && self.anchor.node_id.as_deref() == Some(&attempt_id) {
             self.committed_preview = Some((attempt_id, node_id));
             return self.rebase_preview();
@@ -1064,7 +1107,9 @@ impl ThreadView {
             .values()
             .filter(|saved| {
                 self.nodes.iter().any(|node| {
-                    &node.node_id == *saved && (node.total_chars == 0 || !node.text.is_empty())
+                    &node.node_id == *saved
+                        && !node.presentation.body_evicted
+                        && (node.total_chars == 0 || !node.text.is_empty())
                 })
             })
             .cloned()
@@ -1084,7 +1129,9 @@ impl ThreadView {
             .iter()
             .filter(|(_, saved)| {
                 incoming.iter().any(|node| {
-                    &node.node_id == *saved && (node.total_chars == 0 || !node.text.is_empty())
+                    &node.node_id == *saved
+                        && !node.presentation.body_evicted
+                        && (node.total_chars == 0 || !node.text.is_empty())
                 })
             })
             .map(|(attempt, _)| attempt.clone())
@@ -1180,20 +1227,29 @@ impl ThreadView {
     }
     pub(super) fn on_node_window(&mut self, view_revision: u64, mut node: UiNode) {
         let node_id_for_reply = node.node_id.clone();
-        let body_ready = node.total_chars == 0 || !node.text.is_empty();
+        let body_ready =
+            !node.presentation.body_evicted && (node.total_chars == 0 || !node.text.is_empty());
         let mut installed = false;
         if let Some(existing) = self
             .nodes
             .iter_mut()
             .find(|existing| existing.node_id == node.node_id)
         {
+            if node.presentation.read_revision < existing.presentation.read_revision {
+                return;
+            }
             installed = true;
-            if !existing.same_projection(&node) {
-                if !self.follow {
-                    node.preserve_preview_on_transient_failure(existing);
-                }
+            let accepted_read = existing
+                .presentation
+                .read_revision
+                .max(node.presentation.read_revision);
+            if !existing.same_projection(&node) || existing.presentation.body_evicted {
+                node.preserve_preview_on_transient_failure(existing);
+                node.presentation.read_revision = accepted_read;
                 *existing = node;
                 self.mark_source_changed();
+            } else {
+                existing.presentation.read_revision = accepted_read;
             }
         }
         // A source-window response does not install an off-page node. Its slot
@@ -1216,6 +1272,40 @@ impl ThreadView {
             self.loading = false;
         }
     }
+    fn received_anchor_bindings(&self) -> Vec<(String, String)> {
+        let mut predecessor: Option<String> = None;
+        let mut bindings = Vec::new();
+        for node in &self.nodes {
+            if node.role == "received_response" {
+                if let Some(predecessor) = &predecessor {
+                    bindings.push((node.node_id.clone(), predecessor.clone()));
+                }
+            } else if !self.provisional_nodes.contains(&node.node_id) {
+                predecessor = Some(node.node_id.clone());
+            }
+        }
+        bindings
+    }
+    fn take_received_previews(&mut self, bindings: &[(String, String)]) -> Vec<(String, UiNode)> {
+        let mut received = Vec::new();
+        let mut removed = false;
+        for node in std::mem::take(&mut self.nodes) {
+            if node.role == "received_response" {
+                removed = true;
+                if let Some((_, predecessor)) = bindings.iter().find(|(id, _)| id == &node.node_id)
+                {
+                    received.push((predecessor.clone(), node));
+                }
+            } else {
+                self.nodes.push(node);
+            }
+        }
+        if removed {
+            self.mark_source_changed();
+        }
+        received
+    }
+    /// Returns true when a non-tail snapshot requires the ordinary latest page.
     pub(super) fn on_history_window(
         &mut self,
         mut nodes: Vec<UiNode>,
@@ -1224,23 +1314,77 @@ impl ThreadView {
         total_nodes: u64,
         anchor: ViewAnchor,
         window_reply: bool,
-    ) {
-        if window_reply
-            && !self.history_rebase_pending
+    ) -> bool {
+        if selection_revision < self.selection_revision {
+            return false;
+        }
+        let following = self.follow;
+        let received_bindings = self.received_anchor_bindings();
+        if following
+            && first_ordinal.saturating_add(nodes.len() as u64) < total_nodes
+            && self
+                .first_ordinal
+                .saturating_add(self.selected_node_count() as u64)
+                < total_nodes
+        {
+            self.history_rebase_pending = false;
+            self.loading = false;
+            return true;
+        }
+        if (following || (window_reply && !self.history_rebase_pending))
             && selection_revision == self.selection_revision
         {
             merge_navigation_window(self, &mut nodes, &mut first_ordinal);
         }
-        let relocated = self.history_rebase_pending
-            && !nodes
-                .iter()
-                .any(|node| Some(&node.node_id) == self.anchor.node_id.as_ref());
+        if following {
+            // An anchor window is not necessarily the latest page. Preserve the
+            // paid/current frame until a real tail snapshot arrives.
+            if first_ordinal.saturating_add(nodes.len() as u64) < total_nodes {
+                self.history_rebase_pending = false;
+                self.loading = false;
+                return true;
+            }
+            self.history_rebase_pending = false;
+            // A history window is not an authoritative audit snapshot. Keep
+            // paid bodies at their surviving selected predecessors until that
+            // separately fenced audit reply decides membership.
+            let received = self.take_received_previews(&received_bindings);
+            self.on_history(
+                nodes,
+                None,
+                false,
+                first_ordinal,
+                selection_revision,
+                total_nodes,
+            );
+            self.on_incomplete_responses(received);
+            return false;
+        }
+        let received = self.take_received_previews(&received_bindings);
+        // Rebase is an ordinal update, not proof that a committed stream's
+        // canonical body was fetched. Retire only verified loaded sources.
+        self.retire_committed_preview(&nodes);
+        let previews = self
+            .nodes
+            .drain(..)
+            .filter(|node| {
+                self.provisional_nodes.contains(&node.node_id)
+                    && node.role != "received_response"
+                    && !nodes.iter().any(|saved| saved.node_id == node.node_id)
+            })
+            .collect::<Vec<_>>();
+        nodes.extend(previews);
         self.mark_source_changed();
         self.nodes = nodes;
+        self.provisional_nodes
+            .retain(|id| self.nodes.iter().any(|node| &node.node_id == id));
+        self.on_incomplete_responses(received);
+        let relocated = self.history_rebase_pending
+            && !self
+                .nodes
+                .iter()
+                .any(|node| Some(&node.node_id) == self.anchor.node_id.as_ref());
         self.observe_sent_nodes();
-        self.provisional_nodes.clear();
-        self.committed_nodes.clear();
-        self.committed_preview = None;
         self.first_ordinal = first_ordinal;
         self.selection_revision = selection_revision;
         self.total_nodes = total_nodes;
@@ -1254,7 +1398,6 @@ impl ThreadView {
             self.anchor = anchor;
             self.scroll.within = 0;
         }
-        self.follow = false;
         self.before_cursor = None;
         self.loading = false;
         if self.history_rebase_pending {
@@ -1266,6 +1409,7 @@ impl ThreadView {
             }
             .into();
         }
+        false
     }
     pub(super) fn on_history_invalidated(
         &mut self,
@@ -1486,6 +1630,33 @@ impl ThreadView {
         }
         (old - self.nodes.capacity()) * std::mem::size_of::<UiNode>()
     }
+    pub(super) fn current_uncommitted_preview(&self) -> Option<String> {
+        self.nodes
+            .iter()
+            .rev()
+            .find(|node| {
+                self.provisional_nodes.contains(&node.node_id)
+                    && !self.committed_nodes.contains_key(&node.node_id)
+                    && node.role != "received_response"
+            })
+            .map(|node| node.node_id.clone())
+    }
+    /// Committed preview IDs name attempts, not history nodes. An offscreen
+    /// preview can be dropped as a unit once its canonical source is saved;
+    /// retaining an empty attempt-ID stub would make later hydration impossible.
+    pub(super) fn discard_committed_previews_except(&mut self, protected: &[String]) -> usize {
+        let before = self.retained_body_bytes(protected);
+        let retired = self
+            .committed_nodes
+            .keys()
+            .filter(|id| !protected.contains(id))
+            .cloned()
+            .collect::<Vec<_>>();
+        if self.remove_committed_previews(retired) {
+            self.mark_source_changed();
+        }
+        before.saturating_sub(self.retained_body_bytes(protected))
+    }
     pub(super) fn discard_cached_history(&mut self) {
         self.nodes = Vec::new();
         self.committed_nodes.clear();
@@ -1504,6 +1675,11 @@ impl ThreadView {
         // ordinals contiguous. The counter anticipates compaction below.
         while *retained > budget && self.nodes.len() > working.len() {
             let last = self.nodes.len() - 1;
+            if working.contains(&self.nodes[0].node_id)
+                && working.contains(&self.nodes[last].node_id)
+            {
+                break;
+            }
             let index = if working.contains(&self.nodes[0].node_id) {
                 last
             } else if working.contains(&self.nodes[last].node_id)
@@ -2366,7 +2542,7 @@ mod received_tests {
         assert_eq!(ui.view().received_revision, 11);
     }
     #[test]
-    fn received_window_scope_survives_pending_scroll_but_not_a_later_applied_window() {
+    fn received_window_scope_rejects_stale_replies_but_retains_paid_body_until_fresh_snapshot() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
@@ -2426,9 +2602,19 @@ mod received_tests {
         ui.apply(window(6, 7));
         assert_eq!(ui.view().received_window_revision, Some(6));
         ui.apply(received(5, 12));
-        assert!(!ui.view().nodes.iter().any(|node| node.node_id == "paid"));
+        assert!(ui.view().nodes.iter().any(|node| node.node_id == "paid"));
         assert_eq!(ui.view().received_revision, 11);
-        ui.apply(received(6, 12));
+        ui.apply(UiUpdate::IncompleteResponses {
+            thread_id: "t".into(),
+            generation,
+            selection_revision: 7,
+            view_revision: Some(6),
+            root_revision: 12,
+            nodes: vec![],
+        });
+        assert!(!ui.view().nodes.iter().any(|node| node.node_id == "paid"));
+        assert_eq!(ui.view().received_revision, 12);
+        ui.apply(received(6, 13));
         assert!(ui.view().nodes.iter().any(|node| node.node_id == "paid"));
         // A delayed window cannot move the accepted selection backwards.
         let revision = ui.view().view_revision;
@@ -2736,5 +2922,424 @@ mod body_accounting_tests {
         assert_eq!(view.nodes[0].text, "old text");
         assert_eq!(view.nodes[0].presentation.projection_stamp, Some([7; 32]));
         assert_ne!(old, RenderUnitKey::new(&view, 0, 1, 80, &[]).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod retention_regressions {
+    use super::*;
+
+    fn node(id: &str, text: &str, read: u64) -> UiNode {
+        UiNode {
+            node_id: id.into(),
+            text: text.into(),
+            total_chars: text.chars().count(),
+            presentation: NodePresentation {
+                read_revision: read,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+    fn view() -> ThreadView {
+        let mut view = ThreadView::new(&Config::default(), PathBuf::new());
+        view.thread_id = Some("thread".into());
+        view
+    }
+    #[test]
+    fn follow_window_keeps_paid_stream_until_canonical_body_is_installed() {
+        let mut view = view();
+        view.on_history(vec![node("old", "previous Turn", 1)], None, false, 0, 1, 1);
+        view.on_stream(node("attempt", "current paid response", 0));
+        view.commit_stream_node("attempt".into(), "saved".into(), "thread".into(), 0);
+        let mut unloaded = node("saved", "", 2);
+        unloaded.total_chars = 21;
+        assert!(!view.on_history_window(
+            vec![node("old", "previous Turn", 2), unloaded],
+            0,
+            2,
+            2,
+            ViewAnchor::default(),
+            false
+        ));
+        assert!(view.follow);
+        assert!(
+            view.nodes
+                .iter()
+                .any(|n| n.node_id == "attempt" && n.text == "current paid response")
+        );
+        assert!(view.committed_nodes.contains_key("attempt"));
+        view.on_history_window(
+            vec![
+                node("old", "previous Turn", 3),
+                node("saved", "current paid response", 3),
+            ],
+            0,
+            2,
+            2,
+            ViewAnchor::default(),
+            false,
+        );
+        assert!(view.follow);
+        assert!(!view.nodes.iter().any(|n| n.node_id == "attempt"));
+        assert!(
+            view.nodes
+                .iter()
+                .any(|n| n.node_id == "saved" && n.text == "current paid response")
+        );
+    }
+    #[test]
+    fn disjoint_visible_and_current_working_regions_keep_both_page_edges() {
+        let mut view = view();
+        view.on_history(
+            (0..8)
+                .map(|i| node(&format!("n{i}"), "cached body", 1))
+                .collect(),
+            None,
+            false,
+            0,
+            1,
+            8,
+        );
+        let mut retained = usize::MAX / 2;
+        view.trim_page_edges(&["n0".into(), "n7".into()], &mut retained, 0);
+        assert_eq!(view.nodes.first().unwrap().node_id, "n0");
+        assert_eq!(view.nodes.last().unwrap().node_id, "n7");
+    }
+    #[test]
+    fn only_offscreen_committed_previews_are_discarded_as_complete_units() {
+        let mut view = view();
+        view.on_history(vec![node("base", "saved", 1)], None, false, 0, 1, 1);
+        for (attempt, saved) in [("shown", "saved-shown"), ("offscreen", "saved-offscreen")] {
+            view.on_stream(node(attempt, "paid output", 0));
+            view.commit_stream_node(attempt.into(), saved.into(), "thread".into(), 0);
+        }
+        view.on_stream(node("inflight", "uncommitted output", 0));
+        view.discard_committed_previews_except(&["shown".into(), "inflight".into()]);
+        assert!(
+            view.nodes
+                .iter()
+                .any(|n| n.node_id == "shown" && !n.text.is_empty())
+        );
+        assert!(
+            view.nodes
+                .iter()
+                .any(|n| n.node_id == "inflight" && !n.text.is_empty())
+        );
+        assert!(!view.nodes.iter().any(|n| n.node_id == "offscreen"));
+        assert!(!view.committed_nodes.contains_key("offscreen"));
+    }
+    #[test]
+    fn overlapping_follow_windows_preserve_uncommitted_streams() {
+        for total in [2, 3] {
+            let mut view = view();
+            view.on_history(
+                vec![node("a", "first", 1), node("b", "second", 1)],
+                None,
+                false,
+                0,
+                1,
+                total,
+            );
+            view.on_stream(node("live", "paid uncommitted stream", 0));
+            view.on_history_window(
+                vec![node("a", "first", 2), node("b", "second", 2)],
+                0,
+                1,
+                total,
+                ViewAnchor::default(),
+                false,
+            );
+            assert!(view.follow);
+            assert!(
+                view.nodes
+                    .iter()
+                    .any(|n| n.node_id == "live" && n.text == "paid uncommitted stream")
+            );
+            assert!(view.nodes.iter().any(|n| n.node_id == "b"));
+        }
+    }
+    #[test]
+    fn following_non_tail_anchor_reply_retains_current_frame_and_requests_tail() {
+        let mut view = view();
+        view.on_history(
+            vec![node("latest", "current Turn tool", 10)],
+            None,
+            false,
+            9,
+            1,
+            10,
+        );
+        view.on_stream(node("stream", "visible stream", 0));
+        let refresh = view.on_history_window(
+            vec![node("old", "old Turn", 11)],
+            0,
+            1,
+            10,
+            ViewAnchor::default(),
+            false,
+        );
+        assert!(refresh);
+        assert!(view.follow);
+        assert!(view.nodes.iter().any(|n| n.node_id == "latest"));
+        assert!(view.nodes.iter().any(|n| n.node_id == "stream"));
+    }
+    #[test]
+    fn node_hydration_order_is_separate_from_queue_age_and_navigation_intent() {
+        let mut view = view();
+        view.on_history(vec![node("n", "new window", 10)], None, false, 0, 1, 1);
+        view.delivery_read_revision = 100;
+        view.on_node_window(0, node("n", "stale window", 5));
+        assert_eq!(view.nodes[0].text, "new window");
+        view.on_node_window(0, node("n", "needed hydration", 11));
+        assert_eq!(view.nodes[0].text, "needed hydration");
+        assert_eq!(view.delivery_read_revision, 100);
+        view.follow = false;
+        view.scroll.request = Some((0, Some("n".into())));
+        let mut navigation = node("n", "earlier source offset", 4);
+        navigation.base_char_offset = 42;
+        view.on_node_window(0, navigation);
+        assert_eq!(view.nodes[0].base_char_offset, 0);
+        assert_eq!(view.nodes[0].text, "needed hydration");
+        let mut retry = node("n", "earlier source offset", 12);
+        retry.base_char_offset = 42;
+        view.on_node_window(0, retry);
+        assert_eq!(view.nodes[0].base_char_offset, 42);
+        assert_eq!(view.nodes[0].presentation.read_revision, 12);
+    }
+    #[test]
+    fn discarded_failed_raw_previews_cannot_move_the_retained_tool_body() {
+        use crate::presentation::{
+            BlockKind, OutputStream, PresentationBlock, PresentationField, PresentationKind,
+        };
+        for (read, rebase) in [(9, false), (11, true)] {
+            let mut view = view();
+            let mut saved = node("tool", "same canonical source", 10);
+            saved.presentation.kind = PresentationKind::ToolResult;
+            saved.presentation.blocks = vec![PresentationBlock {
+                kind: BlockKind::ToolResult,
+                stream: Some(OutputStream::Stdout),
+                text: "visible paid tail".into(),
+                ..Default::default()
+            }];
+            view.on_history(vec![saved], None, false, 0, 1, 1);
+            view.history_rebase_pending = rebase;
+            let mut failed = node("tool", "same canonical source", read);
+            failed.presentation.kind = PresentationKind::ToolResult;
+            failed.presentation.fields = vec![PresentationField {
+                key: "/ui_raw_stream_preview_error".into(),
+                value: "IoFailed".into(),
+                ..Default::default()
+            }];
+            view.on_history(vec![failed], None, false, 0, 1, 1);
+            assert!(
+                view.nodes[0]
+                    .presentation
+                    .blocks
+                    .iter()
+                    .any(|b| b.text == "visible paid tail")
+            );
+        }
+    }
+    #[test]
+    fn navigation_keeps_newer_queue_snapshot_and_releases_its_slot() {
+        let mut ui = UiState::new(&Config::default(), PathBuf::new());
+        ui.view_mut().thread_id = Some("thread".into());
+        ui.view_mut().follow = false;
+        ui.view_mut()
+            .on_history(vec![node("n", "body", 20)], None, false, 0, 1, 1);
+        ui.view_mut().delivery_read_revision = 20;
+        ui.view_mut().pending_messages.total = 7;
+        ui.view_mut().scroll.request = Some((0, None));
+        ui.view_mut().loading = true;
+        ui.apply(UiUpdate::HistoryWindow {
+            thread_id: "thread".into(),
+            generation: 0,
+            view_revision: 0,
+            nodes: vec![node("n", "old body", 10)],
+            pending: Default::default(),
+            read_revision: 10,
+            first_ordinal: 0,
+            selection_revision: 1,
+            total_nodes: 1,
+            anchor: ViewAnchor {
+                node_id: Some("n".into()),
+                char_offset: 0,
+            },
+        });
+        assert_eq!(ui.view().pending_messages.total, 7);
+        assert_eq!(ui.view().delivery_read_revision, 20);
+        assert!(ui.view().scroll.request.is_none());
+        assert!(!ui.view().loading);
+        assert!(!ui.view().follow);
+        assert_eq!(ui.view().nodes[0].text, "body");
+    }
+}
+
+#[cfg(test)]
+mod received_window_retention_tests {
+    use super::*;
+
+    fn node(id: &str, role: &str) -> UiNode {
+        let text = format!("paid body {id}");
+        UiNode {
+            node_id: id.into(),
+            role: role.into(),
+            total_chars: text.chars().count(),
+            text,
+            ..Default::default()
+        }
+    }
+    fn view(follow: bool) -> ThreadView {
+        let mut view = ThreadView::new(&Config::default(), PathBuf::new());
+        view.thread_id = Some("thread".into());
+        view.on_history(
+            vec![
+                node("a", "assistant"),
+                node("b", "assistant"),
+                node("tail", "assistant"),
+            ],
+            None,
+            false,
+            0,
+            1,
+            3,
+        );
+        // Preserve every currently retained audit until its authoritative
+        // snapshot arrives, even if prior projections temporarily retained >2.
+        view.on_incomplete_responses(vec![
+            ("a".into(), node("paid-a1", "received_response")),
+            ("a".into(), node("paid-a2", "received_response")),
+            ("b".into(), node("paid-b", "received_response")),
+        ]);
+        view.follow = follow;
+        view.anchor = ViewAnchor {
+            node_id: Some("b".into()),
+            char_offset: 2,
+        };
+        view.history_rebase_pending = !follow;
+        view
+    }
+    fn ids(view: &ThreadView) -> Vec<&str> {
+        view.nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect()
+    }
+    fn same_window(follow: bool) {
+        let mut view = view(follow);
+        let anchor = view.anchor.clone();
+        assert!(!view.on_history_window(
+            vec![
+                node("a", "assistant"),
+                node("b", "assistant"),
+                node("tail", "assistant")
+            ],
+            0,
+            1,
+            3,
+            anchor.clone(),
+            true
+        ));
+        assert_eq!(
+            ids(&view),
+            ["a", "paid-a1", "paid-a2", "b", "paid-b", "tail"],
+            "known audits stay after their real predecessor, not the new tail"
+        );
+        assert_eq!(view.follow, follow);
+        if !follow {
+            assert_eq!(view.anchor, anchor);
+        }
+        for id in ["paid-a1", "paid-a2", "paid-b"] {
+            let retained = view.nodes.iter().find(|node| node.node_id == id).unwrap();
+            assert_eq!(retained.text, format!("paid body {id}"));
+            assert!(view.provisional_nodes.contains(id));
+        }
+        // Only the subsequent accepted audit projection can declare that no
+        // audits remain; history-window delivery alone never made that claim.
+        view.on_incomplete_responses(vec![]);
+        assert_eq!(ids(&view), ["a", "b", "tail"]);
+    }
+    #[test]
+    fn following_same_window_retains_all_anchored_audits_until_audit_snapshot() {
+        same_window(true);
+    }
+    #[test]
+    fn paused_same_window_retains_all_anchored_audits_at_the_original_predecessors() {
+        same_window(false);
+    }
+    #[test]
+    fn ordinary_tail_refresh_keeps_audits_at_their_anchors_and_drops_missing_anchors() {
+        let mut view = view(true);
+        assert!(view.on_history(
+            vec![
+                node("a", "assistant"),
+                node("b", "assistant"),
+                node("tail", "assistant"),
+                node("new-tail", "assistant")
+            ],
+            None,
+            false,
+            0,
+            2,
+            4
+        ));
+        assert_eq!(
+            ids(&view),
+            ["a", "paid-a1", "paid-a2", "b", "paid-b", "tail", "new-tail"]
+        );
+        assert!(view.follow);
+        assert!(view.on_history(
+            vec![node("tail", "assistant"), node("new-tail", "assistant")],
+            None,
+            false,
+            2,
+            2,
+            4
+        ));
+        assert_eq!(ids(&view), ["tail", "new-tail"]);
+        assert!(view.provisional_nodes.is_empty());
+        assert!(view.follow);
+    }
+    #[test]
+    fn non_tail_fallback_does_not_extract_audits_and_new_window_drops_only_missing_anchors() {
+        let mut following = view(true);
+        let before = ids(&following)
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert!(following.on_history_window(
+            vec![node("a", "assistant"), node("b", "assistant")],
+            0,
+            1,
+            4,
+            ViewAnchor::default(),
+            true
+        ));
+        assert_eq!(
+            ids(&following),
+            before.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        assert!(
+            following
+                .nodes
+                .iter()
+                .filter(|node| node.role == "received_response")
+                .all(|node| !node.text.is_empty())
+        );
+        let mut paused = view(false);
+        let anchor = paused.anchor.clone();
+        assert!(!paused.on_history_window(
+            vec![node("b", "assistant"), node("tail", "assistant")],
+            1,
+            1,
+            3,
+            anchor,
+            true
+        ));
+        assert_eq!(ids(&paused), ["b", "paid-b", "tail"]);
+        assert!(paused.provisional_nodes.contains("paid-b"));
+        assert!(!paused.provisional_nodes.contains("paid-a1"));
+        assert!(!paused.provisional_nodes.contains("paid-a2"));
     }
 }

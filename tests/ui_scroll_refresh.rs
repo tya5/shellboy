@@ -279,9 +279,40 @@ fn successful_changed_rendering_and_different_source_ranges_are_accepted() {
     }
 }
 #[test]
-fn following_the_latest_output_does_not_freeze_a_previous_preview() {
+fn following_keeps_paid_raw_after_transient_failure_until_new_successful_preview() {
     let mut ui = paused_tool();
     ui.view_mut().follow = true;
     body_reply(&mut ui, tool_node(false));
-    assert!(!has_raw(&ui));
+    assert!(ui.view().follow);
+    assert!(
+        has_raw(&ui),
+        "a temporary read failure must not erase paid output"
+    );
+    let fields = &ui.view().nodes()[0].presentation.fields;
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.key == "/ui_raw_stream_preview_error" && field.value == "IoFailed")
+    );
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.key == "/ui_raw_stream_preview" && field.value.contains("保持済み")),
+        "current availability must not be represented as a successful read"
+    );
+    let mut success = tool_node(true);
+    success.presentation.blocks[0].text = "NEW SUCCESSFUL FOLLOWING PREVIEW".into();
+    body_reply(&mut ui, success);
+    assert_eq!(
+        ui.view().nodes()[0].presentation.blocks[0].text,
+        "NEW SUCCESSFUL FOLLOWING PREVIEW"
+    );
+    assert!(ui.view().follow);
+    assert!(
+        !ui.view().nodes()[0]
+            .presentation
+            .fields
+            .iter()
+            .any(|field| field.key == "/ui_raw_stream_preview_error")
+    );
 }
