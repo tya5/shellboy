@@ -89,3 +89,10 @@ The Rust checks manual `performance` input profiles both the chosen baseline
 and candidate on Windows with two test threads, plus a separate four-thread
 contention comparison. Cache/runner conditions
 and build versus execution times must accompany any claimed improvement.
+
+For a four-thread Windows check without rerunning the baseline profiling matrix,
+use the manual `windows_test_threads=4` input with `performance=false`. This
+additional stress run selects Windows only; ordinary pushes always execute the
+full three-OS matrix. Ordinary
+pushes retain two Windows test threads; experimental failures are retained and
+never automatically retried into success.

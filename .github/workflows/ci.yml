@@ -13,6 +13,11 @@ on:
         description: Compare baseline/current Windows timings and four-thread contention
         type: boolean
         default: false
+      windows_test_threads:
+        description: Windows-only concurrency experiment (ordinary pushes check all OSes)
+        type: choice
+        options: ['2', '4']
+        default: '2'
       baseline_ref:
         description: Baseline commit for the optional Windows comparison
         type: string
@@ -24,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.windows_test_threads == '4' && '["windows-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -49,10 +54,12 @@ jobs:
       - name: Diagnose native Windows overflow recovery
         if: runner.os == 'Windows' && inputs.diagnostics == true
         run: cargo test --locked --test integration runtime_features::both_overflow_retries_preserve_call_groups_and_never_execute_saved_tools_twice -- --exact --nocapture
-      - name: Bound concurrent Windows database fixtures
+      - name: Select measured Windows fixture concurrency
         if: runner.os == 'Windows'
         shell: pwsh
-        run: '"RUST_TEST_THREADS=2" >> $env:GITHUB_ENV'
+        env:
+          SELECTED_TEST_THREADS: ${{ inputs.windows_test_threads == '4' && '4' || '2' }}
+        run: '"RUST_TEST_THREADS=$env:SELECTED_TEST_THREADS" >> $env:GITHUB_ENV'
       - name: Tests
         run: python scripts/test-timings.py --output .local/ci-timings
       - name: Observe closed-proxy retry phases and timings
