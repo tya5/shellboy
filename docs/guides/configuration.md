@@ -146,8 +146,11 @@ characters (range 1..1048576); when batching, it must cover
 do not detect provider limits. Batching reduces requests, not the billed token
 volume by definition. A rejected batch records its members and falls back to
 individual requests; authentication/configuration failures keep normal pause
-rules. The connection's whole-request timeout applies to each batch. Search
-query embeddings remain singleton. Restart the owner after changing settings.
+rules. The connection's `request_timeout_ms` is one deadline for the entire
+batch. When raising `batch_max_inputs`, also review that timeout and the proxy's
+accepted input/character caps; a larger batch must still finish within the
+configured whole-request deadline. Search query embeddings remain singleton.
+Restart the owner after changing settings.
 
 Fetch models with TUI `/models` or `shellboy model list`; change the current Thread model by selecting in `/models` or running `shellboy thread set --model MODEL_ID`. Available models depend on the endpoint's configuration.
 

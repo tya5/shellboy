@@ -1,5 +1,55 @@
 # Validation record
 
+
+## Standard Usage Persistence And Scalar Reads (#49)
+
+On macOS arm64 / pinned Rust 1.99.1, clean exact source
+`ad9343ce50465d6a97684f087ed0d02a4df6de89` passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH: layout82, Python6, format, strict all-target
+Clippy and Rust **7 groups / 1,474 passed / 0 failed / 28 ignored**. The recorded
+command commits the final test-only correction before running the check;
+its shell exits 0 after 117,955 ms. Later documentation records do not inherit
+that exact-SHA result; independent review, latest-main checks and native main CI
+remain separate verification. No paid API, user DB, push or installed binary is
+used by the coder.
+
+Synthetic regressions cover independent known zero / unknown fields, five-number
+whitelisting, huge top-level attribution and nested appendices, signed 64-bit
+maximum, maximum+1, u64 maximum/+1, negatives, floats including exponent notation,
+booleans, strings, invalid nested structures, malformed/missing JSON and null.
+Rust normalization agrees with guarded SQL extraction for these cases. Legacy
+>64KiB rows feed context usage, the same-model estimation baseline and exact
+adopted-attempt F6 rendering without modifying saved JSON. Only nullable scalars
+are selected into Rust; SQLite still parses the old JSON internally.
+
+Loopback HTTP completion preserves measured input characters while retaining
+only standard usage numbers. Failed/incomplete response envelopes preserve
+identity, output and error diagnosis while removing usage appendices from both
+usage_json and audit raw_response. Existing received-failure classification
+remains incomplete rather than being changed to failed. SSE tests cover all three
+terminal envelope kinds; the real summary/cache/adoption fixture verifies compact
+usage with reasoning/raw provenance and originals retained. Writer tests cover
+transaction rollback and repeated terminal adoption without replacing measurements.
+
+Earlier development checks are not successful evidence: one compile used the
+wrong ThreadGet argument type, one new test incorrectly expected failed rather
+than the existing incomplete recovery classification, and the first clean-SHA
+check exposed a test-only &String/&str inference mismatch after enlarging the F6
+fixture. All are corrected without changing production lifecycle or timing.
+The final exact-source standard result above supersedes those candidate checks.
+
+The pre-existing non-2xx error path still exposes only diagnostics within its
+64KiB limit and does not supply usage to the attempt writer. This is an explicit
+#49 limitation, not a complete #47 outcome. #47 acceptance must add agreed typed
+non-2xx known/partial/unknown usage tests while preserving body limits, diagnostics
+and non-disclosure of the full error body. Oversized/malformed/unreported usage
+must remain unknown. No existing raw/usage-row rewrite migration is introduced.
+The Agent Guide's once-per-task-boundary review uses actual last input, protects
+unfinished work/unapplied instructions and restores access to original facts;
+mock checks do not establish real-model cleanup behavior. Dogfood is unverified.
+
+
 ## #51/#48 Windows repair: separate failed and corrected evidence
 
 ### Additional History Expectation From Repair-Branch CI

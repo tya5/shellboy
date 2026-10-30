@@ -1,6 +1,18 @@
 # Development status
 
-## Issues #42/#43/#55: implemented, pushed and native-verified; awaiting main integration
+## Current integration: index operations and main usage accounting
+
+The reviewed index branch at `e12ab8f` is being combined with origin/main
+`5350fc8`, which includes the usage-accounting work recorded below. Latest
+reviews for #42/#43/#55 report no Medium findings. The combined tree's standard
+checks are pending; the earlier three-OS index result validates `ae9bc19`, not
+this new combination. Both sets of earlier checkpoint records are retained below.
+
+The user has authorized main push after integration and verification. Issue
+closure still waits for successful main CI on the integrated source. No tag,
+release, paid provider test or default-user-store operation is implied.
+
+## Previous index-branch checkpoint: implemented, pushed and native-verified
 
 The reviewed index branch `issue-42-43-55/index` is pushed. Exact source
 `ae9bc19` passes [manual CI40996181881](https://github.com/tya5/shellboy/actions/runs/40996181881)
@@ -70,6 +82,24 @@ The three index issues were not included in that push.
 The #48/#51 sections below retain their original local integration and review
 checkpoints. Their historical publication restrictions and base descriptions
 record those stages; current combined integration is described above.
+
+## #49 Then #47: Standard Usage And Accounting
+
+#49 implements the shared five-number whitelist, guarded SQL scalar reads for
+large saved usage and normalization of known provider-envelope usage in completed,
+failed/incomplete, stream-audit and summary copies. Exact source `ad9343ce` passes
+local macOS standard checks: layout82, Python6, format, strict Clippy and Rust
+7 groups / 1,474 passed / 0 failed / 28 ignored. No existing usage rewrite migration
+or Core cleanup automation is added. Task-boundary cleanup is Agent Guide guidance;
+real-model dogfood and new exact-source native CI are unverified. Independent
+review and latest-main integration checks are separate gates.
+
+The existing non-2xx HTTP path remains diagnostic-only with a 64KiB body limit;
+its usage is unknown in #49. #47 must separately agree and implement its typed
+small-error-body usage boundary before claiming complete failure accounting.
+#47 incremental aggregate design requires separate agreement before implementation;
+the latest issue comment supersedes its original read-time scan proposal.
+Parallel index/index-CLI files are outside this worktree's edit scope.
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 

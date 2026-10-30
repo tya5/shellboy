@@ -173,7 +173,20 @@ Repeated reads do not consume operation-receipt budget. Pending reservations for
 
 ## Edit the selected path when input is large
 
-`thread get`'s `context_usage` shows estimated input, the connection's guidance, and last successful usage. When input approaches the guidance or large tool outputs are no longer useful, use `compact --spill/--summary --from NODE --to NODE`. `--omit --from NODE --to NODE` can omit a detour in the middle; `--trim --to NODE` omits the prefix through that node. Boundaries are inclusive, complete groups. Omitting the current request, an incomplete group, or the newest group is rejected. Inspect candidates and adjust the range.
+At a task boundary, after the push or report, review your own conversation once.
+Use `thread get`'s `context_usage.last_successful_attempt.input_tokens` (the last
+actual input, if reported) and `history list`'s large ranges as evidence. Do not
+use `estimated_input_tokens` to decide this cleanup or start a new conversation
+as a substitute. Spill large tool outputs from completed work that are no longer
+needed with `compact --spill --from NODE --to NODE`; summarize a completed range
+with `compact --summary --from NODE --to NODE` when only its key facts are needed.
+Leave unfinished work, unapplied user instructions and information required for
+the current task untouched. If no completed range is safely dispensable, do not
+edit it. Do this once per task boundary, not on every request: path edits can
+invalidate prompt caches. Original facts remain accessible through `history get`,
+search and `compact --restore`; a summary is not a replacement for original evidence.
+
+For other explicitly needed range edits, use `compact --spill/--summary --from NODE --to NODE`. `--omit --from NODE --to NODE` can omit a detour in the middle; `--trim --to NODE` omits the prefix through that node. Boundaries are inclusive, complete groups. Omitting the current request, an incomplete group, or the newest group is rejected. Inspect candidates and adjust the range.
 
 Acceptance is queued; check operation get through downstream completion. Repeating an operation ID does not edit twice. Changes apply to the next request, not one already in progress. Make infrequent, substantial edits. Do not repeatedly edit the path and unnecessarily invalidate caches.
 

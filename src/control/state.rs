@@ -76,13 +76,14 @@ pub(super) fn fail_attempt(
     error: &Value,
     at: &str,
 ) -> Result<AttemptTransition, StorageError> {
+    let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='failed',error_json=?2,ended_at=?3
+        "UPDATE model_attempt SET state='failed',error_json=?2,ended_at=?3,usage_json=COALESCE(?4,usage_json)
          WHERE id=?1 AND state IN ('preparing','inflight')
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state IN ('preparing','running','waiting') AND r.state='live')",
-        params![attempt, error.to_string(), at],
+        params![attempt, error.to_string(), at, usage.map(|u| u.to_value().to_string())],
     )?;
     attempt_outcome(db, attempt, AttemptState::Failed, changed)
 }
@@ -101,12 +102,26 @@ pub(super) fn complete_attempt(
         params![
             attempt,
             response.get("id").and_then(Value::as_str),
-            response.get("usage").map(Value::to_string),
+            response
+                .get("usage")
+                .map(crate::usage::StandardUsage::from_value)
+                .map(|u| u.to_value().to_string()),
             at
         ],
     )?;
     attempt_outcome(db, attempt, AttemptState::Completed, changed)
 }
+fn normalized_failure(error: &Value) -> (Value, Option<crate::usage::StandardUsage>) {
+    let mut error = error.clone();
+    let usage = error
+        .pointer("/raw_response/usage")
+        .map(crate::usage::StandardUsage::from_value);
+    if let Some(raw) = error.get_mut("raw_response") {
+        crate::usage::normalize_response(raw);
+    }
+    (error, usage)
+}
+
 fn failed_context_limit(body: Option<&str>) -> bool {
     #[derive(serde::Deserialize)]
     struct SavedFailure {
@@ -134,13 +149,14 @@ pub(super) fn incomplete_attempt(
     let permitted_failure = saved_failure
         .flatten()
         .filter(|body| failed_context_limit(Some(body)));
+    let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3
+        "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3,usage_json=COALESCE(?5,usage_json)
          WHERE id=?1 AND (state IN ('preparing','inflight') OR (state='failed' AND error_json=?4))
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state IN ('preparing','running','waiting','recovery_wait') AND r.state='live')",
-        params![attempt, error.to_string(), at, permitted_failure],
+        params![attempt, error.to_string(), at, permitted_failure, usage.map(|u| u.to_value().to_string())],
     )?;
     attempt_outcome(db, attempt, AttemptState::Incomplete, changed)
 }
@@ -546,6 +562,69 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn terminal_usage_is_normalized_atomically_and_replay_does_not_replace_it() {
+        let usage = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0,"extra":"x".repeat(128*1024)},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":-1},"total_tokens":127,"attribution":"x".repeat(128*1024)});
+        let canonical = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0},"output_tokens":4,"total_tokens":127});
+        for operation in [complete_attempt, fail_attempt, incomplete_attempt] {
+            let mut db = fixture("inflight");
+            let body = json!({"id":"response","usage":usage,"raw_response":{"usage":usage,"output":[{"usage":"user content"}]},"error":{"kind":"fixture"}});
+            // Transaction rollback must discard both terminal state and usage.
+            {
+                let tx = db.transaction().unwrap();
+                assert_eq!(
+                    operation(&tx, "attempt", &body, "new").unwrap(),
+                    AttemptTransition::Applied
+                );
+            }
+            let read = |db: &Connection| {
+                db.query_row(
+                    "SELECT state,usage_json,error_json FROM model_attempt WHERE id='attempt'",
+                    [],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .unwrap()
+            };
+            assert_eq!(read(&db).0, "inflight");
+            assert_eq!(read(&db).1.as_deref(), Some("{}"));
+            assert_eq!(
+                operation(&db, "attempt", &body, "new").unwrap(),
+                AttemptTransition::Applied
+            );
+            let saved = read(&db);
+            assert_eq!(
+                serde_json::from_str::<Value>(saved.1.as_deref().unwrap()).unwrap(),
+                canonical
+            );
+            if saved.0 != "completed" {
+                let error: Value = serde_json::from_str(&saved.2).unwrap();
+                assert_eq!(error["raw_response"]["usage"], canonical);
+                assert_eq!(
+                    error["raw_response"]["output"],
+                    body["raw_response"]["output"]
+                );
+                assert_eq!(error["error"], body["error"]);
+            }
+            assert_eq!(
+                operation(
+                    &db,
+                    "attempt",
+                    &json!({"usage":{"input_tokens":999}}),
+                    "late"
+                )
+                .unwrap(),
+                AttemptTransition::AlreadyApplied
+            );
+            assert_eq!(read(&db), saved);
+        }
+    }
+
     #[test]
     fn late_failures_never_reclassify_completed_or_cancelled_attempts() {
         for state in ["completed", "cancelled"] {

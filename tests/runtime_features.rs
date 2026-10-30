@@ -2104,7 +2104,7 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
             .await
             .unwrap();
     let mut completed = answer("calibrated response");
-    completed["usage"] = json!({"input_tokens":123,"output_tokens":4,"total_tokens":127});
+    completed["usage"] = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":100,"extra":"x".repeat(128*1024)},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":2},"total_tokens":127,"attribution":{"items":["x".repeat(128*1024)]}});
     sent.reply.send((200, completed)).unwrap();
     settled(&control, &target).await;
     control.store.database.call(move |db| {
@@ -2114,9 +2114,26 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
         let manifest: Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(manifest["input_characters"], characters);
         assert_eq!(manifest["history_characters"], history_characters);
-        assert_eq!(serde_json::from_str::<Value>(&usage).unwrap()["input_tokens"], 123);
+        assert_eq!(serde_json::from_str::<Value>(&usage).unwrap(), json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":100},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":2},"total_tokens":127}));
+        assert!(usage.len()<256);
         Ok(())
     }).await.unwrap();
+    let details = request(
+        &control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(target.clone()),
+        }),
+    )
+    .await;
+    assert_eq!(
+        details["context_usage"]["last_successful_attempt"]["input_tokens"],
+        123
+    );
+    assert_eq!(
+        details["context_usage"]["last_successful_attempt"]["cached_tokens"],
+        100
+    );
+    assert!(details["context_usage"]["estimation_baseline_attempt_id"].is_string());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -2582,6 +2599,38 @@ async fn unreadable_working_instructions_recover_without_an_outbound_header() {
         "preparation failure precedes any HTTP request"
     );
     std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_response_usage_is_saved_without_provider_appendices_or_audit_loss() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    for status in ["failed", "incomplete"] {
+        let target = thread(&control).await;
+        send(&control, &target, "synthetic failure usage").await;
+        let sent = incoming(&control, &mut receive).await;
+        sent.reply.send((200,json!({"id":"failure-fixture","status":status,"error":{"code":"invalid_request_error","message":"synthetic diagnosis"},"usage":{"input_tokens":23,"input_tokens_details":{"cached_tokens":0,"appendix":"x".repeat(128*1024)},"output_tokens":3,"attribution":"x".repeat(128*1024)},"output":[]}))).unwrap();
+        settled(&control, &target).await;
+        control.store.database.call(move |db| {
+            let (state,usage,error):(String,String,String)=db.query_row("SELECT a.state,a.usage_json,a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 ORDER BY a.rowid DESC LIMIT 1",[target],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+            assert_eq!(state,"incomplete", "received failure keeps the existing recovery classification");
+            let canonical=json!({"input_tokens":23,"input_tokens_details":{"cached_tokens":0},"output_tokens":3});
+            assert_eq!(serde_json::from_str::<Value>(&usage).unwrap(),canonical);
+            let error:Value=serde_json::from_str(&error).unwrap();
+            assert_eq!(error["raw_response"]["usage"],canonical);
+            assert_eq!(error["raw_response"]["id"],"failure-fixture");
+            assert_eq!(error["raw_response"]["status"],status);
+            assert_eq!(error["raw_response"]["error"]["message"],"synthetic diagnosis");
+            assert_eq!(error["raw_response"]["output"],json!([]));
+            assert!(error.to_string().len()<4096);
+            Ok(())
+        }).await.unwrap();
+    }
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

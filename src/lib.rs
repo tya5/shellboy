@@ -29,3 +29,5 @@ pub mod status;
 pub mod storage;
 pub mod terminal_links;
 pub mod ui;
+
+mod usage;
