@@ -5,7 +5,7 @@
 The reviewed index branch `issue-42-43-55/index` is pushed. Exact source
 `ae9bc19` passes [manual CI40996181881](https://github.com/tya5/shellboy/actions/runs/40996181881)
 on all three OSes: Linux1,499 / macOS1,498 / Windows1,386 passed, zero failed;
-ignored27/28/20. Windows uses four test threads. All baseline main test identities
+ignored27/28/20. Windows uses four test threads. All baseline16fe4aa test identities
 and ignored sets remain, with 30 additional active cases per OS. Native macOS
 standard checks also pass (1,498/0/28, six Python gates, 85 registered suites,
 formatting and strict all-target Clippy). See [acceptance](../validation/acceptance.md).
@@ -22,6 +22,12 @@ failed b22a30a Windows run is retained; the duplicate local alternative34ca8d3
 was abandoned and not published. Index implementation/tests and UI are split
 across meaningful commits, followed by current-main integration. Remaining work
 is review and separately authorized main integration of the index changes.
+During final handoff, origin/main advanced to `5350fc8` with another session's
+usage-accounting work (CI40997452704 still in progress). That later feature is
+outside the native-verified index branch. Integrating index into current main
+remains a separate review/combined-check step; do not attribute its success to
+the already verified ae9bc19 baseline.
+
 No paid provider test, default-user reindex/GC, installed-binary update, tag or
 release is included. Subsequent evidence-only updates do not change the verified
 Rust, bundled guides or workflow source and do not trigger automatic branch CI.

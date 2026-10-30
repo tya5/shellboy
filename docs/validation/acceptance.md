@@ -2187,3 +2187,12 @@ publishing; no Rust, bundled-guide, dependency or workflow source changes and
 no duplicate native run are needed for that evidence update. Index features
 remain on the work branch; main contains the authorized CI policy/repairs only.
 No user data, paid API, installed binary or release was changed.
+
+
+Final fetch also observes origin/main5350fc8, containing another session's usage
+work after the verified main16fe4aa. Its run40997452704 is still in progress at
+this checkpoint. It is not merged into the index branch merely to chase a moving
+main during review. The 30-case inventory comparison and native successes above
+are explicitly against16fe4aa/ae9bc19, not that later combination. A future main
+integration must reconcile and validate the then-current main; index remains
+unmerged and publication authorization does not include that future integration.
