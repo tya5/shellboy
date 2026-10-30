@@ -3262,3 +3262,38 @@ fmt and strict all-target Clippy. The native disposable-PTY on/off/model-shell
 OSC isolation regression passes again through the new read path. The final
 rebased full standard check and ordinary three-OS main CI are still independent
 gates, not inferred from these local observations.
+
+
+## v0.4.0 preliminary release preparation (#70)
+
+Public v0.3.0 macOS archive and SHA256SUMS were downloaded anonymously with curl
+--disable over HTTPS. Manifest hashc8a139f704027220fd51bc173e54aa0e2fbb67fd35e0f9b4eb3859714b447611,
+archive1e0010db3a34cd6c159e591d92ffac64062ce793f767972f0518346522d8f5d4,
+executable2e9b1c76b6cb959852eaf2f7283051f186f6ca19acf7e4b2168f0b52e09372bb.
+It reports shellboy0.3.0; it is public bytes, not a tag rebuild or old candidate.
+
+On native macOS ARM64, the real0.3.0 owner created21 synthetic nodes, completed
+work/indexes, one recovery-wait Run and a queued message sent by its real model
+shell/issued Origin. Standalone keyword RAG was also created by that executable.
+After a fixture-only hard stop and WAL-aware backups, a staging0.4.0 debug binary
+opens the copy with schema14 and the complete migration ledger unchanged, RAG3,
+conversation search, legacy unknown/model sender facts, held pending input,
+old/new saved usage and JSON stdout exec through the loopback mock. New exec
+sender is external_cli/self-asserted shellboy exec; owner shuts down0. Five model
+and12 embedding calls are local fixtures, not providers or user data.
+
+Initial harness attempt stopped during read-only backup of a checkpointed RAG
+file marked WAL but lacking sidecars, before starting0.4.0. The fixture now uses
+immutable read-only access only for stopped files with no WAL; conversation WAL
+is never ignored. A fresh fixture passes all checks. That initial harness error
+is not classified as a product migration failure or hidden as a passing run.
+
+The local macOS installer prototype passes fresh/replacement/backup/checksum
+rejection using a real debug executable and stamped scripts. Its other-platform
+archive entries are explicit nonnative placeholders, so it is not candidate or
+cross-OS qualification. The final matrix must use the actual assembled release
+archives and repeat native execution. New Python unit cases reject damaged or
+rehashed-but-unbound/template script sets. Ordinary local checks pass1735/0/32,
+layout92, Python9, format and strict Clippy on the initial staging tree; the final
+rebased source, packaged upgrade, three native installer OSes and exact main CI
+remain pending. No tag/GitHub Release/publication/installed-binary change occurs.

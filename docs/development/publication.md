@@ -201,3 +201,41 @@ removes the staged file to inject a final-rename failure, then verifies the
 original binary is restored, runnable and byte-identical, no extra backup is
 left, and the held process is still live. The fixture kills and reaps its own
 processes before removing its temporary installation.
+
+
+## v0.4.0 preparation only (#70 / D-012)
+
+Authorized scope stops at issue70 step8: version/notes/README, synthetic upgrade,
+exact-source native CI, candidate archives/installers/checksums and isolated
+installation. No v0.4.0 tag, GitHub Release (including draft), publication or user
+binary replacement is authorized. The #54 review fix must be in main before
+selecting the candidate. Include #41 D2 only if already in main at the cut; do
+not wait for or declare the whole redesign complete.
+
+Run Release binaries manually with both release_tag=v0.4.0 and candidate_ref set
+to an exact main SHA whose ordinary three-OS CI is green. Candidate mode retains
+contents:read and skips the publish job. The candidate-installers matrix consumes
+the assembled candidate-assets (three archives, two stamped scripts, SHA256SUMS)
+on native macOS ARM64/Linux x64 and Windows PowerShell5.1/7. All five asset hashes
+are checked; template markers/wrong stamps fail. Each actual installer runs with
+SHELLBOY_VERSION removed and SHELLBOY_INSTALL_DIR set to a disposable path with
+spaces, then replaces that installation, verifies backup bytes, and rejects a
+corrupt archive without changing existing or creating fresh destination state.
+Downloads are a strict local mirror of the intended release URLs: unpublished
+v0.4.0 URLs cannot be qualified before approval/publication. No public v0.3.0
+asset is changed, and no user install/profile/PATH/database is touched.
+
+scripts/check-release-upgrade.py takes an independently verified public0.3.0
+binary and an exact candidate binary. Owned Unix PTYs create completed/recovery/
+queued model-sender conversations through real0.3.0 operations, plus synthetic
+indexes/RAG. Stop that fixture owner, preserve committed WAL via SQLite backup,
+then open the copy with the candidate. Expect schema14/unchanged migration ledger,
+RAG3, readable conversation/sender/pending/usage and successful loopback exec.
+All endpoints are local mocks. Preserve a stopped, checkpointed RAG file without
+WAL sidecars via read-only immutable backup only after every writer is reaped;
+never ignore an existing conversation WAL. No real user data is used.
+
+Keep exact candidate SHA/run links, all six SHA-256 values and installer/upgrade
+results in issue70 and outside-Git artifact evidence rather than changing the
+qualified SHA recursively. The retained release-note draft is review text, not
+a created GitHub Release. Stop at step8 for review and publication authorization.

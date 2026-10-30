@@ -209,6 +209,56 @@ jobs:
           compression-level: 0
           retention-days: 30
 
+
+  candidate-installers:
+    name: Candidate installer ${{ matrix.os }} ${{ matrix.shell }}
+    if: ${{ !inputs.installer_checks && inputs.candidate_ref }}
+    needs: assemble
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            shell: sh
+          - os: macos-15
+            shell: sh
+          - os: windows-latest
+            shell: powershell
+          - os: windows-latest
+            shell: pwsh
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-assets
+          path: candidate-dist
+      - name: Verify stamped scripts and isolated native installation
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          INSTALLER_SHELL: ${{ matrix.shell }}
+        run: |
+          set -euo pipefail
+          if [[ "$INSTALLER_SHELL" == sh ]]; then
+            python scripts/check-candidate-installers.py --assets candidate-dist --tag "$RELEASE_TAG" --report candidate-installer-result.json
+          else
+            python scripts/check-candidate-installers.py --assets candidate-dist --tag "$RELEASE_TAG" --powershell "$INSTALLER_SHELL" --report candidate-installer-result.json
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-installer-${{ matrix.os }}-${{ matrix.shell }}
+          path: candidate-installer-result.json
+          if-no-files-found: error
+          retention-days: 30
+
   publish:
     name: Publish release and checksums
     if: ${{ !inputs.installer_checks && !inputs.candidate_ref }}

@@ -18,7 +18,7 @@ The [development status](docs/development/status.md) and [verification record](d
 
 ## Download
 
-One-line install (available starting with the next release after v0.3.0):
+One-line install:
 
 ```sh
 # macOS Apple Silicon / Linux x64

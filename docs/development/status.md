@@ -1,5 +1,15 @@
 # Development status
 
+## v0.4.0 release preparation (#70): not published
+
+Release notes are drafted in issue70, README uses version-independent install
+URLs, and the staging package is0.4.0 after #54 entered main. Candidate SHA is
+not selected yet: #54's review fix and its main gate must be included; #41 D2 is
+included only if already landed at the cut. Candidate-only native installer
+validation reuses assembled bytes in temporary destinations, with no publication.
+Preliminary public0.3.0 -> staging0.4.0 synthetic upgrade passes; final packaged
+candidate qualification remains pending. No tag/Release/user binary is changed.
+
 ## #65 owner-version guard and validation-record repair
 
 Exec checks the required final-answer read argument before creating/sending work.
