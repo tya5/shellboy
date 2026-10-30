@@ -1,5 +1,24 @@
 # Validation record
 
+## 2026-10-30: #58 diagnostic transition filtering
+
+On main c6397b1 plus this isolated correction, native macOS arm64 with pinned
+Rust1.99.1, build jobs2, incremental0 and test threads2 passes
+`sh scripts/check.sh`: **1,610 passed / 0 failed / 31 ignored**, layout88,
+Python6, formatting and strict all-target Clippy. The focused
+`cargo test --locked --lib ui_history_tests` also passes (2 tests).
+
+A real UiState feeds 100 ordinary history and 100 ordinary window updates,
+then growth; none emits a record. Shrink, stale rejection, user follow change
+and body eviction produce exactly four records via the real diagnostic writer.
+A held admission mutex confirms silent updates neither contend nor increment
+the dropped-record count. Diagnostic filtering occurs before queue admission;
+no new worker, state, schema, dependency or UI I/O is introduced.
+
+Main three-OS CI remains a separate pending gate. Earlier actual PTY evidence
+belongs to the original retention source and was not repeated for this
+logging-only change. No paid API, user store or installed binary was touched.
+
 ## Reactive History Retention (#58)
 
 Runtime/test source747807450f09cf0f9935d5a8e04327256b7f5d94, including

@@ -1,5 +1,20 @@
 # Development status
 
+## #58 diagnostic review follow-up
+
+Ordinary history/window refreshes are filtered before diagnostic queue admission.
+Only node-count reduction, follow changes, stale replies and body eviction emit
+history records. The regression drives 200 unchanged UI refreshes plus growth
+and verifies exactly the four meaningful records; silent refreshes do not
+increment dropped-record counters even under contention.
+
+Native macOS arm64/Rust1.99.1 `sh scripts/check.sh` passes: **1,610 passed /
+0 failed / 31 ignored**, layout88, Python6, format and strict all-target Clippy.
+This is the current combined source on main c6397b1 (#50 included), distinct
+from #58's earlier 1,614-test checkpoint. Main three-OS CI is pending for this
+logging-only correction. #41 changes remain isolated on their work branch;
+the installed binary and user data are unchanged.
+
 ## History retention and conversation redesign (#58 then #41)
 
 #58 runtime/tests at `7478074` (including post-result notification80de5f0)

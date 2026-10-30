@@ -491,6 +491,13 @@ impl Diagnostics {
     }
     /// Nonblocking observation only: no I/O, DB access or content formatting.
     pub fn record_ui_history(&self, trace: UiHistoryTrace, ids: DiagnosticIds) {
+        if trace.after_nodes >= trace.before_nodes
+            && trace.follow_before == trace.follow_after
+            && !matches!(trace.reason, UiHistoryReason::StaleWindow)
+            && trace.evicted_bodies == 0
+        {
+            return;
+        }
         self.enqueue_record(Record {
             event: DiagnosticEvent::UiHistory,
             ids,
@@ -739,7 +746,16 @@ mod ui_history_tests {
         let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
         {
             let _busy = diagnostics.shared.sender.lock().unwrap();
+            // Silent refreshes do not even contend for diagnostic admission.
             diagnostics.record_ui_history(UiHistoryTrace::default(), DiagnosticIds::default());
+            assert_eq!(diagnostics.pending_dropped(), 0);
+            diagnostics.record_ui_history(
+                UiHistoryTrace {
+                    reason: UiHistoryReason::StaleWindow,
+                    ..Default::default()
+                },
+                DiagnosticIds::default(),
+            );
             assert_eq!(diagnostics.pending_dropped(), 1);
         }
         for reason in [
@@ -802,6 +818,94 @@ mod ui_history_tests {
         }
         assert_eq!(entries[0]["dropped"], 1);
         assert!(entries[4].get("ui_history").is_none());
+    }
+
+    #[tokio::test]
+    async fn ordinary_ui_refreshes_are_silent_but_history_transitions_are_logged() {
+        use crate::{
+            config::Config,
+            ui::{UiNode, UiState, UiUpdate, ViewAnchor},
+        };
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().join("logs"), Logging::default());
+        let mut ui = UiState::new(&Config::default(), root.path().into());
+        ui.set_diagnostics(diagnostics.clone());
+        ui.view_mut().thread_id = Some("fixture-thread".into());
+        let node = UiNode {
+            node_id: "visible".into(),
+            text: "visible body\n".repeat(100),
+            total_chars: 1300,
+            ..Default::default()
+        };
+        let history = |read, nodes: Vec<UiNode>| {
+            let total_nodes = nodes.len() as u64;
+            UiUpdate::History {
+                thread_id: "fixture-thread".into(),
+                generation: 0,
+                nodes,
+                pending: Default::default(),
+                read_revision: read,
+                before_cursor: None,
+                append: false,
+                first_ordinal: 0,
+                selection_revision: 1,
+                total_nodes,
+            }
+        };
+        for read in 1..=100 {
+            ui.apply(history(read * 2, vec![node.clone()]));
+            ui.apply(UiUpdate::HistoryWindow {
+                thread_id: "fixture-thread".into(),
+                generation: 0,
+                view_revision: 0,
+                nodes: vec![node.clone()],
+                pending: Default::default(),
+                read_revision: read * 2 + 1,
+                first_ordinal: 0,
+                selection_revision: 1,
+                total_nodes: 1,
+                anchor: ViewAnchor {
+                    node_id: Some("visible".into()),
+                    char_offset: 0,
+                },
+            });
+        }
+        let mut second = node.clone();
+        second.node_id = "second".into();
+        ui.apply(history(300, vec![node.clone(), second])); // growth is also quiet
+        ui.apply(history(301, vec![node.clone()])); // one real node-count reduction
+        ui.apply(history(300, vec![node])); // a stale response is rejected
+        ui.event(Event::Key(KeyEvent::new(
+            KeyCode::PageUp,
+            KeyModifiers::NONE,
+        )));
+        diagnostics.record_ui_history(
+            UiHistoryTrace {
+                reason: UiHistoryReason::BodyEviction,
+                evicted_bodies: 1,
+                ..Default::default()
+            },
+            DiagnosticIds::default(),
+        );
+        diagnostics.shutdown().await;
+        let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        let entries = log
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries.len(),
+            4,
+            "ordinary refreshes must not occupy the log: {entries:?}"
+        );
+        assert_eq!(entries[0]["ui_history"]["reason"], "window_applied");
+        assert_eq!(entries[0]["ui_history"]["before_nodes"], 2);
+        assert_eq!(entries[0]["ui_history"]["after_nodes"], 1);
+        assert_eq!(entries[1]["ui_history"]["reason"], "stale_window");
+        assert_eq!(entries[2]["ui_history"]["reason"], "user_follow");
+        assert_eq!(entries[3]["ui_history"]["reason"], "body_eviction");
+        assert_eq!(diagnostics.pending_dropped(), 0);
     }
 }
 
