@@ -6,8 +6,10 @@ The two response retry fixture files share60s progress/cleanup watchdogs and
 notification-driven persisted-state waits. Product timers, retry/phase/count
 assertions and intentional timed absence/outage checks stay unchanged. Main
 b16f414 run41063015359 attempts1/2 remain failed evidence; the long-Turn arrival
-guard was already60s, so its cause is not established. Local standard and two
-manual native Windows branch runs are pending before main admission.
+guard was already60s, so its cause is not established. Its third attempt passed;
+the two preceding failures remain evidence. Native macOS standard checks pass
+1666/0/32. Exact source3b45c3c passed two independent manual Windows four-thread
+runs,41067174706 and41067200942, both first attempts. Final main CI is pending.
 
 ## #59: saved sender inspection and self-asserted names
 
