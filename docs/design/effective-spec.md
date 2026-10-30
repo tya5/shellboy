@@ -209,3 +209,10 @@ Issue #58 adopts [reactive history retention](tui-history-retention.md) before
 the independently reviewable conversation redesign increments tracked in
 [the #41 plan](../development/issue-41-plan.md). Follow ownership, finite visible
 working sets and paid-text hydration remain invariants throughout those changes.
+
+## #50: factual reduction
+
+[Failure-driven reduction](failure-driven-reduction.md) supersedes the estimated
+75k/hint preflight and once-per-Turn policy in older compaction/retry sections.
+Only failure facts activate automatic reduction; all resends share the normal
+consecutive retry budget. Context edit sizes are characters, never token estimates.
