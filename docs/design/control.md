@@ -365,3 +365,22 @@ The [per-Thread instruction reference contract](agents-reference.md) supersedes
 previous fixed-reference wording: explicit create/set/fork selection is allowed,
 while cwd changes alone never rediscover instructions and same-Turn retry
 continues using its durable snapshot.
+
+## Working-instruction provenance header (#48)
+
+The actual AGENTS developer message begins with exactly one metadata line:
+`Working instructions from <JSON-quoted snapshot path> (user-editable; re-read at each new Turn start; same-Turn retries use the saved snapshot):`
+followed by one LF and the captured original body unchanged. Quote the path as
+JSON and escape remaining control characters and Unicode line separators so a
+path cannot introduce another physical header line. The source is the current
+Turn's fixed snapshot source path, not the Thread's subsequently configured
+reference or cwd. The same-Turn body/path pair remains fixed on later requests
+and explicit retry; a new Turn observes the then-selected source again.
+
+This is outbound presentation only. Snapshot body, byte count, hash, storage,
+message role, instruction precedence and permissions are unchanged. A present
+empty file still has a snapshot and a developer message with an empty body after
+the header. A missing file still has no instruction developer message; unreadable,
+invalid UTF-8 or oversized content retains existing preparation recovery.
+No new snapshot, permission engine, table, worker, queue or dependency is added.
+Mock requests establish factual transmission, not improved model/user behavior.

@@ -47,3 +47,11 @@ thread.fork. These DB-only helpers do not acquire file workers or invent an
 actor. Their returned agents_path is the actual inherited path. Product
 Control/CLI/TUI fork supports explicit references through validation, CAS and
 audit before invoking the primitive with an inherited/default argument.
+
+## Outbound provenance (#48)
+
+The instruction developer message includes a one-line, safely quoted source-path
+header under the [Control contract](control.md#working-instruction-provenance-header-48).
+Its path follows the captured Turn snapshot, including after thread.set changes
+the configured reference. The prefix is not part of the saved body/hash. It does
+not change explicit selection, missing/empty-file behavior or instruction roles.

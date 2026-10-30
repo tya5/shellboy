@@ -1136,3 +1136,15 @@ Adapt existing regressions to #46's resulting layout, then repeat standard
 checks. Do not preemptively transplant or resolve conflicts while #46 is absent.
 This records ordering, not permission to push, post to GitHub, update main or
 replace installed binaries. Physical-terminal verification remains unclaimed.
+
+## #48: attach provenance to the actual instruction message (adopted)
+
+Choose proposal (a): prepend one source/snapshot metadata line to the AGENTS
+developer message, not another system instruction or authority/permission layer.
+This keeps provenance adjacent to the body even when the Agent Guide is unread.
+JSON-quote the fixed Turn snapshot path and escape controls/line separators;
+append one LF and the unmodified body. Preserve all snapshot storage and roles.
+The guide explains configured-reference inheritance/override independently of
+cwd and requires explicit permission for edits, without promising automatic
+exceptions to other higher-priority instructions. Model behavior improvement
+requires later dogfood/real-model observation; mocks prove request contents only.
