@@ -217,7 +217,20 @@ Subsequent independent UI findings are fixed: actual result-popup Esc/F8 emits
 captured-owner close before clearing, ActivateDraft closes the cache, lag rechecks
 one pending snapshot without bypassing cooldown, and ordinary Thread selection
 uses the lightweight DB metadata helper. Focused usage27/0/3ignored and explicit
-selection test1/0 pass; the latest full standard/independent recheck is pending.
+selection test1/0 pass. Exact c4b233728a64cb7100280c28778c77f708525d58
+passes the final standard check: Rust7groups1495/0/30ignored, layout82, Python6,
+format and strict Clippy. The independent reviewer confirms those counts and the
+actual command/cwd/commit-before-check, exit0 and complete output in execution
+1b180353 (89,370ms is the entire shell, including prior commit/notification).
+Independent usage27/0/3, selection1/0 and all-UI78/0/1 checks resolve the reported
+UI P2s and the non-usage index-confirmation regression.
+
+The parent approves documenting the existing surface distinction: explicit F8
+usage/get forms use coalesced Changed refresh; followed references query once and
+F6 pages only inspect cached fields, with explicit re-query and no freshness
+deadline. This documentation clarification changes no runtime code. Independent
+confirmation of that wording and both surfaces remains the final review gate;
+new exact documentation checks and latest-main/native CI are separate evidence.
 Summary/embedding/RAG remain not_recorded/out_of_scope, never known-zero usage.
 No user DB or paid provider call is used. #50 permission is withdrawn; after #47
 main exact CI succeeds, stop and await a new instruction after owner restart.

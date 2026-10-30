@@ -52,10 +52,18 @@ Index/index-CLI/RAG and parallel #53/#56 lifecycle changes are outside the edit
 scope. #50 and other work are outside this task; stop after #47 main exact CI succeeds. Independent review, latest-main
 fetch/rebase and required rechecks precede normal main push and exact three-OS CI.
 
-Current UI read-cache contract: one scoped request is refreshed on Changed using
+Current UI read-cache contract: explicit F8 usage/get detail forms register one
+scoped request, refreshed on Changed using
 existing worker admission; Esc/new operation/Thread switch closes it. Close carries
 an epoch through the existing bounded control mailbox so a saturated ordinary
 queue cannot rearm an older request. No Core cancellation/producer path changes.
+Reference navigation (`FollowManagement`) preserves the existing one-shot query:
+it closes the prior generation and opens an immutable result without registering
+a Changed refresh. F6 pages inspect only the cached response. Explicitly re-query
+the F8 form or follow a reference again for newer values; neither surface promises
+a freshness deadline. Each actual reference aggregation uses `open` once under
+the same slow-only threshold below. Closing/switching drafts leaves no hidden
+usage refresh; ordinary Thread selection stays metadata-only, without aggregation.
 
 Changed refreshes use a fixed three-second post-result cooldown and the existing
 500ms UI tick; one pending/one in-flight scoped read, no added timer or sleep job.

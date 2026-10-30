@@ -120,5 +120,6 @@ Ctrl+Cは現在Threadの中断、Ctrl+Bは現在のforeground shellを背景へ�
 F8の「使用量 · 合計」で、保存されたモデル要求の使用量とRun・モデル要求・shellの時間を別々に確認できます。子会話を含めることもできます。
 CLIは `shellboy usage get --thread THREAD_ID --include-children`、または子を含めず `--run` / `--turn` を指定します。既存のgetにも `usage_totals` が付きます。
 未報告の値を0とはみなしません。summary・embeddingの未記録はcoverageに明示します。実行中の読取時点の値は完了分と別で、重複する3種類の時間を実働時間として足しません。
-詳細は開いた時にDB workerで読みます。変更通知は前回結果後3秒間まとめ、既存の500ms UI tickで1件だけ再照会します（通常3.5秒程度＋worker/DB待ち）。表示はsnapshotで、描画中は再読しません。
+F8で明示的に開く使用量/get詳細は、開いた時にDB workerで読みます。変更通知は前回結果後3秒間まとめ、既存の500ms UI tickで1件だけ再照会します（通常3.5秒程度＋worker/DB待ち）。表示はsnapshotで、描画中は再読しません。
+結果の参照リンクを辿った画面は1回の照会による固定snapshotで、変更通知による再照会はしません。F6の項目ページもcache済み応答を見るだけです。新しい値が必要ならF8の使用量/getフォームを再実行するか、現在の結果から参照を辿り直してください。どちらも鮮度の期限は保証せず、画面を閉じる・draftを切り替えると隠れた使用量更新は残りません。通常の会話選択はmetadataだけを読み、使用量集計は行いません。参照の実照会は集計100ms以上の時だけ、`open`の遅延診断を1回記録します。
 `<data_dir>/logs/shellboy.log` の `event=usage_totals_slow` と `usage_slow.trigger/scope/elapsed_ms` で、固定100ms以上の集計だけを確認できます。高速な集計の診断は出さず、UI描画時間ではありません。

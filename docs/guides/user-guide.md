@@ -77,8 +77,16 @@ durations, with an option for child conversations. CLI users can run
 `--turn` without children. Existing get commands include `usage_totals` too.
 Unknown measurements are not zero; summary/embedding recording is outside this
 version. Active observations are separate and these overlapping durations are
-not effective work time. Details are cached snapshots: Changed bursts coalesce for three seconds after a
-result, then the existing UI tick schedules one DB-worker refresh, not a render query.
+not effective work time. Explicit F8 usage/get detail forms show cached snapshots:
+Changed bursts coalesce for three seconds after a result, then the existing UI
+tick schedules one DB-worker refresh, not a render query. Following a reference
+from a result opens a one-shot snapshot with no Changed refresh; F6 field pages
+only inspect the cached response. For newer values, explicitly submit the F8
+usage/get form again or follow the reference again from a current result.
+Neither surface promises a freshness deadline; closing the view or switching
+drafts leaves no hidden usage refresh. Ordinary conversation selection reads
+metadata only, without usage aggregation. Actual reference queries use the
+`open` slow-diagnostic trigger once, only when aggregation takes at least100ms.
 See [CLI reference](cli-reference.md#saved-usage-1-operation).
 
 ## 4. Change connection or model

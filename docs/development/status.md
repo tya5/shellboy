@@ -158,10 +158,17 @@ scoped UI detail-cache wiring is implemented; no schema, producer/state/driver
 hooks or period API. Initial and varied optimized query measurements pass the
 approved extreme-size~500ms direction; metadata-inclusive46eabea release projections pass the approved direction
 (varied Thread412-433ms median). Latest UI P2/full-standard/independent/native
-gates remain separate. Latest mandatory
+gates remain separate. Exact c4b2337 passes the final local standard check
+(Rust7groups1495/0/30ignored, layout82/Python6/format/strict Clippy), independently
+confirmed alongside usage27/0/3, selection1/0 and all-UI78/0/1. The reported UI
+P2s and index confirmation regression are resolved. Parent-approved docs clarify
+that explicit F8 usage/get forms refresh on Changed, while followed references
+and F6 pages are one-shot/cached snapshots with explicit re-query and no freshness
+deadline. Final wording/surface review, new exact documentation checks and
+latest-main integration/native CI remain separate gates. Latest mandatory
 UI cooldown is3s using the existing500ms tick, one pending/inflight; slow-only
 >=100ms diagnostics use existing shellboy.log with typed non-content fields.
-The focused usage suite passes25/0/3 ignored with synthetic clocks/data/logs.
+The focused usage suite passes27/0/3 ignored with synthetic clocks/data/logs.
 Unrecorded summary/embedding coverage is explicit. Stop after #47 main exact CI;
 #50 and other new work are not authorized until a new post-restart instruction.
 

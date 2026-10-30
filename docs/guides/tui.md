@@ -18,17 +18,29 @@ Conversation, Run and Turn detail results also include these saved totals. Missi
 usage is marked unknown and unrecorded summary/embedding coverage is explicit.
 These values are not a bill, provider-receipt proof or a sum of effective work.
 
-Details query the existing DB worker on open. Changed bursts become one pending
+Explicit F8 usage/get detail forms query the existing DB worker on open.
+For those forms, Changed bursts become one pending
 refresh, eligible three seconds after the previous result and checked by the
 existing500ms UI tick (normally within3.5s plus worker/DB backlog). There is one
 in-flight refresh; displayed values are snapshots. Rendering uses cached fields only. Esc, a new
 operation or conversation selection stops that refresh; stale generations cannot
 replace another view. A refreshed result changes its detail identity, so links
 selected from an older result must be selected again. F6 field pages inspect the
-cached response. No per-frame database read or permanent footer total is added.
+cached response, not a new query. Reference navigation from a result
+(`FollowManagement`) performs one query and opens an immutable snapshot; it does
+not subscribe to Changed or inherit the previous form's refresh. To obtain newer
+values, explicitly submit the F8 usage/get form again or follow the reference
+again from a current result. F6 paging alone does not refresh that snapshot.
+No freshness deadline is promised for either surface. Ordinary conversation
+selection reads lightweight metadata only, without usage aggregation.
+No per-frame database read or permanent footer total is added.
 
 In `<data_dir>/logs/shellboy.log`, filter `event=usage_totals_slow` and inspect `usage_slow.trigger`, `scope`, `elapsed_ms`.
 Only DB-worker aggregations taking at least the fixed100ms threshold are logged; fast reads are silent, and this is not render/IPC time.
+Each actual reference query uses trigger `open` once if it crosses that threshold;
+F6 paging and Changed notifications on the reference snapshot do not re-read or
+log an aggregation. Closing the view or switching drafts leaves no hidden usage
+refresh/subscription.
 
 ## Activity display
 

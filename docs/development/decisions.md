@@ -11,6 +11,16 @@ worker, queue, setting or DB-worker sleep. Normal eligibility is within3.5s plus
 existing worker/DB backlog, not a hard completion guarantee. Close/new-generation
 protect against late application. Esc and F8 closure stop refresh.
 
+The parent-approved small-version surface distinction applies this Changed cache
+only to explicit F8 usage/get detail forms. Existing reference navigation
+(`FollowManagement`) remains a one-shot query and F6 pages inspect cached fields;
+neither registers a new Changed subscription. Explicitly re-query the form or
+follow a reference again for newer values, with no freshness deadline promised.
+Each actual reference aggregation uses one `open` slow diagnostic only at>=100ms.
+Close/draft switch leaves no hidden refresh, ordinary Thread selection remains
+metadata-only, and index confirmation semantics are unchanged. Do not expand
+reference lifecycle registration as part of this clarification.
+
 The latest user instruction withdraws all-execution logging. Only monotonic DB
 aggregation durations >=100ms enter existing shellboy.log as usage_totals_slow.
 Its typed payload is trigger(open/changed/cli), scope and elapsed_ms, no content or
