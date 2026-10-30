@@ -15,7 +15,8 @@ A held admission mutex confirms silent updates neither contend nor increment
 the dropped-record count. Diagnostic filtering occurs before queue admission;
 no new worker, state, schema, dependency or UI I/O is introduced.
 
-Main three-OS CI remains a separate pending gate. Earlier actual PTY evidence
+Main CI41041115046 at exact source75152eb passes all standard jobs on native
+Windows, Linux and macOS. Issue58 is closed with the result linked. Earlier actual PTY evidence
 belongs to the original retention source and was not repeated for this
 logging-only change. No paid API, user store or installed binary was touched.
 

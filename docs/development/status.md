@@ -11,8 +11,8 @@ increment dropped-record counters even under contention.
 Native macOS arm64/Rust1.99.1 `sh scripts/check.sh` passes: **1,610 passed /
 0 failed / 31 ignored**, layout88, Python6, format and strict all-target Clippy.
 This is the current combined source on main c6397b1 (#50 included), distinct
-from #58's earlier 1,614-test checkpoint. Main three-OS CI is pending for this
-logging-only correction. #41 changes remain isolated on their work branch;
+from #58's earlier 1,614-test checkpoint. Main CI41041115046 at source75152eb passes all three native OS jobs;
+issue58 is closed for this logging-only correction. #41 changes remain isolated on their work branch;
 the installed binary and user data are unchanged.
 
 ## History retention and conversation redesign (#58 then #41)
