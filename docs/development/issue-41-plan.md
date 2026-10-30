@@ -25,7 +25,7 @@ Each increment must be usable independently. A requirement that crosses these
 boundaries must land with its complete action/read/render path, not a stub.
 Report shipped and remaining scope on the issue after each main admission.
 
-B+C are one usable implementation unit. Source7fbf20b passes the native standard
+B+C are one usable implementation unit. Source342cb6e passes the native standard
 check and six actual PTY conditions; P1/P3/P7 results and limits are in
 [the qualification record](../validation/conversation-redesign-bc.md). Main
 admission/three-OS CI remain pending, so shipment checkboxes are not yet marked.

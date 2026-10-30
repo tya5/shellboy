@@ -1516,3 +1516,14 @@ candidate_ref is supplied. release_tag is only a package/version label in this
 mode, not a Git tag creation. Do not use tag/publication mode without fresh user
 approval. No installed binary, user DB, tag or GitHub Release is changed here.
 Keep a release-specific notes draft separate from the version-independent README.
+
+
+## #41 quiet footer ownership (2026-10-30)
+
+Send/receipt progress belongs to its typed reactive state, not a copied operation
+notice. Input events promote only status text changed by that event, preventing
+old receipts from reappearing on caret movement. A missing activity snapshot is
+shown as checking, never known idle. History/send failures remain explicit until
+the next deliberate action; an unrelated older success cannot erase a failure.
+Both new readonly UI actions retire their loading state on UI queue rejection as
+well as reader-slot rejection. No new Core lifecycle, queue or producer is added.

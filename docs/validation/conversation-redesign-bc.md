@@ -1,7 +1,7 @@
 # Conversation structure and inline interaction (#41 B+C)
 
-Runtime/test source: `7fbf20b6f231b0da0416d0091db7a404dd5677c3`, based on
-main96bcd16 (including #50 and #61), after standalone #58. This qualifies only
+Runtime/test source: `342cb6ef230538b2c659ce63446901a963589b51`, based on
+main8fb885d (including #50, #61 and 0.3.0 package preparation), after standalone #58. This qualifies only
 B+C; D–G remain open in the [delivery ledger](../development/issue-41-plan.md).
 No schema, protocol, dependency, worker or queue is added.
 
@@ -14,7 +14,7 @@ Native macOS arm64, pinned Rust1.99.1, `CARGO_BUILD_JOBS=2`,
 sh scripts/check.sh
 ```
 
-Passes: **1,653 passed / zero failed / 32 ignored**. Breakdown: library781/0/13,
+Passes: **1,658 passed / zero failed / 32 ignored**. Breakdown: library786/0/13,
 integration862/0/17, termination7/0/1, crash recovery3/0/1. Layout88, Python6,
 formatting and strict all-target Clippy pass. Ignored timing observations are
 reported separately below. Main three-OS CI is a separate pending gate.
@@ -37,7 +37,7 @@ also releases its own admission slot without cancelling a newer token.
 
 `cargo build --locked --bin shellboy` produces the tested debug binary SHA256:
 
-`01abac8737a839500525f20829d0c3396d3e3b6babfd0b9363d04d63e53f389d`
+`2dc2341d51590013e36bc810291fd7b049a05e7ba2487e93666d506a181eab64`
 
 Actual macOS PTYs at80x40 and140x40 pass in dark, light and NO_COLOR modes:
 all six cases exit0, contain no harness/proxy errors and use that exact binary.
@@ -58,6 +58,11 @@ success and stderr failure), and a held next model response. It verifies:
 - Original/F6 popups preserve the selected saved source. Copy is not invoked
   against the host clipboard; exact copy targets are covered by UI tests.
 - Ctrl+End resumes follow; the final answer is visible after canonical adoption.
+
+The held-response captures also verify that an accepted send does not remain
+as a stale operation notice. Typed send progress remains reactive, a missing
+activity observation is not labelled idle, history/send failures stay visible,
+and rejected UI/read-queue actions release their own loading state (unit tests).
 
 The harness waits for the ready composer, not merely endpoint publication. It
 selects actual tool rows rather than assuming the last quiet notification is a
@@ -81,7 +86,7 @@ Three interleaved baseline/candidate pairs give p95:
 | 2 | 1.725ms | 3.172ms |
 | 3 | 1.776ms | 3.132ms |
 
-The exact final runtime source repeats at3.175ms p95. Both the<=8ms absolute
+The exact final0.3.0 runtime source repeats at3.407ms p95. Both the<=8ms absolute
 and<=2ms additional-cost targets pass. Focus-only iterations assert no layout
 or item rebuild. Across520 frames:131 composed layouts,258 item builds
 (128 initial +130 toggles) and16,510 item-cache hits. Cache-hit paths do not
