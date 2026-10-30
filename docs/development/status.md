@@ -157,6 +157,12 @@ small-error-body usage boundary before claiming complete failure accounting.
 #47 incremental aggregate design requires separate agreement before implementation;
 the latest issue comment supersedes its original read-time scan proposal.
 Parallel index/index-CLI files are outside this worktree's edit scope.
+The latest #47 scope excludes all embedding/standalone RAG accounting and its
+previous hook plan; expose out_of_scope/not_recorded, not zero. Only normal/
+summary requests and separate Run/model/shell time remain. The revised proposal
+is explicitly unadopted; period-edge precision/partial coverage, fact lifetime,
+schema/budgets and full implementation still need leader approval. No #47 code,
+schema or tests are implemented.
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 

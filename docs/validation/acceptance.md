@@ -182,6 +182,26 @@ planned #52 behavior require fresh combined checks.
 
 
 
+## #47 Model-Only Scope: Not Implemented Or Validated
+
+The explicitly approved scope covers normal/summary model-request usage and
+Run/model/shell time across Turn/Run/Thread/children. All embedding recording and
+standalone RAG are excluded; acceptance must verify out_of_scope/not_recorded
+coverage with no known-zero token totals, request counts or unused aggregate
+rows. The index/index-CLI hook plan and embedding-side shared HTTP wiring are
+withdrawn. Those producers require a later separately authorized follow-up.
+
+The model non-2xx extension still requires known/partial/unknown tests with
+unchanged diagnostic classification, redaction and 64KiB limit, including shared
+catalog/embedding caller regressions without changing their APIs. Period-edge
+precision/partial coverage, fact reclamation, missing-finish-after-GC, bounded
+initialization/fair maintenance, exact-once terminal updates and large indexed
+query/VM-step checks remain planned, not passed. The complete design is pending
+leader approval; no #47 production, schema or regression implementation is claimed.
+#49's exact native gate is independent and must succeed before #47 joins main.
+
+
+
 ## Standard Usage Persistence And Scalar Reads (#49)
 
 On macOS arm64 / pinned Rust 1.99.1, clean exact source

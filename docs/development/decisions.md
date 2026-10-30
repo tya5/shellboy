@@ -2,6 +2,26 @@
 
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
+## Model-Only Accounting Scope (#47, 2026-10-30, Active)
+
+The latest user-approved scope excludes all embedding usage recording from #47.
+Cover normal/summary model requests, successful/non-successful/unknown usage,
+separate Run/model/shell time and Turn/Run/Thread/child-Thread totals. Expose
+embedding and standalone RAG coverage as out_of_scope/not_recorded, never known
+zero or a fake empty aggregate. Do not create unused embedding rows/columns or
+combine standalone RAG's separate DB with owner statistics. Keep categories
+extensible without implementing an unrequested producer.
+
+Do not edit index/index-CLI files. The embedding hook plan and measured embedding
+HTTP API are withdrawn; a separate small follow-up waits for parallel #42/#43/#55
+main adoption. Keep only the proposed model non-2xx typed extension, preserving
+shared diagnostic wrappers, error classification, redaction and body limits.
+This isolates integration risk without disguising missing measurements. Revisit
+only with explicit follow-up authorization. Arbitrary-period precision/partial
+coverage, fact retention, exact schema/budget and the full #47 design still need
+leader approval; this scope decision alone is not implementation authorization.
+
+
 ## Standard Usage Scalar Boundary (#49, 2026-10-30, Active)
 
 The leader adopts five independent optional u64 measurements, restricted to

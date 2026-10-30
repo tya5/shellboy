@@ -58,3 +58,23 @@ large unknown nested details, all three readers, saved whitelist-only usage,
 completed/failed/incomplete/summary responses, null/invalid values and signed
 64-bit boundaries. Model behavior at task boundaries requires later real-model
 dogfood; mocks and guide wording cannot establish it.
+
+## Adopted #47 Scope, Pending Aggregate Design
+
+The latest explicit scope decision limits #47 to normal/summary model-request
+usage (success, non-success and per-field unknown), separate Run/model/shell time,
+and existing Turn/Run/Thread/child-Thread totals. Embedding indexing/query usage
+and standalone RAG are out of scope. Their public coverage must say out_of_scope
+with reason not_recorded, with no invented zero totals or request counts. Do not
+add unused embedding aggregate rows/columns. Do not mix standalone RAG's separate
+DB into owner statistics. A later small follow-up may add hooks after parallel
+#42/#43/#55 index work lands; no such hook or index/index-CLI edit is authorized here.
+
+Only the model non-2xx typed measurement extension remains proposed, preserving
+existing error diagnostics, redaction and the 64KiB limit. Wiring shared HTTP
+measurements into embedding is withdrawn from this scope. Period precision/
+partial coverage, measurement retention and the complete aggregate design remain
+pending leader approval; this scope decision does not authorize implementation.
+See the [revised proposal](../development/issue-47-design-proposal.md), which
+separates accepted directions from open tradeoffs. #49 native success is a separate
+gate before any #47 change can join main.
