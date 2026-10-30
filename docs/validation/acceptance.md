@@ -1,5 +1,63 @@
 # Validation record
 
+## v0.3.0 preparation (#62)
+
+Single-conversation preparation, macOS arm64/Rust1.99.1, initially based on
+96bcd16. Local standard: Rust7groups1611pass/0fail/31ignore, layout88/Python6,
+fmt/strictClippy, exit0; version0.3.0. Latest-main rebase/standard and exact-SHA
+native CI precede candidate artifacts. Tag/publication/installed update are not
+part of this permission. Package Cargo.lock changes only its own version.
+
+### Public v0.2.0 upgrade fixture
+
+Anonymous curl (--disable, no authorization header) downloaded the public
+v0.2.0 macOS archive and SHA256SUMS from GitHub Releases. Archive SHA256:
+`4f9d08cd9d327296177a4553ba45cff56c01edce708039418ed0750099010666` matches
+the downloaded checksum. Executable reports0.2.0 and creates conversation DB11.
+The verification uses no user DB, real conversation, credentials or paid API.
+
+A private bounded Python harness owns real120x40 macOS PTYs and a local
+Responses/embedding server. It clears inherited SHELLBOY_* context and supplies
+explicit temporary config/data paths. The old binary itself creates synthetic
+conversations, indexes and queued machine input to a recovery-wait Thread.
+Before stopping:21 saved nodes,8 observed indexed chunks,1 held input and1
+recovery-wait Turn. A registered synthetic text folder is keyword-indexed into
+standalone RAG3. The initial manual-ingest attempt used an unregistered source
+scope; the corrected fixture uses public source add/index commands.
+
+To preserve committed recovery/pending facts, hard-stop the old owner after
+fixture adoption rather than let normal shutdown terminalize them. No OS side
+effect is left active. After exit, use read-only SQLite backup to include committed
+WAL in a separate upgrade copy; explicitly close/finalize backup connections and
+use DELETE journaling on that copy before the new owner establishes WAL. An early
+read-only backup probe lacked finalized WAL side files; this was a harness issue,
+not a failed product migration. Original fixture stores are retained separately.
+This is restart/crash-recovery qualification, not a clean old-TUI shutdown test.
+No attachments/managed-file migration or real provider behavior is covered.
+
+With old compact_hint_tokens still present,0.3.0 PTY startup reports that key
+and schema remains11. Remove the key: owner starts, DB becomes14,
+integrity_check=ok/foreign_key_check empty. Retained conversation semantic search
+and scoped history keyword search pass. Held input remains held. usage get counts
+old usage11 input tokens, then2 completed requests after a new mock send. Independent
+RAG keyword search passes and its schema remains3. New owner shuts down normally
+with exit0; old0.2.0 read-only history retrieval refuses upgraded schema14.
+All five Responses and twelve embedding calls hit the synthetic loopback only.
+
+### Native archives and publication boundary
+
+The release workflow candidate_ref accepts an exact main SHA, with release_tag
+only its version label. Candidate build/assembly have read-only repository
+permission; publish is conditional on absence of candidate_ref. Static YAML,
+embedded Python syntax and guard checks pass; actual skipped-job/native results
+are confirmed by the preparation run. Python3.12 is selected for safe tar extraction.
+Each runner extracts its own archive and invokes --version/--help/docs list from
+that packaged binary, checking files; assembly checks exactly3 archives and writes
+SHA256SUMS. These are native CLI smokes, not physical-terminal/UI qualification
+on every OS. Ordinary main three-OS tests are a separate exact-SHA gate.
+Final SHA/run links/archive hashes belong to issue62 and the final report; a
+rebuild changing bytes needs requalification. No v0.3.0 tag/Release is created.
+
 ## #61 documentation qualification
 
 Single-conversation docs-only worktree, base16c8934, macOS arm64/Rust1.99.1.

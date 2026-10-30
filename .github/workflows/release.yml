@@ -58,6 +58,9 @@ jobs:
         with:
           ref: ${{ inputs.candidate_ref || format('refs/tags/{0}', inputs.release_tag || github.ref_name) }}
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install pinned native Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
       - uses: Swatinem/rust-cache@v2
