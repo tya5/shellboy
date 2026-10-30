@@ -269,3 +269,25 @@ thread.create/set/fork accept optional `agents`; thread.get returns required
 `agents_path`. Existing protocol 2 is retained for this pre-1.0 additive change.
 See [the reference contract](agents-reference.md) for validation, relative paths,
 atomic mutation and context_changed/agents_reference delivery.
+
+
+## Pending Input Operations (#52)
+
+Adopt [pending messages](pending-messages.md). `message.send` accepts optional
+`now: bool` (default false); its typed MessageAccepted result reports `now` as
+the explicit foreground-release choice. Normal input queues at the next request
+boundary. Neither mode cancels response generation.
+
+`message.cancel` is a receipt-backed database mutation with `message_ids`, a fixed
+list of1..128 distinct nonempty IDs. Its `items` retain each ID and typed outcome
+(cancelled, already_cancelled, already_admitted, not_found, forbidden, unavailable),
+with optional thread_id/archive_draft_id. Per-ID domain failures permit partial
+success; a storage failure rolls back the transaction. Models can cancel only
+their sender Thread's input; humans can cancel any sender. Admission/path facts
+are checked in that transaction. Replay returns the original saved result.
+Internal receipt metadata is projected by its saved assignment fields, without
+relaxing public DTO unknown-field rejection or losing the immutable assignment.
+
+Human Turn interruption is deliberately an in-process TUI operation, not a new
+model wire command. Exact Turn targeting, durable intent, Run-stop priority and
+model notification follow the adopted design; existing lifecycle enums remain.

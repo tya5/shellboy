@@ -110,3 +110,15 @@ The [per-Thread instruction reference contract](agents-reference.md) supersedes
 previous fixed-reference wording: explicit create/set/fork selection is allowed,
 while cwd changes alone never rediscover instructions and same-Turn retry
 continues using its durable snapshot.
+
+
+## Pending Input (#52)
+
+`message send` queues ordinary input. `message send --now` explicitly releases a
+foreground shell wait; it does not stop the process or cancel response generation.
+`message cancel --message ID [--message ID ...]` uses fixed IDs (maximum128) and
+returns per-message outcomes and restore archive references in the standard JSON
+envelope. It never means all messages arriving before execution. See the
+[pending-input contract](pending-messages.md) and protocol for authority/replay.
+No CLI Turn-interrupt option is introduced; TUI Esc and full Run stop remain
+distinct operations.

@@ -115,7 +115,13 @@ Normal configured send key and CLI send queue at the next tool-group/request
 boundary without releasing a foreground shell. `message send --now` explicitly
 releases that wait; its process continues and the next model input receives the
 saved messages. Persist the bounded delivery-mode fact with the receipt/result
-and operation fingerprint. Human and model CLI follow the same rule.
+and operation fingerprint. MessageAccepted exposes typed `now: bool`, optional
+on input with default false; current acknowledgements serialize it directly.
+Receipt result metadata may additionally contain cancellation facts, so message
+get reads the typed saved assignment projection rather than parsing that internal
+record as a strict public acknowledgement. Public unknown-field rejection stays
+intact. Operation replay retains the original acknowledgement, while message get
+reports the current saved delivery state. Human and model CLI follow the same rule.
 
 TUI Ctrl+Enter sends now unless Ctrl+Enter is configured as the ordinary send
 key. Ctrl+X then Ctrl+S always offers immediate delivery while the composer owns
@@ -169,7 +175,13 @@ Acknowledgement terminalizes only that Turn, settles its already-admitted event
 deliveries (not genuinely later completions), repairs admitted receipts, and
 carries its known unadmitted input to a new same-Run Turn without reassigning
 original receipt/node provenance. The factual context_changed interruption marker
-is admitted once before carried/new input. It records the actual new Turn ID,
+is admitted once before carried/new input. Its phase uses positive evidence:
+`model_attempt_interrupted` only when a saved cancelled attempt has the human
+interruption cause; otherwise `turn_interrupted`. Historical adopted tool groups
+are exposed independently as `had_adopted_groups`, never as proof of the current
+phase. The marker always explains that unadopted response content is audit-only
+and absent from model history, alongside the authority of actual saved tool
+results and continuing execution IDs. It records the actual new Turn ID,
 carried count, up to 128 receipt/message/original-assignment source facts, explicit
 truncation, and first/last carried message IDs. Each carried receipt retains its
 immutable original assignment and adds bounded delivery_context in its existing

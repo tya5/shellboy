@@ -127,3 +127,20 @@ from response acknowledgement and original immutable assignment. Startup-only
 migration13 uses saved positive admission evidence and marks other prior facts
 unknown; Core reads the current column only. The existing state machine, tables,
 worker ownership and payload accounting remain. See [message recovery](message-recovery.md).
+
+
+## Pending Input And Turn Intent (Schema14, #52)
+
+`0014_turn_interrupt` adds nullable turn.interrupt_requested_at and ordinary
+draft indexes for state/Thread/newest-ID reads and submitted source-revision
+watermarks. Fresh schema and the complete migration chain describe the same
+columns/indexes. No table, durable queue version or new lifecycle state is added.
+
+Existing draft rows hold separate frozen submitting/submitted snapshots and
+archived cancellation source references. Submitted metadata binds operation ID,
+source draft/revision and accepted message; editable rows remain independent.
+Raw draft text and serialized metadata have separate bounded budgets as specified
+in [pending messages](pending-messages.md). Existing full-payload byte accounting
+and GC ownership remain effective. receipt.result_json stores explicit now and
+bounded cancellation/delivery-context facts; original assignments stay immutable.
+Historical admission classification remains isolated in migration13.

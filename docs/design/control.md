@@ -393,3 +393,19 @@ acknowledgement and selected-path admission, shared terminal repair and explicit
 resume provenance. Adopt [tool cancellation reasons](tool-cancel-reasons.md) for
 saved causes and observed prerequisites; neither change authorizes replay of
 OS side effects or a new automatic foreground timeout.
+
+
+## Pending Input And Human Turn Interruption (#52)
+
+Follow [pending messages](pending-messages.md) for receipt-backed cancellation,
+frozen send correlation and paired reactive history/queue reads. Ordinary sends
+quietly nudge existing drivers; explicit now releases only an unadmitted pending
+foreground wait. Cancellation never wakes a model.
+
+Human Turn interruption targets an exact saved Turn. The existing registry lock,
+Turn binding and native-start gate fence publication/creation with intent commit;
+DB callbacks never acquire those locks. Run stop/shutdown retain priority. The
+Turn stays active until adopted tool/result pairs are complete, then ends through
+normal next() completion with owned background work preserved. One existing
+context_changed marker describes interruption and bounded carried provenance
+before new input. No independent job engine, poller, worker or queue is added.

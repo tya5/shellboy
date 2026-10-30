@@ -38,3 +38,20 @@ APIの成否は結果の描画処理より前に返し、既に適用された�
 完全一致するslashコマンドは補完の既定候補の先頭に置く。`/cancel` のEnterが登録順で
 `/cancel-wait` の補完に化けないようにする。未完成prefixのTab/Enterは候補の展開だけで実行せず、
 上下キーで明示選択した候補は完全一致の既定優先より優先する。
+
+## Saved message ownership and recovery (#52)
+
+[Pending messages](pending-messages.md) supersedes the earlier message-send
+snapshot lifetime rules above: a frozen operation-correlated submission uses a
+separate existing draft row, while newer editable revisions remain independent.
+The local accepting row transfers to a paired DB history/queue projection, using
+operation/source-revision correlation even when Changed arrives before ACK.
+Slash-operation restoration retains its existing local policy. `/restore list`
+and `/restore draft ID` add durable archives; argumentless context restoration
+is unchanged. Restore callbacks use composer identity/revision/generation CAS
+and preserve canonical attachment positions and available frozen folds.
+
+Normal send waits at a boundary; explicit immediate delivery uses Ctrl+Enter
+unless configured as ordinary send, or Ctrl+X then Ctrl+S. Composer focus changes
+reset the chord. Esc dismissal takes priority over exact-Turn interruption;
+Ctrl+C remains full Run stop. The queue uses the shared popup/list/reader layout.

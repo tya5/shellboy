@@ -26,6 +26,12 @@ the process remains alive when another consumer reads the history.
 | `tool_group_validation_failed` | Preflight rejected another call before any OS side effect. |
 | `owner_shutdown_before_call` | Owner shutdown closed new starts before this call. |
 | `run_stopped_before_call` | Run cancellation was observed before this call. |
+| `human_turn_interrupted` | A human interrupted this Turn; unstarted calls remain unexecuted, while a foreground result with observed running state retains its continuing execution ID. |
+| `previous_turn_interrupted` | The prerequisite foreground wait was released by human Turn interruption. |
+
+The two Turn-interruption reasons are added by #52. Their UI labels distinguish
+human Turn interruption from full Run stop; the saved result status still
+determines whether this call ran or a prerequisite continued in the background.
 
 Classification follows the existing halt decision. Explicit foreground-release
 reasons precede output/terminal classification; otherwise incomplete output

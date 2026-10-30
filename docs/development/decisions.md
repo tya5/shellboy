@@ -1240,3 +1240,17 @@ old messages or adding a recovery scheduler.
   send-key configuration wins over the Ctrl+Enter convenience; the two-key chord
   remains available. Timed automatic backgrounding stays deferred by the latest
   #56 decision, avoiding an unrelated timer/configuration mechanism.
+
+
+## Published Message Recovery Review (#53, 2026-10-30)
+
+Review of main b686ec1 reports no Medium issue and approves closing the Core
+work after exact-SHA three-OS CI. Track unknown historical admission explicitly
+in #52 with synthetic list/cancel/restore verification; do not auto-replay it.
+Retain the two factual existing reason codes: Thread deletion says
+target_unavailable, while general terminal repair may report target or source
+unavailable. No alias/compatibility layer is needed merely to unify wording.
+The five-millisecond polling in a few isolated recovery fixtures observes saved
+state under a sixty-second watchdog; it is not product polling or elapsed-time
+correctness. Prefer existing Changed notifications when next editing those
+fixtures, rather than broadening this fix into an unrelated test rewrite.

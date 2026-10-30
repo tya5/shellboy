@@ -180,3 +180,15 @@ The serial tool-group driver saves structured cancellation facts described in
 `executed: false`, and known prerequisite call/execution/state/exit facts. It
 preserves the existing halt decisions and does not add a foreground timeout or
 stop a shell merely because its foreground wait was released.
+
+
+## Explicit Input Release And Turn Interrupt (#52)
+
+Ordinary messages leave foreground waits intact. Explicit send-now uses saved
+receipt metadata and requires accepted/unadmitted/unselected input; already
+admitted receipts cannot release a later call. Human Turn interruption releases
+a running foreground wait without stopping its process and prevents unstarted
+calls through the shared native-start gate. Saved reasons distinguish this from
+full Run stop and ordinary failure. Background completions keep their existing
+shell_ended delivery. See [pending messages](pending-messages.md) for exact
+ownership, ordering and partial-output retention; no timed backgrounding is added.
