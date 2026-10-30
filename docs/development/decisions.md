@@ -1716,3 +1716,21 @@ and constrain binding.target_thread_id before JSON checks. Reuse receipt_target;
 no migration/new index is needed. EXPLAIN QUERY PLAN must show SEARCH binding
 USING INDEX receipt_target(target_thread_id=?), not SCAN binding. A receipt in
 another Thread is not a watermark for the selected Thread's editable draft.
+
+
+## #41 D1: verify physical query shape, not statement count (2026-10-31)
+
+The first integrated P3 trace46963c9 reduced176→26 SQL executions but increased
+VM work16,602→61,255. A kind filter let SQLite drive the modern selector from
+nodes_retention and repeatedly scan the requested JSON IDs. Force requested IDs
+outermost with an ordinary CROSS JOIN and existing node PK lookup; retain the
+kind filter and add a bundled-SQLite unrelated-node scaling regression. Python
+full-schema isolation measures selector30,146→4,037 VM steps; this guides the
+change but does not substitute for native requalification.
+
+Also filter user candidates only after the materialized128-member title prefix,
+then run the byte-budget window over those candidates. Retain a singleton status
+witness for zero users so path/pending exhaustion is still explicit. The synthetic
+128-nonuser case drops15,953→3,336 VM steps in the Python probe. This changes no
+source ordering, copy budget, title authority or public contract. Requalify native
+before/after results rather than reporting fewer SQL statements as a speedup.

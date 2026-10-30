@@ -230,6 +230,8 @@ pub(super) fn read_tx(
 
 // The requested source identities are one SQL input set. JSON functions select
 // only fixed metadata fields; provider bodies are never copied into this batch.
+// Requested IDs must stay outermost: a kind-index-first plan repeatedly scans
+// json_each and makes unrelated retained tool nodes part of this bounded read.
 const MODERN_NODE_BATCH_SQL: &str = r"
 WITH requested AS (SELECT CAST(key AS INTEGER) AS position,value AS node_id FROM json_each(?1))
 SELECT requested.position,n.id,n.kind,
@@ -241,7 +243,7 @@ SELECT requested.position,n.id,n.kind,
    EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.output')='array' THEN json_extract(n.payload_json,'$.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
    OR EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.response.output')='array' THEN json_extract(n.payload_json,'$.response.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
  ELSE 0 END
-FROM requested JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result') ORDER BY requested.position";
+FROM requested CROSS JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result') ORDER BY requested.position";
 
 // One bounded ordered seek per actual group member. Unlike row_number over a
 // group join, this never reads every call merely to retain its first129 rows.

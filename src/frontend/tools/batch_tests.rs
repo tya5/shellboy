@@ -390,3 +390,53 @@ fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan()
         "{plan:?}"
     );
 }
+
+#[test]
+fn modern_selector_seeks_requested_ids_before_filtering_node_kind() {
+    use rusqlite::StatementStatus;
+
+    let mut db = fixture();
+    let ids =
+        serde_json::to_string(&(0..50).map(|n| format!("result-{n}")).collect::<Vec<_>>()).unwrap();
+    let measure = |db: &Connection| {
+        let mut statement = db.prepare(MODERN_NODE_BATCH_SQL).unwrap();
+        let selected = statement
+            .query_map([&ids], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            selected,
+            (0..50).map(|n| format!("result-{n}")).collect::<Vec<_>>()
+        );
+        statement.get_status(StatementStatus::VmStep)
+    };
+    let small = measure(&db);
+    let tx = db.transaction().unwrap();
+    for n in 0..10_000 {
+        // Same eligible kind: the kind index must not widen source discovery.
+        tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','tool_result','now','{}')",[format!("unrelated-selector-{n}")]).unwrap();
+    }
+    tx.commit().unwrap();
+    let large = measure(&db);
+    assert!(
+        large <= small + 100,
+        "requested-ID work must not scale with unrelated eligible nodes: {small} -> {large} VM steps"
+    );
+    let plan = db
+        .prepare(&format!("EXPLAIN QUERY PLAN {MODERN_NODE_BATCH_SQL}"))
+        .unwrap()
+        .query_map([ids], |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        plan.iter()
+            .any(|step| step.contains("sqlite_autoindex_node_1") && step.contains("id=?")),
+        "{plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|step| step.contains("nodes_retention")),
+        "{plan:?}"
+    );
+}

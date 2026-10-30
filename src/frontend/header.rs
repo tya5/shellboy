@@ -43,7 +43,7 @@ const PATH_PREFIX: &str = "prefix AS MATERIALIZED (
 ), witnesses AS MATERIALIZED (
     SELECT b.position,n.id,n.kind,n.kind='user' AS eligible,
            CASE WHEN n.kind='user' THEN octet_length(n.payload_json) END AS bytes
-    FROM bounded b JOIN node n ON n.id=b.node_id
+    FROM bounded b JOIN node n ON n.id=b.node_id WHERE n.kind='user'
 )";
 
 // Per-state prefixes seek receipt_target. Final ordering on the bounded union
@@ -67,7 +67,7 @@ const PENDING_PREFIX: &str = "accepted AS MATERIALIZED (
     SELECT row_number() OVER (ORDER BY created_at,node_row) AS position,
            node_id AS id,kind,eligible,
            CASE WHEN eligible THEN (SELECT octet_length(n.payload_json) FROM node n WHERE n.id=ordered.node_id) END AS bytes
-    FROM ordered
+    FROM ordered WHERE eligible
 )";
 
 pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, StorageError> {
@@ -119,18 +119,20 @@ fn read_candidates(
     } else {
         "(SELECT count(*) FROM prefix)>128"
     };
-    // Window work is over at most128 membership entries, never the full source.
+    // Filter only after the materialized membership prefix. Window work then
+    // covers real user candidates, never every non-user row or the full source.
+    // A singleton left join retains the overflow witness even with no users.
     // A skipped large source is a missing witness, not permission to choose a
     // later title. Never materialize an uncapped payload inside a CTE.
     let sql = format!("WITH {prefix}, budgeted AS (
         SELECT *,sum(CASE WHEN eligible AND bytes<=?2 THEN bytes ELSE 0 END)
                     OVER (ORDER BY position ROWS UNBOUNDED PRECEDING) AS used
         FROM witnesses
-    ) SELECT eligible,
+    ) SELECT COALESCE(eligible,0),
         CASE WHEN eligible AND bytes<=?2 AND used<=?3 THEN (SELECT n.payload_json FROM node n WHERE n.id=budgeted.id) END,
-        eligible AND bytes IS NOT NULL AND (bytes>?2 OR used>?3),
+        COALESCE(eligible AND bytes IS NOT NULL AND (bytes>?2 OR used>?3),0),
         ({overflow})
-      FROM budgeted ORDER BY position");
+      FROM (SELECT 1) LEFT JOIN budgeted ON 1 ORDER BY position");
     let mut result = Candidates::default();
     let mut statement = db.prepare(&sql)?;
     let rows = statement.query_map(
@@ -340,7 +342,7 @@ mod tests {
             input(&tx,"outside","not a proven first request",true,"now","applied")?;
             let raw=read_tx(&tx,"t")?;
             let witness=raw.title.as_ref().unwrap();
-            assert_eq!(witness.path.rows.len(),PREFIX_ROWS);
+            assert_eq!(witness.path.rows.len(),1,"one empty status witness instead of128 non-user rows");
             assert!(witness.path.truncated);
             assert_eq!(witness.path.copied,0);
             assert_eq!(raw.prepare().title,LIMITED);
@@ -395,7 +397,7 @@ mod tests {
             input(&tx,"after-nonuser-prefix","must not scan through the whole pending queue",false,"zzzz","held")?;
             let raw=read_tx(&tx,"t")?;
             let pending=&raw.title.as_ref().unwrap().pending;
-            assert!(pending.truncated && pending.rows.len()==PREFIX_ROWS && pending.copied==0);
+            assert!(pending.truncated && pending.rows.len()==1 && pending.copied==0);
             assert_eq!(raw.prepare().title,LIMITED);
             tx.commit()?;Ok(())
         }).await.unwrap();
