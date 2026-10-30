@@ -6,7 +6,7 @@
 
 モデル応答は `assistant_response` nodeのJSONに元のoutput配列とmetadataを保持する。個別tool resultは `function_call_output` を持つ後続nodeにする。`group_id` があれば保存されたtool_group/tool_call/tool_resultと対応させる。forkは指定nodeまでのprefixを共有し、未対応callが一つでも残るprefixは拒否する。これにより全call/全resultを分断しない。前の正常な境界へ黙って丸めない。副作用と実行中processは引き継がず、親Runも停止しない。
 
-forkはcwd/AGENTS参照/profile/model/effort/reasoning境界と採用replacement参照、選択中経路に由来するattachment参照をコピーする。node本体は共有し、attachment実体はコピーしない。相対cwdは親cwd基準で字句的に絶対化する。任意cwdが指定された場合もAGENTS.md参照は親から継承する（原文4節、cwd変更と指示参照は別）。元Threadの後続追加・採用変更はforkへ反映されない。fork自体のparent_thread_idは系譜でありRun所有辺を作らない。
+forkはcwd/AGENTS参照/profile/model/effort/reasoning境界と採用replacement参照、選択中経路に由来するattachment参照をコピーする。node本体は共有し、attachment実体はコピーしない。相対cwdは親cwd基準で字句的に絶対化する。任意cwdだけが指定された場合もAGENTS.md参照は親から継承する。明示agents指定は下記#51契約に従って上書きする。元Threadの後続追加・採用変更はforkへ反映されない。fork自体のparent_thread_idは系譜でありRun所有辺を作らない。
 
 `select_path` は圧縮採用などのための低水準transaction関数。expected selection revisionをCASし、node存在・重複なし・DAG循環なしを検査し、必要な新edgeを追加してpath/cursorを差替える。summary→既存suffixは正当なDAG接続として受け入れる。replacement/source作成と全group境界検証は呼出し元の同transactionで行う。
 
@@ -43,3 +43,20 @@ HistoryReaderは既存Control・更新sender・描画幅の借用をまとめ、
 削除Threadの条件は既に各page入口がlive_thread_revisionを使う版を基準に照合する。場所の整理とは別に、通常page・cursor続頁・rebase・指定窓で削除済みと存在しないThreadを拒否する回帰の証拠を確認し、古いレビューのSQLとの差だけで新しい挙動修正を捏造しない。保存形式・公開CLI/UiUpdate契約は維持する。
 
 R5-2の配送先はpage用のReplyとview revisionを持つWindowReplyを区別し、成功と失敗で同じ識別値を使う。DBで返すordinal/nodeとpage metadataは名前付きの一回限りの値として投影workerへ移動する。selection revisionは既存ThreadScope::Liveのscalar getterを使う。本文を読む列の異なるUI行へ未使用のhash/revision列を追加せず、rawのpin寿命は既存shell readerに残す。明示node_idの本文窓は従来通り個別nodeの可用性で判定し、Threadの採用経路とは区別する。
+
+## Explicit instruction references (#51)
+
+The [per-Thread instruction reference contract](agents-reference.md) supersedes
+previous fixed-reference wording: explicit create/set/fork selection is allowed,
+while cwd changes alone never rediscover instructions and same-Turn retry
+continues using its durable snapshot.
+
+### Persistence-only Rust fork helpers
+
+`History::fork` and `history::fork_thread` only inherit the saved instruction
+reference. They reject any explicit `agents: Some(...)`, including an empty
+string, with invalid_argument before writes, directing callers to Control
+thread.fork. These DB-only helpers do not acquire file workers or invent an
+actor. Their returned agents_path is the actual inherited path. Product
+Control/CLI/TUI fork supports explicit references through validation, CAS and
+audit before invoking the primitive with an inherited/default argument.

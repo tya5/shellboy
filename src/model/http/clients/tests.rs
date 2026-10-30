@@ -535,6 +535,7 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
         .request(Request::new(
             format!("{}:create", owner.instance_id),
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 cwd: None,
                 parent_id: None,
                 connection: None,

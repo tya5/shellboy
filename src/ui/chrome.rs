@@ -45,6 +45,7 @@ pub(super) fn header(view: &ThreadView, width: u16, selection: bool) -> String {
     append(&view.title, title_width, false);
     append(model, usize::MAX, false);
     append(&view.cwd.to_string_lossy(), usize::MAX, true);
+    append(&format!("AGENTS: {}", view.agents_path), usize::MAX, true);
     text
 }
 
@@ -78,7 +79,14 @@ pub(super) fn welcome(
             config.ui.newline_keys.join(" / ")
         )),
         Line::from(format!("作業場所: {cwd}")),
-        Line::from("AGENTS.md: 未確認"),
+        Line::from(format!(
+            "AGENTS: {}",
+            fit(
+                &view.agents_path,
+                usize::from(width).saturating_sub(8),
+                true
+            )
+        )),
         Line::from("/ でコマンド候補 · F1 操作ガイド"),
     ]
 }
@@ -159,7 +167,7 @@ mod tests {
             "送信: Ctrl+Enter",
             "改行: Enter",
             "/synthetic/missing-workspace",
-            "AGENTS.md: 未確認",
+            "AGENTS: /synthetic/missing-workspace/AGENTS.md",
         ] {
             assert!(shown.contains(expected), "{expected}: {shown}");
         }

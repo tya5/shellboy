@@ -40,6 +40,7 @@ async fn create(store: &Store, parent: Option<String>) -> ThreadDetails {
         execute(
             store,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,
@@ -153,6 +154,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
         execute(
             &store,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 parent_id: Some(parent.thread_id.clone()),
                 cwd: Some("../child".into()),
                 connection: None,
@@ -184,6 +186,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
         execute(
             &store,
             Command::ThreadSet(ThreadSetArgs {
+                agents: None,
                 title: None,
                 thread_id: Some(id.clone()),
                 connection: None,
@@ -617,6 +620,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
 async fn first_send_creates_thread_and_message_atomically_and_retransmits_once() {
     let (_directory, store) = store().await;
     let args = ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,
@@ -750,6 +754,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let changed = execute(
         &store,
         Command::ThreadSet(ThreadSetArgs {
+            agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
             connection: None,
@@ -763,6 +768,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let changed = execute(
         &store,
         Command::ThreadSet(ThreadSetArgs {
+            agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
             connection: None,
@@ -776,6 +782,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let cleared = execute(
         &store,
         Command::ThreadSet(ThreadSetArgs {
+            agents: None,
             title: None,
             thread_id: Some(thread.thread_id),
             connection: None,
@@ -992,6 +999,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
     use shellboy::control::db::RuntimeReservation;
     let (_directory, store) = store().await;
     let create_request = request(Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,
@@ -1025,6 +1033,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
         .await
         .unwrap();
     let new_request = request(Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,
@@ -1112,6 +1121,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
 async fn old_terminal_receipt_collection_preserves_pending_and_expires_old_execution_ids() {
     let (_directory, store) = store().await;
     let create_request = request(Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,
@@ -1218,6 +1228,7 @@ async fn repeated_quota_refusals_commit_bounded_housekeeping_without_accepting_n
         tx.commit()?;Ok(())
     }).await.unwrap();
     let create_request = request(Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,
@@ -1403,6 +1414,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         33_562_624
     );
     let normal = request(Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,
@@ -1781,6 +1793,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
 async fn fresh_observations_can_reuse_a_mutation_id_without_replacing_its_saved_outcome() {
     let (_directory, store) = store().await;
     let original = request(Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,

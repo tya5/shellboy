@@ -200,6 +200,7 @@ impl Fixture {
         let thread = request(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 cwd: None,
                 parent_id: None,
                 connection: None,

@@ -22,3 +22,6 @@ handling. A design document does not establish successful verification. Check th
 
 - [Index operations](index-operations.md): actionable pause history, deterministic
   batches and explicit dimensions/probe (#42/#43/#55).
+
+- [Per-Thread instruction references](agents-reference.md): explicit selection,
+  validation, audit and new-Turn notification (#51).

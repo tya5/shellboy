@@ -158,6 +158,7 @@ impl Control {
             owner.loaded.data_dir.clone(),
             attachments.clone(),
         ));
+        let instructions = store.instructions.clone();
         Arc::new(Self {
             store,
             attachments,
@@ -170,7 +171,7 @@ impl Control {
             boundaries: Mutex::new(HashMap::new()),
             compact_tasks: Mutex::new(HashMap::new()),
             shell: ShellSupervisor::new(&config),
-            instructions: InstructionLoader::new(&config),
+            instructions,
             replay: replay::ReplayCache::new(config.cache.history_bytes),
             data_dir: owner.loaded.data_dir.clone(),
             #[cfg(unix)]
@@ -417,6 +418,7 @@ impl Control {
             text,
             files,
             ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 model: None,
                 effort: None,
@@ -1156,6 +1158,7 @@ mod failure_tests {
                     .send_draft(
                         format!("{}:barrier-send", sending.store.instance_id),
                         ThreadCreateArgs {
+                            agents: None,
                             connection: None,
                             model: None,
                             effort: None,
@@ -1190,6 +1193,7 @@ mod failure_tests {
                 .request(Request::new(
                     format!("{}:late", control.store.instance_id),
                     Command::ThreadCreate(ThreadCreateArgs {
+                        agents: None,
                         connection: None,
                         model: None,
                         effort: None,
@@ -1326,6 +1330,7 @@ mod failure_tests {
         };
         let created = control
             .request(req(Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: Some("second".into()),
                 cwd: None,
                 model: None,

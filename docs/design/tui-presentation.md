@@ -526,3 +526,8 @@ Ctrl+Lは通常UI・一覧・詳細・popup・選択固定中のどの入力所�
 選択固定中も受信更新は取り込むため、Ctrl+Lは固定時点の画面ではなく最新状態を一度描く。固定後の応答が表示され、追従中なら表示位置が進み得る。選択モードを解除せず、以降の自動描画は再び凍結する。固定時点の別bufferやsnapshotは持たない。
 
 予約はUI所有のbool一つへ集約し、キー連打やRepeatを個別jobへ積まない。既存frame時刻とmax_fpsに従う描画直前に、同じviewportでTerminal::resizeを呼び、端末画面とRatatuiの差分bufferをリセットする。固定依存版のTerminal::clearは物理cursorの照会を待つため直接呼ばず、画面の大きさを変えないfullscreen resize経路でclear相当を行う。HyperlinkBackendのclear_regionが既にinvalidatedを立てるため、同じ経路でリンク領域を再構成する。選択固定中もこの明示描画だけは許可し、固定モード自体は解除しない。周期的full repaintや新しいworker/queue/Core状態は追加しない。幅の不一致など表示ずれの発生原因そのものの解決とは区別する。
+
+Issue #51 supersedes the instruction-reference part of X19: show the saved
+AGENTS reference (or the unsaved root default) without claiming file existence
+or successful observation. `/agents` displays the full path. No UI filesystem
+observation is added.

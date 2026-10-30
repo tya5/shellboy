@@ -95,6 +95,7 @@ pub(super) async fn start(control: &Arc<Control>) -> String {
     let thread = rpc(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             model: None,
             effort: None,
@@ -465,6 +466,7 @@ async fn starting_signal_acknowledges_saved_intent_without_a_live_handle() {
     let thread = rpc(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             model: None,
             effort: None,
@@ -676,6 +678,7 @@ async fn saved_self_stop_replay_does_not_create_a_new_grace_owner_or_stop_effect
     let thread = rpc(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             model: None,
             effort: None,

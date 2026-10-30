@@ -298,6 +298,7 @@ impl Fixture {
             ipc::call(
                 &directory,
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     cwd: None,
                     parent_id: None,
                     connection: None,

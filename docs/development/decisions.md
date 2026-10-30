@@ -1108,3 +1108,72 @@ design, not an implicit change to the present read projection.
 These decisions are provisional only where endpoint support or retrieval
 quality is unknown. A failing endpoint or measured quality regression warrants
 reconsidering the user's chosen caps/dimension, not inventing a provider default.
+
+## #51: explicit AGENTS references (adopted)
+
+Explicit selection is strict and has no clearing operation. Relative paths use
+the effective target cwd, lexical normalization and revision-checked preflight.
+Only reference-change events defer to the next new Turn. This preserves existing
+settings authority and snapshots without adding a worker, queue or table.
+Revisit clearing/composition only under a separate user requirement.
+
+### #51 review: persistence and unsaved TUI selection boundaries (adopted)
+
+Keep History fork helpers DB-only: explicit references require Control, and are
+rejected rather than silently ignored by the helpers. Return inherited paths
+truthfully. Unsaved TUI selection must adopt the created Thread into the original
+draft; a generic management result is not adoption. A draft/generation-bound
+UI action/result uses the existing command slots and ordered outbox; one local
+pending request identity blocks a racing first send. No new Core event, persistent state,
+worker or queue is added. Later edits are retained; replies cannot select an
+unrelated active draft. The existing worker/shutdown owns completion.
+
+UI-to-frontend admission rejection unwraps submitted/management actions and
+releases only the matching draft/generation/request selection. Submitted slash
+text retains its normal restoration behavior. A local UUID identifies each
+pending selection (one bounded value per view) so a stale rejection or result
+cannot release a later selection in the same draft generation.
+
+## #51 external review: deterministic idle checks and deferred Low items
+
+Status: adopted follow-up to public comments
+[6511989087](https://github.com/tya5/shellboy/issues/51#issuecomment-6511989087)
+and [6512018897](https://github.com/tya5/shellboy/issues/51#issuecomment-6512018897).
+
+Idle correctness must not be inferred from a quiet receive timeout. Use the
+existing durable RunEnded boundary, compare target-scoped saved work identities
+and states before/after operation completion, and independently verify the
+settings MutationResult cannot wake a driver/retry. Keep reference-change audit
+pending without delivery/history adoption until a new Turn. No production
+behavior, table, worker, queue or test binary is added for this correction.
+
+The following are record-only Low observations, not closing conditions:
+
+- agents-only and same-path selection still increments profile_revision through
+  the shared settings update, so an admitted preparation may be discarded and
+  rebuilt before POST. Preserve this existing behavior for #51; revisit separate
+  revision domains only in a future scoped change with admission-race coverage.
+- create/fork override audit reports the default/inherited reference as before,
+  even if this new Thread never used it. This is the adopted audit contract;
+  revisit initial-reference wording/delivery only with an explicit UX decision.
+- optional argument fields require changes across constructor literals because
+  not every argument struct implements Default. Defer that ergonomics refactor;
+  it is outside #51's production scope and must not obscure behavioral changes.
+
+Publication dependency: #46 lands before #51 is rebased onto origin/main.
+Adapt existing regressions to #46's resulting layout, then repeat standard
+checks. Do not preemptively transplant or resolve conflicts while #46 is absent.
+This records ordering, not permission to push, post to GitHub, update main or
+replace installed binaries. Physical-terminal verification remains unclaimed.
+
+## #48: attach provenance to the actual instruction message (adopted)
+
+Choose proposal (a): prepend one source/snapshot metadata line to the AGENTS
+developer message, not another system instruction or authority/permission layer.
+This keeps provenance adjacent to the body even when the Agent Guide is unread.
+JSON-quote the fixed Turn snapshot path and escape controls/line separators;
+append one LF and the unmodified body. Preserve all snapshot storage and roles.
+The guide explains configured-reference inheritance/override independently of
+cwd and requires explicit permission for edits, without promising automatic
+exceptions to other higher-priority instructions. Model behavior improvement
+requires later dogfood/real-model observation; mocks prove request contents only.

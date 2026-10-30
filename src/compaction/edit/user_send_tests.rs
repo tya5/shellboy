@@ -19,6 +19,7 @@ async fn accepted_user_message_advances_selection_and_rejects_a_late_context_edi
     let request = Request::new(
         format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,

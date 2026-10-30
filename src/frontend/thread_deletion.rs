@@ -270,6 +270,7 @@ mod tests {
             request(
                 &control,
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     parent_id: None,
                     cwd: None,
                     connection: None,
@@ -306,6 +307,7 @@ mod tests {
         let child = request(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 parent_id: Some("thread".into()),
                 cwd: None,
                 connection: None,
@@ -631,6 +633,7 @@ mod tests {
             request(
                 &control,
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     parent_id: None,
                     cwd: None,
                     connection: None,
@@ -669,6 +672,7 @@ mod tests {
             request(
                 &control,
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     parent_id: None,
                     cwd: None,
                     connection: None,
@@ -690,6 +694,7 @@ mod tests {
         let child = request(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 parent_id: Some("thread".into()),
                 cwd: None,
                 connection: None,

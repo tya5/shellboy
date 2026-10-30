@@ -40,6 +40,7 @@ async fn thread(store: &Store) -> String {
             request(
                 &store.instance_id,
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     parent_id: None,
                     cwd: None,
                     connection: None,
@@ -147,6 +148,7 @@ async fn stopping_thread_remains_observable_when_context_metrics_are_temporarily
         .request(request(
             &owner.instance_id,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 cwd: None,
                 connection: None,
                 model: None,
@@ -607,6 +609,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
     let saved_request = request(
         &control.store.instance_id,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             parent_id: None,
             cwd: None,
             connection: None,
@@ -783,6 +786,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
     let create = request(
         "first",
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             parent_id: None,
             cwd: None,
             connection: None,
@@ -908,6 +912,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
     let original = request(
         "first",
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             parent_id: None,
             cwd: None,
             connection: None,
@@ -923,6 +928,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
     let rejected = request(
         "first",
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             parent_id: None,
             cwd: None,
             connection: None,
@@ -1036,6 +1042,7 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
         .request(request(
             &owner.instance_id,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 cwd: None,
                 connection: None,
                 model: None,

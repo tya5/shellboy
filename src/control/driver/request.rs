@@ -167,6 +167,29 @@ pub(super) fn model_client(
     };
     Ok(client)
 }
+fn instruction_message(source: &std::path::Path, body: &str) -> Result<String, ApiError> {
+    use std::fmt::Write;
+    let source = source.to_str().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::InvalidState,
+            "Instruction snapshot source path is not UTF-8",
+        )
+    })?;
+    let quoted = serde_json::to_string(source).expect("a string serializes as JSON");
+    let mut safe = String::with_capacity(quoted.len());
+    // JSON escapes C0 controls; also cover DEL/C1 and Unicode line separators.
+    for ch in quoted.chars() {
+        if ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}') {
+            write!(safe, "\\u{:04x}", u32::from(ch)).expect("writing to String cannot fail");
+        } else {
+            safe.push(ch);
+        }
+    }
+    Ok(format!(
+        "Working instructions from {safe} (user-editable; re-read at each new Turn start; same-Turn retries use the saved snapshot):\n{body}"
+    ))
+}
+
 pub(super) fn prepare_request(
     snapshot: &Snapshot,
     instruction_body: Option<&Arc<str>>,
@@ -176,7 +199,7 @@ pub(super) fn prepare_request(
         json!({"role":"system","content":[{"type":"input_text","text":"You are Shellboy, a native personal agent. A Thread is a continuing conversation; a Turn is one response interval; a Run owns its shells and child Runs, and may outlive a completed Turn. Execute your own commands by calling the shell function directly. shellboy message send delivers conversation text; it does not execute that text as a shell command. Sending to your own Thread adds input to your current conversation, not a separate agent. A shell tool result's execution_id always identifies the process started by that call, including a CLI process; that process's stdout may itself be JSON. For background work, take the returned execution_id and observe it in a later shell call. Use shellboy shell get --execution ID to check the actual command, cwd, Thread, Run and Turn before diagnosing unexpected output. CLI IDs require named flags, not positional arguments; consult the specific subcommand --help before guessing syntax. Guides are bundled with the executable: use shellboy docs list or shellboy docs search --query TEXT, then shellboy docs get --id ID to read the relevant guide before unfamiliar operations, especially delegation. No repository path is required. Use shellboy --help and shellboy history commands to inspect state, send messages, create children, wait, attach files and retrieve original history. Report actual results and errors. Commands share filesystem access; histories and cwd are per Thread."}]}),
     ];
     if let Some(body) = instruction_body {
-        input.push(json!({"role":"developer","content":[{"type":"input_text","text":&**body}]}));
+        input.push(json!({"role":"developer","content":[{"type":"input_text","text":instruction_message(&snapshot.agents, body)?}]}));
     }
     if let Some(replay) = &snapshot.input {
         crate::control::attachment_input::bind(replay, prepared, &mut input)?;
@@ -251,5 +274,42 @@ impl Snapshot {
         crate::attachments::adopt_prepared_tx(tx, attempt_attachments, attempt_id)
             .map_err(crate::storage::StorageError::from)?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod instruction_header_tests {
+    use super::*;
+
+    #[test]
+    fn instruction_header_is_one_safe_line_and_body_bytes_are_unchanged() {
+        let source = "/synthetic/role\"\\\n\r\t\u{007f}\u{0085}\u{2028}\u{2029}.md";
+        let body = "unchanged 日本語\r\n\nsecond line\u{0001}";
+        let message = instruction_message(std::path::Path::new(source), body).unwrap();
+        let (header, actual) = message.split_once('\n').unwrap();
+        assert_eq!(actual.as_bytes(), body.as_bytes());
+        assert!(
+            !header
+                .chars()
+                .any(|ch| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
+        );
+        let quoted = header.strip_prefix("Working instructions from ").unwrap()
+            .strip_suffix(" (user-editable; re-read at each new Turn start; same-Turn retries use the saved snapshot):").unwrap();
+        assert_eq!(serde_json::from_str::<String>(quoted).unwrap(), source);
+        for escaped in [
+            "\\n", "\\r", "\\t", "\\u007f", "\\u0085", "\\u2028", "\\u2029",
+        ] {
+            assert!(header.contains(escaped), "{escaped}: {header}");
+        }
+    }
+
+    #[test]
+    fn present_empty_instructions_keep_an_empty_body_after_the_header() {
+        let message = instruction_message(std::path::Path::new("/role.md"), "").unwrap();
+        assert_eq!(
+            message,
+            "Working instructions from \"/role.md\" (user-editable; re-read at each new Turn start; same-Turn retries use the saved snapshot):\n"
+        );
+        assert_eq!(message.split_once('\n').unwrap().1, "");
     }
 }

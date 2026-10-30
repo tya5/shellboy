@@ -262,3 +262,10 @@ segment count, state/selection and `vector_payload_bytes`. Payload bytes mean
 float32 values only, not database/WAL or reclaimable storage. Missing historical
 pause time remains unknown. Probe observations are per endpoint/model/request
 mode, not a provider capability catalogue. See [index operations](index-operations.md).
+
+## Instruction references (#51)
+
+thread.create/set/fork accept optional `agents`; thread.get returns required
+`agents_path`. Existing protocol 2 is retained for this pre-1.0 additive change.
+See [the reference contract](agents-reference.md) for validation, relative paths,
+atomic mutation and context_changed/agents_reference delivery.

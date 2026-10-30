@@ -178,6 +178,7 @@ base_url="http://127.0.0.1:1/v1"
             request: Request::new(
                 format!("{}:{number}", owner.instance_id),
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     connection: None,
                     cwd: None,
                     model: None,

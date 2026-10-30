@@ -1,6 +1,11 @@
 # Development status
 
-## Issues #42/#43/#55: local implementation verified; native CI pending
+## Issues #42/#43/#55: combined validation pending with `c0f1ad9`
+
+Origin/main `c0f1ad9`, containing #48/#51, is now merged into the local index
+branch. The combined tree's standard check is pending. The previous 1,482-pass
+result belongs only to `f9d3ee7`; it does not establish merged-tree success.
+No native CI or installed-binary verification is claimed for this combination.
 
 Work is isolated on `issue-42-43-55/index`; user data and the installed binary
 are unchanged. The adopted [index operation design](../design/index-operations.md)
@@ -8,9 +13,9 @@ covers saved pause observations/recovery preview, deterministic bounded batches,
 explicit dimension candidates/probes and space payload facts. Existing workers,
 spaces and app_meta own the work; no table, queue, dependency or poller is added.
 
-The implementation tree, committed through `f9d3ee7`, passes macOS standard
+The pre-merge implementation tree at `f9d3ee7` passed macOS standard
 checks: 1,482 passed, zero failed, 28 ignored; all-target strict Clippy and
-formatting succeed. Real PTY recovery verifies saved stop time, target counts,
+formatting succeeded on that tree. Real PTY recovery verified saved stop time, target counts,
 Y confirmation and S status refresh. Mock HTTP covers deterministic batches,
 first-dimension validation, refusal/transient/late replies, persisted query/ingest
 mode, probe receipts and explicit inactive-space GC. Tests are split by issue;
@@ -27,6 +32,123 @@ Separately, the reviewed #46 measurement branch was fast-forwarded into main at
 [40987103680](https://github.com/tya5/shellboy/actions/runs/40987103680) succeeded
 on all three OSes; #46 is closed.
 The three index issues were not included in that push.
+
+The #48/#51 sections below retain their original local integration and review
+checkpoints. Their historical publication restrictions and base descriptions
+record those stages; current combined integration is described above.
+
+## Issue #48: working-instruction provenance
+
+Combined local integration on the independently approved #51 documentation
+base `f46fa2e` passes at exact `702cef9`: 82-suite layout, five Python checks,
+format, strict Clippy and Rust 7 groups / 1,468 passed / 0 failed / 28 ignored.
+The #48 two-commit range-diff is unchanged, and independent new-SHA review
+repeats the header and full runtime_features suites without findings. This is
+still the #46 branch-based local integration, not origin/main adoption or CI.
+
+The actual instruction developer message now starts with one metadata line:
+JSON-quoted fixed Turn source path, user-editability, new-Turn rereading and
+same-Turn snapshot reuse. The following LF separates the original unmodified
+body. JSON/control/Unicode line-separator escaping prevents a path from adding
+another header line. Snapshot body/hash/size/storage, roles, precedence and
+permissions remain unchanged, including empty/missing/read-failure behavior.
+The Agent Guide explains configured references and authorized conflict handling
+without implying every file lives in cwd or promising automatic exceptions.
+
+Coder validation at exact `120218c` on the approved #51/#46 local base `872c4b8`
+passes layout82, Python5, format, strict all-target Clippy and the full Rust
+suite: 7 groups / 1,468 passed / 0 failed / 28 ignored. Header unit tests pass
+2/2 and the unified runtime_features suite passes 22/22, including #51 tests
+strengthened to parse the heading/path and assert byte-exact original bodies.
+Independent review approves `120218c` with the same focused results; integration
+on the newer #51 documentation base is a separate exact-SHA gate. This is not a claim
+of origin/main tracking, new three-OS CI, physical-terminal verification or
+improved real-model/user behavior. No push, GitHub post or installed-owner
+replacement is performed. See [acceptance](../validation/acceptance.md).
+
+
+## Issue #51: local integration on the completed #46 branch
+
+The original nine-commit series through `7f425e8` is preserved. A separate
+`issue-51/on-46` branch rebases it onto exact #46 source `a949688`, whose native
+CI [40982193189](https://github.com/tya5/shellboy/actions/runs/40982193189)
+passes all three OS check jobs. This is local advance integration, not completed
+origin/main adoption: remote main was still `0469ca0` when the base was chosen.
+
+The nine commits retain their meanings. Four documentation insertion conflicts
+retain both designs and validation histories. Existing test files are already
+registered as modules in #46's single integration harness; no new target/file is
+needed. The first rebased source `144721f` fails Clippy because six new runtime
+calls lack the Control argument added by #46's diagnostic helper. Test-only
+`872c4b8` supplies that argument without changing production behavior or assertions.
+
+At exact `872c4b8`, macOS arm64 / Rust 1.99.1 standard checks with four test
+threads pass layout registration (82 suites), five Python checks, format, strict
+Clippy and Rust tests: 7 harness groups / 1,464 passed / 0 failed / 28 ignored.
+Independent post-rebase approval is tracked separately. These grouped counts
+are not missing suites; the added idle-effects unit test explains the extra pass
+relative to the historical 1,463 checkpoint. See [acceptance](../validation/acceptance.md).
+
+Push, new CI dispatch and installed-binary updates remain unauthorized. Once #46
+lands on main, compare the actual origin/main base and determine whether another
+rebase/review/check is required. The overlapping #48 change has separate
+worktrees and commits and is not included in this #51 result.
+
+## Issue #51: explicit instruction references
+
+Control/CLI thread create, set and fork support `--agents`; TUI create/fork/
+settings forms and `/agents [PATH]` select or display the reference. Explicit
+files receive bounded strict validation, revision-checked atomic mutation and
+actor/path/time audit. Cwd-only updates never rediscover instructions. A running
+Turn keeps its durable body and reference-path snapshot; reference-change events
+wait for the next new Turn without delaying unrelated context notifications.
+
+Independent review approves production implementation through `bfd96f5` after
+three P2 fixes: unsaved TUI adoption, DB-only History helper boundaries and
+rejected UI admission releasing its pending selection. Unsaved selection now
+retains the origin draft and correlates results/rejections with draft,
+generation and one request ID; first send reuses the created Thread.
+
+The coder's clean `bfd96f5` macOS standard check passes: format, strict all-target
+Clippy, 86 test groups / 1,462 passed / 0 failed / 28 ignored. A subsequent
+src-only regression additionally proves child/Control fork overrides select a
+*distinct* file rather than merely inheriting the same path; its focused test
+passes and its test/documentation commit `9ddb49d` is independently approved.
+The exact integrated `9ddb49d` also passes the macOS standard check: format,
+strict all-target Clippy, 86 groups / 1,463 passed / 0 failed / 28 ignored.
+This includes the additional distinct-reference test; it is separate from the
+older 1,462-test production-code evidence. See
+[acceptance](../validation/acceptance.md). Main and remotes remain unchanged;
+push, GitHub posting, installed-binary updates, physical-terminal evaluation
+and three-OS CI remain unperformed in this task's local-only scope.
+
+
+### External Review Follow-Up
+
+The external [review](https://github.com/tya5/shellboy/issues/51#issuecomment-6511989087)
+and [ordering/test follow-up](https://github.com/tya5/shellboy/issues/51#issuecomment-6512018897)
+are read as findings, not independent test execution. Replace the #51 idle
+assertion based on a 100 ms receive timeout with a saved Run-ended boundary and
+Thread-scoped Run/Turn/attempt ID/state comparisons. A src unit regression also
+checks that settings return no driver/retry wake effects and create no delivery
+or history node before the next Turn. Production behavior is unchanged.
+The focused src effect test and loopback runtime test each pass once on macOS
+arm64 / Rust 1.99.1, as does strict lib/runtime Clippy. The earlier exact-SHA
+whole-suite results remain historical checkpoints, not post-rebase evidence.
+
+Three Low observations are recorded only, outside closing conditions: agents-only
+selection increments profile_revision (including same-path selection); initial
+create/fork audits describe default/inherited-to-selected references even when
+the prior reference was never used; adding an optional field spreads constructor
+updates because argument structs do not all implement Default. No production
+changes for these observations are included.
+
+Land #46 first, then rebase #51 onto origin/main and adapt its existing tests to
+#46's final integration-binary layout. Do not transplant or resolve predicted
+conflicts before #46 lands. Re-run standard checks after rebase and retain the
+physical-terminal/native-platform limits. This publication sequence is not push
+authorization; push, main changes and GitHub posting remain on hold.
+
 
 ## Issue #46: measured native test performance completed
 

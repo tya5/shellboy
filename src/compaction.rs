@@ -1794,7 +1794,7 @@ mod tests {
         let (_root, db) = database().await;
         db.call(|db|{let tx=db.transaction()?;history::append_node(&tx,"t","source",None,"user",&json!({"role":"user","content":"original"}),"now")?;
             tx.execute_batch("INSERT INTO attachment_ref VALUES('a','source','/external.bin','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL,'now',0,0,1);")?;
-            history::fork_thread(&tx,&crate::protocol::ThreadForkArgs{thread_id:"t".into(),node_id:"source".into(),cwd:None},"fork","now").map_err(StorageError::from)?;tx.commit()?;Ok(())}).await.unwrap();
+            history::fork_thread(&tx,&crate::protocol::ThreadForkArgs{ agents: None,thread_id:"t".into(),node_id:"source".into(),cwd:None},"fork","now").map_err(StorageError::from)?;tx.commit()?;Ok(())}).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         db.call(move |db| {

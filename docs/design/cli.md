@@ -103,3 +103,10 @@ not permission for a subsequent rebuild. N must be in 1..8192; endpoint support
 and retrieval quality are not inferred from a model alias. Status reports saved
 space dimensions, segment counts, float32 payload bytes and bounded probe facts.
 See [index operations](index-operations.md).
+
+## Explicit instruction references (#51)
+
+The [per-Thread instruction reference contract](agents-reference.md) supersedes
+previous fixed-reference wording: explicit create/set/fork selection is allowed,
+while cwd changes alone never rediscover instructions and same-Turn retry
+continues using its durable snapshot.

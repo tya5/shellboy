@@ -118,6 +118,7 @@ async fn default_explicit_and_thread_catalog_selection_never_changes_thread_or_g
     let create = request(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: Some("second".into()),
             cwd: None,
             model: None,
@@ -503,6 +504,7 @@ async fn runtime_observations_keep_receipts_constant_and_release_raw_output_pins
         .request(request(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,

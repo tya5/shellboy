@@ -160,6 +160,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
 
 fn defaults() -> ThreadCreateArgs {
     ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,
@@ -424,6 +425,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
     request(
         &control,
         Command::ThreadSet(ThreadSetArgs {
+            agents: None,
             connection: None,
             thread_id: Some(thread.clone()),
             cwd: None,
@@ -464,6 +466,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
     let fork = request(
         &control,
         Command::ThreadFork(ThreadForkArgs {
+            agents: None,
             thread_id: thread.clone(),
             node_id: head,
             cwd: None,
@@ -958,6 +961,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
     let fork = request(
         &control,
         Command::ThreadFork(ThreadForkArgs {
+            agents: None,
             thread_id: thread.clone(),
             node_id: original_path.last().unwrap().clone(),
             cwd: None,

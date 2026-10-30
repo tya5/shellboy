@@ -315,6 +315,7 @@ async fn real_result_write_failure_is_repaired_after_storage_is_restored() {
     let thread = rpc(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,
@@ -510,6 +511,7 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
     let response = shellboy::ipc::call(
         &directory,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,

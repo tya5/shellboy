@@ -13,6 +13,39 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::timeout,
 };
+fn working_instructions(body: &Value) -> Option<(String, &str)> {
+    let messages: Vec<_> = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["role"] == "developer")
+        .flat_map(|item| item["content"].as_array().into_iter().flatten())
+        .filter_map(|part| part["text"].as_str())
+        .filter(|text| text.starts_with("Working instructions from "))
+        .collect();
+    assert!(
+        messages.len() <= 1,
+        "instructions must have one developer message"
+    );
+    messages.first().map(|text| {
+        let (header, original) = text.split_once('\n').expect("one header LF before original body");
+        assert!(!header.chars().any(|ch| ch.is_control() || matches!(ch,'\u{2028}'|'\u{2029}')));
+        let quoted = header.strip_prefix("Working instructions from ").unwrap()
+            .strip_suffix(" (user-editable; re-read at each new Turn start; same-Turn retries use the saved snapshot):").unwrap();
+        (serde_json::from_str(quoted).expect("header path is a JSON string"), original)
+    })
+}
+fn assert_working_instructions(body: &Value, path: &std::path::Path, original: &str) {
+    let (source, actual) =
+        working_instructions(body).expect("present instruction developer message");
+    assert_eq!(source, path.to_str().unwrap());
+    assert_eq!(
+        actual.as_bytes(),
+        original.as_bytes(),
+        "original body must remain exact"
+    );
+}
+
 struct Incoming {
     body: Value,
     session: Option<String>,
@@ -189,6 +222,7 @@ async fn thread(control: &Arc<Control>) -> String {
     request(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,
@@ -291,11 +325,10 @@ async fn preparation_failure_preserves_accepted_message_and_retry_reuses_its_tur
         .filter(|item| item["role"] == "user" && item["content"][0]["text"] == original)
         .collect();
     assert_eq!(messages.len(), 1, "retry must reuse the accepted original");
-    assert!(
-        retry
-            .body
-            .to_string()
-            .contains("valid repaired instructions")
+    assert_working_instructions(
+        &retry.body,
+        &root.path().join("AGENTS.md"),
+        "valid repaired instructions",
     );
     retry.reply.send((200, answer("recovered"))).unwrap();
     settled(&control, &thread).await;
@@ -356,6 +389,7 @@ async fn draft_references_and_first_message_commit_together_and_changed_missing_
         .send_draft(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             ThreadCreateArgs {
+                agents: None,
                 cwd: None,
                 parent_id: None,
                 connection: None,
@@ -907,6 +941,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
     let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
     let node = accepted["message_id"].as_str().unwrap().to_owned();
     let args = ThreadCreateArgs {
+        agents: None,
         connection: Some("fixture".into()),
         model: Some("edited-model".into()),
         effort: Some(String::new()),
@@ -1064,6 +1099,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     request(
         &control,
         Command::ThreadSet(ThreadSetArgs {
+            agents: None,
             title: None,
             thread_id: Some(thread.clone()),
             cwd: None,
@@ -1129,6 +1165,7 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
             request(
                 &control,
                 Command::ThreadSet(ThreadSetArgs {
+                    agents: None,
                     title: None,
                     thread_id: Some(thread.clone()),
                     connection: None,
@@ -1595,14 +1632,25 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
     let instruction = "A01_CREATED_AGENTS 日本語\nUse the saved Thread cwd.\n";
     // Inspect only developer instruction text: the tool arguments intentionally
     // carry the same bytes later and are not evidence of instruction loading.
-    let count_instruction = |body: &Value, expected: &str| {
+    let instruction_path = original_paths.1.clone();
+    let count_instruction = move |body: &Value, expected: &str| {
         body["input"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|item| item["role"] == "developer")
             .flat_map(|item| item["content"].as_array().into_iter().flatten())
-            .filter(|part| part["type"] == "input_text" && part["text"] == expected)
+            .filter(|part| {
+                part["type"] == "input_text"
+                    && part["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Working instructions from "))
+            })
+            .filter(|_| {
+                let (path, original) = working_instructions(body).unwrap();
+                assert_eq!(path, instruction_path);
+                original.as_bytes() == expected.as_bytes()
+            })
             .count()
     };
     let accepted: MessageAccepted = serde_json::from_value(
@@ -1966,6 +2014,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
     let child = request(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             parent_id: Some(parent.clone()),
             cwd: None,
             connection: None,
@@ -1980,6 +2029,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
     let fork = request(
         &control,
         Command::ThreadFork(ThreadForkArgs {
+            agents: None,
             thread_id: parent.clone(),
             node_id: accepted.message_id,
             cwd: None,
@@ -2067,6 +2117,471 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
         assert_eq!(serde_json::from_str::<Value>(&usage).unwrap()["input_tokens"], 123);
         Ok(())
     }).await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
+    #[derive(Debug, PartialEq, Eq)]
+    struct SavedWork {
+        runs: Vec<(String, String)>,
+        turns: Vec<(String, String, String)>,
+        attempts: Vec<(String, String, String)>,
+    }
+    async fn saved_work(control: &Control, thread: &str) -> SavedWork {
+        let thread = thread.to_owned();
+        control.store.database.call(move |db| {
+            let runs = db.prepare("SELECT id,state FROM run WHERE thread_id=?1 ORDER BY id")?
+                .query_map([&thread], |r| Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            let turns = db.prepare("SELECT id,run_id,state FROM turn WHERE thread_id=?1 ORDER BY id")?
+                .query_map([&thread], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+            let attempts = db.prepare("SELECT a.id,a.turn_id,a.state FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 ORDER BY a.id")?
+                .query_map([&thread], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+            Ok(SavedWork { runs, turns, attempts })
+        }).await.unwrap()
+    }
+    fn developer_text(body: &Value) -> Vec<&str> {
+        body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["role"] == "developer")
+            .flat_map(|v| v["content"].as_array().into_iter().flatten())
+            .filter_map(|v| v["text"].as_str())
+            .collect()
+    }
+    fn reference_events(body: &Value) -> Vec<Value> {
+        developer_text(body)
+            .into_iter()
+            .filter_map(|t| t.strip_prefix("Shellboy event v1: "))
+            .filter_map(|t| serde_json::from_str::<Value>(t).ok())
+            .filter(|e| e["payload"]["kind"] == "agents_reference")
+            .collect()
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    std::fs::write(root.path().join("old.md"), "OLD_EXPLICIT_ROLE").unwrap();
+    std::fs::write(root.path().join("new.md"), "NEW_EXPLICIT_ROLE").unwrap();
+    std::fs::write(root.path().join("middle.md"), "INTERMEDIATE_ROLE").unwrap();
+    let created = request(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: Some("old.md".into()),
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await;
+    let thread = created["thread_id"].as_str().unwrap().to_owned();
+    request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "first turn".into(),
+        }),
+    )
+    .await;
+    let first = incoming(&control, &mut receive).await;
+    assert_working_instructions(
+        &first.body,
+        &root.path().join("old.md"),
+        "OLD_EXPLICIT_ROLE",
+    );
+    let first_events = reference_events(&first.body);
+    assert_eq!(
+        first_events.len(),
+        1,
+        "creation override is visible on the first Turn"
+    );
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            agents: Some("middle.md".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    // Other settings still deliver at their normal boundary, not at a future Turn.
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            title: Some("changed".into()),
+            effort: Some("brief".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    first.reply.send((200,json!({"id":"agents-tool","status":"completed","output":[{"type":"function_call","call_id":"agents-call","name":"shell","arguments":json!({"command":"echo synthetic","background":false}).to_string()}]}))).unwrap();
+    let after_tool = incoming(&control, &mut receive).await;
+    assert!(
+        developer_text(&after_tool.body)
+            .iter()
+            .any(|t| t.starts_with("Shellboy event v1:")
+                && t.contains("thread_settings")
+                && t.contains("brief")),
+        "unrelated settings must not defer"
+    );
+    assert_working_instructions(
+        &after_tool.body,
+        &root.path().join("old.md"),
+        "OLD_EXPLICIT_ROLE",
+    );
+    assert!(
+        developer_text(&after_tool.body)
+            .iter()
+            .find(|t| t.starts_with("Shellboy context v1:"))
+            .unwrap()
+            .contains(&format!(
+                "AGENTS reference={}",
+                root.path().join("old.md").display()
+            ))
+    );
+    assert_eq!(
+        reference_events(&after_tool.body).len(),
+        1,
+        "new reference event must not enter same-Turn history"
+    );
+    after_tool
+        .reply
+        .send((
+            400,
+            json!({"error":{"code":"synthetic","message":"fixture"}}),
+        ))
+        .unwrap();
+    settled(&control, &thread).await;
+    let run = request(
+        &control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.clone()),
+        }),
+    )
+    .await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            agents: Some("new.md".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    std::fs::remove_file(root.path().join("old.md")).unwrap();
+    request(
+        &control,
+        Command::RunRetry(RunTarget {
+            run_id: run.clone(),
+        }),
+    )
+    .await;
+    let retried = incoming(&control, &mut receive).await;
+    assert_working_instructions(
+        &retried.body,
+        &root.path().join("old.md"),
+        "OLD_EXPLICIT_ROLE",
+    );
+    assert_eq!(reference_events(&retried.body).len(), 1);
+    retried
+        .reply
+        .send((200, answer("old snapshot complete")))
+        .unwrap();
+    settled(&control, &thread).await;
+    request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "new turn".into(),
+        }),
+    )
+    .await;
+    let next = incoming(&control, &mut receive).await;
+    assert_working_instructions(&next.body, &root.path().join("new.md"), "NEW_EXPLICIT_ROLE");
+    let events = reference_events(&next.body);
+    assert_eq!(events.len(), 3);
+    let changed = events.last().unwrap()["event_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        events.last().unwrap()["payload"]["change"]["after"]["path"],
+        root.path().join("new.md").to_str().unwrap()
+    );
+    // Failure before adoption cannot consume the notification or lose its history node.
+    next.reply
+        .send((
+            400,
+            json!({"error":{"code":"synthetic","message":"fixture"}}),
+        ))
+        .unwrap();
+    settled(&control, &thread).await;
+    let run = request(
+        &control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.clone()),
+        }),
+    )
+    .await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request(
+        &control,
+        Command::RunRetry(RunTarget {
+            run_id: run.clone(),
+        }),
+    )
+    .await;
+    let notification_retry = incoming(&control, &mut receive).await;
+    assert_eq!(
+        reference_events(&notification_retry.body)
+            .iter()
+            .filter(|v| v["event_id"] == changed)
+            .count(),
+        1
+    );
+    assert_working_instructions(
+        &notification_retry.body,
+        &root.path().join("new.md"),
+        "NEW_EXPLICIT_ROLE",
+    );
+    notification_retry
+        .reply
+        .send((200, answer("new snapshot adopted")))
+        .unwrap();
+    settled(&control, &thread).await;
+    let event = changed.clone();
+    control
+        .store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM node WHERE id=?1",
+                    [format!("event-{event}")],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM delivery WHERE event_id=?1 AND state='processed'",
+                    [event],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // A completed Turn alone is not idle: await the existing durable Run boundary.
+    let ended = request(
+        &control,
+        Command::Wait(WaitArgs {
+            conditions: vec![WaitCondition::RunEnded { run_id: run }],
+            timeout_ms: 5_000,
+        }),
+    )
+    .await;
+    assert_eq!(ended["status"], "satisfied");
+    let before = saved_work(&control, &thread).await;
+    assert!(!before.runs.is_empty() && !before.turns.is_empty() && !before.attempts.is_empty());
+    assert!(before.runs.iter().all(|(_, state)| state == "completed"));
+    assert!(
+        before
+            .turns
+            .iter()
+            .all(|(_, _, state)| state == "completed")
+    );
+    assert!(
+        before
+            .attempts
+            .iter()
+            .all(|(_, _, state)| matches!(state.as_str(), "completed" | "failed" | "incomplete"))
+    );
+    // Control::request completes apply_effects before returning. Compare all saved
+    // row identities/states after that boundary, not a quiet interval on the proxy.
+    std::fs::write(root.path().join("idle.md"), "IDLE_ROLE").unwrap();
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            agents: Some("idle.md".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert_eq!(
+        saved_work(&control, &thread).await,
+        before,
+        "idle reference selection must not create or change Runs, Turns or attempts"
+    );
+    let target = thread.clone();
+    control.store.database.call(move |db| {
+        let (event, run): (String,Option<String>) = db.query_row(
+            "SELECT id,target_run_id FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='agents_reference' ORDER BY rowid DESC LIMIT 1",
+            [target], |r|Ok((r.get(0)?,r.get(1)?)))?;
+        assert!(run.is_none(), "idle reference audit awaits a future Turn");
+        assert_eq!(db.query_row("SELECT count(*) FROM delivery WHERE event_id=?1",[&event],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(db.query_row("SELECT count(*) FROM node WHERE id=?1",[format!("event-{event}")],|r|r.get::<_,i64>(0))?,0);
+        Ok(())
+    }).await.unwrap();
+    std::fs::remove_file(root.path().join("idle.md")).unwrap();
+    request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "selected file removed".into(),
+        }),
+    )
+    .await;
+    let absent = incoming(&control, &mut receive).await;
+    assert!(working_instructions(&absent.body).is_none());
+    absent
+        .reply
+        .send((200, answer("absent instructions allowed")))
+        .unwrap();
+    settled(&control, &thread).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn working_instruction_header_preserves_empty_and_original_snapshots() {
+    use sha2::{Digest, Sha256};
+    for original in ["", "original 日本語\r\nnext line\n"] {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("AGENTS.md");
+        std::fs::write(&source, original).unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = owner(root.path(), &url).await;
+        let control = Control::new(&owner, root.path().into());
+        let thread = thread(&control).await;
+        let first = request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(thread.clone()),
+                text: "first snapshot".into(),
+            }),
+        )
+        .await;
+        let turn = first["turn_id"].as_str().unwrap().to_owned();
+        let sent = incoming(&control, &mut receive).await;
+        assert_working_instructions(&sent.body, &source, original);
+        let id = turn.clone();
+        let expected_body = original.to_owned();
+        let expected_hash: String = Sha256::digest(original.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let expected_path = source.to_str().unwrap().to_owned();
+        control.store.database.call(move |db| {
+            let (path, body, hash, size):(String,String,String,Option<i64>) = db.query_row(
+                "SELECT s.source_path,s.body,s.content_hash,s.observed_size FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            assert_eq!(path,expected_path);
+            assert_eq!(body.as_bytes(),expected_body.as_bytes());
+            assert_eq!(hash,expected_hash);
+            assert_eq!(size,Some(expected_body.len() as i64));
+            Ok(())
+        }).await.unwrap();
+        sent.reply.send((200, answer("first done"))).unwrap();
+        settled(&control, &thread).await;
+        std::fs::write(&source, "edited at the same source").unwrap();
+        let next = request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(thread.clone()),
+                text: "next Turn observes edit".into(),
+            }),
+        )
+        .await;
+        assert_ne!(next["turn_id"], first["turn_id"]);
+        let sent = incoming(&control, &mut receive).await;
+        assert_working_instructions(&sent.body, &source, "edited at the same source");
+        control.store.database.call(move |db| {
+            let body:String=db.query_row("SELECT s.body FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.id=?1",[turn],|r|r.get(0))?;
+            assert_eq!(body,original,"later file edits cannot alter the saved original snapshot");
+            Ok(())
+        }).await.unwrap();
+        sent.reply.send((200, answer("new snapshot done"))).unwrap();
+        settled(&control, &thread).await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unreadable_working_instructions_recover_without_an_outbound_header() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("AGENTS.md");
+    std::fs::write(&source, "unreadable fixture").unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o0)).unwrap();
+    if std::fs::File::open(&source).is_ok() {
+        // Privileged runners can bypass mode bits; do not claim denial there.
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+        return;
+    }
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    let sent = request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "permission failure".into(),
+        }),
+    )
+    .await;
+    let id = sent["turn_id"].as_str().unwrap().to_owned();
+    settled(&control, &thread).await;
+    control
+        .store
+        .database
+        .call(move |db| {
+            let (state, reason, snapshot): (String, String, Option<String>) = db.query_row(
+                "SELECT state,recovery_reason_json,instruction_snapshot_id FROM turn WHERE id=?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            assert_eq!(state, "recovery_wait");
+            assert_eq!(
+                serde_json::from_str::<ApiError>(&reason).unwrap().code,
+                ErrorCode::IoFailed
+            );
+            assert!(snapshot.is_none());
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM model_attempt WHERE turn_id=?1",
+                    [id],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        receive.try_recv().is_err(),
+        "preparation failure precedes any HTTP request"
+    );
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

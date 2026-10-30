@@ -11,6 +11,7 @@ async fn missing_attachment_before_snapshot_recovers_once_without_driver_restart
         let thread = rpc(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 model: None,
                 effort: None,
@@ -169,6 +170,7 @@ async fn in_process_edit_does_not_wait_for_a_shell_caller_reply_grace() {
                 crate::attachments::DraftContent::appended("edited retained input".into(), 0),
                 vec![],
                 ThreadCreateArgs {
+                    agents: None,
                     connection: None,
                     model: None,
                     effort: None,

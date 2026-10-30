@@ -320,6 +320,12 @@ impl CopyScope {
 }
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    SelectAgents {
+        request_id: String,
+        draft_id: String,
+        generation: u64,
+        args: crate::protocol::ThreadCreateArgs,
+    },
     ThreadDeletion {
         request_id: u64,
         args: ThreadDeleteArgs,
@@ -506,6 +512,12 @@ pub enum UiAction {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    AgentsSelected {
+        request_id: String,
+        draft_id: String,
+        generation: u64,
+        result: Result<ThreadDetails, crate::protocol::ApiError>,
+    },
     ThreadDeletion {
         request_id: u64,
         args: ThreadDeleteArgs,
@@ -1655,6 +1667,51 @@ impl UiState {
                     return;
                 }
             }
+            UiUpdate::AgentsSelected {
+                request_id,
+                draft_id,
+                generation,
+                result,
+            } => {
+                let Some((key, view)) = self
+                    .views
+                    .iter_mut()
+                    .find(|(_, v)| v.draft.draft_id == draft_id)
+                else {
+                    return;
+                };
+                if view.generation != generation
+                    || view.selecting_agents.as_deref() != Some(request_id.as_str())
+                {
+                    return;
+                }
+                view.selecting_agents = None;
+                if view.thread_id.is_some() {
+                    return;
+                }
+                match result {
+                    Ok(details) => {
+                        let thread = details.thread_id.clone();
+                        view.thread_id = Some(thread.clone());
+                        view.on_thread(details, None);
+                        let key = key.clone();
+                        if self.active == key {
+                            let actions = self.select_thread(thread);
+                            self.deferred_actions.extend(actions);
+                        } else {
+                            self.deferred_actions.push(UiAction::SaveDraft {
+                                thread_id: thread,
+                                draft: view.draft.clone(),
+                                anchor: view.anchor.clone(),
+                                follow: view.follow,
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        view.status = format!("AGENTS参照を選択できません: {}", error.message)
+                    }
+                }
+            }
             UiUpdate::Thread {
                 generation,
                 details,
@@ -2181,7 +2238,35 @@ impl UiState {
         }
         self.dirty = true;
     }
+    fn reject_agents_selection(&mut self, action: &UiAction) -> bool {
+        match action {
+            UiAction::SubmittedCommand { action, .. }
+            | UiAction::ManagementIntent { action, .. } => self.reject_agents_selection(action),
+            UiAction::SelectAgents {
+                request_id,
+                draft_id,
+                generation,
+                ..
+            } => {
+                if let Some(view) = self.views.values_mut().find(|v| {
+                    v.draft.draft_id == *draft_id
+                        && v.generation == *generation
+                        && v.selecting_agents.as_deref() == Some(request_id.as_str())
+                }) {
+                    view.selecting_agents = None;
+                    view.status =
+                        "AGENTS参照の選択は未受付です。本文を保持しています。再操作してください"
+                            .into();
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn action_rejected(&mut self, action: &UiAction) {
+        let rejected_agents = self.reject_agents_selection(action);
+
         if let UiAction::ManagementIntent { action, .. } = action {
             self.invalidate_management();
             self.action_rejected(action);
@@ -2195,6 +2280,9 @@ impl UiState {
             if matches!(action.as_ref(), UiAction::ManagementIntent { .. }) {
                 self.invalidate_management();
             }
+            return;
+        }
+        if rejected_agents {
             return;
         }
         if let UiAction::SaveDraft { thread_id, .. } = action {
@@ -2569,6 +2657,7 @@ impl UiState {
                 && matches!(
                     actions[0],
                     UiAction::Command(_)
+                        | UiAction::SelectAgents { .. }
                         | UiAction::Manage(_)
                         | UiAction::ReloadAttachments { .. }
                         | UiAction::Background { .. }
@@ -2625,6 +2714,12 @@ impl UiState {
         self.send_current(None)
     }
     fn send_current(&mut self, confirmed_run_id: Option<String>) -> Vec<UiAction> {
+        if self.view().selecting_agents.is_some() {
+            self.active_view_mut().status =
+                "AGENTS参照を選択中です。本文を保持して完了を待ってください".into();
+            return vec![];
+        }
+
         self.dirty = true;
         let text = self.view().draft.text.clone();
         let view = self.active_view_mut();
@@ -2846,6 +2941,7 @@ impl UiState {
                 };
                 if let (Some(thread_id), Some(node_id)) = (thread_id, node_id) {
                     vec![UiAction::Command(Command::ThreadFork(ThreadForkArgs {
+                        agents: None,
                         thread_id,
                         node_id,
                         cwd: None,
@@ -2895,6 +2991,37 @@ impl UiState {
                     }))]
                 }
             }
+            "/agents" if argument.is_empty() => self.show_help(help::Page::info(
+                "AGENTS参照",
+                "次の新しいTurnで読む指示ファイル（現在Turnのsnapshotは不変）",
+                format!("{}\n\n変更するには /agents パス", self.view().agents_path),
+            )),
+            "/agents" => {
+                if let Some(thread_id) = thread_id {
+                    vec![UiAction::Command(Command::ThreadSet(ThreadSetArgs {
+                        thread_id: Some(thread_id),
+                        agents: Some(argument.into()),
+                        ..Default::default()
+                    }))]
+                } else {
+                    let view = self.view();
+                    let cwd = match crate::input_path::utf8(&view.cwd) {
+                        Ok(cwd) => cwd.to_owned(),
+                        Err(_) => {
+                            return self.command_error("作業場所はUTF-8で表現できる必要があります");
+                        }
+                    };
+                    let args = crate::protocol::ThreadCreateArgs {
+                        agents: Some(argument.into()),
+                        cwd: Some(cwd),
+                        connection: view.connection.clone(),
+                        model: view.model.clone(),
+                        effort: view.effort.clone(),
+                        parent_id: None,
+                    };
+                    self.select_agents(args)
+                }
+            }
             "/cwd" if argument.is_empty() => self.show_help(help::Page::info(
                 "作業フォルダー",
                 "現在の会話でコマンドを実行する場所",
@@ -2906,6 +3033,8 @@ impl UiState {
                     Err(error) => return self.command_error(error),
                 };
                 if thread_id.is_none() {
+                    self.active_view_mut().agents_path =
+                        path.join("AGENTS.md").to_string_lossy().into_owned();
                     self.active_view_mut().cwd = path;
                     vec![]
                 } else {
@@ -3333,7 +3462,29 @@ impl UiState {
             _ => vec![],
         }
     }
+    fn select_agents(&mut self, args: crate::protocol::ThreadCreateArgs) -> Vec<UiAction> {
+        let view = self.active_view_mut();
+        if view.selecting_agents.is_some() {
+            return vec![];
+        }
+        let request_id = uuid::Uuid::new_v4().to_string();
+        view.selecting_agents = Some(request_id.clone());
+        vec![UiAction::SelectAgents {
+            request_id,
+            draft_id: view.draft.draft_id.clone(),
+            generation: view.generation,
+            args,
+        }]
+    }
+
     fn execute_operation(&mut self, command: Command) -> Vec<UiAction> {
+        if let Command::ThreadCreate(args) = &command
+            && args.agents.is_some()
+            && self.view().thread_id.is_none()
+        {
+            return self.select_agents(args.clone());
+        }
+
         self.details = None;
         match &command {
             Command::IndexBackfill(args)

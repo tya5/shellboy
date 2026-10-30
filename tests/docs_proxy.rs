@@ -54,7 +54,7 @@ async fn luna_discovers_bundled_guides_and_observes_its_background_shell() {
     let server = LocalServer::bind(&owner, send).await.unwrap();
     let serving = tokio::spawn(control.clone().serve(receive));
     let checked: Result<(), String> = async {
-        let thread = request(&control, Command::ThreadCreate(ThreadCreateArgs {
+        let thread = request(&control, Command::ThreadCreate(ThreadCreateArgs { agents: None,
             connection: None, cwd: None, model: None, effort: None, parent_id: None,
         })).await;
         let thread_id = thread["thread_id"].as_str().unwrap().to_owned();

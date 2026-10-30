@@ -1,5 +1,255 @@
 # Validation record
 
+## Issue #48: outbound working-instruction provenance
+
+### Combined Local Integration Checkpoint
+
+Exact `702cef9eacf45ed628fcf8125c37b6eda4287640` applies only #48's two approved
+commits onto approved #51 documentation `f46fa2e`; both patches are identical in
+range-diff to `96454e5` / `120218c`. Independent re-review repeats the header
+unit tests (2 passed) and unified runtime_features suite (22 passed), with no
+findings. The combined worktree's standard command
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+passes layout (82 suites registered once), five Python checks, format, strict
+all-target Clippy and Rust **7 groups / 1,468 passed / 0 failed / 28 ignored**.
+Environment: macOS arm64 / pinned Rust 1.99.1; temporary stores and loopback mocks.
+The background command shell takes 264,078 ms including the preceding ff,
+cherry-picks and range-diff. Its saved initial cwd is the #51 worktree, but the
+command explicitly changes to the isolated #48 integration worktree before any
+integration or checks. `shellboy wait` observes completion; full logs and command
+metadata are independently checked rather than inferring success from acceptance.
+
+The source-specific result is distinct from the coder's earlier `120218c` run.
+Later documentation-only commits do not acquire that exact-SHA test result.
+The two validation-record insertion conflicts preserve both #48 and #51 sections.
+Origin/main is not reconciled, new three-OS CI is not run, and real-model behavior
+or physical-terminal evaluation remains unverified. Future main adoption and a
+separately authorized push still require base comparison and required rechecks.
+
+### Environment And Exact Source
+
+macOS arm64 / pinned Rust 1.99.1, separate issue-48 worktree. The initial
+provisional #51-on-#46 base `144721f` was fast-forwarded, before #48 edits, to
+`872c4b8af5bda81801a077a4217b5e9b25f2a9fa` with the integrator's approval.
+That base fixes six #51 fixture calls for #46's helper signature and was later
+independently reapproved. #48 commits remain separate from #51. This is local
+integration on the exact #46 branch, not a claim that origin/main already
+contains #46/#51. No other role's worktree or earlier evidence was modified.
+
+At exact clean implementation SHA `120218cb79063bc97012cb809d422ec837b5a507`,
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH passes: layout **82 suites**, Python **5 passed**,
+format, strict all-target Clippy and Rust **7 groups / 1,468 passed / 0 failed /
+28 ignored**, exit 0. The background shell took 131,067 ms including its preceding
+local commit/status preparation; this is not an isolated test-runtime measure.
+Saved command/cwd/exit metadata and complete output were checked and
+`shellboy wait` observed completion. Sources stayed unchanged during the check.
+
+### Focused Evidence
+
+- `cargo test --locked --lib instruction_header_tests`: 2 passed. The formatter
+  preserves every body byte after the first LF, quotes/round-trips path data and
+  escapes quotes, backslashes, CR/LF/tab, DEL, C1 and Unicode U+2028/U+2029. A
+  present empty file retains an empty body after its metadata line.
+- `cargo test --locked --test integration runtime_features::`: 22 passed using
+  synthetic temporary stores and loopback providers. #51's existing assertions
+  now parse the metadata line, decode and compare the exact path, and compare
+  original body bytes; they were not weakened to substring checks. Same-Turn
+  later requests/retries retain old header/path/body despite file deletion or
+  reference changes; the next new Turn uses the new selected source.
+- Additional mock requests verify empty and nonempty file bodies, saved raw body/
+  hash/observed-size (including Some(0)), same-source edits reread on a new Turn,
+  and immutable prior snapshot bytes. Missing instructions produce no instruction
+  message; invalid UTF-8 retains recovery and repaired-source retry behavior.
+  On Unix where mode bits deny reading, unreadable instructions retain io_failed
+  recovery with no snapshot/attempt/HTTP. Privileged mode-bit bypass is explicitly
+  conditional, not reported as denial success on every runner.
+- The adopted #46 unified harness and existing runtime_features module are used;
+  no test binary/file, table, worker, queue or dependency was added. The only
+  production change is outbound developer-message presentation.
+
+### Remaining Gates
+
+Independent review approved exact `120218cb79063bc97012cb809d422ec837b5a507`
+after separately passing the two header tests, all 22 runtime_features tests,
+layout82 and Python5, and confirming the standard log's counts and shell facts.
+Post-integration validation on the newer #51 documentation base remains a
+separate exact-SHA gate. If the #51/#46 base changes,
+review/check the resulting exact SHA again. Main reconciliation and explicit
+push authorization remain pending; no GitHub post, new CI run or installed
+binary update is performed. Native Linux/Windows, physical terminals, paid/real
+providers and improved human/model conflict-handling behavior were not tested.
+Mocks establish factual request transmission only; a later authorized dogfood
+exercise must establish whether real replies identify the path, constraint and
+safe next-Turn edit procedure accurately. No new priority/permission rule or
+automatic exception to higher-priority instructions is claimed.
+
+
+## Issue #51: advance integration on exact #46 source
+
+Base: `a94968898c704b4ee7b78be1cda860ee6d057b04`, from the completed #46
+measurement branch, not origin/main. Existing native CI run
+[40982193189](https://github.com/tya5/shellboy/actions/runs/40982193189)
+was checked through the current API: exact source matches and Linux/macOS/Windows
+check jobs succeed; optional measurement is skipped. That run does not validate
+#51's rebased changes. No new CI or push was requested for this local integration.
+
+The old `0469ca0..7f425e8` series is preserved and maps one-to-one onto
+`a949688..144721f`. Only documentation insertion contexts differ in range-diff;
+source patches retain their original content. However, textual patch equivalence
+was not build compatibility: the first post-rebase standard check at `144721f`
+failed Clippy with six E0061 errors in `runtime_features` incoming calls. #46's
+helper now requires Control for bounded diagnostic facts. Test-only `872c4b8`
+adds that argument at those six calls, preserving request assertions and the
+Changed-notification guards. IPC/attachment overlap is only constructor fields;
+#46's pending-wait and attachment fixture changes remain intact.
+
+Environment: macOS arm64, Rust 1.99.1, isolated integration worktree. At exact
+`872c4b8af5bda81801a077a4217b5e9b25f2a9fa`, the background command
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 sh scripts/check.sh`
+completes with exit 0. Layout requires each of 82 suites exactly once; five
+Python failure-gate self-checks, format and strict all-target Clippy pass.
+Rust all-target results: **7 harness groups / 1,464 passed / 0 failed / 28 ignored**.
+The command shell elapsed 154,417 ms, including local log setup/result summation;
+this is not a native CI timing benchmark. It was observed with `shellboy wait`.
+The earlier failed source and later successful source are separate evidence.
+
+The ordinary test files remain in place and are imported by
+`tests/integration/main.rs`; #51 does not introduce an extra integration binary.
+Historical 86-group evidence below remains attributed to its original sources.
+The additional idle-effects unit test raises the historical 1,463 passes to 1,464;
+independent inventory/list review is separate from the full integration command.
+No real-provider, physical-terminal or new native Linux/Windows execution is
+established here. Reconcile with origin/main after #46 lands, re-review any
+changed SHA and rerun the required checks before a separately authorized push.
+#48 is a separate worktree/commit boundary and is absent from this source.
+
+## Issue #51: selectable per-Thread instruction references
+
+Environment: macOS arm64, pinned Rust/Cargo 1.99.1; isolated worktree based on
+`0469ca03`. Tests use temporary stores, synthetic instruction files and loopback
+mocks. No real provider traffic, private user-data migration, installed-owner
+replacement, push or GitHub post is part of this validation.
+
+### Production implementation
+
+Exact clean production SHA `bfd96f5238943b57d94ccd678704592c00481edf` passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH: format, strict all-target Clippy and all-target
+tests, **86 groups / 1,462 passed / 0 failed / 28 ignored**, exit 0. The
+background shell took 306,587 ms including its preceding review notification;
+`shellboy wait` observed completion and shell metadata confirmed command/cwd/
+exit. Sources remained unchanged during that final run. Earlier exploratory
+runs are not substituted for this result.
+
+Independent review at the same SHA passes library-wide tests (641 passed,
+10 ignored), focused agents tests (8 passed), History integration (14 passed)
+and agents runtime integration (2 passed), with no remaining findings. The
+reviewer independently confirmed the standard log's counts and shell facts.
+
+### Covered Boundaries
+
+- CLI create/set/fork preserves relative paths until the target effective cwd
+  is known. Root defaults, child/fork inheritance, strict explicit empty/missing/
+  directory/invalid UTF-8/size failures, exact 8 MiB acceptance, readable-mode
+  denial on nonprivileged Unix, same-path validation without invented audit,
+  receipt replay after deletion, and revision-CAS rejection are covered.
+- Preflight uses the same bounded InstructionLoader permits as Control; the
+  existing stat/read growth test covers the shared limit-plus-one read. Failed
+  validation and CAS do not partially update cwd/model/title/reference. Audit
+  retains real caller IDs and old/new paths/time without the Origin token.
+- Loopback requests cover active and recovery changes, old body/source path on
+  same-Turn tool continuation and explicit retry, new snapshot on the next Turn,
+  unrelated settings at their normal boundary, retained notification after a
+  failed request, one saved event node/adoption, idle changes without wake and
+  deletion after selection retaining missing-means-no-instructions behavior.
+- TUI form/slash/reference rendering, unsaved creation through frontend and back,
+  preservation of newer text, origin-draft adoption after switching away,
+  stale-generation/duplicate rejection and next-send receipt targeting the same
+  created Thread are covered. Real ActionSender Full/Closed rejection restores
+  slash input and permits retry; direct-form rejection preserves text and
+  permits normal send. Stale rejection cannot release a later request.
+- DB-only History fork helpers reject explicit Some references, including empty,
+  before writes and leave no Thread/receipt. Inherited path returns truthfully;
+  full explicit overrides belong to Control's validated, audited thread.fork.
+
+### Additional Regression And Limits
+
+After the production-code approval, one src-only test explicitly distinguishes
+parent `parent.md` from child/fork `child.md`, so ignoring an override cannot
+accidentally pass an inheritance assertion. It passes with
+`cargo test --locked --lib child_and_control_fork` (1 passed); production code
+is unchanged. Independent review approved the test/documentation commit
+`9ddb49d4609e6874dddcd335b9a05f3f472d6eb7` after repeating that focused test.
+
+### Final Post-Integration Check
+
+Exact integrated SHA `9ddb49d4609e6874dddcd335b9a05f3f472d6eb7`, in the separate
+integration worktree on macOS arm64 / Rust 1.99.1, passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH: format, strict all-target Clippy and all-target
+tests, **86 groups / 1,463 passed / 0 failed / 28 ignored**, exit 0. This result
+includes the additive distinct-reference test and does not replace the earlier
+1,462-test production checkpoint. Integration was fast-forward only, preserving
+reviewed SHAs without conflicts. The complete background shell took 306,042 ms,
+including its prior-check observation and fast-forward steps; this is not an
+isolated test-runtime measurement. Saved execution metadata confirms the actual
+command, integration cwd, exit 0 and complete output; the final standard log's
+counts were independently re-aggregated for this documentation update.
+
+These are local integration results, not three-OS CI or physical-terminal
+success. Main and remotes remain unchanged; no push, GitHub posting or installed
+binary update is authorized by recording this evidence.
+
+Exploratory failures exposed stale JSON fixtures, old path labels/positional
+form assertions, an empty-CLI-value parser expectation, a Unix permission literal
+rejected by Clippy and a test's incorrect receipt column name; they were fixed.
+Independent review found and drove the three P2 corrections recorded above; no
+commit was amended. Real providers, physical-terminal evaluation and native
+Windows/Linux execution or three-OS CI are not established by local mock tests.
+File validation does not pin future bytes: later deletion/edit/access failures
+retain the adopted Turn snapshot/preparation boundary. A privileged runner may
+bypass Unix mode-bit denial, so that assertion is conditional on actual denial.
+
+
+### External Review Follow-Up: Deterministic Idle Evidence
+
+Sources: [external review](https://github.com/tya5/shellboy/issues/51#issuecomment-6511989087)
+and [follow-up](https://github.com/tya5/shellboy/issues/51#issuecomment-6512018897).
+These comments are review findings and publication requirements, not independent
+execution evidence. The three Low observations (profile_revision coupling,
+initial-reference audit wording and constructor Default ergonomics) are
+record-only and do not change the adopted production behavior or closing gates.
+
+The #51 idle regression no longer infers inactivity from the absence of a proxy
+request within 100 ms. It awaits the existing RunEnded observation and asserts
+saved Runs/Turns are completed and attempts terminal. A single DB-worker read
+captures each target Thread's ordered Run, Turn and attempt identities/states;
+after the settings request completes its committed effects, the same saved rows
+must remain identical, including their counts. The new reference audit remains
+unbound to a Run, without delivery or an event history node before the new Turn.
+A src-only effect regression separately asserts empty wake_threads,
+quiet_wake_threads, stop_runs and compact_threads, guarding a delayed driver
+schedule that an immediate DB snapshot alone would not exclude. No sleep or
+quiet-interval extension is used as proof of inactivity; positive progress
+watchdogs remain bounded failures, not success criteria.
+
+The 1,463-test exact-SHA integration record above remains the pre-follow-up
+checkpoint. On macOS arm64 / Rust 1.99.1, the follow-up passes
+`cargo test --locked --lib idle_agents_set_only` (1 passed),
+`cargo test --locked --test runtime_features explicit_agents_changes` (1 passed)
+and `cargo clippy --locked --lib --test runtime_features -- -D warnings`
+(exit 0), with CARGO_BUILD_JOBS=2, CARGO_INCREMENTAL=0 and RUST_TEST_THREADS=2
+for the tests. Format and diff checks also pass. These are focused results,
+not a new whole-suite count; full validation on the rebased #46 layout is pending
+that task's landing.
+No test file is added. Expected overlap includes runtime_features,
+attachment_provenance, ipc_admission and shared records. #46 lands first; #51
+then rebases and moves tests into the adopted layout before standard rechecks.
+Push instructions in review comments are not permission to push or start CI;
+physical-terminal and native Linux/Windows validation remain unperformed here.
+
+
 ## Issue #46 completed native benchmark: source `03ceac1`
 
 [Run 40980978976](https://github.com/tya5/shellboy/actions/runs/40980978976)

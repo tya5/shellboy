@@ -97,3 +97,10 @@ bounds, not inferred provider limits. Requests share one space/request mode
 and a stable saved-work ordering. Queries remain singleton. No dimension
 setting is added; explicit rebuild mode is saved with its space. See
 [index operations](index-operations.md).
+
+## Explicit instruction references (#51)
+
+The [per-Thread instruction reference contract](agents-reference.md) supersedes
+previous fixed-reference wording: explicit create/set/fork selection is allowed,
+while cwd changes alone never rediscover instructions and same-Turn retry
+continues using its durable snapshot.

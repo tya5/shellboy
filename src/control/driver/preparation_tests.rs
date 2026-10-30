@@ -27,6 +27,7 @@ pub(super) async fn fixture(
             Request::new(
                 format!("{}:create", owner.instance_id),
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     connection: None,
                     cwd: None,
                     model: None,
@@ -87,6 +88,7 @@ async fn add_human_attachment(
         .send_draft(
             format!("{}:{}", control.store.instance_id, id()),
             ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,

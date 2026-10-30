@@ -15,7 +15,7 @@ shellboy docs get --id shellboy/delegation
 shellboy docs get --id shellboy/shell
 ```
 
-The JSON's `result.text` contains the text; use `next_cursor` to continue. The full guide is not expanded into every prompt. `result.links` identifies bundled document IDs and sections. Your working directory's `AGENTS.md` provides separate working instructions, not the product guide.
+The JSON's `result.text` contains the text; use `next_cursor` to continue. The full guide is not expanded into every prompt. `result.links` identifies bundled document IDs and sections. Your Thread's selected instruction file provides separate working instructions, not the product guide; it is not necessarily in the current cwd.
 
 ## Check your context
 
@@ -33,11 +33,38 @@ Model shells inherit `SHELLBOY_THREAD_ID`, `SHELLBOY_RUN_ID`, `SHELLBOY_TURN_ID`
 
 To run a command yourself, call the shell tool directly. `message send` accepts a request for a recipient; it does not execute the command described in that request. Reading the `execution_id` of the shell that ran the sending CLI returns the acceptance JSON. Reading a shell executed by the recipient requires the different ID returned by that recipient's shell tool. Receiving a background launch ID and using a subsequent shell tool call for `shell get/read` is normal two-step usage. `message send` itself is a CLI command inside the shell tool, not a separate route mutually exclusive with “shell execution.” Sending to your own Thread adds input to your own conversation; it does not start another agent.
 
-A shell starts in the cwd saved on its Thread. Different Threads separate history and cwd, not filesystem sandboxes. Divide file ownership when editing concurrently. AGENTS.md follows the snapshot taken at Turn start; it does not change partway through a retry of the same Turn.
+A shell starts in the cwd saved on its Thread. Different Threads separate history and cwd, not filesystem sandboxes. Divide file ownership when editing concurrently. AGENTS.md follows the snapshot taken at Turn start; it does not change partway through a retry of the same Turn. Use `thread create/set/fork --agents PATH` to select a readable UTF-8 instruction file (up to 8 MiB), relative to the target effective cwd. `thread get` exposes `agents_path`. Selection uses normal Thread settings authority, not Run ownership permissions. Changes record the real actor and old/new paths and notify the next new Turn; current-Turn retries retain the old snapshot. Changing cwd alone leaves the reference unchanged. Explicit missing files are rejected; a file deleted after selection still follows the existing no-instructions behavior at a new Turn.
 
 Origin is authenticated context inherited from the model shell by the CLI. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Ownership and human operations](delegation.md#ownership-and-human-operations).
 
 Add attachments through the shell as well, using `shellboy attachment add --path PATH --kind image`. Inspect the returned array's `source_node_id` and `delivery_status`; acceptance is not proof that the model has read the attachment. It is applied to a dedicated node after all results in your tool group are ready. Older attachments are resent at their original provenance positions, so do not treat one as a new image if the current message has no attachment. Shellboy metadata distinguishes the currently read revision and update notifications. See [Attachments](attachments.md).
+
+## Working instructions and conflicts
+
+Working instructions come from an ordinary user-editable file, subject to
+filesystem permissions. A root Thread defaults to `AGENTS.md` in its creation
+cwd; children/forks inherit the parent's current reference unless explicitly
+overridden with `--agents`. Changing cwd alone does not rediscover the file.
+The instruction developer message starts with a JSON-quoted source path and
+snapshot facts. `Shellboy context` also identifies the current Turn's AGENTS
+reference; `thread get` reports the configured `agents_path`, which may differ
+until the next new Turn after a reference change.
+
+Each new Turn reads the selected file and saves a snapshot. Same-Turn later
+requests and retries reuse that body's fixed bytes and source path, even if the
+file is edited or the configured reference changes. An authorized edit can take
+effect at the next new Turn; retrying the old Turn does not refresh it. Do not
+say this working file is immutable Shellboy configuration or that editing it
+cannot affect future Turns.
+
+If a user's request conflicts with the file, identify its concrete source path
+and relevant constraint, explain the edit/reference change and new-Turn boundary
+needed for a future update, and ask whether the user wants a file edit or an
+exception. Do not edit the instruction file without an explicit user request.
+An edit or exception remains subject to other applicable higher-priority
+instructions, permissions and safety requirements: it is not an automatic
+exception and does not unconditionally override system instructions or replace
+the current Turn's snapshot. The provenance header itself adds no authority.
 
 ## Find the next operation quickly
 

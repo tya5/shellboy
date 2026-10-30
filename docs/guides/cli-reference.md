@@ -311,3 +311,14 @@ at read time from the saved start and wall clock, not a process-liveness
 check or monotonic measurement. For terminal shells it is the saved completion
 duration, if known. No output or reclaimed output gives last_output_at: null.
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
+
+### Instruction reference selection
+
+`thread create`, `thread set` and `thread fork` accept `--agents PATH`. The
+relative base is the creation/change target effective cwd after any `--cwd`.
+Explicit selection validates a nonempty readable regular UTF-8 file <=8 MiB.
+Missing is invalid_argument; access/UTF-8 errors are io_failed; oversize is
+input_limit. No reference clearing is provided. Default/inherited missing files
+remain allowed. `thread get` returns the absolute `agents_path`. Changes are
+atomic with other settings, auditable, and apply to the next new Turn, not a
+same-Turn retry. Other-Thread changes retain existing thread.set authority.

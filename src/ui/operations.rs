@@ -708,6 +708,7 @@ impl Form {
             OpKind::ThreadCreate => (
                 vec![
                     f("cwd", "作業場所（空=継承/既定）", String::new(), Text),
+                    f("agents", "AGENTS参照（空=継承/既定）", String::new(), Text),
                     f("connection", "接続（空=継承）", String::new(), Text),
                     f("model", "モデル（空=継承）", String::new(), Text),
                     f("effort", "推論強度（none=解除）", String::new(), Text),
@@ -715,7 +716,8 @@ impl Form {
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadCreate(ThreadCreateArgs {
-                        cwd: form.path("cwd", cwd)?,
+                        agents: form.optional("agents")?,
+                        cwd: form.target_path("cwd", cwd)?,
                         connection: form.optional("connection")?,
                         model: form.optional("model")?,
                         effort: form.effort()?,
@@ -728,12 +730,14 @@ impl Form {
                     thread(),
                     node(),
                     f("cwd", "作業場所（空=継承）", String::new(), Text),
+                    f("agents", "AGENTS参照（空=継承）", String::new(), Text),
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadFork(ThreadForkArgs {
+                        agents: form.optional("agents")?,
                         thread_id: form.owned("thread")?,
                         node_id: form.owned("node")?,
-                        cwd: form.path("cwd", cwd)?,
+                        cwd: form.target_path("cwd", cwd)?,
                     }))
                 },
             ),
@@ -760,6 +764,7 @@ impl Form {
                     ),
                     f("title", "タイトル（set時）", String::new(), Text),
                     f("cwd", "新cwd（空=変更なし）", String::new(), Text),
+                    f("agents", "AGENTS参照（空=変更なし）", String::new(), Text),
                     f("connection", "接続（空=変更なし）", String::new(), Text),
                     f("model", "モデル（空=変更なし）", String::new(), Text),
                     f(
@@ -771,6 +776,7 @@ impl Form {
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadSet(ThreadSetArgs {
+                        agents: form.optional("agents")?,
                         title: match form.value("title_mode")? {
                             "set" => Some(form.owned("title")?),
                             "auto" => Some(String::new()),
@@ -778,7 +784,7 @@ impl Form {
                             _ => return Err("タイトル操作を選択してください".into()),
                         },
                         thread_id: form.optional("thread")?,
-                        cwd: form.path("cwd", cwd)?,
+                        cwd: form.target_path("cwd", cwd)?,
                         connection: form.optional("connection")?,
                         model: form.optional("model")?,
                         effort: form.effort()?,
@@ -1175,6 +1181,13 @@ impl Form {
                     })
             })
             .transpose()
+    }
+
+    fn target_path(&self, name: &str, cwd: &Path) -> Result<Option<String>, String> {
+        // Check representability locally, but leave relative resolution to Control:
+        // this form may target a Thread other than the currently displayed one.
+        self.path(name, cwd)?;
+        self.optional(name)
     }
 
     fn effort(&self) -> Result<Option<String>, String> {
@@ -1874,6 +1887,24 @@ mod tests {
         );
     }
     #[test]
+    fn agents_forms_preserve_relative_target_paths() {
+        let context = Context {
+            thread: "target".into(),
+            node: "source".into(),
+            ..Default::default()
+        };
+        for kind in [OpKind::ThreadCreate, OpKind::ThreadFork, OpKind::ThreadSet] {
+            let mut form = Form::new(kind, &context);
+            form.fields
+                .iter_mut()
+                .find(|f| f.name == "agents")
+                .unwrap()
+                .value = "roles/coder.md".into();
+            let value = serde_json::to_value(form.command(&context.cwd).unwrap()).unwrap();
+            assert_eq!(value["args"]["agents"], "roles/coder.md");
+        }
+    }
+    #[test]
     fn title_form_distinguishes_keep_set_and_auto() {
         let context = Context::default();
         let mut form = Form::new(OpKind::ThreadSet, &context);
@@ -1978,7 +2009,14 @@ mod tests {
         assert!(form.error.is_some());
         let mut operations = Operations::new(Context::default());
         operations.select(OpKind::ThreadCreate);
-        operations.form.as_mut().unwrap().selected = 4;
+        operations.form.as_mut().unwrap().selected = operations
+            .form
+            .as_ref()
+            .unwrap()
+            .fields
+            .iter()
+            .position(|f| f.name == "parent")
+            .unwrap();
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(32, 9)).unwrap();
         terminal

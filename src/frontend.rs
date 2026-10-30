@@ -982,7 +982,7 @@ async fn run_with_delivery(
                                 control
                                     .send_ordered_draft(
                                         trace.operation_id.clone(),
-                                        ThreadCreateArgs {
+                                        ThreadCreateArgs { agents: None,
                                             connection,
                                             cwd: Some(cwd),
                                             model,
@@ -1011,6 +1011,21 @@ async fn run_with_delivery(
                                     result,
                                 })
                                 .await;
+                        });
+                    }
+                    UiAction::SelectAgents { request_id, draft_id, generation, args } => {
+                        let Ok(permit) = command_slots.clone().try_acquire_owned() else {
+                            let error=ApiError::new(ErrorCode::InvalidState,"設定の変更キューが満杯です");
+                            command_outcome::<()>(&updates,submission,&Err(error.clone())).await;
+                            update(&updates,UiUpdate::AgentsSelected { request_id,draft_id,generation,result:Err(error) }).await;
+                            continue;
+                        };
+                        let control=control.clone();
+                        let sender=updates.worker();
+                        spawn_work(&mut workers,permit,async move {
+                            let result=request(&control,Command::ThreadCreate(args)).await.and_then(|v|serde_json::from_value::<ThreadDetails>(v).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Invalid Thread creation response")));
+                            command_outcome(&sender,submission,&result).await;
+                            update(&sender,UiUpdate::AgentsSelected {request_id,draft_id,generation,result}).await;
                         });
                     }
                     UiAction::Command(Command::ThreadSet(args)) => {
@@ -1446,7 +1461,7 @@ async fn run_with_delivery(
                                         confirmed_run_id,
                                         content,
                                         files,
-                                        ThreadCreateArgs {
+                                        ThreadCreateArgs { agents: None,
                                             cwd: Some(cwd),
                                             connection,
                                             model,

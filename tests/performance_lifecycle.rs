@@ -136,6 +136,7 @@ async fn command(control: &Arc<Control>, command: Command) -> Value {
 }
 fn settings() -> ThreadCreateArgs {
     ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,

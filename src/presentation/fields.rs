@@ -38,6 +38,7 @@ fn field_name(key: &str) -> &str {
         "parent_id" => "親会話",
         "title" => "件名",
         "cwd" => "作業フォルダー",
+        "agents_path" => "指示ファイル参照",
         "state" | "status" => "状態",
         "updated_at" => "更新日時",
         "created_at" => "作成日時",
@@ -250,6 +251,7 @@ pub(crate) fn group(pointer: &str) -> (u8, &'static str) {
         key,
         "command"
             | "cwd"
+            | "agents_path"
             | "model"
             | "model_id"
             | "connection"
