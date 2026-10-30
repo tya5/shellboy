@@ -1265,10 +1265,25 @@ repeatable work and decision rationale across conversations. It distinguishes
 known-ID/current-Turn reads, query-embedding cost, global versus Thread scope,
 index coverage and historical evidence versus current user authority/state.
 Omission notices retain keyword retrieval and add semantic history search only
-with both embedding settings. No search is executed by the notice and automatic
-indexing policy is unchanged. The one-week manual observation plan is recorded
+with both embedding settings. No search is executed by the notice. The subsequent required4 switch below
+controls automatic indexing independently of these retrieval suggestions. The one-week manual observation plan is recorded
 in issue71 comment6535408537; rollout, not merely main CI, starts the window.
 Native macOS ARM64/Rust1.99.1 focused tests and full local standard check pass
 (1,739/0/32, layout93, Python9, fmt/strict Clippy). New tests use60-second watchdogs
 only, never latency assertions. Final rebased source and three-OS CI are separate
 gates. No paid provider query, real user data, new telemetry or worker is involved.
+
+
+## Independent history-index switch (#71 required4)
+
+indexing.auto_history is a strict bool, default true. False blocks new automatic
+node/raw authorization and holds already pending automatic jobs/bootstrap inputs.
+Existing vectors stay queryable; explicit backfill/rebuild/probe, prepared-failure
+retry and standalone RAG remain available. No worker/table/queue is added.
+HistorySearch returns an items/auto_history/degraded/scope_status object (not a
+bare array), exposing potentially missing newer sources. Keyword is unchanged.
+Index status and config check show the flag; one-week observation decides whether
+to change its default later, not whether to remove embedding configuration.
+Native mock tests and full standard check pass; actual usefulness still needs
+the post-rollout week. Active-index-only deletion has no existing CLI; the guide
+states inactive-space GC limits rather than recommending unsafe DB deletion.

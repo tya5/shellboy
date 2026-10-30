@@ -3361,6 +3361,40 @@ attempts/results, explicit cross-Thread searches, global cross-Thread usage,
 post-reduction retrieval and evidence actually used in decisions. No telemetry,
 indexing-policy change or user-data scan was added for this observation plan.
 
-Line-count audit against fcb8d78: status1258 -> 1274 (+16/-0);
+Initial guidance-only line-count audit against fcb8d78: status1258 -> 1274 (+16/-0);
 acceptance3335 -> 3366 (+31/-0). Both originals remain exact byte
 prefixes; role headings are preserved. No validation history was replaced.
+
+
+## Independent auto-history policy (#71 required4)
+
+Added after the initial guidance gate, on native macOS ARM64 / Rust1.99.1.
+Two new60-second-watchdog integration tests exercise real temporary SQLite/vec
+and a loopback embedding mock. No latency or negative-observation window is a
+pass condition. With auto_history=false, new node/raw admission and previously
+pending automatic work send zero embedding requests. Existing vectors survive;
+search explicitly returns indexed-only/degraded coverage, including empty results.
+Explicit backfill reauthorizes matching held jobs/bootstrap; rebuild creates a
+new active space while preserving old vectors; probe remains available. Mock
+request counts distinguish these explicit charges from prohibited automatic work.
+Standalone material semantic indexing/search remains functional with embedding
+settings retained; history-scoped hybrid RAG warns of disabled coverage, whereas
+standalone material search is not degraded by this history-only setting.
+Config tests check strict bool/default true and config check's flag; IndexStatus
+reports it. Existing TUI search and caller-disconnect suites pass with the new
+HistorySearch result object, whose hit/provenance fields are unchanged.
+
+The first full run failed in the claim unit's minimal in-memory DDL because it
+omitted the existing authorized_watermark column now read by the policy filter.
+A focused run initially still used that earlier fixture; the DDL was then aligned
+with current schema and the focused test passed. No runtime schema, migration,
+compatibility fallback, test timeout or retry suppression was added.
+Full `RUST_TEST_THREADS=2 sh scripts/check.sh` passes after the fix (1741/0/32),
+layout93, Python9, fmt and strict all-target Clippy. Rebase and final three-OS
+main CI remain separate gates. Real provider/cache/billing behavior and actual
+one-week usefulness are unverified. Existing indexing policy and metadata fields
+are reused; no new telemetry, queue, worker, dependency or user-data modification.
+
+Final record audit against base fcb8d78: status1258 -> 1289 (+31/-0);
+acceptance3335 -> 3400 (+65/-0). The old files remain byte-for-byte
+prefixes; role headings and all prior histories are retained.
