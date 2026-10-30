@@ -211,7 +211,9 @@ name deltas are ignored and counted; partial name fragments still concatenate.
 For missing/empty tool ids, require a nonempty response id: hash its UTF-8 bytes
 once with SHA-256, then hash that hex seed plus the 8-byte big-endian index. Use
 `call_sb_` plus 48 hex digits; mark the original id, source/index and synthesis.
-No response identity is guessed if both identities are absent.
+No response identity is guessed if both identities are absent. Response ids have
+the same 1024-byte bound as call ids, preventing repeated audit metadata from
+amplifying a large id across up to 1024 tool calls.
 
 An omitted choices field is empty only on a chunk carrying non-null usage, with
 an omission counter. Other malformed choices still fail. Store normalization

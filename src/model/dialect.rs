@@ -201,6 +201,12 @@ impl Chat {
             return Ok(vec![json!({"type":"error","error":value["error"]})]);
         }
         if let Some(id) = value["id"].as_str() {
+            if id.len() > 1024 {
+                return Err(ModelError::new(
+                    "input_limit",
+                    "Chat response id exceeds byte limit",
+                ));
+            }
             if self.id.as_deref().is_some_and(|old| old != id) {
                 return Err(protocol("Chat response ID changed"));
             }
