@@ -16,7 +16,7 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
-| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local shared current-view transaction/500ms scope qualifies at67f6f09; actual selected refresh7→1jobs measured; live UI, global planner and native gates pending |
+| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local shared current-view transaction/500ms scope qualifies at67f6f09; D1 SQL batches/raw header qualify1745/0/32; live UI, global planner and native gates pending |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Local tree-cache/viewport foundation qualified; summary patches and native gates pending |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
@@ -246,3 +246,20 @@ thread_display_title for an empty stored title, which scans/parses saved user
 payloads on the DB worker. Separate a bounded frontend title observation from
 off-worker preparation before claiming SQL-only/global batch completion, without
 silently changing CLI title fallback or adding Core compatibility policy.
+
+
+## D1 local batching/header qualification
+
+Source558b870 (including currentmain1b559b9) passes1745/0/32 standard checks.
+Tools modern/projected scopes use actual2SQL (whole groups3), sender scopes2/4,
+recovery1 and header1/3; independent query oracles and native unrelated-record
+scaling tests preserve source/identity/time/byte semantics. No new schema/index
+is needed: retained sources already have migration2's node index. Header/title
+and initial draft JSON no longer parse in the frontend DB closure.
+
+Same-main P3 selected workload:1workerjob retained, SQL176→26, worker p50/p95
+4.813/9.826→3.334/4.359ms, VM16,602→22,632. Intermediate61,255VM revealed a reversed
+selector plan and was fixed; higher remaining VM and measurement limits stay
+explicit in [qualification](../validation/conversation-redesign-shared-read.md#d1-actual-sql-batches-and-bounded-raw-headers).
+This closes the recorded D0 per-node SQL/header debt for those paths, not D live
+work, E patches/F/G, global multi-consumer P3, or native/visual admission gates.

@@ -102,3 +102,87 @@ partial-cascade rollback. The follow-up standard check at161b4c9 succeeds: **1,7
 Python6, formatting and strict all-target Clippy, with the same native macOS and
 bounded build/test settings above. This
 fixes the producer gap only; browser patch consumers remain unfinished.
+
+
+## D1 actual SQL batches and bounded raw headers
+
+Commits2f2e39b/5000b05/ee369f6/92e9450 separate tool sources, sender facts,
+recovery evidence and raw headers. Merge46963c9 includes main1b559b9, including
+submitted-copy retention/Thread-scoped fences and setup follow-ups. Commit558b870
+fixes physical join order and avoids running the title byte-budget window over
+non-user rows. Final native standard check at558b870 passes **1,745/0/32**
+(passed/failed/ignored; library859, integration876, termination7, crash3), layout90,
+Python6, formatting and strict all-target Clippy. Same bounded build/test settings
+as above; no provider call, user data or installed update.
+
+The test-only shared SQLite trace observes real statement executions. It is not
+compiled into the product. Bundled-SQLite regressions establish:
+
+- Modern tool nodes:2 statements for50 direct results;3 with whole groups, using
+  at most129 actual ordinal seeks per distinct group. Sparse ordinals, repeated
+  call IDs/groups, duplicate requests, spoofed/missing/collected sources, foreign
+  shell ownership and the first output-item's null source mapping remain correct.
+  Projected initial-page/scroll tool facts also use2 statements, rather than a
+  per-block loop; independent old queries remain only as test oracles. Explicit
+  one-source preview validation still uses its existing exact query.
+- Common sender facts:2 statements for50 tools;4 for50 distinct user timestamps.
+  Every target/state/timestamp range is capped at129 matching receipts before
+  requested-node filtering. Any overflowing state or ambiguous source is Unknown;
+  legacy-null's Human band convention, typed unknown sender facts, original
+  parent/self identity and non-authoritative external names remain distinct.
+  Only unique sender witnesses are copied, at most8193 Unicode characters each.
+- Recovery:1 statement for50 eligible events, deduplicating saved Turn/time facts.
+  Historical observation time, latest failure/source selection, byte limits,
+  duplicate request order and raw-error decoding after DB exit match the old
+  independent oracle. Empty requests and scope-bound failures execute no SQL.
+  Exact counts still read each distinct indexed attempt range;1 statement is not
+  a constant-work claim.
+- Headers:1 statement for explicit names;3 for an automatic name/witness. Thread,
+  Run/Turn IDs, direct owned counts, context and original settings survive DB
+  shutdown before preparation. Prefixes bound inspected membership before user
+  filtering; source bytes share512KiB, with128KiB per candidate. Earlier omitted
+  sources, row/byte exhaustion and pending tie ordering cannot justify choosing a
+  later input. Empty evidence, unreadable users and limited evidence stay distinct.
+  CLI title semantics remain unchanged; initial draft decoding is also off-DB.
+- Native VM-step/query-plan tests scale unrelated source/node records by10,000
+  without a linear lookup scan. The existing migration2 node-source index is used;
+  no new index/migration/schema or authority rule is needed.
+
+### P3 trace: identical source workload and current-main baseline
+
+Private baseline00d8472 merges the pre-D1 sourcee70b729 with the same main1b559b9
+used by final558b870, isolating the D1 change from concurrent main work. Both
+are built explicitly from their intended worktrees, print full source witnesses
+and assert1 actual worker job for every sample. Fixture:128 saved nodes,50 closed
+successful tool results and50x64KiB retained raw output;10 warmups,30 samples.
+All50 tools return in every sample and raw preview blocks remain0.
+
+| Source | Actual worker jobs | SQL executions (min/max) | Worker work p50/p95 | SQLite VM steps (min/max) |
+| --- | --- | --- | --- | --- |
+| Pre-D1 +same main00d8472 |1 |176/177 |4.813/9.826ms |16,602/16,607 |
+| Intermediate46963c9 |1 |26/27 |4.591/4.937ms |61,255/61,260 |
+| Final558b870 |1 |26/26 |3.334/4.359ms |22,632/22,632 |
+
+The intermediate result exposed a physical-plan regression despite fewer SQL
+statements: a kind index drove repeated requested-ID scans. The final selector
+forces requested IDs before node-PK lookup; the bounded title prefix filters
+users before its window while retaining an empty overflow witness. Keep the
+intermediate observation as evidence, not as final qualification.
+
+Final VM work remains higher than pre-D1; do not report a universal SQL/CPU
+speedup. Worker time here includes instrumentation and local scheduler/load
+variation, and excludes queue waits/presentation/render/provider time. Occasional
+existing worker maintenance appears in the statement/VM hook. SQLite full-scan
+counters98→724 include bounded materialized/temporary CTE scans; they are not
+physical table-row or disk-I/O counts. Native scaling tests and EXPLAIN separately
+prove the intended PK/source-index lookups. This measurement qualifies the
+selected current-view workload, not all popup/list/Watch consumers or global P3.
+
+An earlier minimal Python schema omitted the already-shipped node-source index.
+Its linear-scan curve is explicitly invalid for the current store. The corrected
+full-schema probe and bundled regression support retaining schema14. No proposed
+migration15 was implemented. See the decision log for the rejected proposal.
+
+D live work/clock/output, E patches, F Watch/descendants and G catalogue/forms/
+popups remain open, including applicable P2/P4/P5/P6 and exact-source native
+Windows/Linux/visual gates. Previous B+C captures or CI do not qualify D1.

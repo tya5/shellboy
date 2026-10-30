@@ -1,23 +1,34 @@
 # Development status
 
-## #41 D1 actual SQL batching and raw header (in progress)
+## #41 D1 actual SQL batching and raw header (locally qualified)
 
-Tool node and sender metadata now use set-based queries and bounded indexed
-recursive seeks; sender collision limits remain before identity matching and
-sender-body copying. The normal selected source path no longer executes one
-statement per node. Existing projected initial-page/scroll tool reads and recovery
-observations are being brought into the same batching discipline, with independent
-old-query parity oracles retained only in tests. A shared test-only SQLite trace
-records actual statements instead of maintaining production counters.
+Commits2f2e39b/5000b05/ee369f6/92e9450 separate tool/sender/recovery SQL batches
+from raw-header preparation. Merge46963c9 integrates main1b559b9's submitted-copy
+retention, Thread-scoped fences and setup fixes. Final558b870 fixes physical join
+order and skips non-user title windows. Native macOS/Rust1.99.1 standard passes
+**1,745/0/32** (library859, integration876, termination7, crash3), layout90,
+Python6, formatting and strict all-target Clippy.
 
-A bounded frontend raw-header/title witness replaces the CLI title scan for
-current-view refresh and initial selection. Title JSON and draft decoding run
-after the DB worker; an unavailable earlier source produces an explicit limited
-header title rather than borrowing a later request. CLI semantics are unchanged.
-The first targeted frontend run passes165/0/1 on the intermediate source; later
-batch refinements and final-main integration are not yet qualified. Main1b559b9
-includes config and submitted-copy retention fixes and must be merged before the
-final standard check. D live work/E patches/F/G and native gates remain open.
+Real SQLite traces verify tool direct/projected50-node reads in2 statements,
+whole-group scopes in3, sender tool scopes in2/user scopes in4, recovery50-event
+scopes in1 and raw headers in1/3. Collision/ambiguity, original provenance,
+GC source lookup, sparse ordinals, byte caps and old-query parity are covered.
+Header/title and initial draft JSON prepare after DB release. Bounded earlier
+source loss is explicit rather than replaced with a later title. CLI behavior
+and conversation schema14 remain; the existing node-source index suffices.
+
+The same-main128-node/50-tool P3 comparison retains1 worker job while SQL
+executions fall176→26. Worker p50 is4.813→3.334ms and p95 is9.826→4.359ms in this
+instrumented local sample. VM work still rises16,602→22,632; no global SQL/CPU
+speedup or every-surface P3 completion is claimed. An intermediate61,255-VM plan
+was investigated and corrected; a minimal-schema missing-index assumption was
+rejected before any schema change. Full evidence and limits are in
+[qualification](../validation/conversation-redesign-shared-read.md#d1-actual-sql-batches-and-bounded-raw-headers).
+
+Next: D live-work/clock/output, E ID-restricted browser patches, F Watch/descendants
+and G catalogue/forms/popups, plus full planner and applicable performance/native
+gates. These changes remain local: no push, installed update, release, paid API
+or default-data change.
 
 ## #41 D0 shared current-view read (locally qualified)
 
@@ -46,11 +57,10 @@ All4 real separate-CLI/GC reactivity tests pass in that final suite.
 
 Actual128-node/50-tool observation now verifies7→1 DB jobs per selected refresh;
 worker p95 is3.675→3.940ms, so no SQL-time speedup is claimed. Source identity is
-checked after rejecting one shared-cache artifact mix-up. Existing per-node helper
-SQL still needs genuine batching; one worker job is not completion of that design
-requirement. Empty-title derivation inside the reused ThreadDetails helper also
-still scans/parses on the DB worker and needs separation before SQL-only final
-qualification. See the qualification.
+checked after rejecting one shared-cache artifact mix-up. At that D0 checkpoint, per-node helper SQL and the reused
+ThreadDetails title scan remained open. D1 above implements their actual batches
+and frontend raw-title boundary; global multi-consumer gates still remain open.
+See the qualification.
 
 Next: D live-work/clock/output behavior,
 E/F list/watch/descendants,

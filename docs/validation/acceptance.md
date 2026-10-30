@@ -1,5 +1,19 @@
 # Validation record
 
+## #41 D1 SQL batches and raw headers (local)
+
+Source558b870 integrates current-main1b559b9 and passes native macOS arm64/
+Rust1.99.1 standard checks: **1,745/0/32**, layout90/Python6/fmt/strict Clippy.
+Actual SQLite traces, independent old-query oracles and10,000-unrelated-record
+scaling regressions verify bounded tool/sender/recovery reads and PK/source-index
+shape; raw-header/title/draft preparation is off-DB. No schema/migration/authority
+change is introduced. The [detailed record](conversation-redesign-shared-read.md#d1-actual-sql-batches-and-bounded-raw-headers)
+retains before/intermediate/final evidence, the rejected missing-index assumption
+and remaining limits. P3 selected workload SQL176→26, worker p50 4.813→3.334ms;
+VM16,602→22,632 remains higher, so no universal CPU claim. D/E/F/G, global planner,
+performance and native Windows/Linux/visual gates remain incomplete. No paid API,
+real store, installed binary, push or release was involved.
+
 ## #41 D0 shared-read and E tree-cache foundation (local)
 
 Source67f6f09 integrates mainbb7e29b and qualifies locally with
