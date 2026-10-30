@@ -1256,3 +1256,19 @@ writer queue. The full local standard check passes 1,737/0/32, layout 93, Python
 fmt and strict all-target Clippy; the disposable-PTY on/off/shell-OSC regression
 passes through this reader. Final rebased/native CI remain separate gates.
 Physical receiver behavior is not newly qualified by this fix.
+
+
+## Semantic history retrieval guidance (#71, 2026-10-31)
+
+Agent Guide now gives five concrete uses for indexed meaning, including recovery,
+repeatable work and decision rationale across conversations. It distinguishes
+known-ID/current-Turn reads, query-embedding cost, global versus Thread scope,
+index coverage and historical evidence versus current user authority/state.
+Omission notices retain keyword retrieval and add semantic history search only
+with both embedding settings. No search is executed by the notice and automatic
+indexing policy is unchanged. The one-week manual observation plan is recorded
+in issue71 comment6535408537; rollout, not merely main CI, starts the window.
+Native macOS ARM64/Rust1.99.1 focused tests and full local standard check pass
+(1,739/0/32, layout93, Python9, fmt/strict Clippy). New tests use60-second watchdogs
+only, never latency assertions. Final rebased source and three-OS CI are separate
+gates. No paid provider query, real user data, new telemetry or worker is involved.

@@ -3333,3 +3333,34 @@ No owner is started/restarted, no real database/configuration is accessed and
 no paid provider is called. These public-byte checks are not three-OS synthetic
 upgrade tests or qualification of all physical terminals/real providers.
 A later separately authorized user installation must not restart the live owner.
+
+
+## Semantic retrieval guidance and omission notices (#71)
+
+2026-10-31, native macOS ARM64/Rust1.99.1, source4711c89 on base fcb8d78.
+`cargo test --locked --lib compaction::edit::` passes28 tests, including saved
+marker checks for configured/unconfigured embeddings and explicit/maximal
+omission. Default/unconfigured notices remain keyword-only; configured ones add
+the exact history search command, embedding-request cost and coverage caveat.
+Tests preserve original node endpoints and side-effect warnings. Valid embedding
+settings use a synthetic loopback URL but make no HTTP/model/embedding request.
+`cargo test --locked --test integration docs_cli::agent_semantic_search` passes
+with the guide extracted through the actual worktree executable's owner-free
+`docs get --id shellboy/agent-guide --section when-semantic-history-search-helps`.
+The five situations, cross-conversation safety/cost notes and all three examples
+are checked; commands from both saved notices and the bundled guide are parsed
+by the actual CLI argument parser (including global search, Thread scope, hybrid
+history RAG and rag get --ref). The binary needs neither config nor a data-dir.
+Both new async tests have only a60-second watchdog; no sleep, timing comparison
+or real-provider experiment is introduced.
+`RUST_TEST_THREADS=2 sh scripts/check.sh` passes1,739/0/32, layout93, Python9,
+fmt and all-target strict Clippy. Rebased full check and ordinary three-OS CI
+remain independent gates. Search efficacy is not established by a mock: the
+reviewer's read-only one-week plan in issue71 comment6535408537 separates
+attempts/results, explicit cross-Thread searches, global cross-Thread usage,
+post-reduction retrieval and evidence actually used in decisions. No telemetry,
+indexing-policy change or user-data scan was added for this observation plan.
+
+Line-count audit against fcb8d78: status1258 -> 1274 (+16/-0);
+acceptance3335 -> 3366 (+31/-0). Both originals remain exact byte
+prefixes; role headings are preserved. No validation history was replaced.
