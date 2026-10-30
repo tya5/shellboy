@@ -86,7 +86,11 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Command | Behavior |
 |---|---|
 | `config init` | Create the bundled commented template at `--config PATH` or the OS default; existing files/symlinks are never overwritten. `result.created=false` means an existing path was left intact |
-| `config check` | Strictly read that file, resolve defaults, check key-variable presence and GET the model catalog once. No owner or conversation/embedding request. A missing/unadvertised setting, HTTP/network error or invalid TOML exits 1 with path/facts in `error.details` |
+| `config check` | Strictly read that file, resolve defaults, check key-variable presence and GET the model catalog once. No owner or conversation/embedding request. A missing required setting, HTTP/network error or invalid TOML exits 1 with path/facts in `error.details` |
+
+An unadvertised model produces `result.warnings` but still exits 0 (proxy aliases
+and wildcards may work). Failed template writes remove the newly created file;
+cleanup failures report `incomplete_file_retained`.
 
 Both commands return ordinary JSON and reject `--operation-id`: they are not
 owner RPCs and create no receipt or owner database. Init is an explicit file

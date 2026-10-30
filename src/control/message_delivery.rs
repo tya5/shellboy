@@ -7,7 +7,7 @@ use crate::{
     protocol::{ApiError, ErrorCode},
     storage::StorageError,
 };
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 
 const TERMINAL: &str = "(EXISTS(SELECT 1 FROM run r WHERE r.id=receipt.run_id AND r.state IN ('completed','stopped','failed')) OR EXISTS(SELECT 1 FROM turn u WHERE u.id=receipt.turn_id AND u.state IN ('completed','stopped','failed')))";
@@ -20,6 +20,10 @@ pub(crate) fn mark_admitted_tx(
 ) -> rusqlite::Result<()> {
     for node in nodes {
         db.execute("UPDATE receipt SET path_admission='admitted' WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node])?;
+        let operation: Option<String> = db.query_row("SELECT client_operation_id FROM receipt WHERE target_thread_id=?1 AND message_node_id=?2",params![thread,node],|r|r.get(0)).optional()?;
+        if let Some(operation) = operation {
+            super::submission_retention::collect_operation(db, &operation)?;
+        }
     }
     Ok(())
 }

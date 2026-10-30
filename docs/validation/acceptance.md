@@ -2940,3 +2940,72 @@ config files retain the existing strict loader error; use `config init` with the
 same `--config` before startup. No existing configuration or installed binary
 was changed by these checks. Installer guidance is a source/output change for
 the next release; old v0.3.0 assets are not modified.
+
+### Path-safety follow-up and local rerun history
+
+The initial seven setup tests are followed by a Unix-only non-Unicode path test
+(eight on Unix, six on Windows). A disposable-HOME reproduction found a JSON
+serialization panic when init reported a non-Unicode configuration path.
+`eed67fe` rejects that unsupported path before file I/O and uses display-safe
+UTF-8 for diagnostic directory paths. All eight focused tests pass locally;
+no user path/configuration was used or modified.
+
+The local combined check at `453c5e0` failed the existing unpaused-index repaint
+assertion in `real_tui_accepts_text_renders_proxy_response_and_exits_cleanly`;
+`bb7e29b`, differing only in documentation reconciliation, passed the full
+standard rerun without Rust/test changes. Its exact-source three-OS main CI
+[41077938813](https://github.com/tya5/shellboy/actions/runs/41077938813) also passes.
+The same pre-existing repaint assertion recurred in the default-concurrency
+local full check at `eed67fe`, while setup tests, fmt, Clippy and other tests
+passed. No timeout, assertion or test skip is changed. A bounded full recheck
+uses `RUST_TEST_THREADS=2`; report that environment/result separately and do not
+claim it diagnoses or fixes the repaint issue. Final-source ordinary main CI
+remains a distinct gate for the path-safety follow-up.
+
+### #69 review follow-up
+
+Replace short elapsed-time assumptions with 60-second watchdogs and committed
+state notifications. Count pending mock connections only after the CLI finishes
+or the fixture owner and all owned work shut down; no sleep loop or 100/150ms
+negative observation remains. Partial template-write injection verifies cleanup,
+retry and non-overwrite. Catalog aliases not advertised by the mock now succeed
+with `model_advertised=false` and warnings, per #68 D-009. Eight focused Unix
+integration cases and the partial-write unit test pass locally; ordinary final
+three-OS CI is still required separately. No paid/provider probe is added.
+
+## #60 submission retention qualification
+
+Synthetic macOS temporary DB/loopback fixtures only; no installed binary, user DB
+or paid provider. Full `RUST_TEST_THREADS=2 sh scripts/check.sh` passes1688/0/32, layout89,
+Python6, formatting and strict all-target Clippy. Exact frozen-copy metadata validation, source-revision fences and
+bounded four-field receipt markers preserve cancellation archives. Sixteen repeated
+submitted/admitted sends each release at least8192 logical bytes and leave no
+submitted row; exact replay and reopen retain the markers. Old rows are collected
+128 then2 through the real history GC path. Unknown/submitting copies survive DB
+reopen. Cancelled text and attachment position restore without a model send after
+copy collection and ordinary GC; late autosave is suppressed, newer edit accepted.
+The initial full check failed two old frontend expectations that all accepted
+copies remain forever. Their replacements retain canonical-text/trace/edit/zero-
+shell assertions, assert receipt binding and admission, and require copy retention
+when admission is still uncertain. Final exact main CI remains pending. No
+physical-terminal crash or real-provider qualification; receipt watermark scan scalability is unmeasured.
+
+
+Combined with #69 base bd75c9a, exact #60 source7d34cbe passes the full standard
+check1698/0/32, layout90, Python6, fmt and strict all-target Clippy on native macOS
+arm64/Rust1.99.1 with RUST_TEST_THREADS=2. The first combined full run failed the
+existing tui_process unpaused-index repaint at tests/tui_process.rs:137; the
+same-SHA/same-environment full rerun passed without Rust/test changes. Preserve
+that failure independently; no timeout/assertion is weakened or failure cause
+claimed fixed. Only appended documentation conflicts arose during rebase and
+both #69 and #60 histories are retained; runtime patches are unchanged.
+
+
+## #60 indexed fence follow-up
+
+Thread isolation and EXPLAIN QUERY PLAN are checked against the actual generated
+fence SQL, requiring SEARCH binding USING INDEX receipt_target with a target-
+Thread equality and rejecting a binding table scan. No schema/index is added.
+Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 standard check passes1699/0/32,
+layout90, Python6, fmt and strict all-target Clippy. Native main CI remains
+a separate pending gate; prior #60 results are not substituted.

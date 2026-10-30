@@ -1357,6 +1357,8 @@ Turn scenarios where Changed is guaranteed. A reserved native-start row has no
 guaranteed notification while its start gate is held; retain bounded5ms fixture
 polling there. Product timers and side-effect assertions do not change.
 
+Historical #52 deferral: the submitted-copy decision in this paragraph is
+superseded by the active #60 receipt-watermark decision below.
 Defer submitted-draft retention cleanup (review Low3). Those rows also preserve
 crash/replay correlation and the source-revision watermark; deleting them at
 admission would revive stale autosaves or lose replay provenance. They already
@@ -1675,3 +1677,42 @@ without an old-format shim or a new authority policy. Revisit a covering index
 only with measured same-node fanout or native lookup evidence demonstrating a
 material benefit beyond the current index. Check the full schema and existing
 migration history before using a minimal prototype to infer a missing index.
+
+## 2026-10-31: catalog absence is advisory (#68 D-009 / #69)
+
+Active, from the user's issue68 decision and issue69 review: an unadvertised
+model is a warning with exit success, because wildcard/alias proxy models need
+not appear in a catalog. No chat probe is substituted to guess availability.
+Syntax, required settings, credentials and catalog HTTP failures remain errors.
+Revisit only if actual naming mistakes justify an explicit stricter option.
+
+## 2026-10-31: finished submission copies and receipt watermarks (#60)
+
+Active; supersedes the submitted-copy retention deferral in the #52 review.
+User approval requires body-free, bounded facts in existing receipt JSON, not a
+new archive engine/table/migration. Keep only operation ID, source draft ID and
+revision, and message ID, each identifier <=4096 UTF-8 bytes and the escaped
+object <=64KiB. Both acceptance and legacy GC use the same binding shape.
+
+The copy is collected only for admitted or known-admission cancelled input;
+unknown/submitting copies and editable/archived drafts remain. Cancellation
+archives retain original source references and restore text/attachments without
+sending. A terminal Run alone is not proof that held unadmitted input is gone.
+Receipt-based fences keep old autosaves/restore suppressed after copy disposal.
+
+Use existing DB-worker transactions and history/all GC, at most128 candidate
+copies per pass. No schema or index is added: exact source-revision checks can
+scan receipt scalar JSON (including across edit-fork Threads). This is a bounded
+payload, not an O(1) query-cost claim. A new index/migration needs measured need;
+do not trade away cross-Thread correctness to pretend a target-only seek suffices.
+No user data or installed executable is edited as part of validation.
+
+
+## 2026-10-31: Thread-bounded submission fences (#60 Medium follow-up)
+
+Active, superseding the initial #60 global receipt-scan tradeoff. Per user/reviewer
+instruction, pass the receiving Thread at every autosave/selection/archive fence
+and constrain binding.target_thread_id before JSON checks. Reuse receipt_target;
+no migration/new index is needed. EXPLAIN QUERY PLAN must show SEARCH binding
+USING INDEX receipt_target(target_thread_id=?), not SCAN binding. A receipt in
+another Thread is not a watermark for the selected Thread's editable draft.

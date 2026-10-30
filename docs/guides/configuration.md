@@ -32,8 +32,8 @@ connection/model settings and credential-variable presence (never its value).
 It sends only a bounded **GET model catalog** request, like `model list`, and
 checks whether `default_model` is advertised. It sends no conversation or
 embedding request. Success is not proof that a provider supports Responses or
-will accept a billed request. A model absent from the catalog may be a supported
-proxy alias; confirm that separately rather than guessing. `config check` is an
+will accept a billed request. A model absent from the catalog produces a warning but check still succeeds
+(decision D-009): it may be a supported proxy alias; confirm that separately rather than guessing. `config check` is an
 explicit network operation; the startup welcome performs no network probe.
 
 `base_url` must be the **API root**, for example `https://proxy.example/v1`, not

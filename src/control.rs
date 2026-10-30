@@ -6,6 +6,7 @@ mod live;
 pub(crate) mod message_delivery;
 pub(crate) mod pending_messages;
 mod runtime;
+pub(crate) mod submission_retention;
 mod turn_interrupt;
 mod ui_events;
 pub use foreground::ForegroundRelease;

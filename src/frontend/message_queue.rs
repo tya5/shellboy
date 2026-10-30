@@ -43,7 +43,7 @@ pub(super) fn query(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let mut submitted=db.prepare("SELECT json_extract(body_json,'$._submission.operation_id'),json_extract(body_json,'$._submission.source_draft_id'),json_extract(body_json,'$._submission.source_revision'),json_extract(body_json,'$._submission.message_id') FROM draft WHERE thread_id=?1 AND state='submitted' ORDER BY updated_at DESC,id DESC LIMIT 128")?;
+    let mut submitted=db.prepare("SELECT operation_id,source_draft_id,source_revision,message_id FROM (SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,json_extract(body_json,'$._submission.source_revision') AS source_revision,json_extract(body_json,'$._submission.message_id') AS message_id,updated_at AS accepted_at FROM draft WHERE thread_id=?1 AND state='submitted' UNION ALL SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id) GROUP BY operation_id,source_draft_id,source_revision,message_id ORDER BY max(accepted_at) DESC,operation_id DESC LIMIT 128")?;
     let submitted = submitted
         .query_map([thread], |row| {
             Ok(SubmittedMessage {
@@ -106,8 +106,13 @@ pub(super) async fn archives(
     control: &Control,
     thread: Option<String>,
 ) -> Result<Vec<(String, String)>, ApiError> {
+    let submission_fence = crate::control::submission_retention::fence(
+        "json_extract(current.body_json,'$._submission.source_draft_id')",
+        "json_extract(current.body_json,'$._submission.source_revision')",
+        "COALESCE(current.thread_id,?1)",
+    );
     let result=control.store.database.call(move|db|{
-        let mut stmt=db.prepare("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT EXISTS(SELECT 1 FROM draft submitted WHERE submitted.state='submitted' AND json_extract(submitted.body_json,'$._submission.source_draft_id')=json_extract(current.body_json,'$._submission.source_draft_id') AND json_extract(submitted.body_json,'$._submission.source_revision')>=json_extract(current.body_json,'$._submission.source_revision'))) ORDER BY updated_at DESC,id DESC LIMIT 128")?;
+        let mut stmt=db.prepare(&format!("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {submission_fence}) ORDER BY updated_at DESC,id DESC LIMIT 128"))?;
         let rows=stmt.query_map([thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
         let result=rows.into_iter().map(|(id,kind,source,text)|{let label=if kind.as_deref()==Some("cancelled_message") {format!("取消した入力 · {}",source.as_deref().unwrap_or("不明"))} else {format!("未確定の送信 · {}",text.as_deref().unwrap_or(""))};(id,label)}).collect();
         Ok(result)
@@ -122,7 +127,12 @@ pub(super) async fn restore_archive(
     checked_storage(control, result).await
 }
 async fn restore_archive_inner(control: &Control, id: String) -> Result<DraftSnapshot, ApiError> {
-    let value=control.store.database.call(move|db|Ok(db.query_row("SELECT body_json FROM draft current WHERE id=?1 AND state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (state<>'submitting' OR NOT EXISTS(SELECT 1 FROM draft submitted WHERE submitted.state='submitted' AND json_extract(submitted.body_json,'$._submission.source_draft_id')=json_extract(current.body_json,'$._submission.source_draft_id') AND json_extract(submitted.body_json,'$._submission.source_revision')>=json_extract(current.body_json,'$._submission.source_revision')))",[id],|r|r.get::<_,String>(0)).optional()?)).await.map_err(storage_error)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Restorable draft not found"))?;
+    let submission_fence = crate::control::submission_retention::fence(
+        "json_extract(current.body_json,'$._submission.source_draft_id')",
+        "json_extract(current.body_json,'$._submission.source_revision')",
+        "current.thread_id",
+    );
+    let value=control.store.database.call(move|db|Ok(db.query_row(&format!("SELECT body_json FROM draft current WHERE id=?1 AND state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (state<>'submitting' OR NOT {submission_fence})"),[id],|r|r.get::<_,String>(0)).optional()?)).await.map_err(storage_error)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Restorable draft not found"))?;
     let value: Value = serde_json::from_str(&value)
         .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Archived draft is malformed"))?;
     let snapshot = if value["kind"] == "cancelled_message" {
@@ -793,6 +803,151 @@ mod tests {
                 .code,
             ErrorCode::TargetUnavailable
         );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+    use rusqlite::params;
+    use serde_json::json;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_copy_is_retired_but_text_and_attachment_restore_without_sending() {
+        let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let path = root.path().join("retention-file.txt");
+        std::fs::write(&path, b"fixture attachment").unwrap();
+        let file = path.to_string_lossy().into_owned();
+        owner.db.call(move|db| {
+            let tx=db.transaction()?;
+            let body=json!({"role":"user","content":[{"type":"input_text","text":"before"},{"type":"attachment_ref","attachment_id":"retention-file"},{"type":"input_text","text":"after"}]}).to_string();
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('retention-message','user','0',?1,?2,?3)",params![body,body.len()as i64,crate::digest::sha256_hex(body.as_bytes())])?;
+            tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES('retention-message','retention-op','null','thread','retention-message','held','unadmitted','0','{}')",[])?;
+            tx.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('retention-file','retention-message',?1,'file','external','0')",[file])?;
+            let body=json!({"draft_id":"retention-composer","revision":7,"text":"beforeafter","attachments":[],"_submission":{"operation_id":"retention-op","source_draft_id":"retention-composer","source_revision":7,"message_id":"retention-message","accepted_thread_id":"thread"}}).to_string();
+            tx.execute("INSERT INTO draft VALUES(?1,'thread',7,?2,'submitted','0')",params![crate::control::db::DraftSubmission::id_for_operation("retention-op"),body])?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let before = owner
+            .db
+            .call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM model_attempt", [], |r| {
+                    r.get::<_, i64>(0)
+                })?)
+            })
+            .await
+            .unwrap();
+        let request = Request::new(
+            format!("{}:retention-cancel", owner.instance_id),
+            Command::MessageCancel(MessageCancelArgs {
+                message_ids: vec!["retention-message".into()],
+            }),
+        );
+        let response = control.request(request).await;
+        assert!(response.ok, "{:?}", response.error);
+        let archive = response.result.unwrap()["items"][0]["archive_draft_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        control
+            .gc
+            .collect(StorageCategory::History, chrono::Utc::now())
+            .await
+            .unwrap();
+        let snapshot = restore_archive_inner(&control, archive.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.text,
+            format!("before{}after", crate::ui::draft::MARKER)
+        );
+        assert_eq!(snapshot.attachments.len(), 1);
+        assert_eq!(snapshot.attachments[0].position, Some("before".len()));
+        assert_eq!(snapshot.attachments[0].path, path);
+        owner
+            .db
+            .call(move |db| {
+                assert!(!db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM draft WHERE state='submitted')",
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )?);
+                assert!(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM draft WHERE id=?1 AND state='archived')",
+                    [archive],
+                    |r| r.get::<_, bool>(0)
+                )?);
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
+                        .get::<_, i64>(0))?,
+                    before
+                );
+                assert!(
+                    query(db, "thread")?
+                        .submitted
+                        .iter()
+                        .any(|s| s.source_draft_id == "retention-composer" && s.revision == 7)
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        // Simulate a crash-before-ack editable copy and an older unfinished submission.
+        owner.db.call(|db| {
+            let snapshot=serde_json::to_string(&DraftSnapshot{draft_id:"retention-composer".into(),revision:7,text:"stale unsent copy".into(),..Default::default()}).unwrap();
+            db.execute("INSERT INTO draft VALUES('retention-composer','thread',7,?1,'editing','later')",[snapshot])?;
+            let snapshot=json!({"draft_id":"retention-composer","revision":6,"text":"older unfinished","attachments":[],"_submission":{"source_draft_id":"retention-composer","source_revision":6}}).to_string();
+            db.execute("INSERT INTO draft VALUES('older-submitting','thread',6,?1,'submitting','before')",[snapshot])?;Ok(())
+        }).await.unwrap();
+        let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+        crate::frontend::select_thread(&control, &updates, "thread", 7, 0, None, 80)
+            .await
+            .unwrap();
+        assert!(
+            incoming
+                .try_iter()
+                .any(|update| matches!(update, UiUpdate::Thread { draft: None, .. })),
+            "sent editable content must not restore"
+        );
+        assert!(
+            !archives(&control, Some("thread".into()))
+                .await
+                .unwrap()
+                .iter()
+                .any(|(id, _)| id == "older-submitting")
+        );
+        assert!(
+            restore_archive_inner(&control, "older-submitting".into())
+                .await
+                .is_err()
+        );
+        owner.db.call(|db| {
+            assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE id='older-submitting' AND state='submitting')",[],|r|r.get::<_,bool>(0))?);
+            // Remove the synthetic old editable fixture to observe insert rejection separately.
+            db.execute("DELETE FROM draft WHERE id='retention-composer'",[])?;Ok(())
+        }).await.unwrap();
+        for revision in [7, 8] {
+            let draft = DraftSnapshot {
+                draft_id: "retention-composer".into(),
+                revision,
+                text: "late autosave".into(),
+                ..Default::default()
+            };
+            crate::frontend::save_draft(
+                &control,
+                "thread".into(),
+                draft,
+                ViewAnchor::default(),
+                true,
+            )
+            .await
+            .unwrap();
+            let exists=owner.db.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE id='retention-composer' AND state='editing' AND revision=?1)",[revision as i64],|r|r.get::<_,bool>(0))?)).await.unwrap();
+            assert_eq!(exists, revision == 8);
+        }
+        server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

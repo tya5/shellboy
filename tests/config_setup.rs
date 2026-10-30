@@ -38,6 +38,18 @@ fn run(command: &mut Command) -> (bool, Value, String) {
     });
     (output.status.success(), json, stdout)
 }
+fn drain_connections(listener: std::net::TcpListener) -> usize {
+    listener.set_nonblocking(true).unwrap();
+    let mut count = 0;
+    loop {
+        match listener.accept() {
+            Ok(_) => count += 1,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => panic!("cannot inspect completed mock connections: {error}"),
+        }
+    }
+}
 fn expected_path(home: &Path) -> std::path::PathBuf {
     if cfg!(windows) {
         home.join("Roaming").join("shellboy").join("config.toml")
@@ -197,7 +209,7 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            let (mut stream, _) = tokio::time::timeout(Duration::from_secs(15), listener.accept())
+            let (mut stream, _) = tokio::time::timeout(Duration::from_secs(60), listener.accept())
                 .await
                 .unwrap()
                 .unwrap();
@@ -224,12 +236,8 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
                 body.len()
             );
             stream.write_all(reply.as_bytes()).await.unwrap();
-            assert!(
-                tokio::time::timeout(Duration::from_millis(150), listener.accept())
-                    .await
-                    .is_err(),
-                "unexpected second request"
-            );
+            drop(stream);
+            listener
         });
         std::fs::write(
             &path,
@@ -247,7 +255,11 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         })
         .await
         .unwrap();
-        assert_eq!(ok, status == 200 && advertised, "{text}");
+        assert_eq!(ok, status == 200 && body.starts_with('{'), "{text}");
+        if ok && !advertised {
+            assert_eq!(value["result"]["model_advertised"], false);
+            assert_eq!(value["result"]["warnings"].as_array().unwrap().len(), 1);
+        }
         assert!(!text.contains(key), "credential value leaked");
         if status != 200 {
             assert_eq!(value["error"]["details"]["http_status"], status);
@@ -255,7 +267,17 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         if status == 404 {
             assert!(text.contains("https://proxy.example/v1") && text.contains("/responses"));
         }
-        server.await.unwrap();
+        let listener = tokio::time::timeout(Duration::from_secs(60), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_std()
+            .unwrap();
+        let connections = 1 + drain_connections(listener);
+        assert_eq!(
+            connections, 1,
+            "extra connections after the completed command"
+        );
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -442,6 +464,7 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
         .as_str()
         .unwrap()
         .to_owned();
+    let mut changes = control.subscribe();
     let sent = control
         .request(request(Command::MessageSend(MessageSendArgs {
             sender_label: None,
@@ -451,7 +474,7 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
         })))
         .await;
     assert!(sent.ok, "{sent:?}");
-    let reason = tokio::time::timeout(Duration::from_secs(10), async {
+    let reason = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let reply = control
                 .request(request(Command::ThreadGet(ThreadTarget {
@@ -462,7 +485,10 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
             if let Some(reason) = value["recovery_reason"].as_str() {
                 break serde_json::from_str::<ApiError>(reason).unwrap();
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            match changes.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(error) => panic!("state notification closed: {error}"),
+            }
         }
     })
     .await
@@ -478,11 +504,33 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
             && notice.contains("config check"),
         "{notice}"
     );
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), listener.accept())
-            .await
-            .is_err()
-    );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
+    let listener = listener.into_std().unwrap();
+    let connections = drain_connections(listener);
+    assert_eq!(connections, 0, "connections after all owned work ended");
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_setup_paths_return_json_before_io_and_diagnostics_cannot_panic() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+    let root = tempfile::tempdir().unwrap();
+    let invalid = root.path().join(OsStr::from_bytes(b"bad-\xff.toml"));
+    let (ok, value, _) = run(command(root.path())
+        .arg("--config")
+        .arg(&invalid)
+        .args(["config", "init"]));
+    assert!(!ok && value["error"]["code"] == "invalid_argument");
+    assert!(!invalid.exists());
+    let file = root.path().join("config.toml");
+    std::fs::write(&file, "").unwrap();
+    let (ok, value, _) = run(command(root.path())
+        .arg("--config")
+        .arg(&file)
+        .arg("--data-dir")
+        .arg(&invalid)
+        .args(["config", "check"]));
+    assert!(!ok && value["error"]["details"]["setup"]["data_dir"].is_string());
+    assert!(!invalid.exists());
 }

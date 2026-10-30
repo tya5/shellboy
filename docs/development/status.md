@@ -68,6 +68,40 @@ Store/Control regression tests pass. Follow-up standard check at161b4c9 succeeds
 E browser patch consumers and native Windows/Linux qualification remain unfinished. This adds no schema, event type,
 worker, queue or lifecycle policy.
 
+## #60 Medium follow-up: indexed Thread-scoped receipt fences
+
+Autosave, selection and archive fences now constrain receipt.target_thread_id to
+the receiving/current Thread. The existing receipt_target index limits JSON reads;
+there is no schema/migration/new index. A regression verifies Thread isolation
+and EXPLAIN QUERY PLAN SEARCH (not SCAN) for the actual generated fence SQL.
+Native macOS arm64/Rust1.99.1 RUST_TEST_THREADS=2 standard check passes1699/0/32,
+layout90, Python6, fmt and strict Clippy. Native main CI remains pending.
+
+## #60: bounded submission facts and terminal copy disposal
+
+Existing receipt.result_json holds only a bounded four-field submission binding.
+Known admission/cancellation removes the correlated submitted copy transactionally;
+submitting/unknown, editable drafts and cancellation archives are retained.
+Autosave/editable/submitting restoration and queue correlation consult the receipt
+facts after the copy is gone. Ordinary history/all GC backfills at most128 old
+eligible copies per pass. No schema/table/column/worker/queue/setting is added.
+
+Native macOS arm64/Rust1.99.1 full standard checks pass **1688 passed / 0 failed /
+32 ignored** before integration, layout89, Python6, fmt and strict all-target Clippy, with
+RUST_TEST_THREADS=2. Eight new regressions cover bounded body-free markers,
+admission/deletion rollback, known/unknown retention,16 repeated sends with
+logical storage drops, exact receipt replay after copy disposal, durable DB reopen,
+130-copy GC batches and cancelled text/attachment restoration without sending
+after GC. Initial full validation found two old frontend tests that required
+permanent copies; they now check retained receipt facts, positive admission,
+canonical text, independent edits and known-versus-uncertain copy lifetime.
+After integration with #69 base bd75c9a, exact source7d34cbe passes **1698/0/32**,
+layout90, Python6, fmt and strict all-target Clippy. Its first full run failed the
+unchanged PTY unpaused-index repaint; the same-SHA/same-environment full rerun
+passes. That failure is retained, not claimed fixed. Native main CI is pending.
+Source-draft watermark checks may scan receipt JSON; no O(1) lookup or physical
+SQLite shrink is promised. Real user data and physical terminal are untested.
+
 ## #59 review follow-up: legacy sender explanation (D-006)
 
 The CLI reference and protocol design distinguish legacy null's historical human

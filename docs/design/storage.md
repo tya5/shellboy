@@ -148,3 +148,9 @@ in [pending messages](pending-messages.md). Existing full-payload byte accountin
 and GC ownership remain effective. receipt.result_json stores explicit now and
 bounded cancellation/delivery-context facts; original assignments stay immutable.
 Historical admission classification remains isolated in migration13.
+
+
+#60 retains only a bounded draft_submission binding in receipt.result_json after
+terminal copy disposal; schema remains14. See pending-messages for the exact
+unknown/submitting guards and the existing GC transaction lifecycle. Cancelled
+archive references and original message/attachment storage remain unchanged.
