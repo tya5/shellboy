@@ -157,6 +157,8 @@ mod tui_process;
 mod tui_recovery;
 #[path = "../tui_shutdown.rs"]
 mod tui_shutdown;
+#[path = "../turn_interrupt.rs"]
+mod turn_interrupt;
 #[path = "../ui.rs"]
 mod ui;
 #[path = "../ui_scroll_refresh.rs"]
