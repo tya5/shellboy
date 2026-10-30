@@ -55,6 +55,8 @@ mod http_header_measurement;
 mod http_observation;
 #[path = "../index.rs"]
 mod index;
+#[path = "../index_batch.rs"]
+mod index_batch;
 #[path = "../input_history_backend.rs"]
 mod input_history_backend;
 #[path = "../instructions.rs"]
