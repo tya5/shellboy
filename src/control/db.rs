@@ -1668,7 +1668,11 @@ fn bounded_thread_title(text: &str) -> String {
 /// Display-only fallback. Never rewrite an explicit title or the user's history.
 /// The selected path, rather than a Run's latest assistant/tool output, defines
 /// the earliest meaningful user text, including on a forked/shared history.
-fn thread_display_title(connection: &Connection, id: &str, stored: &str) -> Result<String> {
+pub(crate) fn thread_display_title(
+    connection: &Connection,
+    id: &str,
+    stored: &str,
+) -> Result<String> {
     if !stored.trim().is_empty() {
         return Ok(stored.into());
     }

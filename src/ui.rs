@@ -38,6 +38,8 @@ mod operations;
 mod overlay;
 mod popup;
 mod presentation;
+#[cfg(test)]
+mod program_status_tests;
 mod redraw;
 pub mod startup;
 mod terminal_guard;
@@ -437,6 +439,11 @@ impl CopyScope {
 }
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    ProgramStatusSeen {
+        thread_id: String,
+        run_id: String,
+    },
+
     SelectAgents {
         request_id: String,
         draft_id: String,
@@ -677,6 +684,8 @@ pub struct DraftRecoveryTarget {
 }
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    ProgramStatus(crate::program_status::Snapshot),
+
     SendOperation {
         draft_id: String,
         revision: u64,
@@ -1434,6 +1443,8 @@ pub struct UiState {
     next_fold: u64,
     deferred_actions: Vec<UiAction>,
     terminal_requests: Vec<Vec<u8>>,
+    program_status_pending: Option<crate::program_status::Snapshot>,
+    program_status_seen: Option<(String, String)>,
     layout_cache: HistoryLayoutCache,
     visible_links: Vec<crate::terminal_links::LinkRegion>,
     // Last actually painted source IDs; bounded by the 128-node projection.
@@ -1526,6 +1537,8 @@ impl UiState {
             next_fold: 1,
             deferred_actions: Vec::new(),
             terminal_requests: Vec::new(),
+            program_status_pending: None,
+            program_status_seen: None,
             layout_cache: HistoryLayoutCache::default(),
             visible_links: vec![],
             painted_body_nodes: None,
@@ -1883,6 +1896,25 @@ impl UiState {
         }
     }
     fn apply_inner(&mut self, update: UiUpdate) {
+        if let UiUpdate::ProgramStatus(snapshot) = update {
+            if self.config.ui.program_status == crate::config::ProgramStatus::Off {
+                return;
+            }
+            if snapshot.selected == self.view().thread_id {
+                if let Some(pair) = &snapshot.viewed
+                    && snapshot.selected.as_deref() == Some(pair.0.as_str())
+                    && self.program_status_seen.as_ref() != Some(pair)
+                {
+                    self.deferred_actions.push(UiAction::ProgramStatusSeen {
+                        thread_id: pair.0.clone(),
+                        run_id: pair.1.clone(),
+                    });
+                    self.program_status_seen = Some(pair.clone());
+                }
+                self.program_status_pending = Some(snapshot);
+            }
+            return;
+        }
         if matches!(update, UiUpdate::RecoveryBell) {
             self.bell.request(self.config.ui.bell, Instant::now());
             return;
@@ -2107,6 +2139,7 @@ impl UiState {
                 result,
             } => self.apply_thread_deletion(request_id, args, execute, result),
             UiUpdate::SavedMessage { .. } => unreachable!("handled as atomic saved projection"),
+            UiUpdate::ProgramStatus(_) => unreachable!("handled before view updates"),
             UiUpdate::RecoveryBell => unreachable!("handled before selected-view updates"),
             UiUpdate::ScopedManagement { .. } => {
                 unreachable!("scoped result handled before normal updates")
@@ -5245,6 +5278,7 @@ fn run_session(
     let mut selecting = false;
     let mut last_save = Instant::now();
     let mut detached = false;
+    let mut program_status = crate::program_status::Publisher::new(config.ui.program_status);
     loop {
         if termination.is_some_and(termination::Termination::forced) {
             return Ok(UiExitReason::Forced);
@@ -5280,6 +5314,11 @@ fn run_session(
         }
         let rendered = (|| -> io::Result<()> {
             termination::check_terminal()?;
+            if let Some(snapshot) = state.program_status_pending.take()
+                && snapshot.selected == state.view().thread_id
+            {
+                program_status.sync(&snapshot, terminal.backend_mut())?;
+            }
             state.bell.flush(terminal.backend_mut(), Instant::now())?;
             for bytes in state.take_terminal_requests() {
                 use std::io::Write;
@@ -5328,6 +5367,9 @@ fn run_session(
                 return Err(error);
             }
         }
+    }
+    if !state.is_forced() && !detached {
+        program_status.clear(terminal.backend_mut())?;
     }
     Ok(if state.is_forced() {
         UiExitReason::Forced

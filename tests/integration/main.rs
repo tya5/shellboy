@@ -97,6 +97,8 @@ mod performance_load;
 mod performance_tui;
 #[path = "../presentation.rs"]
 mod presentation;
+#[path = "../program_status.rs"]
+mod program_status;
 #[path = "../protocol.rs"]
 mod protocol;
 #[path = "../query_index_performance.rs"]

@@ -100,6 +100,29 @@ bell = false
 
 This uses terminal BEL. Sound, screen flash, or visual-bell behavior follows terminal settings. If inaudible, check those settings; multiplexers such as tmux also need bell forwarding/notification configuration. Shellboy does not change OS notifications or volume.
 
+## Terminal program status
+
+Shellboy reports saved activity using [OSC7501 rev0.4](https://www.superlogical.com/rex/docs/build/program-status)
+on the same terminal, **between** cell frames. This does not alter the status row
+or conversation renderer. It uses the existing activity classifier: active work
+maps to working, recovery to blocked (auth/config failures may carry kind=auth),
+failed work to error, unseen completion to done, and idle/stopped/viewed completion
+to idle. The root summarizes every conversation, including ones outside the
+32-child export cap; idle children are cleared. Normal exit sends a root clear.
+
+Only final changed reports are written. Titles/messages have controls, bidi and
+invisible-format characters removed, are UTF-8-byte bounded and standard-base64
+encoded. Progress is not known and is omitted. Model/tool OSC bytes are stored
+and sanitized as ordinary untrusted output, not forwarded as Shellboy reports.
+
+Disable with `[ui] program_status = "off"` in TOML (put the field on a new line)
+and restart. It then writes no OSC7501, even at exit. There is no feature query,
+receiver process or kitty/cmux/herdr-specific command/passthrough. Supporting
+terminals decide how to present the records. Unknown OSCs should be ignored;
+tmux may discard them. PTY/byte-capture tests do not qualify a physical receiver's
+GUI: actual kitty/cmux/herdr and WezTerm/Terminal.app display remains separately
+verified or explicitly unverified in the validation record.
+
 ## Input and basic keys
 
 These are defaults. Change send/newline combinations with `ui.send_key` and `ui.newline_keys`. Combinations producing the same terminal key code cannot be distinguished. While processing, the composer explains that additional instructions apply at the next boundary; during recovery wait, a new instruction resumes work.

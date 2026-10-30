@@ -301,6 +301,31 @@ These settings provide identifiers the endpoint can use; they do not guarantee c
 
 F6 details for a completed answer show saved `usage.input_tokens_details.cached_tokens` as `入力キャッシュ` (input cache). Zero and unreported values are distinct. The UI does not infer cache hits from old records or invalid values and also displays the corresponding model request ID.
 
+## Terminal program status
+
+`ui.program_status = "on"` (default) emits generic OSC7501 rev0.4 program status
+on the TUI terminal. Set it to `"off"` and restart to emit **no** OSC7501,
+including no query or exit clear. No receiver/product detection or external
+agent-report command is used. The CLI does not emit TUI program-status reports.
+
+```toml
+[ui]
+program_status = "off"
+```
+
+The root report summarizes all saved conversations, with priority blocked > error
+> working > done > idle. At most 32 nonidle conversation records are retained;
+overflow remains in root counts. Completion is unseen only if it happens during
+this UI session and has not been selected after completion. Old completions do
+not become new unread work on startup. Seen identities are session-local, never
+written into your DB. Idle/deleted/evicted records clear; normal exit clears all.
+No percentage or heartbeat is fabricated. `kind=auth` uses typed saved auth/config
+facts, not error-message guesses. Free text is cleaned and base64-encoded with
+strict size caps; it is not terminal markup.
+
+See [TUI terminal status](tui.md#terminal-program-status) for receiver limits and
+verified scope. This feature does not change the conversation display or lifecycle.
+
 ## HTTP timeouts
 
 Per-connection `response_header_timeout_ms` defaults to 120,000ms (two minutes) and must be positive. It bounds the interval from request start, including upload, until response headers arrive. It does not establish whether the peer received the complete request.
@@ -384,7 +409,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `io` | `output_buffer_bytes=8388608`, `output_batch_bytes=65536`, `output_batch_ms=25` | Raw collection buffer 8MiB, DB batch 64KiB/25ms |
 | `workers` | `attachment=2`, `control_file=1` | Bounded file-worker counts |
 | `indexing` | `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
-| `ui` | `max_fps=30`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true` | Rendering, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait |
+| `ui` | `max_fps=30`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"` | Rendering, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait |
 | `logging` | `file_bytes=5242880`, `files=3` | Diagnostic logs, 5MiB ×3 |
 
 `cache.history_bytes` exclusively budgets the cross-Thread send-history conversion LRU. `body_bytes` retains UI bodies and node metadata; `layout_bytes` budgets render layouts including widths/folds; `attachment_base64_bytes` budgets converted attachments. These are not a whole-process RSS cap including active viewport/HTTP pins, SQLite/OS caches, runtime resources, or saved history. Cache eviction does not delete history; data is fetched again as needed. A zero cache budget disables retained caching, not all active working memory.

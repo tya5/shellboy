@@ -34,3 +34,7 @@ handling. A design document does not establish successful verification. Check th
 - [Reactive history retention (#58)](tui-history-retention.md)
 
 - [Conversation redesign (#41)](conversation-redesign.md)
+
+
+Terminal-only metadata: [OSC7501 program status](program-status.md) uses the existing
+saved activity classifier and frame-boundary writer, not a conversation renderer.

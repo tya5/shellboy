@@ -1,6 +1,7 @@
 //! Async TUI adapter. Files, clipboard, DB, and preparation never run on the UI.
 pub mod activity;
 mod admission;
+mod program_status;
 use admission::{spawn_read, spawn_work};
 mod draft_images;
 mod draft_saver;
@@ -268,6 +269,10 @@ fn trace_send(
     );
 }
 enum BackgroundResult {
+    ProgramStatus {
+        epoch: u64,
+        result: Result<program_status::Projected, ApiError>,
+    },
     ThreadDeletion {
         request_id: u64,
         args: ThreadDeleteArgs,
@@ -723,6 +728,13 @@ async fn run_with_delivery(
     let mut ui_subscription = control.subscribe_ui();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut status_session = program_status::Session::new();
+    let status_enabled = control.store.config.ui.program_status == crate::config::ProgramStatus::On;
+    let mut status_dirty = status_enabled;
+    let mut status_ready = true;
+    let mut status_inflight = false;
+    let mut status_epoch = 0u64;
+    let mut status_selected: Option<String> = None;
     let mut initialize = Some(UiUpdate::Initialize { cwd });
     let mut draft_failure = None;
     loop {
@@ -801,6 +813,40 @@ async fn run_with_delivery(
         }
         if updates.closed() {
             break;
+        }
+        if status_enabled && status_selected != selection.active_thread {
+            status_selected = selection.active_thread.clone();
+            status_epoch = status_epoch.wrapping_add(1);
+            status_dirty = true;
+            status_ready = true;
+        }
+        if status_enabled
+            && status_dirty
+            && status_ready
+            && !status_inflight
+            && !updates.backpressured()
+        {
+            let selected = status_selected.clone();
+            let started = status_session.started;
+            let seen = status_session.seen.clone();
+            let epoch = status_epoch;
+            let source = control.clone();
+            let sender = background_tx.clone();
+            if spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
+                let result = source
+                    .store
+                    .database
+                    .call(move |db| program_status::project(db, selected, started, seen))
+                    .await
+                    .map_err(storage_error);
+                let _ = sender
+                    .send(BackgroundResult::ProgramStatus { epoch, result })
+                    .await;
+            }) {
+                status_dirty = false;
+                status_ready = false;
+                status_inflight = true;
+            }
         }
         ui_subscription.select(selection.active_thread.as_deref());
         actions.enable_cancel(control_tasks.is_empty());
@@ -1724,6 +1770,13 @@ async fn run_with_delivery(
                             .await;
                         }
                     }
+                    UiAction::ProgramStatusSeen { thread_id, run_id } => {
+                        if status_enabled && status_session.seen.get(&thread_id) != Some(&run_id) {
+                            status_session.seen.insert(thread_id, run_id);
+                            status_epoch = status_epoch.wrapping_add(1);
+                            status_dirty = true;
+                        }
+                    }
                     UiAction::ActivateDraft { draft_id } => {
                         management.close_usage();
                         selection.activate_draft(draft_id);
@@ -2551,6 +2604,15 @@ async fn run_with_delivery(
                 }
             },
             result=background_rx.recv(),if !receipt_batch.active() && updates.main_ready()=> match result {
+                Some(BackgroundResult::ProgramStatus { epoch, result }) => {
+                    status_inflight = false;
+                    if epoch == status_epoch && status_selected == selection.active_thread {
+                        if let Ok(projected) = result {
+                            status_session.seen = projected.seen;
+                            update(&updates, UiUpdate::ProgramStatus(projected.snapshot)).await;
+                        }
+                    } else { status_dirty = true; }
+                }
                 Some(BackgroundResult::ThreadDeletion { request_id, args, execute, mut known_thread_ids, result }) => {
                     let result = match result {
                         Ok(thread_deletion::Outcome::Preview(value)) => Ok(ThreadDeletionReply::Preview(value)),
@@ -2904,6 +2966,7 @@ async fn run_with_delivery(
             },
             event=ui_subscription.receiver.recv()=> match event {
                 Ok(EngineEvent::Changed { thread_id, recovery }) => {
+                    status_dirty |= status_enabled;
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
                     }
@@ -2943,6 +3006,7 @@ async fn run_with_delivery(
                     status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    status_dirty |= status_enabled;
                     management.usage_lagged();
                     #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
@@ -2983,7 +3047,8 @@ async fn run_with_delivery(
                     });
                 }
             },
-            _=tick.tick(),if selection.progress_running || management.usage_waiting()=> {
+            _=tick.tick(),if selection.progress_running || management.usage_waiting() || (status_enabled && status_dirty)=> {
+                status_ready = true;
                 if selection.progress_running && let Some(thread) = selection.active_thread.clone()
                     && let Some(generation) = selection.generations.get(&thread).copied()
                     && let Ok(permit) = progress_slots.clone().try_acquire_owned()
@@ -3154,6 +3219,7 @@ async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
                 _=>{},
             },
             _=tick.tick()=>{
+
                 if tokio::time::Instant::now()>=next_choice{force_available=true;}
                 update(updates,UiUpdate::ShutdownProgress{elapsed_ms:started.elapsed().as_millis().min(u64::MAX as u128)as u64,detail:if force_available{"停止・保存が猶予時間を超えました。待機継続または強制終了を選択してください。強制終了では未保存・未回収が残る可能性があります".into()}else{"新規受付を停止し、所有処理・下書き・出力を保存して解放しています".into()},force_available}).await;
             },

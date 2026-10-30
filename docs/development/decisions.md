@@ -1703,3 +1703,18 @@ Core persistence retains output items, not the entire HTTP envelope. Missing
 both identities and incomplete arguments are not repaired. Keep capacity-error
 classification unchanged: string codes only, no vendor-message inference. No
 paid/live-provider validation is authorized; no new Core table/worker/queue.
+
+
+## 2026-10-31: generic terminal status without renderer changes (#54 / D-011)
+
+Adopt default on, maximum32 child records plus root, no feature query/progress/
+heartbeat. The only activity classifier is existing activity::classify. Use the
+existing bounded read admission, DB worker, coalescing UI outbox and tick; add no
+worker/poller/process/queue/table/dependency. A UI acknowledgment marks a selected
+completion seen; session-start UTC excludes historical completions from new done
+signals. Seen entries are pruned when deleted/replaced and never persisted.
+The full-thread scalar scan is an event-coalesced aggregate cost, not an O(1)
+claim; titles/history are projected only for retained children. Wire diffing
+compares final encoded bytes; root clear is normal-exit only and off emits none.
+Only UI metadata admission and frame-boundary IO are changed, not #41 draw/layout
+or status-row code. Keep real receiver qualification separate from mock success.

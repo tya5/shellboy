@@ -373,7 +373,14 @@ pub enum PaletteMode {
     Dark,
     Light,
 }
-section!(Ui { bell: bool = true, max_fps: u32 = 30, paste_fold_chars: usize = 1_000, paste_fold_lines: usize = 3, send_key: String = "Enter".into(), newline_keys: Vec<String> = vec!["Ctrl+J".into(), "Shift+Enter".into()], copy_backend: CopyBackend = CopyBackend::Auto, palette: PaletteMode = PaletteMode::Dark });
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProgramStatus {
+    #[default]
+    On,
+    Off,
+}
+section!(Ui { program_status: ProgramStatus = ProgramStatus::On, bell: bool = true, max_fps: u32 = 30, paste_fold_chars: usize = 1_000, paste_fold_lines: usize = 3, send_key: String = "Enter".into(), newline_keys: Vec<String> = vec!["Ctrl+J".into(), "Shift+Enter".into()], copy_backend: CopyBackend = CopyBackend::Auto, palette: PaletteMode = PaletteMode::Dark });
 section!(positive "logging", Logging {
     file_bytes: u64 = 5 * MIB,
     files: usize = 3

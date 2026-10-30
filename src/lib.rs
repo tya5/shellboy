@@ -24,6 +24,7 @@ pub mod ipc;
 mod json_pointer;
 pub mod model;
 pub mod presentation;
+pub mod program_status;
 pub mod protocol;
 pub mod rag;
 pub mod shell;
