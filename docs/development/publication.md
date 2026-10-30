@@ -182,3 +182,22 @@ checks use `SHELLBOY_INSTALL_DIR`; the user's installed binary, profiles and rea
 data are untouched. Downloading installer assets through the advertised Release
 URLs remains untested until the next release publishes those assets; v0.3.0 is
 intentionally unchanged.
+
+### Windows running-image replacement follow-up (#63)
+
+[Manual branch run 41062404250](https://github.com/tya5/shellboy/actions/runs/41062404250)
+at `c7b155e` passes Windows PowerShell 5.1 and PowerShell 7 (and both Unix jobs).
+Windows now renames the old executable to its unique backup path, then renames
+the staged binary into place; a failed final rename restores the backup. If
+restoration itself fails, the error names the retained backup for manual repair.
+The running process is not stopped or upgraded by this operation.
+
+The regression test keeps the real public v0.3.0 executable running, blocked on
+`message send --text-stdin` with stdin left open. This holds the Windows image
+without starting an interactive owner, accessing a real database or contacting
+a model. Replacement succeeds while that process remains live; the new binary
+runs and the backup matches the original bytes. A second live-image check
+removes the staged file to inject a final-rename failure, then verifies the
+original binary is restored, runnable and byte-identical, no extra backup is
+left, and the held process is still live. The fixture kills and reaps its own
+processes before removing its temporary installation.
