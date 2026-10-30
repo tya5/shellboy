@@ -1043,3 +1043,17 @@ mkdir前に予定pathを記録し、locatorのみ・空directory・bind後の各
 改名前の作業履歴と公開用の新履歴は分離しています。名称変更・公開準備は旧goal全体の完遂とは扱いません。レビュー対応goalはv0.1.1公開後に再開しました。
 
 Windows/Linuxのnative検証はGitHub Actionsで実施しました。実provider API、実IME・OS clipboard、各端末GUIの再検証は今回未実施です。既知の制限は [一覧](known-limitations.md)、レビュー台帳は [運用](maintenance.md) に記載します。
+
+## Guide follow-up (#67, 2026-10-30)
+
+Documentation only: the delegation guide now gives the parent/user the completed
+child retention decision, preview-before-delete procedure and usage/audit tradeoff;
+the User Guide fixes `at least 100ms`. The English shell guide contains a macOS
+Seatbelt wrapper checked through a real synthetic model shell and isolated owner,
+with direct-write/network tests, owner CLI calls and process-group stopping.
+The English/Japanese User Guides link to it. Linux bubblewrap capability passes
+an Ubuntu branch-only probe, but its complete proxy/IPC wrapper is deferred and
+no executable Linux recipe is claimed. Windows gives unverified least-privilege
+account/ACL, egress-policy and VM alternatives, not a shell-wrapper recipe.
+See [verified and unverified scope](../validation/acceptance.md#guide-follow-up-67).
+No Rust code, installed binary, real database, real provider or Release changes.

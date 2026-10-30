@@ -2776,3 +2776,61 @@ combined source result; do not substitute ae9bc19's earlier native CI for it.
 Subsequent changes here are development/validation records only. The user
 authorizes main push; confirm its exact-source three-OS CI before issue closure.
 #53/#56/#52 code and any user-data operations are excluded.
+
+## Guide follow-up (#67)
+
+2026-10-30. Source: runtime `ed40f33`, initial guide snippets `3d65edd`, with final
+snippet/config rechecks before push. Native macOS 26.3.1 ARM64, Python 3 and
+`/usr/bin/sandbox-exec` (confirmed deprecated in its local manual). Extract the
+Scheme/profile and sh wrapper from `docs/guides/shell.md`, substitute disposable
+physical work/scratch/profile paths and a fixture proxy port, and configure
+`[shell] executable` to that wrapper. No real user owner or paid provider is used.
+
+A temporary Python HTTP Responses fixture requests one actual background model
+shell from a separate PTY owner; a separate local proxy fixture answers only
+`http://allowed.test/` with 200 and rejects `http://denied.test/` with 403. Checks:
+
+- Direct writes to work/scratch succeed; a sibling path outside both is denied.
+- HTTP through the fixture proxy returns the expected allow/reject codes; direct
+  TCP to a different local service fails even with proxy bypass requested.
+- The model shell's real `message send` succeeds through its issued owner socket,
+  and `wait` observes a known-completed independent fixture Turn without a cycle.
+- The real `shell stop` operation terminates the wrapped model shell and its
+  sleep descendant; the descendant PID disappears. The fixture owner and HTTP
+  servers are stopped afterwards; all storage is disposable.
+
+This is an HTTP allowlist fixture, not a production forwarding proxy or HTTPS
+CONNECT/DNS-rebinding qualification. Reads and other OS IPC are not confined by
+the allow-default profile. This is not malicious-code escape resistance or
+all-macOS-version certification. No real provider interoperability was tested.
+
+[Linux capability run 41068155623](https://github.com/tya5/shellboy/actions/runs/41068155623)
+at branch-only SHA `60a4749` succeeds on Ubuntu 22.04 x64 / kernel 6.8.0-1070-azure
+with bubblewrap 0.6.1. It installs bubblewrap in the ephemeral runner and checks
+read-only `/`, writable work/temp binds and direct TCP denial in `--unshare-net`.
+The validation-only workflow is **not merged into main**. A complete Linux
+proxy bridge, owner CLI connectivity and stopping were not verified together;
+Landlock and WSL2 are also unverified. To keep this follow-up bounded, the guide
+defers that executable recipe rather than extrapolating from the capability test.
+Windows ACL/Firewall/AppContainer/VM options are conceptual, unverified here.
+
+The three cleanup lines were checked against the existing `thread delete-preview`
+and `thread delete` contract (no live/stopping Runs, matching descendant choice)
+and usage's exclusion of deleted Threads. The User Guide typo and its Japanese
+safety-section link were checked for alignment. Rust and workflow changes are
+excluded from the main-bound documentation commits; standard checks and exact
+main CI remain separate validation gates.
+
+### Related #63 validation history
+
+The Windows running-image fix is recorded in [publication](../development/publication.md#windows-running-image-replacement-follow-up-63).
+At `b16f414`, local full standard check first failed the existing TUI repaint
+assertion `real_tui_accepts_text_renders_proxy_response_and_exits_cleanly`;
+the unchanged same-SHA full rerun passed. Main CI
+[41063015359](https://github.com/tya5/shellboy/actions/runs/41063015359) passed
+macOS/Linux on attempt 1. Windows attempt 1 timed out in
+`a_long_turn_can_reduce_again_after_successful_tool_work`; failed-job rerun
+attempt 2 passed that test but timed out in
+`partial_uploads_reduce_on_the_second_failure_and_keep_the_retry_budget`.
+Same-SHA failed-job rerun attempt 3 passed. No Rust/test changes or automatic
+retry suppression were introduced; the timeout causes remain unresolved.

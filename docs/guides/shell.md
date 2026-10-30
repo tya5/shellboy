@@ -291,6 +291,9 @@ executable = "/absolute/trusted/wrapped-bash"
 HTTP_PROXY = "http://127.0.0.1:3128"
 HTTPS_PROXY = "http://127.0.0.1:3128"
 NO_PROXY = ""
+http_proxy = "http://127.0.0.1:3128"
+https_proxy = "http://127.0.0.1:3128"
+no_proxy = ""
 ```
 
 The local synthetic check used a disposable owner/data-dir and a model fixture,
@@ -315,8 +318,10 @@ option, but is not evaluated here.
 
 The complete wrapper, owner IPC, proxy bridge and stopping behavior have not
 been qualified together on Linux, so no executable Linux recipe is provided.
-The separate capability-probe result is recorded in the validation notes; it
-must not be read as a successful full sandbox acceptance check.
+[Ubuntu 22.04 capability run 41068155623](https://github.com/tya5/shellboy/actions/runs/41068155623)
+passes with bubblewrap 0.6.1: work/temp writes work, other writes fail on the
+read-only bind, and an isolated network namespace blocks direct TCP. This is
+not a full sandbox acceptance check; see the [validation notes](../validation/acceptance.md#guide-follow-up-67).
 
 ### Windows: no lightweight equivalent wrapper supplied
 
