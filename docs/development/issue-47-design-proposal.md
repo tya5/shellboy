@@ -69,13 +69,72 @@ facts and open measurement rows in the deletion transaction; deleted scopes are
 excluded from backfill and descendant reads. No owner embedding totals are part
 of this change.
 
-All new table/index bytes must enter logical-storage accounting. Fixed aggregate
-rows and worst-case period/point-row reservations count toward begin admission,
-before HTTP. Reserve bounded terminal-write space as existing admission permits;
-never issue an unadmitted paid request and assume its accounting can be dropped.
-If terminal persistence still fails, source/result and aggregates roll back
-together, preserving existing uncertain-storage handling rather than reporting
-successful adoption. Detailed reservation sizing and failure tests remain open.
+### Existing Storage Facts And Proposed Admission
+
+Verified current sources: `src/config.rs` defines limits.data_warning_bytes =
+8 GiB and limits.data_max_bytes = 10 GiB by default; user configuration overrides
+these values. `src/gc.rs::require_capacity_tx` currently rejects new work when
+logical_usage.total() >= data_max_bytes. It does not reserve future result bytes.
+Terminal recording, stops, observations and GC remain available at the limit.
+`src/gc/usage.rs` sums scalar covering-index measurements of retained payloads;
+SQLite B-tree/index page overhead is physical, not logical payload bytes.
+Receipt-specific reservation/counter semantics are not a generic data quota and
+must not be silently reused for model accounting.
+
+Proposed extension, pending minimal DDL: define exact metrics logical payload
+bytes from stored identifiers/timestamps/purpose and typed scalar fields, with
+SQL-derived byte expressions/covering indexes, not an unchecked cached estimate.
+Do not claim those logical bytes equal physical SQLite pages. Add these payload
+bytes to existing logical history usage, not a new quota setting/category cap.
+All-time/coarse bucket/coverage metadata count too. Do not count shared identifiers
+or reservation bytes twice in the same accounting definition.
+
+For a begin transaction let U be current logical usage including existing pending
+metrics reservations, B the exact new begin/fact bytes, and R a proven upper bound
+on additional metrics bytes at any allowed terminal outcome (including newly
+created scope/category/coarse-bucket rows). Admit only if checked U+B+R <= the
+configured data_max_bytes; otherwise return existing storage_limit before HTTP.
+Store the pending R on the begun source/measurement so concurrent begins cannot
+reuse the same headroom. At finish atomically release R, persist actual typed
+facts/totals and commit the source result. No new fixed per-request quota is
+invented. Exact B/R formulas await the chosen schema; no fabricated numeric
+reservation can be approved before its field widths/keys/nulls are specified.
+
+This reservation is for new metrics writes only, not a promise to reserve every
+future response/shell payload byte or avoid OS disk-full errors. Other existing
+terminal writers are allowed to exceed the logical threshold. Terminal accounting
+must not be refused merely because logical usage has since crossed the limit;
+if actual DB persistence fails, source/aggregate/reservation changes roll back
+together and existing uncertain-storage handling applies. Begin-side admission,
+terminal over-limit recording and actual storage failure require separate tests.
+
+### Pressure Reclamation Proposal, Not A New Retention Age
+
+Retain all-time/coarse-bucket totals until scope deletion. No fixed-age metrics
+expiry is proposed. Existing retention.tool_raw_days = 7 and tool_raw_bytes =
+1 GiB apply to raw shell output only; do not reuse them for measurement facts.
+Reclaim only terminal, already-accounted edge facts, oldest first by indexed
+(first_terminal_at,id). Never reclaim active/uninitialized/unsettled facts.
+
+Trigger choice still needs leader confirmation: use the configured logical
+warning threshold as proactive pressure, with data_max_bytes as the hard admission
+threshold, rather than inventing a third numeric watermark. This would be a new,
+explicit metrics-GC policy attached to an existing warning setting, not a claim
+that warning currently performs this reclamation. If warning remains display-only,
+max/projected-admission pressure instead needs an explicitly agreed wake/pending
+pressure signal so refusal just below max does not permanently prevent recovery.
+Do not silently add a polling loop or assume receipt cleanup solves this case.
+
+Proposed GC work budget reuses the existing bounded collection scale: at most
+128 point facts / 1 MiB measured logical payload in one transaction, oldest first;
+then yield. These are work limits, not new retained-data quotas. Mark each affected
+coarse bucket's edge coverage incomplete in the same transaction as fact deletion;
+leave all-time/coarse numeric totals unchanged. A later duplicate finish for the
+missing id is obsolete and cannot INSERT/UPSERT it. If protected totals or other
+retained history still fill the logical limit, stop reclaiming when eligible
+facts are exhausted and report pressure/deferred; never delete aggregate totals
+or pretend capacity was recovered. Physical free space need not increase.
+
 
 ## Exactly Once And Outcome Corrections
 
@@ -89,13 +148,21 @@ Proposed outcome mapping for model attempts:
 | terminal -> same terminal / obsolete generation | No addition or replacement. |
 | persisted result reclassified across success/non-success, if later explicitly supported | Correct the same measurement atomically; do not keep the old outcome total. |
 
+The adopted counting direction is separate attempt_count and http_request_count.
+A successful CAS records the HTTP-start fact immediately before the client call,
+not before preparation/admission; it is an attempted HTTP invocation, not proof
+of provider receipt. The authoritative HTTP completion observer claims settlement
+once for a begun started id. Not-started and missing/obsolete results must be
+separate outcomes, not generic zero-usage successful requests. Coordination with
+Core cancellation/obsolete adoption remains to be specified without adopting a
+late response or losing an already-started request's observation.
+
 The current model_attempt preparing state can fail before an HTTP call. The
 final schema must distinguish attempt/pre-request failures from actual attempted
 HTTP requests rather than reporting an invented provider request count. Existing
 model_attempt.started_at-to-first-terminal duration follows that saved attempt's
-clock, not proof of server processing or receipt. The request-count naming and
-pre-request time treatment require an explicit final decision; do not hide this
-under the word request. Summary begin is immediately before its actual client
+clock, not proof of server processing or receipt. The separate count names are adopted; pre-request time treatment and the
+completion/adoption CAS relationship still require a final transition design. Summary begin is immediately before its actual client
 call, after preparation and storage admission.
 
 Current completion CAS does not permit failed -> completed. Do not invent that
@@ -117,7 +184,12 @@ shell duration is not synthesized from wall clock. Active values stay separate.
 ## Initialization, Maintenance And GC
 
 Migration creates schema/indexes and initialization metadata only, with no
-large source scan. The existing maintenance tick performs at most one batch of
+large source scan. Verified `src/control.rs` maintenance currently performs receipt
+collection, GC All, then a 60-second sleep; shutdown joins its existing handle.
+Adding at most 256 old records per existing pass can therefore take hours for a
+100k-record backfill. Preserve explicit initializing coverage rather than hiding
+that throughput or adding a new timer. Tests drive bounded steps/notifications,
+not a many-hour wall-clock wait. The existing maintenance tick performs at most one batch of
 256 eligible records, with a bounded work/byte budget and one short transaction;
 it yields to normal DB work instead of looping to completion on startup/read.
 No new worker, timer, poller or generic persistent work queue is introduced.
@@ -224,13 +296,13 @@ Consequently a repeated finish after GC cannot recreate a row or add usage.
 Startup settles active records as interrupted/unknown; it never repeats HTTP.
 
 Proposed reclamation: retain all-time and coarse bucket totals while a scope
-exists; reclaim terminal edge facts in bounded GC batches under an explicitly
-chosen age/byte policy. Before pruning a point, mark the affected coarse bucket's
-edge coverage incomplete in the same transaction. A full-bucket query still has
+exists; reclaim terminal edge facts only under the agreed existing logical-storage
+pressure policy, not a new fixed age. Before pruning a point, mark the affected
+coarse bucket's edge coverage incomplete in the same transaction. A full-bucket query still has
 its exact total; a historical partial-bucket query reports boundary_facts_pruned
 and unknown missing count, not zero. All-time totals survive point GC. Never
-forget coverage metadata while claiming an exact historical edge. Exact age/byte
-limits and reservation size require leader agreement.
+forget coverage metadata while claiming an exact historical edge. The pressure
+trigger, exact byte expressions and reservation size require leader agreement.
 
 ## Active Values, Lineage And UI
 
