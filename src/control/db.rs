@@ -1,4 +1,5 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
+pub(crate) mod thread_summary;
 use crate::digest::sha256_hex as hash;
 use std::{
     path::{Component, Path, PathBuf},
@@ -1761,24 +1762,10 @@ fn thread_excerpt(connection: &Connection, thread: &str) -> Result<String> {
     Ok(String::new())
 }
 
-const THREAD_LIST_SQL: &str = "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
-    COALESCE(u.state,latest.state), latest.stop_reason,latest.id,latest.state,u.state,
-    EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=latest.id AND state IN ('starting','running','stopping'))
-      OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=latest.id AND state IN ('live','stopping')),
-    a.state,CASE WHEN a.state='failed' AND a.generation=u.generation AND json_valid(a.error_json)
-      THEN json_extract(a.error_json,'$.automatic_retry') END,
-    CASE WHEN latest.state='live' AND u.state='running' AND COALESCE(a.state,'')<>'inflight'
-      THEN EXISTS(SELECT 1 FROM tool_group WHERE turn_id=u.id AND state='running') ELSE 0 END
-FROM thread t LEFT JOIN run latest ON latest.id=(
-    SELECT r.id FROM run r WHERE r.thread_id=t.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
-LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=latest.id ORDER BY created_at DESC,id DESC LIMIT 1)
-LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id
-    AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1)
-WHERE t.deleted_at IS NULL AND t.rowid<=?1
-    AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
-ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
-
-fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<ThreadSummary>> {
+pub(crate) fn thread_list(
+    connection: &Connection,
+    args: &ThreadListArgs,
+) -> Result<Page<ThreadSummary>> {
     let filter = args.query.as_deref().unwrap_or("");
     let needle = title_text(filter).to_lowercase();
     let watermark: i64 = connection
@@ -1804,7 +1791,9 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
     };
     // Filter against the same derived labels returned by ThreadGet/List. Keep
     // candidates as a cursor: a filtered miss scans without collecting history.
-    let mut statement = connection.prepare(THREAD_LIST_SQL).map_err(sql_error)?;
+    let mut statement = connection
+        .prepare(&thread_summary::page_sql())
+        .map_err(sql_error)?;
     let mut rows = statement
         .query(params![
             watermark,
@@ -1819,55 +1808,14 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
         .map_err(sql_error)?;
     let mut items = Vec::new();
     while let Some(row) = rows.next().map_err(sql_error)? {
-        let id: String = row.get(0).map_err(sql_error)?;
-        let stored: String = row.get(1).map_err(sql_error)?;
-        let title = thread_display_title(connection, &id, &stored)?;
-        let cwd: String = row.get(2).map_err(sql_error)?;
-        if !needle.is_empty()
-            && !title_text(&format!("{id} {title} {cwd}"))
-                .to_lowercase()
-                .contains(&needle)
-        {
+        let raw = thread_summary::decode(row).map_err(sql_error)?;
+        let id = &raw.thread_id;
+        let title = thread_display_title(connection, id, &raw.stored_title)?;
+        if !thread_summary::matches_filter(id, &title, &raw.cwd, filter) {
             continue;
         }
-        let excerpt = thread_excerpt(connection, &id)?;
-        let run: Option<String> = row.get(8).map_err(sql_error)?;
-        let turn: Option<String> = row.get(9).map_err(sql_error)?;
-        let attempt: Option<String> = row.get(11).map_err(sql_error)?;
-        let diagnostic: Option<String> = row.get(12).map_err(sql_error)?;
-        let retrying = diagnostic
-            .as_deref()
-            .and_then(|s| {
-                serde_json::from_str::<crate::ui::activity::AutomaticRetrySnapshot>(s).ok()
-            })
-            .is_some_and(|r| r.number > 0 && r.number <= r.limit);
-        items.push(ThreadSummary {
-            activity: crate::activity::classify(
-                run.as_deref(),
-                turn.as_deref(),
-                row.get(10).map_err(sql_error)?,
-                attempt.as_deref() == Some("inflight"),
-                retrying,
-                row.get(13).map_err(sql_error)?,
-            ),
-            thread_id: id,
-            title,
-            cwd,
-            parent_id: row.get(3).map_err(sql_error)?,
-            latest_run_stop_reason: row.get(6).map_err(sql_error)?,
-            revisit: row
-                .get::<_, Option<String>>(7)
-                .map_err(sql_error)?
-                .map(|run| super::revisit::summary(connection, &run))
-                .transpose()?
-                .flatten(),
-            updated_at: row.get(4).map_err(sql_error)?,
-            state: row
-                .get::<_, Option<String>>(5)
-                .map_err(sql_error)?
-                .unwrap_or_else(|| "idle".into()),
-            excerpt,
-        });
+        let excerpt = thread_excerpt(connection, id)?;
+        items.push(thread_summary::prepare(raw, title, excerpt));
         if items.len() > args.limit as usize {
             break;
         }
@@ -2424,7 +2372,10 @@ mod thread_list_plan_tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         let plans: Vec<String> = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {THREAD_LIST_SQL}"))
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {}",
+                thread_summary::page_sql()
+            ))
             .unwrap()
             .query_map(params![100_i64, "", "", 50], |r| r.get(3))
             .unwrap()

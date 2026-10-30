@@ -4,12 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Observe real top-level SQLite statement executions, without a new dependency
 /// or production counter. The hook and its pointee live only for this fixture.
-pub(super) struct Statements<'a> {
+pub(crate) struct Statements<'a> {
     db: &'a Connection,
     count: Box<AtomicUsize>,
 }
 impl<'a> Statements<'a> {
-    pub(super) fn new(db: &'a Connection) -> Self {
+    pub(crate) fn new(db: &'a Connection) -> Self {
         let count = Box::new(AtomicUsize::new(0));
         extern "C" fn trace(
             _: u32,
@@ -36,7 +36,7 @@ impl<'a> Statements<'a> {
         assert_eq!(result, rusqlite::ffi::SQLITE_OK);
         Self { db, count }
     }
-    pub(super) fn count(&self) -> usize {
+    pub(crate) fn count(&self) -> usize {
         self.count.load(Ordering::Relaxed)
     }
 }

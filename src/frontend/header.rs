@@ -189,10 +189,13 @@ impl RawHeader {
 }
 impl TitleWitness {
     pub(super) fn prepare(self) -> String {
+        self.prepare_outcome().0
+    }
+    fn prepare_outcome(self) -> (String, bool) {
         let mut user = false;
         for (index, source) in [self.path, self.pending].into_iter().enumerate() {
             if index == 1 && source.truncated {
-                return LIMITED.into();
+                return (LIMITED.into(), true);
             }
             for candidate in source.rows {
                 if !candidate.user {
@@ -200,21 +203,21 @@ impl TitleWitness {
                 }
                 user = true;
                 if candidate.omitted {
-                    return LIMITED.into();
+                    return (LIMITED.into(), true);
                 }
                 let title = candidate
                     .body
                     .and_then(|body| serde_json::from_str(&body).ok())
                     .and_then(|body| crate::control::db::title_from_user_payload(&body));
                 if let Some(title) = title {
-                    return title;
+                    return (title, false);
                 }
             }
             if source.truncated {
-                return LIMITED.into();
+                return (LIMITED.into(), true);
             }
         }
-        if user { "名称未設定" } else { "未送信" }.into()
+        ((if user { "名称未設定" } else { "未送信" }).into(), false)
     }
 }
 
@@ -458,5 +461,260 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(witness.prepare(), "名称未設定");
+    }
+}
+
+/// Owned title evidence for one bounded browser ID set.
+pub(super) struct RawTitles {
+    entries: std::collections::BTreeMap<String, (String, Option<TitleWitness>)>,
+}
+impl RawTitles {
+    pub(super) fn prepare(self) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
+        let mut titles = std::collections::BTreeMap::new();
+        let mut limited = Vec::new();
+        for (id, (stored, witness)) in self.entries {
+            let (title, is_limited) = witness
+                .map(TitleWitness::prepare_outcome)
+                .unwrap_or((stored, false));
+            if is_limited {
+                limited.push(id.clone());
+            }
+            titles.insert(id, title);
+        }
+        (titles, limited)
+    }
+}
+// Recursive successors seek the existing membership indexes. Shared LIMITs
+// apply before user/body filtering: neither lane can inspect an entire history.
+const TITLE_BATCH_SQL: &str = r"
+WITH RECURSIVE keys AS MATERIALIZED (
+ SELECT json_extract(value,'$[0]') AS thread,CAST(key AS INTEGER) AS input_pos FROM json_each(?1)
+), states(state) AS (VALUES('accepted'),('held')),
+path_walk(thread,input_pos,depth,ordinal) AS (
+ SELECT thread,input_pos,1,(SELECT min(ordinal) FROM thread_path p WHERE p.thread_id=keys.thread) FROM keys
+ UNION ALL
+ SELECT thread,input_pos,depth+1,(SELECT min(ordinal) FROM thread_path p WHERE p.thread_id=path_walk.thread AND p.ordinal>path_walk.ordinal)
+ FROM path_walk WHERE ordinal IS NOT NULL AND depth<129 ORDER BY 3,2 LIMIT 1025
+), pending_walk(thread,input_pos,state,depth,receipt_row) AS (
+ SELECT thread,input_pos,state,1,(SELECT rowid FROM receipt r INDEXED BY receipt_target WHERE r.target_thread_id=keys.thread AND r.state=states.state ORDER BY created_at,rowid LIMIT 1)
+ FROM keys CROSS JOIN states
+ UNION ALL
+ SELECT w.thread,w.input_pos,w.state,w.depth+1,
+   (SELECT r.rowid FROM receipt r INDEXED BY receipt_target WHERE r.target_thread_id=w.thread AND r.state=w.state
+      AND (r.created_at,r.rowid)>(current.created_at,current.rowid) ORDER BY r.created_at,r.rowid LIMIT 1)
+ FROM pending_walk w JOIN receipt current ON current.rowid=w.receipt_row
+ WHERE w.depth<129 ORDER BY 4,2,3 LIMIT 1025
+), path_numbered AS MATERIALIZED (
+ SELECT *,row_number() OVER(ORDER BY depth,input_pos) AS inspected FROM path_walk
+), pending_numbered AS MATERIALIZED (
+ SELECT *,row_number() OVER(ORDER BY depth,input_pos,state) AS inspected FROM pending_walk
+), path_members AS MATERIALIZED (
+ SELECT w.thread,w.input_pos,w.depth,p.node_id FROM path_numbered w CROSS JOIN thread_path p
+ ON p.thread_id=w.thread AND p.ordinal=w.ordinal WHERE w.depth<=128 AND w.inspected<=1024
+), pending_members AS MATERIALIZED (
+ SELECT w.thread,w.input_pos,w.depth,w.state,r.created_at,r.message_node_id AS node_id,n.rowid AS node_row
+ FROM pending_numbered w CROSS JOIN receipt r ON r.rowid=w.receipt_row CROSS JOIN node n ON n.id=r.message_node_id
+ WHERE w.inspected<=1024
+), pending_ordered AS MATERIALIZED (
+ SELECT *,row_number() OVER(PARTITION BY thread ORDER BY created_at,node_row) AS position FROM pending_members
+), status AS MATERIALIZED (
+ SELECT k.thread,k.input_pos,
+   EXISTS(SELECT 1 FROM path_walk w WHERE w.thread=k.thread AND w.depth=129 AND w.ordinal IS NOT NULL)
+     OR ((SELECT count(*) FROM path_walk)>=1025 AND NOT EXISTS(SELECT 1 FROM path_walk w WHERE w.thread=k.thread AND w.ordinal IS NULL)) AS path_limited,
+   EXISTS(SELECT 1 FROM pending_walk w WHERE w.thread=k.thread AND w.depth=129 AND w.receipt_row IS NOT NULL)
+     OR (SELECT count(*) FROM pending_members p WHERE p.thread=k.thread)>128
+     OR ((SELECT count(*) FROM pending_walk)>=1025 AND EXISTS(SELECT 1 FROM states s WHERE NOT EXISTS(SELECT 1 FROM pending_walk w WHERE w.thread=k.thread AND w.state=s.state AND w.receipt_row IS NULL))) AS pending_limited
+ FROM keys k
+), witnesses AS MATERIALIZED (
+ SELECT p.thread,p.input_pos,0 AS lane,p.depth AS position,n.id,octet_length(n.payload_json) AS bytes
+ FROM path_members p CROSS JOIN node n ON n.id=p.node_id WHERE n.kind='user'
+ UNION ALL
+ SELECT p.thread,p.input_pos,1 AS lane,p.position,n.id,octet_length(n.payload_json) AS bytes
+ FROM pending_ordered p CROSS JOIN node n ON n.id=p.node_id
+ WHERE p.position<=128 AND n.kind='user' AND NOT EXISTS(SELECT 1 FROM thread_path path WHERE path.thread_id=p.thread AND path.node_id=p.node_id)
+), budgeted AS MATERIALIZED (
+ SELECT *,sum(CASE WHEN bytes<=?2 THEN bytes ELSE 0 END)
+   OVER(ORDER BY input_pos,lane,position ROWS UNBOUNDED PRECEDING) AS used FROM witnesses
+)
+SELECT thread,input_pos,-1 AS lane,0 AS position,NULL AS body,0 AS omitted,path_limited,pending_limited FROM status
+UNION ALL
+SELECT thread,input_pos,lane,position,
+ CASE WHEN bytes<=?2 AND used<=?3 THEN (SELECT payload_json FROM node n WHERE n.id=budgeted.id) END,
+ bytes IS NOT NULL AND (bytes>?2 OR used>?3),0,0 FROM budgeted
+ORDER BY input_pos,lane,position";
+
+pub(super) fn read_titles_tx(
+    db: &Connection,
+    requests: &[(String, String)],
+) -> Result<RawTitles, StorageError> {
+    if requests.len() > 128 {
+        return Err(
+            ApiError::new(ErrorCode::InputLimit, "Browser title scope exceeds128 IDs").into(),
+        );
+    }
+    let mut entries = std::collections::BTreeMap::new();
+    let mut untitled = Vec::new();
+    for (id, stored) in requests {
+        if entries.contains_key(id) {
+            continue;
+        }
+        if stored.trim().is_empty() {
+            entries.insert(id.clone(), (stored.clone(), Some(TitleWitness::default())));
+            untitled.push((id.clone(), String::new()));
+        } else {
+            entries.insert(id.clone(), (stored.clone(), None));
+        }
+    }
+    if untitled.is_empty() {
+        return Ok(RawTitles { entries });
+    }
+    let encoded = serde_json::to_string(&untitled).expect("title IDs serialize");
+    let mut statement = db.prepare(TITLE_BATCH_SQL)?;
+    let mut rows = statement.query(rusqlite::params![
+        encoded,
+        SOURCE_BYTES as i64,
+        WITNESS_BYTES as i64
+    ])?;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let witness = entries
+            .get_mut(&id)
+            .and_then(|(_, w)| w.as_mut())
+            .expect("requested title witness");
+        let lane: i64 = row.get(2)?;
+        if lane < 0 {
+            witness.path.truncated = row.get(6)?;
+            witness.pending.truncated = row.get(7)?;
+        } else {
+            let candidates = if lane == 0 {
+                &mut witness.path
+            } else {
+                &mut witness.pending
+            };
+            let body: Option<String> = row.get(4)?;
+            candidates.copied += body.as_ref().map_or(0, String::len);
+            candidates.rows.push(Candidate {
+                user: true,
+                body,
+                omitted: row.get(5)?,
+            });
+        }
+    }
+    Ok(RawTitles { entries })
+}
+
+#[cfg(test)]
+mod browser_title_batch_tests {
+    use super::*;
+    use crate::frontend::sql_trace::Statements;
+    use rusqlite::StatementStatus;
+    fn fixture() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db
+    }
+    fn thread(db: &Connection, id: &str) {
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','','p','m','now')",[id]).unwrap();
+    }
+    fn source(db: &Connection, thread: &str, n: i64, user: bool) {
+        let id = format!("{thread}-{n}");
+        let body = if user {
+            r#"{"role":"user","content":"question"}"#
+        } else {
+            "{}"
+        };
+        db.execute(
+            "INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,?2,'now',?3)",
+            rusqlite::params![id, if user { "user" } else { "tool_result" }, body],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO thread_path VALUES(?1,?2,?3)",
+            rusqlite::params![thread, n, id],
+        )
+        .unwrap();
+    }
+    #[test]
+    fn explicit_titles_and_invalid_scope_execute_no_source_sql() {
+        let db = fixture();
+        let trace = Statements::new(&db);
+        let (titles, limited) = read_titles_tx(&db, &[("t".into(), "Known".into())])
+            .unwrap()
+            .prepare();
+        assert_eq!(titles["t"], "Known");
+        assert!(limited.is_empty());
+        assert!(read_titles_tx(&db, &vec![("x".into(), String::new()); 129]).is_err());
+        assert_eq!(trace.count(), 0);
+    }
+    #[test]
+    fn global_membership_ceiling_cannot_choose_a_later_unobserved_title() {
+        let mut db = fixture();
+        let tx = db.transaction().unwrap();
+        let mut requests = Vec::new();
+        for i in 0..128 {
+            let id = format!("t{i}");
+            thread(&tx, &id);
+            for n in 0..20 {
+                source(&tx, &id, n, n == 10);
+            }
+            requests.push((id, String::new()));
+        }
+        tx.commit().unwrap();
+        let encoded = serde_json::to_string(&requests).unwrap();
+        let prefix = TITLE_BATCH_SQL
+            .split("SELECT thread,input_pos,-1 AS lane")
+            .next()
+            .unwrap();
+        let inspected:(i64,i64)=db.query_row(&format!("{prefix}SELECT (SELECT count(*) FROM path_walk),(SELECT count(*) FROM pending_walk) WHERE ?3>=0"),rusqlite::params![encoded,128*1024,512*1024],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!(inspected.0, 1025);
+        assert!(inspected.1 <= 1025);
+        let (_, limited) = read_titles_tx(&db, &requests).unwrap().prepare();
+        assert_eq!(limited.len(), 128);
+    }
+    #[test]
+    fn indexed_title_work_does_not_scale_with_unrelated_membership() {
+        let mut db = fixture();
+        thread(&db, "selected");
+        source(&db, "selected", 0, true);
+        thread(&db, "unrelated");
+        let encoded = serde_json::to_string(&[("selected", "")]).unwrap();
+        let measure = |db: &Connection| {
+            let mut statement = db.prepare(TITLE_BATCH_SQL).unwrap();
+            let rows = statement
+                .query_map(rusqlite::params![encoded, 128 * 1024, 512 * 1024], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(rows.len(), 2);
+            statement.get_status(StatementStatus::VmStep)
+        };
+        let before = measure(&db);
+        let tx = db.transaction().unwrap();
+        for n in 0..10_000 {
+            source(&tx, "unrelated", n, true);
+        }
+        tx.commit().unwrap();
+        let after = measure(&db);
+        assert!(after <= before + 100, "{before}->{after}");
+        let plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {TITLE_BATCH_SQL}"))
+            .unwrap()
+            .query_map(rusqlite::params![encoded, 128 * 1024, 512 * 1024], |r| {
+                r.get::<_, String>(3)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|p| p.contains("thread_path") && p.contains("SEARCH")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter().any(|p| p.contains("receipt_target")),
+            "{plan:?}"
+        );
     }
 }
