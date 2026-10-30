@@ -69,28 +69,44 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     })
     .await
     .unwrap();
+    // The canonical header/path can arrive together. Do not consume the
+    // header and then wait for a second copy of that same atomic observation.
+    let mut header_seen = false;
     next_update(&mut updates_receive, |update| match update {
+        UiUpdate::CurrentView {
+            details, history, ..
+        } if details.thread_id == thread && details.title == "saved message" => {
+            let UiUpdate::History { nodes, .. } = *history else {
+                panic!("paired canonical history")
+            };
+            assert!(
+                nodes
+                    .iter()
+                    .any(|node| node.role == "user" && node.text.contains("saved message"))
+            );
+            Some(())
+        }
         UiUpdate::Thread {
             details,
             draft: None,
             ..
-        } if details.thread_id == thread && details.title == "saved message" => Some(()),
-        _ => None,
-    })
-    .await;
-    // Stop only after the immutable user node has entered the selected path.
-    // Its terminal receipt records admission, not cancellation or an answer.
-    next_update(&mut updates_receive, |update| match update {
+        } if details.thread_id == thread && details.title == "saved message" => {
+            header_seen = true;
+            None
+        }
         UiUpdate::History { nodes, .. }
             if nodes
                 .iter()
-                .any(|node| node.role == "user" && node.text.contains("saved message")) =>
+                .any(|node| node.role == "user" && node.text.contains("saved message"))
+                && header_seen =>
         {
             Some(())
         }
         _ => None,
     })
     .await;
+    // Stop only after the immutable user node has entered the selected path.
+    // Its terminal receipt records admission, not cancellation or an answer.
     actions_send
         .send(UiAction::Cancel {
             thread_id: thread.clone(),
@@ -2458,7 +2474,12 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     assert!(response.ok);
     // Wait until the metadata-triggered refresh actually reached the UI queue.
     next_update(&mut incoming, |update| match update {
-        UiUpdate::History { thread_id, .. } if thread_id == thread => Some(()),
+        UiUpdate::CurrentView {
+            details, history, ..
+        } if details.thread_id == thread && details.title == "metadata during stream" => {
+            assert!(matches!(*history,UiUpdate::History {thread_id,..} if thread_id==thread));
+            Some(())
+        }
         UiUpdate::Stream { ack: Some(ack), .. } => {
             ack.notify_one();
             None
@@ -2513,6 +2534,42 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     complete.send(()).unwrap();
     let mut observed = None;
     let (node, revision, total) = next_update(&mut incoming, |update| match update {
+        UiUpdate::CurrentView {
+            generation: actual,
+            details,
+            history,
+            committed,
+            ..
+        } => {
+            assert_eq!((&details.thread_id, actual), (&thread, generation));
+            let UiUpdate::History {
+                nodes,
+                selection_revision,
+                total_nodes,
+                ..
+            } = *history
+            else {
+                panic!("paired canonical history")
+            };
+            let node = nodes
+                .iter()
+                .find(|node| node.text.contains("persisted final prose"))?;
+            assert_eq!(
+                committed
+                    .iter()
+                    .filter(|(owner, _)| owner == &attempt)
+                    .count(),
+                1,
+                "one canonical mapping per attempt"
+            );
+            assert!(
+                committed
+                    .iter()
+                    .any(|(owner, target)| owner == &attempt && target == &node.node_id),
+                "atomic frame must carry mapping before canonical history is adopted"
+            );
+            Some((node.node_id.clone(), selection_revision, total_nodes))
+        }
         UiUpdate::StreamCommitted {
             thread_id,
             generation: actual,
