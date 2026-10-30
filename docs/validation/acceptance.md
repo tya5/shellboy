@@ -2864,7 +2864,6 @@ post-index model-wait footer, then passed without source changes:1679/0/32,
 layout89, Python6, fmt and strict Clippy. Neither failure is claimed fixed.
 Final main CI remains a separate gate.
 
-<<<<<<< HEAD
 
 ## #59 D-006 review clarification
 
@@ -2880,7 +2879,7 @@ one lacked the unpaused index fact, the other missed the subsequent model-wait
 footer. Their original logs remain outside Git; no test was skipped or weakened,
 and a lower-concurrency success does not establish the failure's cause/fix.
 Final main CI is a separate gate; physical-terminal F6 remains unqualified.
-=======
+
 ## First-run configuration (#69)
 
 2026-10-30. Native macOS ARM64, pinned Rust 1.99.1. Local standard check
@@ -2890,7 +2889,7 @@ subprocesses with temporary HOME/USERPROFILE/APPDATA/LOCALAPPDATA/XDG paths,
 explicit/relative configuration paths, missing files/defaults/keys, unknown
 `compact_hint_tokens`, unreadable directory-as-file, endpoint suffixes, template
 identity, refusal to overwrite existing/dangling symlinks (Unix), and no owner
-storage creation. The two pure/report/owner cases also check source metadata and
+storage creation. The report and owner cases also check source metadata and
 localized first-send or missing-key recovery details without an HTTP connection.
 
 A bounded loopback catalog mock requires `GET /v1/models` and rejects any second
@@ -2924,4 +2923,3 @@ config files retain the existing strict loader error; use `config init` with the
 same `--config` before startup. No existing configuration or installed binary
 was changed by these checks. Installer guidance is a source/output change for
 the next release; old v0.3.0 assets are not modified.
->>>>>>> 9a51c55 (docs: record native first-run setup validation and release boundaries)
