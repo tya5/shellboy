@@ -4,6 +4,20 @@
 
 対象snapshotには選択revision、profile revision、reasoning epoch、経路順node ID・payload revision・実本文hashを固定する。API待機中にDB transactionを保持しない。採用時に固定版を照合し、要約node・replacement・全source参照・選択pathを同一transactionで保存する。原文nodeは変更しない。元の経路を選び直した場合は、完全一致する入力と生成規則の成功片だけを再利用する。
 
+## Owner-scope fences during queued message acceptance (#52)
+
+The compaction snapshot freezes both the presence and identity of its current
+live Run and active Turn. Adoption rejects a newly live/stopping Run when the
+snapshot had none, or a newly active Turn when the snapshot had none; existing
+Run liveness and Turn generation/state fences still apply when captured.
+Selected-path revision advances only on real history adoption, never merely on
+message acceptance. An ordinary queued message in the same active Turn remains
+off-path and cannot be erased by compaction of the unchanged selected sources;
+it does not invalidate a valid snapshot solely by being accepted. This applies
+to automatic as well as explicit compaction. No new counter, schema field or
+worker is needed. Broad Thread metadata changes do not acquire a new compaction
+fence, avoiding unnecessary discard of completed summary API work.
+
 完結tool groupはassistantの全callと全resultを一つの境界として扱う。spillは全callと各結果のplaceholderを一つのnodeへ保存する。placeholderはcall ID、コマンド引数、終了状態、execution IDと原文node IDを含む。通常は最新完結groupを保護し、明確なcontext超過の二段階目だけ保護を解除する。reasoning epochを新しいepochへ付け替えない。
 
 通常の要約対象は現在Turnと直近完了Turnより前の連続prefix。未反映のユーザー指示と未完結groupは対象外。64,000 Unicode文字の初期segmentを完結group境界で分け、明確なcontext超過だけ深さ8まで二分する。opaque reasoningは除外し、現在epochの送信対象推論のみを入力へ含める。部分成功はDBへ保存するが、経路採用は全成功時だけ。最終統合APIは呼ばない。

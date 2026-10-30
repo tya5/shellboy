@@ -1254,3 +1254,21 @@ The five-millisecond polling in a few isolated recovery fixtures observes saved
 state under a sixty-second watchdog; it is not product polling or elapsed-time
 correctness. Prefer existing Changed notifications when next editing those
 fixtures, rather than broadening this fix into an unrelated test rewrite.
+
+
+## Compaction owner-scope absence is a saved fence (#52, 2026-10-30)
+
+Adopt exact absence checks for the existing optional Run/Turn snapshot fences.
+A snapshot taken before a first Run or between Turns must not adopt after a new
+owner scope starts. The prior validator checked captured Some values only,
+leaving None-to-Some transitions unchecked. Reuse indexed Run/Turn existence
+checks; do not add a counter or bump selection_revision at message acceptance.
+
+A same-active-Turn queued message remains off-path and cannot be erased by the
+captured selected-source edit. Existing path/source/profile/generation validation
+therefore remains sufficient in that case. A general thread.revision fence would
+also reject unrelated metadata and routine queued reports, potentially discarding
+paid automatic summaries without improving this source-safety boundary. Revisit
+only if a concrete change alters selected/protected source semantics without
+advancing an existing fence. Deterministic Store-only regressions distinguish
+new Run, new Turn and unchanged active Turn instead of racing driver adoption.
