@@ -1,13 +1,17 @@
 //! Automatic Responses retries through a real owner, using only synthetic loopback traffic.
 use serde_json::{Value, json};
-use shellboy::{app::DataOwner, control::Control, protocol::*};
+use shellboy::{
+    app::DataOwner,
+    control::{Control, EngineEvent},
+    protocol::*,
+};
 use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::{sleep, timeout},
+    time::timeout,
 };
 
 struct Incoming {
@@ -240,20 +244,44 @@ impl Fixture {
         }
     }
 
-    async fn incoming(&mut self) -> Incoming {
-        self.incoming_with_timeout(5).await
+    #[track_caller]
+    fn incoming(&mut self) -> impl std::future::Future<Output = Incoming> + '_ {
+        self.incoming_with_timeout(60)
     }
 
-    async fn incoming_after_tool(&mut self) -> Incoming {
-        self.incoming_with_timeout(if cfg!(windows) { 15 } else { 5 })
-            .await
+    #[track_caller]
+    fn incoming_after_tool(&mut self) -> impl std::future::Future<Output = Incoming> + '_ {
+        self.incoming_with_timeout(60)
     }
 
-    async fn incoming_with_timeout(&mut self, seconds: u64) -> Incoming {
-        timeout(Duration::from_secs(seconds), self.requests.recv())
-            .await
-            .expect("expected HTTP request")
-            .unwrap()
+    #[track_caller]
+    fn incoming_with_timeout(
+        &mut self,
+        seconds: u64,
+    ) -> impl std::future::Future<Output = Incoming> + '_ {
+        let caller = std::panic::Location::caller();
+        async move {
+            match timeout(Duration::from_secs(seconds), self.requests.recv()).await {
+                Ok(Some(value)) => value,
+                result => {
+                    let diagnostic = timeout(
+                        Duration::from_secs(5),
+                        progress(&self.control, self.accepted.turn_id.clone()),
+                    )
+                    .await;
+                    panic!(
+                        "HTTP request watchdog at {}:{}; receive={}; saved lifecycle facts={diagnostic:?}",
+                        caller.file(),
+                        caller.line(),
+                        if result.is_err() {
+                            "timeout"
+                        } else {
+                            "sender closed"
+                        }
+                    );
+                }
+            }
+        }
     }
 
     async fn attempts(&self) -> Vec<(String, Option<Value>)> {
@@ -266,50 +294,86 @@ impl Fixture {
         }).await.unwrap()
     }
 
-    async fn settled(&self) -> String {
+    #[track_caller]
+    fn settled(&self) -> impl std::future::Future<Output = String> + '_ {
+        let caller = std::panic::Location::caller();
         let turn = self.accepted.turn_id.clone().unwrap();
-        timeout(Duration::from_secs(5), async {
-            loop {
-                let turn = turn.clone();
-                let state: String = self
-                    .control
-                    .store
-                    .database
-                    .call(move |db| {
-                        Ok(
-                            db.query_row("SELECT state FROM turn WHERE id=?1", [turn], |row| {
-                                row.get(0)
-                            })?,
-                        )
-                    })
-                    .await
-                    .unwrap();
-                if !matches!(state.as_str(), "preparing" | "running" | "waiting") {
-                    return state;
+        let thread = self.accepted.thread_id.clone();
+        let mut events = self.control.subscribe();
+        async move {
+            let result = timeout(Duration::from_secs(60), async {
+                loop {
+                    let turn = turn.clone();
+                    let state: String = self
+                        .control
+                        .store
+                        .database
+                        .call(move |db| {
+                            Ok(db.query_row(
+                                "SELECT state FROM turn WHERE id=?1",
+                                [turn],
+                                |row| row.get(0),
+                            )?)
+                        })
+                        .await
+                        .unwrap();
+                    if !matches!(state.as_str(), "preparing" | "running" | "waiting") {
+                        return state;
+                    }
+                    changed(&mut events, &thread, caller).await;
                 }
-                sleep(Duration::from_millis(5)).await;
+            })
+            .await;
+            match result {
+                Ok(state) => state,
+                Err(_) => {
+                    let diagnostic =
+                        timeout(Duration::from_secs(5), progress(&self.control, Some(turn))).await;
+                    panic!(
+                        "Turn did not settle within fixture watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
+                        caller.file(),
+                        caller.line()
+                    );
+                }
             }
-        })
-        .await
-        .expect("turn did not settle")
+        }
     }
 
-    async fn waiting_for_retry(&self) {
-        timeout(Duration::from_secs(5), async {
-            loop {
-                if self.attempts().await.iter().any(|(state, error)| {
-                    state == "failed"
-                        && error
-                            .as_ref()
-                            .is_some_and(|value| value.get("automatic_retry").is_some())
-                }) {
-                    return;
+    #[track_caller]
+    fn waiting_for_retry(&self) -> impl std::future::Future<Output = ()> + '_ {
+        let caller = std::panic::Location::caller();
+        let thread = self.accepted.thread_id.clone();
+        let mut events = self.control.subscribe();
+        async move {
+            let result = timeout(Duration::from_secs(60), async {
+                loop {
+                    if self.attempts().await.iter().any(|(state, error)| {
+                        state == "failed"
+                            && error
+                                .as_ref()
+                                .is_some_and(|value| value.get("automatic_retry").is_some())
+                    }) {
+                        return;
+                    }
+                    // retry_or_recover publishes Changed after the automatic_retry
+                    // transaction commits, before releasing its boundary/waiting.
+                    changed(&mut events, &thread, caller).await;
                 }
-                sleep(Duration::from_millis(5)).await;
+            })
+            .await;
+            if result.is_err() {
+                let diagnostic = timeout(
+                    Duration::from_secs(5),
+                    progress(&self.control, self.accepted.turn_id.clone()),
+                )
+                .await;
+                panic!(
+                    "Automatic retry was not persisted within fixture watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
+                    caller.file(),
+                    caller.line()
+                );
             }
-        })
-        .await
-        .expect("automatic retry was not persisted");
+        }
     }
 
     async fn no_more_requests(&mut self) {
@@ -321,32 +385,113 @@ impl Fixture {
         );
     }
 
-    async fn close(self) {
-        timeout(Duration::from_secs(5), self.control.shutdown())
-            .await
-            .expect("Control shutdown did not finish")
-            .unwrap();
-        timeout(Duration::from_secs(5), self.owner.shutdown())
-            .await
-            .expect("owner shutdown did not finish")
-            .unwrap();
-        self.server.abort();
-        let _ = self.server.await;
+    #[track_caller]
+    fn close(self) -> impl std::future::Future<Output = ()> {
+        let caller = std::panic::Location::caller();
+        async move {
+            match timeout(Duration::from_secs(60), self.control.shutdown()).await {
+                Ok(result) => result.unwrap(),
+                Err(_) => {
+                    let diagnostic = timeout(
+                        Duration::from_secs(5),
+                        progress(&self.control, self.accepted.turn_id.clone()),
+                    )
+                    .await;
+                    panic!(
+                        "Control shutdown watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
+                        caller.file(),
+                        caller.line()
+                    );
+                }
+            }
+            match timeout(Duration::from_secs(60), self.owner.shutdown()).await {
+                Ok(result) => result.unwrap(),
+                Err(_) => {
+                    let diagnostic = timeout(
+                        Duration::from_secs(5),
+                        progress(&self.control, self.accepted.turn_id.clone()),
+                    )
+                    .await;
+                    panic!(
+                        "Owner shutdown watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
+                        caller.file(),
+                        caller.line()
+                    );
+                }
+            }
+            self.server.abort();
+            let _ = self.server.await;
+        }
     }
 }
 
-async fn request(control: &Arc<Control>, command: Command) -> Value {
-    let response = timeout(
-        Duration::from_secs(5),
-        control.request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
-            command,
-        )),
-    )
-    .await
-    .expect("Control request did not finish");
-    assert!(response.ok, "{:?}", response.error);
-    response.result.unwrap()
+// Watchdogs are fixture deadlock guards. Failure reports retain bounded saved
+// states/phase codes only, never request bodies, raw errors or response text.
+async fn progress(
+    control: &Control,
+    turn: Option<String>,
+) -> Result<Value, shellboy::storage::StorageError> {
+    control.store.database.call(move |db| {
+        let mut state = serde_json::Map::new();
+        for (name, query) in [
+            ("runs", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'stop_reason',substr(stop_reason,1,128)) FROM run WHERE (?1 IS NULL OR id=(SELECT run_id FROM turn WHERE id=?1)) ORDER BY rowid DESC LIMIT 8"),
+            ("turns", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'generation',generation,'instruction_snapshot_present',instruction_snapshot_id IS NOT NULL,'recovery_code',substr(json_extract(recovery_reason_json,'$.code'),1,128)) FROM turn WHERE (?1 IS NULL OR id=?1) ORDER BY rowid DESC LIMIT 8"),
+            ("attempts", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'error_kind',substr(json_extract(error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(error_json,'$.error.http_observation.phase'),1,128),'retry_number',json_extract(error_json,'$.automatic_retry.number'),'retry_delay_ms',json_extract(error_json,'$.automatic_retry.delay_ms')) FROM model_attempt WHERE (?1 IS NULL OR turn_id=?1) ORDER BY rowid DESC LIMIT 8"),
+        ] {
+            let rows = db.prepare(query)?.query_map([turn.as_deref()], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            state.insert(name.into(), json!(rows));
+        }
+        Ok(Value::Object(state))
+    }).await
+}
+async fn changed(
+    events: &mut tokio::sync::broadcast::Receiver<EngineEvent>,
+    thread: &str,
+    caller: &'static std::panic::Location<'static>,
+) {
+    loop {
+        match events.recv().await {
+            Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == thread => return,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => return,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => panic!(
+                "Fixture event stream closed at {}:{} for Thread {thread}",
+                caller.file(),
+                caller.line()
+            ),
+            _ => {}
+        }
+    }
+}
+#[track_caller]
+fn request(
+    control: &Arc<Control>,
+    command: Command,
+) -> impl std::future::Future<Output = Value> + '_ {
+    let caller = std::panic::Location::caller();
+    async move {
+        let response = match timeout(
+            Duration::from_secs(60),
+            control.request(Request::new(
+                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                command,
+            )),
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(_) => {
+                let diagnostic = timeout(Duration::from_secs(5), progress(control, None)).await;
+                panic!(
+                    "Control request watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
+                    caller.file(),
+                    caller.line()
+                );
+            }
+        };
+        assert!(response.ok, "{:?}", response.error);
+        response.result.unwrap()
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

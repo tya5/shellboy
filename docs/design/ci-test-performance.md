@@ -91,3 +91,13 @@ verification. Keep explicit two-thread diagnosis and a Windows-only four-thread
 experiment available through the manual input; its `default` choice always
 preserves the ordinary three-OS matrix. Do not generalize these samples to
 arbitrary higher concurrency or promise deterministic runner latency.
+
+The normal four-thread run at `51d2702` exposed three more shared fixture guard
+failures in response_retries: two five-second HTTP-arrival guards and one
+five-second Control-shutdown guard. Retain that failed run. These helper guards
+are not product deadline or retry-delay assertions: give them a 60s deadlock
+bound and bounded persisted-phase diagnostics. Use existing notifications for
+settled-state observation where guaranteed, without changing exact predicates,
+retry counts, absence checks, native upload phases or configured product timers.
+This addresses fixture readiness/cleanup rather than adding an automatic retry
+or turning an observed failure into an old-SHA success.
