@@ -50,11 +50,14 @@ same-SHA failed-job rerun as separate records; rerun success does not erase the
 failure or prove its cause. Existing user authorization requirements for push
 and release still apply. See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57).
 
-## v0.3.0 preparation only (#62)
+## Historical v0.3.0 preparation (#62, superseded)
 
-No v0.3.0 tag or GitHub Release is authorized yet. The version-independent README
-links to releases/latest; version-specific changes and upgrade warnings are in
-[the notes draft](release-v0.3.0-draft.md) and issue62 for review.
+This subsection records the pre-approval preparation stage, not current release
+status. It is superseded by the [publication evidence](#v030-publication-2026-10-30)
+below. At that stage, no v0.3.0 tag or GitHub Release had been authorized. The
+version-independent README linked to releases/latest; version-specific changes
+and upgrade warnings were submitted in the notes draft and issue62 for review.
+The [retained notes file](release-v0.3.0-draft.md) now holds the published body.
 
 The existing release workflow accepts optional `candidate_ref` (an exact main SHA).
 For preparation, supply **both** that SHA and `release_tag=v0.3.0`, after the same
@@ -69,8 +72,11 @@ Keep the downloaded candidates and checksums outside Git. Final SHA, run links,
 archive hashes and results are recorded in issue62/the preparation report rather
 than making recursive metadata-only commits that change the chosen SHA. A later
 rebuild can produce different archive bytes; never substitute it for qualified
-assets without checking that new set. Tags/publication, unauthenticated v0.3.0
-asset download, installed-binary updates and release completion remain later gates.
+assets without checking that new set. At the preparation stage, tags/publication,
+unauthenticated v0.3.0 asset download, installed-binary updates and release
+completion were later gates. Publication and public-byte verification are now
+recorded below; installed-binary updates remain separately authorized work and
+were not performed by this cleanup.
 
 ## v0.3.0 publication (2026-10-30)
 
