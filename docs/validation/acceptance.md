@@ -2770,3 +2770,13 @@ combined source result; do not substitute ae9bc19's earlier native CI for it.
 Subsequent changes here are development/validation records only. The user
 authorizes main push; confirm its exact-source three-OS CI before issue closure.
 #53/#56/#52 code and any user-data operations are excluded.
+
+
+## Windows retry fixture watchdog follow-up (2026-10-30)
+
+Scope: response_retries and response_upload_recovery fixture-only guards and
+Changed-driven waits. No product timeout/retry policy or success predicate is
+changed. Main run41063015359 attempt1 failed long-Turn post-tool HTTP arrival
+(already60s); attempt2 failed partial-upload Control shutdown (5s). Logs were
+inspected separately; load remains a hypothesis. Attempt3 is observed separately.
+Local standard, two manual Windows branch runs, and final main CI remain pending.
