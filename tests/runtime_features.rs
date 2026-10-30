@@ -189,6 +189,7 @@ async fn thread(control: &Arc<Control>) -> String {
     request(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,
@@ -356,6 +357,7 @@ async fn draft_references_and_first_message_commit_together_and_changed_missing_
         .send_draft(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             ThreadCreateArgs {
+                agents: None,
                 cwd: None,
                 parent_id: None,
                 connection: None,
@@ -907,6 +909,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
     let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
     let node = accepted["message_id"].as_str().unwrap().to_owned();
     let args = ThreadCreateArgs {
+        agents: None,
         connection: Some("fixture".into()),
         model: Some("edited-model".into()),
         effort: Some(String::new()),
@@ -1064,6 +1067,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     request(
         &control,
         Command::ThreadSet(ThreadSetArgs {
+            agents: None,
             title: None,
             thread_id: Some(thread.clone()),
             cwd: None,
@@ -1129,6 +1133,7 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
             request(
                 &control,
                 Command::ThreadSet(ThreadSetArgs {
+                    agents: None,
                     title: None,
                     thread_id: Some(thread.clone()),
                     connection: None,
@@ -1966,6 +1971,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
     let child = request(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             parent_id: Some(parent.clone()),
             cwd: None,
             connection: None,
@@ -1980,6 +1986,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
     let fork = request(
         &control,
         Command::ThreadFork(ThreadForkArgs {
+            agents: None,
             thread_id: parent.clone(),
             node_id: accepted.message_id,
             cwd: None,
@@ -2067,6 +2074,262 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
         assert_eq!(serde_json::from_str::<Value>(&usage).unwrap()["input_tokens"], 123);
         Ok(())
     }).await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
+    fn developer_text(body: &Value) -> Vec<&str> {
+        body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["role"] == "developer")
+            .flat_map(|v| v["content"].as_array().into_iter().flatten())
+            .filter_map(|v| v["text"].as_str())
+            .collect()
+    }
+    fn reference_events(body: &Value) -> Vec<Value> {
+        developer_text(body)
+            .into_iter()
+            .filter_map(|t| t.strip_prefix("Shellboy event v1: "))
+            .filter_map(|t| serde_json::from_str::<Value>(t).ok())
+            .filter(|e| e["payload"]["kind"] == "agents_reference")
+            .collect()
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    std::fs::write(root.path().join("old.md"), "OLD_EXPLICIT_ROLE").unwrap();
+    std::fs::write(root.path().join("new.md"), "NEW_EXPLICIT_ROLE").unwrap();
+    std::fs::write(root.path().join("middle.md"), "INTERMEDIATE_ROLE").unwrap();
+    let created = request(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: Some("old.md".into()),
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await;
+    let thread = created["thread_id"].as_str().unwrap().to_owned();
+    request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "first turn".into(),
+        }),
+    )
+    .await;
+    let first = incoming(&mut receive).await;
+    assert!(developer_text(&first.body).contains(&"OLD_EXPLICIT_ROLE"));
+    let first_events = reference_events(&first.body);
+    assert_eq!(
+        first_events.len(),
+        1,
+        "creation override is visible on the first Turn"
+    );
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            agents: Some("middle.md".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    // Other settings still deliver at their normal boundary, not at a future Turn.
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            title: Some("changed".into()),
+            effort: Some("brief".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    first.reply.send((200,json!({"id":"agents-tool","status":"completed","output":[{"type":"function_call","call_id":"agents-call","name":"shell","arguments":json!({"command":"echo synthetic","background":false}).to_string()}]}))).unwrap();
+    let after_tool = incoming(&mut receive).await;
+    assert!(
+        developer_text(&after_tool.body)
+            .iter()
+            .any(|t| t.starts_with("Shellboy event v1:")
+                && t.contains("thread_settings")
+                && t.contains("brief")),
+        "unrelated settings must not defer"
+    );
+    assert!(developer_text(&after_tool.body).contains(&"OLD_EXPLICIT_ROLE"));
+    assert!(!developer_text(&after_tool.body).contains(&"NEW_EXPLICIT_ROLE"));
+    assert!(
+        developer_text(&after_tool.body)
+            .iter()
+            .find(|t| t.starts_with("Shellboy context v1:"))
+            .unwrap()
+            .contains(&format!(
+                "AGENTS reference={}",
+                root.path().join("old.md").display()
+            ))
+    );
+    assert_eq!(
+        reference_events(&after_tool.body).len(),
+        1,
+        "new reference event must not enter same-Turn history"
+    );
+    after_tool
+        .reply
+        .send((
+            400,
+            json!({"error":{"code":"synthetic","message":"fixture"}}),
+        ))
+        .unwrap();
+    settled(&control, &thread).await;
+    let run = request(
+        &control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.clone()),
+        }),
+    )
+    .await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            agents: Some("new.md".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    std::fs::remove_file(root.path().join("old.md")).unwrap();
+    request(&control, Command::RunRetry(RunTarget { run_id: run })).await;
+    let retried = incoming(&mut receive).await;
+    assert!(developer_text(&retried.body).contains(&"OLD_EXPLICIT_ROLE"));
+    assert_eq!(reference_events(&retried.body).len(), 1);
+    retried
+        .reply
+        .send((200, answer("old snapshot complete")))
+        .unwrap();
+    settled(&control, &thread).await;
+    request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "new turn".into(),
+        }),
+    )
+    .await;
+    let next = incoming(&mut receive).await;
+    assert!(developer_text(&next.body).contains(&"NEW_EXPLICIT_ROLE"));
+    assert!(!developer_text(&next.body).contains(&"OLD_EXPLICIT_ROLE"));
+    let events = reference_events(&next.body);
+    assert_eq!(events.len(), 3);
+    let changed = events.last().unwrap()["event_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        events.last().unwrap()["payload"]["change"]["after"]["path"],
+        root.path().join("new.md").to_str().unwrap()
+    );
+    // Failure before adoption cannot consume the notification or lose its history node.
+    next.reply
+        .send((
+            400,
+            json!({"error":{"code":"synthetic","message":"fixture"}}),
+        ))
+        .unwrap();
+    settled(&control, &thread).await;
+    let run = request(
+        &control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.clone()),
+        }),
+    )
+    .await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request(&control, Command::RunRetry(RunTarget { run_id: run })).await;
+    let notification_retry = incoming(&mut receive).await;
+    assert_eq!(
+        reference_events(&notification_retry.body)
+            .iter()
+            .filter(|v| v["event_id"] == changed)
+            .count(),
+        1
+    );
+    assert!(developer_text(&notification_retry.body).contains(&"NEW_EXPLICIT_ROLE"));
+    notification_retry
+        .reply
+        .send((200, answer("new snapshot adopted")))
+        .unwrap();
+    settled(&control, &thread).await;
+    let event = changed.clone();
+    control
+        .store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM node WHERE id=?1",
+                    [format!("event-{event}")],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM delivery WHERE event_id=?1 AND state='processed'",
+                    [event],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // An idle settings change does not create work. Later deletion remains allowed.
+    std::fs::write(root.path().join("idle.md"), "IDLE_ROLE").unwrap();
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            agents: Some("idle.md".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert!(
+        timeout(Duration::from_millis(100), receive.recv())
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(root.path().join("idle.md")).unwrap();
+    request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            thread_id: Some(thread.clone()),
+            text: "selected file removed".into(),
+        }),
+    )
+    .await;
+    let absent = incoming(&mut receive).await;
+    assert!(!developer_text(&absent.body).contains(&"NEW_EXPLICIT_ROLE"));
+    absent
+        .reply
+        .send((200, answer("absent instructions allowed")))
+        .unwrap();
+    settled(&control, &thread).await;
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

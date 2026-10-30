@@ -56,7 +56,13 @@ pub struct Store {
     pub config: Arc<Config>,
     pub index: Arc<crate::index::IndexService>,
     pub startup_cwd: PathBuf,
+    pub(crate) instructions: crate::instructions::InstructionLoader,
     pub instance_id: String,
+}
+
+struct AgentsPlan {
+    command: Command,
+    source: Option<(String, i64)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -93,6 +99,7 @@ impl Store {
                 clients.clone(),
             ),
             clients,
+            instructions: crate::instructions::InstructionLoader::new(&config),
             database,
             config,
             startup_cwd,
@@ -141,6 +148,7 @@ impl Store {
                 .map_err(storage_error)?
                 .and_then(MutationResult::value);
         }
+        let plan = self.prepare_agents(&request, &caller).await?;
         let store = self.clone();
         self.database
             .call(move |connection| {
@@ -158,7 +166,7 @@ impl Store {
                     tx.commit()?;
                     return Ok(result);
                 }
-                Ok(store.execute_transaction(connection, &request, caller.as_ref()))
+                Ok(store.execute_transaction(connection, &request, caller.as_ref(), plan.as_ref()))
             })
             .await
             .map_err(storage_error)?
@@ -551,12 +559,12 @@ impl Store {
                 let user:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN thread_path p ON p.node_id=n.id WHERE p.thread_id=?1 AND n.id=?2 AND n.deleted_reason IS NULL AND json_extract(n.payload_json,'$.role')='user')",params![thread,node],|r|r.get(0)).map_err(sql_error)?;
                 if !user{return Err(error(ErrorCode::InvalidArgument,"Edit target must be an original user request on this Thread's selected path"));}
                 let fork=uuid::Uuid::new_v4().to_string();let now=chrono::Utc::now().to_rfc3339();
-                history::fork_thread(&tx,&ThreadForkArgs{thread_id:thread.clone(),node_id:node.clone(),cwd:args.cwd.clone()},&fork,&now)?;
+                history::fork_thread(&tx,&ThreadForkArgs{ agents: None,thread_id:thread.clone(),node_id:node.clone(),cwd:args.cwd.clone()},&fork,&now)?;
                 let mut path:Vec<String>=tx.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal").map_err(sql_error)?.query_map([&fork],|r|r.get(0)).map_err(sql_error)?.collect::<rusqlite::Result<_>>().map_err(sql_error)?;
                 if path.pop().as_deref()!=Some(&node){return Err(error(ErrorCode::InvalidState,"Edit fork boundary changed"));}
                 tx.execute("DELETE FROM attachment_selection WHERE thread_id=?1 AND attachment_id IN (SELECT id FROM attachment_ref WHERE source_node_id=?2)",params![fork,node]).map_err(sql_error)?;
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
-                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None},None,&now)?;}
+                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
                 let mut result=store.send_content(&tx,&MessageSendArgs{thread_id:Some(fork),text:content.text.clone()},None,&operation_id,&now,content.new_source_elements(files.len())?)?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
@@ -591,6 +599,7 @@ impl Store {
         connection: &mut Connection,
         request: &Request,
         caller: Option<&Origin>,
+        plan: Option<&AgentsPlan>,
     ) -> Result<MutationResult> {
         let fingerprint = hash(
             serde_json::to_vec(&json!({"command":request.command,"caller":caller}))
@@ -602,7 +611,17 @@ impl Store {
             &fingerprint,
             caller,
             Admission::for_command(&request.command),
-            |tx, now| self.dispatch(tx, &request.command, caller, &request.operation_id, now),
+            |tx, now| {
+                if let Some(plan) = plan {
+                    if let Some((thread, expected)) = &plan.source {
+                        let revision: Option<i64> = tx.query_row("SELECT revision FROM thread WHERE id=?1 AND deleted_at IS NULL", [thread], |r|r.get(0)).optional().map_err(sql_error)?;
+                        if revision != Some(*expected) { return Err(error(ErrorCode::OperationConflict, "Thread settings changed during AGENTS validation; retry with a new operation ID")); }
+                    }
+                    self.dispatch(tx, &plan.command, caller, &request.operation_id, now)
+                } else {
+                    self.dispatch(tx, &request.command, caller, &request.operation_id, now)
+                }
+            },
         )
     }
 
@@ -739,12 +758,22 @@ impl Store {
                 "Status uses the dedicated read-only projection",
             )),
             Command::ThreadCreate(args) => {
-                let id = self.create_thread(tx, args, now)?;
+                let mut defaults = args.clone();
+                defaults.agents = None;
+                let id = self.create_thread(tx, &defaults, now)?;
+                if let Some(path) = &args.agents {
+                    self.set_agents_tx(tx, &id, path, caller, now)?;
+                }
                 MutationResult::value(thread_details(tx, &id)?)
             }
             Command::ThreadFork(args) => {
                 let id = uuid::Uuid::new_v4().to_string();
-                history::fork_thread(tx, args, &id, now)?;
+                let mut defaults = args.clone();
+                defaults.agents = None;
+                history::fork_thread(tx, &defaults, &id, now)?;
+                if let Some(path) = &args.agents {
+                    self.set_agents_tx(tx, &id, path, caller, now)?;
+                }
                 MutationResult::value(thread_details(tx, &id)?)
             }
             Command::ThreadGet(args) => MutationResult::value(thread_details(
@@ -820,6 +849,104 @@ impl Store {
                 "this operation requires its runtime service",
             )),
         }
+    }
+
+    async fn prepare_agents(
+        &self,
+        request: &Request,
+        caller: &Option<Origin>,
+    ) -> Result<Option<AgentsPlan>> {
+        let (path, cwd, source) = match &request.command {
+            Command::ThreadCreate(a) => (a.agents.clone(), a.cwd.clone(), a.parent_id.clone()),
+            Command::ThreadFork(a) => (a.agents.clone(), a.cwd.clone(), Some(a.thread_id.clone())),
+            Command::ThreadSet(a) => (
+                a.agents.clone(),
+                a.cwd.clone(),
+                Some(target(a.thread_id.as_deref(), caller.as_ref())?),
+            ),
+            _ => return Ok(None),
+        };
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        if self.replay(request, caller).await?.is_some() {
+            return Ok(None);
+        }
+        let source_id = source.clone();
+        let startup = self.startup_cwd.clone();
+        let (cwd, source) = self
+            .database
+            .call(move |db| {
+                let (base, source) = if let Some(id) = source_id {
+                    let value: Option<(String, i64)> = db
+                        .query_row(
+                            "SELECT cwd,revision FROM thread WHERE id=?1 AND deleted_at IS NULL",
+                            [&id],
+                            |r| Ok((r.get(0)?, r.get(1)?)),
+                        )
+                        .optional()?;
+                    let Some((base, revision)) = value else {
+                        return Ok(Err(error(ErrorCode::ThreadNotFound, "Thread not found")));
+                    };
+                    (PathBuf::from(base), Some((id, revision)))
+                } else {
+                    (startup, None)
+                };
+                Ok(
+                    normalize(cwd.as_deref().map(Path::new).unwrap_or(&base), &base)
+                        .map(|cwd| (cwd, source)),
+                )
+            })
+            .await
+            .map_err(storage_error)??;
+        let path = normalize(Path::new(&path), &cwd)?;
+        let prepared = self.instructions.prepare(cwd, path.clone()).await?;
+        if prepared.is_none() {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "Explicit AGENTS path does not exist",
+            ));
+        }
+        let path = path
+            .to_str()
+            .ok_or_else(|| error(ErrorCode::InvalidArgument, "AGENTS path must be Unicode"))?
+            .to_owned();
+        let mut command = request.command.clone();
+        match &mut command {
+            Command::ThreadCreate(a) => a.agents = Some(path),
+            Command::ThreadSet(a) => a.agents = Some(path),
+            Command::ThreadFork(a) => a.agents = Some(path),
+            _ => unreachable!(),
+        }
+        Ok(Some(AgentsPlan { command, source }))
+    }
+
+    fn set_agents_tx(
+        &self,
+        tx: &Transaction<'_>,
+        thread: &str,
+        path: &str,
+        caller: Option<&Origin>,
+        now: &str,
+    ) -> Result<()> {
+        let before: String = tx
+            .query_row(
+                "SELECT agents_path FROM thread WHERE id=?1",
+                [thread],
+                |r| r.get(0),
+            )
+            .map_err(sql_error)?;
+        if before == path {
+            return Ok(());
+        }
+        let excluded_turn: Option<String> = tx.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY created_at DESC,rowid DESC LIMIT 1", [thread], |r|r.get(0)).optional().map_err(sql_error)?;
+        tx.execute(
+            "UPDATE thread SET agents_path=?2 WHERE id=?1",
+            params![thread, path],
+        )
+        .map_err(sql_error)?;
+        super::context::record(tx, thread, "agents_reference", actor(caller), json!({"before":{"path":before},"after":{"path":path},"excluded_turn_id":excluded_turn}), now).map_err(sql_error)?;
+        Ok(())
     }
 
     fn create_thread(
@@ -901,6 +1028,7 @@ impl Store {
             && args.model.is_none()
             && args.cwd.is_none()
             && args.effort.is_none()
+            && args.agents.is_none()
         {
             tx.execute("UPDATE thread SET title=COALESCE(?2,title),revision=revision+1,updated_at=?3 WHERE id=?1",params![id,title,now]).map_err(sql_error)?;
             let mut result = MutationResult::value(thread_details(tx, &id)?)?;
@@ -929,6 +1057,9 @@ impl Store {
         };
         let changed = profile != current.connection || model != current.model;
         tx.execute("UPDATE thread SET cwd=?2,profile_id=?3,model_id=?4,effort=?5,revision=revision+1,profile_revision=profile_revision+1,reasoning_epoch=reasoning_epoch+?6,updated_at=?7,title=COALESCE(?8,title) WHERE id=?1",params![id,cwd.to_string_lossy(),profile,model,effort,i64::from(changed),now,title]).map_err(sql_error)?;
+        if let Some(path) = &args.agents {
+            self.set_agents_tx(tx, &id, path, caller, now)?;
+        }
         let after = thread_details(tx, &id)?;
         if current.cwd != after.cwd
             || current.connection != after.connection
@@ -1154,7 +1285,7 @@ fn assign_message(
 }
 
 fn actor(caller: Option<&Origin>) -> Value {
-    caller.map(|value|json!({"kind":"shell","thread_id":value.thread_id,"run_id":value.run_id,"execution_id":value.execution_id})).unwrap_or_else(||json!({"kind":"human"}))
+    caller.map(|value|json!({"kind":"shell","thread_id":value.thread_id,"run_id":value.run_id,"execution_id":value.execution_id,"turn_id":value.turn_id})).unwrap_or_else(||json!({"kind":"human"}))
 }
 
 fn queue_compact_tx(
@@ -1210,7 +1341,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails{context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails{ agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection
@@ -2106,6 +2237,312 @@ mod activity_list_tests {
                 .iter()
                 .filter(|t| t.thread_id.starts_with("bulk-"))
                 .all(|t| t.activity == ActivityPhase::Idle)
+        );
+    }
+}
+
+#[cfg(test)]
+mod agents_reference_tests {
+    use super::*;
+
+    async fn fixture() -> (tempfile::TempDir, Store) {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(root.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let config = Config::parse("default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+        let store = Store::new(db, Arc::new(config), root.path().into(), "fixture".into());
+        (root, store)
+    }
+    fn req(command: Command) -> Request {
+        Request::new(format!("fixture:{}", uuid::Uuid::new_v4()), command)
+    }
+    fn create(agents: Option<&str>, cwd: Option<&str>, parent: Option<String>) -> Command {
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: agents.map(str::to_owned),
+            cwd: cwd.map(str::to_owned),
+            parent_id: parent,
+            connection: None,
+            model: None,
+            effort: None,
+        })
+    }
+    async fn details(store: &Store, id: &str) -> Value {
+        store
+            .execute(
+                req(Command::ThreadGet(ThreadTarget {
+                    thread_id: Some(id.into()),
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result
+    }
+
+    #[tokio::test]
+    async fn explicit_agents_resolution_inheritance_validation_and_receipt_replay() {
+        let (root, store) = fixture().await;
+        std::fs::create_dir(root.path().join("project")).unwrap();
+        std::fs::write(root.path().join("project/role.md"), "role instructions").unwrap();
+        let request = req(create(Some("./role.md"), Some("project"), None));
+        let first = store.execute(request.clone(), None).await.unwrap().result;
+        let thread = first["thread_id"].as_str().unwrap();
+        let expected = root
+            .path()
+            .join("project/role.md")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(first["agents_path"], expected);
+        let inherited = store
+            .execute(req(create(None, None, Some(thread.into()))), None)
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(inherited["agents_path"], expected);
+        // The low-level fork continues sharing history but uses current settings.
+        let target = thread.to_owned();
+        store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                history::append_node(
+                    &tx,
+                    &target,
+                    "source",
+                    None,
+                    "user",
+                    &json!({"role":"user","content":[{"type":"input_text","text":"fork source"}]}),
+                    "now",
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let fork = store
+            .execute(
+                req(Command::ThreadFork(ThreadForkArgs {
+                    agents: None,
+                    thread_id: thread.into(),
+                    node_id: "source".into(),
+                    cwd: None,
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(fork["agents_path"], expected);
+        let override_fork = store
+            .execute(
+                req(Command::ThreadFork(ThreadForkArgs {
+                    agents: Some("role.md".into()),
+                    thread_id: thread.into(),
+                    node_id: "source".into(),
+                    cwd: None,
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(override_fork["agents_path"], expected);
+        let no_change = req(Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.into()),
+            agents: Some("role.md".into()),
+            ..Default::default()
+        }));
+        store.execute(no_change, None).await.unwrap();
+        let count:i64=store.database.call(|db|Ok(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='agents_reference'",[],|r|r.get(0))?)).await.unwrap();
+        assert_eq!(
+            count, 1,
+            "same resolved reference must not fabricate events"
+        );
+        std::fs::remove_file(&expected).unwrap();
+        assert_eq!(
+            store.execute(request, None).await.unwrap().result,
+            first,
+            "replay must not revalidate a file removed after acceptance"
+        );
+        let before = details(&store, thread).await;
+        let failed = store
+            .execute(
+                req(Command::ThreadSet(ThreadSetArgs {
+                    thread_id: Some(thread.into()),
+                    agents: Some("missing".into()),
+                    cwd: Some(root.path().to_str().unwrap().into()),
+                    model: Some("must-not-commit".into()),
+                    title: Some("not committed".into()),
+                    ..Default::default()
+                })),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(failed.code, ErrorCode::InvalidArgument);
+        assert_eq!(details(&store, thread).await, before);
+        let root_default = store
+            .execute(req(create(None, None, None)), None)
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            root_default["agents_path"],
+            root.path().join("AGENTS.md").to_str().unwrap()
+        );
+        for (name, bytes, code) in [
+            ("invalid", vec![255], ErrorCode::IoFailed),
+            (
+                "oversize",
+                vec![b'x'; 8 * 1024 * 1024 + 1],
+                ErrorCode::InputLimit,
+            ),
+        ] {
+            std::fs::write(root.path().join(name), bytes).unwrap();
+            assert_eq!(
+                store
+                    .execute(req(create(Some(name), None, None)), None)
+                    .await
+                    .unwrap_err()
+                    .code,
+                code
+            );
+        }
+        std::fs::write(root.path().join("exact"), vec![b'x'; 8 * 1024 * 1024]).unwrap();
+        store
+            .execute(req(create(Some("exact"), None, None)), None)
+            .await
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = root.path().join("unreadable");
+            std::fs::write(&path, "private fixture").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o0)).unwrap();
+            // Privileged runners can bypass mode bits; do not claim denial there.
+            if std::fs::File::open(&path).is_err() {
+                assert_eq!(
+                    store
+                        .execute(req(create(Some("unreadable"), None, None)), None)
+                        .await
+                        .unwrap_err()
+                        .code,
+                    ErrorCode::IoFailed
+                );
+            }
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert_eq!(
+            store
+                .execute(req(create(Some("project"), None, None)), None)
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::IoFailed
+        );
+        assert_eq!(
+            store
+                .execute(req(create(Some(""), None, None)), None)
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_preflight_cas_and_real_actor_are_atomic() {
+        let (root, store) = fixture().await;
+        std::fs::write(root.path().join("one.md"), "one").unwrap();
+        std::fs::write(root.path().join("two.md"), "two").unwrap();
+        let created = store
+            .execute(req(create(Some("one.md"), None, None)), None)
+            .await
+            .unwrap()
+            .result;
+        let id = created["thread_id"].as_str().unwrap().to_owned();
+        let request = req(Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(id.clone()),
+            agents: Some("two.md".into()),
+            title: Some("must-not-commit".into()),
+            ..Default::default()
+        }));
+        let plan = store
+            .prepare_agents(&request, &None)
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .execute(
+                req(Command::ThreadSet(ThreadSetArgs {
+                    thread_id: Some(id.clone()),
+                    model: Some("concurrent".into()),
+                    ..Default::default()
+                })),
+                None,
+            )
+            .await
+            .unwrap();
+        let saved = details(&store, &id).await;
+        let cloned = store.clone();
+        let conflict = store
+            .database
+            .call(move |db| Ok(cloned.execute_transaction(db, &request, None, Some(&plan))))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(conflict.code, ErrorCode::OperationConflict);
+        assert_eq!(details(&store, &id).await, saved);
+        let origin = Origin {
+            instance_id: "fixture".into(),
+            thread_id: "actual-model".into(),
+            run_id: "actual-run".into(),
+            turn_id: "actual-turn".into(),
+            execution_id: "actual-shell".into(),
+            token: "private-token".into(),
+        };
+        store
+            .execute(
+                req(Command::ThreadSet(ThreadSetArgs {
+                    thread_id: Some(id.clone()),
+                    agents: Some("two.md".into()),
+                    ..Default::default()
+                })),
+                Some(origin),
+            )
+            .await
+            .unwrap();
+        let target = id.clone();
+        let events:Vec<String>=store.database.call(move|db|Ok(db.prepare("SELECT payload_ref_json FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='agents_reference' ORDER BY rowid")?.query_map([target],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?)).await.unwrap();
+        let event: Value = serde_json::from_str(events.last().unwrap()).unwrap();
+        assert_eq!(event["actor"]["thread_id"], "actual-model");
+        assert_eq!(event["actor"]["turn_id"], "actual-turn");
+        assert!(event["observed_at"].is_string());
+        assert!(!events.join("").contains("private-token"));
+        assert_eq!(
+            event["change"]["before"]["path"],
+            root.path().join("one.md").to_str().unwrap()
+        );
+        assert_eq!(
+            event["change"]["after"]["path"],
+            root.path().join("two.md").to_str().unwrap()
+        );
+        store
+            .execute(
+                req(Command::ThreadSet(ThreadSetArgs {
+                    thread_id: Some(id.clone()),
+                    cwd: Some("..".into()),
+                    ..Default::default()
+                })),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            details(&store, &id).await["agents_path"],
+            event["change"]["after"]["path"]
         );
     }
 }

@@ -259,7 +259,7 @@ fn mutation_owner_survives_saved_draft_install_receipt_body_eviction_and_other_r
     });
     let saved = DraftSnapshot::default();
     let saved_id = saved.draft_id.clone();
-    let details = serde_json::from_value(serde_json::json!({"thread_id":"a","title":"saved","cwd":fixture_cwd(),"connection":"fixture","model":"fixture","children_count":0,"shells_count":0})).unwrap();
+    let details = serde_json::from_value(serde_json::json!({"agents_path":"/AGENTS.md","thread_id":"a","title":"saved","cwd":fixture_cwd(),"connection":"fixture","model":"fixture","children_count":0,"shells_count":0})).unwrap();
     ui.apply(UiUpdate::Thread {
         generation: ui.view().generation,
         details,

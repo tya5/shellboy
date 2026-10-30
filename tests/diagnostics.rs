@@ -242,6 +242,7 @@ async fn streamed_fixture(malformed_final: bool) {
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,

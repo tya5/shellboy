@@ -715,6 +715,7 @@ impl Form {
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadCreate(ThreadCreateArgs {
+                        agents: None,
                         cwd: form.path("cwd", cwd)?,
                         connection: form.optional("connection")?,
                         model: form.optional("model")?,
@@ -731,6 +732,7 @@ impl Form {
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadFork(ThreadForkArgs {
+                        agents: None,
                         thread_id: form.owned("thread")?,
                         node_id: form.owned("node")?,
                         cwd: form.path("cwd", cwd)?,
@@ -771,6 +773,7 @@ impl Form {
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadSet(ThreadSetArgs {
+                        agents: None,
                         title: match form.value("title_mode")? {
                             "set" => Some(form.owned("title")?),
                             "auto" => Some(String::new()),

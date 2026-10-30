@@ -2831,6 +2831,7 @@ impl UiState {
                 };
                 if let (Some(thread_id), Some(node_id)) = (thread_id, node_id) {
                     vec![UiAction::Command(Command::ThreadFork(ThreadForkArgs {
+                        agents: None,
                         thread_id,
                         node_id,
                         cwd: None,

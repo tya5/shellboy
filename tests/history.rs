@@ -139,6 +139,7 @@ async fn summary_can_precede_existing_suffix_and_fork_keeps_shared_sources() {
     );
     let child = history
         .fork(ThreadForkArgs {
+            agents: None,
             thread_id: "thread".into(),
             node_id: "summary".into(),
             cwd: None,
@@ -184,6 +185,7 @@ async fn fork_cannot_split_tool_calls_from_any_required_result() {
     )
     .await;
     let args = |id: &str| ThreadForkArgs {
+        agents: None,
         thread_id: "thread".into(),
         node_id: id.into(),
         cwd: None,
@@ -239,6 +241,7 @@ async fn list_cursors_bind_revision_and_snippets_limit_unicode_characters() {
     );
     let other = history
         .fork(ThreadForkArgs {
+            agents: None,
             thread_id: "thread".into(),
             node_id: "c".into(),
             cwd: Some("../different/nested/..".into()),
@@ -370,6 +373,7 @@ async fn fork_copies_attachment_selection_by_reference_and_only_for_prefix() {
     }).await.unwrap();
     let child = history
         .fork(ThreadForkArgs {
+            agents: None,
             thread_id: "thread".into(),
             node_id: "a".into(),
             cwd: None,

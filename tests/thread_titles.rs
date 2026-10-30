@@ -27,6 +27,7 @@ async fn create(store: &Store) -> ThreadDetails {
         execute(
             store,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,
@@ -168,6 +169,7 @@ async fn explicit_title_is_preserved_and_shared_fork_uses_its_selected_user_path
         execute(
             &store,
             Command::ThreadFork(ThreadForkArgs {
+                agents: None,
                 thread_id: source.thread_id.clone(),
                 node_id: first.message_id,
                 cwd: None,
@@ -467,6 +469,7 @@ async fn pending_accepted_and_held_titles_do_not_leak_other_threads_or_unselecte
 
 fn set_title(thread: Option<&str>, title: Option<&str>, model: Option<&str>) -> Command {
     Command::ThreadSet(ThreadSetArgs {
+        agents: None,
         connection: None,
         thread_id: thread.map(Into::into),
         cwd: None,

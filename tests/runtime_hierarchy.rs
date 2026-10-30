@@ -120,6 +120,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     let thread = command(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             cwd: None,
             model: None,
@@ -232,6 +233,7 @@ async fn child_thread(control: &Arc<Control>, parent: &str) -> String {
     command(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             cwd: None,
             model: None,

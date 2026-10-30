@@ -307,6 +307,9 @@ pub struct CompactOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadCreateOptions {
+    /// Instruction file; relative to the target effective cwd.
+    #[arg(long)]
+    pub agents: Option<PathBuf>,
     #[arg(long)]
     pub cwd: Option<PathBuf>,
     #[arg(long)]
@@ -321,6 +324,9 @@ pub struct ThreadCreateOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadForkOptions {
+    /// Instruction file; relative to the target effective cwd.
+    #[arg(long)]
+    pub agents: Option<PathBuf>,
     #[arg(long = "thread")]
     pub thread_id: String,
     #[arg(long = "node")]
@@ -337,6 +343,9 @@ pub struct ThreadDeleteOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadSetOptions {
+    /// Instruction file; relative to the target effective cwd.
+    #[arg(long)]
+    pub agents: Option<PathBuf>,
     /// Display title; an empty string restores the automatic title.
     #[arg(long)]
     pub title: Option<String>,
@@ -632,6 +641,7 @@ impl Cli {
                     thread_id: a.thread_id,
                 }),
                 ThreadCommand::Create(a) => C::ThreadCreate(wire::ThreadCreateArgs {
+                    agents: path_option(a.agents)?,
                     connection: a.connection,
                     cwd: path_option(a.cwd)?,
                     model: a.model,
@@ -639,6 +649,7 @@ impl Cli {
                     parent_id: a.parent_id,
                 }),
                 ThreadCommand::Fork(a) => C::ThreadFork(wire::ThreadForkArgs {
+                    agents: path_option(a.agents)?,
                     thread_id: a.thread_id,
                     node_id: a.node_id,
                     cwd: path_option(a.cwd)?,
@@ -652,6 +663,7 @@ impl Cli {
                     descendants: a.descendants,
                 }),
                 ThreadCommand::Set(a) => C::ThreadSet(wire::ThreadSetArgs {
+                    agents: path_option(a.agents)?,
                     title: a.title,
                     connection: a.connection,
                     thread_id: a.thread_id,

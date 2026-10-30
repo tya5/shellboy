@@ -275,6 +275,7 @@ async fn epoch_switch_back_never_revives_old_opaque_and_fork_has_an_independent_
     assert!(text.contains("opaque-a2"));
     let fork_thread = shellboy::history::History::new(f.db.clone())
         .fork(shellboy::protocol::ThreadForkArgs {
+            agents: None,
             thread_id: "t".into(),
             node_id: "a2".into(),
             cwd: None,

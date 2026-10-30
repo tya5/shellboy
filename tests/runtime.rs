@@ -130,6 +130,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     let thread = command(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             cwd: None,
             model: None,
@@ -228,6 +229,7 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     let other_thread = command(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             cwd: None,
             model: None,
@@ -599,6 +601,7 @@ async fn incomplete_response_created_after_gc_roots_survives_sweep() {
     let deleted = command(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             cwd: None,
             model: None,
@@ -1204,6 +1207,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         command(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,
@@ -1790,6 +1794,7 @@ async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_en
     let child = command(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             connection: None,
             cwd: None,
             model: None,
@@ -2097,6 +2102,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     command(
         &control,
         Command::ThreadSet(ThreadSetArgs {
+            agents: None,
             title: None,
             thread_id: Some(accepted.thread_id.clone()),
             cwd: None,
@@ -2232,6 +2238,7 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
     let reply: Value = serde_json::from_slice(&cli.stdout).unwrap();
     assert_eq!(reply["error"]["code"], "thread_not_found");
     let args = ThreadCreateArgs {
+        agents: None,
         connection: None,
         cwd: None,
         model: None,

@@ -113,6 +113,7 @@ async fn thread(control: &Arc<Control>) -> String {
     request(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,
@@ -842,6 +843,7 @@ async fn child_revisit_finishes_before_parent_receives_child_completion_and_its_
     let child_thread = request(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: Some(parent_thread.clone()),
             connection: None,

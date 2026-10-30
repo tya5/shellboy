@@ -94,6 +94,7 @@ async fn upload_recovery(auto_trim: bool) {
     let thread = request(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,
@@ -248,6 +249,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     let thread = request(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
             cwd: None,
             parent_id: None,
             connection: None,

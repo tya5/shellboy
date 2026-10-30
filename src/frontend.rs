@@ -981,7 +981,7 @@ async fn run_with_delivery(
                                 control
                                     .send_ordered_draft(
                                         trace.operation_id.clone(),
-                                        ThreadCreateArgs {
+                                        ThreadCreateArgs { agents: None,
                                             connection,
                                             cwd: Some(cwd),
                                             model,
@@ -1444,7 +1444,7 @@ async fn run_with_delivery(
                                         confirmed_run_id,
                                         content,
                                         files,
-                                        ThreadCreateArgs {
+                                        ThreadCreateArgs { agents: None,
                                             cwd: Some(cwd),
                                             connection,
                                             model,

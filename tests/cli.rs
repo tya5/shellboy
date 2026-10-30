@@ -886,3 +886,55 @@ async fn revisit_targets_and_bounded_stdin_map_to_shared_commands() {
         "stdin reads at most limit+1 bytes before rejecting"
     );
 }
+
+#[tokio::test]
+async fn agents_paths_remain_relative_until_target_cwd_is_known() {
+    for (args, expected) in [
+        (
+            vec![
+                "thread",
+                "create",
+                "--agents",
+                "roles/coder.md",
+                "--cwd",
+                "project",
+            ],
+            "thread.create",
+        ),
+        (
+            vec![
+                "thread",
+                "set",
+                "--thread",
+                "target",
+                "--agents",
+                "roles/coder.md",
+                "--cwd",
+                "project",
+            ],
+            "thread.set",
+        ),
+        (
+            vec![
+                "thread",
+                "fork",
+                "--thread",
+                "target",
+                "--node",
+                "source",
+                "--agents",
+                "roles/coder.md",
+                "--cwd",
+                "project",
+            ],
+            "thread.fork",
+        ),
+    ] {
+        let command = convert(&args).await;
+        assert_eq!(command.name(), expected);
+        let value = serde_json::to_value(command).unwrap();
+        assert_eq!(value["args"]["agents"], "roles/coder.md");
+        assert_eq!(value["args"]["cwd"], "project");
+    }
+    assert!(Cli::try_parse_from(["shellboy", "thread", "set", "--agents", ""]).is_err());
+}

@@ -1258,6 +1258,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         .send_draft(
             format!("{}:start", control.store.instance_id),
             ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,
@@ -1314,6 +1315,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         .request(Request::new(
             format!("{}:after-failure", observer.store.instance_id),
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,
@@ -2297,6 +2299,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         .request(Request::new(
             format!("{}:metadata-refresh", observer.store.instance_id),
             Command::ThreadSet(ThreadSetArgs {
+                agents: None,
                 thread_id: Some(thread.clone()),
                 title: Some("metadata during stream".into()),
                 connection: None,
@@ -2678,6 +2681,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
             Request::new(
                 format!("{}:thread", control.store.instance_id),
                 Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
                     connection: None,
                     cwd: None,
                     model: None,

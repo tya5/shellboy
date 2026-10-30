@@ -222,6 +222,7 @@ async fn stream_input_layout_and_db_fairness() {
                         .request(Request::new(
                             format!("{}:{}", c.store.instance_id, uuid::Uuid::new_v4()),
                             Command::ThreadSet(ThreadSetArgs {
+                                agents: None,
                                 thread_id: Some(thread),
                                 connection: None,
                                 cwd: None,

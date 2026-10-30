@@ -128,6 +128,7 @@ mod tests {
         let control = crate::control::Control::new(&owner, root.path().into());
         let operation = format!("{}:ordered-acceptance", control.store.instance_id);
         let args = crate::protocol::ThreadCreateArgs {
+            agents: None,
             connection: None,
             cwd: None,
             model: None,

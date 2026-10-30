@@ -91,6 +91,7 @@ impl ThreadCreateArgs {
         for (name, value) in [
             ("connection", &self.connection),
             ("cwd", &self.cwd),
+            ("agents", &self.agents),
             ("model", &self.model),
             ("parent_id", &self.parent_id),
         ] {
@@ -104,6 +105,7 @@ impl ThreadForkArgs {
     fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.thread_id, "thread_id")?;
         nonempty(&self.node_id, "node_id")?;
+        optional_nonempty(self.agents.as_deref(), "agents")?;
         optional_nonempty(self.cwd.as_deref(), "cwd")
     }
 }
@@ -113,6 +115,7 @@ impl ThreadSetArgs {
         optional_nonempty(self.connection.as_deref(), "connection")?;
         optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
         optional_nonempty(self.cwd.as_deref(), "cwd")?;
+        optional_nonempty(self.agents.as_deref(), "agents")?;
         optional_nonempty(self.model.as_deref(), "model")?;
         if let Some(title) = &self.title {
             if title
@@ -130,6 +133,7 @@ impl ThreadSetArgs {
             && self.model.is_none()
             && self.effort.is_none()
             && self.title.is_none()
+            && self.agents.is_none()
         {
             Err(invalid("thread.set requires a change"))
         } else {

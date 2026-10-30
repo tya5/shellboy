@@ -78,7 +78,7 @@ impl History {
                     "SELECT cwd,profile_id,model_id,effort,parent_thread_id FROM thread WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(ThreadDetails {
+                        Ok(ThreadDetails { agents_path: String::new(),
                             context_usage: None,
                             context: None,
                             thread_id: id.clone(),

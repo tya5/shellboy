@@ -143,6 +143,7 @@ async fn recovery_and_stopping_hold_and_fork_does_not_copy_unapplied_attachment(
             Request::new(
                 "instance:fork",
                 Command::ThreadFork(ThreadForkArgs {
+                    agents: None,
                     thread_id: "thread".into(),
                     node_id: "base".into(),
                     cwd: None,
@@ -189,6 +190,7 @@ async fn draft_source_exists_with_ordered_refs_in_same_acceptance_transaction() 
         .send_draft(
             "instance:draft".into(),
             ThreadCreateArgs {
+                agents: None,
                 connection: None,
                 cwd: None,
                 model: None,
