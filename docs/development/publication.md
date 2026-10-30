@@ -158,3 +158,27 @@ three archives, two version-bound scripts, and `SHA256SUMS` covering all five.
 Check the scripts contain the proposed tag and no template marker, and run them
 against the matching public release after publication using a temporary install
 directory. The ordinary three-OS Rust CI gate still applies independently.
+
+### Installer validation (2026-10-30)
+
+[Manual branch run 41060210585](https://github.com/tya5/shellboy/actions/runs/41060210585)
+at script/workflow SHA `64a5302` passes all four jobs: macOS 15 ARM64,
+Ubuntu 22.04 x64 (`sh`/dash), Windows PowerShell 5.1 and PowerShell 7.
+Public v0.3.0 downloads were unauthenticated. Each job uses a temporary directory
+with spaces in its path, installs fresh, replaces the binary, verifies
+`shellboy 0.3.0` and identical backup bytes, tests an environment version override
+against a differently bound script, and tests a bound script without an override.
+Mock downloads verify that checksum mismatch leaves an existing binary unchanged
+and creates no fresh destination; mock CPU detection verifies explicit rejection.
+PATH/restart/database-backup guidance is asserted. Build, assembly and publish
+jobs are skipped in this validation mode.
+
+Native macOS ARM64 runs the same installer checks successfully. Local validation
+also rejects invalid version strings and exercises the assembly Python with
+synthetic archives: three archives, two version-bound scripts and a five-entry
+`SHA256SUMS` are produced. This fixture is not a release build. Full standard
+checks pass locally after rebase; Rust code is unchanged. All installed-binary
+checks use `SHELLBOY_INSTALL_DIR`; the user's installed binary, profiles and real
+data are untouched. Downloading installer assets through the advertised Release
+URLs remains untested until the next release publishes those assets; v0.3.0 is
+intentionally unchanged.
