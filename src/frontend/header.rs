@@ -17,7 +17,7 @@ pub(super) struct RawHeader {
     title: Option<TitleWitness>,
 }
 #[derive(Default)]
-struct TitleWitness {
+pub(super) struct TitleWitness {
     path: Candidates,
     pending: Candidates,
 }
@@ -87,24 +87,32 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
             usage_totals:None,context_usage:None,context:None,
         },row.get::<_,String>(7)?)),
     ).optional()?.ok_or_else(||ApiError::new(ErrorCode::ThreadNotFound,"Thread not found"))?;
-    let title = if details.title.trim().is_empty() {
-        let path = read_candidates(db, thread, PATH_PREFIX, WITNESS_BYTES, false)?;
-        let pending = read_candidates(
-            db,
-            thread,
-            PENDING_PREFIX,
-            WITNESS_BYTES.saturating_sub(path.copied),
-            true,
-        )?;
-        Some(TitleWitness { path, pending })
-    } else {
-        None
-    };
+    let title = read_title_tx(db, thread, &details.title)?;
     Ok(RawHeader {
         details,
         updated_at,
         title,
     })
+}
+
+/// Same bounded title evidence for the header and at most3 displayed children.
+pub(super) fn read_title_tx(
+    db: &Connection,
+    thread: &str,
+    stored: &str,
+) -> Result<Option<TitleWitness>, StorageError> {
+    if !stored.trim().is_empty() {
+        return Ok(None);
+    }
+    let path = read_candidates(db, thread, PATH_PREFIX, WITNESS_BYTES, false)?;
+    let pending = read_candidates(
+        db,
+        thread,
+        PENDING_PREFIX,
+        WITNESS_BYTES.saturating_sub(path.copied),
+        true,
+    )?;
+    Ok(Some(TitleWitness { path, pending }))
 }
 
 fn read_candidates(
@@ -180,7 +188,7 @@ impl RawHeader {
     }
 }
 impl TitleWitness {
-    fn prepare(self) -> String {
+    pub(super) fn prepare(self) -> String {
         let mut user = false;
         for (index, source) in [self.path, self.pending].into_iter().enumerate() {
             if index == 1 && source.truncated {

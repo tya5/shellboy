@@ -42,6 +42,7 @@ fn read_visible_tx(
     db: &Connection,
     thread: &str,
     tool_scope: Option<ToolObservation>,
+    waits: Option<&[(String, String)]>,
 ) -> Result<RawVisible, StorageError> {
     if tool_scope
         .as_ref()
@@ -77,7 +78,7 @@ fn read_visible_tx(
             view_revision: None,
         },
     )?;
-    let activity = activity::read_tx(db, thread)?;
+    let activity = activity::read_tx_with_waits(db, thread, waits)?;
     // Queue, path, metadata and activity have all been read. Publish one witness
     // for this entire observation, never a separate per-surface read sequence.
     history.set_read_revision(message_queue::read_revision());
@@ -179,12 +180,13 @@ pub(super) async fn run(
             return;
         };
         let target=thread.clone();
+        let waits=control.pending_wait_sources();
         let read=control.store.database.call(move |db| {
             let tx=db.transaction()?;
             let receipts=receipt_states_tx(&tx,&ids)?;
             // Domain failures of the selected view do not discard independently
             // committed receipt facts. Storage failures retain their real type.
-            let visible=read_visible_tx(&tx,&target,tool_scope).map_err(StorageError::into_api_error);
+            let visible=read_visible_tx(&tx,&target,tool_scope,waits.as_deref()).map_err(StorageError::into_api_error);
             tx.commit()?;
             Ok((receipts,visible))
         }).await.map_err(storage_error);
@@ -251,7 +253,7 @@ mod tests {
                 })
                 .collect(),
         };
-        let error = read_visible_tx(&db, "not-read", Some(scope))
+        let error = read_visible_tx(&db, "not-read", Some(scope), Some(&[]))
             .err()
             .unwrap()
             .into_api_error();
@@ -305,7 +307,7 @@ mod tests {
             .call(move |db| {
                 let tx = db.transaction()?;
                 let receipts = receipt_states_tx(&tx, &["queued".into()])?;
-                let raw = read_visible_tx(&tx, "t", Some(scope))?;
+                let raw = read_visible_tx(&tx, "t", Some(scope), Some(&[]))?;
                 tx.commit()?;
                 Ok((raw, receipts))
             })
@@ -405,7 +407,7 @@ mod tests {
                     tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('a',?1,'message','completed','{}',?2)",rusqlite::params![ordinal,id])?;
                 }
             }
-            let raw=read_visible_tx(&tx,"t",None)?;
+            let raw=read_visible_tx(&tx,"t",None,Some(&[]))?;
             assert_eq!(raw.recovery.len(),1,"a non-event carrying event_id is not a recovery observation");
             tx.commit()?;Ok(raw)
         }).await.unwrap();

@@ -99,12 +99,21 @@ pub(super) struct RawProjection {
     tool_running: bool,
     tools: u64,
     cancelled: u64,
+    live_work: Option<super::live_work::RawLiveWork>,
 }
 
 /// Latest Run owns the selected Turn; an older Turn cannot revive a newer Run.
 pub(super) fn read_tx(
     db: &Connection,
     thread: &str,
+) -> Result<RawProjection, crate::storage::StorageError> {
+    read_tx_with_waits(db, thread, None)
+}
+
+pub(super) fn read_tx_with_waits(
+    db: &Connection,
+    thread: &str,
+    waits: Option<&[(String, String)]>,
 ) -> Result<RawProjection, crate::storage::StorageError> {
     let run: Option<(String, String, Option<String>)> = db
         .query_row(
@@ -125,6 +134,7 @@ pub(super) fn read_tx(
             tool_running: false,
             tools: 0,
             cancelled: 0,
+            live_work: None,
         });
     };
     let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
@@ -150,6 +160,11 @@ pub(super) fn read_tx(
         tool_running: false,
         tools: 0,
         cancelled: 0,
+        live_work: if owned && matches!(run_state.as_str(), "live" | "stopping") {
+            Some(super::live_work::read_tx(db, run_id, waits)?)
+        } else {
+            None
+        },
     };
     if let Some(saved_turn) = turn {
         let turn_id = &saved_turn.id;
@@ -204,6 +219,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         tool_running,
         tools,
         cancelled,
+        live_work,
     } = raw;
     let Some((run_id, run_state, stop_reason)) = run else {
         return Projection {
@@ -220,6 +236,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         .as_ref()
         .and_then(crate::presentation::revisit_label);
     let mut snapshot = ActivitySnapshot {
+        live_work: live_work.map(super::live_work::prepare),
         revisit,
         run_id: Some(run_id),
         ..Default::default()
@@ -337,11 +354,10 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
     );
     let poll_running = run_state == "stopping"
         || (run_state == "live"
-            && (owned
-                || matches!(
-                    state.as_deref(),
-                    Some("preparing" | "running" | "waiting" | "recovery_wait")
-                )));
+            && matches!(
+                state.as_deref(),
+                Some("preparing" | "running" | "waiting" | "recovery_wait")
+            ));
     Projection {
         snapshot,
         observed_at: std::time::Instant::now(),
@@ -357,10 +373,11 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::stora
 }
 pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiError> {
     let target = thread.to_owned();
+    let waits = control.pending_wait_sources();
     let result = control
         .store
         .database
-        .call(move |db| read_tx(db, &target))
+        .call(move |db| read_tx_with_waits(db, &target, waits.as_deref()))
         .await
         .map_err(super::storage_error);
     let raw = super::checked_storage(control, result).await?;
@@ -417,6 +434,42 @@ mod tests {
         assert!(
             projection.poll_running,
             "saved live recovery policy remains unchanged"
+        );
+    }
+
+    #[test]
+    fn background_only_uses_saved_live_work_without_periodic_turn_polling() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
+            INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','2020-01-01T00:00:00Z');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','2020-01-01T00:00:00Z');
+            INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('s','r','u','op','running','/','{}','UTF-8','UTF-8','open','2020-01-01T00:00:00Z');").unwrap();
+        let projection = prepare(read_tx_with_waits(&db, "t", Some(&[])).unwrap());
+        assert!(!projection.poll_running);
+        assert!(!projection.snapshot.turn_in_progress);
+        assert_eq!(projection.snapshot.live_work.unwrap().shells, 1);
+        db.execute("UPDATE run SET state='completed' WHERE id='r'", [])
+            .unwrap();
+        assert!(
+            prepare(read_tx(&db, "t").unwrap())
+                .snapshot
+                .live_work
+                .is_none(),
+            "terminal Run must not imply live work from inconsistent retained rows"
+        );
+        db.execute("UPDATE run SET state='live' WHERE id='r'", [])
+            .unwrap();
+        db.execute("UPDATE shell_execution SET state='exited'", [])
+            .unwrap();
+        // A source table used exclusively by live-work observations may be
+        // unavailable here: owned=false must not even prepare that query.
+        db.execute("DROP TABLE output_chunk", []).unwrap();
+        assert!(
+            prepare(read_tx(&db, "t").unwrap())
+                .snapshot
+                .live_work
+                .is_none()
         );
     }
 }

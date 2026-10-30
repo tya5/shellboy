@@ -1178,7 +1178,9 @@ async fn progress_distinguishes_answered_background_and_counts_only_actual_spawn
     let control = Control::new(&owner, root.path().into());
     owner.db.call(|db|{db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-10-01T00:00:00Z','2026-10-01T00:00:02Z'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('spawned','r','u','spawned','running','/','{\"spawned\":true}','UTF-8','UTF-8','closed','now'),('cancelled','r','u','cancelled','stopped','/','{}','UTF-8','UTF-8','closed','now'),('rejected','r','u','rejected','failed','/','{\"spawned\":false}','UTF-8','UTF-8','closed','now');")?;Ok(())}).await.unwrap();
     let (send, receive) = std::sync::mpsc::sync_channel(8);
-    assert!(frontend::progress(&control, &send, "t").await.unwrap());
+    // The returned flag requests foreground polling, not Run liveness.
+    // Answered background work remains visible via Changed and a local clock.
+    assert!(!frontend::progress(&control, &send, "t").await.unwrap());
     assert!(
         matches!(receive.try_recv().unwrap(),UiUpdate::Progress{tool_calls:1,state,..}if state=="回答済み背景処理中")
     );

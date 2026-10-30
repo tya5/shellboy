@@ -7,6 +7,8 @@ mod draft_saver;
 mod header;
 mod history_reader;
 mod input_history;
+mod live_output;
+mod live_work;
 mod message_metadata;
 mod message_queue;
 mod receipt_delivery;
@@ -281,6 +283,10 @@ enum BackgroundResult {
     StreamFrame {
         ticket: streaming::Ticket,
         result: Result<streaming::Outcome, ApiError>,
+    },
+    LivePreview {
+        ticket: live_output::Ticket,
+        result: live_output::ReadResult,
     },
     DraftSaved {
         thread_id: String,
@@ -703,6 +709,10 @@ async fn run_with_delivery(
 ) -> Result<(), ApiError> {
     actions.close_tool_starts_on_quit(&control);
     let mut selection = selection::Selection::default();
+    let mut live_output = live_output::Observation::default();
+    let observed_control = control.clone();
+    let mut output_signal = Box::pin(observed_control.shell_output_notification().notified());
+    output_signal.as_mut().enable();
     let mut ipc_failure = server.failures();
     let mut watch_ipc_failure = true;
     let mut control_tasks = JoinSet::new();
@@ -745,6 +755,7 @@ async fn run_with_delivery(
     let mut initialize = Some(UiUpdate::Initialize { cwd });
     let mut draft_failure = None;
     loop {
+        live_output.retain(selection.active_thread.as_deref(), &selection.generations);
         if let Some(value) = initialize.take() {
             initialize = updates.defer(value);
         }
@@ -830,7 +841,29 @@ async fn run_with_delivery(
         ui_subscription.select(selection.active_thread.as_deref());
         actions.enable_cancel(control_tasks.is_empty());
         let refresh_deadline = selection.refresh_deadline(&dirty_threads, &refreshing);
+        let live_deadline = live_output.deadline();
         tokio::select! {
+            _=output_signal.as_mut()=>{
+                output_signal.set(observed_control.shell_output_notification().notified());
+                output_signal.as_mut().enable();
+                if let Some(ids)=live_output.executions() {
+                    let markers=control.committed_output_markers(&ids).await?;
+                    if let Some(value)=live_output.markers(markers) {update(&updates,value).await;}
+                }
+            },
+            _=tokio::time::sleep_until(live_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
+                if live_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
+                if let Ok(permit)=read_slots.clone().try_acquire_owned()
+                    && let Some(ticket)=live_output.take(tokio::time::Instant::now()) {
+                    let cursor=live_output.take_cursor();
+                    let control=control.clone();let results=background_tx.clone();
+                    read_workers.spawn(async move {
+                        let _permit=permit;
+                        let result=tokio::select! {biased;_=ticket.stop.cancelled()=>Err("Live output view closed".into()),r=live_output::read(&control,&ticket.execution,cursor)=>r};
+                        let _=results.send(BackgroundResult::LivePreview {ticket,result}).await;
+                    });
+                }
+            },
             _=tokio::time::sleep_until(refresh_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if refresh_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{},
             _=control.gc.availability_changed()=> {
@@ -1853,6 +1886,19 @@ async fn run_with_delivery(
                             .await;
                         }
                     }
+                    UiAction::ObserveLiveWork {thread_id,generation,revision,executions,open} => {
+                        if selection.active_thread.as_deref()==Some(&thread_id) && selection.generations.get(&thread_id)==Some(&generation) {
+                            match live_output.observe(thread_id.clone(),generation,revision,executions,open) {
+                                Ok(())=>{
+                                    if let Some(ids)=live_output.executions() {
+                                        let markers=control.committed_output_markers(&ids).await?;
+                                        if let Some(value)=live_output.markers(markers) {update(&updates,value).await;}
+                                    }
+                                },
+                                Err(error)=>status(&updates,Some(thread_id),error).await,
+                            }
+                        }
+                    }
                     UiAction::RefreshTools {
                         thread_id,generation,revision,view_revision,nodes,
                     } => {
@@ -2638,6 +2684,12 @@ async fn run_with_delivery(
                         Err(error) => status(&updates, Some(thread_id), error).await,
                     }
                 }
+                Some(BackgroundResult::LivePreview {ticket,result})=>{
+                    if live_output.complete(&ticket) {
+                        let result=result.map(|(cursor,page)| {live_output.install_cursor(cursor);page});
+                        update(&updates,UiUpdate::LiveWorkPreview {thread_id:ticket.thread,generation:ticket.generation,revision:ticket.revision,execution_id:ticket.execution,result}).await;
+                    }
+                },
                 Some(BackgroundResult::Progress {
                     thread_id,
                     result,
@@ -2899,6 +2951,12 @@ async fn run_with_delivery(
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
                     }
+                    // A displayed child changes the selected parent's bounded
+                    // projection, never starts a hidden-child history read.
+                    if let Some(parent) = selection.dependent_parent(&thread_id) {
+                        selection.changed(&parent);
+                        dirty_threads.insert(parent);
+                    }
                     management.usage_changed(&thread_id);
                     streams.invalidate(&thread_id);
                     selection.changed(&thread_id);
@@ -2976,26 +3034,8 @@ async fn run_with_delivery(
                 }
             },
             _=tick.tick(),if selection.progress_running || management.usage_waiting()=> {
-                if selection.progress_running && let Some(thread) = selection.active_thread.clone()
-                    && let Some(generation) = selection.generations.get(&thread).copied()
-                    && let Ok(permit) = progress_slots.clone().try_acquire_owned()
-                {
-                    let control = control.clone();
-                    let sender = background_tx.clone();
-                    let stop = selection.cancel.clone();
-                    let epoch = selection.progress_epoch;
-                    read_workers.spawn(async move {
-                                let _permit = permit;
-                                tokio::select! {
-                                    biased;
-                                    _ = stop.cancelled() => {},
-                                    result = activity::read(&control, &thread) => {
-                                        let _ = sender.send(BackgroundResult::Progress {
-                                            thread_id: thread, result, epoch, generation,
-                                        }).await;
-                                    },
-                                }
-                            });
+                if selection.progress_running && let Some(thread)=selection.active_thread.clone() {
+                    dirty_threads.insert(thread);
                 }
             },
             _=read_workers.join_next(),if !read_workers.is_empty()=> {},
@@ -3005,6 +3045,7 @@ async fn run_with_delivery(
     }
     drop(ui_subscription);
     read_cancel.cancel();
+    drop(live_output);
     selection.cancel.cancel();
     cancel.cancel();
     drop(background_rx);
@@ -3258,6 +3299,9 @@ async fn select_thread(
     }.await;
     checked_storage(control, result).await
 }
+/// Publish saved progress facts; return whether foreground polling is needed.
+/// An answered Run with owned background work remains visible through Changed
+/// and local display clocks without periodic database polling.
 pub async fn progress(
     control: &Control,
     updates: &SyncSender<UiUpdate>,

@@ -63,7 +63,7 @@ fn normalize_page(page: &mut PreviewPage, budget: usize) {
     page.stdout = normalize(&page.stdout, budget.saturating_sub(page.stderr.len()));
 }
 
-async fn execution_preview(
+pub(super) async fn execution_preview(
     control: &Control,
     execution: String,
     limit: usize,
@@ -98,6 +98,41 @@ async fn execution_preview(
         }
         normalize_page(&mut page, limit);
         Ok(page)
+    })
+    .await?
+}
+
+pub(super) async fn live_execution_preview(
+    control: &Control,
+    execution: String,
+    cursor: Option<crate::control::output::preview::live::LiveCursor>,
+) -> Result<
+    (
+        crate::control::output::preview::live::LiveCursor,
+        PreviewPage,
+    ),
+    ApiError,
+> {
+    let path = control.store.database.path().to_path_buf();
+    presentation_work(move || {
+        let db =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| {
+                    crate::storage::save_error(format!("live preview database open failed: {e}"))
+                })?;
+        db.busy_timeout(std::time::Duration::from_millis(250))
+            .and_then(|_| db.pragma_update(None, "query_only", true))
+            .map_err(|e| {
+                crate::storage::save_error(format!("live preview read-only setup failed: {e}"))
+            })?;
+        let (cursor, mut page) = crate::control::output::preview::live::read(
+            &db,
+            &execution,
+            cursor,
+            PreviewLimits { bytes: 4096 },
+        )?;
+        normalize_page(&mut page, 4096);
+        Ok((cursor, page))
     })
     .await?
 }
