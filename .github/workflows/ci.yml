@@ -1,129 +1,79 @@
-name: Rust checks
+# Validation-only branch: never merge this workflow into main.
+name: Public v0.3.0 archive smoke
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
-    inputs:
-      diagnostics:
-        description: Repeat native overflow, proxy and attachment observations
-        type: boolean
-        default: false
-      performance:
-        description: Compare baseline/current Windows timings and four-thread contention
-        type: boolean
-        default: false
-      windows_test_threads:
-        description: Windows threads (4 selects Windows-only experiment; default/2 check all OSes)
-        type: choice
-        options: ['default', '2', '4']
-        default: 'default'
-      baseline_ref:
-        description: Baseline commit for the optional Windows comparison
-        type: string
-        default: '0469ca03fe97191b91d10cb0ba78ac5d612bb97f'
 permissions:
   contents: read
 jobs:
-  check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.windows_test_threads == '4' && '["windows-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: native-v1
-          cache-on-failure: true
-      - name: Check complete integration layout
-        run: python scripts/check-test-layout.py
-      - name: Check timing runner failure gates
-        run: python -m unittest discover -s scripts/tests
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --locked --all-targets --keep-going -- -D warnings
-      - name: Diagnose native Windows overflow recovery
-        if: runner.os == 'Windows' && inputs.diagnostics == true
-        run: cargo test --locked --test integration runtime_features::both_overflow_retries_preserve_call_groups_and_never_execute_saved_tools_twice -- --exact --nocapture
-      - name: Select measured Windows fixture concurrency
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          SELECTED_TEST_THREADS: ${{ inputs.windows_test_threads == '2' && '2' || '4' }}
-        run: '"RUST_TEST_THREADS=$env:SELECTED_TEST_THREADS" >> $env:GITHUB_ENV'
-      - name: Tests
-        run: python scripts/test-timings.py --output .local/ci-timings
-      - name: Observe closed-proxy retry phases and timings
-        if: inputs.diagnostics == true
-        run: cargo test --locked --test integration response_upload_recovery::refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens -- --exact --nocapture
-      - name: Repeat attachment preparation observations in fresh processes
-        if: inputs.diagnostics == true
-        shell: bash
-        run: |
-          set -euo pipefail
-          for observation in 1 2; do
-            echo "Attachment preparation observation ${observation}/2"
-            cargo test --locked --test integration attachment_provenance:: -- --nocapture
-          done
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: native-test-timings-${{ runner.os }}
-          path: .local/ci-timings
-          include-hidden-files: true
-  measure:
-    if: github.event_name == 'workflow_dispatch' && inputs.performance == true
+  public-archive:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - sample: before
-            threads: '2'
-          - sample: after
-            threads: '2'
-          - sample: after-four-threads
-            threads: '4'
-    runs-on: windows-latest
-    timeout-minutes: 40
-    env:
-      RUST_TEST_THREADS: ${{ matrix.threads }}
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            extension: zip
+            executable: shellboy.exe
+          - os: macos-15
+            target: aarch64-apple-darwin
+            extension: tar.gz
+            executable: shellboy
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            extension: tar.gz
+            executable: shellboy
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          path: tooling
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          path: subject
-          ref: ${{ matrix.sample == 'before' && inputs.baseline_ref || github.sha }}
-          persist-credentials: false
-      - name: Install pinned Rust toolchain
+          python-version: '3.12'
+      - name: Download anonymous public bytes, verify and run native binary
         shell: bash
-        run: rustup toolchain install 1.99.1 --profile minimal
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: subject -> target
-          shared-key: native-v1
-          cache-on-failure: true
-      - name: Record all-target and isolated test timings
-        working-directory: subject
-        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_EXTENSION: ${{ matrix.extension }}
+          RELEASE_EXECUTABLE: ${{ matrix.executable }}
         run: |
-          profile=()
-          if [[ "${{ matrix.sample }}" != after-four-threads ]]; then
-            profile=(--per-test storage,index,control_db)
-          fi
-          python ../tooling/scripts/test-timings.py --output "$RUNNER_TEMP/test-performance-${{ matrix.sample }}" "${profile[@]}"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-performance-${{ matrix.sample }}
-          path: ${{ runner.temp }}/test-performance-${{ matrix.sample }}
+          python - <<'PY'
+          import hashlib, os, platform, subprocess, tarfile, tempfile, zipfile
+          from pathlib import Path
+          base = 'https://github.com/tya5/shellboy/releases/download/v0.3.0/'
+          expected = {
+              'shellboy-v0.3.0-aarch64-apple-darwin.tar.gz': '1e0010db3a34cd6c159e591d92ffac64062ce793f767972f0518346522d8f5d4',
+              'shellboy-v0.3.0-x86_64-pc-windows-msvc.zip': 'f708987b51106c347d9039cd8012daa5e26284f4f266c836131ac5c9f2c93046',
+              'shellboy-v0.3.0-x86_64-unknown-linux-gnu.tar.gz': 'd3ff9508b2b835f446b9d7285c9ff78f2eeb8fab292a04430ae4c8f04c0754d9',
+          }
+          sums_hash = 'c8a139f704027220fd51bc173e54aa0e2fbb67fd35e0f9b4eb3859714b447611'
+          name = f"shellboy-v0.3.0-{os.environ['RELEASE_TARGET']}.{os.environ['RELEASE_EXTENSION']}"
+          root = Path(tempfile.mkdtemp(prefix='shellboy-public-v030-'))
+          for filename, digest in [('SHA256SUMS', sums_hash), (name, expected[name])]:
+              path = root / filename
+              subprocess.run(['curl', '--disable', '--fail', '--location', '--silent', '--show-error',
+                              '--proto', '=https', '--proto-redir', '=https', '--tlsv1.2',
+                              base + filename, '--output', str(path)], check=True)
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              assert actual == digest, (filename, actual, digest)
+              print('public_sha256:', actual, filename, flush=True)
+          manifest = {}
+          for line in (root / 'SHA256SUMS').read_text(encoding='utf-8').splitlines():
+              digest, filename = line.split()
+              assert filename not in manifest, 'Duplicate checksum entry'
+              manifest[filename] = digest
+          assert manifest == expected, manifest
+          archive = root / name
+          extracted = root / 'extracted'
+          extracted.mkdir()
+          if name.endswith('.zip'):
+              with zipfile.ZipFile(archive) as bundle:
+                  bundle.extractall(extracted)
+          else:
+              with tarfile.open(archive) as bundle:
+                  bundle.extractall(extracted, filter='data')
+          stage, = extracted.iterdir()
+          binary = stage / os.environ['RELEASE_EXECUTABLE']
+          version = subprocess.check_output([str(binary), '--version'], text=True).strip()
+          assert version == 'shellboy 0.3.0', version
+          print('native_public_smoke:', platform.platform(), platform.machine(), name, version, flush=True)
+          print('public_binary_sha256:', hashlib.sha256(binary.read_bytes()).hexdigest(), flush=True)
+          PY
