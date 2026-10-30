@@ -2,7 +2,8 @@
 use crate::program_status::{
     CHILD_LIMIT, Counts, Record, Snapshot, State, clean, map_phase, thread_id,
 };
-use std::collections::BTreeMap;
+use crate::protocol::ApiError;
+use std::{collections::BTreeMap, path::PathBuf};
 pub(super) struct Session {
     pub started: chrono::DateTime<chrono::Utc>,
     pub seen: BTreeMap<String, String>,
@@ -14,7 +15,49 @@ impl Session {
             seen: BTreeMap::new(),
         }
     }
+
+    pub fn accept(
+        &mut self,
+        result: Result<Projected, ApiError>,
+        dirty: &mut bool,
+    ) -> Option<Snapshot> {
+        match result {
+            Ok(projected) => {
+                self.seen = projected.seen;
+                Some(projected.snapshot)
+            }
+            Err(_) => {
+                *dirty = true;
+                None
+            }
+        }
+    }
 }
+
+/// Only called through finite frontend admission; never occupies the writer queue.
+pub(super) async fn read(
+    path: PathBuf,
+    selected: Option<String>,
+    started: chrono::DateTime<chrono::Utc>,
+    seen: BTreeMap<String, String>,
+) -> Result<Projected, ApiError> {
+    super::presentation_work(move || {
+        let mut db = rusqlite::Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        db.busy_timeout(std::time::Duration::from_millis(250))?;
+        db.pragma_update(None, "query_only", true)?;
+        // Keep all rows and retained-child titles on the same WAL snapshot.
+        let transaction = db.transaction()?;
+        let projected = project(&transaction, selected, started, seen)?;
+        transaction.commit()?;
+        Ok::<_, crate::storage::StorageError>(projected)
+    })
+    .await?
+    .map_err(super::storage_error)
+}
+
 pub(super) struct Projected {
     pub snapshot: Snapshot,
     pub seen: BTreeMap<String, String>,
@@ -165,6 +208,156 @@ mod tests {
         }
         Ok(())
     }
+    #[tokio::test]
+    async fn failed_projection_retries_without_changed_and_preserves_seen() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("db");
+        let mut session = Session::new();
+        session.seen.insert("seen".into(), "r-seen".into());
+        let mut dirty = false;
+        let failed = read(path.clone(), None, session.started, session.seen.clone()).await;
+        assert!(failed.is_err());
+        assert!(!path.exists(), "read-only open must not create a database");
+        assert!(session.accept(failed, &mut dirty).is_none());
+        assert!(
+            dirty,
+            "the next existing tick must be able to retry without Changed"
+        );
+        assert_eq!(session.seen.get("seen").map(String::as_str), Some("r-seen"));
+
+        let worker = DbWorker::open(&path).await.unwrap();
+        worker
+            .call(|db| insert(db, "idle", None, "completed", None, None))
+            .await
+            .unwrap();
+        // Simulate admission at the next coalescing opportunity, without Changed.
+        dirty = false;
+        let retried = read(path, None, session.started, session.seen.clone()).await;
+        let snapshot = session.accept(retried, &mut dirty).unwrap();
+        assert!(!dirty);
+        assert_eq!(snapshot.counts.idle, 1);
+        assert!(session.seen.is_empty());
+        worker.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ten_thousand_threads_read_while_writer_is_occupied() {
+        use std::time::{Duration, Instant};
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("db");
+        let worker = DbWorker::open(&path).await.unwrap();
+        worker
+            .call(|db| {
+                let tx = db.transaction()?;
+                for i in 0..9992 {
+                    insert(
+                        &tx,
+                        &format!("historical-{i:05}"),
+                        Some("completed"),
+                        "completed",
+                        Some("2026-01-01T00:00:00Z"),
+                        None,
+                    )?;
+                }
+                insert(&tx, "live", Some("live"), "running", None, None)?;
+                insert(&tx, "stopping", Some("stopping"), "running", None, None)?;
+                insert(&tx, "recovery", Some("live"), "recovery_wait", None, None)?;
+                insert(
+                    &tx,
+                    "failed",
+                    Some("failed"),
+                    "failed",
+                    Some("2026-01-01T00:00:00Z"),
+                    None,
+                )?;
+                insert(
+                    &tx,
+                    "fresh",
+                    Some("completed"),
+                    "completed",
+                    Some("2026-01-03T00:00:00Z"),
+                    None,
+                )?;
+                insert(
+                    &tx,
+                    "seen",
+                    Some("completed"),
+                    "completed",
+                    Some("2026-01-03T00:00:00Z"),
+                    None,
+                )?;
+                insert(&tx, "stopped", Some("stopped"), "stopped", None, None)?;
+                insert(&tx, "idle", None, "completed", None, None)?;
+                tx.execute(
+                    "INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) SELECT 'a-'||id,id,0,0,'fixture','fixture',0,CASE WHEN state='running' THEN 'inflight' WHEN state='recovery_wait' THEN 'failed' ELSE 'completed' END,'{}','2026-01-01' FROM turn",
+                    [],
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let start = chrono::DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let seen = BTreeMap::from([("seen".into(), "r-seen".into())]);
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        let writing = worker
+            .try_call(move |db| {
+                let tx = db.transaction()?;
+                tx.execute("UPDATE run SET state='failed' WHERE id='r-live'", [])?;
+                entered.send(()).unwrap();
+                // Synthetic only: hold a writer transaction until all reads finish.
+                gate.recv_timeout(Duration::from_secs(60)).unwrap();
+                tx.commit()?;
+                Ok(())
+            })
+            .unwrap();
+        ready.await.unwrap();
+        let reads = tokio::time::timeout(Duration::from_secs(60), async {
+            let mut timings = Vec::new();
+            for _ in 0..10 {
+                let began = Instant::now();
+                let projected = read(path.clone(), None, start, seen.clone()).await.unwrap();
+                timings.push(began.elapsed());
+                let counts = &projected.snapshot.counts;
+                assert_eq!(
+                    (
+                        counts.working,
+                        counts.blocked,
+                        counts.error,
+                        counts.done,
+                        counts.idle
+                    ),
+                    (2, 1, 1, 1, 9995)
+                );
+                assert_eq!(projected.snapshot.children.len(), 5);
+                assert_eq!(projected.seen, seen);
+            }
+            timings
+        })
+        .await;
+        release.send(()).unwrap();
+        writing.receive().await.unwrap();
+        let timings = reads.expect("read-only projection must not queue behind writer");
+        let micros: Vec<_> = timings.iter().map(Duration::as_micros).collect();
+        eprintln!(
+            "OSC7501 10000 threads / 10 read-only projections, open+transaction+SQL+close us: {micros:?}; mean={} us",
+            micros.iter().sum::<u128>() / micros.len() as u128
+        );
+        let after = read(path.clone(), None, start, seen).await.unwrap();
+        assert_eq!(after.snapshot.counts.working, 1);
+        assert_eq!(after.snapshot.counts.error, 2);
+        worker.shutdown().await.unwrap();
+        // No retained read connection/transaction should obstruct shutdown/checkpoint.
+        let db = rusqlite::Connection::open(&path).unwrap();
+        let busy: i64 = db
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(busy, 0);
+    }
+
     #[tokio::test]
     async fn all_threads_count_but_only32_export_and_seen_completion_is_ephemeral() {
         let root = tempfile::tempdir().unwrap();

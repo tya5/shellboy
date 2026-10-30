@@ -3,7 +3,9 @@
 Adopt rev0.4 of https://www.superlogical.com/rex/docs/build/program-status
 for issue54 / decision68 D-011. This is generic terminal metadata, not a receiver
 integration. Default on; off emits nothing, including no shutdown clear/query.
-Use existing base64, DB worker, bounded frontend read admission and update queue.
+Use existing base64, bounded frontend read admission, presentation blocking pool
+and update queue. Database projection uses a short-lived read-only connection,
+not the persistence worker queue.
 No new worker, process, timer, poller, table or dependency is introduced.
 
 The existing saved-fact `activity::classify` is the only activity classifier.
@@ -16,7 +18,16 @@ and never persisted. The frontend keeps one seen entry per visited completion,
 not every historical Run. UI acknowledges only a snapshot for its selected Thread.
 
 A single coalesced read uses the existing finite read pool after saved-work or
-selection changes, not a new periodic task. It streams all live Thread metadata
+selection changes, not a new periodic task. Open/close and SQL run inside the
+existing two-slot presentation blocking pool (the blocking closure owns its permit
+until completion, including observer cancellation). Use read-only open flags,
+query_only, a 250ms busy timeout and one deferred read transaction for consistent
+counts/titles/seen pruning. No migration, checkpoint or write is performed by
+this reader. Close the connection after the snapshot; do not retain a WAL reader
+between reads. Projection failure keeps status dirty for retry on the existing
+coalescing cadence without requiring another Changed event.
+
+It streams all live Thread metadata
 for exact aggregate counts without collecting history. Retain only the highest-
 priority 32 nonidle children; root counts include overflow. Root precedence:
 blocked > error > working > done > idle. Auth kind uses typed saved configuration/

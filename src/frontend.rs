@@ -833,12 +833,13 @@ async fn run_with_delivery(
             let source = control.clone();
             let sender = background_tx.clone();
             if spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                let result = source
-                    .store
-                    .database
-                    .call(move |db| program_status::project(db, selected, started, seen))
-                    .await
-                    .map_err(storage_error);
+                let result = program_status::read(
+                    source.store.database.path().to_path_buf(),
+                    selected,
+                    started,
+                    seen,
+                )
+                .await;
                 let _ = sender
                     .send(BackgroundResult::ProgramStatus { epoch, result })
                     .await;
@@ -2607,9 +2608,8 @@ async fn run_with_delivery(
                 Some(BackgroundResult::ProgramStatus { epoch, result }) => {
                     status_inflight = false;
                     if epoch == status_epoch && status_selected == selection.active_thread {
-                        if let Ok(projected) = result {
-                            status_session.seen = projected.seen;
-                            update(&updates, UiUpdate::ProgramStatus(projected.snapshot)).await;
+                        if let Some(snapshot) = status_session.accept(result, &mut status_dirty) {
+                            update(&updates, UiUpdate::ProgramStatus(snapshot)).await;
                         }
                     } else { status_dirty = true; }
                 }
