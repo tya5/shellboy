@@ -1,5 +1,30 @@
 # Development status
 
+## Issue #51: explicit instruction references
+
+Control/CLI thread create, set and fork support `--agents`; TUI create/fork/
+settings forms and `/agents [PATH]` select or display the reference. Explicit
+files receive bounded strict validation, revision-checked atomic mutation and
+actor/path/time audit. Cwd-only updates never rediscover instructions. A running
+Turn keeps its durable body and reference-path snapshot; reference-change events
+wait for the next new Turn without delaying unrelated context notifications.
+
+Independent review approves production implementation through `bfd96f5` after
+three P2 fixes: unsaved TUI adoption, DB-only History helper boundaries and
+rejected UI admission releasing its pending selection. Unsaved selection now
+retains the origin draft and correlates results/rejections with draft,
+generation and one request ID; first send reuses the created Thread.
+
+The coder's clean `bfd96f5` macOS standard check passes: format, strict all-target
+Clippy, 86 test groups / 1,462 passed / 0 failed / 28 ignored. A subsequent
+src-only regression additionally proves child/Control fork overrides select a
+*distinct* file rather than merely inheriting the same path; its focused test
+passes. Final test/documentation review and post-integration full checks remain
+separate from the production-code evidence. See
+[acceptance](../validation/acceptance.md). Push, GitHub posting, installed-binary
+updates and three-OS CI remain unperformed in this task's local-only scope.
+
+
 ## Issue #46: measured native test performance completed
 
 The reviewed measurement branch `issue-46/test-performance` is pushed; main is

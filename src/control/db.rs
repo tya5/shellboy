@@ -2453,6 +2453,69 @@ mod agents_reference_tests {
     }
 
     #[tokio::test]
+    async fn child_and_control_fork_can_override_with_a_distinct_reference() {
+        let (root, store) = fixture().await;
+        std::fs::write(root.path().join("parent.md"), "parent role").unwrap();
+        std::fs::write(root.path().join("child.md"), "child role").unwrap();
+        let parent = store
+            .execute(req(create(Some("parent.md"), None, None)), None)
+            .await
+            .unwrap()
+            .result;
+        let thread = parent["thread_id"].as_str().unwrap().to_owned();
+        let child = store
+            .execute(
+                req(create(Some("child.md"), None, Some(thread.clone()))),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_ne!(child["agents_path"], parent["agents_path"]);
+        assert_eq!(
+            child["agents_path"],
+            root.path().join("child.md").to_str().unwrap()
+        );
+        let target = thread.clone();
+        store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                history::append_node(
+                    &tx,
+                    &target,
+                    "source",
+                    None,
+                    "user",
+                    &json!({"text":"fork source"}),
+                    "now",
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let fork = store
+            .execute(
+                req(Command::ThreadFork(ThreadForkArgs {
+                    agents: Some("child.md".into()),
+                    thread_id: thread,
+                    node_id: "source".into(),
+                    cwd: None,
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(fork["agents_path"], child["agents_path"]);
+        assert_ne!(
+            fork["agents_path"], parent["agents_path"],
+            "Control must keep the verified override even though History rejects raw overrides"
+        );
+    }
+
+    #[tokio::test]
     async fn agents_preflight_cas_and_real_actor_are_atomic() {
         let (root, store) = fixture().await;
         std::fs::write(root.path().join("one.md"), "one").unwrap();

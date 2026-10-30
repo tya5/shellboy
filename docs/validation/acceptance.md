@@ -1,5 +1,74 @@
 # Validation record
 
+## Issue #51: selectable per-Thread instruction references
+
+Environment: macOS arm64, pinned Rust/Cargo 1.99.1; isolated worktree based on
+`0469ca03`. Tests use temporary stores, synthetic instruction files and loopback
+mocks. No real provider traffic, private user-data migration, installed-owner
+replacement, push or GitHub post is part of this validation.
+
+### Production implementation
+
+Exact clean production SHA `bfd96f5238943b57d94ccd678704592c00481edf` passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+with `$HOME/.cargo/bin` on PATH: format, strict all-target Clippy and all-target
+tests, **86 groups / 1,462 passed / 0 failed / 28 ignored**, exit 0. The
+background shell took 306,587 ms including its preceding review notification;
+`shellboy wait` observed completion and shell metadata confirmed command/cwd/
+exit. Sources remained unchanged during that final run. Earlier exploratory
+runs are not substituted for this result.
+
+Independent review at the same SHA passes library-wide tests (641 passed,
+10 ignored), focused agents tests (8 passed), History integration (14 passed)
+and agents runtime integration (2 passed), with no remaining findings. The
+reviewer independently confirmed the standard log's counts and shell facts.
+
+### Covered Boundaries
+
+- CLI create/set/fork preserves relative paths until the target effective cwd
+  is known. Root defaults, child/fork inheritance, strict explicit empty/missing/
+  directory/invalid UTF-8/size failures, exact 8 MiB acceptance, readable-mode
+  denial on nonprivileged Unix, same-path validation without invented audit,
+  receipt replay after deletion, and revision-CAS rejection are covered.
+- Preflight uses the same bounded InstructionLoader permits as Control; the
+  existing stat/read growth test covers the shared limit-plus-one read. Failed
+  validation and CAS do not partially update cwd/model/title/reference. Audit
+  retains real caller IDs and old/new paths/time without the Origin token.
+- Loopback requests cover active and recovery changes, old body/source path on
+  same-Turn tool continuation and explicit retry, new snapshot on the next Turn,
+  unrelated settings at their normal boundary, retained notification after a
+  failed request, one saved event node/adoption, idle changes without wake and
+  deletion after selection retaining missing-means-no-instructions behavior.
+- TUI form/slash/reference rendering, unsaved creation through frontend and back,
+  preservation of newer text, origin-draft adoption after switching away,
+  stale-generation/duplicate rejection and next-send receipt targeting the same
+  created Thread are covered. Real ActionSender Full/Closed rejection restores
+  slash input and permits retry; direct-form rejection preserves text and
+  permits normal send. Stale rejection cannot release a later request.
+- DB-only History fork helpers reject explicit Some references, including empty,
+  before writes and leave no Thread/receipt. Inherited path returns truthfully;
+  full explicit overrides belong to Control's validated, audited thread.fork.
+
+### Additional Regression And Limits
+
+After the production-code approval, one src-only test explicitly distinguishes
+parent `parent.md` from child/fork `child.md`, so ignoring an override cannot
+accidentally pass an inheritance assertion. It passes with
+`cargo test --locked --lib child_and_control_fork` (1 passed); production code
+is unchanged. Final full-suite evidence including this additive test belongs to
+the post-integration check, not the earlier 1,462-test production run.
+
+Exploratory failures exposed stale JSON fixtures, old path labels/positional
+form assertions, an empty-CLI-value parser expectation, a Unix permission literal
+rejected by Clippy and a test's incorrect receipt column name; they were fixed.
+Independent review found and drove the three P2 corrections recorded above; no
+commit was amended. Real providers, physical-terminal evaluation and native
+Windows/Linux execution or three-OS CI are not established by local mock tests.
+File validation does not pin future bytes: later deletion/edit/access failures
+retain the adopted Turn snapshot/preparation boundary. A privileged runner may
+bypass Unix mode-bit denial, so that assertion is conditional on actual denial.
+
+
 ## Issue #46 completed native benchmark: source `03ceac1`
 
 [Run 40980978976](https://github.com/tya5/shellboy/actions/runs/40980978976)
