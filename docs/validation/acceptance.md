@@ -2246,3 +2246,20 @@ main during review. The 30-case inventory comparison and native successes above
 are explicitly against16fe4aa/ae9bc19, not that later combination. A future main
 integration must reconcile and validate the then-current main; index remains
 unmerged and publication authorization does not include that future integration.
+
+
+## 2026-10-30: index review integration with main5350fc8
+
+Reviewed #42/#43/#55 contain no Medium findings. The Low dispositions are recorded
+in [the review follow-up](../development/index-review-follow-up.md). Main usage
+work5350fc8 is merged at51a819f, retaining both model HTTP test groups and both
+documentation histories. The configuration guide now explicitly couples larger
+batches with review of the whole-request timeout and proxy caps.
+
+Native macOS `sh scripts/check.sh` with Rust1.99.1, build jobs2, incremental0 and
+test threads2 succeeds: 1,504 passed / zero failed / 28 ignored, six Python gates,
+85 registered suites, formatting and all-target strict Clippy. This is the new
+combined source result; do not substitute ae9bc19's earlier native CI for it.
+Subsequent changes here are development/validation records only. The user
+authorizes main push; confirm its exact-source three-OS CI before issue closure.
+#53/#56/#52 code and any user-data operations are excluded.

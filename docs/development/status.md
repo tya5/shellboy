@@ -1,5 +1,16 @@
 # Development status
 
+## Reviewed index integration into main5350fc8
+
+Reviews #42/#43/#55 have no Medium findings. Merge51a819f preserves current
+main usage changes and index changes; native macOS standard checks pass with
+1,504 passed, zero failed, 28 ignored, six Python tests and strict Clippy/fmt.
+The #43 batch deadline guidance is added without changing defaults/algorithms.
+See [review dispositions](index-review-follow-up.md). Main publication is
+authorized; exact new main CI is the closure gate. Prior branch-native results
+remain separately identified historical checkpoints. #53/#56/#52 work is on
+a separate branch and is not included here.
+
 ## Current integration: index operations and main usage accounting
 
 The reviewed index branch at `e12ab8f` is being combined with origin/main
