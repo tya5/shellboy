@@ -2842,4 +2842,11 @@ Changed-driven waits. No product timeout/retry policy or success predicate is
 changed. Main run41063015359 attempt1 failed long-Turn post-tool HTTP arrival
 (already60s); attempt2 failed partial-upload Control shutdown (5s). Logs were
 inspected separately; load remains a hypothesis. Attempt3 is observed separately.
-Local standard, two manual Windows branch runs, and final main CI remain pending.
+Native macOS arm64/Rust1.99.1 full standard check passes1666/0/32, layout88,
+Python6, formatting and strict all-target Clippy. The exact test/document tree
+3b45c3c passes independent native Windows four-thread manual runs
+[41067174706](https://github.com/tya5/shellboy/actions/runs/41067174706) and
+[41067200942](https://github.com/tya5/shellboy/actions/runs/41067200942), both
+first attempts, including both named failures. No product source or workflow
+changed. Original b16f414 attempt3 succeeded; that does not erase attempts1/2.
+This follow-up changes validation prose only; final main CI remains pending.
