@@ -125,7 +125,7 @@ overwrites a file or symlink, prompts for keys, or starts an owner/database.
 Check loads the same strict configuration and path rules, reports missing
 connection/model/credential-variable names without values, and only sends one
 bounded GET model-catalog request through the existing HTTP client. A model
-absent from the catalog is reported as not advertised, not proven unusable.
+absent from the catalog is a warning with exit success, not proven unusable.
 HTTP 404 and endpoint-suffix errors explain API-root syntax (`.../v1`, not
 `.../v1/responses`). No Responses/embedding request is sent by check.
 

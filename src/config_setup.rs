@@ -244,17 +244,30 @@ pub async fn execute(
             .details(json!({"setup":setup,"http_status":error.status,"failure_kind":error.kind,"request":"GET model catalog only"}))
     })?;
     let model = config.default_model.as_deref().expect("reported model");
-    if !models.iter().any(|candidate| candidate == model) {
-        return Err(ApiError::new(ErrorCode::ConfigInvalid, "Configured model is not advertised by the model catalog (this does not prove it is unusable)")
-            .hint("Choose an advertised default_model, or confirm the alias with your proxy administrator")
-            .details(json!({"setup":setup,"model":model,"model_count":models.len()})));
-    }
+    let advertised = models.iter().any(|candidate| candidate == model);
+    let warnings = if advertised {
+        vec![]
+    } else {
+        vec![
+            "Configured model is not advertised by the catalog; this does not prove it is unusable. A proxy wildcard or alias may accept it.",
+        ]
+    };
     Ok(
-        json!({"setup":setup,"connection":name,"model":model,"model_count":models.len(),"request":"GET model catalog only","message":"Configuration and model catalog checked; no conversation request sent"}),
+        json!({"setup":setup,"connection":name,"model":model,"model_advertised":advertised,"warnings":warnings,"model_count":models.len(),"request":"GET model catalog only","message":"Configuration and model catalog checked; no conversation request sent"}),
     )
 }
 
 fn init(path: &Path) -> Result<Value, ApiError> {
+    init_with_write(path, |file| {
+        file.write_all(TEMPLATE.as_bytes())
+            .and_then(|_| file.sync_all())
+    })
+}
+
+fn init_with_write(
+    path: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> Result<Value, ApiError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|_| {
             ApiError::new(ErrorCode::IoFailed, "Cannot create configuration directory")
@@ -283,13 +296,40 @@ fn init(path: &Path) -> Result<Value, ApiError> {
             .details(json!({"config_path":path})));
         }
     };
-    file.write_all(TEMPLATE.as_bytes())
-        .and_then(|_| file.sync_all())
-        .map_err(|_| {
-            ApiError::new(ErrorCode::IoFailed, "Cannot finish configuration template")
-                .details(json!({"config_path":path}))
-        })?;
+    let result = write(&mut file);
+    drop(file); // Close before cleanup, including on Windows.
+    if result.is_err() {
+        let retained = std::fs::remove_file(path)
+            .err()
+            .is_some_and(|error| error.kind() != std::io::ErrorKind::NotFound);
+        return Err(ApiError::new(ErrorCode::IoFailed, "Cannot finish configuration template")
+            .hint("If incomplete_file_retained is true, remove the incomplete file after resolving its filesystem error, then rerun config init")
+            .details(json!({"config_path":path,"incomplete_file_retained":retained})));
+    }
     Ok(
         json!({"config_path":path,"created":true,"message":"Template created; edit the endpoint/model and set api_key_env in your environment, not in this file","precedence":PRECEDENCE,"next":NEXT}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn partial_template_write_is_removed_and_init_can_retry_without_overwrite() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        let error = init_with_write(&path, |file| {
+            file.write_all(b"default_")?;
+            Err(std::io::Error::other("synthetic write failure"))
+        })
+        .unwrap_err();
+        assert_eq!(error.details.unwrap()["incomplete_file_retained"], false);
+        assert!(!path.exists());
+        assert_eq!(init(&path).unwrap()["created"], true);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), TEMPLATE);
+        assert_eq!(
+            init_with_write(&path, |_| panic!("must not write existing file")).unwrap()["created"],
+            false
+        );
+    }
 }

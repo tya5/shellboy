@@ -2944,3 +2944,14 @@ passed. No timeout, assertion or test skip is changed. A bounded full recheck
 uses `RUST_TEST_THREADS=2`; report that environment/result separately and do not
 claim it diagnoses or fixes the repaint issue. Final-source ordinary main CI
 remains a distinct gate for the path-safety follow-up.
+
+### #69 review follow-up
+
+Replace short elapsed-time assumptions with 60-second watchdogs and committed
+state notifications. Count pending mock connections only after the CLI finishes
+or the fixture owner and all owned work shut down; no sleep loop or 100/150ms
+negative observation remains. Partial template-write injection verifies cleanup,
+retry and non-overwrite. Catalog aliases not advertised by the mock now succeed
+with `model_advertised=false` and warnings, per #68 D-009. Eight focused Unix
+integration cases and the partial-write unit test pass locally; ordinary final
+three-OS CI is still required separately. No paid/provider probe is added.

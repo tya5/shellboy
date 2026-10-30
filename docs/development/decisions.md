@@ -1601,3 +1601,11 @@ loading and model-catalog HTTP bounds rather than add provider templates, login,
 interactive setup or billed chat probes. Keep AGENTS existence display deferred:
 it requires worker-fed filesystem observations and overlaps #41; this task only
 changes empty-state/notification text. Revisit after that UI work is stable.
+
+## 2026-10-31: catalog absence is advisory (#68 D-009 / #69)
+
+Active, from the user's issue68 decision and issue69 review: an unadvertised
+model is a warning with exit success, because wildcard/alias proxy models need
+not appear in a catalog. No chat probe is substituted to guess availability.
+Syntax, required settings, credentials and catalog HTTP failures remain errors.
+Revisit only if actual naming mistakes justify an explicit stricter option.
