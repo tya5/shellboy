@@ -2832,6 +2832,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
     text(&mut ui, "/threads");
     enter(&mut ui);
     ui.apply(UiUpdate::Threads {
+        read_sequence: 0,
         generation: ui.list_generation(),
         requested_cursor: None,
         display_times: vec![],
@@ -2846,7 +2847,8 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
                 cwd: "/synthetic/project".into(),
                 parent_id: None,
                 state: "idle".into(),
-                updated_at: "2026-10-25T00:00:00Z".into(),
+                // Keep this density fixture in the supplied newest-first order.
+                updated_at: format!("2026-10-25T00:00:{:02}Z", 29 - i),
                 excerpt: format!(
                     "# 見出し\n\n**本文** {} HIDDEN_TAIL",
                     "e\u{301}".repeat(100)

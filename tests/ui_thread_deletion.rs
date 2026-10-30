@@ -19,11 +19,13 @@ fn list(ui: &mut UiState, ids: &[&str]) {
         )));
     }
     ui.apply(UiUpdate::Threads {
+        read_sequence: 0,
         generation: ui.list_generation(),
         requested_cursor: None,
         threads: ids
             .iter()
-            .map(|id| ThreadSummary {
+            .enumerate()
+            .map(|(position, id)| ThreadSummary {
                 activity: shellboy::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,
@@ -32,7 +34,13 @@ fn list(ui: &mut UiState, ids: &[&str]) {
                 cwd: "/synthetic".into(),
                 parent_id: None,
                 state: "completed".into(),
-                updated_at: "now".into(),
+                // Supplied fixture order represents a newest-first server page.
+                updated_at: chrono::DateTime::<chrono::Utc>::from_timestamp(
+                    1_700_000_000 - position as i64,
+                    0,
+                )
+                .unwrap()
+                .to_rfc3339(),
                 excerpt: String::new(),
             })
             .collect(),
@@ -165,6 +173,7 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
     assert_eq!(ui.threads().len(), 1);
     assert_eq!(ui.thread_selection(), 0);
     ui.apply(UiUpdate::Threads {
+        read_sequence: 0,
         generation: old,
         requested_cursor: None,
         threads: vec![ThreadSummary {

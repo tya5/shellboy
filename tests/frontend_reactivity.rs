@@ -33,6 +33,9 @@ struct Fixture {
     ui: UiState,
     terminal: Terminal<TestBackend>,
     source_snapshots: Vec<shellboy::ui::DetailSourceSnapshot>,
+    view_sequences: Vec<u64>,
+    browser_sequences: Vec<u64>,
+    browser_pages: usize,
 }
 impl Fixture {
     async fn new(url: &str) -> Self {
@@ -79,6 +82,9 @@ impl Fixture {
             ui,
             terminal: Terminal::new(TestBackend::new(180, 40)).unwrap(),
             source_snapshots: Vec::new(),
+            view_sequences: Vec::new(),
+            browser_sequences: Vec::new(),
+            browser_pages: 0,
         };
         fixture
             .until("initial selected header", |ui, screen| {
@@ -89,6 +95,18 @@ impl Fixture {
     }
     async fn pump(&mut self) -> String {
         while let Ok(update) = self.updates.try_recv() {
+            match &update {
+                UiUpdate::CurrentView { history, .. } => {
+                    if let UiUpdate::History { read_revision, .. } = history.as_ref() {
+                        self.view_sequences.push(*read_revision);
+                    }
+                }
+                UiUpdate::BrowserPatch { patch } => {
+                    self.browser_sequences.push(patch.read_sequence)
+                }
+                UiUpdate::Threads { .. } => self.browser_pages += 1,
+                _ => {}
+            }
             if let UiUpdate::DetailLinks {
                 result: Ok(snapshot),
                 ..
@@ -192,13 +210,20 @@ impl Fixture {
     }
 }
 async fn changed_at(events: &mut broadcast::Receiver<EngineEvent>, recovery: bool) -> Instant {
+    changed_thread_at(events, "reactive", recovery).await
+}
+async fn changed_thread_at(
+    events: &mut broadcast::Receiver<EngineEvent>,
+    expected: &str,
+    recovery: bool,
+) -> Instant {
     timeout(Duration::from_secs(15), async {
         loop {
             if let EngineEvent::Changed {
                 thread_id,
                 recovery: entered,
             } = events.recv().await.unwrap()
-                && thread_id == "reactive"
+                && thread_id == expected
                 && (!recovery || entered)
             {
                 return Instant::now();
@@ -774,5 +799,129 @@ async fn real_history_gc_preserves_live_fork_sources_then_invalidates_deleted_ch
             .any(|node| node.node_id == "f7-paid-prefix" && node.text.contains("PAID_R6_HISTORY")),
         "received display copy is retained even though canonical sources became unavailable"
     );
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn selected_header_and_open_browser_share_one_changed_snapshot_without_reload() {
+    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    for action in fixture.ui.event(crossterm::event::Event::Key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('t'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ),
+    )) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture
+        .until("browser page", |ui, _| {
+            ui.threads_visible() && ui.threads().iter().any(|row| row.thread_id == "reactive")
+        })
+        .await;
+    // Settle the initial selected-detail observation before measuring Changed.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while fixture.browser_sequences.is_empty() {
+        fixture.pump().await;
+        assert!(Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    let generation = fixture.ui.list_generation();
+    let pages = fixture.browser_pages;
+    fixture.view_sequences.clear();
+    fixture.browser_sequences.clear();
+    let (_, commit) = fixture
+        .cli(&[
+            "thread",
+            "set",
+            "--thread",
+            "reactive",
+            "--title",
+            "E1_PAIRED_TITLE",
+        ])
+        .await;
+    fixture
+        .until("both consumers update without user input", |ui, _| {
+            ui.view().title == "E1_PAIRED_TITLE"
+                && ui
+                    .threads()
+                    .iter()
+                    .any(|row| row.thread_id == "reactive" && row.title == "E1_PAIRED_TITLE")
+        })
+        .await;
+    latency("browser_paired_header", commit);
+    assert_eq!(fixture.ui.list_generation(), generation);
+    assert_eq!(
+        fixture.browser_pages, pages,
+        "normal Changed must not reload the list"
+    );
+    assert_eq!(fixture.view_sequences.len(), 1, "one selected observation");
+    assert_eq!(
+        fixture.browser_sequences, fixture.view_sequences,
+        "both facts share the DB transaction's read sequence"
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn foreign_cli_creates_and_deletes_unloaded_browser_rows_without_input_or_reload() {
+    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    for action in fixture.ui.event(crossterm::event::Event::Key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('t'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ),
+    )) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture
+        .until("initial browser", |ui, _| {
+            ui.threads_visible() && ui.threads().iter().any(|row| row.thread_id == "reactive")
+        })
+        .await;
+    let generation = fixture.ui.list_generation();
+    let pages = fixture.browser_pages;
+    let (created, _) = fixture.cli_only(&["thread", "create"]).await;
+    let id = created["result"]["thread_id"].as_str().unwrap().to_owned();
+    let mut events = fixture.control.subscribe();
+    let expected = id.clone();
+    let changed =
+        tokio::spawn(async move { changed_thread_at(&mut events, &expected, false).await });
+    fixture
+        .cli_only(&[
+            "thread",
+            "set",
+            "--thread",
+            &id,
+            "--title",
+            "E1_FOREIGN_NEW_ROW",
+        ])
+        .await;
+    let commit = changed.await.unwrap();
+    fixture
+        .until("new row not present in original page", |ui, screen| {
+            ui.threads()
+                .iter()
+                .any(|row| row.thread_id == id && row.title == "E1_FOREIGN_NEW_ROW")
+                && screen.contains("E1_FOREIGN_NEW_ROW")
+        })
+        .await;
+    latency("browser_external_add", commit);
+    let mut events = fixture.control.subscribe();
+    let expected = id.clone();
+    let changed =
+        tokio::spawn(async move { changed_thread_at(&mut events, &expected, false).await });
+    fixture
+        .cli_only(&["thread", "delete", "--thread", &id])
+        .await;
+    let commit = changed.await.unwrap();
+    fixture
+        .until("external deleted row removed", |ui, screen| {
+            ui.threads().iter().all(|row| row.thread_id != id)
+                && !screen.contains("E1_FOREIGN_NEW_ROW")
+        })
+        .await;
+    latency("browser_external_delete", commit);
+    assert_eq!(fixture.ui.list_generation(), generation);
+    assert_eq!(fixture.browser_pages, pages);
     fixture.finish().await;
 }

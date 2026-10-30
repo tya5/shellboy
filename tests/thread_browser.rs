@@ -26,6 +26,7 @@ fn open() -> UiState {
 }
 fn page(ui: &mut UiState, cursor: Option<&str>, items: Vec<ThreadSummary>, next: Option<&str>) {
     ui.apply(UiUpdate::Threads {
+        read_sequence: 0,
         generation: ui.list_generation(),
         requested_cursor: cursor.map(String::from),
         threads: items,
@@ -81,10 +82,14 @@ fn tree_keys_follow_visible_order_and_open_the_original_target() {
 #[test]
 fn additional_pages_merge_by_id_preserve_selection_and_reject_stale_cursors() {
     let mut ui = open();
+    // Model real server ordering: the orphan child is newest, and its
+    // parent is old enough to arrive on the subsequent cursor page.
+    let mut child = item("child", Some("parent"));
+    child.updated_at = "2026-10-25T10:00:01Z".into();
     page(
         &mut ui,
         None,
-        vec![item("child", Some("parent")), item("other", None)],
+        vec![child, item("other", None)],
         Some("page2"),
     );
     assert_eq!(selected(&ui), "child");
@@ -95,12 +100,9 @@ fn additional_pages_merge_by_id_preserve_selection_and_reject_stale_cursors() {
     assert_eq!(ui.threads().len(), 2);
     let mut changed = item("other", None);
     changed.title = "updated".into();
-    page(
-        &mut ui,
-        Some("page2"),
-        vec![changed, item("parent", None)],
-        Some("page3"),
-    );
+    let mut parent = item("parent", None);
+    parent.updated_at = "2026-10-25T09:59:59Z".into();
+    page(&mut ui, Some("page2"), vec![changed, parent], Some("page3"));
     assert_eq!(ui.threads().len(), 3);
     assert_eq!(selected(&ui), "child");
     assert_eq!(
@@ -112,12 +114,13 @@ fn additional_pages_merge_by_id_preserve_selection_and_reject_stale_cursors() {
         "updated"
     );
     key(&mut ui, KeyCode::Home);
-    assert_eq!(selected(&ui), "other"); // source root order is retained
+    assert_eq!(selected(&ui), "other"); // saved root ordering is retained
     key(&mut ui, KeyCode::End);
     assert_eq!(selected(&ui), "child");
     let old = ui.list_generation();
     key(&mut ui, KeyCode::Char('q'));
     ui.apply(UiUpdate::Threads {
+        read_sequence: 0,
         generation: old,
         requested_cursor: Some("page3".into()),
         threads: vec![item("late", None)],
