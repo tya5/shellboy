@@ -1,5 +1,19 @@
 # Validation record
 
+## #41 D2 owned work and output (local)
+
+Final source807ac97 passes native macOS arm64/Rust1.99.1 standard checks:
+**1,777 passed/0 failed/32 ignored**, layout90/Python6/fmt/strict Clippy.
+The [qualification](conversation-redesign-live-work.md) separates actual pipe/DB
+commit ordering, same-snapshot timing, typed ownership/selection, finite decoder
+and outbox tests from native six-condition PTY shell interactions. NO_COLOR
+chromatic output is absent in both widths. Synthetic fixtures and a loopback
+Responses mock avoid the default store, credentials and paid model APIs.
+
+D's P2/P5 and full multi-consumer P3 remain open, along with E/F/G and applicable
+native OS/GUI gates. Short PTY byte counts are not draw/DB-job/CPU counters and
+old B+C CI does not qualify this source. No push/release/install was performed.
+
 ## #41 D1 SQL batches and raw headers (local)
 
 Source558b870 integrates current-main1b559b9 and passes native macOS arm64/

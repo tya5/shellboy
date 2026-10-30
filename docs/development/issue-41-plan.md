@@ -16,7 +16,7 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
-| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local shared current-view transaction/500ms scope qualifies at67f6f09; D1 SQL batches/raw header qualify1745/0/32; live UI, global planner and native gates pending |
+| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local live UI/ownership/wait/output and delivery source807ac97 qualifies1777/0/32 plus6 actual PTYs; P2/P5/global planner and applicable native gates pending |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Local tree-cache/viewport foundation qualified; summary patches and native gates pending |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
@@ -263,3 +263,45 @@ selector plan and was fixed; higher remaining VM and measurement limits stay
 explicit in [qualification](../validation/conversation-redesign-shared-read.md#d1-actual-sql-batches-and-bounded-raw-headers).
 This closes the recorded D0 per-node SQL/header debt for those paths, not D live
 work, E patches/F/G, global multi-consumer P3, or native/visual admission gates.
+
+## E implementation seams after the D2 audit
+
+Keep E's next complete unit separate from live-work display. Standalone
+ThreadCreate/ThreadFork currently return no changed_threads; notify the exact
+created ID after commit before claiming additions work. UIEvents already
+forwards all existing Changed facts, so no broader subscription is necessary.
+
+Extract saved summary facts from THREAD_LIST_SQL into an ordinary connection
+helper for at most128 IDs and reuse the existing activity classifier. Do not
+call ThreadGet or the CLI's unbounded title/excerpt derivation per changed row.
+D2's at-most-three child title witnesses are an explicit bounded exception, not
+an acceptable256-query/64MiB128-Thread browser batch. Design a set-oriented title
+witness with a shared byte allowance before enabling that batch.
+
+The existing frontend/read slots should own one visible-browser dirty set and
+500ms deadline; a changed ID outside the loaded page still needs one bounded
+summary lookup to discover matching additions. Closing clears that work. Patches
+must preserve selected ID, screen row, expansion and filters, update ordering
+from saved facts, remove deleted/nonmatching IDs, and reject old page/patch
+snapshots so pagination cannot resurrect a deletion. Keep preview-body hydration
+separate from summary patches: current list rows do not need excerpt bodies,
+but clearing a selected row's known excerpt silently would be a regression.
+These are implementation constraints, not completed E validation.
+
+
+## D2 local live-work functional qualification
+
+Reviewable commits552e325/39b81cc/9bf7369/51a1eda/761c232/45b8b15 separate
+pending waits, child-owner facts, output markers, incremental read cursors, UI and
+frontend integration.78511d4 coalesces display snapshots in existing latest-value
+slots;807ac97 adds bundled help/User Guides. Standard **1777/0/32** and actual
+80/140-column ×dark/light/NO_COLOR PTYs6/6 pass. See
+[live-work qualification](../validation/conversation-redesign-live-work.md).
+This does not check off P2/P5/native GUI/OS or full multi-consumer P3, and does not
+complete E/F/G. Preserve that distinction before admission.
+
+The existing D1 title policy deliberately skips NULL/unparseable bodies and may
+choose a later readable input (covered by its original tests/CLI-parity policy).
+Changing that to limited/unknown evidence is a possible E policy refinement,
+not a silent correction bundled into D2. Decide and document it before the
+set-oriented title reader changes those cases.

@@ -1734,3 +1734,86 @@ witness for zero users so path/pending exhaustion is still explicit. The synthet
 128-nonuser case drops15,953→3,336 VM steps in the Python probe. This changes no
 source ordering, copy budget, title authority or public contract. Requalify native
 before/after results rather than reporting fewer SQL statements as a speedup.
+
+
+## #41 D2: reuse exact registered wait sources (2026-10-31)
+
+Copy existing operation/source-execution identities, then join their saved shell
+owner and pending key in the activity transaction. Do not add duplicated Origin
+scope fields to the registry or infer ownership from OS-handle liveness. Handles
+can be removed before pending-wait cleanup; driver identity can race a replacement
+Run. The exact saved-owner join preserves that boundary. Snapshot128 is above the
+normal CLI transport's24 concurrent ordinary requests; direct Control calls can
+exceed that, so overflow is explicitly unavailable instead of an arbitrary prefix
+that might hide the selected Run's oldest waits. Revisit the cap only with a real
+admitted workload, and keep unavailable distinct from zero.
+
+Background wait registration/cleanup currently lack a guaranteed Changed when
+Turn state stays unchanged. Add existing factual notifications after registration
+and committed deletion; retain existing CAS/stop/disconnect semantics. No new
+state, worker, queue, table, protocol operation or registry lifetime is introduced.
+
+### #41 D2 incremental output ownership
+
+Keep one display-only decoder/cursor for the open live shell in the existing
+frontend observer. Initial observation and retention/encoding changes use the
+finite tail; contiguous updates carry each stream's decoder state. If saved
+bytes outrun the4KiB read allowance or the128-row metadata window, explicitly
+reset to a tail and mark skipped/uncertain instead of replaying an unbounded
+backlog. Preserve incomplete code units until a committed complete terminal
+snapshot. The cursor owns no CLI pin, durable offset or public read cursor.
+Selection/visibility/shell closure cancels and drops it; stale replies cannot
+install it in a new scope. Decoder state and display text share one open-shell
+lifetime, with4KiB total retained text and4KiB total new bytes/read. These are
+bounded active display working data, separate from retained history previews.
+
+### #41 D2 validation findings before admission
+
+The first full standard run failed three assertions. Two were real product
+regressions: initial live-read admission recomputed an immediate Instant after
+its caller's `now`, keeping the first read forever in the future; the new live
+clock used the draft-touching UI accessor and scheduled redundant autosave
+signature checks. Fix admission against the saved optional deadline and use a
+presentation-only mutable accessor. Keep the original assertions.
+
+The remaining overflow assertion was a test harness defect: concatenating every
+Ratatui cell inserted continuation blanks inside wide Japanese text. The last
+Wait row's original label already fit its40-column allocation. Reconstruct rows
+using Unicode display widths, preserve real spaces/newlines and retain the exact
+visible overflow/command and hidden-ID assertions. The separately added width
+reservation protects overflow when secondary timing grows; it was not a third
+reproduced product bug. The second run's886/1/13 isolated this harness failure;
+the first run's884/3/13 and neither partial run are passing qualification.
+Record the later exact source and full standard result separately.
+
+## D2: 親への停止通知をDriverなしの経路にも揃える
+
+復旧待ちの子RunはliveのままDriverが終了できるため、後続の停止は通常のowner nudgeを通らない。表示中3件の依存追跡だけでは、範囲外の子を停止した際に親の件数が更新されない。既存stop target取得にlive/stoppingの親Threadを含め、Driverなしのdrainがcommitした後だけChangedを送る。親モデルは起動せず、失敗時は既存の子Errorを維持する。新しい照会・状態・通知型は増やさない。再確認条件は停止処理の所有境界またはDriver終了時の親通知責任が変わった場合。
+
+D2's third standard run passed888 library tests but stopped at one integration
+assertion expecting answered-background progress to request periodic polling.
+The adopted reactive design deliberately returns false for this cadence while
+preserving the factual background label and actual-spawn count. Update that
+single boolean expectation and document the helper's return meaning; the
+stopping-Run expectation remains true. This is an intentional cadence contract
+change, unlike the initial-admission and autosave defects above.
+
+A subsequent audit found a genuine snapshot-time race: deriving the live-work
+monotonic base in delayed presentation could discard a newer output marker as
+if it belonged to an older DB observation. Capture the paired monotonic/wall
+base before returning raw SQL facts and prepare ages against that captured base.
+Also reconstruct trimmed cursor strings when retained capacity exceeds the
+allowance, because trimming length alone does not release allocation. Neither
+finding is qualified by earlier green library tests; repeat current-source checks.
+
+
+D2 output observation/preview delivery uses the existing latest-value outbox
+instead of ordered critical-result slots. A stalled UI must not retain one
+critical record for each output marker. Marker updates therefore carry all
+currently observed displayed execution scalars (maximum3), not just the changed
+subset; replacing a pending update preserves a different earlier shell's known
+marker. Full preview snapshots are replaceable by Thread/generation as well.
+Receipt/business results keep ordered delivery. Pressure tests exercise1,000
+updates per kind with a full raw UI channel and require two latest entries,
+zero critical entries and the newest values after draining. No channel/queue or
+capacity is added. The previously qualified45b8b15 source predates this follow-up.

@@ -1,5 +1,32 @@
 # Development status
 
+## #41 D2 live work (local functional qualification)
+
+Source807ac97 adds owned shell/child/wait rows, saved timing and bounded live
+output in independently reviewable local commits552e325/39b81cc/9bf7369/51a1eda/
+761c232/45b8b15/78511d4. New work, recovery/completion and no-Driver child stops
+notify the owning view without adding a model wake for metadata. The accepted
+selected projection seals at most3 child dependencies; existing500ms reads and
+postcommit output markers drive display updates. No new table/worker/queue,
+public operation or migration is introduced.
+
+Final native macOS arm64/Rust1.99.1 standard passes **1,777/0/32**
+(library891/integration876/termination7/crash3), layout90/Python6/fmt/strict
+Clippy. Actual shell commit/rollback markers, snapshot-clock races, decoder
+continuity, stale/hidden output, owned/wait proof and delivery pressure are
+covered. Six actual PTYs (80/140 columns ×dark/light/NO_COLOR) verify the shell
+row after Turn completion, CLI-driven output updates and removal after stop.
+English/Japanese User Guides, TUI guide and built-in help describe the controls.
+See [live-work qualification](../validation/conversation-redesign-live-work.md)
+for historical failures, the wide-cell harness correction and exact limits.
+
+D is not closed: P2's native ten-minute CPU/draw/DB counters, hidden-output P5,
+combined multi-consumer P3 and applicable OS/visual admission gates remain open.
+The three-second PTY transport samples and simulated600-second UI-clock test
+are explicitly not those native performance results. E ID-summary patches,
+F Watch/descendants and G catalogue/forms/popups remain. Changes are local;
+no push, installed executable update, release, paid API or default-store change.
+
 ## #41 D1 actual SQL batching and raw header (locally qualified)
 
 Commits2f2e39b/5000b05/ee369f6/92e9450 separate tool/sender/recovery SQL batches
