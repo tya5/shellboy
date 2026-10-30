@@ -1,22 +1,26 @@
 # Development status
 
-## Issue #46: native test performance candidate
+## Issue #46: measured native test performance
 
-Pulled `0469ca0` before work. The candidate is on local branch
-`issue-46/test-performance`, with separate measurement, layout, fixture and
-watchdog commits. Ordinary integration links fall from 82 to 3; the two native
-self-spawning suites retain their subprocess names. All 1,480 normalized test
-identities and 28 ignored identities match the original macOS inventory.
+The measurement branch `issue-46/test-performance` contains separate layout,
+fixture, watchdog and evidence commits; main remains unchanged. Ordinary
+integration links fall from 82 to 3, with both self-spawning suites retained.
+Same-OS inventories are identical: macOS 1,480 / 28 ignored and Windows 1,361 / 20.
+Historical raw-schema fixture setup is batched; the unproven index seed rewrite
+was discarded. No product state, durability setting or Rust dependency changes.
 
-The macOS standard check passes format, strict all-target Clippy and 7 harnesses /
-1,452 passed / 0 failed / 28 ignored. Five separate Python timing-gate self-checks
-pass. Local measurements, historical Windows timings, adopted choices and
-limits are tracked in the [investigation](issue-46-ci-performance.md) and
-[acceptance](../validation/acceptance.md). No Windows improvement is claimed yet.
-The prepared manual CI measures baseline/candidate at two threads plus a separate
-four-thread contention run. Native execution requires the requested permission
-to push the measurement branch; main is unchanged. No release or local-binary
-installation is part of this task.
+Native source `8fa0429` passes the normal three-OS CI (Linux 1,453 / macOS 1,452 /
+Windows 1,341 passed, zero failed) and the separate Windows four-thread check.
+The earlier eight four-thread runtime_features failures are retained in the
+[investigation](issue-46-ci-performance.md); shared helper guards/notifications
+were repaired rather than retrying that sample into success. Its measured
+Windows harness sums 350.876s at two threads and 237.908s at four support adopting
+a bounded four-thread CI default. The normal three-OS workflow verifies that
+configuration; source-specific results remain separate from earlier successes.
+
+Before/after conditions and limits are in [acceptance](../validation/acceptance.md).
+No release or installed-binary update is part of this task; the branch is for
+review and has not been merged to main.
 
 ## Issue #44 review follow-up: readable activity column
 

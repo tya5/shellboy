@@ -1,5 +1,48 @@
 # Validation record
 
+## Issue #46 native measurements and repaired concurrency
+
+The pulled baseline `0469ca0` passes all three native check jobs in
+[run 40973071843](https://github.com/tya5/shellboy/actions/runs/40973071843).
+Windows job/Tests: 888 / 640s. The first grouped candidate `70259d3` ordinary
+checks pass on three OSes in
+[run 40975268982](https://github.com/tya5/shellboy/actions/runs/40975268982):
+Windows job/Tests 554 / 384s. That workflow overall is failed because its separate
+four-thread experiment failed eight runtime_features watchdogs; do not label the
+whole run green. No automatic retry is used to hide those failures.
+
+Its successful baseline/current Windows two-thread profiling jobs retain
+exactly 1,361 test identities including 20 ignored. Historical-DDL fixture batching
+has strong isolated evidence: 23 storage samples 28.687→4.719s, public-schema
+convergence 8.859→0.703s, v6/v7 matrix 7.328→0.656s. Index seed batching has no
+observed benefit and is discarded; control_db is unchanged. Native source `8fa0429`
+then passes both:
+
+- Normal [three-OS run 40977425641](https://github.com/tya5/shellboy/actions/runs/40977425641):
+  Linux 1,453 / macOS 1,452 / Windows 1,341 passed, zero failed; ignored 27 / 28 / 20.
+- [Windows-only four-thread run 40977438259](https://github.com/tya5/shellboy/actions/runs/40977438259):
+ 1,341 passed / 0 failed / 20 ignored, with every earlier failing runtime_features
+  case successful. This is the repaired fixture, not a rerun of the old failure.
+
+The repaired source's two/four-thread Windows harness sums 350.876/237.908s
+support adopting a bounded four-thread default. Build times 108.782/136.281s and
+a standalone child harness 2.016/22.454s demonstrate runner/process variability;
+do not attribute every timing delta to concurrency. Both use four CPUs, Python
+3.12.10 and win25-vs2026 image 20261021.278.1. Ordinary pushes still check all three
+OSes and every original test; a manual four-thread stress run selects Windows
+only. No production timer, test assertion, durability policy or dependency was
+weakened to obtain a pass.
+
+After the notification/guard repair and index reversion, local macOS strict
+all-target Clippy and all 808 integration cases at four threads pass (16 ignored).
+Library/native subprocess test sources are unchanged from the earlier full
+standard check and separately verified by the native runs above. Python 5 timing
+self-checks pass. Final source-specific workflow results are linked from
+[issue 46](https://github.com/tya5/shellboy/issues/46); this record does not apply an
+earlier SHA's result to later configuration/docs commits. Native hosted Windows
+execution is real; physical console-close and arbitrary higher concurrency are
+not established. No user datastore or paid API is used.
+
 ## Issue #46 local performance candidate
 
 Baseline source `0469ca0` was pulled first. Historical Windows run 40954267575
@@ -28,8 +71,8 @@ macOS ARM64 / pinned Rust 1.99.1:
   profiling suites; actual failures retain names and do not skip later harnesses.
   The timing runner uses no automatic retries.
 
-Three-OS CI, matched Windows before/after timings and the four-thread contention
-experiment are pending permission to push the measurement branch. The test set,
+At this initial local stage, native measurements were pending; the completed
+native measurements and repaired concurrency results are recorded above. The test set,
 ignore policy, production durability and native assertions are preserved;
 repeated diagnostics become manual options while their substantive cases remain
 in every ordinary native suite. No paid API or default user datastore was used.

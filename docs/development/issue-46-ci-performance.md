@@ -63,5 +63,109 @@ The initial aggregate local run passes 1,452 tests, 0 failed, 28 ignored with
 all 1,480 identities and the ignored set equal to the original 82-suite inventory.
 This includes real Unix termination/crash tests; it is not Windows success.
 Final standard-check and native before/after results belong in
-[acceptance](../validation/acceptance.md). Native CI measurement remains pending;
-no Windows improvement or three-OS completion is claimed yet.
+[acceptance](../validation/acceptance.md). Native evidence below supersedes this initial local-only boundary.
+
+## Native comparison started
+
+The user authorized pushing only the measurement branch and running CI; main
+remains unchanged. Source `70259d3` is pushed to `issue-46/test-performance`.
+[Run 40975268982](https://github.com/tya5/shellboy/actions/runs/40975268982)
+combines the ordinary three-OS check with Windows baseline/current two-thread
+and current four-thread samples. The duplicate push-triggered run 40975197111
+was cancelled before completion; it is not passing evidence.
+
+The two-thread cap originated at `60847e3`, after Windows fixture cleanup slowed
+under simultaneous DB/IPC/file workers; the historical record did not establish
+a shared mutable database/port collision. The source audit found per-test stores,
+dynamic active ports and child-only environment changes. Keep causal uncertainty
+separate from the native contention experiment.
+
+An additional current-source macOS four-thread run passes 1,452 tests with the
+same 1,480 identities and 28 ignored identities, no failures. Summed native harness
+wall time is 52.007s, versus 90.997s in the earlier two-thread aggregate sample.
+These are single local samples; they do not establish Windows safety or speed.
+The stable 1.99.1 test harness explicitly rejects `--report-time` without nightly
+`-Z unstable-options`; no bootstrap/nightly workaround was enabled. This supports
+using the small stable artifact/timing wrapper rather than relying on that flag.
+
+## First native results: source `70259d3`
+
+[Run 40975268982](https://github.com/tya5/shellboy/actions/runs/40975268982)
+passes all three ordinary check jobs: Linux 1,453 / macOS 1,452 / Windows 1,341
+passed, zero failed; ignored 27 / 28 / 20 respectively. The overall comparison run
+is **failed**, because its separate four-thread experiment failed eight cases;
+it is not described as a fully green workflow. The two-thread candidate and
+baseline profiling jobs both pass. Windows inventories match exactly: 1,361
+identities including 20 ignored, no missing/added names.
+
+The direct pre-change main run
+[40973071843](https://github.com/tya5/shellboy/actions/runs/40973071843)
+also succeeds on all three OSes at source `0469ca0`. Compare ordinary jobs/steps:
+
+| OS | Before job / Tests (s) | Candidate job / Tests (s) |
+| --- | ---: | ---: |
+| Windows |888 /640|554 /384|
+| macOS |409 /332|384 /239|
+| Linux |328 /278|208 /149|
+
+Thus the initial Windows ordinary Tests step falls 40%, and its job falls 37.6%.
+The macOS job benefits less than its Tests step because other/cache steps still
+contribute. These are single native runs, not a statistical latency guarantee.
+
+The separate Windows two-thread before/after profiles use four CPUs, Python
+3.12.10 and image win25-vs2026 / 20261021.278.1. Build/link is 340.250→189.047s;
+summed harness execution 254.567→219.218s. These independent runners have the
+same recorded image/hardware class, but cache/runner variability is not removed.
+Isolated profiles include process startup and are not concurrent-test durations:
+
+| Suite / case | Before (s) | Candidate (s) |
+| --- | ---: | ---: |
+| storage, all 23 isolated cases |28.687|4.719|
+| storage public-schema convergence |8.859|0.703|
+| storage v6/v7 matrix |7.328|0.656|
+| index, all 50 isolated cases |20.298|24.953|
+| index 405-source case |7.812|8.937|
+| control_db, all 23 isolated cases |3.234|4.345|
+
+Keep the measured storage optimization. Discard the index source-seed rewrite
+(`aa957e2`), which adds duplicate fixture SQL without observed benefit. control_db
+stays unchanged; production transaction/durability checks are not bypassed.
+
+## Four-thread findings and fixture repair
+
+The initial four-thread library passes 577 tests. Integration passes 754 and fails 8;
+all failures point to shared runtime_features mock-arrival/settled 5s guards:
+
+- edited_request_requires_exact_run_consent_and_waits_for_old_run_to_stop
+- editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_settings
+- invalid_second_tool_prevents_first_side_effect_and_every_call_receives_a_result
+- manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_extra_turn
+- model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag
+- preparation_failure_preserves_accepted_message_and_retry_reuses_its_turn
+- quota_recovery_wait_collects_via_control_and_requires_explicit_same_message_retry
+- responses_session_header_uses_stable_thread_uuid_and_distinct_child_and_fork_ids
+
+Do not rerun that failed sample into success. `e529d91` replaces busy DB polling
+with subscribe-before-query target Changed notifications and lag reinspection,
+keeps the exact settled predicate, and adds 60s deadlock guards with 5s-bounded
+saved-state diagnostics (up to 8 Runs / 8 Turns, no payload/error text). Local
+integration 808 passed / 0 failed / 16 ignored at four threads after that repair
+and removal of index batching; strict all-target Clippy passes. No product timer,
+new Core notification, transaction or native lifecycle behavior changes.
+
+The follow-up source `8fa0429` is pushed only to the measurement branch. Its ordinary
+[three-OS run 40977425641](https://github.com/tya5/shellboy/actions/runs/40977425641)
+and separate
+[Windows-only four-thread run 40977438259](https://github.com/tya5/shellboy/actions/runs/40977438259)
+both pass. The normal run has Linux 1,453/ macOS 1,452/ Windows 1,341 successes;
+Windows-only four-thread has 1,341 successes, 0 failures, 20 ignored, including all
+eight earlier failing cases. Inventories and ignored sets remain equal.
+
+The repaired source's two-thread ordinary Windows job/Tests is 594 / 460s, with
+build 108.782s and harness 350.876s; the four-thread sample build is 136.281s and
+harness 237.908s. A child-process harness alone varies 2.016→22.454s without any
+code/concurrency change to its two active cases, so these are noisy individual
+runs, not deterministic speed guarantees. Overall evidence favors a bounded
+four-thread CI default. Preserve explicit two-thread diagnosis and require the
+normal three-OS workflow for the adopted configuration. No main merge or release
+is part of this authorization.
