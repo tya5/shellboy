@@ -1,5 +1,32 @@
 # Validation record
 
+## Interrupted Input And Tool Cancellation (#53, #56)
+
+On macOS arm64 / pinned Rust 1.99.1, source through `68568bf` passes
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`:
+layout84, Python6, format, strict all-target Clippy and Rust **1,496 passed /
+0 failed / 29 ignored**. Logs remain private under .local. Gitleaks8.30.1 scans
+the four new commits with no finding. No installed binary/default data/paid API
+is used. Native Windows/Linux results for this new message work are unverified.
+
+Temporary SQLite, synthetic files and loopback HTTP cover admission facts,
+repeated startup, actual Unix owner SIGKILL, explicit human/owning-parent versus
+unrelated-caller recovery, immutable old assignments, reception order and replay,
+legacy unknown admission, capacity/transaction rollback and source deletion.
+The real TUI send Store path tests zero/one attachment and retained selection CAS.
+UI tests distinguish saved applied from answered and keep held receipts tracked.
+Three real-shell vertical cases verify nonzero exit, new-input release and human
+background release, exactly one execution and committed result/model replay
+agreement for later cancelled calls. Incomplete-output and saved CLI-wait causes
+are classifier unit tests, not native vertical scenarios.
+
+Candidate checks exposed an actual stale attachment-registration revision, an
+incorrect terminal-Turn frontend inference, obsolete existing expectations and
+one Clippy finding. These were corrected before the final passing check; the
+failed candidates are not native-success evidence. The later main merge and
+planned #52 behavior require fresh combined checks.
+
+
 
 ## Standard Usage Persistence And Scalar Reads (#49)
 

@@ -193,3 +193,8 @@ visible and requires explicit restoration; original assignments remain immutable
 Issue #56 adopts [tool cancellation reasons](tool-cancel-reasons.md): distinguish
 failed prerequisites from released waits using saved facts without changing
 execution policy or adding an automatic background timer.
+
+Issue #52 adopts [pending messages and human Turn interruption](pending-messages.md):
+one reactive saved queue with paired history reads, per-message cancellation,
+durable draft correlation, explicit foreground release and a Turn-only human
+interrupt. Full Run stop remains separate; automatic timed backgrounding is deferred.

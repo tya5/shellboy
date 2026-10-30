@@ -28,3 +28,5 @@ handling. A design document does not establish successful verification. Check th
 
 - [Interrupted message recovery](message-recovery.md) (#53)
 - [Tool cancellation reasons](tool-cancel-reasons.md) (#56)
+
+- [Pending messages and Turn interruption](pending-messages.md) (#52)

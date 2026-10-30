@@ -1,5 +1,31 @@
 # Development status
 
+## Pending Message Work (#53, #56, Then #52)
+
+#53 and #56 are locally implemented in separate design/implementation commits
+through `68568bf`. On macOS arm64 / Rust 1.99.1, the standard check passes
+**1,496 / 0 failed / 29 ignored**, layout84, Python6, format and strict all-target
+Clippy. Gitleaks finds no leaks in the four new commits. Regressions include
+actual owner-process death, explicit recovery ordering/authority, immutable
+assignments, the TUI attachment-revision boundary and factual saved cancellation
+results/replay. Applied input is distinct from a completed answer in the TUI.
+Earlier candidate checks failed on stale expectations and one Clippy finding;
+those failures are not successful evidence.
+
+The verified index main `343c2d6` is now merged locally as `b6621bf`, retaining
+both sets of presentation tests. That merged source has not yet received its
+combined standard check. #52 is adopted in pending-messages.md and next for
+implementation; queue UI, cancellation, durable restore, send-now and Turn-only
+interruption are not yet implemented or verified. No #53/#56 push, native CI,
+installed-binary update or paid API is claimed.
+
+#42/#43/#55 are published on main `343c2d6`, with successful exact-SHA three-OS
+CI run [41001556952](https://github.com/tya5/shellboy/actions/runs/41001556952):
+Linux1,505 / macOS1,504 / Windows1,392 passed, zero failures; Windows threads4.
+All three tickets contain the review disposition/validation comments and are
+closed. This does not validate the later local message-control work.
+
+
 ## Reviewed index integration into main5350fc8
 
 Reviews #42/#43/#55 have no Medium findings. Merge51a819f preserves current
