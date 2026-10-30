@@ -18,13 +18,19 @@ not E's batched external-change projection or Watch implementation.
 The first shared-read library run found2 failures (818 passed/13 ignored): an
 old Thread-only notification expectation and a real initial-viewport regression.
 Both are corrected; additional audits restore event-kind filtering and paired
-history diagnostics. These corrections still need current-tree qualification.
-Latest main throughbb7e29b, including #59's explanation and #69's standalone setup,
-is integrated before that standard check. Prior foundation checks on e6b1cfc
-(1,687/0/32) do not qualify this new combined source.
+history diagnostics. Latest main throughbb7e29b, including #59's explanation and
+#69's standalone setup, is integrated. Source67f6f09 now passes the standard check:
+**1,711 passed /0 failed /32 ignored**, layout90/Python6/fmt/strict Clippy.
+The first integrated check's2 stale observer failures and their correction remain
+in the [qualification record](../validation/conversation-redesign-shared-read.md).
+All4 real separate-CLI/GC reactivity tests pass in that final suite.
 
-Next: standard checks, real separate-CLI reactivity and actual DB-job/work-time
-measurement, then D live-work/clock/output behavior, E/F list/watch/descendants,
+Actual128-node/50-tool observation now verifies7→1 DB jobs per selected refresh;
+worker p95 is3.675→3.940ms, so no SQL-time speedup is claimed. Source identity is
+checked after rejecting one shared-cache artifact mix-up. See the qualification.
+
+Next: D live-work/clock/output behavior,
+E/F list/watch/descendants,
 and G catalogue/forms/general popups. Visible source-detail reads are still their
 existing separate finite consumer; activity polling also remains until D's next
 unit. Do not claim every-surface1job/500ms or P2/P4/P5/P6 completion. These commits

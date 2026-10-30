@@ -1,5 +1,18 @@
 # Validation record
 
+## #41 D0 shared-read and E tree-cache foundation (local)
+
+Source67f6f09 integrates mainbb7e29b and qualifies locally with
+`sh scripts/check.sh`: **1,711 passed /0 failed /32 ignored**, layout90,
+Python6, formatting and strict all-target Clippy on native macOS arm64/Rust1.99.1.
+The [detailed record](conversation-redesign-shared-read.md) retains the observed
+initial failures and distinguishes shared current-view/paused facts, atomic
+application/diagnostics, tree caching and viewport corrections from unfinished
+live-work, list patches/Watch and general popup work. Actual selected-view worker measurement is7→1 jobs, with worker p95
+3.675→3.940ms (no SQL-time speedup); full multi-consumer P3 and native
+Windows/Linux qualification remain pending. No paid API, real user
+data, installed executable or release is involved.
+
 ## #59 sender inspection and labels
 
 2026-10-30, native macOS arm64/Rust1.99.1. `sh scripts/check.sh` succeeds:

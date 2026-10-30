@@ -16,8 +16,8 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
-| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local D0 helper extraction qualified before later-main merge; shared transaction/planner and live UI still pending |
-| E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
+| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local shared current-view transaction/500ms scope qualifies at67f6f09; actual selected refresh7→1jobs measured; live UI, global planner and native gates pending |
+| E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Local tree-cache/viewport foundation qualified; summary patches and native gates pending |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
 
@@ -212,3 +212,24 @@ G's later CLI/form catalogue must include the #59 `message send --sender-label`
 argument and sender-inspection fields. Its name is self-asserted, never a source
 of authority; preserve the sender contract rather than inventing a TUI-only
 meaning or silently treating external CLI as a verified human.
+
+
+## D0 shared-read local qualification
+
+Commitsf43f7dd/55cdc67 separate the coherent selected-view snapshot from tree
+caching. Merge2fd4197 integrates #59/#69 mainbb7e29b;67f6f09 adapts exact header,
+path and stream-mapping integration observers. Native local standard1711/0/32
+passes, including actual CLI mutations/GC and paired diagnostics. See
+[qualification](../validation/conversation-redesign-shared-read.md) for observed
+failures and boundaries. This does not check off global refresh consolidation,
+D live work, E patches, F, G or their performance/native gates.
+
+G's typed catalogue must reflect #69's `config init`/`config check` leaves and
+all their current options in addition to #59 sender-label. Completeness follows
+the current CLI, not the historical57-leaf count.
+
+D0 selected-view measurement:7aea088→2fd4197 has7→1 actual DB jobs on every
+128-node/50-tool sample. Worker p95 is3.675→3.940ms; do not report a worker-time
+improvement. Open-popup/list/watch/descendant combined measurements remain future
+P3 gates. A stale shared-target artifact was rejected, with source-witness and
+per-sample job assertions required on the final after-run.
