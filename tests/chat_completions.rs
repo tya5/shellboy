@@ -170,6 +170,21 @@ fn incomplete_length_disconnect_explicit_errors_and_terminal_junk_do_not_invent_
     assert_eq!(stream.finish(true).unwrap().text, "Hello");
     let mut stream = Stream::new(Api::ChatCompletions);
     assert!(stream.push(b"data: [DONE]\n\n").is_err());
+    let mut ordered = Stream::new(Api::ChatCompletions);
+    for delta in [json!({"refusal":"first"}), json!({"content":"second"})] {
+        ordered
+            .push(
+                format!(
+                    "data: {}\n\n",
+                    json!({"choices":[{"index":0,"delta":delta,"finish_reason":null}]})
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+    }
+    ordered.push(b"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n").unwrap();
+    assert_eq!(ordered.finish(true).unwrap().text, "firstsecond");
+
     assert!(!shellboy::model::ModelError::provider(Some(400),&json!({"error":{"code":"invalid_request_error","message":"context words are not structured proof"}})).is_context_limit());
 }
 async fn read_request(stream: &mut tokio::net::TcpStream) -> (String, Value) {

@@ -174,13 +174,22 @@ struct Call {
 struct Chat {
     decoder: SseDecoder,
     id: Option<String>,
-    text: String,
-    refusal: String,
+    content: Vec<Value>,
     calls: BTreeMap<u64, Call>,
     finish: Option<String>,
     usage: Option<Value>,
 }
 impl Chat {
+    fn body(&mut self, kind: &str, field: &str, text: &str) {
+        if let Some(last) = self.content.last_mut()
+            && last["type"] == kind
+            && let Some(Value::String(body)) = last.get_mut(field)
+        {
+            body.push_str(text);
+            return;
+        }
+        self.content.push(json!({"type":kind,field:text}));
+    }
     fn item(&mut self, value: &Value) -> Result<Vec<Value>, ModelError> {
         if let Some(value) = value.get("usage").filter(|v| !v.is_null()) {
             self.usage = Some(usage(value));
@@ -220,7 +229,7 @@ impl Chat {
                 return Err(protocol("Chat output after finish_reason"));
             }
             if let Some(text) = delta["content"].as_str() {
-                self.text.push_str(text);
+                self.body("output_text", "text", text);
                 if !text.is_empty() {
                     events.push(json!({"type":"response.output_text.delta","delta":text}));
                 }
@@ -228,7 +237,7 @@ impl Chat {
                 return Err(protocol("Unsupported Chat content delta"));
             }
             if let Some(refusal) = delta["refusal"].as_str() {
-                self.refusal.push_str(refusal);
+                self.body("refusal", "refusal", refusal);
                 events.push(json!({"type":"response.refusal.delta","delta":refusal}));
             }
             if let Some(calls) = delta.get("tool_calls").filter(|v| !v.is_null()) {
@@ -258,9 +267,7 @@ impl Chat {
                         entry.id = id.into();
                     }
                     if let Some(name) = call["function"]["name"].as_str() {
-                        if entry.name != name {
-                            entry.name.push_str(name);
-                        }
+                        entry.name.push_str(name);
                         if entry.name.len() > 1024 {
                             return Err(protocol("Chat function name too large"));
                         }
@@ -308,16 +315,9 @@ impl Chat {
         let complete = matches!(reason, "stop" | "tool_calls");
         let status = if complete { "completed" } else { "incomplete" };
         let mut output = Vec::new();
-        let mut content = Vec::new();
-        if !self.text.is_empty() {
-            content.push(json!({"type":"output_text","text":self.text}));
-        }
-        if !self.refusal.is_empty() {
-            content.push(json!({"type":"refusal","refusal":self.refusal}));
-        }
-        if !content.is_empty() {
+        if !self.content.is_empty() {
             output.push(
-                json!({"type":"message","role":"assistant","status":status,"content":content}),
+                json!({"type":"message","role":"assistant","status":status,"content":self.content}),
             );
         }
         for call in self.calls.values() {
