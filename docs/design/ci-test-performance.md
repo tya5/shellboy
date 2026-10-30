@@ -101,3 +101,18 @@ settled-state observation where guaranteed, without changing exact predicates,
 retry counts, absence checks, native upload phases or configured product timers.
 This addresses fixture readiness/cleanup rather than adding an automatic retry
 or turning an observed failure into an old-SHA success.
+
+## Unicode failure diagnostics (#51/#48 Windows follow-up)
+
+Timing artifacts already use explicit UTF-8. The c0f Windows failure was a
+console-encoding error while printing the failed harness tail, not loss of the
+raw artifact. Configure stdout/stderr as UTF-8 with replacement error handling
+at runner startup, and decode native libtest listings explicitly as UTF-8.
+Persist each original harness result and failure identity before console
+reporting. Emit every recorded failed test name as one ASCII-safe JSON string
+line before the unchanged diagnostic tail. Keep raw UTF-8 logs complete and
+retain the native harness exit code; a failed harness still makes the runner
+return 1, never success. Keep inventories, ignored policy, concurrency and timers
+unchanged. A child-runner self-check starts with ascii:strict output, exercises
+Unicode logs and test names with native exit 101, and verifies complete logs,
+visible failure names and no secondary encoding failure.

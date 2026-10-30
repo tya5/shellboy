@@ -1,5 +1,52 @@
 # Validation record
 
+## #51/#48 Windows repair: separate failed and corrected evidence
+
+The [#51 failure report](https://github.com/tya5/shellboy/issues/51#issuecomment-6513119814)
+and [#46 console diagnosis](https://github.com/tya5/shellboy/issues/46#issuecomment-6513118002)
+identify two Windows failures at exact main SHA
+`c0f1ad984be7a5d64d9dfbab4189cd3ba0438151`, run `40988162209`, attempts 1 and 2.
+Both downloaded results records identify that source and the same native lib
+exit 101/failure names:
+
+- `control::db::agents_reference_tests::explicit_agents_resolution_inheritance_validation_and_receipt_replay`:
+  actual native project/backslash/role.md versus expected mixed project/role.md.
+- `ui::chrome::tests::empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents`:
+  actual cwd.join-generated AGENTS path versus a literal slash-only label.
+
+Both records also contain the secondary runner charmap encoding error. Raw
+harness logs are present UTF-8 artifacts; the failure was printing their Unicode
+tail to the Windows cp1252 console before appending/saving the harness record.
+These two failed attempts remain failed evidence; no further same-SHA rerun is
+used to hide them. Local macOS success at the old source did not prove Windows
+expectation portability.
+
+The repair changes only the two fixture expectations, timing-runner Unicode
+observability and its existing self-check suite, plus these records. It does not
+change Rust production paths/rendering, native test inventories, ignored tests,
+parallelism, deadlines, retries or dependencies. The fixture tests each pass
+once on macOS arm64 / Rust 1.99.1, using the existing four-thread configuration.
+
+The new Python regression launches a real child runner with
+`PYTHONIOENCODING=ascii:strict`, `PYTHONUTF8=0` and an uncoerced C locale. A real
+Python fixture process emits UTF-8 Japanese/emoji output exceeding the console
+tail size and exits 101; subcases use ASCII and non-ASCII test names. Before the
+runner repair it reproduces secondary encoding/decoding failures. After repair,
+all six Python self-checks pass: the full raw log bytes match, the harness record
+retains exit 101/counts/names, every name is printed as an ASCII-safe line before
+the tail, the inventory retains Unicode identities, no runner-stage encoding
+error is added and overall exit remains 1. This is a synthetic failure-path
+check, not native Windows execution of the repaired Rust suite.
+
+Full local standard checks, independent review and new exact-SHA three-OS CI
+results are pending at this checkpoint. The publication gate is repair branch
+CI success before any main update, followed by latest-main reconciliation and
+necessary rebase/recheck, normal main push and main CI. Only the integrator is
+authorized to push; recording this plan does not authorize force pushes, issue
+operations, release or installed-binary replacement. Physical-terminal/real
+provider verification is not claimed.
+
+
 ## Issue #48: outbound working-instruction provenance
 
 ### Combined Local Integration Checkpoint

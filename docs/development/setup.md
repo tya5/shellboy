@@ -58,8 +58,9 @@ GitHub Actionsの定義はローカル成功とは別です。pushしていな�
 ## Integration layout and native timing (#46)
 
 Python 3.11 or newer is used by the layout/timing scripts (standard library
-only); it is not a product runtime dependency. Five timing-gate self-checks
-cover lost counts, ignored identity, failure continuation and empty exact filters.
+only); it is not a product runtime dependency. Six timing-gate self-checks
+cover lost counts, ignored identity, failure continuation, empty exact filters
+and Unicode failure reporting under a strict-ASCII child console.
 Standard checks first run
 `python3 scripts/check-test-layout.py` (`python` on Windows). Register each new
 ordinary `tests/*.rs` file as a module in `tests/integration/main.rs`; the two

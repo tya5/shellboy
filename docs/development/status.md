@@ -1,5 +1,32 @@
 # Development status
 
+## #51/#48: Windows CI fixture and diagnostic repair
+
+Main source `c0f1ad984be7a5d64d9dfbab4189cd3ba0438151` failed Windows in both
+attempts of run `40988162209`. The two native failures are portable-expectation
+bugs in `explicit_agents_resolution_inheritance_validation_and_receipt_replay`
+and `empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents`:
+Windows-native separators differed from slash-containing expected strings.
+Expected values now use Path components; production normalization/rendering and
+the full equality/rendered-label assertions are unchanged.
+
+The timing runner's raw artifacts were already UTF-8 and recoverable. A cp1252
+console error while printing the failed log tail interrupted harness-result
+recording. The separately scoped repair uses UTF-8 stdout/stderr and libtest
+listing decoding, saves the native harness result before diagnostics, and prints
+all failed names as ASCII-safe lines before the unchanged tail. A strict-ASCII
+child-runner regression fails against the old script and passes after repair,
+retaining full Unicode logs, exit 101/names and runner exit 1.
+
+Focused macOS fixture tests and six Python self-checks pass. Full local checks
+and exact repair-branch three-OS CI remain separate gates; neither failed c0f
+attempt is relabeled successful. Required publication order is reviewed local
+checks, normal repair-branch push, exact-SHA three-OS success, latest-main
+reconciliation/necessary rebase and recheck, then normal main push and main CI.
+The integrator alone handles authorized pushes. No force push, issue close,
+release, installed-binary update or GitHub post is authorized.
+
+
 ## Issue #48: working-instruction provenance
 
 Combined local integration on the independently approved #51 documentation

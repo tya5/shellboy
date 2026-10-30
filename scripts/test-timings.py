@@ -36,11 +36,15 @@ def listing(binary, ignored=False):
     command = [binary, '--list', '--format=terse']
     if ignored:
         command.append('--ignored')
-    result = subprocess.run(command, check=True, text=True, capture_output=True)
+    result = subprocess.run(command, check=True, text=True, encoding='utf-8', capture_output=True)
     return sorted(line[:-6] for line in result.stdout.splitlines() if line.endswith(': test'))
 
 
 def main():
+    # CI consoles may default to a code page unable to represent failure logs.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--artifacts', type=Path, help='existing Cargo JSON from an all-target no-run build')
@@ -67,7 +71,7 @@ def main():
 
     try:
         record['source_sha'] = subprocess.run(
-            ['git', 'rev-parse', 'HEAD'], check=True, text=True, capture_output=True
+            ['git', 'rev-parse', 'HEAD'], check=True, text=True, encoding='utf-8', capture_output=True
         ).stdout.strip()
         artifacts = args.artifacts or args.output / 'cargo-artifacts.jsonl'
         if args.artifacts is None:
@@ -114,10 +118,15 @@ def main():
                 if item['exit_code']:
                     failed = sorted(set(re.findall(r'^    (\S+)$', text, re.M)) & set(names))
                     record['failures'].append({'target': target, 'exit_code': item['exit_code'], 'tests': failed})
+            record['harnesses'].append(item)
+            # Persist the original result before best-effort console diagnostics.
+            save()
+            if not (args.inventory_only or args.profile_only):
+                if item['exit_code']:
+                    for name in failed:
+                        print('Failed test: ' + json.dumps(name, ensure_ascii=True), flush=True)
                     print(text[-16000:], flush=True)
                 print(f"  {item['seconds']:.3f}s, exit {item['exit_code']}", flush=True)
-            record['harnesses'].append(item)
-            save()
             for test in names:
                 suite = test.partition('::')[0] if target == 'test:integration' else target.partition(':')[2]
                 discovered_suites.add(suite)
