@@ -1771,3 +1771,58 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
                 && row["usage_slow"]["elapsed_ms"] == 100)
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_open_logs_once() {
+    use crate::protocol::{Command, UsageGetArgs};
+    let (root, owner, control, server) = fixture().await;
+    let logfile = owner.loaded.data_dir.join("logs").join("shellboy.log");
+    let (updates, incoming) = std::sync::mpsc::sync_channel(64);
+    for target in ["thread", "independent"] {
+        crate::usage_totals::with_test_elapsed(
+            std::time::Duration::from_millis(100),
+            super::select_thread(&control, &updates, target, 1, 0, None, 80),
+        )
+        .await
+        .unwrap();
+        let mut found = false;
+        while let Ok(update) = incoming.try_recv() {
+            if let crate::ui::UiUpdate::Thread { details, .. } = update {
+                assert!(details.usage_totals.is_none());
+                assert!(details.context_usage.is_none());
+                assert!(!details.agents_path.is_empty());
+                found = true;
+            }
+        }
+        assert!(found);
+    }
+    crate::usage_totals::with_test_elapsed(
+        std::time::Duration::from_millis(100),
+        super::management_request(
+            &control,
+            Command::UsageGet(UsageGetArgs {
+                thread_id: Some("thread".into()),
+                ..Default::default()
+            }),
+            tokio_util::sync::CancellationToken::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    let rows = std::fs::read_to_string(logfile)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|row| row["event"] == "usage_totals_slow")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows.len(),
+        1,
+        "selection must run zero aggregations, explicit detail one"
+    );
+    assert_eq!(rows[0]["usage_slow"]["trigger"], "open");
+    drop(root);
+}

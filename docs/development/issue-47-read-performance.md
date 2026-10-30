@@ -1,7 +1,8 @@
 # Saved Usage Read Measurements (#47)
 
 These are shared read-query projection measurements, not completed CLI/IPC/UI
-latency. The initial projection is not yet attached to those surfaces. No schema,
+latency. The current CLI/get/UI surfaces call this same projection, but transport
+and rendering are not timed here. No schema,
 producer/state/driver hook, persisted total or paid/user-data operation is used.
 The latest target is advisory100ms, with roughly500ms acceptable at100k after
 obvious query waste is removed; no absolute wall-time assertion enters CI.
@@ -90,3 +91,31 @@ has no suitable schema12 index; retain complete saved-shell coverage instead of
 assuming every row has a tool-call join. Re-measure this new exact source before
 accepting performance. Firstlast/own-Turn metadata, CLI/get/TUI attachment, broader
 edge regressions and full standard/native checks remain separate completion gates.
+
+## Metadata-Inclusive Exact Checkpoint
+
+Exact `46eabeaefebb941882bdd58019c2675948a0dc8f` includes saved first/last known
+start metadata and own-Turn lifetime, plus the required throttle/slow-only log
+wiring. Both release probes pass (231.77s execution; shell6892c0b9, exit0 including
+its preceding full standard). Same fixture/cold definitions/repetitions as above.
+Fresh median/p95 ms for every standard/layout case:
+
+| Layout | JSON | Turn | Run | Thread | Thread+Children |
+| --- | --- | --- | --- | --- | --- |
+| Hot | Small | 2.27/2.84 | 2.21/2.74 | 398.23/411.42 | 402.30/420.65 |
+| Hot | Legacy256 | 5.72/6.41 | 5.69/6.32 | 397.09/412.12 | 398.45/410.57 |
+| Spread | Small | 2.00/2.19 | 2.01/2.39 | 5.80/6.31 | 388.21/404.77 |
+| Spread | Legacy256 | 5.53/6.37 | 5.63/6.29 | 9.18/9.69 | 395.57/407.28 |
+
+Varied hot small Thread412.21/425.85ms and children414.98/418.03ms; distinct-legacy
+Thread432.51/449.57ms and children428.65/437.49ms. All fit the adopted approximate
+500ms extreme-size direction. Full warm/first/VM-step/component data remain in
+`/tmp/shellboy-47-mandatory-scale.log`; this is not OS-cold or complete UI latency.
+The first/last metadata adds genuine work compared with the earlier projection,
+so these timings are not a pure optimization-only comparison with that baseline.
+No persistent total/index/schema alternative is required or introduced.
+
+Subsequent UI P2 fixes close actual result popups/drafts, recheck lagged events,
+and use lightweight metadata on ordinary Thread selection. They do not change
+the measured aggregate SQL. Selection invokes zero aggregate reads/slow events;
+an explicit detail uses the open trigger once, verified with injected elapsed.

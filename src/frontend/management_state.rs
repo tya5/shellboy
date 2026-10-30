@@ -126,6 +126,11 @@ impl Management {
             w.dirty = true;
         }
     }
+    pub(super) fn usage_lagged(&mut self) {
+        if let Some(w) = &mut self.usage_watch {
+            w.dirty = true;
+        }
+    }
     pub(super) fn usage_waiting(&self) -> bool {
         self.usage_watch
             .as_ref()
@@ -359,5 +364,48 @@ mod usage_throttle_log_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod usage_lag_tests {
+    use super::*;
+    use crate::{protocol::UsageGetArgs, ui::ManagementContext};
+    #[test]
+    fn lost_changed_reinspects_one_open_scope_without_bypassing_cooldown() {
+        let mut m = Management::default();
+        let now = Instant::now();
+        let context = ManagementContext {
+            epoch: 1,
+            owner_draft: "d".into(),
+            owner_thread: Some("t".into()),
+        };
+        let generation = m.next_generation();
+        m.watch_usage(
+            &Command::UsageGet(UsageGetArgs {
+                thread_id: Some("t".into()),
+                ..Default::default()
+            }),
+            Some(&context),
+            generation,
+        );
+        m.usage_finished_at(generation, None, now);
+        m.usage_lagged();
+        m.usage_lagged();
+        assert!(m.usage_waiting());
+        assert!(
+            m.usage_ready_at(now + USAGE_COOLDOWN - Duration::from_nanos(1))
+                .is_none()
+        );
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN).is_some());
+        m.usage_begin_refresh(generation);
+        m.usage_lagged();
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN * 2).is_none());
+        m.usage_finished_at(generation, None, now + USAGE_COOLDOWN);
+        assert!(m.usage_ready_at(now + USAGE_COOLDOWN * 2).is_some());
+        m.close_usage();
+        m.usage_lagged();
+        assert!(!m.usage_waiting());
+        assert!(!m.usage_accepts(generation));
     }
 }

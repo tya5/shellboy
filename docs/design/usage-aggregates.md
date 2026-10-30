@@ -49,7 +49,7 @@ approval. Do not preemptively redesign persistence. No paid API or user DB is us
 Preserve #49 storage/normalization and current storage/HTTP diagnostics. No schema,
 markers, client observer, summary ledger, new GC/retention policy or period scheme.
 Index/index-CLI/RAG and parallel #53/#56 lifecycle changes are outside the edit
-scope. #50 is queued after #47 completion. Independent review, latest-main
+scope. #50 and other work are outside this task; stop after #47 main exact CI succeeds. Independent review, latest-main
 fetch/rebase and required rechecks precede normal main push and exact three-OS CI.
 
 Current UI read-cache contract: one scoped request is refreshed on Changed using

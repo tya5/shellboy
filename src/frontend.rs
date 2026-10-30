@@ -1717,6 +1717,7 @@ async fn run_with_delivery(
                         }
                     }
                     UiAction::ActivateDraft { draft_id } => {
+                        management.close_usage();
                         selection.activate_draft(draft_id);
                         streams.clear();
                         stream_retry = None;
@@ -2873,6 +2874,7 @@ async fn run_with_delivery(
                     status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    management.usage_lagged();
                     #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
@@ -3148,16 +3150,8 @@ async fn select_thread(
     render_width: u16,
 ) -> Result<(), ApiError> {
     let result = async {
-    let details: ThreadDetails = serde_json::from_value(
-        request(
-            control,
-            Command::ThreadGet(ThreadTarget {
-                thread_id: Some(thread.into()),
-            }),
-        )
-        .await?,
-    )
-    .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Invalid Thread details reply"))?;
+    let metadata_target=thread.to_owned();
+    let details=control.store.database.call(move|db|crate::control::db::thread_details(db,&metadata_target).map_err(crate::storage::StorageError::from)).await.map_err(storage_error)?;
     let target = thread.to_owned();
     let (draft,view)=control.store.database.call(move|db|{use rusqlite::OptionalExtension;let body:Option<String>=db.query_row("SELECT body_json FROM draft current WHERE thread_id=?1 AND state='editing' AND NOT EXISTS(SELECT 1 FROM draft submitted WHERE submitted.state='submitted' AND json_extract(submitted.body_json,'$._submission.source_draft_id')=current.id AND json_extract(submitted.body_json,'$._submission.source_revision')>=current.revision) ORDER BY updated_at DESC LIMIT 1",[&target],|r|r.get(0)).optional()?;let view=db.query_row("SELECT anchor_node_id,anchor_offset,follow_tail FROM view_state WHERE thread_id=?1",[target],|r|Ok((ViewAnchor{node_id:r.get(0)?,char_offset:r.get::<_,i64>(1)? as usize},r.get::<_,bool>(2)?))).optional()?;Ok((body.and_then(|v|serde_json::from_str::<DraftSnapshot>(&v).ok()),view))}).await.map_err(storage_error)?;
     update(

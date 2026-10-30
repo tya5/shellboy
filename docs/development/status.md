@@ -156,12 +156,14 @@ measurement-first scope reads saved states/numbers only and does not extend it.
 The former write-time/period design is superseded. Read-only SQL plus CLI/get and
 scoped UI detail-cache wiring is implemented; no schema, producer/state/driver
 hooks or period API. Initial and varied optimized query measurements pass the
-approved extreme-size~500ms direction; final metadata-inclusive remeasurement and
-latest full standard/independent/native gates remain separate. Latest mandatory
+approved extreme-size~500ms direction; metadata-inclusive46eabea release projections pass the approved direction
+(varied Thread412-433ms median). Latest UI P2/full-standard/independent/native
+gates remain separate. Latest mandatory
 UI cooldown is3s using the existing500ms tick, one pending/inflight; slow-only
 >=100ms diagnostics use existing shellboy.log with typed non-content fields.
 The focused usage suite passes25/0/3 ignored with synthetic clocks/data/logs.
-Unrecorded summary/embedding coverage is explicit; #50 remains queued after #47.
+Unrecorded summary/embedding coverage is explicit. Stop after #47 main exact CI;
+#50 and other new work are not authorized until a new post-restart instruction.
 
 ## #51/#48: Windows CI fixture and diagnostic repair
 

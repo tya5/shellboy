@@ -209,10 +209,18 @@ long deadlock watchdogs, not sleep-based timing correctness.
 See [measurement evidence](../development/issue-47-read-performance.md) for the
 initial and optimized shared projection results, layouts, JSON variation/cache
 limits, EXPLAIN/VM steps and fresh/warm definitions. These are not IPC/render
-latencies. Final metadata-inclusive scale, newest exact-source standard, independent
-feature review and native main CI are not yet established by this record.
+latencies. Exact46eabea metadata-inclusive release scale passes both probes and remains
+below the adopted approximate500ms extreme-size goal (varied Thread median412.21ms,
+legacy432.51ms; p95425.85/449.57). Its standard check passes7groups1492/0/30,
+Python6/layout82. This does not approve later UI changes or native main CI.
+Subsequent independent UI findings are fixed: actual result-popup Esc/F8 emits
+captured-owner close before clearing, ActivateDraft closes the cache, lag rechecks
+one pending snapshot without bypassing cooldown, and ordinary Thread selection
+uses the lightweight DB metadata helper. Focused usage27/0/3ignored and explicit
+selection test1/0 pass; the latest full standard/independent recheck is pending.
 Summary/embedding/RAG remain not_recorded/out_of_scope, never known-zero usage.
-No user DB or paid provider call is used; #50 is still queued separately.
+No user DB or paid provider call is used. #50 permission is withdrawn; after #47
+main exact CI succeeds, stop and await a new instruction after owner restart.
 
 ## Standard Usage Persistence And Scalar Reads (#49)
 
