@@ -18,14 +18,14 @@ Legacy estimated-policy tests were replaced by the new factual retry contract;
 zero retries now suppress explicit-overflow resends too, so those stage fixtures
 explicitly configure two resends. Sources and already-executed tools are preserved.
 
-At the fixed pre-CI checkpoint (2026-10-30T09:26:40Z, based on this task's saved
+At the fixed pre-CI checkpoint (2026-10-30T09:27:36.263333Z, based on this task's saved
 usage read through the #47 CLI), 71 completed model attempts reported 34,621,445
 input tokens, including 25,966,080 cached, and 49,617 output tokens. Model-attempt
 latency sum was 2,050,371 ms; ended-shell latency sum 977,583 ms. These overlap,
 are not active-work/CPU totals, and omit later record/CI/finish requests. The
 existing conversation already had a very large context: this is not a controlled
 fresh-context comparison. Monetary cost is unmeasured; no IDs/raw logs/private
-attribution data are published. No model summary/paid probe was requested.
+attribution data are published. No real-provider summary or paid probe was requested.
 
 Local standard check: 7 Rust groups / 1,588 pass / 0 fail / 31 ignored,
 layout 88, Python 6, fmt/strict Clippy. Background plus wait observed completion.
