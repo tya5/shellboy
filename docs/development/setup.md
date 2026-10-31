@@ -286,3 +286,18 @@ histories, decodes intercepted OSC52 bytes, and checks sole/numbered/full-body
 copy plus cancellation without a host clipboard or provider call. The only
 real-time bound is the shared 60-second watchdog. Raw terminal and text snapshots
 stay outside the repository, with binary SHA-256 provenance in the manifest.
+
+### Operation Form and Help PTY Qualification
+
+After building the current `shellboy` source, run
+`python3 scripts/check-operation-popups.py --binary target/debug/shellboy --out /tmp/UNIQUE-operation-popups`.
+Use the existing shared CARGO_TARGET_DIR binary when working from a worktree;
+do not create another target directory for this capture. The eight-case
+80/140-column dark/light/NO_COLOR/vt100 matrix opens owner read, send, standalone
+read and saved-change forms, verifies their Enter verbs, opens per-operation F1
+help and returns to the retained form/list. It never submits an operation and
+creates only isolated disposable data through the shared PTY helper. The sole
+real-time bound is that helper's60-second watchdog. Text/raw frames and a binary
+SHA-256 manifest are evidence of the native Unix process/PTY only, not physical
+terminal screenshots or Windows UI success. Retain failures as well as passes;
+the existence of this driver is not a qualification result.
