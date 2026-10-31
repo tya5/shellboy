@@ -2083,6 +2083,11 @@ mod tests {
                 .command(&context.cwd)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
             assert_eq!(command.name(), name);
+            assert_eq!(
+                OperationId::from_owner_command(&command),
+                operation.catalogue(),
+                "form and result must use the same typed operation identity"
+            );
             use crate::protocol::CommandRoute;
             assert_eq!(
                 command.route(),

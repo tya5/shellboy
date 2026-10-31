@@ -1291,7 +1291,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
         .unwrap();
         assert_eq!(
             reports,
-            ["作業状態"],
+            ["作業 · 状態一覧"],
             "the stale report body is never emitted"
         );
         assert_eq!(notices.len(), 1);

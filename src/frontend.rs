@@ -409,55 +409,9 @@ struct EditableRequest {
     run_id: Option<String>,
 }
 fn command_title(command: &Command) -> String {
-    let name = match command {
-        Command::Status(_) => "作業状態",
-        Command::ModelList(_) => "モデル一覧",
-        Command::ThreadList(_) => "会話一覧",
-        Command::ThreadGet(_) => "会話の詳細",
-        Command::CompactList(_) => "圧縮履歴の取得",
-        Command::ShellList(_) => "shell実行一覧",
-        Command::UsageGet(_) => "使用量の合計",
-        Command::ThreadCreate(_) => "会話の作成",
-        Command::ThreadFork(_) => "会話の分岐",
-        Command::ThreadDelete(_) => "会話の削除",
-        Command::ThreadDeletePreview(_) => "会話の削除前確認",
-        Command::ThreadSet(_) => "会話の設定",
-        Command::MessageSend(_) => "依頼の送信",
-        Command::MessageCancel(_) => "反映待ちの取消",
-        Command::MessageGet(_) => "依頼と回答の確認",
-        Command::OperationGet(_) => "操作の受付結果",
-        Command::RunGet(_) => "作業の詳細",
-        Command::RunRetry(_) => "同じ内容で再試行",
-        Command::RunStop(_) => "作業を停止",
-        Command::RevisitSet(_) => "Set Revisit",
-        Command::RevisitGet(_) => "Inspect Revisit",
-        Command::RevisitCancel(_) => "Cancel Revisit",
-        Command::TurnGet(_) => "応答処理の詳細",
-        Command::Wait(_) => "条件の成立を待機",
-        Command::HistoryList(_) => "履歴一覧",
-        Command::HistoryGet(_) => "履歴の原文",
-        Command::HistorySearch(_) => "履歴の検索",
-        Command::HistoryRelations(_) => "履歴のつながり",
-        Command::ShellGet(_) => "コマンドの詳細",
-        Command::ShellRead(_) => "コマンド出力の読取り",
-        Command::ShellWrite(_) => "コマンドへ入力",
-        Command::ShellEof(_) => "コマンドの入力を終了",
-        Command::ShellStop(_) => "コマンドを停止",
-        Command::AttachmentAdd(_) => "添付の追加",
-        Command::AttachmentList(_) => "添付一覧",
-        Command::AttachmentRemove(_) => "添付の除外",
-        Command::Compact(_) => "会話の要約",
-        Command::ContextEdit(_) => "会話の入力範囲を編集",
-        Command::IndexStatus(_) => "索引の状態",
-        Command::IndexPreview(_) => "索引の費用対象の確認",
-        Command::IndexBackfill(_) => "未索引資料の追加",
-        Command::IndexRetry(_) => "索引の再試行",
-        Command::IndexProbe(_) => "埋め込み接続の確認",
-        Command::IndexRebuild(_) => "索引の再構築",
-        Command::StorageStatus(_) => "保存容量",
-        Command::StorageCollect(_) => "保存データの回収",
-    };
-    name.into()
+    crate::operations::OperationId::from_owner_command(command)
+        .label()
+        .into()
 }
 // Report operation acceptance separately from presentation: a report-rendering
 // failure must not invite retrying an already-applied mutation.
