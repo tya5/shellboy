@@ -4315,3 +4315,14 @@ on that binary (`/tmp/issue-84-pty-final`); manifest, screen text, raw bytes and
 request counts remain synthetic local evidence. No timing threshold is asserted.
 Subsequent evidence-only documentation changes do not alter the tested Rust tree.
 Native three-OS CI and integration status are tracked in issue #84.
+
+## F isolated session-state primitive
+
+Dedicated F preparation branch based on E10d6df8 ports pure ui/watch from archived
+a410fb3 and registers the ordinary UI module. Native macOS/Rust1.99.1 focused
+`cargo test --locked --lib ui::watch::` passes7/0/0 (990 filtered out): bounded
+seen LRU/uncertainty, completion identity, stale/replaced action targets, stable
+category order and local visible ages/sanitization. Formatting passes. No I/O,
+new Core state, command, worker or table is added. Runtime Watch/page/lineage
+integration, later archive corrections, full standard and F P2–P5/native proof
+remain pending. No new feature is advertised or admitted to main by these tests.

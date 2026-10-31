@@ -1805,3 +1805,13 @@ standard result and separate main approval. Before F admission, update to the
 actually admitted main and recheck schema/index numbering. Old combined-source
 results are not evidence for this branch. This preserves main admission order
 while making the next reviewable unit concrete during independent E checks.
+
+## F session-state primitive local draft
+
+On the F-only branch, copied the existing pure Watch/session state primitive
+from archivea410fb3 into ui/watch and registered the ordinary UI module. It
+contains no I/O, Core storage or new command. No Watch action/read/UI mode is
+exposed yet; this is not a usable-F or admission claim. Focused ui::watch tests pass7/0/0 on native macOS (990 filtered out); this
+is the isolated state primitive, not the full standard or a usable Watch screen.
+E branch/main/public measurement refs remain unchanged. The primitive must later
+absorb relevant archived corrections and the F ledger gates before publication.

@@ -21,6 +21,7 @@ mod composer;
 mod details;
 pub mod live_work;
 pub mod thread_patch;
+pub mod watch;
 pub use details::{DetailSourceFacts, DetailSourceSnapshot};
 pub(crate) mod draft;
 mod help;
