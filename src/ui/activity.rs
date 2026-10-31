@@ -268,7 +268,11 @@ impl ActivityView {
                 if snapshot.attempt_id.as_deref() != Some(attempt) {
                     // Retain one candidate without demoting the currently observed attempt.
                     match &mut self.early_receive {
-                        Some(r) if r.attempt == attempt => r.observed_at = r.observed_at.max(at),
+                        Some(r) if r.attempt == attempt => {
+                            r.first_at = r.first_at.min(at);
+                            r.observed_at = r.observed_at.max(at);
+                        }
+                        Some(r) if r.observed_at > at => {}
                         _ => {
                             self.early_receive = Some(ReceiveObservation {
                                 attempt: attempt.into(),

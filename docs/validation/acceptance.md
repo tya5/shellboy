@@ -5116,3 +5116,75 @@ submission. This is a test-only change after Rust qualification; src is unchange
 No physical-font/ConPTY/IME or performance qualification is inferred. Three-OS CI,
 main integration and any user-binary replacement remain delegated; provisional A
 must not land. No installed binary, release or real OS clipboard is modified.
+## Footer phase/time/recovery qualification (#85)
+
+Starting main9b4ae34, then rebased onto2b3cd91 for the shared #94 capture helper.
+No Core state, schema, public protocol, new worker/queue/scheduler or provider
+retry policy changes. The user authorized starting before F/G; current published
+F overlap was checked, and later integration rebases. Worker3 received the exact
+chrome activity-facts/draw_status recovery wiring ranges before more shared edits;
+key-hint selection/layout/truncation remains #87-owned in a separate worktree.
+
+Pure monotonic-time tests pass for saved attempt age/new attempt vs continuing
+Turn, same-anchor stability and no equality-driven repaint, tool/request overlap,
+both receive/snapshot orders including an older phase in between, stale attempts,
+invalid saved times and lost observation. The existing header-liveness assertion
+was intentionally updated to Receiving as a transport fact, not generated text.
+Snapshot timestamp strings are bounded; wall observation time is excluded from
+semantic snapshot equality. Age anchors are parsed on acceptance, not every draw.
+The existing Core saved-fact classifier and terminal precedence remain intact.
+
+A temporary real-SQL projection test preserves original recovery_reason_json but
+suppresses its active footer after running/completed/stopped saved resolution;
+unresolved failed recovery and typed #76 reset facts remain. The old explicit-stop
+test previously expected a historical reason as active recovery: it now expects
+no active recovery and separately checks the original saved stop_reason. All
+1,011 nonignored library tests passed at that checkpoint. Wrong UsageLimit paths,
+a fully explicit snapshot constructor and an on_receipt fixture signature were
+compile-time test/setup errors, corrected without changing production policy.
+
+The first real PTY run reached successful external CLI retry but still displayed
+provider:fixture failure in the footer. This exposed generic EngineEvent recovery
+errors being promoted to independent Info notices. The corrected frontend defers
+only typed saved-execution recovery/config failures to the existing reactive read;
+storage/unclassified errors keep their existing notification path. No string
+matching or TTL guesses failure resolution. The same native fixture then passed.
+
+Native macOS ARM64/Rust1.99.1, actual PTY with temporary HOME/config/data-dir,
+copy_backend=osc52 and unauthenticated loopback only. Shared scripts/dev/Terminal
+and VT frame decoding are reused; no user clipboard/config/provider/data read.
+The handler gates first headers/body completion, then observes a synthetic saved
+running-group marker while that request is inflight (no early tool execution or
+real OS shell is claimed). It removes the marker before completing, then exercises
+HTTP400 failure, real separate-CLI run retry and success, then typed quota recovery.
+All8 width/palette/fallback conditions pass with4 requests and8 captured stages
+per condition:64 frames total. Captures include separate tool/request ages, no
+active recovery or stale failure footer after successful retry, quota kind/reset
+UTC and explicit wait/retry or /model guidance. A passed reset is not automatic
+resume; the unchanged connection-scoped remembered-limit rule still applies.
+No new short timer, latency pass/fail bound or settling wait is used: only the
+shared capture/CLI60-second watchdog and explicit state/transport gates.
+
+Project knowledge was searched first; it returned the helper procedure, not
+relevant new activity facts. Guide semantic scope was degraded/unready; no index
+rebuild or knowledge mutation was attempted. P1 and final standard/branch handoff
+are separate gates, not inferred from these screenshots or library results.
+
+The existing manual P1 test was reused unchanged:140x40 TestBackend,128 nodes,
+50 tool rows,20 warmups/500 timed interactions, same debug profile. Copied native
+lib-test executables from baseline2b3cd91 and candidate66ac885 were run in three
+interleaved pairs with no compilation during the timed portion. p95 microseconds:
+8350->7327,5713->6935,8919->6300. Candidate observations stay below8ms and relative
++2ms; no speedup is inferred from the noisy baseline (two baseline values exceed
+8ms under shared-machine load). Both preserve131 layout builds,258 unit builds,
+16510 unit hits and all focus-only reuse assertions. This is a current-main
+incremental comparison, not a fresh historical1fec7f0 measurement. Artifact/source
+witnesses and logs are retained in the temporary P1 directory. Source changes
+made during baseline build are restored before any candidate check.
+
+A later source review replaces aggregate MIN on active groups with one existing
+first-match LIMIT1 read (bounded timestamp) so capturing a tool age does not force
+an aggregate full traversal beyond the old EXISTS behavior. A lost-observation
+regression also prevents a new snapshot from fabricating first-byte age: age stays
+unknown until a new receive observation, without counting the unknown gap.
+Older mismatching receive observations cannot displace a newer early candidate.

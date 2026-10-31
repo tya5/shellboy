@@ -398,3 +398,18 @@ shell row or child conversation. A shell outside the bounded displayed history
 reports that limit; F6 retains the full saved references. F7 remains HTTP links.
 Unlike row groups have nonselectable spacing; consecutive tools stay dense.
 The `◉` work-region heading is reserved for #86, not drawn by this change.
+
+## Activity phase and elapsed time
+
+The footer's request age belongs to the current model attempt, not the whole
+Turn. Tool activity may be shown alongside request waiting/reception; the two
+labels have separate ages. `観測` marks a local observation interval, not a
+persisted phase-start fact, and unavailable timestamps are not reported as zero.
+Reception means observed transport headers/body liveness, not proof of generated
+assistant text. Saved recovery disappears after confirmed resume/completion/stop;
+unrelated failed operations remain visible until their own handling or dismissal.
+
+A saved usage-limit recovery shows its kind and reset time in UTC, plus waiting
+and `/model` guidance. A passed reset time does not automatically resume work.
+Choosing a different model on the same connection does not bypass that
+connection's remembered limit; original reason/details remain available.

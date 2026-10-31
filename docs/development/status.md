@@ -1985,3 +1985,19 @@ The user selected B (⇥) on 2026-10-31. The common External/外から row and t
 driver default now use B; an explicit regression assertion binds mark/label/CJK
 width. The prior A branch remains historical, not the integration candidate.
 The selected branch is being requalified and sent to worker4 as visually approved.
+## Attempt-scoped footer facts (#85)
+
+The shared Core classifier/protocol stays unchanged. Internal selected-view facts
+now keep tool overlap and saved attempt/group age anchors separately; UI timing
+uses the existing monotonic sampling/Animation cadence, not another scheduler.
+Both receive/snapshot delivery orders retain a bounded candidate. Transport
+reception is not assistant text progress. Historical recovery reasons stop owning
+the footer after saved resolution; structured driver recovery errors invalidate
+the reactive view rather than becoming sticky independent operation notices.
+
+Eight native temporary-owner PTY conditions pass through the shared #94 Terminal
+helper:80/140 columns, dark/light/NO_COLOR/vt100,64 completed screens. Tests include
+header/body gates, a synthetic saved running-group overlap marker (not an OS shell
+execution claim), external CLI retry, success and typed usage-limit recovery.
+P1 comparison and final standard/rebase checks remain independent pending gates;
+worker4 owns review-required CI/integration. #87 key hints remain worker3-owned.
