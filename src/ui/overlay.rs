@@ -481,9 +481,10 @@ impl UiState {
             && self.confirmation.is_none()
             && self.top_overlay() != Some(Overlay::Threads)
             && !(self.top_overlay() == Some(Overlay::Operations)
-                && self.operations.as_ref().is_some_and(|operations| {
-                    operations.hint_context() == key_hints::Context::Form
-                }))
+                && self
+                    .operations
+                    .as_ref()
+                    .is_some_and(|operations| operations.owns_form_help()))
         {
             self.selection_mode = false;
             if self.top_overlay() == Some(Overlay::Help) {
@@ -718,12 +719,21 @@ mod tests {
                 "{explanation}"
             );
             assert!(explanation.contains("Run ID"), "{explanation}");
+            let hint = explanation.lines().last().unwrap();
+            assert!(
+                !hint.contains("Enter") && !hint.contains("次の項目"),
+                "{hint}"
+            );
             assert!(!ui.help_visible, "global help must not steal form F1");
             ui.event(key(KeyCode::Esc, KeyModifiers::NONE));
             terminal
                 .draw(|frame| crate::ui::draw(frame, &mut ui))
                 .unwrap();
             let form = rendered(&terminal);
+            assert!(
+                form.lines().last().unwrap().contains("Enter 表示"),
+                "{form}"
+            );
             assert!(
                 form.contains("Enter 表示") && !form.contains("使い方"),
                 "{form}"
@@ -759,7 +769,10 @@ mod tests {
             ui.event(key(KeyCode::Char('n'), KeyModifiers::NONE))
                 .is_empty()
         );
-        assert_eq!(ui.hint_context(), key_hints::Context::Form);
+        assert_eq!(
+            ui.hint_context(),
+            key_hints::Context::Form(crate::operations::EnterVerb::Execute)
+        );
     }
     #[test]
     fn derived_owner_keeps_valid_stacking_without_extra_mode_state() {

@@ -41,7 +41,9 @@ pub(super) enum Action {
     Choose,
     Complete,
     NextField,
+    Display,
     Execute,
+    Submit,
     Refresh,
 }
 impl Action {
@@ -72,7 +74,15 @@ impl Action {
             Self::Choose => ("Enter", "選択"),
             Self::Complete => ("Tab", "補完"),
             Self::NextField => ("Tab", "次の項目"),
-            Self::Execute => ("Enter", "送信"),
+            Self::Display => (
+                "Enter",
+                crate::operations::EnterVerb::Display.text().fallback,
+            ),
+            Self::Execute => (
+                "Enter",
+                crate::operations::EnterVerb::Execute.text().fallback,
+            ),
+            Self::Submit => ("Enter", crate::operations::EnterVerb::Send.text().fallback),
             Self::Refresh => ("r", "再取得"),
         }
     }
@@ -126,7 +136,7 @@ pub(super) enum Context {
     Help,
     Popup,
     Management,
-    Form,
+    Form(crate::operations::EnterVerb),
     Confirmation,
     Shutdown,
 }
@@ -152,7 +162,9 @@ impl Context {
             Self::Help => &[Back],
             Self::Popup => &[Move, Choose, Back],
             Self::Management => &[Operations, Back],
-            Self::Form => &[NextField, Execute, Back],
+            Self::Form(crate::operations::EnterVerb::Display) => &[NextField, Display, Back],
+            Self::Form(crate::operations::EnterVerb::Execute) => &[NextField, Execute, Back],
+            Self::Form(crate::operations::EnterVerb::Send) => &[NextField, Submit, Back],
             Self::Confirmation | Self::Shutdown => &[],
         }
     }
@@ -286,6 +298,9 @@ mod tests {
             Context::Selection,
             Context::Original { next: true },
             Context::Popup,
+            Context::Form(crate::operations::EnterVerb::Display),
+            Context::Form(crate::operations::EnterVerb::Execute),
+            Context::Form(crate::operations::EnterVerb::Send),
         ] {
             let cache = Cache::default();
             for width in 0..180 {
@@ -309,6 +324,29 @@ mod tests {
         let text = cache.text(Context::Typing, 120, &config);
         assert!(text.contains("Ctrl+Enter 送信"));
         assert!(text.contains("Enter 改行"));
+    }
+    #[test]
+    fn form_cache_tracks_catalogue_verb_and_never_uses_the_composer_send_binding() {
+        use crate::operations::EnterVerb;
+        let cache = Cache::default();
+        let mut config = Config::default();
+        config.ui.send_key = "Ctrl+Enter".into();
+        for (verb, expected) in [
+            (EnterVerb::Display, "Enter 表示"),
+            (EnterVerb::Execute, "Enter 実行"),
+            (EnterVerb::Send, "Enter 送信"),
+        ] {
+            let context = Context::Form(verb);
+            let text = cache.text(context, 120, &config);
+            assert!(text.contains(expected), "{text}");
+            assert!(
+                !text.contains("Ctrl+Enter"),
+                "form Enter is independent of composer keys"
+            );
+            let pointer = text.as_ptr();
+            drop(text);
+            assert_eq!(pointer, cache.text(context, 120, &config).as_ptr());
+        }
     }
 }
 

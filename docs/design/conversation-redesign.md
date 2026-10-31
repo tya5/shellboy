@@ -170,6 +170,11 @@ F1 inside an operation form opens that operation's field/ID explanation and
 Esc/F1 returns to the unchanged form. General help may layer above the operation
 list and other popups, retaining #87's escape route; its global handler must not
 intercept the form-specific explanation promised by the form footer.
+The shared bottom hint uses the same catalogue EnterVerb and dynamic effect as
+the form, with that typed verb in its existing cache key. An open explanation
+advertises help navigation, not field editing/submission. Keep form-owned F1
+dispatch distinct from hint classification, so closing an explanation remains
+possible while a client confirmation still retains layered general help.
 
 The latest main adds headless process lifecycle commands serve/shutdown (#5).
 These are launch/termination controls for a separate terminal-free owner, not

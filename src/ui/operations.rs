@@ -437,9 +437,15 @@ impl Operations {
         use super::key_hints::Context;
         match &self.form {
             Some(form) if form.client_confirmation.is_some() => Context::Confirmation,
-            Some(_) => Context::Form,
+            Some(form) if form.help => Context::Help,
+            Some(form) => Context::Form(form.operation.catalogue().enter_verb(form.effect())),
             None => Context::Popup,
         }
+    }
+    pub(super) fn owns_form_help(&self) -> bool {
+        self.form
+            .as_ref()
+            .is_some_and(|form| form.client_confirmation.is_none())
     }
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
         if let Some(form) = &mut self.form {
