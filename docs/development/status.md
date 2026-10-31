@@ -1681,3 +1681,15 @@ selector or compilation is counted as P3 success. The normal binary uses only
 private temporary hooks, asserted synthetic state/population, per-sample saved
 title changes and the shared60s deadlock guard. This is a direct read-pipeline
 cost fixture, not a UI event-loop or future F/G/all-consumer performance claim.
+
+## E P3 direct-read observations retained (2026-10-31)
+
+New E qualification record documents source-matched normal-release30-sample
+read-path observations, including higher after wall time and0 writer/1 readonly
+connection. It explicitly leaves P3 open because service startup/caller scope
+is not yet matched between legacy CLI and paired refresh. Next P3 iteration
+must initialize the same services, classify actual closures and verify saved
+lifecycle facts after observations. It must not substitute direct-read timing
+for actual Changed-to-paint or future F/G/global coalescing. The first wrong
+page-count assumption and stale shared-target build were rejected and retained.
+No product/runtime format change or main push was made for the measurements.

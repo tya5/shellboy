@@ -4139,3 +4139,18 @@ Native Unix P2/P5 jobs have finished both builds and entered formal observation;
 no performance values are available at this checkpoint. The Windows native jobs
 upload explicit unavailable.json at both widths, not a ConPTY measurement.
 Main admission and main CI remain separate later gates; main is unchanged.
+
+## E P3 direct-read characterization limits (2026-10-31)
+
+The [E qualification record](conversation-redesign-e.md) now contains actual
+normal-release before0d4f63a/after0b7bd73 observations:30 samples each, automatic/
+explicit titles,128 saved nodes,50 returned nodes/tools and50 List rows. After
+uses0 writer closures/1 readonly connection per sample; observed pipeline p95
+is8.4079/6.5973ms versus3.2981/2.9446ms before, not a speedup claim.
+
+This does not close P3: legacy CLI request starts/wakes services while the direct
+new path does not explicitly start Control; all-worker counters are unclassified.
+Record that lifecycle/caller asymmetry and require a matched-services follow-up.
+No UI event-loop, future F/G, full-consumer, Windows or pure-SQL-time success is
+inferred. Source/binary/controller/fixture failure records remain private and
+separate from the frozen public CI candidate. Main remains unchanged.
