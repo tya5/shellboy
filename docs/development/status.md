@@ -1716,3 +1716,14 @@ E7c6f4d6 or covered by its default-three-row formal results. Preserve current wa
 0=immediate/default30000ms semantics; a comment's infinite-wait suggestion is not
 adopted as a contract change. Design/implementation and maximum-capacity/native
 proof remain independent pending work; no new Core table is justified.
+
+## User-approved #41 scope correction (6539106715)
+
+#41 now finishes at the existing E/F/G main admissions plus their ledgers/P2–P6
+measurements. Added display work is transferred to #83–#87, owned by Shellboy's
+work thread; #85–#87 wait until F/G land, #83/#84 may proceed independently.
+The plan's G-C/B-S/D3 inventories are marked transferred rather than left as
+Codex completion gates. No transferred feature was implemented. Preserve those
+other threads' future main changes; keep the frozen E CI candidate unchanged.
+E main admission is still separately approval-gated after producer3 review.
+Current local work remains E's matched-services/caller-classified P3 measurement.

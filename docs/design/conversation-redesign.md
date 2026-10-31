@@ -5,6 +5,17 @@ This design covers the issue body and comments through6520544888; the complete
 implementation ledger is [the delivery plan](../development/issue-41-plan.md).
 Only the next complete B+C increment is starting; D/E/F/G remain planned.
 
+## Current issue ownership (2026-10-31)
+
+User decision[6539106715](https://github.com/tya5/shellboy/issues/41#issuecomment-6539106715)
+limits #41 to the existing E/F/G main admissions, requirement ledgers and P2–P6
+measurements. Later conversation marker/notification/spacing, pasted slash,
+footer/seconds, owned-work presentation/configuration and detail/copy/image
+convenience additions are owned by #83–#87. They are not new requirements for
+this E/F/G admission. #85–#87 start only after F/G reach main. The delivery plan
+retains an explicit handoff mapping; earlier original catalogue/forms/reactivity
+and immutable source/copy identity contracts below remain applicable.
+
 ## Delivery and ownership
 
 #58 must ship alone first. Each later main increment is usable independently, passes the local standard, and has green main CI on all three OSes before another main increment proceeds. Report delivered and remaining requirements after each admission; close #41 only when the complete ledger is satisfied. #35 follows #41. No new public protocol command, lifecycle state, schema, persisted UI state, business event, worker or queue is required. Existing Core facts may gain a narrow bounded in-process observation only where D explicitly requires it.

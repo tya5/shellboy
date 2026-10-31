@@ -8,6 +8,30 @@ until every adopted requirement is delivered. Keep #58 separate and first;
 English migration (#35) follows #41. Each implementation increment and meaningful
 subpart gets a reviewable commit; avoid a combined redesign commit.
 
+## Current owner-approved scope (6539106715)
+
+The user's2026-10-31 decision limits #41 completion to admitting the existing
+E, F and G increments into main, with their requirement ledgers and P2–P6
+measurements (including long CI measure jobs). B+C/D2 are already in main.
+Later10/31 display additions belong to #83–#87 and are not Codex/#41 work.
+E main admission still needs a separate approval after producer3 review.
+
+| Transferred inventory / comment scope | Owner issue | Coordination |
+| --- | --- | --- |
+| B-S1–B-S3, D3-M1/M2/N1: conversation kind markers, notification identity/navigation, spacing | #83 | Shellboy work thread; may proceed before F/G. Owned-work header-specific marker/spacing belongs to #86. |
+| G-C1: typed slash with pasted arguments / literal pasted command | #84 | Shellboy work thread; may proceed before F/G. |
+| Status footer strings/seconds and clearing resolved failures (6538715802/6538696784/6536400800) | #85 | Start after F/G main admission. |
+| D3-L1/L2/C1/W1/W2 and heading color role: owned-work region/configurable rows/saved wait target/deadline | #86 | Start after F/G main admission. |
+| G-C2–G-C6: detail keys, easy whole-answer/code-block copy, image/attachment discovery | #87 | Start after F/G main admission. |
+
+Historical inventories below retain the exact requests/supersessions for handoff,
+but their transferred rows are not unfinished #41 admission gates. No design,
+implementation or new validation of #83–#87 is assigned here. Original G
+catalogue/forms, existing stable original/copy identities and original P6 popup
+performance remain #41; transferring later convenience additions does not remove
+those earlier requirements. Preserve changes independently merged by #83/#84
+when updating main; do not import the archived combined F/G development branch.
+
 ## Ordered increments
 
 | Increment | Scope | State |
@@ -368,10 +392,10 @@ global constant-query or lower-CPU claim. Long P2/P5 measurements belong in the
 manual CI measurement job, distinct from functional/native UI tests.
 
 
-## Subsequent G mandatory copy/paste and attachment additions
+## Transferred copy/paste and attachment inventory (#84/#87)
 
-These requirements are tracked now and implemented with G after separate E/F
-admission. They do not change E's current key or CLI contracts.
+These later additions are transferred by6539106715 to #84/#87. They are
+historical handoff rows, not required work for #41 E/F/G admission.
 
 | ID | Required outcome | Evidence required before G admission |
 | --- | --- | --- |
@@ -388,11 +412,11 @@ Copying a code block is UI/Frontend composition of the existing saved-original
 read and Markdown extraction path, not justification for a new Core operation,
 worker, table, parser or storage format.
 
-## Additional conversation spacing review
+## Transferred conversation spacing inventory (#83)
 
 [Comment6538457249](https://github.com/tya5/shellboy/issues/41#issuecomment-6538457249)
-adds a small optional presentation improvement, tracked separately from E's
-browser admission. It is not implemented or verified by E's existing tests.
+adds a presentation improvement transferred to #83 by6539106715. Its prior
+B-S inventory is retained for handoff, not #41 work or an E verification claim.
 
 | ID | Requested outcome | Required evidence / placement |
 | --- | --- | --- |
@@ -421,13 +445,13 @@ includes latestmainc950 and qualifies1891/0/32 plusPython11; no follow-up push o
 new three-OS CI is claimed. Keep this fixed cut separate from published CBC and
 from its historical main912 comparison. Do not merge F/G or close #41 on this data.
 
-## Additional mandatory D presentation follow-up (2026-10-31)
+## Transferred owned-work/history inventory (#83/#86, 2026-10-31)
 
-Comments6538770938–6539059651 add required owned-work/history presentation.
-Track this as a separate D follow-up; do not mix it into the frozen E candidate,
-claim the prior default-three-row P2/P5 qualifies a new maximum, or silently drop
-it when F/G land. Implement on its own reviewable branch after the applicable
-admission decision. No new storage/table is justified by these display requests.
+Comments6538770938–6539059651 are transferred by6539106715 to #83/#86.
+The following is a historical handoff inventory, not a #41 D follow-up. Do not
+implement these rows here or use default-three-row results to qualify #86's
+future maximum. #86 waits for F/G main admission; #83 may proceed separately.
+No new storage/table is justified by the recorded display requests.
 
 Supersession:6538923280 replaces the earlier box-header proposal with a heading
 and indented output-style guide;6539007408 replaces the heading with
