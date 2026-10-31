@@ -2005,3 +2005,10 @@ left body/right metadata, with noncritical metadata yielding to body and attenti
 facts retained. Runtime elapsed painting preserves the separated body and metadata.
 Validation is pending the serialized Rust slot and native three-state PTY check;
 this entry is not a claim of completed acceptance or #97's selected inspection UI.
+
+#98 final qualification supersedes the pending-validation note: standard check
+passes on main f1e2a16 with serialized single-job Cargo, and eight native PTY
+conditions cover actual foreground/background/completed shells plus focused
+opened/closed rows. The final focus fallback is bold, not a new left marker;
+headings keep their columns. Opened notices use the shared muted indentation.
+#99's preview lifetime/closed-error issue remains separate and requires review.

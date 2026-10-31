@@ -1915,12 +1915,13 @@ fn typed_history(
                                 view.palette,
                             ));
                         } else if !tool.reason.is_empty() {
-                            chunk.push(Line::from(Span::styled(
-                                crate::presentation::sanitize_plain(&tool.reason, 0).0,
-                                Style::default().fg(theme::ATTENTION),
-                            )));
+                            chunk.extend(tool_note(&tool.reason, width, view.palette));
                         } else {
-                            chunk.push(Line::from("  出力は原文で確認 · F6 詳細"));
+                            chunk.extend(tool_note(
+                                "出力は原文で確認 · F6 詳細",
+                                width,
+                                view.palette,
+                            ));
                         }
                     }
                     append_item_rows(&mut lines, &mut sources, chunk, node, index, region, width);
@@ -2269,7 +2270,30 @@ pub(super) fn paint_live_times(
                 .map(|span| Span::styled(span.content.to_string(), span.style))
                 .collect::<Vec<_>>(),
         );
-        let (kind, metadata, critical) = tool_metadata(tool, Some(seconds));
+        let (kind, fallback, critical) = tool_metadata(tool, Some(seconds));
+        let metadata = cached
+            .spans
+            .last()
+            .filter(|span| {
+                span.style.underline_color == Some(INPUT_DECORATION_MARKER)
+                    && !span.content.trim().is_empty()
+            })
+            .map(|span| {
+                let mut parts = span.content.split(" · ").collect::<Vec<_>>();
+                if parts
+                    .last()
+                    .is_some_and(|part| *part == "経過未取得" || part.ends_with('秒'))
+                {
+                    parts.pop();
+                }
+                let mut value = parts.join(" · ");
+                if !value.is_empty() {
+                    value.push_str(" · ");
+                }
+                value.push_str(&format!("{seconds}秒"));
+                value
+            })
+            .unwrap_or(fallback);
         let mut painted = tool_row(
             mark,
             body,
@@ -4069,6 +4093,12 @@ mod conversation_item_tests {
             }],
         )];
         let (lines, _, sources) = history(&view, 80);
+        // The source node may have less correlation detail than the cached row.
+        view.nodes_mut_for_test()[0].presentation.blocks[0]
+            .tool
+            .as_mut()
+            .unwrap()
+            .reason_kind = crate::presentation::ToolReasonKind::Unknown;
         let mut painted = borrowed(&lines);
         paint_live_times(
             &mut painted,

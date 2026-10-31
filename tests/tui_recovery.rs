@@ -627,13 +627,19 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     }
     for wanted in [
         "printf one",
-        "⏵ 背景（利用者）",
-        "sleep 30",
+        "⏵ sleep 30",
+        "背景（利用者）",
         "⊘ printf MUST_NOT_RUN",
         "利用者が先行する呼出しを背景へ移したため未実行",
     ] {
         assert!(shown.contains(wanted), "missing {wanted}: {shown}");
     }
+    let running_row = shown
+        .lines()
+        .find(|line| line.contains("⏵ sleep 30"))
+        .unwrap();
+    assert!(running_row.contains("背景（利用者）"), "{running_row}");
+    assert!(running_row.find("sleep 30").unwrap() < running_row.find("背景（利用者）").unwrap());
     for command in ["printf one", "sleep 30", "printf MUST_NOT_RUN"] {
         assert_eq!(
             shown.matches(command).count(),

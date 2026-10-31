@@ -160,7 +160,7 @@ def main():
                         scene("new-conversation", lambda s: "F1 help" in s and "UNKNOWN_OBSERVATION" not in s)
                         terminal.send("ROW_FIXTURE_START\r")
                         live = scene("background-and-foreground", lambda s: "ROW_FIXTURE_DONE" in s and
-                                     "⏵ 背景" in s and "printf FAST_ONE" in s and "printf FAST_TWO" in s)
+                                     "⏵ read fixture_line" in s and "背景" in s and "printf FAST_ONE" in s and "printf FAST_TWO" in s)
                         assert "▸ ROW_FIXTURE_BODY" in live
                         live_color = None
                         for y in range(terminal.screen.lines):
