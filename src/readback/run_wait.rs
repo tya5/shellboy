@@ -89,7 +89,8 @@ mod tests {
             "UPDATE app_meta SET value='[]'",
             "UPDATE app_meta SET value='[\"missing\"]'",
             "DELETE FROM operation_receipt",
-            "UPDATE operation_receipt SET result_ref_json='bad'",
+            // Simulate damaged storage without weakening the production schema.
+            "PRAGMA ignore_check_constraints=ON; UPDATE operation_receipt SET result_ref_json='bad'; PRAGMA ignore_check_constraints=OFF",
             "UPDATE operation_receipt SET result_ref_json='{\"result\":{\"context_edit\":{}}}'",
             "UPDATE operation_receipt SET result_ref_json='{\"result\":{\"context_edit\":{\"action\":\"unknown\"}}}'",
         ] {
