@@ -1,5 +1,14 @@
 # Development status
 
+## Exact-SHA CI reuse (#92)
+
+Main push may reuse actual first-attempt successful three-OS native checks on
+its exact SHA via the read-only Actions API. Missing or failed API evidence runs
+all checks, and manual dispatch always runs native checks. The reviewer approved
+reuse only; Windows retains the original single job/four test threads. Rejected
+split experiments and #95 failures are retained in acceptance. Native unsplit
+qualification and live main-push reuse remain pending on the reuse-only source.
+
 ## Explicit usage-limit recovery (#76)
 
 Known future usage-limit resets now bypass automatic resend/reduction and enter

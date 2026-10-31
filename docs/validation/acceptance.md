@@ -1,5 +1,36 @@
 # Validation record
 
+## Exact-SHA CI reuse (#92, reuse-only qualification pending)
+
+On 2026-10-31 the reviewer approved reuse and explicitly dropped Windows
+partitioning: two-job wall times7.3/8.5min (other samples7.8/8.1min) did not
+materially improve the earlier8.9min unsplit job, because each job repeated
+all-target build/link work. The final tree preserves the main baseline's full
+single-job Windows execution, timing runner, layout checks and Python tests;
+there is no partition manifest, selector, batching helper or shard audit.
+
+Retain experimental provenance, not as proof for the final source:
+- Measurement efc10e5/run41182264568 passed; library103.812s and integration146.219s.
+- Candidate39577ff/run41184106926 failed Python Unicode subprocess sibling imports.
+- Candidate7f339a7/run41184263185 rejected unassigned visible support modules.
+- Candidatefa1e26b/run41184815121 rejected ambiguous libtest substring skips.
+- Candidate1fa0e95/run41185378870 passed three OSes and the former inventory audit
+  (1846 Windows identities,24 ignored); execution128.032/182.828s, independent
+  all-target builds173.578/182.484s. This was not the final reuse-only layout.
+- Rebalanced4355953/run41186034007 passed Linux/macOS/Windows1 but failed Windows2:
+  frontend_reactivity::selected_header_and_open_browser_share_one_changed_snapshot_without_reload
+  observed read sequences44/43; response_retries::stalled_permanent_error_body_is_not_retried
+  observed request counts3/1. Per reviewer, #95 owns their separate diagnosis;
+  no assertion was weakened, excluded or retried into qualification.
+
+The reuse gate's Node fixtures cover exact-SHA success, wrong SHA/repository,
+reruns, skipped/incomplete/Windows-only native jobs and API failures. Require
+new first-attempt native three-OS checks in the original unsplit configuration
+before main integration. Actual main-push reuse and the no-prior-success main
+push fallback remain untested live until authorized integration; mocked gate
+cases do not establish those paths. No local Rust build/test was performed on
+the8GB integration host. Final exact-source results will also be linked in #92.
+
 ## #41 D2 owned work and output (local)
 
 Final source807ac97 passes native macOS arm64/Rust1.99.1 standard checks:
