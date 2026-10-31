@@ -580,7 +580,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     .await;
     assert_eq!(
         notice,
-        "OSC52: 本文全体のコピー要求を端末へ送りました（完了未確認）"
+        "OSC52: 本文全体のコピー要求を端末へ送りました（25文字・完了未確認）"
     );
     send.send(UiAction::Copy {
         node_id: node.clone(),
@@ -604,7 +604,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     .await;
     assert_eq!(
         notice,
-        "OSC52: コードブロック全体のコピー要求を端末へ送りました（完了未確認）"
+        "OSC52: コードの塊 1のコピー要求を端末へ送りました（8文字・完了未確認）"
     );
     observer
         .store
