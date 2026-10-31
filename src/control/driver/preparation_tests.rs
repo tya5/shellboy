@@ -1496,6 +1496,7 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
             format!("{}:stop", owner.instance_id), Command::RunStop(RunTarget { run_id:run.clone() }),
         ), None).await.unwrap();
         assert_eq!(stopped.stop_runs, vec![run.clone()]);
+        assert!(matches!(next(&control, &accepted.thread_id, run).await.unwrap(), Next::Done));
         control.stop_run(run).await;
         assert!(slot.stop.is_cancelled());
         let target = run.clone();
