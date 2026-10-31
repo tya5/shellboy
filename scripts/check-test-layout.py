@@ -21,3 +21,11 @@ assert len(registered) == len(set(registered)), 'duplicate integration suite reg
 assert set(registered) == expected, {'missing': sorted(map(str, expected-set(registered))),
                                      'extra': sorted(map(str, set(registered)-expected))}
 print(f'Integration layout: {len(registered)} suites, each registered once')
+
+# This entry point is shared by the shell/PowerShell check and all native CI jobs.
+import json
+from watchdog_policy import check as check_watchdogs
+errors = check_watchdogs(root, json.loads((root / 'scripts/test-watchdog-allowances.json').read_text(encoding='utf-8')))
+if errors:
+    raise SystemExit('\n'.join(errors))
+print('Test watchdog policy: no unapproved real-time guards')

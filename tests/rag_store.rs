@@ -81,7 +81,7 @@ async fn proxy(
 // Only marked query requests are held. Each arrival owns its response release;
 // dropping the test-side sender closes that request instead of orphaning it.
 async fn held_query(arrivals: &mut mpsc::Receiver<oneshot::Sender<()>>) -> oneshot::Sender<()> {
-    tokio::time::timeout(std::time::Duration::from_secs(5), arrivals.recv())
+    crate::test_watchdog::watchdog("tests/rag_store.rs: held_query", arrivals.recv())
         .await
         .expect("marked query must arrive at the HTTP response gate")
         .expect("HTTP fixture must retain the query arrival sender")
@@ -427,7 +427,7 @@ async fn readonly_history_semantic_reuses_index_and_rejects_space_change_and_tom
     release
         .send(())
         .expect("query must still await response release");
-    let changed = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+    let changed = crate::test_watchdog::watchdog("tests/rag_store.rs: readonly_history_semantic_reuses_index_and_rejects_space_change_and_tombstone", pending)
         .await
         .expect("released history query must finish")
         .unwrap();
@@ -487,7 +487,7 @@ async fn material_query_releases_snapshot_during_api_and_rejects_new_publication
     release
         .send(())
         .expect("query must still await response release");
-    let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+    let result = crate::test_watchdog::watchdog("tests/rag_store.rs: material_query_releases_snapshot_during_api_and_rejects_new_publication", pending)
         .await
         .expect("released material query must finish")
         .unwrap();
@@ -611,7 +611,7 @@ async fn owner_shuts_down_normally_during_history_query_http_and_query_reopens_o
         search(&task_root, "history", "SHUTDOWN NEAR", SearchMode::Semantic).await
     });
     let release = held_query(&mut arrivals).await;
-    tokio::time::timeout(std::time::Duration::from_secs(1), owner.shutdown())
+    crate::test_watchdog::watchdog("tests/rag_store.rs: owner_shuts_down_normally_during_history_query_http_and_query_reopens_offline", owner.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -622,7 +622,7 @@ async fn owner_shuts_down_normally_during_history_query_http_and_query_reopens_o
     release
         .send(())
         .expect("owner shutdown must not cancel independent query HTTP");
-    let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+    let result = crate::test_watchdog::watchdog("tests/rag_store.rs: owner_shuts_down_normally_during_history_query_http_and_query_reopens_offline", pending)
         .await
         .expect("released shutdown query must finish")
         .unwrap();
@@ -1841,7 +1841,7 @@ async fn scoped_history_deleted_during_query_embedding_reports_thread_not_found(
     .await
     .unwrap();
     release.send(()).unwrap();
-    let found = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+    let found = crate::test_watchdog::watchdog("tests/rag_store.rs: scoped_history_deleted_during_query_embedding_reports_thread_not_found", pending)
         .await
         .unwrap()
         .unwrap();
