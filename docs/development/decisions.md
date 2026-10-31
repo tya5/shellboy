@@ -2492,3 +2492,23 @@ if actual combined-consumer P3/count tests show excessive admission. Narrow it
 using already-known exact dependencies before adding infrastructure. Initial
 explicit payload/list reads and the other saved routes still require their own
 readonly/source-cost qualification; this helper is not a blanket completion.
+
+
+## #41 count policy: remove invented universal flat-VM gate
+
+Independent audit against user/reviewer6543044236 and6520522032 confirms that
+constant VM work under own-Thread cardinality is not a universal requirement.
+The explicit gates are bounded targets, indexed SQL, queries/request, cache and
+frame counts. Descendant depth8/256 and other adopted numeric caps still apply.
+Earlier notes demanding constant total SQL work for every exact aggregate were
+stronger than the request. Keep scope isolation/source-copy evidence and record
+own-cardinality growth honestly; do not add denormalized counters or discard
+known values solely for that invented gate. Current Run tie-order index tests
+compare a useful optional optimization, not a mandatory migration. Revisit if
+actual scoped work starves the finite pool or a concrete new requirement needs
+stronger bounds; timings remain observations, not current acceptance thresholds.
+
+Header's display-only128KiB path allowance avoids treating512-byte identity limits
+as a valid path limit. Oversized settings fail explicitly with a field witness;
+canonical CLI values remain intact. Native synthetic tests can qualify these
+copies/semantics, not Windows filesystem/path execution. No schema/worker/queue.

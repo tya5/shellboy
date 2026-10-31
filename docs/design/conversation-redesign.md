@@ -576,6 +576,27 @@ actual indexes and then-current schema before an index-only migration. F is17;
 a possible next slot is not reserved, and pre-upgrade backup/atomic ledger and
 rollback/reopen checks remain required.
 
+### Indexed scope is distinct from constant own-cardinality work
+
+Authoritative count policy6543044236 bounds reread targets, indexed scope,
+statements/request, copies/cache and frames; it does not require constant SQLite
+VM work as the target's own lifetime grows. Exact indexed child/shell count(*)
+and canonical latest-context selection may remain O(matching owned rows), with
+native growth observations and no whole-owner/global scan. Do not add counters,
+denormalization, unknown results or a migration solely to flatten that cost.
+Keep specifically adopted numeric caps (including depth8/256 descendants and
+128 owned-ID prefixes) unchanged. Tests must not call bounded returned data or
+query counts a proof of constant total SQL VM/memory. An index's ID tie-breaker
+extension is optional when the current indexed-scope gate already passes.
+
+Header scalar capture gates each cell before copying: IDs/timestamps512 bytes,
+CLI-compatible explicit title2048, profile/model4096, effort64, and cwd/agents
+paths128KiB each. A field-specific InputLimit refuses the whole unsafe header;
+no truncated path/identity becomes a command default. Recovery64KiB and shared
+title witnesses512KiB remain independently bounded. The path allowance is a
+conservative UTF-8 display envelope for extended paths, not Windows qualification.
+Exact indexed owned-work counts stay factual rather than being capped to zero.
+
 ## Cross-surface reactivity and performance admission (comments6520522032/6520544888)
 
 Delivery ownership update2026-11-01: the user moves unfinished saved lists/status
