@@ -33,7 +33,10 @@ impl RequestWitness {
             .into_iter()
             .all(valid_identity)
             .then(|| size_of::<Self>() + self.owner.capacity() + self.target.capacity())
-            .filter(|_| self.owner.capacity() <= MAX_IDENTITY_BYTES && self.target.capacity() <= MAX_IDENTITY_BYTES)
+            .filter(|_| {
+                self.owner.capacity() <= MAX_IDENTITY_BYTES
+                    && self.target.capacity() <= MAX_IDENTITY_BYTES
+            })
     }
 }
 
@@ -68,7 +71,9 @@ impl TargetWitnesses {
     }
     pub fn relevant(&self, committed: Option<&[String]>) -> bool {
         match (self, committed) {
-            (Self::Known(ids), Some(changed)) if !ids.is_empty() && changed.len() <= MAX_TARGETS => {
+            (Self::Known(ids), Some(changed))
+                if !ids.is_empty() && changed.len() <= MAX_TARGETS =>
+            {
                 ids.iter().any(|id| changed.contains(id))
             }
             // Lost/unknown scope is explicit and conservative, never permission.
@@ -183,7 +188,12 @@ impl ObservationNotice {
     pub fn text(&self) -> String {
         let captured = self.captured_at.map_or_else(
             || "取得時刻なし".into(),
-            |time| format!("取得 UTC {}", time.to_rfc3339_opts(SecondsFormat::Millis, true)),
+            |time| {
+                format!(
+                    "取得 UTC {}",
+                    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+                )
+            },
         );
         let state = match self.freshness {
             Freshness::Captured => "取得時点の事実",
@@ -192,9 +202,16 @@ impl ObservationNotice {
             Freshness::Unavailable => "確認範囲を取得できません",
         };
         let attempt = self.last_attempt_at.map_or_else(String::new, |time| {
-            format!(" · 最終要求 UTC {}", time.to_rfc3339_opts(SecondsFormat::Millis, true))
+            format!(
+                " · 最終要求 UTC {}",
+                time.to_rfc3339_opts(SecondsFormat::Millis, true)
+            )
         });
-        format!("{} · {captured} · {state}{attempt} · {}", self.kind.label(), self.next_action.label())
+        format!(
+            "{} · {captured} · {state}{attempt} · {}",
+            self.kind.label(),
+            self.next_action.label()
+        )
     }
 }
 
@@ -205,13 +222,34 @@ mod tests {
 
     #[test]
     fn identity_and_target_metadata_reject_truncation_and_excess_capacity() {
-        let witness = RequestWitness { owner: "owner".into(), target: "thread:one".into(), request: 1, generation: 2, revision: 3 };
+        let witness = RequestWitness {
+            owner: "owner".into(),
+            target: "thread:one".into(),
+            request: 1,
+            generation: 2,
+            revision: 3,
+        };
         assert!(witness.metadata_bytes().is_some());
-        assert!(RequestWitness { target: "x".repeat(MAX_IDENTITY_BYTES + 1), ..witness }.metadata_bytes().is_none());
-        assert!(TargetWitnesses::Known(vec!["id".into(); MAX_TARGETS + 1]).metadata_bytes().is_none());
+        assert!(
+            RequestWitness {
+                target: "x".repeat(MAX_IDENTITY_BYTES + 1),
+                ..witness
+            }
+            .metadata_bytes()
+            .is_none()
+        );
+        assert!(
+            TargetWitnesses::Known(vec!["id".into(); MAX_TARGETS + 1])
+                .metadata_bytes()
+                .is_none()
+        );
         let mut large = String::with_capacity(1024);
         large.push('x');
-        assert!(TargetWitnesses::Known(vec![large]).metadata_bytes().is_none());
+        assert!(
+            TargetWitnesses::Known(vec![large])
+                .metadata_bytes()
+                .is_none()
+        );
         assert!(TargetWitnesses::Unavailable.relevant(Some(&[])));
         let empty = TargetWitnesses::Known(vec![]);
         assert!(!empty.available());
@@ -230,11 +268,18 @@ mod tests {
     #[test]
     fn retained_result_and_notice_are_bounded_without_clock_or_io() {
         assert!(result_metadata_bytes(&json!({"cost": 42}), MAX_METADATA_BYTES).is_some());
-        assert!(result_metadata_bytes(&json!("x".repeat(MAX_METADATA_BYTES)), MAX_METADATA_BYTES).is_none());
-        let notice = ObservationNotice { kind: ObservationKind::Models,
+        assert!(
+            result_metadata_bytes(&json!("x".repeat(MAX_METADATA_BYTES)), MAX_METADATA_BYTES)
+                .is_none()
+        );
+        let notice = ObservationNotice {
+            kind: ObservationKind::Models,
             captured_at: Some(DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
-            last_attempt_at: None, freshness: Freshness::Captured,
-            next_action: NextAction::RefreshModels, confirmation_enabled: false };
+            last_attempt_at: None,
+            freshness: Freshness::Captured,
+            next_action: NextAction::RefreshModels,
+            confirmation_enabled: false,
+        };
         assert_eq!(notice.text(), notice.text());
         assert!(notice.text().contains("UTC"));
         assert!(notice.text().contains("Ctrl+R"));
