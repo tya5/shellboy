@@ -29,6 +29,7 @@ pub mod presentation;
 pub mod program_status;
 pub mod protocol;
 pub mod rag;
+pub mod serve;
 pub mod shell;
 pub mod status;
 pub mod storage;

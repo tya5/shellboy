@@ -91,7 +91,10 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Err(error) => {
-            if invoking_exec() {
+            if invoking("serve") {
+                return shellboy::serve::startup_error(cli_parse_error(&error));
+            }
+            if invoking("exec") {
                 let error = cli_parse_error(&error);
                 let mut outcome = shellboy::exec_client::Outcome::input(&error.message);
                 outcome.diagnostics["error"] =
@@ -101,12 +104,36 @@ fn main() -> ExitCode {
             return print_error(cli_parse_error(&error), None);
         }
     };
+    if matches!(cli.command, Some(CliCommand::Serve)) {
+        if cli
+            .data_dir
+            .as_ref()
+            .is_none_or(|p| p.as_os_str().is_empty())
+        {
+            return shellboy::serve::startup_error(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "serve requires an explicit --data-dir DIR",
+            ));
+        }
+        if cli.operation_id.is_some() {
+            return shellboy::serve::startup_error(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "--operation-id does not apply to serve",
+            ));
+        }
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
     {
         Ok(value) => value,
         Err(_) => {
+            if matches!(&cli.command, Some(CliCommand::Serve)) {
+                return shellboy::serve::startup_error(ApiError::new(
+                    ErrorCode::IoFailed,
+                    "Cannot start async runtime",
+                ));
+            }
             if matches!(&cli.command, Some(CliCommand::Exec(_))) {
                 return emit_exec(shellboy::exec_client::Outcome {
                     code: 6,
@@ -120,7 +147,7 @@ fn main() -> ExitCode {
             );
         }
     };
-    let cwd = if cli.command.is_none() {
+    let cwd = if cli.command.is_none() || matches!(cli.command, Some(CliCommand::Serve)) {
         std::path::PathBuf::new()
     } else {
         match std::env::current_dir() {
@@ -154,6 +181,13 @@ fn main() -> ExitCode {
         );
     }
     match cli.command.take() {
+        Some(CliCommand::Serve) => match runtime.block_on(shellboy::serve::run(
+            cli.config,
+            cli.data_dir.expect("serve path checked before runtime"),
+        )) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => shellboy::serve::startup_error(error),
+        },
         Some(CliCommand::Exec(options)) => {
             let data = match resolve_cli_data_dir(
                 cli.data_dir.as_deref(),
@@ -199,7 +233,7 @@ fn main() -> ExitCode {
         None => run_tui(cli, runtime),
     }
 }
-fn invoking_exec() -> bool {
+fn invoking(command: &str) -> bool {
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--data-dir" || arg == "--config" || arg == "--operation-id" {
@@ -209,7 +243,7 @@ fn invoking_exec() -> bool {
         if arg.to_string_lossy().starts_with('-') {
             continue;
         }
-        return arg == "exec";
+        return arg == command;
     }
     false
 }
