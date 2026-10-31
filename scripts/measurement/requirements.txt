@@ -1,0 +1,3 @@
+# CI-only fixed-screen VT decoding; never added to product dependencies.
+pyte==0.8.2
+wcwidth==0.2.13

@@ -12,6 +12,23 @@ on:
         description: Compare baseline/current Windows timings and four-thread contention
         type: boolean
         default: false
+      native_tui_performance:
+        description: Also record native Unix P2 (600s) and P5 (60s), before/after at 80/140 columns
+        type: boolean
+        default: false
+      native_tui_producers:
+        description: Independent hidden-output producers for P5 (P2 always one)
+        type: choice
+        options: ['1', '2', '3', '4']
+        default: '3'
+      native_tui_baseline_ref:
+        description: Exact baseline ref for same-runner native TUI observations
+        type: string
+        default: 'd0a92bf2d4fffd12d8606ce5e9365d2fd4606410'
+      native_tui_candidate_ref:
+        description: Candidate ref (empty uses this workflow commit)
+        type: string
+        default: ''
       windows_test_threads:
         description: Windows threads (4 selects Windows-only experiment; default/2 check all OSes)
         type: choice
@@ -127,3 +144,69 @@ jobs:
         with:
           name: test-performance-${{ matrix.sample }}
           path: ${{ runner.temp }}/test-performance-${{ matrix.sample }}
+
+  native-tui-measure:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_tui_performance == true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        cols: [80, 140]
+    runs-on: ${{ matrix.os }}
+    # Two serial subjects plus independent release builds; candidate Watch adds600s/60s.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: before
+          ref: ${{ inputs.native_tui_baseline_ref }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: after
+          ref: ${{ inputs.native_tui_candidate_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate harness failure and witness gates
+        run: python -m unittest discover -s tooling/scripts/tests -p test_tui_measure.py
+      - name: Record unavailable native Windows fixture
+        if: runner.os == 'Windows'
+        run: python tooling/scripts/tui-measure.py unavailable --baseline before --candidate after --output observations
+      - name: Install CI-only fixed-screen decoder
+        if: runner.os != 'Windows'
+        run: python3 -m pip install --disable-pip-version-check -r tooling/scripts/measurement/requirements.txt
+      - name: Install measured toolchain
+        if: runner.os != 'Windows'
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Instrument baseline temporary checkout
+        if: runner.os != 'Windows'
+        run: python3 tooling/scripts/tui-measure.py prepare --subject before --output observations/before
+      - name: Instrument candidate temporary checkout
+        if: runner.os != 'Windows'
+        run: python3 tooling/scripts/tui-measure.py prepare --subject after --output observations/after
+      - name: Build baseline measurement-only binary
+        if: runner.os != 'Windows'
+        run: python3 tooling/scripts/tui-measure.py build --subject before --output observations/before
+      - name: Build candidate measurement-only binary
+        if: runner.os != 'Windows'
+        run: python3 tooling/scripts/tui-measure.py build --subject after --output observations/after
+      - name: Record both subjects on this runner (no performance threshold gates)
+        if: runner.os != 'Windows'
+        run: python3 tooling/scripts/tui-measure.py run-pair --baseline before --candidate after --output observations --cols ${{ matrix.cols }} --producers ${{ inputs.native_tui_producers }}
+      - name: Summarize available and missing observations
+        if: always()
+        run: python tooling/scripts/tui-measure.py summarize --output observations
+      - name: Upload measurements, source patches and failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-tui-${{ runner.os }}-${{ matrix.cols }}-${{ github.run_id }}
+          path: observations/
+          if-no-files-found: error
+          retention-days: 14
