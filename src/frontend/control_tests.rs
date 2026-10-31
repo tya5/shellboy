@@ -903,7 +903,11 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
         crate::ui::activity::ActivityPhase::Stopped
     );
     assert!(
-        projection.snapshot.recovery.is_none(),
+        projection
+            .snapshot
+            .recovery
+            .as_ref()
+            .is_some_and(|r| r.resolved),
         "#85: explicit saved stop resolves the active recovery footer, not its historical evidence"
     );
     let stop = control

@@ -531,7 +531,8 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     read_repaint_text(&mut terminal, &mut output, &["一時停止: false"]).await;
     terminal.write_all(b"\x1b[27u").unwrap();
     terminal.write_all(b"hello from actual terminal\r").unwrap();
-    read_until_text(&mut terminal, &mut output, "モデル応答待ち").await;
+    // #85: this fixture already delivered HTTP headers, so reception is observed.
+    read_until_text(&mut terminal, &mut output, "応答受信中").await;
     let waiting = collect_matching(
         &mut terminal,
         &mut output,

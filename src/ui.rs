@@ -5256,6 +5256,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         .snapshot
         .as_ref()
         .and_then(|s| s.recovery.as_ref())
+        .filter(|r| !r.resolved)
         .map(|r| {
             (
                 if r.usage_limit.is_some() {

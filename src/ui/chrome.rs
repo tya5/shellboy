@@ -147,6 +147,7 @@ pub(super) fn footer_lines(
         .snapshot
         .as_ref()
         .and_then(|s| s.recovery.as_ref())
+        .filter(|r| !r.resolved)
         .and_then(|r| r.limit_summary())
     {
         facts.push(limit);

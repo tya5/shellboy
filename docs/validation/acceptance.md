@@ -5188,3 +5188,18 @@ an aggregate full traversal beyond the old EXISTS behavior. A lost-observation
 regression also prevents a new snapshot from fabricating first-byte age: age stays
 unknown until a new receive observation, without counting the unknown gap.
 Older mismatching receive observations cannot displace a newer early candidate.
+
+The first full integration run exposed real compatibility regressions, not flakes:
+a sampled133-second UI observation was not committed to the new phase anchor;
+and removing the entire RecoverySnapshot also removed the intentional historical
+recovery panel after stop. Phase anchors now commit the existing sampled UI time
+and never go backwards. RecoverySnapshot.resolved distinguishes historical panel
+facts from current footer ownership, preserving that panel, original reasons and
+stop details while clearing only active footer/action facts. The unchanged
+frontend_activity suite8, external-CLI reactivity case1 and tui_recovery suite2
+all pass after these corrections. No wait length or assertion of saved history
+was weakened. The native fixture's old 'waiting' expectation after HTTP headers
+was intentionally changed to transport Receiving under the adopted #85 contract.
+The fixture likewise checks absence of active footer recovery, not absence of the
+historical recovery panel. The initial four integration failures are retained in
+logs; they are not covered by the separate #96 unrelated-CI classification.

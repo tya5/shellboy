@@ -274,9 +274,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         snapshot.timing.generation = Some(generation);
         snapshot.context_reduction = reduction::prepare(context_reduction);
         if let Some(reason) = reason
-            && (run_state == "failed"
-                || (matches!(run_state.as_str(), "live" | "stopping")
-                    && matches!(turn_state.as_str(), "recovery_wait" | "failed")))
+            && (turn_state == "recovery_wait" || serde_json::from_str::<ApiError>(&reason).is_ok())
         {
             // Startup interruption writes a different saved reason schema. Its
             // presence alone is not evidence that this Turn awaited recovery.
@@ -334,6 +332,9 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             let (pending_messages, saved_tool_results, live_shells, uncollected_shells) =
                 recovery_counts.expect("saved recovery reason has collected recovery counts");
             snapshot.recovery = Some(RecoverySnapshot {
+                resolved: !(run_state == "failed"
+                    || (matches!(run_state.as_str(), "live" | "stopping")
+                        && matches!(turn_state.as_str(), "recovery_wait" | "failed"))),
                 usage_limit: error
                     .as_ref()
                     .and_then(|e| e.details.as_ref())
@@ -531,14 +532,26 @@ mod footer85_tests {
         for state in ["running", "completed", "stopped"] {
             db.execute("UPDATE turn SET state=?1", [state]).unwrap();
             assert!(
-                project(&db, "t").unwrap().snapshot.recovery.is_none(),
+                project(&db, "t")
+                    .unwrap()
+                    .snapshot
+                    .recovery
+                    .as_ref()
+                    .is_some_and(|r| r.resolved),
                 "saved resolved state {state} wins over retained historical reason"
             );
         }
         db.execute("UPDATE turn SET state='failed'", []).unwrap();
         assert!(project(&db, "t").unwrap().snapshot.recovery.is_some());
         db.execute("UPDATE run SET state='stopped'", []).unwrap();
-        assert!(project(&db, "t").unwrap().snapshot.recovery.is_none());
+        assert!(
+            project(&db, "t")
+                .unwrap()
+                .snapshot
+                .recovery
+                .unwrap()
+                .resolved
+        );
         let original: String = db
             .query_row("SELECT recovery_reason_json FROM turn", [], |r| r.get(0))
             .unwrap();
