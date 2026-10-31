@@ -100,7 +100,20 @@ pub(super) fn capture_list_scope(
     let mut ids = Vec::new();
     let mut work = Vec::new();
     let mut compact = Vec::new();
+    let mut data_threads = BTreeSet::new();
     for row in rows {
+        if let Some(thread) = row.get("thread_id").and_then(Value::as_str) {
+            if thread.is_empty() || thread.len() > 1024 || thread.chars().any(char::is_control) {
+                return Err(bad("Captured data Thread identity exceeds scalar limit"));
+            }
+            if !data_threads.contains(thread) {
+                text_bytes = text_bytes.saturating_add(thread.len());
+                if text_bytes > status::TEXT_BYTES {
+                    return Err(bad("Captured data Threads exceed channel"));
+                }
+                data_threads.insert(thread.to_owned());
+            }
+        }
         let key = match route {
             Route::Status => "id",
             Route::Thread => "thread_id",
@@ -202,6 +215,7 @@ pub(super) fn capture_list_scope(
         return Err(bad("Notification IDs exceed metadata channel"));
     }
     let mut threads = changed_threads.iter().cloned().collect::<BTreeSet<_>>();
+    threads.extend(data_threads);
     let explicit = match command {
         Command::Status(a) => a.thread_id.as_ref(),
         Command::ThreadList(_) => None,
