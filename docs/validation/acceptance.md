@@ -6046,3 +6046,14 @@ completion of the remaining canonical code-copy/image-failure work. No Rust
 process remains from this task. Both worker1 and worker2 received one concrete
 slot-released notice so #85's quiet observation can proceed; no new Rust run is
 started during that observation.
+
+### #87 Remaining Copy/Image Paths: Qualification Pending
+
+Additional WIP code extends the already-qualified contextual-key stage with a
+canonical chooser, numbered assistant captions, source-digest validation, Unicode
+copy counts and image-failure `/attach` advice. Static formatting/layout and Python
+syntax checks pass; compilation, new source/ownership tests, full standard check,
+P1 measurements and the new `scripts/check-code-copy.py` real PTY matrix remain
+pending. Earlier stage-1 PTY captures do not prove these additional behaviors.
+Only synthetic fixtures and intercepted OSC52 are planned; no installed binary,
+real clipboard, paid model request or user data is part of this qualification.
