@@ -1,4 +1,5 @@
 //! Shared popup geometry, list focus, and reader viewports. No domain actions or I/O.
+mod reader;
 use super::theme;
 use crossterm::event::KeyCode;
 use ratatui::{
@@ -11,6 +12,7 @@ use ratatui::{
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
+pub(super) use reader::ReaderCache;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct PaintBounds {
@@ -21,6 +23,11 @@ pub(super) fn move_selection(selected: usize, delta: isize, count: usize) -> usi
     selected
         .saturating_add_signed(delta)
         .min(count.saturating_sub(1))
+}
+pub(super) fn move_reader(scroll: u16, delta: isize, maximum: u16) -> u16 {
+    usize::from(scroll)
+        .saturating_add_signed(delta)
+        .min(usize::from(maximum)) as u16
 }
 pub(super) fn panel_recorded(
     frame: &mut Frame<'_>,
@@ -37,6 +44,23 @@ pub(super) fn panel_recorded(
     }));
     panel(frame, area, title, context, footer)
 }
+pub(super) fn compact_recorded(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    context: &str,
+    footer: &str,
+    height: u16,
+    paint: &std::cell::Cell<Option<PaintBounds>>,
+) -> Rect {
+    let layout = PanelLayout::new(area, context, footer, Some(height));
+    paint.set(Some(PaintBounds {
+        outer: layout.outer,
+        body: layout.body(),
+    }));
+    compact(frame, area, title, context, footer, height)
+}
+
 /// The existing application status remains visible below every popup.
 pub(super) const STATUS_ROWS: u16 = 2;
 pub(super) fn viewport(area: Rect) -> Rect {
