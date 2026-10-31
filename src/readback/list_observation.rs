@@ -80,14 +80,20 @@ pub(crate) fn read_shells_tx(
 ) -> Result<Raw, StorageError> {
     observation::validate_ids(ids).map_err(StorageError::from)?;
     if ids.is_empty() {
-        return Ok(Raw::default());
+        return Ok(Raw {
+            unconfirmed: true,
+            ..Default::default()
+        });
     }
-    read_json_tx(
+    let mut raw = read_json_tx(
         db,
         SHELL_POINT_SQL,
         &serde_json::to_string(ids).expect("bounded IDs"),
         budget,
-    )
+    )?;
+    raw.unconfirmed = true;
+    assert!(raw.statements <= SHELL_POINT_STATEMENTS);
+    Ok(raw)
 }
 
 pub(crate) fn compact_point_sql(source: &Source) -> String {
@@ -198,6 +204,7 @@ pub(crate) fn read_compact_membership_tx(
         result.limited |= raw.limited;
         result.statements += 1;
     }
+    assert!(result.statements <= COMPACT_PREFIX_STATEMENTS);
     Ok(result)
 }
 pub(crate) fn prepare(raw: Raw) -> Result<Value, ApiError> {
