@@ -417,3 +417,14 @@ its tool_result relation and call completion transaction commit successfully.
 The earlier shell-collection notification cannot substitute for this edge:
 a concurrent frontend read may occur before the canonical result exists. No
 rollback publishes this notification, and no new business event/state is added.
+
+
+## Unix startup shell uncertainty (#82)
+
+The previous-instance snapshot still precedes startup state repair in the same
+transaction. On Unix only, active shell records are failed with reason
+previous_instance_interrupted_os_state_unverified and recovery.os_state=unverified;
+the snapshot reports the same planned state and uncertainty. This is an owner
+interruption, not an observed OS exit. Real terminal records are not rewritten,
+no stored PIDs are signaled, and Run/Turn/receipt/tool repair and normal shutdown
+ordering are unchanged. Native lifetime ownership is specified in shell.md.

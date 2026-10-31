@@ -432,6 +432,9 @@ pub(crate) fn interrupt_previous_work(
 ) -> Result<RepairReport, StorageError> {
     super::revisit::drop_all_pending(tx)?;
     tx.execute("UPDATE turn SET state='stopped',ended_at=?1,recovery_reason_json=?2 WHERE state IN ('preparing','running','waiting','recovery_wait')",rusqlite::params![now,r#"{"reason":"previous_instance_interrupted","result_uncertain":true}"#])?;
+    #[cfg(unix)]
+    tx.execute("UPDATE shell_execution SET state='failed',ended_at=?1,end_reason='previous_instance_interrupted_os_state_unverified',output_complete=0,shell_json=json_set(shell_json,'$.recovery',json('{\"os_state\":\"unverified\",\"result_uncertain\":true}')) WHERE state IN ('starting','running','stopping')",[&now])?;
+    #[cfg(not(unix))]
     tx.execute("UPDATE shell_execution SET state='stopped',ended_at=?1,end_reason='previous_instance_interrupted',output_complete=0 WHERE state IN ('starting','running','stopping')",[&now])?;
     let report = repair_interrupted_tool_groups(tx, now)?;
     tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping')",[&now])?;

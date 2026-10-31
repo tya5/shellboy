@@ -1941,3 +1941,23 @@ explicit in validation/storage docs. No new tables, workers, queues or denormali
 source copies. Revisit only if real scoped-query workloads justify another access
 path; mocks/query plans are not real-provider or general latency guarantees.
 Source: issue75 and user-approved query-plan/read-only/watchdog/redaction constraints.
+
+
+## 2026-10-31: Unix lifeline ownership (#82)
+
+Use one native guardian per live Unix execution. Its PID reserves the model PGID
+while it waits outside that group, so existing normal TERM/grace/KILL probes do
+not count the guardian as surviving work. A short-lived setup child creates its
+private group, preventing an owner-group SIGKILL from killing the guardian too.
+Steady owner/guardian overhead is two FDs each (lifeline and status), not just
+the proposal's one owner FD. The status acknowledgment preserves the existing
+natural-exit/late-stop contract; exec-error acknowledgment is startup-only.
+All use the existing supervisor task; no runtime worker, queue, table or package
+is added. The low-level fork branches perform native operations only.
+
+Do not add a persistent PID registry or attempt startup kills by old numbers.
+Startup records OS-unverified Unix shells as failed rather than claiming stopped.
+Escaped groups, intentional guardian tampering, kernel-stop latency and observing
+old-version survivors are outside this minimum implementation. Windows Job and
+normal owner shutdown policies are not changed. Revisit the helper layout only
+if native tests or a future shell runtime change invalidate these bounds.

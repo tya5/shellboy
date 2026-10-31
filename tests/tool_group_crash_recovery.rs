@@ -561,15 +561,35 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
         if let Ok(text)=std::fs::read_to_string(&pidfile) && text.ends_with('\n') && let Ok(pid)=text.trim().parse::<i32>() {
             assert!(pid>1);
             // SAFETY: getpgid only observes the PID written by our shell.
-            assert_eq!(unsafe {libc::getpgid(pid)},pid);
-            killed.shell_group=Some(pid);
+            let group = unsafe {libc::getpgid(pid)};
+            assert!(group > 1 && group != killed.child.id() as i32);
+            killed.shell_group=Some(group);
             let db=rusqlite::Connection::open_with_flags(directory.join("shellboy.db"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
             let ready:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution s JOIN output_chunk o ON o.execution_id=s.id WHERE s.state='running' AND o.bytes=CAST('CRASH_READY' AS BLOB))",[],|r|r.get(0)).unwrap();
             if ready {break;}
         }
         assert!(killed.child.try_wait().unwrap().is_none());sleep(Duration::from_millis(5)).await;
     }}).await.expect("actual shell never reached running plus saved output");
-    killed.kill();
+    // Kill only the real owner PID, not its group and not the shell group.
+    assert_eq!(
+        unsafe { libc::kill(killed.child.id() as i32, libc::SIGKILL) },
+        0
+    );
+    killed.child.wait().unwrap();
+    let group = killed.shell_group.unwrap();
+    crate::test_watchdog::watchdog("owner-death lifeline removes the shell group", async {
+        loop {
+            if unsafe { libc::kill(-group, 0) } != 0
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    killed.shell_group = None;
     let owner = open(root.path()).await;
     let rows = result_snapshot(&owner).await;
     assert_eq!(rows.len(), 1);
@@ -579,9 +599,38 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
     assert_eq!(output["status"], "interrupted");
     assert_eq!(output["result_uncertain"], true);
     assert_eq!(output["output_complete"], false);
-    assert_eq!(output["saved_execution"]["state"], "stopped");
+    assert_eq!(
+        output["saved_execution"]["state"],
+        if cfg!(unix) { "failed" } else { "stopped" }
+    );
     assert_eq!(output["saved_execution"]["output_complete"], false);
     let control = Control::new(&owner, root.path().into());
+    let details = control
+        .request(Request::new(
+            "read-interrupted-shell",
+            Command::ShellGet(ExecutionTarget {
+                execution_id: output["execution_id"].as_str().unwrap().into(),
+            }),
+        ))
+        .await;
+    assert!(details.ok, "{:?}", details.error);
+    let details = details.result.unwrap();
+    assert_eq!(details["state"], "failed");
+    assert_eq!(
+        details["reason"],
+        "previous_instance_interrupted_os_state_unverified"
+    );
+    for field in [
+        "exit_code",
+        "exit_signal",
+        "forced",
+        "group_cleanup_confirmed",
+    ] {
+        assert!(
+            details.get(field).is_none_or(Value::is_null),
+            "unverified fact was fabricated: {field}"
+        );
+    }
     send_and_complete(&control, &thread, "AFTER_SIGKILL").await;
     assert_pairs(&proxy.next().await, &["call-crash"], "AFTER_SIGKILL");
     owner

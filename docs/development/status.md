@@ -1509,3 +1509,27 @@ clock or non-gating measurement occurrences are documented separately. #41 was
 notified; only minimal cfg(test) lib-module wiring overlaps its current files.
 Local targeted tests and Python mutation tests pass; final full/rebased checks,
 two complete native branch runs and main CI are independent pending gates.
+
+
+## Unix owner-death shell lifetime (#82, 2026-10-31)
+
+A per-execution native guardian holds a close-on-exec owner lifeline and a status
+socket, reserves the execution PGID with its live PID, and waits outside both
+model and owner groups. EOF requests group KILL. A short-lived setup child is
+reaped before publication; no runtime worker, queue, table or dependency is added.
+The owner and guardian each retain two FDs per execution; launch-only descriptors
+and native ownership/cleanup bounds are recorded in the Shell design.
+
+Unix restart records interrupted active shells as failed with
+previous_instance_interrupted_os_state_unverified, without inventing exit/signal
+or confirmed group cleanup. Existing terminal outputs and Windows startup/Job
+handling are unchanged. Normal owner Ctrl+Q/SIGTERM routing and TERM/grace/KILL
+policy are preserved; raw shell status/reap acknowledgment is native-adapter work.
+
+Native macOS mock/real-process tests pass for two independent shell groups under
+owner-PID and owner-group KILL, real owner restart with no replay, natural exit /
+late stop, exec failure/script fallback, and normal signal/PTY shutdown. Direct
+Bash signal/exit oracles also pass. Full local standard checks have passed; final
+rebased checks and Linux/macOS/Windows CI remain separate gates. No installed
+binary, real owner/data, release or paid provider is used. Escaped groups and
+stop-time guarantees remain outside scope; no stored-PID cleanup is attempted.

@@ -14,7 +14,7 @@ stdout/stderrは別pump。各pipeに最大8KiBの固定read bufferを一つ持�
 
 `ShellEvent::Output(OutputChunk)` のprivate permitは、**DBがchunkをcommitしてからchunkをdropするまで**保持する。consumerがbytesを無制限queueへcloneしてpermitを先に返してはいけない。64件のchannelとbyte予算の両方で背圧がかかる。停止control経路は別である。execution当たりshell_raw_bytes超過は保存可能prefixまでを送り、明示 `raw output limit exceeded` を記録して対象を停止する。上限後も実行を継続させて黙って出力を捨てる方式は採らない。
 
-Unixは起動時 `process_group(0)` でexecution固有群へ入れる。停止は群TERM→有限猶予→KILL。直接shellの自然終了でも同じ群の残存処理へTERM/KILLし、pipe保持による無期限drainを防ぐ。direct childのexit code/signal、forced、output_complete、group_cleanup_confirmedは別々に保持する。 S3では完了時に実supervisorが返したforced/exit_signal/group_cleanup_confirmedを既存shell_jsonのcompletion objectへ保存し、同じtransactionでshell_endedへ含める。shell getの追加optional fieldとモデルtool結果も同じ事実を公開する。既存schema/columnは増やさず、旧記録・起動中・回復時の未知な値をfalseやsignalなしへ補完しない。旧履歴/raw/保存済みtool結果は書き換えない。 ShellDetailsの追加fieldはserde default/None省略とし、新clientは旧ownerの返値も受け取れる。欠損や旧extensionの型不明値は未知のまま省略し、JSON booleanのfalseは既知のfalseとして保持する。信号API成功を完全回収確認と同じにせず、`kill(-pgid,0)` が消滅を確認できなければ未確認を残す。群外へ脱離した処理と本体SIGKILL後の孤児完全回収は原文通り保証外。前回PIDを再起動後killする経路は存在しない。
+Unixは起動時 `process_group(0)` でexecution固有群へ入れる。停止は群TERM→有限猶予→KILL。直接shellの自然終了でも同じ群の残存処理へTERM/KILLし、pipe保持による無期限drainを防ぐ。direct childのexit code/signal、forced、output_complete、group_cleanup_confirmedは別々に保持する。 S3では完了時に実supervisorが返したforced/exit_signal/group_cleanup_confirmedを既存shell_jsonのcompletion objectへ保存し、同じtransactionでshell_endedへ含める。shell getの追加optional fieldとモデルtool結果も同じ事実を公開する。既存schema/columnは増やさず、旧記録・起動中・回復時の未知な値をfalseやsignalなしへ補完しない。旧履歴/raw/保存済みtool結果は書き換えない。 ShellDetailsの追加fieldはserde default/None省略とし、新clientは旧ownerの返値も受け取れる。欠損や旧extensionの型不明値は未知のまま省略し、JSON booleanのfalseは既知のfalseとして保持する。信号API成功を完全回収確認と同じにせず、`kill(-pgid,0)` が消滅を確認できなければ未確認を残す。群外へ脱離した処理は保証外。Unix owner異常終了は下記 #82 lifeline 契約で補強する。前回PIDを再起動後killする経路は存在しない。
 
 出力/初期stdin taskのdrainはdrain_timeout_msで有限化し、残るtaskはabortする。queueの背圧でdrain未完了となった場合も `output_complete=false` と理由を残す。 S5ではDrain不完全だけで自然終了のExited/exit codeをFailedへ置換しない。初期stdin・wait・raw上限・実I/O等の操作エラーは従来通りFailedとする。direct child待ちで停止branchを選んだ事実をその監視task内のboolへ固定し、終了後の配下確認/drain中に届いたstopを最終stateへ遡及しない。同時にreadyなら確認済みchild終了を先に採る。出力不完全による未実行callの取消しは維持し、理由をprocess失敗と区別する。新しい永続状態/列/workerは追加せず、Unix/Windowsの共通state判定だけをprivate helperへ寄せる。consumerは**eventsをEOFまで取得・永続化してから**completionの終端を保存し、そのcommit後に所有者へ通知する。watch到着だけでは出力保存完了を意味しない。
 
@@ -192,3 +192,51 @@ calls through the shared native-start gate. Saved reasons distinguish this from
 full Run stop and ordinary failure. Background completions keep their existing
 shell_ended delivery. See [pending messages](pending-messages.md) for exact
 ownership, ordering and partial-output retention; no timed backgrounding is added.
+
+
+## Unix owner-death lifeline (#82)
+
+The Unix native adapter owns one tiny forked guardian per admitted execution,
+not a runtime worker/service, queue or table. The guardian's live PID reserves
+the execution PGID. The configured shell is its child in that PGID; the guardian
+moves to a private group and blocks ordinary terminal signals. A short-lived
+setup child creates that group and is reaped before startup publication; a setup
+pipe prevents it lingering if setup is interrupted. The guardian therefore also
+survives an owner-group SIGKILL.
+It remains alive until native cleanup completes or the owner disappears. This
+keeps the PGID reserved even after the configured shell exits, without retaining
+a zombie shell or making the guardian count as a surviving execution descendant.
+
+The owner keeps one close-on-exec lifeline socket and one status socket per
+live execution. A third socket pair is startup-only exec-error acknowledgment. Private-group
+setup adds one transient child and pipe (two FDs), with no retained setup child.
+The guardian retains only its lifeline reader and status writer; unrelated file
+and socket descriptors (especially other lifelines and owner locks) are closed.
+Linux uses close_range when available; the portable fallback closes the inherited
+FD table up to the process's spawn-time descriptor limit. Shellboy does not alter
+that limit concurrently with native spawn. All post-fork work is raw native
+syscalls, without Rust allocation, locks, runtime operations or destructors.
+The configured argv/environment/cwd and raw wait status are preserved. The
+shell is a member of the guardian-numbered group, not its group leader. Natural
+status uses waitid(WNOWAIT) and a one-time acknowledgment on the status socket
+before reap, so disappearance cannot precede owner observation. Reap is then
+acknowledged before the existing group-cleanup probes, within the existing
+reap/drain budget, not counted as a surviving shell during grace. This supersedes
+the earlier S9 decision against WNOWAIT for the old direct-child adapter.
+
+The guardian waits atomically for lifeline EOF or SIGCHLD using pselect, not a
+timer/poller. EOF requests KILL for its reserved group, reaps its direct child if still
+in that group, and exits; it does not wait indefinitely for an escaped child. the guarantee is a signal request, not an elapsed-time guarantee or
+proof that every escaped process disappeared. Normal supervision still applies
+the existing TERM/grace/KILL and group-confirmation policy. It uses the relayed
+shell wait status, closes the lifeline only after group cleanup, and reaps the
+guardian within the existing reap/drain budget. Windows Job and owner Ctrl+Q /
+SIGTERM shutdown policies are unchanged. No PID/PGID from storage is signaled.
+
+On Unix startup, active records from an interrupted owner become failed with
+reason previous_instance_interrupted_os_state_unverified and
+recovery.os_state=unverified, not an
+assertion that the OS shell stopped. Exit/signal/group-confirmation facts are
+not fabricated; old executions lacking a lifeline are also unverified. Startup
+interruption evidence reports the same distinction. No new persistent state or
+schema is required. Terminal records and saved real outputs remain immutable.

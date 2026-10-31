@@ -15,9 +15,19 @@ is ready). Windows console close retains a four-second OS callback cap. Known
 owned Unix process groups receive a best-effort KILL before forced process exit;
 that does not prove saving or reaping completed. If blocked terminal output
 prevents restoration, Unix raw mode can be restored with `stty sane`.
-OS deadlines, SIGKILL and power
-loss can still interrupt saving: inspect the previous shutdown record after
-restart. A signal is a request to stop, not proof that every effect was saved.
+OS deadlines, SIGKILL and power loss can still interrupt saving: inspect the
+previous shutdown record after restart. A signal is a request to stop, not proof
+that every effect was saved.
+
+On Unix, newly launched model shells have an owner-lifetime guardian: owner death
+closes a private lifeline and requests KILL for that execution's process group.
+This is not a stop-time guarantee. Processes deliberately escaping the group
+(e.g. via `setsid`, or detached/nohup launch arrangements) may survive. Windows
+continues to use its kill-on-close Job object. On Unix restart, interrupted active
+executions are recorded as failed with
+`previous_instance_interrupted_os_state_unverified`, not as confirmed OS stops;
+exit status and group cleanup remain unknown. This also covers older executions
+without a guardian. Startup does not signal stored PIDs/PGIDs or replay commands.
 
 Windows console close uses the same bounded path when the OS delivers its event.
 Logoff/shutdown delivery is best effort, particularly when GUI libraries suppress

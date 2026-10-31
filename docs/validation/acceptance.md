@@ -3969,3 +3969,57 @@ for idle; it uses #77's 60-second watchdog and no speed criterion. The file phas
 receives only owned rows, not a connection or transaction. Full standard checks,
 role checks, exact-source native CI and record-line audit are tracked in #79.
 Tests use temporary files/databases and no provider. F6 remains deferred to #41.
+
+
+## Unix owner-death lifeline (#82)
+
+2026-10-31, native macOS ARM64 / Rust 1.99.1, main 0d4f63a base. Temporary HOME,
+data and loopback Responses fixtures only; no installed binary, real owner,
+user data, release or paid provider is changed.
+
+The Unix adapter adds a fixed native guardian, not a runtime worker/queue/table.
+Its live PID reserves the model PGID, with the guardian outside both model and
+owner groups. A startup-only child creates its private group and is reaped before
+publication. Steady overhead is two owner FDs and two guardian FDs per execution;
+three close-on-exec socket pairs are launch-only, and group setup temporarily
+uses a pipe/two FDs. The status handshake is required to retain the natural-exit /
+late-stop contract. No FD is allocated while waiting for the Turn gate. See the
+Shell design for post-fork operations and descriptor closure responsibility.
+
+Evidence on this source:
+- Native shell suite passes stdin/encoding/profile/env/argv, natural exit,
+  nonzero/signal status, backpressure/late stop, descendant cleanup and raw bounds.
+  A direct Bash oracle compares SIGPIPE, SIGTERM and nonzero exit/outputs.
+  Missing executable failure and no-shebang executable-script fallback preserve
+  the launch result. The private mechanism does not add a public CLI helper.
+- A subprocess owner starts two real shell groups with sleep descendants. Tests
+  KILL only its PID, then separately its whole owner group; both model groups
+  must disappear by native ESRCH observation. Test fallback cleanup runs only
+  after observation/assertion and cannot make a passing outcome. Cross-execution
+  inherited descriptors therefore cannot keep the lifelines alive in this fixture.
+- The real DataOwner/Control crash regression now kills only the owner, not the
+  shell group in the test. It observes the group gone, reopens the same DB, checks
+  failed/unverified shell get with no fabricated exit/signal/forced/group facts,
+  retains adjacent call/result repair and confirms no repeated shell execution.
+- Full ordinary local checks pass normal Ctrl+Q, SIGTERM/HUP, terminal loss and
+  forced shutdown fixtures. Their native identities are observed with getpgid
+  rather than assuming shell PID=PGID or PPID=owner after the guardian change.
+  Windows Job and its startup repair path are not modified.
+
+Two development failures were retained and fixed: the first shell suite found
+that reaping before relaying status could let late stop relabel natural exit;
+waitid(WNOWAIT), owner receipt and reap acknowledgment fix the native handoff
+without weakening the existing assertion. The first crash observation rejected
+transient EPERM as though it must already be ESRCH; it now keeps observing unknown
+states and still requires actual ESRCH before success. No short timeout, settling
+window, latency assertion or new watchdog allowance was added. New test waits
+use the shared #77 watchdog only; existing product stop/drain budgets are reused.
+
+Local full checks passed twice during development (the second: 1,866 passed /
+0 failed / 33 ignored, layout 93, Python 18, fmt and strict all-target Clippy).
+The subsequent direct-launch oracle passed separately. Final source after native
+FD-admission placement/documentation and rebase needs its own standard check and
+native three-OS CI, not inferred from these earlier gates. Linux process behavior
+and Windows build/tests remain unqualified until that CI completes. Full cleanup
+of deliberately escaped groups, protection from deliberate guardian tampering,
+absolute stop-time guarantees and stale-PID recovery are not implemented.
