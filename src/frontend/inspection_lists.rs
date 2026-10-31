@@ -25,6 +25,25 @@ pub(super) struct CapturedScope {
     pub route: Route,
     text_bytes: usize,
 }
+fn command_bytes(command: &Command) -> Result<usize, ApiError> {
+    struct Counter(usize);
+    impl std::io::Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            if self.0 > status::TEXT_BYTES {
+                return Err(std::io::Error::other("query metadata limit"));
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter(0);
+    serde_json::to_writer(&mut counter, command)
+        .map_err(|_| bad("Captured query metadata exceeds channel"))?;
+    Ok(counter.0)
+}
 fn bad(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InputLimit, message)
 }
@@ -69,7 +88,8 @@ pub(super) fn capture_list_scope(
         Command::CompactList(_) => Route::Compact,
         _ => return Err(bad("Command is not a retained list route")),
     };
-    let text_bytes = metadata_size(&original, 0, &mut 0)?;
+    let mut text_bytes =
+        metadata_size(&original, 0, &mut 0)?.saturating_add(command_bytes(command)?);
     let rows = original
         .get("items")
         .and_then(Value::as_array)
@@ -160,6 +180,12 @@ pub(super) fn capture_list_scope(
     }
     let threads = threads.into_iter().collect::<Vec<_>>();
     status::validate_ids(&threads)?;
+    text_bytes = text_bytes.saturating_add(threads.iter().map(String::len).sum::<usize>());
+    if text_bytes > status::TEXT_BYTES {
+        return Err(bad(
+            "Captured list/query/dependency metadata exceeds channel",
+        ));
+    }
     Ok(CapturedScope {
         command: command.clone(),
         original,
