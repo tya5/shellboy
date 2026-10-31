@@ -14,7 +14,9 @@ The user's2026-10-31 decision limits #41 completion to admitting the existing
 E, F and G increments into main, with their requirement ledgers and P2–P6
 measurements (including long CI measure jobs). B+C/D2 are already in main.
 Later10/31 display additions belong to #83–#87 and are not Codex/#41 work.
-E main admission still needs a separate approval after producer3 review.
+E main admission is approved by6540583854, conditional on latest-main standard
+checks and exact-candidate three-OS CI. After E lands, F publication/CI is
+authorized; F main admission still requires separate reviewer approval.
 
 | Transferred inventory / comment scope | Owner issue | Coordination |
 | --- | --- | --- |
@@ -383,7 +385,7 @@ must not be inferred from D2 or the combined development branch.
 | E7 | Preserve #71 auto-history admission and #73 summary behavior; preserve #54 conditional tick and dirty status retry. | E changes no `src/index` or Program Status implementation; tick guard remains `progress_running || usage_waiting || (status_enabled && status_dirty)`. Merged sourcea0d8865 standard1891/0/32 passes. |
 | E8 | #77 single60s helper, notification-driven actual UI updates and scheduled visible-action wakeups; report latency without asserting machine speed. | Main #77 is merged. Standard layout/policy gate passes at0b7bd73; obsolete allowances for9 converted guards removed. Six exact occurrences in3 pure-clock UI tests remain reasoned/fingerprinted samples, not runtime watchdogs. No broad exception. |
 | E9 | P3 visible List plus selected conversation coalescing/DB cost; P5 hidden40-batch/s output workload. | Repaired7c6f4d6 formal producer3 run41166258538 meets40commits/s in all16 P5 windows (Linux150, Mac53.98–57.05), with0 visible reads/draws. Originalproducer1 remains separate. Matched-services/caller P3 components and actual16-mutation128-node/50-tool frontend prove E selected+List uses1 readonly snapshot,0 UI writer and no page reload; p95 observed-event-to-draw496.6643ms. Full F/G combined-consumer P3 remains staged; no speedup claim. |
-| E10 | Exact-source standard check, secret scan, reviewer decision and ordinary3-OS main CI, then #41 scope report. | Published7c6f4d6 ordinary3OS/producer3 run41166258538 is green. Latest local merge10d6df8 includes main2327636 and passes1915/0/33, Python18, upstream #84 PTY8/8 and diff secret scan. P3 own scope is qualified at0b; P2/F/G full gates retain limits. No main admission/main CI or combined-source Linux/Windows result; separate Claude approval remains required. |
+| E10 | Exact-source standard check, secret scan, reviewer decision and ordinary3-OS main CI, then #41 scope report. | Published7c6f4d6 ordinary3OS/producer3 run41166258538 is green. Latest local merge10d6df8 includes main2327636 and passes1915/0/33, Python18, upstream #84 PTY8/8 and diff secret scan. P3 own scope is qualified at0b; P2/F/G full gates retain limits. Approval6540583854 now permits admission after latest-main local standard and exact-candidate three-OS CI; both are being rerun on the integrated source. No main admission or combined-source Linux/Windows result is claimed yet. |
 
 Canonical open/filter/pagination still uses the existing CLI title/excerpt path
 inside the readonly task. That path can issue per-row queries and scan filtered

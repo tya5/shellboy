@@ -15,8 +15,9 @@ Shellboyへの改名では旧名の実行名・環境変数・既定保存先へ
 
 ## Current conversation storage
 
-Conversation schema 15 records selected-path admission (13), Turn interruption
-and draft indexes (14), and derived readback indexes (15); standalone RAG remains schema3. The existing migration2
+Conversation schema16 records selected-path admission (13), Turn interruption
+and draft indexes (14), derived readback indexes (15), and bounded Thread
+observation lookup indexes (16); standalone RAG remains schema3. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;
 no new index/migration is required. See [storage](storage.md). Historical version
 notes below describe their own releases, not the current schema number.
