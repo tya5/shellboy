@@ -60,7 +60,7 @@ jobs:
           SELECTED_TEST_THREADS: ${{ inputs.windows_test_threads == '2' && '2' || '4' }}
         run: '"RUST_TEST_THREADS=$env:SELECTED_TEST_THREADS" >> $env:GITHUB_ENV'
       - name: Tests
-        run: python scripts/test-timings.py --output .local/ci-timings
+        run: python scripts/test-timings.py --output .local/ci-timings --per-suite
       - name: Observe closed-proxy retry phases and timings
         if: inputs.diagnostics == true
         run: cargo test --locked --test integration response_upload_recovery::refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens -- --exact --nocapture
