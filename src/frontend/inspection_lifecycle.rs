@@ -573,6 +573,120 @@ mod tests {
         }
     }
     #[test]
+    fn latest_turn_tie_breaker_reuses_one_index_and_bounds_complete_run_query() {
+        let db = fixture();
+        // Force the historical layout even after a future migration extends it.
+        // Only this disposable fixture changes; no migration is adopted here.
+        db.execute_batch("UPDATE turn SET state='completed' WHERE id='u'; DROP INDEX turns_by_run; CREATE INDEX turns_by_run ON turn(run_id,created_at);").unwrap();
+        let seed_ties = |from: usize, until: usize| {
+            db.execute_batch("BEGIN").unwrap();
+            for i in from..until {
+                db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'foreign','r','completed','2026-01-01T00:00:04Z')",[format!("tie-{i:06}")]).unwrap();
+            }
+            db.execute_batch("COMMIT").unwrap();
+        };
+        let measure = || {
+            let trace = Statements::new(&db);
+            let mut statement = db.prepare(RUN_SQL).unwrap();
+            let turns = statement
+                .query_map(params!["r", JSON_BYTES as i64], |row| {
+                    row.get::<_, Option<String>>(6)
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(turns.len(), 1);
+            assert_eq!(
+                trace.count(),
+                1,
+                "measure the complete Run metadata query, not a rewritten latest-Turn surrogate"
+            );
+            (
+                turns[0].clone(),
+                [
+                    statement.get_status(StatementStatus::VmStep),
+                    statement.get_status(StatementStatus::Sort),
+                    statement.get_status(StatementStatus::FullscanStep),
+                ],
+            )
+        };
+        let plan = || {
+            db.prepare(&format!("EXPLAIN QUERY PLAN {RUN_SQL}"))
+                .unwrap()
+                .query_map(params!["r", JSON_BYTES as i64], |row| {
+                    row.get::<_, String>(3)
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        seed_ties(0, 32);
+        let old_small = measure();
+        seed_ties(32, 4096);
+        let old_dense = measure();
+        let expected = canonical(&db, &run());
+        assert_eq!(
+            prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
+            expected
+        );
+        assert_eq!(old_dense.0.as_deref(), Some("tie-004095"));
+        assert!(
+            old_dense.1[0] > old_small.1[0],
+            "old equal-time work must be witnessed: {old_small:?}->{old_dense:?}"
+        );
+        assert!(
+            old_dense.1[1] > 0,
+            "old index leaves a tie-breaker sort: {old_dense:?}"
+        );
+        assert!(plan().iter().any(|part| part.contains("TEMP B-TREE")));
+        db.execute_batch(
+            "DROP INDEX turns_by_run; CREATE INDEX turns_by_run ON turn(run_id,created_at,id);",
+        )
+        .unwrap();
+        let extended = measure();
+        assert_eq!(extended.0, old_dense.0);
+        assert_eq!(
+            extended.1[1], 0,
+            "the existing index extension removes the sort"
+        );
+        assert_eq!(extended.1[2], 0);
+        assert!(extended.1[0] < old_dense.1[0]);
+        assert_eq!(
+            prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
+            expected,
+            "same rows and canonical fields before/after the index replacement"
+        );
+        let extended_plan = plan();
+        assert!(
+            extended_plan
+                .iter()
+                .any(|part| part.contains("COVERING INDEX turns_by_run")),
+            "{extended_plan:?}"
+        );
+        assert!(
+            !extended_plan
+                .iter()
+                .any(|part| part.contains("TEMP B-TREE")),
+            "{extended_plan:?}"
+        );
+        seed_ties(4096, 8192);
+        let larger = measure();
+        assert_eq!(larger.0.as_deref(), Some("tie-008191"));
+        assert_eq!(
+            larger.1, extended.1,
+            "the complete query's instruction/sort/fullscan counts must not grow with the tie group"
+        );
+        assert_eq!(
+            prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
+            canonical(&db, &run())
+        );
+        eprintln!(
+            "Run latest-Turn counts (VM/sort/fullscan): old32={:?}, old4096={:?}, extended4096={:?}, extended8192={:?}",
+            old_small.1, old_dense.1, extended.1, larger.1
+        );
+    }
+
+    #[test]
     fn closed_targets_do_no_sql_and_raw_facts_outlive_connection() {
         let db = fixture();
         let trace = Statements::new(&db);
