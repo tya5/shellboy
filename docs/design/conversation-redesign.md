@@ -668,3 +668,24 @@ on them. A deleted/missing root is unavailable, not an exact empty scope.
 Run ownership is deliberately irrelevant to ancestry. These conclusions concern
 the inspected current deletion/GC implementation; they do not authorize changing
 deletion behavior or inventing missing lineage after future physical removal.
+
+
+### F visible Watch source admission
+
+Before parsing command JSON or copying any answer/recovery body, the readonly
+statement measures source bytes. Command JSON, recovery and answer witnesses
+share a16KiB per-row and64KiB aggregate admission budget. Individually oversized
+sources are excluded; if remaining eligible sources exceed the row budget, that
+row's witnesses are unavailable rather than copied and discarded afterwards.
+Malformed JSON stays unavailable, with original/detail navigation retained. A
+512-character command label can occupy2048 UTF-8 bytes and is not a512-byte
+budget. The complete admitted command source is charged, not only its label.
+
+Stored parent labels have a separate4096-byte SQL-copy bound per visible row;
+parent derived-title evidence retains the existing header reader's independent
+budget. Native metadata, wrappers, prepared strings and the2000-row session
+cache are separate retained allocations:64KiB is a source-witness budget, not
+a claim about total process or Watch memory. Reads remain exact-ID batches
+(max128); JSON/text projection runs on the existing finite presentation worker
+after the caller-owned readonly transaction ends. Shared summaries/titles may
+only be reused from that same transaction. No new worker/queue/table is added.

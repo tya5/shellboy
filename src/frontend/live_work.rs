@@ -182,11 +182,11 @@ pub(super) fn read_tx(
     Ok(result)
 }
 
-fn age(saved: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> {
+pub(super) fn age(saved: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> {
     let saved = chrono::DateTime::parse_from_rfc3339(saved?).ok()?;
     now.signed_duration_since(saved).to_std().ok()
 }
-fn label(value: Option<&str>, fallback: &str) -> String {
+pub(super) fn label(value: Option<&str>, fallback: &str) -> String {
     let (safe, _) = crate::presentation::sanitize_plain(value.unwrap_or_default(), 0);
     let safe: String = safe.chars().take(512).collect();
     if safe.trim().is_empty() {

@@ -1867,3 +1867,25 @@ The two explicitly ignored P4 timing/million-sibling observations remain unrun.
 The existing presentation-pool/shared consumer broker is not wired to this new
 module yet; this is not a working Watch screen or all-consumer P3 qualification.
 Formatting/layout93/watchdog pass. Primitive diff secret scan has0 findings.
+
+
+## F bounded visible Watch details (2026-10-31)
+
+The local F reader now extracts exact-ID saved details, reusing supplied summary
+and parent-title facts only within the caller's snapshot. Command JSON, recovery
+and answer sources share pre-copy16KiB/row and64KiB aggregate admission; stored
+parent labels independently cap at4096 bytes. Existing live-work age/sanitization
+helpers are shared with sibling frontend modules, without a public API change.
+
+Native macOS `cargo test --locked --lib frontend::watch_read::` passes9/0/0
+(1006 filtered), including large/malformed command JSON, UTF-8 byte accounting,
+combined per-row sources, whole-command aggregate charging, unavailable previews,
+shared-query reuse and unchanged VM work after10,000 unrelated Threads. Formatting,
+layout93 and common watchdog policy pass. Initial private-helper visibility
+compile failure and missing required Turn in the new synthetic shell fixture
+were corrected; earlier logs are retained separately from the successful run.
+
+This is still local F preparation: no Watch UI/action exposure, new worker or
+writer call. Actual presentation-pool wiring, same-snapshot consumer broker,
+strict Clippy/full standard, native three-OS CI and F P2–P5 remain unqualified.
+No main update, installed binary/default-data change, paid API or release.

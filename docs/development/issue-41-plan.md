@@ -537,3 +537,11 @@ separately reviewable, then wait for delegated approval before F publication.
 No F row is complete solely from these primitives. Strict Clippy remains an
 admission gate: unused projected facts/helpers are intentionally unsuppressed
 until real F consumers are wired. No G/new display scope is imported.
+
+
+F5/F6 reader evidence: focused Watch details pass9/0/0, including combined
+source budgets and source-level Unicode/command bounds. This establishes the
+reader primitive only; F4 runtime coalescing, visible UI memory accounting and
+full F admission are still pending. The three shared-consumer tests prove
+query reuse given same-transaction supplied witnesses, not that every runtime
+caller has already been connected.

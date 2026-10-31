@@ -2082,3 +2082,21 @@ measurement7c6f4d6 stays unchanged. Original P2/P5 and P3 source witnesses remai
 0d4/7c and0b respectively; do not relabel them as measurements of this merge.
 Recheck the combined local source with the standard suite. Keep #71 admission,
 #54 conditional tick, canonical #77 guards and #84 provenance behavior intact.
+
+
+## F Watch witness admission (2026-10-31)
+
+Treat the16KiB row limit as the sum of eligible command JSON, recovery and answer
+sources, rather than allowing16KiB separately for each. A row exceeding that
+sum leaves its source fields explicitly unavailable; oversized individual
+sources do not prevent an unrelated small field from being considered. Rows
+are admitted deterministically by Thread ID under the64KiB aggregate ceiling.
+Charging the complete command JSON avoids admitting128 large commands merely
+because their512-character labels are short; UTF-8 labels may use2048 bytes.
+This conservative row-level policy may show less preview than a field-by-field
+packing algorithm, but avoids partial body copies and a new scheduling policy.
+Originals remain available through existing navigation. Revisit only if measured
+real usage shows too many unavailable previews, retaining pre-copy byte bounds
+and explicit unavailable reasons. Stored parent title copies separately cap at
+4096 bytes; normal public titles are already limited to512 Unicode characters.
+The source budget does not describe total Watch cache or RSS.
