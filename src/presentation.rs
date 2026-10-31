@@ -24,6 +24,7 @@ mod events;
 pub(crate) mod fields;
 mod markdown_links;
 mod projection;
+pub mod rows;
 pub use projection::project;
 mod summary;
 use crate::terminal_links::valid_link_target as http;
@@ -187,6 +188,12 @@ pub struct ToolPresentation {
     pub reason_kind: ToolReasonKind,
     pub execution_id: Option<String>,
     pub elapsed_ms: Option<u64>,
+    #[serde(skip)]
+    pub started_at: Option<String>,
+    #[serde(skip)]
+    pub background: bool,
+    #[serde(skip)]
+    pub elapsed_observation: Option<(std::time::Duration, std::time::Instant)>,
     pub exit_code: Option<i64>,
 }
 impl ToolPresentation {
@@ -200,7 +207,7 @@ impl ToolPresentation {
         });
         let (mut mark, _) = tool_state_heading(state, code);
         if tool_failed(&self.status, self.exit_code) {
-            mark = "✗";
+            mark = rows::RowKind::Failure.mark();
         }
         let state_text = tool_state_text(state, code);
         let identity_command = self.command_identity();
@@ -272,11 +279,18 @@ impl ToolPresentation {
         let state = live
             .map(|state| format!(" · {}", tool_state_text(state, None)))
             .unwrap_or_default();
-        format!("↳ {}{state}", self.command_identity())
+        format!(
+            "{} {}{state}",
+            rows::RowKind::ToolCall.mark(),
+            self.command_identity()
+        )
     }
     pub fn clear_observation(&mut self) {
         self.current_state = None;
         self.current_exit_code = None;
+        self.elapsed_observation = None;
+        self.started_at = None;
+        self.background = false;
     }
     pub fn observation_unavailable(&mut self) {
         self.clear_observation();
@@ -298,6 +312,7 @@ impl ToolPresentation {
             + self.group_id.as_ref().map_or(0, String::capacity)
             + self.call_node_id.as_ref().map_or(0, String::capacity)
             + self.result_node_id.as_ref().map_or(0, String::capacity)
+            + self.started_at.as_ref().map_or(0, String::capacity)
             + self.command.capacity()
             + self.status.capacity()
             + self.current_state.as_ref().map_or(0, String::capacity)
@@ -315,26 +330,32 @@ fn compact_tool_label(text: &str, limit: usize) -> String {
 }
 
 fn tool_state_heading(state: &str, exit_code: Option<i64>) -> (&'static str, &'static str) {
-    match state {
-        "requested" => ("↳", "呼出し"),
-        "pending" => ("◌", "待機中"),
-        "starting" | "running_current" => ("◐", "実行中"),
-        "running" => ("↗", "背景継続（返却時）"),
-        "background_current" => ("↗", "背景で継続中"),
-        "stopping" => ("◐", "停止要求済み"),
-        "completed" => ("·", "結果あり"),
+    let label = match state {
+        "requested" => "呼出し",
+        "pending" => "待機中",
+        "starting" | "running_current" => "実行中",
+        "running" => "背景継続（返却時）",
+        "background_current" => "背景で継続中",
+        "stopping" => "停止要求済み",
+        "completed" => "結果あり",
         "exited" => match exit_code {
-            Some(0) => ("✓", "終了"),
-            Some(_) => ("✗", "終了"),
-            None => ("·", "終了（コード不明）"),
+            Some(0) => "終了",
+            Some(_) => "終了",
+            None => "終了（コード不明）",
         },
-        "failed" | "error" => ("✗", "失敗"),
-        "cancelled" => ("⊘", "未実行・取消"),
-        "not_started" => ("⊘", "未開始"),
-        "interrupted" => ("!", "中断・結果不確か"),
-        "stopped" => ("⊘", "停止"),
-        _ => ("·", "状態は詳細参照"),
-    }
+        "failed" | "error" => "失敗",
+        "cancelled" => "未実行・取消",
+        "not_started" => "未開始",
+        "interrupted" => "中断・結果不確か",
+        "stopped" => "停止",
+        _ => "状態は詳細参照",
+    };
+    let kind = if state == "exited" && exit_code.is_none() {
+        rows::RowKind::Unknown
+    } else {
+        rows::tool_kind(state, tool_failed(state, exit_code))
+    };
+    (kind.mark(), label)
 }
 fn tool_failed(state: &str, code: Option<i64>) -> bool {
     matches!(state, "failed" | "error") || (state == "exited" && code.is_some_and(|code| code != 0))

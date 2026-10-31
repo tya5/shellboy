@@ -80,6 +80,7 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
+| `status --memory` | Owner-wide cache retained/limit/entry accounting and native process memory; unknown values have reasons. Exclusive with activity filters; on-demand and no provider request |
 
 ### Standalone configuration (2 commands)
 
@@ -584,3 +585,50 @@ whole snippet, with a redaction flag. This conservative convenience cannot detec
 arbitrary obfuscated secrets: keep results private. No stdout/stderr/body is
 returned; explicitly use shell get/read for the chosen execution ID and raw output.
 All IDs/metrics describe retained facts; collected history cannot be reconstructed.
+
+## Owner memory
+
+`status --memory` asks the running owner for JSON cache accounting and native
+process memory. It is owner-wide and cannot be combined with activity filters.
+`caches` contains body, layout, attachment and replay retained bytes, limit bytes
+and entry counts/units. These reuse existing budget accounting, not a new heap
+measurement. Body working-set exclusions and pinned/live shared allocations mean
+cache bytes are not a complete partition of process memory. Counts are views for
+body, layout-or-unit entries for layout, paths for attachments and Threads for
+replay. The existing cache limits do not change.
+
+`process.metrics` reports byte values with an unavailable_reason when unknown:
+macOS footprint/RSS, Linux RSS/PSS and Windows working set/private bytes. Missing
+UI owners yield null body/layout values, not invented zeros. Snapshots are taken
+on request, are not atomic across owners, and must not be added to estimate total
+heap. SQLite/allocator/other untracked allocations are not estimated. No periodic
+sampling/logging, cache purge or provider request is performed. F8 display remains
+separate #41 work.
+
+### Thread wait continuation and latest messages (#74)
+
+`wait --conditions-json JSON [--after CURSOR] [--timeout-ms N]` accepts
+`{"type":"thread_settled","thread_ids":["A","B"],"states":["completed","recovery_wait","failed","stopped"]}`.
+The nonempty states filter is explicit; omit unwanted states. At most64 Thread
+IDs total (each at most128 bytes) and four distinct states are accepted; repeated
+IDs within a condition are errors. Other existing wait conditions can coexist.
+The result's `snapshot.changes` contains bounded Thread/Run/state/at and optional
+Turn identities; `at=null` means not recorded, never a guessed observation time.
+`cursor` is the Thread continuation cursor when these conditions are present,
+otherwise the existing shell-output cursor. `snapshot.more` announces another
+saved matching change. Keep the cursor on timeout too and pass it to the next
+wait with unchanged conditions. It is independent of owner instance. Cursor
+anchors invalidated by data removal require a fresh observation; external SQL
+editing/VACUUM is not a supported continuation path. Self/owning-ancestor/composed
+model waits remain cycle checked. Human wait observation does not scan the model
+ownership graph. No-after reports current settled states, not arbitrary history.
+
+`thread list/get` keep `excerpt` and add `last_answer` and `last_input` objects
+(or null when absent). The answer includes `node_id`, `turn_id`, `at`, `excerpt`
+and `body_available`; the input includes `message_id`, `node_id`, `at`, `state`,
+`sender`, `excerpt`, `body_available`. Excerpts include at most512 characters
+from at most64 natural-text fragments, excluding tools/reasoning/opaque bodies.
+These are the Thread's own saved facts, not expansion of fork-only ancestors.
+Existing list paging/limits remain unchanged. Held/cancelled input is still a
+received fact, not proof that the model consumed it; sender labels do not grant
+permissions. Reclaimed bodies retain identity/time with an empty excerpt.

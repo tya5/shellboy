@@ -24,6 +24,7 @@ impl UiUpdate {
             | Self::BrowserPatch { .. }
             | Self::BrowserPatchFailed { .. }
             | Self::BrowserResync { .. }
+            | Self::MemoryProbe(_)
             | Self::LiveWorkObserved { .. }
             | Self::LiveWorkPreview { .. }
             | Self::DetailSourcesChanged { .. }

@@ -3,6 +3,7 @@ mod compact;
 mod foreground;
 pub(crate) mod interruption;
 mod live;
+mod memory;
 pub(crate) mod message_delivery;
 pub(crate) mod pending_messages;
 mod runtime;
@@ -47,6 +48,10 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
+    MemoryProbe {
+        owner: u64,
+        reply: crate::memory::UiMemoryReply,
+    },
     Changed {
         thread_id: String,
         /// Committed transition fact for frontend attention; never a saved state.
@@ -93,6 +98,8 @@ struct LiveShell {
 }
 
 pub struct Control {
+    #[cfg(test)]
+    memory_samples: AtomicUsize,
     pub store: Store,
     pub attachments: Arc<crate::attachments::AttachmentService>,
     pub index: Arc<crate::index::IndexService>,
@@ -168,6 +175,8 @@ impl Control {
         ));
         let instructions = store.instructions.clone();
         Arc::new(Self {
+            #[cfg(test)]
+            memory_samples: AtomicUsize::new(0),
             store,
             attachments,
             gc,
@@ -705,7 +714,9 @@ impl Control {
         let result = async {
             request.validate()?;
             let origin = self.validate_origin(&request.origin).await?;
-            self.start().await?;
+            if !matches!(&request.command, Command::Status(a) if a.memory) {
+                self.start().await?;
+            }
             if self.stop.is_cancelled() {
                 return Err(ApiError::new(
                     ErrorCode::InvalidState,

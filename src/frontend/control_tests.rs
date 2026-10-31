@@ -305,6 +305,7 @@ async fn cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting() 
     for _ in 0..2 {
         sender
             .try_send(UiAction::Manage(Command::Wait(WaitArgs {
+                after: None,
                 conditions: vec![WaitCondition::RunEnded {
                     run_id: "independent-run".into(),
                 }],
@@ -417,6 +418,7 @@ async fn saturated_queue_quit_persists_prior_send_and_latest_snapshot_without_st
     for _ in 0..6 {
         sender
             .try_send(UiAction::Manage(Command::Wait(WaitArgs {
+                after: None,
                 conditions: vec![WaitCondition::RunEnded {
                     run_id: "independent-run".into(),
                 }],
@@ -533,6 +535,7 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
     for _ in 0..2 {
         sender
             .try_send(UiAction::Manage(Command::Wait(WaitArgs {
+                after: None,
                 conditions: vec![WaitCondition::RunEnded {
                     run_id: "independent-run".into(),
                 }],

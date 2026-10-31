@@ -75,9 +75,9 @@ results. Per-request attachment metadata exposes that same path and any observed
 unavailability. Managed and external files share preparation, current-byte reads,
 per-Thread/ID successful-send hash baselines and change notices. Do not change
 permissions, introduce exports or add a retention pin merely to display a path.
-List joins managed lifecycle state through its existing unique path index and
-observes filesystem availability outside the DB writer, on the existing finite
-presentation worker. This is an observation, not a lease or future-read guarantee.
+List joins managed lifecycle state through its existing unique path index on
+finite presentation admission. After that reader closes, filesystem availability
+is observed through the existing control-file admission, outside the DB writer. This is an observation, not a lease or future-read guarantee.
 Existing selection/draft/fork/inflight reclamation rules remain unchanged.
 F6 path presentation is delegated to the overlapping #41 display work; #79 does
 not modify its rendering files in this first version.

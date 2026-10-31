@@ -86,6 +86,8 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         })
         .is_some_and(|retry| retry.number > 0 && retry.number <= retry.limit);
     ThreadSummary {
+        last_answer: None,
+        last_input: None,
         activity: crate::activity::classify(
             raw.run_state.as_deref(),
             raw.turn_state.as_deref(),

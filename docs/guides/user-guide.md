@@ -180,7 +180,7 @@ F8 retains its current `この会話で` (in this conversation), `よく使う` 
 and `すべての操作` (all actions) groups. Filter by human-facing name, CLI name or
 related slash command; enter target IDs and arguments in separate fields.
 Results use field/value presentation. [TUI controls](tui.md#read-source-text-and-links-from-details)
-documents detailed keys and copy ranges. The separate live-work region, watch
+documents detailed keys and copy ranges. Watch
 mode and operation-form redesign are later increments; they are not implied by
 the conversation layout.
 
@@ -211,23 +211,23 @@ Changes apply to subsequent requests, without rewriting communication already se
 
 ## 5. Delegate to a child
 
-Simply saying “use subagents” does not guarantee that the model understands Shellboy's child-Thread operations. The Agent Guide is not injected automatically. When using a checkout, provide actual absolute paths and ask the model to read them first:
+Simply saying "use subagents" does not guarantee that the model understands Shellboy's child-Thread operations. Guides are bundled with the executable; the model receives a short entry-point instruction and reads the guides itself when needed, not their full text in every prompt. No checkout or repository path is required. To explicitly request the procedures, name the guide IDs:
 
 ```text
-First use shell to read /path/to/shellboy/docs/guides/agent-guide.md and
-/path/to/shellboy/docs/guides/delegation.md.
+First read shellboy docs get --id shellboy/agent-guide and
+shellboy docs get --id shellboy/delegation using shell.
 Follow those procedures to create an owned child Thread and delegate research only.
 After sending its request, check assignment and completion, retrieve the original
 answer, and summarize the results.
 ```
 
-If you copied only the binary elsewhere, the docs need not exist alongside it. Replace these paths with the actual guide locations. [Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
+[Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
 
 A Thread's `AGENTS.md` reference points to working instructions. A new root Thread defaults to the cwd's `AGENTS.md`; it is read when preparing a new Turn, while a retry in the same Turn uses the saved snapshot. The Agent Guide explains product operations; a repository's root `AGENTS.md` supplies that repository's work instructions. They serve different purposes.
 
 ## 6. Interrupt and exit
 
-Ctrl+C stops the current Run and its owned work. Ctrl+B moves its current foreground shell into the background: the target shell continues, while any unexecuted later calls in the same group are canceled. This differs from changing screens. After backgrounding, the screen reports the target shell and treatment of later calls, and the model receives the corresponding result. If no later calls exist, no nonexistent cancellation is shown. An interruption progresses from stopping to interrupted according to saved state, distinctly from backgrounding or completion.
+Ctrl+C stops the current Run and its owned work. Esc closes an open overlay; otherwise, it interrupts only the current Turn. Ctrl+B moves its current foreground shell into the background: the target shell continues, while any unexecuted later calls in the same group are canceled. This differs from changing screens. After backgrounding, the screen reports the target shell and treatment of later calls, and the model receives the corresponding result. If no later calls exist, no nonexistent cancellation is shown. An interruption progresses from stopping to interrupted according to saved state, distinctly from backgrounding or completion.
 
 Waiting to observe completion differs from interrupting the target. To cancel only an observation started in F8's wait form, press lowercase w on the result screen or use `/cancel-wait`. This does not stop the target Run or shell. In forms, Enter executes, Ctrl+J inserts a newline in multiline text, and Ctrl+U replaces a suggested value.
 
@@ -243,6 +243,34 @@ After a failure, inspect Run/Turn context in F8. `/compact-max` reduces safe
 context without a summary API; `/retry` separately resends and may charge again.
 `/restore` can recover omitted text. Core no longer estimates tokens or uses a
 75k threshold. Last successful measured usage and its time are in thread get.
+
+## Storage and resources
+
+Conversations, answers, reasoning and summaries are saved in the data directory
+without automatic expiry. Raw shell output and managed clipboard images are separate:
+
+- Terminal shell raw output: default seven days / total 1GiB (`retention.tool_raw_days`, `tool_raw_bytes`).
+- Managed images: default seven days / total 256MiB (`retention.clipboard_days`, `clipboard_bytes`).
+
+Live shells, pins, selected images and saved drafts protect content from collection.
+Collection leaves history references and unavailability reasons, not recoverable raw content.
+Managed PNGs live under `<data_dir>/managed/clipboard/`; their absolute `path` is not permanent storage. GC never deletes external originals.
+
+While the owner runs, GC starts automatically and repeats about one minute after each pass;
+raw/history DB work uses batches of up to 128 records, not a 128-per-minute quota.
+SQLite pages freed by collection are reused; no automatic VACUUM shrinks the DB file.
+To reduce logical storage, inspect `shellboy storage status`, run `shellboy storage collect`,
+then preview unwanted conversations with `shellboy thread delete-preview --thread THREAD_ID`
+before `shellboy thread delete --thread THREAD_ID`. Collection respects protection and sharing;
+preview is read-only and does not estimate reclaimable bytes. See [Recovery and storage](recovery-and-storage.md).
+
+For RAM, `[cache]` budgets are `body_bytes` (32MiB), `layout_bytes` (16MiB),
+`history_bytes` (32MiB), and `attachment_base64_bytes` (64MiB) by default.
+Lower them in the configuration file and restart the owner; `0` disables retained caching,
+not active working memory or saved history. These are not a whole-process memory cap.
+`shellboy status --memory` shows on-demand owner cache accounting and native process memory;
+unknown values are null, not zero, and cache figures must not be added to footprint/RSS.
+See [Configuration](configuration.md#all-sections-and-defaults) for settings and [CLI reference](cli-reference.md) for observation details.
 
 ## Safety model
 

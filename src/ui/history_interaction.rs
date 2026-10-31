@@ -249,7 +249,11 @@ impl UiState {
                 }
                 Some(vec![])
             }
-            KeyCode::Enter | KeyCode::Char(' ') => Some(self.toggle_history_item()),
+            KeyCode::Enter => Some(
+                self.follow_history_notice()
+                    .unwrap_or_else(|| self.toggle_history_item()),
+            ),
+            KeyCode::Char(' ') => Some(self.toggle_history_item()),
             KeyCode::Char('o') => Some(self.open_history_details(false, true)),
             KeyCode::Char('c') => Some(
                 self.selected_history_item()
@@ -266,6 +270,56 @@ impl UiState {
             KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete => Some(vec![]),
             _ => None,
         }
+    }
+    fn follow_history_notice(&mut self) -> Option<Vec<UiAction>> {
+        let item = self.selected_history_item()?;
+        let notice = self
+            .view()
+            .nodes()
+            .iter()
+            .find(|n| n.node_id == item.primary_node_id)
+            .filter(|node| node.presentation.kind == crate::presentation::PresentationKind::Event)
+            .map(|node| {
+                let field = |key: &str| {
+                    node.presentation
+                        .fields
+                        .iter()
+                        .find(|f| f.key == key)
+                        .map(|f| f.value.clone())
+                };
+                (field("/payload/execution_id"), field("/payload/thread_id"))
+            });
+        if let Some((execution, thread)) = notice {
+            if let Some(execution) = execution {
+                let layout = self.item_layout();
+                if let Some((row, target)) =
+                    layout.sources.iter().enumerate().find_map(|(row, source)| {
+                        source
+                            .item
+                            .as_ref()
+                            .filter(|target| {
+                                target.execution_id.as_ref() == Some(&execution)
+                                    && matches!(
+                                        target.key,
+                                        ItemKey::Tool { .. } | ItemKey::LocalTool { .. }
+                                    )
+                            })
+                            .map(|target| (row, Arc::clone(target)))
+                    })
+                {
+                    self.select_history_item(row, target, &layout);
+                    return Some(vec![]);
+                }
+                self.active_view_mut().status =
+                    crate::presentation::rows::NOTICE_SOURCE_OUTSIDE_WINDOW.into();
+                self.dirty = true;
+                return Some(vec![]);
+            }
+            if let Some(thread) = thread {
+                return Some(self.select_thread(thread));
+            }
+        }
+        None
     }
     pub(super) fn toggle_history_item(&mut self) -> Vec<UiAction> {
         let Some(item) = self.selected_history_item() else {
@@ -539,6 +593,98 @@ mod tests {
     }
     fn key(ui: &mut UiState, code: KeyCode) -> Vec<UiAction> {
         ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
+    }
+    #[test]
+    fn notification_enter_follows_exact_loaded_tool_without_fetching_output() {
+        let mut ui = fixture();
+        let tool = crate::presentation::ToolPresentation {
+            group_id: Some("group".into()),
+            call_id: "call".into(),
+            execution_id: Some("execution".into()),
+            status: "completed".into(),
+            command: "fixture".into(),
+            ..Default::default()
+        };
+        let fields = crate::presentation::fields_of_value(
+            &serde_json::json!({"kind":"shell_ended", "payload":{"execution_id":"execution"}}),
+        );
+        let notice = UiNode {
+            node_id: "notice".into(),
+            presentation: crate::presentation::NodePresentation {
+                kind: crate::presentation::PresentationKind::Event,
+                title: "saved shell notice".into(),
+                fields,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let nodes = vec![
+            UiNode {
+                node_id: "source".into(),
+                presentation: crate::presentation::NodePresentation {
+                    kind: crate::presentation::PresentationKind::ToolResult,
+                    blocks: vec![crate::presentation::PresentationBlock {
+                        kind: crate::presentation::BlockKind::ToolResult,
+                        tool: Some(tool),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            notice.clone(),
+        ];
+        let apply = |ui: &mut UiState, nodes: Vec<UiNode>, revision| {
+            let count = nodes.len();
+            ui.apply(UiUpdate::History {
+                thread_id: "thread".into(),
+                generation: ui.view().generation,
+                nodes,
+                pending: Default::default(),
+                read_revision: revision,
+                before_cursor: None,
+                append: false,
+                first_ordinal: 0,
+                selection_revision: revision,
+                total_nodes: count as u64,
+            });
+            Terminal::new(TestBackend::new(80, 28))
+                .unwrap()
+                .draw(|frame| draw(frame, ui))
+                .unwrap();
+        };
+        apply(&mut ui, nodes, 2);
+        key(&mut ui, KeyCode::Tab);
+        assert_eq!(ui.view().items.focus, Some(ItemKey::Node("notice".into())));
+        key(&mut ui, KeyCode::Char(' '));
+        assert_eq!(
+            ui.view().items.focus,
+            Some(ItemKey::Node("notice".into())),
+            "Space only folds; Enter follows"
+        );
+        assert!(key(&mut ui, KeyCode::Enter).is_empty());
+        assert_eq!(
+            ui.view().items.focus,
+            Some(ItemKey::Tool {
+                group_id: "group".into(),
+                call_id: "call".into()
+            })
+        );
+        ui = fixture();
+        apply(&mut ui, vec![notice.clone()], 3);
+        key(&mut ui, KeyCode::Tab);
+        assert!(key(&mut ui, KeyCode::Enter).is_empty());
+        assert!(ui.view().status.contains("表示範囲外"));
+        assert_eq!(ui.view().items.focus, Some(ItemKey::Node("notice".into())));
+        ui = fixture();
+        let mut child = notice;
+        child.presentation.fields = crate::presentation::fields_of_value(
+            &serde_json::json!({"kind":"child_turn_completed","payload":{"thread_id":"child"}}),
+        );
+        apply(&mut ui, vec![child], 4);
+        key(&mut ui, KeyCode::Tab);
+        key(&mut ui, KeyCode::Enter);
+        assert_eq!(ui.view().thread_id.as_deref(), Some("child"));
     }
     #[test]
     fn history_focus_keeps_global_popups_and_exact_detail_target() {

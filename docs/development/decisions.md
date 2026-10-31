@@ -2082,3 +2082,61 @@ measurement7c6f4d6 stays unchanged. Original P2/P5 and P3 source witnesses remai
 0d4/7c and0b respectively; do not relabel them as measurements of this merge.
 Recheck the combined local source with the standard suite. Keep #71 admission,
 #54 conditional tick, canonical #77 guards and #84 provenance behavior intact.
+
+## #80 minimal on-demand memory (2026-10-31, active)
+
+Source: issue #80 and the user's scoped implementation request. Choose the status
+--memory flag, existing cache budget accounting and native process APIs. UI cache
+figures use the existing event/update queues and a per-request completion responder;
+that responder is reply plumbing, not an additional work/admission queue. Native
+reads reuse the existing control-file slots, after UI counter capture and outside
+the DB lane. There is no periodic sampler or new production counter. OS failures
+and absent UI ownership remain null with reasons. No allocator/SQLite estimation,
+leak diagnosis or request-copy optimization is included. F8 display is delegated
+to #41 because its published branch overlaps the diagnostic/rendering files.
+
+## 2026-10-31: minimal conversation row vocabulary (#83)
+
+Adopt a single display table with EAW=N marks rather than ambiguous `●`/`◇`/
+`◐`; reuse palette roles and named copy keys, without a translation framework.
+Keep spacing in display/source-row maps, not storage or item counts. Live
+seconds repaint cached rows from a saved-start/monotonic observation, with no
+DB poller or Markdown relayout. Correlate notification sources only in the
+bounded loaded view; do not hydrate shell output merely by selecting a notice.
+Choose Enter navigation because baseline F7 is HTTP-only. Do not alter #86's
+region rendering. Defer missing command/child names and off-window source
+lookup to a bounded read-projection follow-up, rather than changing Core events.
+No dialog, new worker, queue, schema, protocol or
+theme setting is required. Existing pending DTO work in #74 is not modified.
+
+## #89: Observe committed boundaries, not scheduler or diagnostic admission (2026-10-31)
+
+Status: active. Issue #89 and the #77/ad6c54b test policy apply. The three
+failures have concrete test-side counterexamples: independent context metadata
+commit, valid acceptance before native handle registration, and permitted
+diagnostic drops. Preserve production ordering and grace; add only a test-only
+registration gate, saved-fact/notification observation, and durable/native
+shutdown gates. Listener teardown is the repeated-signal acknowledgment, not
+its best-effort diagnostic line. This does not claim every native lifecycle
+race is impossible or attribute the missing handle to lifeline termination.
+
+## 2026-10-31: bounded saved Thread observations (#74)
+
+Use indexed terminal Run rows plus existing child_recovery_wait facts, rather
+than a new subscription service or clock-only cursor. Root recovery also saves
+that existing fact without a delivery because resume clears the current reason;
+otherwise an unobserved recovery/resume cannot be reconstructed. This is one
+small additional root-recovery write, not a new lifecycle or event type.
+Query-scoped per-stream row positions/ID anchors avoid wall-clock reordering;
+round-robin consumption preserves prefixes/fairness under the64-change cap.
+Source rows are retained while Threads exist; removal/replacement rejects anchors.
+
+Latest answer uses the own final Turn pointer, not arbitrary assistant tool steps
+or fork-only ancestors. Latest input uses received receipt order, including held/
+cancelled, with existing safe sender facts. This is the smaller first version;
+no new UI watcher, idle-without-Run condition or fork-answer expansion is added.
+Revisit these cuts only with a concrete consumer. Four derived indexes/schema16
+support bounded seeks. Body excerpts are bounded in fragments/returned characters,
+not a claim of zero source-JSON parsing cost. No table/worker/queue/dependency is
+added. #80 and #83 were integrated before shared files were edited; UI changes
+are optional DTO initialization only, not rendering/row/composer behavior.

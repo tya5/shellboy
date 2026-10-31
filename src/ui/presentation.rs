@@ -2,6 +2,7 @@
 use super::history_items::{ItemKey, ItemRegion};
 use super::theme;
 use super::{ThreadView, UiNode, rendered_node_text};
+use crate::presentation::rows::{RowGroup, RowKind, blank_between};
 use crate::presentation::{BlockKind, OutputStream, PresentationKind};
 use ratatui::{
     style::{Color, Modifier, Style},
@@ -21,7 +22,7 @@ fn conversational(node: &UiNode) -> bool {
         && matches!(node.role.as_str(), "user" | "assistant"))
 }
 fn source_candidate(text: &str) -> &str {
-    text.trim_start_matches([' ', '›', '●', '│', '┃']).trim()
+    text.trim_start_matches([' ', '›', '▸', '│', '┃']).trim()
 }
 
 fn label(node: &UiNode) -> &str {
@@ -58,7 +59,7 @@ fn color(node: &UiNode) -> Color {
     match node.presentation.kind {
         PresentationKind::User => theme::EMPHASIS,
         PresentationKind::Assistant => theme::TEXT,
-        PresentationKind::Event => theme::MUTED,
+        PresentationKind::Event => RowKind::Notice.spec().2,
         PresentationKind::ToolCall | PresentationKind::ToolResult => theme::TOOL,
         PresentationKind::Interrupted => theme::ATTENTION,
         PresentationKind::Summary | PresentationKind::Spill => theme::REPLACEMENT,
@@ -124,13 +125,22 @@ fn node_lines_inner(
     } else {
         vec![Line::from(Span::styled(
             if node.presentation.kind == PresentationKind::ToolResult {
-                format!("↳ {}", label(node))
+                format!("{} {}", RowKind::ToolCall.mark(), label(node))
             } else {
                 match node.presentation.kind {
-                    PresentationKind::Event => format!("· {}", label(node)),
-                    PresentationKind::Summary => format!("◇ {}", label(node)),
-                    PresentationKind::Spill => format!("↪ {}", label(node)),
-                    PresentationKind::Interrupted => format!("⊘ {}", label(node)),
+                    PresentationKind::Event => format!(
+                        "{} {} · {}",
+                        RowKind::Notice.mark(),
+                        RowKind::Notice.spec().1,
+                        label(node)
+                    ),
+                    PresentationKind::Summary => {
+                        format!("{} {}", RowKind::Summary.mark(), label(node))
+                    }
+                    PresentationKind::Spill => format!("{} {}", RowKind::Spill.mark(), label(node)),
+                    PresentationKind::Interrupted => {
+                        format!("{} {}", RowKind::Cancelled.mark(), label(node))
+                    }
                     _ => label(node).to_owned(),
                 }
             },
@@ -278,9 +288,9 @@ fn node_lines_inner(
                         0,
                         Span::styled(
                             if index == 0 {
-                                "↳ shell  "
+                                format!("{} shell  ", RowKind::ToolCall.mark())
                             } else {
-                                "         "
+                                "         ".into()
                             },
                             Style::default().fg(theme::MUTED),
                         ),
@@ -584,12 +594,12 @@ fn node_lines_with_header(
                         if node.role == "user" {
                             input_marker(node)
                         } else {
-                            "● "
+                            format!("{} ", RowKind::Assistant.mark())
                         },
                         Style::default().fg(if node.role == "user" {
-                            theme::USER_MARKER
+                            RowKind::Human.spec().2
                         } else {
-                            theme::ASSISTANT_MARKER
+                            RowKind::Assistant.spec().2
                         }),
                     )
                 } else {
@@ -635,6 +645,13 @@ fn quiet_event(node: &UiNode) -> bool {
         && !node.presentation.body_evicted
         && node.presentation.title != "状態変更"
         && node.presentation.kind == PresentationKind::Event
+        && !node.presentation.fields.iter().any(|f| {
+            f.key == "/kind"
+                && matches!(
+                    f.value.as_str(),
+                    "shell_ended" | "child_turn_completed" | "child_run_ended" | "child_report"
+                )
+        })
         && !node.presentation.requires_attention()
 }
 
@@ -647,7 +664,12 @@ fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
         }
     }
     vec![Line::from(Span::styled(
-        format!("· {}", facts.join(" · ")),
+        format!(
+            "{} {} · {}",
+            RowKind::Notice.mark(),
+            RowKind::Notice.spec().1,
+            facts.join(" · ")
+        ),
         Style::default().fg(theme::MUTED),
     ))]
 }
@@ -1100,7 +1122,7 @@ pub(super) fn history_with_cache(
             offset,
         });
         lines.push(Line::default());
-        let region = Arc::new(node_region(node));
+        let region = Arc::new(node_region(view, node));
         for source in &mut sources[row_start..] {
             source.item = Some(region.clone());
         }
@@ -1121,15 +1143,27 @@ pub(super) fn history_with_cache(
     let (lines, sources) = quiet_section_tails(view, lines, sources, width);
     (lines, links, sources)
 }
-fn input_marker(node: &UiNode) -> &'static str {
+fn input_marker(node: &UiNode) -> String {
     use crate::presentation::InputSource;
-    match node.presentation.input_source {
-        InputSource::Human => "› ",
-        InputSource::Parent => "↳ 親 · ",
-        InputSource::SelfModel => "↺ 自分 · ",
-        InputSource::OtherModel => "↳ モデル · ",
-        InputSource::Revisit => "↻ 再訪 · ",
-        InputSource::Unknown => "› 入力 · ",
+    let kind = match node.presentation.input_source {
+        InputSource::Human | InputSource::Unknown => RowKind::Human,
+        InputSource::Parent => RowKind::Parent,
+        InputSource::SelfModel => RowKind::SelfModel,
+        InputSource::OtherModel => RowKind::OtherModel,
+        InputSource::Revisit => RowKind::Revisit,
+    };
+    if matches!(node.presentation.input_source, InputSource::Human) {
+        format!("{} ", kind.mark())
+    } else {
+        format!(
+            "{} {} · ",
+            kind.mark(),
+            if node.presentation.input_source == InputSource::Unknown {
+                "入力"
+            } else {
+                kind.spec().1
+            }
+        )
     }
 }
 fn user_band(lines: &mut [Line<'static>], node: &UiNode, width: u16, palette: theme::Palette) {
@@ -1179,10 +1213,39 @@ fn user_band(lines: &mut [Line<'static>], node: &UiNode, width: u16, palette: th
         }
     }
 }
-fn node_region(node: &UiNode) -> ItemRegion {
+fn node_region(view: &ThreadView, node: &UiNode) -> ItemRegion {
+    let execution = if node.presentation.kind == PresentationKind::Event {
+        node.presentation
+            .fields
+            .iter()
+            .find(|f| f.key == "/payload/execution_id")
+            .map(|f| f.value.clone())
+    } else {
+        None
+    };
+    let mut source_node_ids = vec![node.node_id.clone()];
+    if let Some(execution) = &execution {
+        for tool in view
+            .nodes()
+            .iter()
+            .flat_map(|n| n.presentation.blocks.iter())
+            .filter_map(|b| b.tool.as_ref())
+            .filter(|t| t.execution_id.as_ref() == Some(execution))
+            .take(128)
+        {
+            for id in [&tool.call_node_id, &tool.result_node_id]
+                .into_iter()
+                .flatten()
+            {
+                if source_node_ids.len() < 8 && !source_node_ids.contains(id) {
+                    source_node_ids.push(id.clone());
+                }
+            }
+        }
+    }
     ItemRegion {
         key: ItemKey::Node(node.node_id.clone()),
-        source_node_ids: vec![node.node_id.clone()],
+        source_node_ids,
         primary_node_id: node.node_id.clone(),
         execution_id: None,
         expandable: true,
@@ -1204,25 +1267,36 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     format!("{state}:{code:?}:{}", tool.requires_attention())
 }
 
-fn compact_tool_line(tool: &crate::presentation::ToolPresentation, width: u16) -> Line<'static> {
+fn compact_tool_line(
+    tool: &crate::presentation::ToolPresentation,
+    width: u16,
+    palette: theme::Palette,
+) -> Line<'static> {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-    let status = tool
+    let status = tool.current_state.as_deref().unwrap_or(&tool.status);
+    let failed = tool.requires_attention();
+    let code = if tool
         .current_state
         .as_deref()
-        .filter(|state| *state != "observation_unavailable")
-        .unwrap_or(&tool.status);
-    let failed = tool.requires_attention();
-    let mark = if matches!(status, "cancelled" | "not_started" | "interrupted") {
-        "⊘"
-    } else if failed {
-        "✗"
-    } else if matches!(status, "completed" | "exited" | "succeeded") {
-        "✓"
+        .is_some_and(|state| state != "observation_unavailable")
+    {
+        tool.current_exit_code
     } else {
-        "↳"
+        tool.exit_code
     };
-    let code = tool.current_exit_code.or(tool.exit_code);
+    let row_kind = if status == "exited" && code.is_none() {
+        RowKind::Unknown
+    } else {
+        crate::presentation::rows::tool_kind(status, failed)
+    };
+    let mark = row_kind.mark();
     let mut right = code.map(|code| format!("終了 {code}")).unwrap_or_default();
+    if row_kind == RowKind::Running && tool.started_at.is_some() {
+        right = "経過未取得".into();
+    }
+    if row_kind == RowKind::Unknown {
+        right = RowKind::Unknown.spec().1.into();
+    }
     if let Some(ms) = tool.elapsed_ms {
         if !right.is_empty() {
             right.push_str(" · ");
@@ -1244,7 +1318,22 @@ fn compact_tool_line(tool: &crate::presentation::ToolPresentation, width: u16) -
     };
     let available =
         usize::from(width).saturating_sub(right.width() + if right.is_empty() { 2 } else { 4 });
-    let mut left = format!("{mark} ");
+    let background = if tool.background || status == "background_current" || status == "running" {
+        match tool.reason_kind {
+            crate::presentation::ToolReasonKind::HumanBackgrounded => "背景（利用者） ",
+            crate::presentation::ToolReasonKind::AdditionalInput => "背景（追加入力） ",
+            _ => "背景 ",
+        }
+    } else {
+        ""
+    };
+    let identity = tool
+        .execution_id
+        .as_deref()
+        .map(|id| format!("{} ", id.chars().take(8).collect::<String>()))
+        .unwrap_or_default();
+    let mut left = format!("{mark} {background}{identity}");
+    let prefix_len = left.len();
     let mut used = left.width();
     for ch in command.chars() {
         let next = ch.width().unwrap_or(0);
@@ -1254,23 +1343,18 @@ fn compact_tool_line(tool: &crate::presentation::ToolPresentation, width: u16) -
         left.push(ch);
         used += next;
     }
-    if left.trim_start_matches(['✓', '✗', '⊘', '↳', ' ']) != command && available > 3 {
+    if left[prefix_len..].trim_start() != command && available > 3 {
         left.push('…');
     }
-    let mut line = Line::from(Span::styled(
-        left,
-        Style::default().fg(if failed {
-            theme::ATTENTION
-        } else {
-            theme::TOOL
-        }),
-    ));
+    let mut line = Line::from(Span::styled(left, Style::default().fg(row_kind.spec().2)));
     if !right.is_empty() {
         line.spans.push(Span::raw(" ".repeat(
             usize::from(width).saturating_sub(line.width() + right.width()),
         )));
-        line.spans
-            .push(Span::styled(right, Style::default().fg(theme::MUTED)));
+        line.spans.push(Span::styled(
+            right,
+            Style::default().fg(row_kind.metadata_color(palette)),
+        ));
     }
     line
 }
@@ -1387,7 +1471,15 @@ fn append_node_cached(
         vec![Line::from("… 本文を折りたたみ · Enterで開く")]
     };
     user_band(&mut chunk, node, width, view.palette);
-    append_item_rows(lines, sources, chunk, node, index, node_region(node), width);
+    append_item_rows(
+        lines,
+        sources,
+        chunk,
+        node,
+        index,
+        node_region(view, node),
+        width,
+    );
     if let (Some(key), Some(cache)) = (unit_key, cache.as_mut()) {
         cache.insert_unit(
             key,
@@ -1448,7 +1540,7 @@ fn typed_history(
                 chunk,
                 summary_node,
                 summary_index,
-                node_region(summary_node),
+                node_region(view, summary_node),
                 width,
             );
             summary_until = summary_index + 1;
@@ -1566,7 +1658,7 @@ fn typed_history(
                         outcome,
                     };
                     let row_start = lines.len();
-                    let mut chunk = vec![compact_tool_line(tool, width)];
+                    let mut chunk = vec![compact_tool_line(tool, width, view.palette)];
                     // Canonical call URLs remain original link targets after
                     // compacting the visible command.
                     annotate_links(&mut chunk, &node.presentation.links, &mut links);
@@ -1751,21 +1843,61 @@ fn typed_history(
             if let Some(last) = sources.last_mut() {
                 last.covered_end = index + 1;
             }
-        } else {
-            sources.push(RowSource {
-                node: index,
-                covered_end: index + 1,
-                offset: sources
-                    .last()
-                    .filter(|source| source.node == index)
-                    .map_or(node.base_char_offset, |source| source.offset),
-                item: sources.last().and_then(|source| source.item.clone()),
-            });
-            lines.push(Line::default());
         }
     }
     let (lines, sources) = quiet_section_tails(view, lines, sources, width);
+    let (lines, sources) = row_boundaries(view, lines, sources);
     (lines, links, sources)
+}
+
+fn row_boundaries(
+    view: &ThreadView,
+    lines: Vec<Line<'static>>,
+    sources: Vec<RowSource>,
+) -> (Vec<Line<'static>>, Vec<RowSource>) {
+    let mut output = Vec::with_capacity(lines.len());
+    let mut mapped = Vec::with_capacity(sources.len());
+    let mut previous: Option<(super::history_items::ItemKey, RowGroup)> = None;
+    for (line, source) in lines.into_iter().zip(sources) {
+        if let Some(item) = &source.item {
+            let group = if matches!(item.key, ItemKey::Tool { .. } | ItemKey::LocalTool { .. }) {
+                RowGroup::Tool
+            } else {
+                match view
+                    .nodes()
+                    .iter()
+                    .find(|n| n.node_id == item.primary_node_id)
+                    .unwrap_or(&view.nodes()[source.node])
+                    .presentation
+                    .kind
+                {
+                    PresentationKind::User => RowGroup::Input,
+                    PresentationKind::Event | PresentationKind::Interrupted => RowGroup::Notice,
+                    PresentationKind::Summary | PresentationKind::Spill => RowGroup::Replacement,
+                    _ => RowGroup::Body,
+                }
+            };
+            if previous
+                .as_ref()
+                .is_some_and(|(key, before)| key != &item.key && blank_between(*before, group))
+            {
+                let mut gap = source.clone();
+                gap.item = None;
+                output.push(Line::default());
+                mapped.push(gap);
+            }
+            previous = Some((item.key.clone(), group));
+        }
+        output.push(line);
+        mapped.push(source);
+    }
+    if let Some(last) = mapped.last().cloned() {
+        let mut tail = last;
+        tail.item = None;
+        output.push(Line::default());
+        mapped.push(tail);
+    }
+    (output, mapped)
 }
 
 fn quiet_section_tails(
@@ -1838,7 +1970,12 @@ fn quiet_section_tails(
                 });
             for line in hanging_wrap(
                 vec![Line::from(Span::styled(
-                    format!("· {}", labels.join(" · ")),
+                    format!(
+                        "{} {} · {}",
+                        RowKind::Notice.mark(),
+                        RowKind::Notice.spec().1,
+                        labels.join(" · ")
+                    ),
                     Style::default().fg(view.palette.muted()),
                 ))],
                 width.max(1),
@@ -1952,6 +2089,59 @@ pub(super) fn borrowed<'a>(lines: &'a [Line<'static>]) -> Vec<Line<'a>> {
                 .collect(),
         })
         .collect()
+}
+
+/// Paint live seconds over cached rows; no source/layout revision or DB read.
+pub(super) fn paint_live_times(
+    lines: &mut [Line<'_>],
+    sources: &[RowSource],
+    view: &ThreadView,
+    width: u16,
+    now: std::time::Instant,
+) {
+    use unicode_width::UnicodeWidthStr;
+    if !lines.iter().any(|line| {
+        line.spans
+            .first()
+            .is_some_and(|s| s.content.starts_with(RowKind::Running.mark()))
+    }) {
+        return;
+    }
+    for (line, source) in lines.iter_mut().zip(sources) {
+        if !line
+            .spans
+            .first()
+            .is_some_and(|s| s.content.starts_with(RowKind::Running.mark()))
+        {
+            continue;
+        }
+        let Some(start) = source.item.as_ref().and_then(|item| {
+            view.nodes()
+                .get(source.node)?
+                .presentation
+                .blocks
+                .iter()
+                .filter_map(|block| block.tool.as_ref())
+                .find(|tool| tool.execution_id == item.execution_id)?
+                .elapsed_observation
+        }) else {
+            continue;
+        };
+        let seconds = (start.0 + now.saturating_duration_since(start.1)).as_secs();
+        let elapsed = format!("{seconds}秒");
+        let Some(left) = line.spans.first().cloned() else {
+            continue;
+        };
+        let padding = usize::from(width).saturating_sub(left.content.width() + elapsed.width());
+        line.spans = vec![
+            left,
+            Span::raw(" ".repeat(padding)),
+            Span::styled(
+                elapsed,
+                Style::default().fg(RowKind::Running.metadata_color(view.palette)),
+            ),
+        ];
+    }
 }
 
 /// Use Ratatui's identical word wrapper offscreen, once per layout cache miss.
@@ -2917,7 +3107,7 @@ mod tests {
         let shown = plain(&node_lines(&node, false, 0, 40, &mut Vec::new()));
         assert!(shown.contains("future_node"));
         assert!(
-            !shown.contains('●'),
+            !shown.contains('▸'),
             "unknown items must not become empty assistant replies"
         );
     }
@@ -3147,7 +3337,7 @@ mod tests {
         let mut targets = Vec::new();
         // Viewport clipping slices whole wrapped rows and preserves line styles.
         let lines = node_lines(&node, false, 0, 20, &mut targets);
-        assert!(plain(&lines).starts_with("● "));
+        assert!(plain(&lines).starts_with("▸ "));
         assert!(
             lines
                 .iter()
@@ -3267,8 +3457,8 @@ mod tests {
                     .lines()
                     .any(|line| line.trim_start().starts_with("▸ 推論"))
             );
-            assert!(shown.lines().any(|line| line.starts_with("● 回答の本文")));
-            assert!(!shown.lines().any(|line| line.starts_with("● 推論")));
+            assert!(shown.lines().any(|line| line.starts_with("▸ 回答の本文")));
+            assert!(!shown.lines().any(|line| line.starts_with("▸ 推論")));
         }
         let event = |kind: &str, change: serde_json::Value| {
             let payload = serde_json::json!({"text":format!("Shellboy event v1: {}",serde_json::json!({"kind":kind,"change":change}))});
@@ -3307,7 +3497,7 @@ mod tests {
         };
         assert!(
             plain(&node_lines(&node, false, 0, 80, &mut Vec::new()))
-                .starts_with("◇ 要約 · 出典2件")
+                .starts_with("⬦ 要約 · 出典2件")
         );
     }
     #[test]
@@ -3334,7 +3524,7 @@ mod tests {
             },
         };
         let shown = node_lines(&node, false, 0, 80, &mut Vec::new());
-        assert_eq!(plain(&shown), "↳ shell  printf synthetic-marker");
+        assert_eq!(plain(&shown), "▹ shell  printf synthetic-marker");
         assert!(
             shown[0]
                 .spans
@@ -3450,7 +3640,7 @@ mod tests {
         for (code, mark, color) in [
             (Some(0), "✓", Color::Cyan),
             (Some(7), "✗", Color::LightRed),
-            (None, "·", Color::Cyan),
+            (None, "◌", Color::Cyan),
         ] {
             for kind in ["assistant_response", "tool_result"] {
                 let payload = if kind == "assistant_response" {
@@ -3482,7 +3672,7 @@ mod tests {
                     header.content.starts_with(&format!(
                         "{} #2 printf fixture",
                         if kind == "assistant_response" {
-                            "↳"
+                            "▹"
                         } else {
                             mark
                         }
@@ -3531,6 +3721,176 @@ mod tests {
 
 #[cfg(test)]
 mod conversation_item_tests {
+
+    #[test]
+    fn boundary_rows_are_unselectable_and_tools_stay_dense() {
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let call = |group: &str| PresentationBlock {
+            kind: BlockKind::ToolCall,
+            tool: Some(tool(group, "completed")),
+            ..Default::default()
+        };
+        *view.nodes_mut_for_test() = vec![
+            node("before", "before", vec![prose("before", 0)]),
+            node("calls", "", vec![call("a"), call("b")]),
+            node("after", "after", vec![prose("after", 0)]),
+        ];
+        let original = view
+            .nodes()
+            .iter()
+            .map(|n| n.text.clone())
+            .collect::<Vec<_>>();
+        let (lines, _, sources) = history(&view, 80);
+        let tools = sources
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                matches!(s.item.as_ref().map(|r| &r.key), Some(ItemKey::Tool { .. })).then_some(i)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[1], tools[0] + 1);
+        for (line, source) in lines.iter().zip(&sources) {
+            if line.spans.is_empty() {
+                assert!(
+                    source.item.is_none(),
+                    "generated blank must not be selectable"
+                );
+            }
+        }
+        assert_eq!(
+            view.nodes()
+                .iter()
+                .map(|n| n.text.clone())
+                .collect::<Vec<_>>(),
+            original
+        );
+    }
+    #[test]
+    fn compact_shell_metadata_uses_shared_palette_without_changing_text() {
+        use crate::config::PaletteMode;
+        for (status, code, kind) in [
+            ("completed", Some(0), RowKind::Success),
+            ("exited", Some(7), RowKind::Failure),
+            ("failed", None, RowKind::Failure),
+            ("cancelled", None, RowKind::Cancelled),
+        ] {
+            let mut value = tool("metadata", status);
+            value.exit_code = code;
+            value.elapsed_ms = Some(12400);
+            let mut previous_text = None;
+            for mode in [PaletteMode::Dark, PaletteMode::Light] {
+                for no_color in [false, true] {
+                    let palette = theme::Palette::from_capabilities(mode, no_color, true);
+                    let line = compact_tool_line(&value, 80, palette);
+                    let right = line.spans.last().unwrap();
+                    assert!(right.content.ends_with("12.4秒"));
+                    assert_eq!(right.style.fg, Some(kind.metadata_color(palette)));
+                    let text = line
+                        .spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>();
+                    if let Some(previous) = &previous_text {
+                        assert_eq!(&text, previous);
+                    }
+                    previous_text = Some(text);
+                }
+            }
+        }
+    }
+    #[test]
+    fn live_time_paints_from_saved_base_without_changing_layout_or_sources() {
+        let now = std::time::Instant::now();
+        let mut live = tool("live", "running");
+        live.current_state = Some("background_current".into());
+        live.background = true;
+        live.started_at = Some("2026-10-31T00:00:00Z".into());
+        live.elapsed_observation = Some((std::time::Duration::from_secs(316), now));
+        live.reason_kind = crate::presentation::ToolReasonKind::HumanBackgrounded;
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![node(
+            "live",
+            "",
+            vec![PresentationBlock {
+                kind: BlockKind::ToolCall,
+                tool: Some(live),
+                ..Default::default()
+            }],
+        )];
+        let (lines, _, sources) = history(&view, 80);
+        let mut painted = borrowed(&lines);
+        paint_live_times(
+            &mut painted,
+            &sources,
+            &view,
+            80,
+            now + std::time::Duration::from_secs(7),
+        );
+        let shown = painted
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(shown.contains("⏵ 背景（利用者）"), "{shown}");
+        assert!(shown.contains("323秒"), "{shown}");
+        assert_eq!(
+            painted
+                .iter()
+                .find(|line| line.spans.last().is_some_and(|s| s.content == "323秒"))
+                .unwrap()
+                .spans
+                .last()
+                .unwrap()
+                .style
+                .fg,
+            Some(RowKind::Running.metadata_color(view.palette))
+        );
+        assert!(
+            plain(&lines).contains("経過未取得"),
+            "cached rows must remain immutable"
+        );
+    }
+    #[test]
+    fn notification_region_keeps_sources_without_triggering_output_hydration() {
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let live = tool("live", "completed");
+        let execution = live.execution_id.clone().unwrap();
+        let call_id = live.call_node_id.clone().unwrap();
+        let mut event = node("notice", "", vec![]);
+        event.presentation.kind = PresentationKind::Event;
+        event.presentation.fields = vec![crate::presentation::PresentationField {
+            key: "/payload/execution_id".into(),
+            label: "実行ID".into(),
+            value: execution.clone(),
+            display: None,
+            value_omitted: false,
+        }];
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(live),
+                    ..Default::default()
+                }],
+            ),
+            event,
+        ];
+        let region = node_region(&view, &view.nodes()[1]);
+        assert!(
+            region.execution_id.is_none(),
+            "notification selection must not fetch shell output"
+        );
+        assert!(region.source_node_ids.contains(&call_id));
+        assert!(region.source_node_ids.contains(&"notice".into()));
+    }
     use super::*;
     use crate::{
         config::Config,

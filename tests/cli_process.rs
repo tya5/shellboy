@@ -229,7 +229,39 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
             .await
             .unwrap()
     }
+    // The runnable driver independently records index context. Observe that
+    // saved boundary before measuring preview's non-mutation contract.
+    let mut changes = control.subscribe();
+    let observed_key = format!("index.observed.{thread}");
+    crate::test_watchdog::watchdog(
+        "driver index context saved before preview baseline",
+        async {
+            loop {
+                let key = observed_key.clone();
+                let saved = control
+                    .store
+                    .database
+                    .call(move |db| {
+                        db.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
+                            [key],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .map_err(Into::into)
+                    })
+                    .await
+                    .unwrap();
+                if saved {
+                    break;
+                }
+                changes.recv().await.unwrap();
+            }
+        },
+    )
+    .await
+    .unwrap();
     let index_before = index_state(&control).await;
+    assert_eq!(index_before, (0, 0, 1));
     let preview_operation = format!("{}:cost-preview", owner.instance_id);
     let preview_args = [
         "--operation-id",

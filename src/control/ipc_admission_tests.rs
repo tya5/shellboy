@@ -30,6 +30,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
             crate::ipc::call(
                 &data,
                 Command::Wait(WaitArgs {
+                    after: None,
                     conditions: vec![WaitCondition::RunEnded {
                         run_id: "run".into(),
                     }],

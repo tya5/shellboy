@@ -473,6 +473,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
         std::sync::Arc::new(FixtureClipboard),
     ));
     send.send(UiAction::Command(Command::Wait(WaitArgs {
+        after: None,
         conditions: vec![WaitCondition::RunEnded {
             run_id: "wait-run".into(),
         }],
@@ -2056,6 +2057,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         .await
         .unwrap();
     send.send(UiAction::Manage(Command::Wait(WaitArgs {
+        after: None,
         conditions: vec![WaitCondition::RunEnded {
             run_id: "observed-run".into(),
         }],

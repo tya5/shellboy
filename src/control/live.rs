@@ -16,6 +16,8 @@ use tokio_util::sync::CancellationToken;
 pub(super) struct LiveRegistry {
     drivers: Mutex<HashMap<String, DriverSlot>>,
     shells: Mutex<HashMap<String, LiveShell>>,
+    #[cfg(all(test, unix))]
+    pub(super) test_registration: Mutex<()>,
 }
 impl LiveRegistry {
     /// The lookup, existing-slot notification and new-slot publication share one
@@ -96,6 +98,8 @@ impl LiveRegistry {
     }
 
     pub(super) async fn register_shell(&self, execution: String, shell: LiveShell) {
+        #[cfg(all(test, unix))]
+        let _registration = self.test_registration.lock().await;
         self.shells.lock().await.insert(execution, shell);
     }
 

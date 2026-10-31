@@ -79,7 +79,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
          FROM thread t LEFT JOIN run r ON r.thread_id=t.id AND r.state IN ('live','stopping')
          LEFT JOIN turn u ON u.thread_id=t.id AND u.run_id=r.id AND u.state IN ('preparing','running','waiting','recovery_wait')
          WHERE t.id=?1 AND t.deleted_at IS NULL",
-        [thread], |row| Ok((ThreadDetails {
+        [thread], |row| Ok((ThreadDetails { last_answer: None, last_input: None,
             last_compaction:None,thread_id:thread.into(), title:row.get(0)?, cwd:row.get(1)?, connection:row.get(2)?,
             model:row.get(3)?, effort:row.get(4)?, parent_id:row.get(5)?, agents_path:row.get(6)?,
             run_id:row.get(8)?,turn_id:row.get(9)?,recovery_reason:row.get(10)?,
@@ -269,7 +269,7 @@ mod tests {
     #[tokio::test]
     async fn owned_header_matches_cli_facts_and_prepares_after_database_shutdown() {
         let (_root, owner) = fixture().await;
-        let (raw,expected)=owner.db.call(|db| {
+        let (raw,mut expected)=owner.db.call(|db| {
             let tx=db.transaction()?;
             tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('p','/','','p','m','now'),('child','/','','p','m','now'),('unowned','/','','p','m','now');
                 UPDATE thread SET parent_thread_id='p',effort='high' WHERE id='t';
@@ -289,6 +289,11 @@ mod tests {
         }).await.unwrap();
         owner.shutdown().await.unwrap();
         let actual = raw.prepare();
+        // The bounded header intentionally does not fetch optional CLI message bodies.
+        // Keep its three-query budget and compare every shared header fact unchanged.
+        assert!(actual.last_input.is_none() && actual.last_answer.is_none());
+        assert_eq!(expected.last_input.take().unwrap()["message_id"], "pending");
+        assert!(expected.last_answer.is_none());
         assert_eq!(
             serde_json::to_value(&actual).unwrap(),
             serde_json::to_value(expected).unwrap()

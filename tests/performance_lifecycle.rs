@@ -459,6 +459,7 @@ async fn repeated_owned_runs_release_resources_after_many_turns() {
             command(
                 &observer_control,
                 Command::Wait(WaitArgs {
+                    after: None,
                     conditions: vec![WaitCondition::RunEnded { run_id: target_run }],
                     timeout_ms: 30000,
                 }),

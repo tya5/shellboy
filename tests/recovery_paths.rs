@@ -328,6 +328,7 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
                 .request(Request::new(
                     operation,
                     Command::Wait(WaitArgs {
+                        after: None,
                         conditions: vec![WaitCondition::RunEnded {
                             run_id: "r-parent".into(),
                         }],
@@ -407,6 +408,7 @@ async fn shutdown_context_save_failure_is_cached_but_wait_and_run_still_drain() 
                 .request(Request::new(
                     operation,
                     Command::Wait(WaitArgs {
+                        after: None,
                         conditions: vec![WaitCondition::RunEnded { run_id: "r".into() }],
                         timeout_ms: 120000,
                     }),

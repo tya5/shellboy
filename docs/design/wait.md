@@ -43,3 +43,11 @@ spawn後にCLI waitがslot登録へ先行した場合は、登録時に既存Not
 状態変更のcommit後だけ既存Changedで画面を更新し、監視pollerや汎用遷移エンジンは追加しない。
 通常終了は既存C5のsnapshotでpending条件とwaitingを保存してから取消し・終端化する。
 Forceの途中切断は従来どおり次回起動の回復対象とする。
+
+## Thread observations (#74)
+
+Adopt [Thread observations and resumable wait](thread-observation.md) for the
+bounded thread_settled condition, instance-independent cursor and separate
+latest-answer/latest-input projections. Existing wait lifecycle, ownership and
+cancellation rules remain. Recovery facts for root Runs use the already-existing
+recovery event without a delivery; terminal Run facts require no extra event.

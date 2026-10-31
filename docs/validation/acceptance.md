@@ -4339,3 +4339,357 @@ timings are not relabelled as10d6df8. The new merge's ordinary Linux/Windows CI
 and main CI have not run. E publication requires the promised separate review
 approval. Only the approved measurement branch was pushed; main, installation,
 user store and transferred #83–#87 features were not changed by this work.
+
+## #80 on-demand owner memory qualification (2026-10-31)
+
+The minimal interface is status --memory: read-only, owner-wide, and exclusive
+with activity filters. It returns existing cache budget accounting (body views,
+layout/unit entries, attachment paths and replay Threads) plus configured limits.
+Existing live/pinned counts remain separate. This is not a full heap measurement,
+not an additive partition of OS memory, and not a leak diagnosis. No new retained
+byte counter, cap, table, worker or work queue is added.
+
+UI counters respond to a request on existing EngineEvent/UiUpdate delivery with a
+single completion responder. No periodic sampler or log exists. Process and other
+cache reads reuse existing bounded control-file admission, not the DB/UI lane.
+MacOS uses native rusage_info_v2 footprint/resident bytes; Linux parses bounded
+proc RSS/PSS kB fields with checked conversion; Windows uses current-process
+working-set/private usage. OS failure/absence, unsupported platforms and absent
+UI ownership yield null plus reasons, never a guessed zero.
+
+Synthetic tests on native macOS arm64/Rust 1.99.1 verify body/layout growth after
+use and attachment/replay growth after preparation, without exceeding configured
+retention caps in those fixtures. The actual request completes with the DB writer
+held. Process sampling stays at 0 until requested; attached UI replies precede
+sampling, and two requests produce exactly two samples. Private observation JSONL
+rows are 0 to 2; operation_receipt/model_attempt remain 0 to 0. Native-field tests
+require a byte value or a concrete failure reason for each platform's expected
+metrics, and malformed/overflow proc units stay unknown. CLI conversion and scope
+conflicts are tested; no model/embedding provider is used. Waits use #77's shared
+60-second watchdog only, not performance thresholds.
+
+Initial local checks caught a fixture cursor/path mismatch at shutdown, private
+method use in an external CLI test, and an unchecked server-shutdown Result. The
+fixture and tests were corrected without changing production recovery semantics.
+Full standard/role/bundled-doc checks, native OS results and record-line audits are
+tracked in #80. The earlier #79 adopted-design paragraph is aligned with its
+review-corrected connection/file-admission separation; historical evidence stays.
+
+The published #41 branch overlaps F8/frontend/UI files. Only minimal request/reply
+plumbing is included here; F8 display, leak investigation, untracked SQLite/heap
+estimation and request-copy/peak optimization are deferred. No real owner/data-dir,
+installed binary, tag or Release is modified by verification.
+
+The first #80 branch CI (dd416b7, run 41168775635 attempt 1) passed Windows/Linux
+but macOS failed the existing cli_process durable-retransmission test's index
+preview metadata assertion: (0,0,1) versus baseline (0,0,0). New memory tests passed.
+There are no index-preview implementation/test changes in this task; the cause is
+unproven. Preserve the failure and any same-SHA failed-job rerun as separate facts
+in #80. A follow-up also qualifies CLI help's default saved-state description with
+its live owner-memory exception. No test guard, assertion or retry policy is relaxed.
+
+The same-SHA failed-job rerun of first candidate dd416b7 succeeded (41168775635,
+attempt 2). After #82 integration/help correction, candidate 3e43896's run
+41170243551 attempt 1 passed Windows/Linux but macOS failed the existing parent-PTY
+termination test's required scope=signal diagnostic row. Its unchanged failed-job
+rerun also succeeded (attempt 2); no timing/assertion/runtime relaxation is made.
+The attempted main push after qualification was safely rejected non-fast-forward
+when other work landed during the pre-push standard check. Rebase retains the
+complete upstream records and requalifies the combined SHA; run links/results
+remain in #80 rather than changing qualified source recursively.
+
+### 2026-10-31: #83 row vocabulary, pre-rebase native observations
+
+macOS 26.3.1 (a), build25D771280a, arm64 debug; CARGO_BUILD_JOBS=2 and
+RUST_TEST_THREADS=2. No release build, installed-binary change or user data.
+- Focused presentation 34/34 and existing history-interaction 8/8 passed before
+  the additional explicit notification-navigation regression was added.
+- `python3 scripts/check-row-kinds.py --binary target/debug/shellboy --fixture
+  target/debug/examples/visual_fixture --out /tmp/issue-83-pty-fifth`: exit0,
+  actual Unix PTY + pyte + synthetic loopback SSE, 8 sessions / 56 completed
+  screens, 80/140 columns, dark/light/NO_COLOR/TERM=vt100. A real background
+  read coexisted with two consecutive foreground successes; saved-start seconds,
+  marks, dense tools, factual delivery notices, Enter source jump and explicit
+  output expansion/close were observed. Static summary/input/child notice/
+  unavailable rows used a separate synthetic conversation, not model replay.
+- All16 table entries have Unicode EAW=N and ordinary/CJK width1 (including
+  repeated source arrow). Canonical text, source anchors and item identities
+  remain independent of generated nonselectable blanks.
+- First PTY attempt fed a deliberately unmatched visual tool result into model
+  replay and correctly entered recovery. Separate static/live scenes fix the
+  fixture. Attempts2/3 misselected or misqualified the baseline HTTP-only F7
+  overlay and hit shutdown watchdogs. Enter navigation supersedes that approach.
+  Attempt4 had a whitespace-sensitive wrapped-label assertion; normalized text
+  fixed the driver. No failed attempt is counted as product acceptance.
+- First standard check: Python18/layout/watchdog checks passed; strict Clippy
+  rejected a nested if and the new navigation test had usize vs u64. Corrected;
+  full standard/rebase validation and matched-baseline P1/3OS CI remain pending.
+- Physical terminal glyphs, real IME/clipboard and Windows ConPTY are unverified.
+  Native OS CI is not physical terminal UX. Missing name/source enrichment: #88.
+
+The first rebased standard run passed Clippy, then had948 unit passes/2 failures:
+a remaining old unknown-code glyph expectation and the new off-window fixture
+incorrectly reused a view that intentionally retained its old source. Both tests
+are corrected. Self-check also separated Enter following from Space/mouse
+expansion; exact loaded source, independent unavailable source and child Thread
+navigation now pass the focused regression without adding a read/poll operation.
+
+The next full run passed950 unit tests and918 integration tests, with two
+remaining integration golden-label failures (`●` answer and `↳` background).
+These are updated to the adopted `▸` and `⏵ 背景（利用者）` contracts without
+changing source-order, command-identity, cancellation or watchdog assertions.
+
+
+Final local source7028c3b is rebased on accepted main e933054 (including #80).
+The three append-only documentation conflicts retained both tasks' records;
+Rust/UI integration had no conflict. The pending standard/local qualification
+statements above are superseded by the following independent final results:
+- `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 sh scripts/check.sh`: exit0,
+  Rust1,887 passed / 0 failed / 33 ignored, layout93 suites, Python18, fmt and
+  strict all-target Clippy. Evidence: `/tmp/issue-83-check-final2.log`.
+- Final rebuilt debug binary SHA256:
+  `bccbe30aab271abdcad9ba37da4cd2f6150e7681a772ae5d5d277b3ffd8993ee`.
+  The same actual PTY command, now `--out /tmp/issue-83-pty-final`, independently
+  passes8 sessions/56 completed frames after rebase/Enter-only following. Tests
+  also verify Space remains folding, unavailable source stays local and child
+  Enter follows the saved Thread. `py_compile` and `git diff --check` pass.
+- Same140x40 TestBackend,128 nodes/50 tools, debug,20 warmup/500 timed frames,
+  interaction mode on both main e933054 and candidate7028c3b, three interleaved
+  pairs: p95 microseconds3268→4449,3388→5135,3187→4169. All pass<=8ms and
+  <=current-main+2ms (largest delta1747us). Both keep131 layout builds,
+  258 unit builds/16510 unit hits and focus-only reuse assertions. Logs/JSON:
+  `/tmp/issue-83-p1.log`, `/tmp/issue-83-p1.json`. This is an incremental
+  current-main comparison, not a fresh observation of historical main1fec7f0.
+- Source/script changes stop at7028c3b; subsequent status/acceptance edits are
+  evidence-only. Branch CI and review outcome are recorded in issue #83; local
+  success alone is not three-OS admission or physical terminal qualification.
+
+## #89 CI observation ordering qualification
+
+2026-10-31, native macOS 26.3.1 arm64 / Rust 1.99.1. Synthetic owners, loopback
+fixtures and native owned child processes only; no user DB, settings, installed
+binary, owner or release/tag changes. Build jobs are capped at 2 and test threads
+at 4 to limit memory. Every new wait uses the shared 60-second watchdog; there
+is no performance threshold or increased production/test timeout.
+
+### Causes and controlled order
+
+- Run 41172774266 attempt 1 failed at the immediate live-shell unwrap.
+  `signal_shell` saves stopping and can clone no handle before `register_shell`;
+  the reply is nevertheless valid. A cfg(test, unix) registration gate now
+  deliberately holds native handle publication until after successful acceptance.
+  The test asserts that the live entry is absent at acceptance, then subscribes
+  before releasing the gate and waits for the entry. Native stdin remains
+  writable, the runtime-operation grace owner remains present, and shutdown
+  drains registrations/operations/requests. Ten fresh test invocations passed.
+  The gate is absent from production. The Unix lifeline's startup work can
+  widen this valid interval; no evidence establishes incorrect native killing.
+- Run 41168775635 attempt 1 observed metadata (0,0,1) versus (0,0,0).
+  The runnable driver's `record_context_observations_tx` independently inserts
+  `index.observed.THREAD`. The real CLI test now observes that exact saved key
+  with engine notifications before taking the baseline, verifies (0,0,1), then
+  preserves the complete preview/retransmission non-mutation assertion. Five
+  fresh invocations passed; index metadata is not excluded from the comparison.
+- Run 41170243551 attempt 1 required a signal diagnostic after parent PTY loss.
+  Diagnostics admission uses `try_lock`/`try_send`, so shutdown drain cannot
+  restore records dropped before admission. Grep audited signal/owner diagnostic
+  presence assertions in termination tests. Shared graceful checks now require
+  saved tool completion, stopped Run/app_shutdown and stopped shell, successful
+  native exit where observable, and ESRCH for the known native process group.
+  Present signal records retain stage/boundary validation; missing records are
+  explicitly tested and malformed records are rejected. EOF retains its stricter
+  terminal_lost check. Repeated-signal tests wait for listener endpoint removal
+  rather than log admission, including with a blocked database writer. Three
+  complete native termination-suite invocations passed before the additional
+  malformed-record check; final standard/native CI covers that check too.
+
+Local full-check and exact-source three-OS CI outcomes are retained in issue #89.
+Repeated passing runs are supplementary observations, not the causal evidence:
+that evidence is the forced acknowledgment-before-publication order, saved
+index-context boundary, and the documented lossy diagnostic admission contract.
+No runtime interruption capture or native lifeline/stderr source is changed,
+leaving the concurrent #82 work separate. No schema, table, worker or queue is
+added. Prior failed-job reruns from #80 remain historical, not proof of a fix.
+
+Local standard check (`CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=4 sh scripts/check.sh`)
+passes: Rust 1,889 passed / 0 failed / 33 ignored, integration layout 93,
+Python 18, fmt and strict all-target Clippy. The document-role test passes
+separately. Status adds 10 lines and deletes 0; this qualification appends its
+record without deleting prior evidence. Rebase/pre-push validation is repeated
+on the exact candidate; native branch CI must pass before main integration.
+
+## 2026-10-31 shell metadata palette follow-up (#83)
+
+- User-requested separate change before #81. `rows.rs` owns right-hand metadata
+  color: the existing palette muted role for routine facts, existing attention
+  role for failure/nonzero exits/cancellation, previous Reset under NO_COLOR.
+  Both compact headers and live-seconds painting use it. No text, identity,
+  source/layout, persistence, protocol or theme configuration changes.
+- macOS 26.3.1 (a), arm64 debug: standard check passes 1,889 Rust tests,
+  33 ignored, zero failed; layout 93 suites, Python 18, fmt/strict Clippy pass.
+  New tests cover all row kinds, dark/light/plain metadata spans, stable text
+  and live elapsed-color painting.
+- Actual Unix PTY plus pyte and synthetic loopback SSE: 80 columns, dark/light/
+  NO_COLOR/vt100, four candidate sessions with 36 completed scenes. Normal
+  metadata uses #8a8a8a/#4e4e4e in dark/light, attention remains #ff0000.
+  Live background elapsed seconds are muted. Candidate NO_COLOR shell-row
+  visible cells/foreground/background equal an independent baseline owner.
+  Baseline is the pre-follow-up binary built for #81 at `1610b3b`; its Rust
+  sources equal reviewed main `0ca4ec5` (guide-only differences).
+- PTY driver failures are preserved: initial attention expectation used a
+  symbolic ANSI name instead of pyte's indexed RGB value; next comparisons
+  exposed empty orphan-stub versus space representation. Corrected the driver
+  to compare displayed blank cells without relaxing color/nonblank checks.
+  Final independent rerun succeeds; failures are not counted as passing scenes.
+- Evidence: `/tmp/issue-83-metadata-check.log`, `-build.log`, `-pty-v4.log`,
+  `/tmp/issue-83-metadata-pty-v4/` (screens, raw, cell-color JSON and results).
+  Physical-terminal/font readability, IME, OS clipboard and Windows ConPTY
+  remain unverified; this small color-only change does not rerun P1.
+
+## 2026-10-31 storage/resource guide audit (#81)
+
+- Scope: documentation only. Initial audit used reviewed #83 main `0ca4ec5`
+  (main CI `41175347395` passes on all three OSes). Revalidated on `0e53156`
+  including accepted #89 and the separately committed shell-metadata follow-up;
+  retention/cache/docs-system implementation sources remain unchanged.
+- Requirements: #81 body and its two additional comments. Both User Guides
+  explain storage/GC/cache/memory and bundled delegation IDs; Esc, last-successful
+  usage and the usage-section placement are aligned. Only the stale live-work
+  qualifier is removed; watch/forms and deferred F8 names remain unchanged.
+- Sources: `src/config.rs` Retention/Cache (7 days, 1GiB/256MiB;
+  32/16/32/64MiB), `src/control.rs` maintenance (initial pass, then 60-second
+  sleep), `src/gc.rs`/`src/gc/history.rs` (raw/history batches and reachability),
+  `src/attachments.rs` collect_managed (protection and owned clipboard paths),
+  `src/memory.rs`/`src/control/memory.rs` (on-demand metrics), `src/docs.rs`
+  and `src/control/driver/request.rs` (bundled guides and short system entry).
+- Important clarification: 128 is a raw/history DB batch size, not a global
+  collection-per-pass/minute limit. Raw/history collection can repeat batches;
+  managed-image candidate selection has no equivalent LIMIT 128. The managed
+  report truncates details to 128, not collection work. No runtime change here.
+- Compared against recovery/storage, configuration and attachment guides.
+  No remaining checkout/absolute-guide-path premise was found in feature guides.
+- Python document/script tests: 18 pass. All 33 Japanese-guide local links and
+  fragment targets pass an ad-hoc check (the initial checker mishandled same-file
+  fragments; correcting its path resolution fixes the checker, not guide text).
+- Rebased candidate `32c0673`: standard check passes 1,891 Rust tests / zero
+  failures / 33 ignored, layout 93 suites, Python 18, fmt and strict Clippy.
+  `scripts/check-docs.py` against its rebuilt debug binary passes 33 offline CLI
+  checks: 13 guides, three categories, 141 resolved bundled links, valid hashes
+  and UTF-8 section boundaries. Empty cwd/environment, absent config and no
+  owner/API are independently checked. Japanese local links are 33/33 passing.
+  Evidence: `/tmp/issue-81-check-rebased.log`, `/tmp/issue-81-bundled-docs.json`.
+  Binary SHA256: `b9c153e6f0bc083caa3430ec7234f77e8b4d799faf629878131024342391b852`.
+- The separate metadata commit `0e53156` also passes the post-#89 standard check
+  (1,891 Rust tests) and fresh 80-column PTY at
+  `/tmp/issue-83-metadata-pty-rebased/`. The earlier 1,889-test observation above
+  predates #89; both are retained rather than relabeling old results.
+- No release build, performance/PTY rerun for the guide-only delta, physical
+  terminal/IME/clipboard/ConPTY verification or real-data GC is performed.
+  Exact-SHA three-OS CI/integration outcomes are tracked in #81/#83.
+
+## #82 Low follow-up: bound snapshot values and guardian EOF
+
+2026-10-31, native macOS ARM64/Rust1.99.1, a separate commit before #74.
+SHELL_SNAPSHOT uses SQL parameters for startup state and JSON extras, not source
+text replacement. The existing app_ipc restart fixture now reads the actual
+interruption_context JSON and asserts failed/unverified on Unix, stopped with
+no os_state field elsewhere, and retained result uncertainty.
+
+close_from's lower bound is inclusive, so fd2 was already closed in production;
+no /dev/null reassignment or lifetime policy change is needed. The new native
+natural_shell_exit_drains_stderr_to_eof_before_guardian_release test confirms
+stderr bytes and EOF while try_wait still says the guardian is alive. A separate
+normal supervisor test natural_exit_releases_guardian_and_finishes_output_drain_
+without_stderr_eof_cycle confirms stdout/stderr tail bytes, Exited0, complete
+output and confirmed group cleanup through the production release/drain path.
+All three focused checks pass. The first native harness incorrectly retained
+Command's parent pre_exec FD copies while waiting for the launch acknowledgment;
+that harness blocked and was terminated. A first whitespace-based edit missed
+its target; the unchanged harness was terminated again. The fixture was fixed
+to match production drop-before-ack in existing blocking work. This is not an
+observed production stderr-retention defect. No test deadline was shortened.
+
+## Bounded Thread wait/readback qualification (#74)
+
+Base main0ca4ec5, native macOS ARM64/Rust1.99.1. Build concurrency is1, test
+concurrency2; no release build or concurrent duplicate full check is used.
+New waits use the existing Notify-before-read loop, receipt/cleanup and graph.
+Terminal state/time comes from Run rows; genuine recovery/resume uses retained
+existing recovery events, also recorded for root Runs without parent delivery.
+No lifecycle classification from arbitrary attempt failures is introduced.
+
+The following focused observations pass during implementation; final combined
+full-standard/native results are independent gates recorded by exact SHA in
+issue74 rather than inferred from this list:
+
+- Actual EXPLAIN QUERY PLAN on next/head Run and recovery, current Run/Turn,
+  last Run and latest answer/input statements proves indexed Thread/range or
+  primary-key seeks, without history-wide table scans or temporary order trees.
+  A manual SQLite3.51 check also shows thread/state/rowid and expression/rowid
+  range seeks. Root human waits skip the unrelated model ownership graph.
+- Synthetic131 changes cross the64-change cap without loss, using per-stream
+  positions and round robin. Current active work is not an old completion;
+  unknown/deleted targets and invalid scopes/cursors/limits are distinguished.
+- A real pending model observation is registered before the existing Changed
+  publication; a completed Run and newer live Run are committed between reads.
+  The wait still returns the saved completion and leaves new work live.
+- A real temporary owner stores a root recovery fact, resumes the Turn, and
+  reads both the prior completion and recovery via cursor. After shutdown and
+  restart the same cursor reads the new stopped fact. Self/ancestor/composed
+  ownership protection remains; no polling or target stop is used to wait.
+- A schema15 temporary store upgrades/reopens with all four indexes and unchanged
+  Run/event row identities. The touched schema14 corruption fixture retains its
+  source-preservation assertions and uses the shared watchdog; its one obsolete
+  allowance is removed, not broadened.
+- A real owner plus two gated loopback JSON model responses verifies multi-Thread
+  settlement and old final answer versus new received input during the second
+  request, same metadata in list/get, saved sender/label, then the new final
+  answer. Another saved-fact fixture keeps held input distinct, strips an unknown
+  credential field and preserves identity when body bytes are reclaimed.
+- The CLI maps --after to the shared wait contract and rejects65 targets or after
+  without a Thread condition. Guide examples explain cursor continuation and
+  distinguish received input/labels from execution or recovery authorization.
+
+The initial plan fixture used &str-to-SQLite-Value conversions unsupported by the
+pinned API; explicit owned Values fixed compilation. The initial loopback fixture
+assumed ThreadCreateArgs::default; explicit current fields fixed compilation.
+The first latest-data fixture set a Turn answer FK before inserting the node;
+correct insertion order fixed that fixture. These are harness failures, not
+suppressed assertions. Further final-gate failures, if any, must be retained in
+the issue result. All async waits use the common60s watchdog, not speed criteria.
+
+Source excerpts select one node, at most64 natural fragments and512 returned
+characters, excluding tools/reasoning/opaque bodies. Missing bodies remain known
+identities with an empty excerpt. The selected path's fork-only ancestor answer
+is not expanded; no idle-without-Run state, subscription or UI watch screen is
+added. No new table/worker/queue/dependency, real provider, user data, installed
+binary or owner swap is part of qualification. #80/#83 main is retained; UI edits
+only initialize new optional DTO fields after their owner work completed.
+
+
+### Final-gate integration findings (#74)
+
+The first combined local gate stopped in lib tests:960 passed/3 failed/13 ignored.
+The new receipt Thread-order index gave the submission fence an equivalent
+Thread-prefix SEARCH instead of receipt_target; the plan test now allows these
+two named prefix indexes while retaining the target binding and no-scan checks.
+No retention assertion or production fence policy is changed. The lightweight
+header intentionally leaves new optional CLI message bodies unobserved; its test
+still enforces three statements and all shared facts, separately asserting the
+canonical received message and the header's None fields. It does not add body
+queries or drop the old header checks. An old-schema startup fixture left the
+four new indexes while rolling back its ledger; it now drops those derived
+indexes too. Runtime migration stays strict, with no IF NOT EXISTS workaround.
+That touched fixture's10s guard moves to the shared60s watchdog, removing one
+more stale allowance (two removed in this task). Revalidation follows normally;
+these deterministic integration findings are not called unrelated CI flakes.
+
+The next full gate passed lib tests but exposed the same old-schema fixture
+omission in ten integration cases (index reset, message recovery, readonly RAG
+schema rejection and storage/hot-query upgrades) plus one Run plan name check:
+913 passed/11 failed/17 ignored in integration. All downgrade scripts that drop
+the prior readback indexes now also drop the four new derived indexes, keeping
+ledger/schema consistent before migration. The hot Run plan accepts only the
+old one_live_run or new wait_run_state named index, with an explicit Thread
+SEARCH predicate; unrelated plan checks remain unchanged. Production migration
+stays strict and source-preservation/rollback/reopen assertions are retained.

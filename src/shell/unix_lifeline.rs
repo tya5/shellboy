@@ -319,7 +319,8 @@ unsafe fn write_int(fd: i32, value: i32) -> bool {
         true
     }
 }
-unsafe fn close_above(first: u32, limit: i32) {
+// Inclusive lower bound, including stderr when first == 2.
+unsafe fn close_from(first: u32, limit: i32) {
     unsafe {
         #[cfg(target_os = "linux")]
         if libc::syscall(libc::SYS_close_range, first, u32::MAX, 0u32) == 0 {
@@ -344,7 +345,7 @@ unsafe fn private_group(limit: i32) -> bool {
             if libc::dup2(pipe[0], 0) < 0 {
                 libc::_exit(126);
             }
-            close_above(1, limit);
+            close_from(1, limit);
             let mut byte = 0u8;
             while libc::read(0, (&mut byte as *mut u8).cast(), 1) < 0 && errno() == libc::EINTR {}
             libc::_exit(0);
@@ -366,9 +367,10 @@ unsafe fn guard(child: i32, life: i32, status: i32, limit: i32) -> ! {
             libc::kill(-group, libc::SIGKILL);
             libc::_exit(126);
         }
+        // fd2 (shell stderr) is closed too: its EOF must not depend on release.
         // Do not keep stdout, owner locks, other lifelines or std's exec-error
         // pipe alive. The execing shell alone must decide spawn success/failure.
-        close_above(2, limit);
+        close_from(2, limit);
         let mut action: libc::sigaction = std::mem::zeroed();
         action.sa_sigaction = child_signal as *const () as usize;
         libc::sigemptyset(&mut action.sa_mask);
@@ -452,5 +454,50 @@ unsafe fn guard(child: i32, life: i32, status: i32, limit: i32) -> ! {
             while libc::waitpid(child, std::ptr::null_mut(), 0) < 0 && errno() == libc::EINTR {}
         }
         libc::_exit(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn natural_shell_exit_drains_stderr_to_eof_before_guardian_release() {
+        crate::test_watchdog::watchdog("native stderr EOF before guardian release", async {
+            let mut command = Command::new("/bin/sh");
+            command
+                .args(["-c", "printf stdout-tail; printf stderr-tail >&2"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .process_group(0);
+            let mut native = tokio::task::spawn_blocking(move || {
+                let prepared = Prepared::configure(&mut command).unwrap();
+                let child = command.spawn().unwrap();
+                // Match the supervisor: release parent pre_exec FD copies first.
+                drop(command);
+                prepared.attached(child).unwrap()
+            })
+            .await
+            .unwrap();
+            let mut stderr = native.child.stderr.take().unwrap();
+            let mut stdout = native.child.stdout.take().unwrap();
+            assert!(native.wait().await.unwrap().success());
+            native.reap_shell().await.unwrap();
+            assert!(native.child.try_wait().unwrap().is_none());
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes).await.unwrap();
+            assert_eq!(bytes, b"stderr-tail");
+            assert!(
+                native.child.try_wait().unwrap().is_none(),
+                "EOF cannot rely on guardian exit"
+            );
+            native.release();
+            assert!(native.child.wait().await.unwrap().success());
+            bytes.clear();
+            stdout.read_to_end(&mut bytes).await.unwrap();
+            assert_eq!(bytes, b"stdout-tail");
+        })
+        .await
+        .unwrap();
     }
 }

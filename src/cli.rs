@@ -288,9 +288,12 @@ pub struct ListOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nUse operation get --operation ID to inspect an operation receipt.\nGuide: shellboy docs get --id shellboy/agent-guide"
+    after_help = "Examples:\n  shellboy status\n  shellboy status --memory\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nActivity mode reads saved database facts only. --memory observes current owner cache accounting and native process memory. Neither mode starts model or RAG work.\nUse operation get --operation ID to inspect an operation receipt.\nGuide: shellboy docs get --id shellboy/agent-guide"
 )]
 pub struct StatusOptions {
+    /// Query the running owner's cache accounting and native process memory.
+    #[arg(long, conflicts_with_all = ["thread_id", "run_id", "since", "state", "all", "limit", "cursor"])]
+    pub memory: bool,
     /// Exact Thread; model callers default to their own Thread.
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
@@ -501,12 +504,15 @@ pub struct ExecutionOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Wait for a saved target:\n  shellboy wait --conditions-json '[{\"type\":\"shell_ended\",\"execution_id\":\"WORK_EXECUTION_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"turn_completed\",\"turn_id\":\"CHILD_TURN_ID\"}]' --timeout-ms 30000\n\nConditions use any semantics. timeout leaves the target running; satisfied means inspect target state, not guaranteed success. recovery_wait means inspect Run/Turn and choose recovery explicitly. Guide: shellboy docs get --id shellboy/delegation"
+    after_help = "Wait for a saved target:\n  shellboy wait --conditions-json '[{\"type\":\"shell_ended\",\"execution_id\":\"WORK_EXECUTION_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"turn_completed\",\"turn_id\":\"CHILD_TURN_ID\"}]' --timeout-ms 30000\n\nThread conditions: {\"type\":\"thread_settled\",\"thread_ids\":[\"A\",\"B\"],\"states\":[\"completed\",\"recovery_wait\",\"failed\",\"stopped\"]}. Reuse result.cursor with --after and unchanged conditions to catch saved transitions.\n\nConditions use any semantics. timeout leaves the target running; satisfied means inspect target state, not guaranteed success. recovery_wait means inspect Run/Turn and choose recovery explicitly. Guide: shellboy docs get --id shellboy/delegation"
 )]
 pub struct WaitOptions {
-    /// JSON array of typed turn_completed/run_ended/shell_ended/shell_output conditions.
+    /// JSON array of typed thread_settled/turn_completed/run_ended/shell_ended/shell_output conditions.
     #[arg(long)]
     pub conditions_json: String,
+    /// Continue saved Thread transitions from a previous wait cursor.
+    #[arg(long)]
+    pub after: Option<String>,
     #[arg(long, default_value_t = wire::DEFAULT_WAIT_TIMEOUT_MS)]
     pub timeout_ms: u64,
 }
@@ -734,6 +740,7 @@ impl Cli {
         };
         let command = match command {
             CliCommand::Status(a) => C::Status(wire::StatusArgs {
+                memory: a.memory,
                 thread_id: a.thread_id,
                 run_id: a.run_id,
                 since: a.since,
@@ -847,6 +854,7 @@ impl Cli {
                     invalid("conditions-json must be an array of typed wait conditions")
                 })?,
                 timeout_ms: a.timeout_ms,
+                after: a.after,
             }),
             CliCommand::History { command } => match command {
                 HistoryCommand::List(a) => C::HistoryList(wire::HistoryListArgs {
