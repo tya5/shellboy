@@ -6726,3 +6726,32 @@ These are synthetic native macOS results, not Windows/Linux or physical-terminal
 qualification. P1 remains deferred, record-only and non-gating. Python SQLite
 observations remain separately classified. Both prior failed attempts remain
 recorded. Push approval does not imply acceptance; reviewer review is required.
+
+### #105 Frozen Cold Pair: Development Debug Information
+
+macOS/aarch64, rustc/cargo1.99.1, two build jobs/test threads, no profile/Rust flag
+overrides: frozen main5ecbebc03b43d9b1b760d64d93eca14141a2cfa6 versus profile-only
+7a4bfc8880203b2c5ff08cd8db8cfa332cd7eb4b. Each ran `sh scripts/check.sh` exactly
+once in its own initially empty temporary `CARGO_TARGET_DIR`: fmt/clippy/layout94,
+71 Python tests and2125 Rust tests passed (0 failures,35 ignored) on each side.
+Verbose shellboy dev/test commands show debuginfo=2 versus line-tables-only.
+
+Allocated target snapshots:5773640 KiB/5.5G versus4680264 KiB/4.5G, an18.94%
+reduction. Executable bytes before/after: main111329272/107014568;
+integration171932160/165743952; termination_signals9987192/9779800;
+tool_group_crash_recovery55526808/53677032. Elapsed440.9526/427.8692 seconds are
+single-run observations, not acceptance thresholds or a controlled speed claim.
+
+After candidate size capture, a temporary Cargo example deliberately panicked
+(exit101); its actual stack retained `examples/issue105_backtrace_probe.rs:2:23`
+and `examples/issue105_backtrace_probe.rs:3:13`. Probe and both temporary targets
+were removed in finally blocks. Pre-leg free bytes139730665472/139564847104
+exceeded the40 GiB guard. No shared/worktree-local target was modified by the pair.
+Evidence: `/tmp/sb105-verify-evidence.pz0fk0dv/` (results.json, baseline-check.log,
+candidate-check.log, candidate-backtrace.log); execution
+f424a5d9-4033-486a-bdf2-b97dd598c8d2 exited0 after874.413s with group cleanup
+confirmed. The older805efc9/3a933824 pair is historical context, not this result.
+
+Main advanced to #88 during measurement; the pair stayed frozen. Subsequent
+rebase/latest-main standard checks and Windows/Linux CI are separate and not yet
+qualified by this record. No extra comparison, P1 run or cold retry was performed.

@@ -3218,3 +3218,13 @@ subsequently qualified all16 cases, superseding that earlier partial result.
 The first failed chain ran no Rust tests/build/PTY. Python SQLite3.51 synthetic
 metadata/query-plan observations remain separate non-Rust evidence. No Core
 event, protocol or storage schema is changed. P1 remains deferred and non-gating.
+
+## #105 Line-Table Debug Information: Frozen Measurement Complete
+
+The profile-only frozen5ecbebc/7a4bfc88 pair passed one cold standard check per
+side (2125 Rust tests/35 ignored,71 Python tests), reducing allocated target size
+18.94% (5.5G to4.5G). A post-snapshot panic preserved source-line stack locations;
+both temporary targets and the probe were deleted. Release/test layout is
+unchanged. The task branch is rebased onto landed #88/mainca317a8; latest-source
+standard qualification and3-OS CI remain pending. See acceptance/decisions and
+issue105 for frozen provenance; older pair results are not substituted.
