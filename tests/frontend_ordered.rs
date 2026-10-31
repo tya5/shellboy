@@ -6,7 +6,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::{mpsc, oneshot},
-    time::timeout,
 };
 struct Incoming {
     body: Value,
@@ -62,7 +61,7 @@ async fn proxy() -> (
     (url, receive, server)
 }
 async fn incoming(receive: &mut mpsc::Receiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), receive.recv())
+    crate::test_watchdog::watchdog("tests/frontend_ordered.rs: incoming", receive.recv())
         .await
         .unwrap()
         .unwrap()
@@ -71,7 +70,7 @@ async fn update<T>(
     receive: &std::sync::mpsc::Receiver<UiUpdate>,
     mut take: impl FnMut(UiUpdate) -> Option<T>,
 ) -> T {
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/frontend_ordered.rs: update", async {
         loop {
             match receive.try_recv() {
                 Ok(UiUpdate::SavedMessage {
@@ -113,7 +112,7 @@ async fn update<T>(
 }
 async fn settled(control: &Control, thread: &str) {
     let thread = thread.to_owned();
-    timeout(Duration::from_secs(5),async {loop {let thread=thread.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[thread],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::time::sleep(Duration::from_millis(2)).await;}}).await.unwrap();
+    crate::test_watchdog::watchdog("tests/frontend_ordered.rs: settled",async {loop {let thread=thread.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[thread],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::time::sleep(Duration::from_millis(2)).await;}}).await.unwrap();
 }
 async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     let response = control
@@ -398,7 +397,7 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
         .await
         .unwrap();
     actions.send(UiAction::Quit).await.unwrap();
-    timeout(Duration::from_secs(8), bridge)
+    crate::test_watchdog::watchdog("tests/frontend_ordered.rs: human_chips_keep_source_positions_through_followups_edit_restore_and_owner_restart", bridge)
         .await
         .unwrap()
         .unwrap()

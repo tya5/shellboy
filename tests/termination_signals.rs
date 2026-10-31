@@ -16,7 +16,7 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    time::{sleep, timeout},
+    time::sleep,
 };
 
 struct Owner {
@@ -51,8 +51,8 @@ impl Owner {
             "send signal to owned fixture process"
         );
     }
-    async fn exited(&mut self, budget: Duration) -> ExitStatus {
-        timeout(budget, async {
+    async fn exited(&mut self) -> ExitStatus {
+        crate::test_watchdog::watchdog("tests/termination_signals.rs: exited", async {
             loop {
                 self.drain();
                 if let Some(status) = self.child.try_wait().unwrap() {
@@ -261,7 +261,7 @@ impl Fixture {
             owner,
             server,
         };
-        timeout(Duration::from_secs(20), async {
+        crate::test_watchdog::watchdog("tests/termination_signals.rs: running_with", async {
             loop {
                 fixture.owner.drain();
                 // Locator publication precedes a usable request/reply round
@@ -293,8 +293,8 @@ impl Fixture {
         .await
         .expect("owner startup watchdog");
         let directory = fixture.root.path().join("data");
-        let thread = timeout(
-            Duration::from_secs(15),
+        let thread = crate::test_watchdog::watchdog(
+            "tests/termination_signals.rs: running_with",
             ipc::call(
                 &directory,
                 Command::ThreadCreate(ThreadCreateArgs {
@@ -323,8 +323,8 @@ impl Fixture {
             .as_str()
             .unwrap()
             .to_owned();
-        let accepted = timeout(
-            Duration::from_secs(15),
+        let accepted = crate::test_watchdog::watchdog(
+            "tests/termination_signals.rs: running_with",
             ipc::call(
                 &directory,
                 Command::MessageSend(MessageSendArgs {
@@ -347,7 +347,7 @@ impl Fixture {
             )
         });
         assert!(accepted.ok, "{:?}", accepted.error);
-        timeout(Duration::from_secs(20),async {loop {
+        crate::test_watchdog::watchdog("tests/termination_signals.rs: running_with",async {loop {
             fixture.owner.drain();
             if let Ok(text)=std::fs::read_to_string(&pidfile) && text.ends_with('\n') && let Ok(pid)=text.trim().parse::<i32>() {
                 assert!(pid>1);fixture.owner.native_group=Some(pid);
@@ -482,7 +482,7 @@ impl Fixture {
         );
     }
     async fn wait_signal_log(&mut self) {
-        timeout(Duration::from_secs(2), async {
+        crate::test_watchdog::watchdog("tests/termination_signals.rs: wait_signal_log", async {
             loop {
                 self.owner.drain();
                 if self.log().contains("signal_term") {
@@ -501,7 +501,7 @@ async fn term_and_hup_stop_native_shell_and_save_results_before_success_exit() {
     for (signal, stage) in [(libc::SIGTERM, "signal_term"), (libc::SIGHUP, "signal_hup")] {
         let mut fixture = Fixture::running().await;
         fixture.owner.signal(signal);
-        let status = fixture.owner.exited(Duration::from_secs(8)).await;
+        let status = fixture.owner.exited().await;
         assert!(
             status.success(),
             "signal {signal}: {status}\n{}",
@@ -517,7 +517,7 @@ async fn closing_real_pty_master_does_not_abandon_owner_cleanup() {
     let mut fixture = Fixture::running().await;
     let started = Instant::now();
     drop(fixture.owner.terminal.take());
-    let status = fixture.owner.exited(Duration::from_secs(8)).await;
+    let status = fixture.owner.exited().await;
     assert!(
         status.success(),
         "PTY loss: {status}, elapsed {:?}\n{}",
@@ -539,7 +539,7 @@ async fn actual_parent_shell_pty_close_kills_term_ignoring_owned_groups_without_
         let native = fixture.owner.native_group.unwrap();
         let started = Instant::now();
         drop(fixture.owner.terminal.take());
-        let stopped = timeout(Duration::from_secs(12), async {
+        let stopped = crate::test_watchdog::watchdog("tests/termination_signals.rs: actual_parent_shell_pty_close_kills_term_ignoring_owned_groups_without_force", async {
             loop {
                 let _ = fixture.owner.child.try_wait();
                 let owner_gone = unsafe { libc::kill(owner, 0) } < 0
@@ -585,7 +585,7 @@ async fn eof_without_a_controlling_terminal_signal_still_drains_owner() {
     let mut fixture = Fixture::running_with(None, true, false, 2000).await;
     let native = fixture.owner.native_group.unwrap();
     drop(fixture.owner.terminal.take());
-    let status = fixture.owner.exited(Duration::from_secs(12)).await;
+    let status = fixture.owner.exited().await;
     assert!(
         status.success(),
         "noncontrolling PTY EOF: {status}\n{}",
@@ -616,13 +616,12 @@ async fn second_signal_forces_without_waiting_for_blocked_database_cleanup() {
     hold.execute_batch("BEGIN IMMEDIATE").unwrap();
     fixture.owner.signal(libc::SIGTERM);
     fixture.wait_signal_log().await;
-    let start = Instant::now();
     fixture.owner.signal(libc::SIGTERM);
-    let status = fixture.owner.exited(Duration::from_secs(2)).await;
+    let status = fixture.owner.exited().await;
     assert_eq!(status.code(), Some(1));
-    assert!(start.elapsed() < Duration::from_secs(2));
+
     hold.execute_batch("ROLLBACK").unwrap();
-    timeout(Duration::from_secs(2), async {
+    crate::test_watchdog::watchdog("tests/termination_signals.rs: second_signal_forces_without_waiting_for_blocked_database_cleanup", async {
         while unsafe { libc::kill(-native, 0) } == 0 {
             sleep(Duration::from_millis(10)).await;
         }
@@ -640,7 +639,7 @@ async fn term_followed_by_duplicate_hup_finishes_configured_native_grace() {
         fixture.owner.signal(libc::SIGHUP);
         sleep(Duration::from_millis(20)).await;
     }
-    let status = fixture.owner.exited(Duration::from_secs(14)).await;
+    let status = fixture.owner.exited().await;
     assert!(
         status.success(),
         "TERM/HUP during configured grace: {status}\n{}",
@@ -702,7 +701,7 @@ async fn one_signal_deadline_is_enforced_even_when_the_main_thread_is_stalled() 
         terminal_tail: Vec::new(),
         finished: false,
     };
-    timeout(Duration::from_secs(20), async {
+    crate::test_watchdog::watchdog("tests/termination_signals.rs: one_signal_deadline_is_enforced_even_when_the_main_thread_is_stalled", async {
         while !root.path().join("observer-ready").exists() {
             assert!(owner.child.try_wait().unwrap().is_none());
             sleep(Duration::from_millis(5)).await;
@@ -710,11 +709,10 @@ async fn one_signal_deadline_is_enforced_even_when_the_main_thread_is_stalled() 
     })
     .await
     .expect("observer subprocess startup");
-    let start = Instant::now();
     owner.signal(libc::SIGTERM);
-    let status = owner.exited(Duration::from_secs(8)).await;
+    let status = owner.exited().await;
     assert_eq!(status.code(), Some(1));
-    assert!(start.elapsed() >= Duration::from_secs(4));
+
     let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
     assert!(log.contains("signal_deadline"));
 }

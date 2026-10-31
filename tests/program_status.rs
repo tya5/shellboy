@@ -9,11 +9,8 @@ mod native {
         path::Path,
         process::Stdio,
     };
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        time::{Duration, timeout},
-    };
-    const WATCH: Duration = Duration::from_secs(60);
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
     const PREFIX: &[u8] = b"\x1b]7501;";
     fn command(home: &Path) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
@@ -35,8 +32,8 @@ mod native {
         command
     }
     async fn cli(home: &Path, data: &Path, args: &[&str]) -> Value {
-        let output = timeout(
-            WATCH,
+        let output = crate::test_watchdog::watchdog(
+            "tests/program_status.rs: cli",
             command(home)
                 .arg("--data-dir")
                 .arg(data)
@@ -82,7 +79,7 @@ mod native {
         bytes: &mut Vec<u8>,
         predicate: impl Fn(&[u8]) -> bool,
     ) {
-        timeout(WATCH, async {
+        crate::test_watchdog::watchdog("tests/program_status.rs: read_until", async {
             loop {
                 if predicate(bytes) {
                     return;
@@ -141,7 +138,7 @@ mod native {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn tty_lifecycle_and_shell_osc_are_isolated_in_on_and_off_modes() {
-        timeout(WATCH,async {
+        crate::test_watchdog::watchdog("tests/program_status.rs: tty_lifecycle_and_shell_osc_are_isolated_in_on_and_off_modes",async {
         for mode in ["on","off"] {
             let root=tempfile::tempdir().unwrap();let home=root.path().join("home");std::fs::create_dir(&home).unwrap();
             let data=root.path().join("owner-data");let config=root.path().join("config.toml");

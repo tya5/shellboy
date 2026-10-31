@@ -41,7 +41,7 @@ fn pty() -> (File, File) {
     (master, slave)
 }
 async fn until(terminal: &mut File, output: &mut Vec<u8>, needle: &[u8]) {
-    tokio::time::timeout(Duration::from_secs(8), async {
+    crate::test_watchdog::watchdog("tests/tui_shutdown.rs: until", async {
         loop {
             let mut bytes = [0; 8192];
             match terminal.read(&mut bytes) {
@@ -136,7 +136,7 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     // continuously drains output; waiting for exit first can lose the Darwin
     // PTY's queued bytes when its final slave descriptor closes.
     until(&mut terminal, &mut output, b"Forced exit:").await;
-    let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+    let status = crate::test_watchdog::watchdog("tests/tui_shutdown.rs: explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes", child.wait())
         .await
         .unwrap()
         .unwrap();

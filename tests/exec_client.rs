@@ -10,17 +10,15 @@ use std::{
     path::Path,
     process::{Output, Stdio},
     sync::Arc,
-    time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::timeout,
 };
 use tokio_util::sync::CancellationToken;
-const WATCHDOG: Duration = Duration::from_secs(90);
+
 struct Incoming {
     body: Value,
     reply: oneshot::Sender<String>,
@@ -165,23 +163,26 @@ impl Fixture {
         command
     }
     async fn next(&mut self, child: &mut JoinHandle<Output>) -> Incoming {
-        timeout(WATCHDOG,async{tokio::select!{request=self.incoming.recv()=>request.expect("mock receiver"),out=&mut *child=>panic!("exec exited before its request: {:?}",out.unwrap())}}).await.unwrap()
+        crate::test_watchdog::watchdog("tests/exec_client.rs: next",async{tokio::select!{request=self.incoming.recv()=>request.expect("mock receiver"),out=&mut *child=>panic!("exec exited before its request: {:?}",out.unwrap())}}).await.unwrap()
     }
     async fn close(self) {
-        timeout(WATCHDOG, self.server.shutdown())
+        crate::test_watchdog::watchdog("tests/exec_client.rs: close", self.server.shutdown())
             .await
             .unwrap()
             .unwrap();
-        timeout(WATCHDOG, self.control.shutdown())
+        crate::test_watchdog::watchdog("tests/exec_client.rs: close", self.control.shutdown())
             .await
             .unwrap()
             .unwrap();
-        timeout(WATCHDOG, self.owner.shutdown())
+        crate::test_watchdog::watchdog("tests/exec_client.rs: close", self.owner.shutdown())
             .await
             .unwrap()
             .unwrap();
         self.stop.cancel();
-        timeout(WATCHDOG, self.mock).await.unwrap().unwrap();
+        crate::test_watchdog::watchdog("tests/exec_client.rs: close", self.mock)
+            .await
+            .unwrap()
+            .unwrap();
     }
     async fn active(&mut self) -> (MessageAccepted, Incoming) {
         let thread = self
@@ -217,24 +218,28 @@ impl Fixture {
             .await;
         assert!(accepted.ok, "{:?}", accepted.error);
         let accepted = serde_json::from_value(accepted.result.unwrap()).unwrap();
-        let request = timeout(WATCHDOG, self.incoming.recv())
-            .await
-            .unwrap()
-            .unwrap();
+        let request =
+            crate::test_watchdog::watchdog("tests/exec_client.rs: active", self.incoming.recv())
+                .await
+                .unwrap()
+                .unwrap();
         (accepted, request)
     }
     async fn queued_exec(&self, thread: &str) {
         let mut events = self.control.subscribe();
         let target = thread.to_owned();
-        timeout(WATCHDOG,async {loop {let id=target.clone();let count=self.owner.db.call(move|db|Ok(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.label')='shellboy exec'",[id],|r|r.get::<_,i64>(0))?)).await.unwrap();if count>0{break;}loop {match events.recv().await {Ok(EngineEvent::Changed{thread_id,..})if thread_id==target=>break,Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>break,Err(e)=>panic!("{e}"),_=>{}}}}}).await.unwrap();
+        crate::test_watchdog::watchdog("tests/exec_client.rs: queued_exec",async {loop {let id=target.clone();let count=self.owner.db.call(move|db|Ok(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.label')='shellboy exec'",[id],|r|r.get::<_,i64>(0))?)).await.unwrap();if count>0{break;}loop {match events.recv().await {Ok(EngineEvent::Changed{thread_id,..})if thread_id==target=>break,Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>break,Err(e)=>panic!("{e}"),_=>{}}}}}).await.unwrap();
     }
 }
 fn spawn(mut command: tokio::process::Command) -> JoinHandle<Output> {
     tokio::spawn(async move {
-        timeout(WATCHDOG, command.spawn().unwrap().wait_with_output())
-            .await
-            .unwrap()
-            .unwrap()
+        crate::test_watchdog::watchdog(
+            "tests/exec_client.rs: spawn",
+            command.spawn().unwrap().wait_with_output(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
     })
 }
 fn diagnostic(output: &Output) -> Value {
@@ -266,7 +271,7 @@ async fn native_stdout_is_only_validated_utf8_final_json_and_sender_is_recorded(
     assert!(incoming.body.to_string().contains("work"));
     let value = json!({"value":format!("{}\u{65e5}\u{672c}\u{8a9e}","x".repeat(70_000))});
     incoming.reply.send(http(200,json!({"id":"with-reasoning","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"This is reasoning, not the JSON answer."}]},{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":value.to_string()}]}]}))).unwrap();
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog("tests/exec_client.rs: native_stdout_is_only_validated_utf8_final_json_and_sender_is_recorded", child).await.unwrap().unwrap();
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stdout).unwrap(),
@@ -281,8 +286,7 @@ async fn native_stdout_is_only_validated_utf8_final_json_and_sender_is_recorded(
     );
     assert_eq!(diag["turn_usage"].as_array().unwrap().len(), 1);
     assert_eq!(diag["turn_usage"][0]["turn_id"], diag["turn_id"]);
-    let original = timeout(
-        WATCHDOG,
+    let original = crate::test_watchdog::watchdog("tests/exec_client.rs: native_stdout_is_only_validated_utf8_final_json_and_sender_is_recorded",
         tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .arg("--data-dir")
             .arg(fixture.root.path().join("data"))
@@ -351,7 +355,7 @@ async fn bounded_repairs_stay_in_history_and_report_raw_answer_on_schema_failure
             }))
             .unwrap();
     }
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog("tests/exec_client.rs: bounded_repairs_stay_in_history_and_report_raw_answer_on_schema_failure", child).await.unwrap().unwrap();
     assert_eq!(output.status.code(), Some(3));
     assert!(output.stdout.is_empty());
     let diag = diagnostic(&output);
@@ -400,7 +404,13 @@ async fn one_corrective_message_can_produce_a_valid_result() {
         .reply
         .send(answer("{\"value\":\"corrected\"}"))
         .unwrap();
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog(
+        "tests/exec_client.rs: one_corrective_message_can_produce_a_valid_result",
+        child,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stdout).unwrap(),
@@ -425,7 +435,13 @@ async fn recovery_wait_is_not_an_implicit_retry_or_success() {
             json!({"error":{"message":"synthetic permanent provider failure"}}),
         ))
         .unwrap();
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog(
+        "tests/exec_client.rs: recovery_wait_is_not_an_implicit_retry_or_success",
+        child,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(output.status.code(), Some(4));
     assert!(output.stdout.is_empty());
     let diag = diagnostic(&output);
@@ -447,7 +463,13 @@ async fn timeout_leaves_the_existing_run_and_queued_input_alive() {
         .arg("queued work");
     let child = spawn(command);
     fixture.queued_exec(&accepted.thread_id).await;
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog(
+        "tests/exec_client.rs: timeout_leaves_the_existing_run_and_queued_input_alive",
+        child,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(output.status.code(), Some(5));
     assert!(output.stdout.is_empty());
     let diag = diagnostic(&output);
@@ -490,7 +512,13 @@ async fn input_added_to_an_active_turn_waits_for_its_real_answer() {
     let next = fixture.next(&mut child).await;
     assert!(next.body.to_string().contains("report appended value"));
     next.reply.send(answer("{\"value\":\"appended\"}")).unwrap();
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog(
+        "tests/exec_client.rs: input_added_to_an_active_turn_waits_for_its_real_answer",
+        child,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stdout).unwrap(),
@@ -517,7 +545,10 @@ async fn absent_owner_and_unsupported_schema_have_distinct_stderr_only_failures(
         if let Some(extra) = extra {
             command.arg(extra);
         }
-        timeout(WATCHDOG, command.output()).await.unwrap().unwrap()
+        crate::test_watchdog::watchdog("tests/exec_client.rs: invoke", command.output())
+            .await
+            .unwrap()
+            .unwrap()
     }
     let output = invoke(&data, &schema, None).await;
     assert_eq!(output.status.code(), Some(6));
@@ -541,7 +572,13 @@ async fn missing_thread_is_input_error_not_a_provider_call() {
     let schema = fixture.schema();
     let mut command = fixture.command(&schema);
     command.args(["--thread", "does-not-exist", "report value"]);
-    let output = timeout(WATCHDOG, command.output()).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog(
+        "tests/exec_client.rs: missing_thread_is_input_error_not_a_provider_call",
+        command.output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert_eq!(diagnostic(&output)["status"], "input_error");
@@ -575,7 +612,13 @@ async fn validated_numeric_json_spelling_is_not_rounded_by_the_client() {
         .reply
         .send(answer("9007199254740993.0"))
         .unwrap();
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog(
+        "tests/exec_client.rs: validated_numeric_json_spelling_is_not_rounded_by_the_client",
+        child,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
@@ -590,7 +633,13 @@ async fn old_owner_is_rejected_before_creating_or_sending_work() {
     let schema = fixture.schema();
     let mut command = fixture.command(&schema);
     command.arg("do not execute on an incompatible owner");
-    let output = timeout(WATCHDOG, command.output()).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog(
+        "tests/exec_client.rs: old_owner_is_rejected_before_creating_or_sending_work",
+        command.output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(output.status.code(), Some(6));
     assert!(output.stdout.is_empty());
     let diagnostic = diagnostic(&output);
@@ -632,7 +681,7 @@ async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_res
         .reply
         .send(answer("{\"value\":\"already done\"}"))
         .unwrap();
-    let output = timeout(WATCHDOG, child).await.unwrap().unwrap();
+    let output = crate::test_watchdog::watchdog("tests/exec_client.rs: final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_resend", child).await.unwrap().unwrap();
     assert_eq!(output.status.code(), Some(6));
     assert!(output.stdout.is_empty());
     let diagnostic = diagnostic(&output);
@@ -654,8 +703,7 @@ async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_res
             .unwrap()
             .contains("do not resend")
     );
-    let original = timeout(
-        WATCHDOG,
+    let original = crate::test_watchdog::watchdog("tests/exec_client.rs: final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_resend",
         tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .arg("--data-dir")
             .arg(fixture.root.path().join("data"))

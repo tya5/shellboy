@@ -21,7 +21,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
     task::JoinHandle,
-    time::timeout,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -90,7 +89,7 @@ impl Proxy {
     }
     async fn shutdown(self) {
         self.stop.cancel();
-        timeout(Duration::from_secs(5), self.task)
+        crate::test_watchdog::watchdog("tests/performance_lifecycle.rs: shutdown", self.task)
             .await
             .unwrap()
             .unwrap();
@@ -172,7 +171,7 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
-    timeout(Duration::from_secs(15), async {
+    crate::test_watchdog::watchdog("tests/performance_lifecycle.rs: until", async {
         while !check().await {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -277,7 +276,7 @@ fn alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 async fn pid(path: &Path) -> i32 {
-    timeout(Duration::from_secs(15), async {
+    crate::test_watchdog::watchdog("tests/performance_lifecycle.rs: pid", async {
         loop {
             if let Ok(body) = tokio::fs::read_to_string(path).await
                 && let Ok(pid) = body.parse::<i32>()
@@ -500,7 +499,7 @@ async fn repeated_owned_runs_release_resources_after_many_turns() {
         state(&control, "run", &child_run, "stopped").await;
         let stop_to_terminal = stopping.elapsed();
         assert_eq!(
-            timeout(Duration::from_secs(5), observer)
+            crate::test_watchdog::watchdog("tests/performance_lifecycle.rs: repeated_owned_runs_release_resources_after_many_turns", observer)
                 .await
                 .unwrap()
                 .unwrap()["status"],
@@ -584,10 +583,13 @@ async fn repeated_owned_runs_release_resources_after_many_turns() {
     tokio::time::sleep(Duration::from_secs(12)).await;
     sample(&control, &proxy, None, "idle_12s", started.elapsed()).await;
     let shutdown = Instant::now();
-    timeout(Duration::from_secs(10), control.shutdown())
-        .await
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "tests/performance_lifecycle.rs: repeated_owned_runs_release_resources_after_many_turns",
+        control.shutdown(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     println!(
         "LIFECYCLE_SHUTDOWN {}",
         json!({"control_ms":shutdown.elapsed().as_secs_f64()*1000.0})

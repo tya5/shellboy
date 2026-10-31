@@ -11,7 +11,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::mpsc,
-    time::{sleep, timeout},
+    time::sleep,
 };
 
 struct Proxy {
@@ -68,10 +68,13 @@ impl Proxy {
         }
     }
     async fn next(&mut self) -> Value {
-        timeout(Duration::from_secs(20), self.incoming.recv())
-            .await
-            .expect("model request watchdog")
-            .expect("proxy stopped")
+        crate::test_watchdog::watchdog(
+            "tests/tool_group_crash_recovery.rs: next",
+            self.incoming.recv(),
+        )
+        .await
+        .expect("model request watchdog")
+        .expect("proxy stopped")
     }
 }
 fn config(root: &Path, url: &str) -> PathBuf {
@@ -89,8 +92,8 @@ async fn open(root: &Path) -> DataOwner {
     .unwrap()
 }
 async fn rpc(control: &Arc<Control>, command: Command) -> Value {
-    let response = timeout(
-        Duration::from_secs(20),
+    let response = crate::test_watchdog::watchdog(
+        "tests/tool_group_crash_recovery.rs: rpc",
         control.request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             command,
@@ -116,24 +119,31 @@ async fn send_and_complete(control: &Arc<Control>, thread: &str, marker: &str) {
     )
     .unwrap();
     let turn = accepted.turn_id.unwrap();
-    timeout(Duration::from_secs(20), async {
-        loop {
-            let turn = turn.clone();
-            let state: String = control
-                .store
-                .database
-                .call(move |db| {
-                    Ok(db.query_row("SELECT state FROM turn WHERE id=?1", [turn], |r| r.get(0))?)
-                })
-                .await
-                .unwrap();
-            assert_ne!(state, "recovery_wait", "repaired tool pairs were rejected");
-            if state == "completed" {
-                break;
+    crate::test_watchdog::watchdog(
+        "tests/tool_group_crash_recovery.rs: send_and_complete",
+        async {
+            loop {
+                let turn = turn.clone();
+                let state: String = control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(
+                            db.query_row("SELECT state FROM turn WHERE id=?1", [turn], |r| {
+                                r.get(0)
+                            })?,
+                        )
+                    })
+                    .await
+                    .unwrap();
+                assert_ne!(state, "recovery_wait", "repaired tool pairs were rejected");
+                if state == "completed" {
+                    break;
+                }
+                sleep(Duration::from_millis(5)).await;
             }
-            sleep(Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .expect("new Turn did not complete");
 }
@@ -341,7 +351,7 @@ async fn real_result_write_failure_is_repaired_after_storage_is_restored() {
     )
     .await;
     let _initial = proxy.next().await;
-    timeout(Duration::from_secs(20), async {
+    crate::test_watchdog::watchdog("tests/tool_group_crash_recovery.rs: real_result_write_failure_is_repaired_after_storage_is_restored", async {
         loop {
             if let shellboy::control::EngineEvent::Error { error, .. } =
                 events.recv().await.unwrap()
@@ -500,7 +510,7 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
         shell_group: None,
         active: true,
     };
-    timeout(Duration::from_secs(20), async {
+    crate::test_watchdog::watchdog("tests/tool_group_crash_recovery.rs: sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pairs", async {
         while !root.path().join("owner-ready").exists() {
             assert!(
                 killed.child.try_wait().unwrap().is_none(),
@@ -547,7 +557,7 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
     .unwrap();
     assert!(response.ok, "{:?}", response.error);
     let _initial = proxy.next().await;
-    timeout(Duration::from_secs(20),async {loop {
+    crate::test_watchdog::watchdog("tests/tool_group_crash_recovery.rs: sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pairs",async {loop {
         if let Ok(text)=std::fs::read_to_string(&pidfile) && text.ends_with('\n') && let Ok(pid)=text.trim().parse::<i32>() {
             assert!(pid>1);
             // SAFETY: getpgid only observes the PID written by our shell.
@@ -593,3 +603,255 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
 
 #[path = "support/watchdog.rs"]
 pub(crate) mod test_watchdog;
+
+#[test]
+#[ignore = "owned subprocess entry for shutdown crash boundaries"]
+fn shutdown_owner_crash_child() {
+    let Some(root) = std::env::var_os("SHELLBOY_SHUTDOWN_CRASH_ROOT") else {
+        return;
+    };
+    let root = PathBuf::from(root);
+    let phase = std::env::var("SHELLBOY_SHUTDOWN_CRASH_PHASE").unwrap();
+    tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(async {
+        test_watchdog::watchdog("parent installs native process containment", async {
+            while !root.join("go").exists() { sleep(Duration::from_millis(5)).await; }
+        }).await.unwrap();
+        let owner=open(&root).await;
+        let control=Control::new(&owner, root.clone());
+        owner.db.call(|db| {
+            let tx=db.transaction()?;
+            tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','','','fixture','fixture','now')",[])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now')",[])?;
+            tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now')",[])?;
+            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
+            tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','u','running','now')",[])?;
+            let calls=(0..3).map(|i|json!({"type":"function_call","call_id":format!("c{i}"),"name":"shell","arguments":"{\"command\":\"MUST_NOT_REEXECUTE\"}"})).collect::<Vec<_>>();
+            history::append_node(&tx,"t","calls",Some("u"),"assistant_response",&json!({"output":calls,"group_id":"g","reasoning_epoch":0}),"now")?;
+            for (i,item) in calls.iter().enumerate() {
+                let call=format!("c{i}");
+                tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('a',?1,'function_call','completed',?2,'calls')",params![i as i64,item.to_string()])?;
+                tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g',?1,?2,'shell',?3,?4,?5)",params![call,i as i64,item["arguments"].as_str().unwrap(),["completed","running","pending"][i],(i==1).then_some("saved-execution")])?;
+            }
+            let real=json!({"item":{"type":"function_call_output","call_id":"c0","output":"{\"status\":\"exited\",\"text\":\"ORIGINAL_SAVED_FACT\",\"exit_code\":0}"},"group_id":"g"});
+            history::append_node(&tx,"t","original-result",Some("u"),"tool_result",&real,"now")?;
+            tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','c0','original-result','exited')",[])?;
+            tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('saved-execution','r','u','saved-execution','running','','{}','UTF-8','UTF-8','open','now')",[])?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let mut barrier=None;
+        if phase=="control-await" || phase=="control-transaction" || phase=="owner-await" {
+            if phase=="owner-await" { test_watchdog::watchdog("Control shutdown before owner boundary",control.shutdown()).await.unwrap().unwrap(); }
+            let (entered,ready)=tokio::sync::oneshot::channel();
+            let (release,gate)=std::sync::mpsc::channel::<()>();
+            let in_transaction=phase=="control-transaction";
+            let reply=owner.db.try_call(move |db| {
+                let tx=if in_transaction { Some(db.transaction()?) } else {None};
+                if let Some(tx)=&tx { tx.execute("UPDATE node SET payload_json=json_set(payload_json,'$.uncommitted',true) WHERE id='original-result'",[])?; }
+                entered.send(()).unwrap();
+                test_watchdog::blocking_recv("forced termination of fixture DB barrier", &gate).unwrap();
+                Ok(())
+            }).unwrap();
+            ready.await.unwrap();
+            barrier=Some((release,reply));
+        }
+        match phase.as_str() {
+            "before-control" => {},
+            "control-await" | "control-transaction" => {
+                let shutdown=control.shutdown();tokio::pin!(shutdown);
+                assert!(futures_util::poll!(&mut shutdown).is_pending());
+                std::fs::write(root.join("boundary-ready"),&phase).unwrap();
+                std::future::pending::<()>().await;
+            },
+            "after-control" => { test_watchdog::watchdog("Control shutdown",control.shutdown()).await.unwrap().unwrap(); },
+            "owner-await" => {
+                let shutdown=owner.shutdown();tokio::pin!(shutdown);
+                assert!(futures_util::poll!(&mut shutdown).is_pending());
+                std::fs::write(root.join("boundary-ready"),&phase).unwrap();
+                std::future::pending::<()>().await;
+            },
+            _=>panic!("unknown crash boundary"),
+        }
+        std::fs::write(root.join("boundary-ready"),phase).unwrap();
+        // Keep the test-only barrier sender alive until the native force-kill.
+        let _barrier=barrier;
+        std::future::pending::<()>().await;
+    });
+}
+
+struct ShutdownVictim {
+    child: std::process::Child,
+    active: bool,
+    #[cfg(windows)]
+    job: windows_sys::Win32::Foundation::HANDLE,
+}
+impl ShutdownVictim {
+    fn kill(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.active = false;
+        #[cfg(unix)]
+        if self.child.try_wait().unwrap().is_none() {
+            assert_eq!(
+                unsafe { libc::kill(self.child.id() as i32, libc::SIGKILL) },
+                0
+            );
+        }
+        #[cfg(windows)]
+        assert_ne!(
+            unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.job, 137) },
+            0
+        );
+        let _ = self.child.wait();
+    }
+}
+impl Drop for ShutdownVictim {
+    fn drop(&mut self) {
+        self.kill();
+        #[cfg(windows)]
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.job);
+        }
+    }
+}
+#[tokio::test]
+async fn forced_shutdown_boundaries_preserve_facts_and_recover_without_duplicate_tools() {
+    for phase in [
+        "before-control",
+        "control-await",
+        "control-transaction",
+        "after-control",
+        "owner-await",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        config(root.path(), "http://127.0.0.1:1/v1");
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "shutdown_owner_crash_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SHELLBOY_SHUTDOWN_CRASH_ROOT", root.path())
+            .env("SHELLBOY_SHUTDOWN_CRASH_PHASE", phase)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit());
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("SHELLBOY_") {
+                command.env_remove(key);
+            }
+        }
+        command
+            .env("SHELLBOY_SHUTDOWN_CRASH_ROOT", root.path())
+            .env("SHELLBOY_SHUTDOWN_CRASH_PHASE", phase);
+        let child = command.spawn().unwrap();
+        #[cfg(windows)]
+        let job = {
+            use std::os::windows::io::AsRawHandle;
+            let job = unsafe {
+                windows_sys::Win32::System::JobObjects::CreateJobObjectW(
+                    std::ptr::null(),
+                    std::ptr::null(),
+                )
+            };
+            assert!(!job.is_null());
+            assert_ne!(
+                unsafe {
+                    windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+                        job,
+                        child.as_raw_handle(),
+                    )
+                },
+                0
+            );
+            job
+        };
+        let mut victim = ShutdownVictim {
+            child,
+            active: true,
+            #[cfg(windows)]
+            job,
+        };
+        std::fs::write(root.path().join("go"), b"contained").unwrap();
+        test_watchdog::watchdog("child reaches named persisted shutdown boundary", async {
+            while !root.path().join("boundary-ready").exists() {
+                assert!(
+                    victim.child.try_wait().unwrap().is_none(),
+                    "child exited at {phase}"
+                );
+                sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let before = {
+            let db = rusqlite::Connection::open_with_flags(
+                root.path().join("data/shellboy.db"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            db.query_row(
+                "SELECT payload_json FROM node WHERE id='original-result'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap()
+        };
+        victim.kill();
+        let owner = open(root.path()).await;
+        let rows = result_snapshot(&owner).await;
+        assert_eq!(rows.len(), 3, "{phase}");
+        assert!(
+            rows.iter()
+                .any(|r| r.0 == "c0" && r.1 == "original-result" && r.2 == before),
+            "saved real result changed at {phase}"
+        );
+        for row in rows.iter().filter(|r| r.0 != "c0") {
+            let body: Value = serde_json::from_str(&row.2).unwrap();
+            let result: Value =
+                serde_json::from_str(body["item"]["output"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                result["status"],
+                if row.0 == "c2" {
+                    "not_started"
+                } else {
+                    "interrupted"
+                },
+                "{phase}"
+            );
+        }
+        owner
+            .db
+            .call(|db| {
+                let integrity: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+                assert_eq!(integrity, "ok");
+                assert!(!db.prepare("PRAGMA foreign_key_check")?.exists([])?);
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM shell_execution", [], |r| r
+                        .get::<_, i64>(0))?,
+                    1
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM tool_call WHERE state!='completed'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        owner.shutdown().await.unwrap();
+        let owner = open(root.path()).await;
+        assert_eq!(
+            result_snapshot(&owner).await,
+            rows,
+            "startup duplicated repaired results at {phase}"
+        );
+        owner.shutdown().await.unwrap();
+    }
+}

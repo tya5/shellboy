@@ -87,8 +87,8 @@ impl Drop for Tui {
         if self.child.try_wait().ok().flatten().is_none() {
             // Even failed assertions must ask the owner to stop its shell groups.
             let _ = self.terminal.write_all(&[0x11]);
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline {
+            let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
+            while !deadline.expired() {
                 let mut bytes = [0; 8192];
                 let _ = self.terminal.read(&mut bytes);
                 if self.child.try_wait().ok().flatten().is_some() {
@@ -181,7 +181,7 @@ impl Tui {
         }
     }
     fn until(&mut self, needle: &[u8]) {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
         loop {
             self.drain();
             if self.output.contains(needle) {
@@ -192,7 +192,7 @@ impl Tui {
                 "TUI exited before measured output"
             );
             assert!(
-                Instant::now() < deadline,
+                !deadline.expired(),
                 "TUI output deadline exceeded for {:?}; tail {:?}",
                 String::from_utf8_lossy(needle),
                 String::from_utf8_lossy(
@@ -213,7 +213,7 @@ impl Tui {
     }
 
     fn write(&mut self, mut bytes: &[u8]) {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
         while !bytes.is_empty() {
             self.drain();
             match self.terminal.write(&bytes[..bytes.len().min(4096)]) {
@@ -223,7 +223,7 @@ impl Tui {
                 }
                 Err(e) => panic!("PTY write: {e}"),
             };
-            assert!(Instant::now() < deadline, "PTY write timeout");
+            assert!(!deadline.expired(), "PTY write timeout");
         }
     }
     fn measured(&mut self, input: &[u8], needle: &str) -> Duration {
@@ -245,7 +245,7 @@ impl Tui {
         self.output.clear();
         let start = Instant::now();
         self.write(&[0x11]);
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
         let mut force_offer = false;
         let mut wait_sent = false;
         let mut wait_ack = false;
@@ -273,7 +273,7 @@ impl Tui {
                 return start.elapsed();
             }
             assert!(
-                Instant::now() < deadline,
+                !deadline.expired(),
                 "normal shutdown exceeded fixture deadline; PTY tail {:?}",
                 String::from_utf8_lossy(
                     &self.output.visible[self.output.visible.len().saturating_sub(4096)..]
@@ -313,7 +313,7 @@ impl Proxy {
                         let running = running.clone();
                         let responses = responses.clone();
                         workers.push(std::thread::spawn(move||{
-            stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();let mut bytes=Vec::new();let (split,length)=loop {let mut b=[0;8192];let n=stream.read(&mut b).unwrap_or(0);if n==0{return;}bytes.extend_from_slice(&b[..n]);if let Some(p)=bytes.windows(4).position(|v|v==b"\r\n\r\n"){let head=String::from_utf8_lossy(&bytes[..p]);let length=head.lines().find_map(|line|line.to_lowercase().strip_prefix("content-length:").and_then(|s|s.trim().parse::<usize>().ok())).unwrap_or(0);break(p+4,length);}};
+            stream.set_read_timeout(Some(crate::test_watchdog::WATCHDOG)).unwrap();let mut bytes=Vec::new();let (split,length)=loop {let mut b=[0;8192];let n=stream.read(&mut b).unwrap_or(0);if n==0{return;}bytes.extend_from_slice(&b[..n]);if let Some(p)=bytes.windows(4).position(|v|v==b"\r\n\r\n"){let head=String::from_utf8_lossy(&bytes[..p]);let length=head.lines().find_map(|line|line.to_lowercase().strip_prefix("content-length:").and_then(|s|s.trim().parse::<usize>().ok())).unwrap_or(0);break(p+4,length);}};
             while bytes.len()<split+length {let mut b=[0;8192];let n=stream.read(&mut b).unwrap_or(0);if n==0{return;}bytes.extend_from_slice(&b[..n]);assert!(bytes.len()<8*1024*1024,"unexpected fixture request size");}
             let request:Value=serde_json::from_slice(&bytes[split..split+length]).unwrap();
             let embedding=String::from_utf8_lossy(&bytes[..split]).contains("/embeddings");
@@ -513,11 +513,11 @@ fn real_binary_large_paste_switch_under_raw_index_gc_load() {
                     .spawn()
                     .unwrap(),
             );
-            let deadline = Instant::now() + Duration::from_secs(10);
+            let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
             while snapshot(&db)["raw_bytes"].as_i64().unwrap() == 0 {
                 tui.drain();
                 assert!(
-                    Instant::now() < deadline,
+                    !deadline.expired(),
                     "shell never produced retained raw; model attempts: {:?}",
                     db.prepare("SELECT state,error_json FROM model_attempt")
                         .unwrap()
@@ -573,14 +573,14 @@ fn real_binary_large_paste_switch_under_raw_index_gc_load() {
         tui.fresh_input();
         tui.measured(b"/switch p12\r\x0e/switch p0\r", "HISTORY_p0_READY");
         if raw_mib > 0 {
-            let deadline = Instant::now() + Duration::from_secs(90);
+            let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
             loop {
                 let done:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id NOT LIKE 'gc-%' AND state='exited' AND output_complete=1)",[],|r|r.get(0)).unwrap();
                 if done {
                     break;
                 }
                 tui.drain();
-                assert!(Instant::now() < deadline, "raw completion timeout");
+                assert!(!deadline.expired(), "raw completion timeout");
                 std::thread::sleep(Duration::from_millis(10));
             }
             assert_eq!(snapshot(&db)["raw_bytes"], raw_mib * 1024 * 1024);

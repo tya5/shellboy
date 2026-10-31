@@ -13,7 +13,7 @@ use tokio::{
 };
 
 async fn read_until(terminal: &mut File, bytes: &mut Vec<u8>, needle: &[u8]) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let deadline = crate::test_watchdog::Deadline::new("PTY readiness/repaint");
     loop {
         let mut buffer = [0; 8192];
         match terminal.read(&mut buffer) {
@@ -26,7 +26,7 @@ async fn read_until(terminal: &mut File, bytes: &mut Vec<u8>, needle: &[u8]) {
             return;
         }
         assert!(
-            tokio::time::Instant::now() < deadline,
+            !deadline.expired(),
             "terminal did not show expected text: {}",
             String::from_utf8_lossy(bytes)
         );
@@ -79,26 +79,40 @@ fn emitted_text(bytes: &[u8]) -> String {
     }
     String::from_utf8_lossy(&out).into_owned()
 }
-async fn collect_output(terminal: &mut File, output: &mut Vec<u8>, duration: Duration) -> Vec<u8> {
+async fn collect_matching(
+    terminal: &mut File,
+    output: &mut Vec<u8>,
+    label: &'static str,
+    predicate: impl Fn(&[u8]) -> bool,
+) -> Vec<u8> {
     let start = output.len();
-    let deadline = tokio::time::Instant::now() + duration;
-    loop {
-        let mut buffer = [0; 8192];
-        match terminal.read(&mut buffer) {
-            Ok(n) => output.extend_from_slice(&buffer[..n]),
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(e) => panic!("terminal read: {e}"),
-        };
-        assert!(output.len() < 4 * 1024 * 1024, "terminal output flood");
-        if tokio::time::Instant::now() >= deadline {
-            break;
+    crate::test_watchdog::watchdog(label, async {
+        loop {
+            let mut buffer = [0; 8192];
+            match terminal.read(&mut buffer) {
+                Ok(n) => output.extend_from_slice(&buffer[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => panic!("terminal read: {e}"),
+            }
+            assert!(output.len() < 4 * 1024 * 1024, "terminal output flood");
+            if predicate(&output[start..]) {
+                return output[start..].to_vec();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    output[start..].to_vec()
+    })
+    .await
+    .expect("PTY output predicate watchdog")
+}
+async fn collect_output(terminal: &mut File, output: &mut Vec<u8>) -> Vec<u8> {
+    collect_matching(terminal, output, "any PTY output", |bytes| {
+        !bytes.is_empty()
+    })
+    .await
 }
 async fn read_until_text(terminal: &mut File, output: &mut Vec<u8>, label: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    eprintln!("PTY awaiting footer/text: {label}");
+    let deadline = crate::test_watchdog::Deadline::new("PTY readiness/repaint");
     // A terminal diff can move the cursor across unchanged blank cells rather
     // than emitting their spaces. Compare meaningful text independent of those
     // layout bytes; all words, punctuation and numeric counts must still match.
@@ -113,33 +127,32 @@ async fn read_until_text(terminal: &mut File, output: &mut Vec<u8>, label: &str)
             return;
         }
         assert!(
-            tokio::time::Instant::now() < deadline,
+            !deadline.expired(),
             "missing footer {label}: {}",
             emitted_text(output)
         );
-        collect_output(terminal, output, Duration::from_millis(20)).await;
+        collect_output(terminal, output).await;
     }
 }
 // This observer is not a VT emulator: cursor-diff bytes alone cannot recover
 // reused cells. Ask the real UI for a complete repaint, then require all labels
 // in that same fresh frame rather than joining unrelated historical diffs.
 async fn read_repaint_text(terminal: &mut File, output: &mut Vec<u8>, labels: &[&str]) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        terminal.write_all(&[0x0c]).unwrap();
-        let repaint = collect_output(terminal, output, Duration::from_millis(120)).await;
-        let shown = emitted_text(&repaint);
-        if repaint.windows(4).any(|bytes| bytes == b"\x1b[2J")
-            && labels.iter().all(|label| shown.contains(label))
-        {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "full repaint did not contain {labels:?}: {shown}"
-        );
-    }
+    eprintln!("PTY awaiting fresh repaint: {labels:?}");
+    terminal.write_all(&[0x0c]).unwrap();
+    collect_matching(
+        terminal,
+        output,
+        "fresh repaint containing expected labels",
+        |bytes| {
+            let shown = emitted_text(bytes);
+            bytes.windows(4).any(|b| b == b"\x1b[2J")
+                && labels.iter().all(|label| shown.contains(label))
+        },
+    )
+    .await;
 }
+
 fn color_updates(bytes: &[u8]) -> Vec<&[u8]> {
     bytes
         .windows(2)
@@ -299,10 +312,13 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     let (allow_delta, delta_ready) = tokio::sync::oneshot::channel();
     let (allow_completion, completion_ready) = tokio::sync::oneshot::channel();
     let proxy = tokio::spawn(async move {
-        let (mut stream, _) = tokio::time::timeout(Duration::from_secs(60), listener.accept())
-            .await
-            .unwrap()
-            .unwrap();
+        let (mut stream, _) = crate::test_watchdog::watchdog(
+            "tests/tui_process.rs: real_tui_accepts_text_renders_proxy_response_and_exits_cleanly",
+            listener.accept(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let mut bytes = Vec::new();
         let split = loop {
             let mut buffer = [0; 4096];
@@ -349,15 +365,21 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
             delta.len() + complete.len()
         );
         stream.write_all(head.as_bytes()).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(30), delta_ready)
-            .await
-            .unwrap()
-            .unwrap();
+        crate::test_watchdog::watchdog(
+            "tests/tui_process.rs: real_tui_accepts_text_renders_proxy_response_and_exits_cleanly",
+            delta_ready,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         stream.write_all(delta.as_bytes()).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(30), completion_ready)
-            .await
-            .unwrap()
-            .unwrap();
+        crate::test_watchdog::watchdog(
+            "tests/tui_process.rs: real_tui_accepts_text_renders_proxy_response_and_exits_cleanly",
+            completion_ready,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         stream.write_all(complete.as_bytes()).await.unwrap();
     });
     let mut master = -1;
@@ -431,18 +453,70 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     read_repaint_text(
         &mut terminal,
         &mut output,
-        &["失敗した許可済み索引作業", "資料数: 1", "対象文字数: 29"],
+        &[
+            "索引処理の実行確認",
+            "失敗した許可済み索引作業",
+            "資料数: 1",
+            "対象文字数: 29",
+            "Yで実行",
+        ],
     )
     .await;
     terminal.write_all(b"y").unwrap();
-    collect_output(&mut terminal, &mut output, Duration::from_millis(150)).await;
+    let mut index_observation = serde_json::Value::Null;
+    let resumed = crate::test_watchdog::watchdog("saved index retry clears pause", async {
+        loop {
+            // Keep draining the real PTY while observing saved state: otherwise
+            // its output backpressure can prevent the UI from reading Y.
+            for _ in 0..16 {
+                let mut bytes = [0; 8192];
+                match terminal.read(&mut bytes) {
+                    Ok(n) if n > 0 => output.extend_from_slice(&bytes[..n]),
+                    _ => break,
+                }
+            }
+            assert!(output.len() < 4 * 1024 * 1024, "terminal output flood");
+            let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+            command
+                .arg("--data-dir")
+                .arg(&data)
+                .args(["index", "status"])
+                .kill_on_drop(true);
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("SHELLBOY_") {
+                    command.env_remove(key);
+                }
+            }
+            let result = command.output().await.unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+            let unpaused = value["ok"] == true && value["result"]["paused"] == false;
+            index_observation = value;
+            if unpaused {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    assert!(
+        resumed.is_ok(),
+        "saved index observation: {index_observation}"
+    );
     terminal.write_all(b"s").unwrap();
     read_repaint_text(&mut terminal, &mut output, &["一時停止: false"]).await;
-    terminal.write_all(b"\x1b").unwrap();
-    collect_output(&mut terminal, &mut output, Duration::from_millis(100)).await;
+    terminal.write_all(b"\x1b[27u").unwrap();
     terminal.write_all(b"hello from actual terminal\r").unwrap();
     read_until_text(&mut terminal, &mut output, "モデル応答待ち").await;
-    let waiting = collect_output(&mut terminal, &mut output, Duration::from_millis(700)).await;
+    let waiting = collect_matching(
+        &mut terminal,
+        &mut output,
+        "waiting color changes",
+        |bytes| {
+            let colors = color_updates(bytes);
+            colors.len() >= 3 && colors.windows(2).any(|pair| pair[0] != pair[1])
+        },
+    )
+    .await;
     assert_animated_colors(&waiting, "waiting");
     // Input is handled while the mocked request is deliberately stalled.
     terminal
@@ -452,7 +526,16 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     allow_delta.send(()).unwrap();
     read_until_text(&mut terminal, &mut output, "応答受信中").await;
     read_until_text(&mut terminal, &mut output, "SHELLBOY_TUI_OK").await;
-    let receiving = collect_output(&mut terminal, &mut output, Duration::from_millis(700)).await;
+    let receiving = collect_matching(
+        &mut terminal,
+        &mut output,
+        "receiving color changes",
+        |bytes| {
+            let colors = color_updates(bytes);
+            colors.len() >= 3 && colors.windows(2).any(|pair| pair[0] != pair[1])
+        },
+    )
+    .await;
     assert_animated_colors(&receiving, "receiving");
     // A real mouse event pauses on the provisional attempt before the driver
     // commits a distinct persisted assistant node. Exact row identity is
@@ -461,25 +544,48 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     read_repaint_text(&mut terminal, &mut output, &["↓"]).await;
     allow_completion.send(()).unwrap();
     read_repaint_text(&mut terminal, &mut output, &["✓", "↓"]).await;
-    collect_output(&mut terminal, &mut output, Duration::from_millis(800)).await;
-    let idle = collect_output(&mut terminal, &mut output, Duration::from_millis(500)).await;
-    assert!(
-        idle.is_empty(),
-        "completed idle must stop terminal redraw bytes: {}",
-        String::from_utf8_lossy(&idle)
-    );
+    // Static-idle redraw is tested with the deterministic draw budget, not a
+    // finite window with no PTY bytes (which cannot prove future absence).
+    assert!(emitted_text(&output).contains("✓"));
     // An external terminal writer can invalidate the app's remembered screen.
-    foreign_output
-        .write_all(b"\x1b[3;79HFOREIGN_SCREEN_MARKER")
-        .unwrap();
-    let foreign = collect_output(&mut terminal, &mut output, Duration::from_millis(100)).await;
+    let foreign_writer = tokio::task::spawn_blocking(move || {
+        foreign_output.write_all(b"\x1b[3;79HFOREIGN_SCREEN_MARKER")
+    });
+    let foreign = collect_matching(
+        &mut terminal,
+        &mut output,
+        "foreign writer marker",
+        |bytes| {
+            bytes
+                .windows(b"FOREIGN_SCREEN_MARKER".len())
+                .any(|v| v == b"FOREIGN_SCREEN_MARKER")
+        },
+    )
+    .await;
     assert!(
         foreign
             .windows(b"FOREIGN_SCREEN_MARKER".len())
             .any(|v| v == b"FOREIGN_SCREEN_MARKER")
     );
+    crate::test_watchdog::watchdog(
+        "foreign PTY writer completes while master drains",
+        foreign_writer,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
     terminal.write_all(&[0x0c]).unwrap(); // Ctrl+L
-    let repaint = collect_output(&mut terminal, &mut output, Duration::from_millis(350)).await;
+    let repaint = collect_matching(
+        &mut terminal,
+        &mut output,
+        "manual repaint draft",
+        |bytes| {
+            bytes.windows(4).any(|b| b == b"\x1b[2J")
+                && emitted_text(bytes).contains("EDITABLE_WHILE_WAITING")
+        },
+    )
+    .await;
     assert!(
         repaint.windows(4).any(|v| v == b"\x1b[2J"),
         "manual repaint must clear the real terminal"
@@ -502,7 +608,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     // A terminal emulator keeps reading while its child shuts down. Without
     // draining the master here, a final redraw can fill the PTY buffer and
     // block the child's terminal writer before it can exit.
-    let status = tokio::time::timeout(Duration::from_secs(5), async {
+    let status = crate::test_watchdog::watchdog("tests/tui_process.rs: real_tui_accepts_text_renders_proxy_response_and_exits_cleanly", async {
         let exit = child.wait();
         tokio::pin!(exit);
         loop {

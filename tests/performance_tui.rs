@@ -196,7 +196,7 @@ impl Tui {
         }
     }
     fn until(&mut self, needle: &[u8]) {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
         loop {
             self.drain();
             if self.output.contains(needle) {
@@ -206,7 +206,7 @@ impl Tui {
                 self.child.try_wait().unwrap().is_none(),
                 "TUI exited before measured output"
             );
-            assert!(Instant::now() < deadline, "TUI output deadline exceeded");
+            assert!(!deadline.expired(), "TUI output deadline exceeded");
             let mut descriptor = libc::pollfd {
                 fd: self.terminal.as_raw_fd(),
                 events: libc::POLLIN,
@@ -255,7 +255,7 @@ impl Tui {
     }
     fn quit(&mut self) {
         self.terminal.write_all(&[0x11]).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(8);
+        let deadline = crate::test_watchdog::Deadline::new("native PTY/process fixture");
         loop {
             self.drain();
             if let Some(status) = self.child.try_wait().unwrap() {
@@ -263,7 +263,7 @@ impl Tui {
                 return;
             }
             assert!(
-                Instant::now() < deadline,
+                !deadline.expired(),
                 "graceful TUI shutdown deadline exceeded"
             );
             std::thread::sleep(Duration::from_millis(5));
