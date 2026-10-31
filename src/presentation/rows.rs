@@ -2,6 +2,9 @@
 use crate::ui::theme;
 use ratatui::style::Color;
 
+pub const NOTICE_SOURCE_OUTSIDE_WINDOW: &str =
+    "元のtool行は表示範囲外です · F6で保存済み参照を確認";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowKind {
     Human,

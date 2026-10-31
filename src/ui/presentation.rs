@@ -1218,7 +1218,7 @@ fn node_region(view: &ThreadView, node: &UiNode) -> ItemRegion {
         node.presentation
             .fields
             .iter()
-            .find(|f| f.key.ends_with("/execution_id"))
+            .find(|f| f.key == "/payload/execution_id")
             .map(|f| f.value.clone())
     } else {
         None

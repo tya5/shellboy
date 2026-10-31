@@ -4162,3 +4162,10 @@ RUST_TEST_THREADS=2. No release build, installed-binary change or user data.
   full standard/rebase validation and matched-baseline P1/3OS CI remain pending.
 - Physical terminal glyphs, real IME/clipboard and Windows ConPTY are unverified.
   Native OS CI is not physical terminal UX. Missing name/source enrichment: #88.
+
+The first rebased standard run passed Clippy, then had948 unit passes/2 failures:
+a remaining old unknown-code glyph expectation and the new off-window fixture
+incorrectly reused a view that intentionally retained its old source. Both tests
+are corrected. Self-check also separated Enter following from Space/mouse
+expansion; exact loaded source, independent unavailable source and child Thread
+navigation now pass the focused regression without adding a read/poll operation.
