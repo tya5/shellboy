@@ -2857,13 +2857,15 @@ mod description_context_tests {
                     )
                 })
                 .unwrap();
-            let shown: String = terminal
-                .backend()
-                .buffer()
-                .content()
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect();
+            let buffer = terminal.backend().buffer();
+            let mut shown = String::new();
+            let mut column = 0;
+            while column < buffer.area.width {
+                let symbol = buffer[(column, 0)].symbol();
+                shown.push_str(symbol);
+                // Wide glyphs own the next grid cell; it is not a rendered space.
+                column += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+            }
             assert!(
                 shown.contains("共有assistant原文") && shown.contains("call b"),
                 "{width}: {shown}"
