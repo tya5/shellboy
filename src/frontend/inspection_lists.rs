@@ -345,6 +345,63 @@ mod tests {
         assert!(capture_list_scope(&command, Arc::new(json!({"not_items":[]})), &[]).is_err());
     }
     #[test]
+    fn all_four_routes_keep_canonical_row_identity_and_original_window() {
+        let cases = [
+            (
+                Command::Status(StatusArgs::default()),
+                json!({"items":[{"kind":"run","id":"r"}],"next_cursor":"status-next"}),
+                Route::Status,
+                "r",
+            ),
+            (
+                Command::ThreadList(
+                    serde_json::from_value(json!({"query":"filter","limit":17})).unwrap(),
+                ),
+                json!({"items":[{"thread_id":"t"}],"next_cursor":"thread-next"}),
+                Route::Thread,
+                "t",
+            ),
+            (
+                Command::ShellList(
+                    serde_json::from_value(json!({"state":"running","limit":17})).unwrap(),
+                ),
+                json!({"items":[{"execution_id":"s"}],"next_cursor":"shell-next"}),
+                Route::Shell,
+                "s",
+            ),
+            (
+                Command::CompactList(
+                    serde_json::from_value(json!({"thread_id":"t","limit":17})).unwrap(),
+                ),
+                json!({"items":[{"event_id":"n","record_kind":"retained_replacement"}]}),
+                Route::Compact,
+                "n",
+            ),
+        ];
+        for (command, value, route, id) in cases {
+            let value = Arc::new(value);
+            let scope = capture_list_scope(&command, value.clone(), &[]).unwrap();
+            assert_eq!(scope.route, route);
+            assert_eq!(scope.ids, [id]);
+            assert_eq!(scope.command, command);
+            assert!(Arc::ptr_eq(&scope.original, &value));
+        }
+    }
+    #[test]
+    fn global_scope_does_not_invent_a_viewer_thread_or_hide_invalid_kinds() {
+        let command = Command::Status(StatusArgs::default());
+        let scope = capture_list_scope(&command, Arc::new(json!({"items":[]})), &[]).unwrap();
+        assert!(scope.threads.is_empty());
+        assert!(
+            capture_list_scope(
+                &command,
+                Arc::new(json!({"items":[{"kind":"owned-work-widget","id":"r"}]})),
+                &[]
+            )
+            .is_err()
+        );
+    }
+    #[test]
     fn capture_checks_text_and_structure_before_cloning() {
         let command = Command::ThreadList(serde_json::from_value(json!({})).unwrap());
         let value =
