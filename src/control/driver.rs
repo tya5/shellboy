@@ -719,6 +719,8 @@ async fn run_shell(
         // fixtures; production publishes its endpoint before starting drivers.
         env.insert("SHELLBOY_SOCKET".into(), address);
     }
+    #[cfg(not(unix))]
+    env.insert("SHELLBOY_SOCKET".into(), String::new());
     if let Ok(executable) = std::env::current_exe()
         && let Some(parent) = executable.parent()
     {

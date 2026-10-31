@@ -1,5 +1,14 @@
 # Development status
 
+## Terminal-free owner startup (#5 stage 2)
+
+serve now requires an explicit data directory and reuses owner_session without
+a terminal or TUI. Readiness is one flushed stdout JSON row after binding IPC
+and starting its dispatcher; startup failures use stderr. EOF is not a stop.
+Process tests cover inherited owner variables, CLI availability, duplicate locks
+and output isolation. Shutdown/signals and parent/process crash checks remain
+stages 3/4; Core review and exact-source integration are tracked in #5.
+
 ## Shared owner bootstrap (#5 stage 1)
 
 Owner assembly and partial-startup cleanup now live in `owner_session`, outside

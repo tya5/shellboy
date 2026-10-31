@@ -657,3 +657,24 @@ HTTP observation. Owner restart forgets the memory; already-in-flight requests
 are not cancelled. Input preparation is not skipped. Embeddings and model-list
 requests are outside this first version. Short bottom-line TUI rendering is
 tracked separately in #85; use run get/the existing recovery reason for now.
+
+## Terminal-free owner startup (#5, unreleased)
+
+`shellboy serve --data-dir DIR [--config FILE]` starts an owner without a terminal.
+The data directory must be explicit and is protected by the normal owner lock;
+an already-owned directory is an error, not an attach request. Configuration
+lookup is the same as TUI startup. The process stays part of its caller's shell;
+it does not daemonize and stdin EOF does not stop it.
+
+Wait for the flushed stdout JSON row with `event: "ready"` before sending CLI
+requests to that explicit data directory. It reports the absolute data path,
+owner instance and protocol version, not a model connection check. Startup
+failures are JSON on stderr, never a successful stdout row. A data directory
+that cannot be represented in UTF-8 readiness JSON is rejected with cleanup.
+Inherited owner socket/origin/data variables do not select this owner. Shells
+started by it receive its own identity; an inapplicable inherited Unix socket
+is cleared on Windows. API-key and normal proxy variables are not cleared.
+
+This incremental startup stage does not yet add a graceful shutdown command or
+signal adapter. Those and the final normal stdout row are tracked in #5 stage 3;
+use only disposable test directories until the remaining lifecycle stages land.

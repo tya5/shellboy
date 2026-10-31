@@ -420,3 +420,14 @@ not evade the cooldown. Wait or ask the user to select another connection/model
 with `/model`; do not automatically switch cost or behavior. Expiry permits a
 new explicit request, not automatic resumption. Memory is discarded on owner
 restart. See the CLI reference for the exact supported provider error shapes.
+
+## Terminal-free startup (#5, unreleased)
+
+`serve --data-dir DIR --config FILE` can start a separate owner from a background
+shell without a TUI. Use a disposable explicit directory and wait for its stdout
+`ready` JSON before sending commands with that same `--data-dir`. The owner lock
+rejects reuse of a live owner's data. EOF on the background shell's stdin is not
+a shutdown request. The child remains owned work, not a detached daemon; model
+requests to its configured endpoint have their usual cost. Startup failures use
+stderr. Graceful CLI/signal termination and the full cleanup recipe are later
+#5 stages; this startup-only increment is not yet a complete lifecycle recipe.

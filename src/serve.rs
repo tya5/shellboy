@@ -18,6 +18,13 @@ pub async fn run(config: Option<PathBuf>, data: PathBuf) -> Result<(), ApiError>
         owner_session::initialize_reporting(config, Some(data), CancellationToken::new(), |_| {})
             .await?
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Owner startup cancelled"))?;
+    if prepared.owner.loaded.data_dir.to_str().is_none() {
+        prepared.shutdown().await?;
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "serve requires a UTF-8 data directory for its JSON readiness record",
+        ));
+    }
     let dispatcher = tokio::spawn(prepared.control.clone().serve(prepared.requests));
     // Retain cleanup ownership after handing the receiver to the dispatcher.
     let owner_session::Prepared {
