@@ -5518,3 +5518,40 @@ the old CI lacks the full admission/tick trace needed to prove its exact past
 interleaving or exclude all other contributors. Standard/doc checks and final
 SHA are reported in #95. Native Windows/Linux validation on this new source is
 still an integration gate, not inferred from local success or old split runs.
+
+## #100 post-F reproduction and fitting viewport correction
+
+2026-10-31, native macOS arm64 / Rust 1.99.1. New task worktree starts at admitted
+F fff2076. Cherry-picking saved test3de75eb required only an additive EOF merge:
+all existing F test source, including 2b9514e, was retained before appending the
+reproduction. No E-specific browser/admission patch was replayed.
+
+After explicitly building this source's CLI, the preserved real-CLI/held-loopback
+model reproduction is red at cycle0: header/internal membership and CLI retain
+three rows, the promoted worker title is not painted, and closing/reopening
+restores it before the assertion fails. This is an assertion failure, not a
+watchdog failure. On the same unmodified F source, the original 2b9514e open-list
+foreign-running-row test passes. The tests differ deliberately: the original
+checks membership, while the new test also checks actual painted text.
+
+List sorts/retains membership correctly but restores a selected-screen anchor
+by increasing TableState offset. At unchanged geometry it previously clamped
+only when the viewport grew, even if every row fit. Reconcile a fitting List's
+offset to zero. A separate Watch unit is also red on F: its c5785c5 formatting
+band computes a local clamped offset while the actual TableState still starts
+below the first row. Set the actual fitting offset before formatting/rendering/
+visible-detail scope. Keep bounded neighborhood formatting; do not format all
+2000 rows to mask the problem. No timestamp, database, membership or browser
+read-admission changes are made. The withdrawn future-timestamp lead is not a
+clock bug or a reason to repair user data.
+
+After correction, all 58 ThreadBrowser tests pass, including the unchanged
+2000-row viewport-neighborhood count assertions. The actual CLI reproduction
+passes four alternating running/stopped worker cycles (browser-witness.jsonl
+0->8 rows, unchanged browser generation/page count), and the original F test
+passes all 16 competing/running-row reorders. New waits use the existing shared
+watchdog; no speed criterion, allowance, retry, ignore or assertion relaxation
+was added. These are synthetic UI buffers/owned CLI processes and loopback only,
+not a trace of the user's original terminal geometry or real-provider behavior.
+Final standard/doc-role/bin/docs/record checks and SHA are recorded in #100;
+fresh native CI and user review remain the integration coordinator's gates.

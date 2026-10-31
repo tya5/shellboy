@@ -2584,3 +2584,12 @@ the passing membership regression with a visual fix. The
 records both outcomes. Exact-source3OS and main push follow; no release/install.
 After F, start G on then-current main without waiting for #87 (6543753689);
 later side reconciles overlap, and G P6 time is observation only.
+
+## #100 fitting viewport correction on admitted F
+
+The preserved E process reproduction still fails on F fff2076 while F's
+2b9514e membership test passes. List retains row data but can hide a promoted
+row above an unnecessary offset. List and Watch now reconcile the actual offset
+when all rows fit; Watch does so before bounded formatting/detail scope.
+Membership, F admission guards and overflow anchors are unchanged. Fresh local
+checks and the exact reviewed candidate are reported in issue #100.
