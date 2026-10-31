@@ -1,5 +1,13 @@
 # Development status
 
+## On-demand owner memory (#80)
+
+CLI status --memory returns existing body/layout/attachment/replay cache accounting
+and native process metrics through existing UI delivery and control-file slots.
+Unknown values remain null with reasons. No periodic sampler, cap changes or new
+work queue/worker is introduced. Synthetic cache-growth/held-writer/on-demand tests
+pass; native exact-source checks are tracked in #80. F8 display stays with #41.
+
 ## Attachment list file admission review (#79)
 
 Read-only attachment rows now leave the projection closure and its connection

@@ -4075,3 +4075,43 @@ on that binary (`/tmp/issue-84-pty-final`); manifest, screen text, raw bytes and
 request counts remain synthetic local evidence. No timing threshold is asserted.
 Subsequent evidence-only documentation changes do not alter the tested Rust tree.
 Native three-OS CI and integration status are tracked in issue #84.
+
+## #80 on-demand owner memory qualification (2026-10-31)
+
+The minimal interface is status --memory: read-only, owner-wide, and exclusive
+with activity filters. It returns existing cache budget accounting (body views,
+layout/unit entries, attachment paths and replay Threads) plus configured limits.
+Existing live/pinned counts remain separate. This is not a full heap measurement,
+not an additive partition of OS memory, and not a leak diagnosis. No new retained
+byte counter, cap, table, worker or work queue is added.
+
+UI counters respond to a request on existing EngineEvent/UiUpdate delivery with a
+single completion responder. No periodic sampler or log exists. Process and other
+cache reads reuse existing bounded control-file admission, not the DB/UI lane.
+MacOS uses native rusage_info_v2 footprint/resident bytes; Linux parses bounded
+proc RSS/PSS kB fields with checked conversion; Windows uses current-process
+working-set/private usage. OS failure/absence, unsupported platforms and absent
+UI ownership yield null plus reasons, never a guessed zero.
+
+Synthetic tests on native macOS arm64/Rust 1.99.1 verify body/layout growth after
+use and attachment/replay growth after preparation, without exceeding configured
+retention caps in those fixtures. The actual request completes with the DB writer
+held. Process sampling stays at 0 until requested; attached UI replies precede
+sampling, and two requests produce exactly two samples. Private observation JSONL
+rows are 0 to 2; operation_receipt/model_attempt remain 0 to 0. Native-field tests
+require a byte value or a concrete failure reason for each platform's expected
+metrics, and malformed/overflow proc units stay unknown. CLI conversion and scope
+conflicts are tested; no model/embedding provider is used. Waits use #77's shared
+60-second watchdog only, not performance thresholds.
+
+Initial local checks caught a fixture cursor/path mismatch at shutdown, private
+method use in an external CLI test, and an unchecked server-shutdown Result. The
+fixture and tests were corrected without changing production recovery semantics.
+Full standard/role/bundled-doc checks, native OS results and record-line audits are
+tracked in #80. The earlier #79 adopted-design paragraph is aligned with its
+review-corrected connection/file-admission separation; historical evidence stays.
+
+The published #41 branch overlaps F8/frontend/UI files. Only minimal request/reply
+plumbing is included here; F8 display, leak investigation, untracked SQLite/heap
+estimation and request-copy/peak optimization are deferred. No real owner/data-dir,
+installed binary, tag or Release is modified by verification.

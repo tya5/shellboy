@@ -282,3 +282,11 @@ presentation pool and read-only WAL snapshots. Schema 15 adds four justified
 indexes, not tables/workers/queues; see storage and CLI designs for costs, boundary
 semantics and explicit retention/unknown coverage. Unreleased main functionality
 requires a matching new owner/CLI, not merely the published v0.4.0 executable.
+
+## On-demand owner memory (#80)
+
+Adopt the [CLI owner memory observation](cli.md#on-demand-owner-memory-80) and
+[wire routing](protocol.md#owner-memory-observation-80). Existing budgeted cache
+accounting and native OS facts are observed only on request, outside the DB worker.
+Unknown values remain unknown; no cache cap, schema, worker or work queue is added.
+F8 presentation and untracked allocator/request-copy investigations are separate.

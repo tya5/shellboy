@@ -524,10 +524,11 @@ args!(AttachmentAddArgs { #[serde(default)] thread_id: Option<String>, path: Str
 args!(AttachmentRemoveArgs { #[serde(default)] thread_id: Option<String>, attachment_id: String });
 args!(#[derive(Default)] IndexArgs { #[serde(default, skip_serializing_if = "Option::is_none")] dimensions: Option<usize>, #[serde(default)] scope: Option<IndexScope>, #[serde(default)] space_id: Option<String>, #[serde(default)] thread_ids: Vec<String>, #[serde(default)] source_ids: Vec<String> });
 args!(StorageArgs { #[serde(default)] category: Option<StorageCategory> });
-args!(StatusArgs { #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] since: Option<String>, #[serde(default)] state: Vec<String>, #[serde(default)] all: bool, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
+args!(StatusArgs { #[serde(default)] memory: bool, #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] since: Option<String>, #[serde(default)] state: Vec<String>, #[serde(default)] all: bool, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 impl Default for StatusArgs {
     fn default() -> Self {
         Self {
+            memory: false,
             thread_id: None,
             run_id: None,
             since: None,

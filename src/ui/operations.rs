@@ -1143,6 +1143,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::Status(StatusArgs {
+                        memory: false,
                         thread_id: form.optional("thread")?,
                         run_id: form.optional("run")?,
                         since: form.optional("since")?,

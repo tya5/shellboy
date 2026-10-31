@@ -1128,3 +1128,23 @@ async fn saved_readback_options_are_typed_bounded_and_observational() {
     .await
     .expect("saved-readback CLI fixture watchdog");
 }
+
+#[tokio::test]
+async fn status_memory_is_typed_read_only_and_excludes_activity_filters() {
+    let command =
+        crate::test_watchdog::watchdog("memory CLI conversion", convert(&["status", "--memory"]))
+            .await
+            .unwrap();
+    assert!(matches!(command,Command::Status(ref a) if a.memory));
+    command.validate().unwrap();
+    for option in [
+        vec!["--thread", "t"],
+        vec!["--all"],
+        vec!["--limit", "5"],
+        vec!["--since", "2026-10-31T00:00:00Z"],
+    ] {
+        let mut args = vec!["shellboy", "status", "--memory"];
+        args.extend(option);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+}

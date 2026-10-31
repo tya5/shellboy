@@ -80,6 +80,7 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
+| `status --memory` | Owner-wide cache retained/limit/entry accounting and native process memory; unknown values have reasons. Exclusive with activity filters; on-demand and no provider request |
 
 ### Standalone configuration (2 commands)
 
@@ -584,3 +585,22 @@ whole snippet, with a redaction flag. This conservative convenience cannot detec
 arbitrary obfuscated secrets: keep results private. No stdout/stderr/body is
 returned; explicitly use shell get/read for the chosen execution ID and raw output.
 All IDs/metrics describe retained facts; collected history cannot be reconstructed.
+
+## Owner memory
+
+`status --memory` asks the running owner for JSON cache accounting and native
+process memory. It is owner-wide and cannot be combined with activity filters.
+`caches` contains body, layout, attachment and replay retained bytes, limit bytes
+and entry counts/units. These reuse existing budget accounting, not a new heap
+measurement. Body working-set exclusions and pinned/live shared allocations mean
+cache bytes are not a complete partition of process memory. Counts are views for
+body, layout-or-unit entries for layout, paths for attachments and Threads for
+replay. The existing cache limits do not change.
+
+`process.metrics` reports byte values with an unavailable_reason when unknown:
+macOS footprint/RSS, Linux RSS/PSS and Windows working set/private bytes. Missing
+UI owners yield null body/layout values, not invented zeros. Snapshots are taken
+on request, are not atomic across owners, and must not be added to estimate total
+heap. SQLite/allocator/other untracked allocations are not estimated. No periodic
+sampling/logging, cache purge or provider request is performed. F8 display remains
+separate #41 work.
