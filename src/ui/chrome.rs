@@ -804,7 +804,7 @@ mod context_wait_footer_tests {
                 ..Default::default()
             },
         );
-        let text = footer_lines(&view, 140, false, palette, vec![], None)
+        let text = footer_lines(&view, 140, "", palette, vec![], None)
             .iter()
             .flat_map(|l| &l.spans)
             .map(|s| s.content.as_ref())
@@ -818,7 +818,7 @@ mod context_wait_footer_tests {
                 ..Default::default()
             },
         );
-        let text = footer_lines(&view, 140, false, palette, vec![], None)
+        let text = footer_lines(&view, 140, "", palette, vec![], None)
             .iter()
             .flat_map(|l| &l.spans)
             .map(|s| s.content.as_ref())
