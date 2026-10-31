@@ -230,12 +230,13 @@ impl LiveWorkView {
         let age = self.seconds.get(index)?.1?;
         let observed = matches!(&self.rows().get(index)?.target,LiveWorkTarget::Shell {execution_id,..} if self.markers.contains_key(execution_id));
         Some(format!(
-            " · {}{age}秒前",
+            " · {}{}前",
             if observed {
                 "出力観測"
             } else {
                 "保存出力"
-            }
+            },
+            crate::presentation::elapsed_text(age.saturating_mul(1000), false)
         ))
     }
     pub fn advance(&mut self, now: Instant) -> bool {
@@ -428,7 +429,12 @@ impl LiveWorkView {
             .seconds
             .first()
             .and_then(|(elapsed, _)| *elapsed)
-            .map(|s| format!(" · 最古 {s}秒"))
+            .map(|s| {
+                format!(
+                    " · 最古 {}",
+                    crate::presentation::elapsed_text(s.saturating_mul(1000), false)
+                )
+            })
             .unwrap_or_default();
         let output = self.output_age_label(0).unwrap_or_default();
         Some(format!(
@@ -467,7 +473,12 @@ pub(super) fn draw(
             .seconds
             .get(index)
             .and_then(|(e, _)| *e)
-            .map(|s| format!(" · {s}秒"))
+            .map(|s| {
+                format!(
+                    " · {}",
+                    crate::presentation::elapsed_text(s.saturating_mul(1000), false)
+                )
+            })
             .unwrap_or_default();
         let age = view.output_age_label(index).unwrap_or_default();
         let extra = if index + 1 == view.visible_rows {

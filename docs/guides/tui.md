@@ -489,3 +489,10 @@ A saved usage-limit recovery shows its kind and reset time in UTC, plus waiting
 and `/model` guidance. A passed reset time does not automatically resume work.
 Choosing a different model on the same connection does not bypass that
 connection's remembered limit; original reason/details remain available.
+
+Elapsed labels share one formatter: `45秒`, `5分12秒`, then `1時間3分`.
+Tool rows keep tenths below a minute (for example `0.4秒`). Numeric saved facts
+and originals remain unchanged. Terminal activity labels show the saved Run end
+time, for example 完了 · 21:16 (or a date on other local days), not a new observation time;
+missing/invalid end facts are marked unavailable. Live/recovery phases do not
+reuse a previous end time. An idle clock does not trigger a redraw just for dates.

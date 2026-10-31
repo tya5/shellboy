@@ -107,10 +107,13 @@ pub struct AutomaticRetrySnapshot {
 impl AutomaticRetrySnapshot {
     pub(super) fn label(&self) -> String {
         format!(
-            "（{}/{}） · {}秒待機{} · 再送は重複課金の可能性",
+            "（{}/{}） · {}待機{} · 再送は重複課金の可能性",
             self.number,
             self.limit,
-            self.delay_ms.div_ceil(1000),
+            crate::presentation::elapsed_text(
+                self.delay_ms.div_ceil(1000).saturating_mul(1000),
+                false
+            ),
             if self.partial_response_discarded {
                 " · 途中応答を保存して作り直し"
             } else {
@@ -371,10 +374,11 @@ impl ActivityView {
         if seconds < 30 {
             return None;
         }
+        let elapsed = crate::presentation::elapsed_text(seconds.saturating_mul(1000), false);
         Some(if receive.received {
-            format!("最後の受信から{seconds}秒")
+            format!("最後の受信から{elapsed}")
         } else {
-            format!("受信待ち{seconds}秒（画面の観測開始から）")
+            format!("受信待ち{elapsed}（画面の観測開始から）")
         })
     }
 

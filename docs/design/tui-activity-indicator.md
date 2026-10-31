@@ -116,3 +116,8 @@ Formatting a later explicit redraw may age the date label without any idle timer
 new read or unsolicited frame. Recovery/live phases do not show an older end time.
 Latest user performance policy supersedes the earlier latency/CPU admission gate:
 record measurements only; accept using virtual-clock/frame/read/job count bounds.
+
+The historical one-row initial scope above is not the current layout: current
+chrome::footer_lines returns two quiet rows. #85 owns first-row activity facts and
+recovery content; #87 owns second-row key-hint selection/fit. These additions do
+not reintroduce an earlier row layout or overwrite #87's caller-supplied hint API.

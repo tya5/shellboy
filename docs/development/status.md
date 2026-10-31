@@ -2677,3 +2677,7 @@ Final serialized validation on source6303d91/mainafe4c08 passes1,972/0/33,
 Python41/layout94/fmt/strict Clippy/policy. Rebuilt native PTYs pass all8/64 again
 with resolved historical panels retained. Quiet P1 passes all three matched pairs;
 loaded-host failures remain recorded. CI/main admission belongs to worker4.
+User follow-ups to #85 are in progress: shared translated-unit elapsed formatter
+across footer/tool/owned-work/notices, plus terminal saved-ended_at time/date.
+71bbad0 admission was put on HOLD; a new ref will supersede the rebased branch.
+CPU/p95 are observations only under the latest policy, not acceptance gates.

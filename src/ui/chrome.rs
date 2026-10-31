@@ -160,12 +160,33 @@ pub(super) fn footer_lines(
             "↓".into()
         });
     }
+    if matches!(
+        phase,
+        super::activity::ActivityPhase::Completed
+            | super::activity::ActivityPhase::Stopped
+            | super::activity::ActivityPhase::Failed
+    ) && let Some(snapshot) = view.activity.snapshot.as_ref()
+        && snapshot.run_id.is_some()
+    {
+        if let Some(offset) = chrono::FixedOffset::east_opt(snapshot.timing.local_offset_seconds) {
+            facts.push(crate::presentation::ended_text(
+                snapshot.timing.ended_at.as_ref(),
+                chrono::Utc::now(),
+                offset,
+            ));
+        } else {
+            facts.push(crate::presentation::TIME_TEXT[3].1.into());
+        }
+    }
     let send = view.sending();
     if let Some((send_phase, count, started)) = send {
         facts.push(format!(
-            "{} {count} · {}s",
+            "{} {count} · {}",
             send_phase.label(),
-            started.elapsed().as_secs()
+            crate::presentation::elapsed_text(
+                started.elapsed().as_secs().saturating_mul(1000),
+                false
+            )
         ));
     } else if view
         .activity
@@ -668,5 +689,64 @@ mod tests {
             footer.contains("子孫") && footer.contains("稼働2") && footer.contains("復旧1"),
             "{footer}"
         );
+    }
+}
+
+#[cfg(test)]
+mod terminal_time_tests {
+    use super::*;
+    use crate::{
+        config::Config,
+        ui::{
+            activity::{ActivityPhase, ActivitySnapshot, SavedTiming},
+            view::ThreadView,
+        },
+    };
+    #[test]
+    fn ended_footer_uses_saved_date_only_for_terminal_phases() {
+        let mut view = ThreadView::new(&Config::default(), std::path::PathBuf::from("/"));
+        let at = chrono::DateTime::parse_from_rfc3339("2020-01-02T03:04:00Z").unwrap();
+        for phase in [
+            ActivityPhase::Completed,
+            ActivityPhase::Stopped,
+            ActivityPhase::Failed,
+            ActivityPhase::AwaitingModel,
+        ] {
+            view.activity.accept(
+                1,
+                ActivitySnapshot {
+                    run_id: Some("saved".into()),
+                    phase,
+                    timing: SavedTiming {
+                        ended_at: Some(at),
+                        local_offset_seconds: 9 * 3600,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            );
+            let lines = footer_lines(
+                &view,
+                200,
+                false,
+                crate::ui::theme::Palette::from_capabilities(
+                    crate::config::PaletteMode::Dark,
+                    false,
+                    true,
+                ),
+                vec![],
+                None,
+            );
+            let text = lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.as_ref())
+                .collect::<String>();
+            assert_eq!(
+                text.contains("2020-01-02 12:04"),
+                phase != ActivityPhase::AwaitingModel,
+                "{text}"
+            );
+        }
     }
 }

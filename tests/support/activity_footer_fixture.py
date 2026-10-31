@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -140,7 +141,8 @@ def main():
         edit("DELETE FROM tool_group WHERE id='ui85-marker'")
         capture('tool finished', lambda text: '応答受信中' in text and 'ツール処理中' not in text)
         finish.set()
-        capture('answer', lambda text: 'fixture answer' in text)
+        capture('answer', lambda text: 'fixture answer' in text and '完了' in '\n'.join(text.splitlines()[-2:])
+                and re.search(r'\b\d{2}:\d{2}\b', '\n'.join(text.splitlines()[-2:])))
         terminal.paste('fixture failure request')
         terminal.send('\r')
         capture('failure', lambda text: '復旧待ち' in text and 'fixture failure' in text)

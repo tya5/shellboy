@@ -6287,7 +6287,7 @@ mod layout_cache_tests {
         };
         assert!(line(&terminal).contains("一時的なエラーのため再試行中"));
         assert!(line(&terminal).contains("（1/2）"));
-        assert!(line(&terminal).contains("60秒待機"));
+        assert!(line(&terminal).contains("1分0秒待機"));
         assert!(line(&terminal).contains("途中応答を保存して作り直し"));
         assert!(line(&terminal).contains("重複課金の可能性"));
         assert_ne!(terminal.backend().buffer()[(0, 0)].fg, theme::ATTENTION);

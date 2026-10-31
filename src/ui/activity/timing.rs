@@ -7,12 +7,16 @@ pub struct SavedTiming {
     pub attempt_started_at: Option<String>,
     pub tool_started_at: Option<String>,
     pub wall_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub ended_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub local_offset_seconds: i32,
 }
 impl PartialEq for SavedTiming {
     fn eq(&self, other: &Self) -> bool {
         self.generation == other.generation
             && self.attempt_started_at == other.attempt_started_at
             && self.tool_started_at == other.tool_started_at
+            && self.ended_at == other.ended_at
+            && self.local_offset_seconds == other.local_offset_seconds
     }
 }
 impl Eq for SavedTiming {}
@@ -122,14 +126,18 @@ impl PhaseClock {
         let now = now.max(self.committed_at);
         match self.base {
             Some(base) => format!(
-                "{}{}s",
+                "{}{}",
                 if self.observed {
                     FooterText::Observed.text()
                 } else {
                     ""
                 },
-                base.saturating_add(now.saturating_duration_since(self.at))
-                    .as_secs()
+                crate::presentation::elapsed_text(
+                    base.saturating_add(now.saturating_duration_since(self.at))
+                        .as_secs()
+                        .saturating_mul(1000),
+                    false
+                )
             ),
             None => FooterText::UnknownAge.text().into(),
         }
@@ -165,7 +173,7 @@ mod tests {
         view.accept_at(1, a.clone(), at);
         assert_eq!(
             view.phase_time_note(at + Duration::from_secs(3)).as_deref(),
-            Some("123s")
+            Some("2分3秒")
         );
         let mut later = a;
         later.timing.wall_at = Some(later.timing.wall_at.unwrap() + chrono::Duration::seconds(3));
@@ -173,7 +181,7 @@ mod tests {
         view.accept_at(2, snapshot("b", 7), at + Duration::from_secs(4));
         assert_eq!(
             view.phase_time_note(at + Duration::from_secs(5)).as_deref(),
-            Some("8s")
+            Some("8秒")
         );
         assert!(!view.accept_at(1, snapshot("a", 999), at));
     }
@@ -194,7 +202,7 @@ mod tests {
         assert_eq!(view.phase(), ActivityPhase::Receiving);
         assert_eq!(
             view.phase_time_note(at + Duration::from_secs(5)).as_deref(),
-            Some("観測 5s")
+            Some("観測 5秒")
         );
         assert!(!view.receive_at("b", at + Duration::from_secs(5)));
         view.accept_at(3, snapshot("b", 4), at + Duration::from_secs(6));
@@ -211,14 +219,14 @@ mod tests {
             Some((s.timing.wall_at.unwrap() - chrono::Duration::seconds(15)).to_rfc3339());
         view.accept_at(1, s, at);
         assert_eq!(view.phase(), ActivityPhase::Tools);
-        assert_eq!(view.phase_time_note(at).as_deref(), Some("15s"));
-        assert!(view.secondary_note(at).unwrap().contains("120s"));
+        assert_eq!(view.phase_time_note(at).as_deref(), Some("15秒"));
+        assert!(view.secondary_note(at).unwrap().contains("2分0秒"));
         view.receive_at("a", at + Duration::from_secs(1));
         assert_eq!(view.phase(), ActivityPhase::Tools);
         assert!(
             view.secondary_note(at + Duration::from_secs(2))
                 .unwrap()
-                .contains("観測 1s")
+                .contains("観測 1秒")
         );
         let mut end = snapshot("a", 122);
         end.phase = ActivityPhase::Completed;
@@ -262,7 +270,7 @@ mod tests {
         view.receive_at("a", at + Duration::from_secs(6));
         assert_eq!(
             view.phase_time_note(at + Duration::from_secs(7)).as_deref(),
-            Some("観測 1s")
+            Some("観測 1秒")
         );
     }
     #[test]
@@ -284,7 +292,7 @@ mod tests {
             assert_eq!(view.phase(), ActivityPhase::Receiving);
             assert_eq!(
                 view.phase_time_note(at + Duration::from_secs(4)).as_deref(),
-                Some("観測 3s")
+                Some("観測 3秒")
             );
         }
     }

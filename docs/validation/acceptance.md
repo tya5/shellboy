@@ -5857,3 +5857,11 @@ claimed as success. The heavy slot was released directly to worker1 afterwards.
 Subsequent changes in this qualification commit are record-only; Rust and fixture
 source blobs remain identical to the fully checked source. CI is not dispatched
 by this worker, and the branch is handed to worker4 as review required.
+
+The user subsequently requested one shared elapsed presentation for footer,
+tool, owned-work and notice durations, retaining subminute tool tenths, and the
+saved ended_at time/date beside terminal phases. These follow-up sources are
+not covered by the earlier green gate until their new validation completes.
+The broader performance-policy update makes p95/CPU observations only; prior
+loaded and quiet values remain recorded, without repeating a quiet measurement.
+Structural job/read/draw counters and virtual-time redraw bounds remain gates.

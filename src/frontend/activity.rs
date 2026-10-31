@@ -99,7 +99,7 @@ impl Projection {
 /// Owned SQL facts from one caller-controlled read transaction. Projection and
 /// model-error/diagnostic decoding are deliberately outside the DB worker.
 pub(super) struct RawProjection {
-    run: Option<(String, String, Option<String>)>,
+    run: Option<(String, String, Option<String>, Option<String>)>,
     turn: Option<SavedTurn>,
     attempt: Option<SavedAttempt>,
     revisit: Option<String>,
@@ -126,14 +126,14 @@ pub(super) fn read_tx_with_waits(
     thread: &str,
     waits: Option<&[(String, String)]>,
 ) -> Result<RawProjection, crate::storage::StorageError> {
-    let run: Option<(String, String, Option<String>)> = db
+    let run: Option<(String, String, Option<String>,Option<String>)> = db
         .query_row(
-            "SELECT id,state,stop_reason FROM run WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
+            "SELECT id,state,stop_reason,substr(ended_at,1,128) FROM run WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
             [thread],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?,r.get(3)?)),
         )
         .optional()?;
-    let Some((ref run_id, ref run_state, _)) = run else {
+    let Some((ref run_id, ref run_state, _, _)) = run else {
         return Ok(RawProjection {
             run,
             turn: None,
@@ -236,7 +236,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         cancelled,
         live_work,
     } = raw;
-    let Some((run_id, run_state, stop_reason)) = run else {
+    let Some((run_id, run_state, stop_reason, ended_at)) = run else {
         return Projection {
             snapshot: ActivitySnapshot::default(),
             observed_at: std::time::Instant::now(),
@@ -255,6 +255,10 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         timing: crate::ui::activity::SavedTiming {
             tool_started_at,
             wall_at: Some(chrono::Utc::now()),
+            ended_at: ended_at
+                .as_deref()
+                .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok()),
+            local_offset_seconds: chrono::Local::now().offset().local_minus_utc(),
             ..Default::default()
         },
         live_work: live_work.map(super::live_work::prepare),
