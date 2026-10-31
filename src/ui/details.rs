@@ -840,6 +840,35 @@ impl Details {
         fields.sort_by_key(|field| crate::presentation::fields::group(&field.key).0);
         fields
     }
+    fn described_command_context(&self, view: &ThreadView) -> Option<String> {
+        if !view.describe_calls {
+            return None;
+        }
+        let key = self.item_key.as_ref()?;
+        view.nodes()
+            .iter()
+            .flat_map(|node| {
+                node.presentation
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(index, block)| {
+                        block.tool.as_ref().map(|tool| (node, index, block, tool))
+                    })
+            })
+            .filter(|(node, index, _, tool)| {
+                super::ItemKey::tool(tool, &node.node_id, *index) == *key
+                    && crate::tool_description::label(tool.description.as_deref()).is_some()
+            })
+            .max_by_key(|(_, _, block, _)| crate::presentation::tool_observation_rank(block))
+            .map(|(_, _, _, tool)| {
+                format!(
+                    "shell · call {} · コマンドpreview {}",
+                    safe(&tool.call_id.chars().take(48).collect::<String>()),
+                    safe(&tool.command)
+                )
+            })
+    }
     pub(super) fn open_source(&mut self, node_id: String, next: &mut u64) -> UiAction {
         self.change_source(node_id);
         self.original(None, next)
@@ -1132,20 +1161,26 @@ impl Details {
                 count
             )
         } else if matches!(self.mode, Mode::Fields) {
-            view.nodes()
-                .iter()
-                .find(|node| node.node_id == self.node_id)
-                .map(|node| {
-                    let (label, preview) = entry(node, usize::from(area.width.saturating_sub(16)));
-                    format!("{label} · {preview}")
-                })
-                .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
+            self.described_command_context(view).unwrap_or_else(|| {
+                view.nodes()
+                    .iter()
+                    .find(|node| node.node_id == self.node_id)
+                    .map(|node| {
+                        let (label, preview) =
+                            entry(node, usize::from(area.width.saturating_sub(16)));
+                        format!("{label} · {preview}")
+                    })
+                    .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
+            })
         } else if matches!(self.mode, Mode::Original) {
             self.original
                 .as_ref()
                 .map(|body| {
                     format!(
-                        "保存 {} · 表示受信 {}",
+                        "{}保存 {} · 表示受信 {}",
+                        self.described_command_context(view)
+                            .map(|s| format!("{s} · 同じ原文内の隣接callはIDで区別 · "))
+                            .unwrap_or_default(),
                         safe(&body.provenance.created_at),
                         self.original_observed_at.as_deref().unwrap_or("未確認")
                     )
@@ -2758,5 +2793,55 @@ mod tests {
             .filter(|ch| !ch.is_whitespace())
             .collect::<String>();
         assert!(compact.contains("名乗り：leader"), "{shown}");
+    }
+}
+
+#[cfg(test)]
+mod description_context_tests {
+    use super::*;
+    #[test]
+    fn shared_original_node_keeps_selected_adjacent_call_identity_in_details_and_original() {
+        use crate::presentation::{
+            BlockKind, NodePresentation, PresentationBlock, PresentationKind, ToolPresentation,
+        };
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        *view.nodes_mut_for_test() = vec![super::super::UiNode {
+            node_id: "shared".into(),
+            role: "assistant".into(),
+            presentation: NodePresentation {
+                kind: PresentationKind::Assistant,
+                blocks: ["a", "b"]
+                    .iter()
+                    .map(|id| PresentationBlock {
+                        kind: BlockKind::ToolCall,
+                        tool: Some(ToolPresentation {
+                            group_id: Some("g".into()),
+                            call_id: (*id).into(),
+                            command: format!("EXACT_COMMAND_{id}"),
+                            description: Some(format!("label {id}")),
+                            call_node_id: Some("shared".into()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }];
+        let mut details = Details::for_node(&view, "shared".into(), false).with_item_key(
+            super::super::ItemKey::Tool {
+                group_id: "g".into(),
+                call_id: "b".into(),
+            },
+        );
+        for mode in [Mode::Fields, Mode::Original] {
+            details.mode = mode;
+            let context = details.described_command_context(&view).unwrap();
+            assert!(context.contains("call b") && context.contains("EXACT_COMMAND_b"));
+            assert!(!context.contains("EXACT_COMMAND_a"));
+        }
+        view.describe_calls = false;
+        assert!(details.described_command_context(&view).is_none());
     }
 }
