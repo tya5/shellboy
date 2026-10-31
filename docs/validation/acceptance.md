@@ -3740,3 +3740,84 @@ Standard-library tests check PNG hash, dimensions, palette, chunk CRCs,
 decompression, placement and textual alternatives without image-library/network
 requirements. Exact-source standard/native CI and text-file line-count audits
 are recorded in #78. No runtime, user configuration, DB or installed binary change.
+
+## State-based test watchdog migration (#77)
+
+2026-10-31, native macOS ARM64, Rust1.99.1, based on main b581283.
+The single tests/support/watchdog.rs WATCHDOG is60seconds. Async guards label the
+awaited operation and caller while returning the original Result; existing
+saved-progress diagnostics remain. Synchronous PTY loops and DB barrier receives
+reuse that budget. Controlled-clock tests check the helper, Retry-After policy,
+heartbeat idle refresh and file-worker timeout ownership without native latency
+assertions. Production timer/grace/busy settings and runtime behavior are unchanged.
+
+Non-#41 integration/unit files were migrated in separate Core/transport,
+presentation, HTTP, lifecycle and native-process commits. The four reported
+flaky fixture paths use the shared helper (recovery_paths, response_retries,
+response_upload_recovery, attachment_provenance). The ordered invalid-AGENTS
+preparation pause subscribes before inspecting saved state and reinspects on
+Changed/lag rather than polling the DB every5ms. Existing notification-based retry
+and upload waits keep their saved-phase assertions. Negative HTTP observations
+count queued connections after the operation's completion signal; channel checks
+follow completed operations/persisted phases, with final attempt counts retained.
+Explicitly blocked native/DB work uses future polling instead of20/30ms absence.
+The former ignored minute-long outage fixture now checks seven explicit failures
+and the preserved retry budget with a small test-configured cap; exact delay
+policy is checked on a virtual clock, not by counting attempts that fit in61s.
+No product limit was changed.
+
+Native shutdown qualification varies five named persisted boundaries: before
+Control shutdown, while shutdown awaits a held DB job, while an uncommitted
+transaction is held, after Control drains, and while owner close awaits the DB.
+The fixture child is really killed (SIGKILL on Unix; TerminateJobObject on Windows).
+It contains synthetic completed/running/pending tool facts, not a real provider
+or a model request. Reopen verifies original result identity/payload byte equality,
+rollback, interrupted running output, not_started pending output, integrity/FK
+checks, unchanged shell count and no repeated repair on a second reopen. This
+samples transaction/shutdown boundaries, not every CPU instruction or real power
+loss. Existing real-native-shell SIGKILL and native signal cases remain.
+macOS focused forced-boundary test passes all five positions. Windows is a
+separate required native gate, not inferred from the Unix result.
+
+Native disposable PTY coverage uses output predicates, not700ms color samples or
+500ms silence as success. Static-idle frame behavior is tested via the deterministic
+draw budget. The fixture continues draining its master while waiting for saved
+index retry status and runs its deliberately foreign slave writer concurrently
+with master draining, avoiding test-created PTY backpressure deadlocks. Escape
+uses an unambiguous CSI-u key frame, not a sleep to disambiguate a lone ESC.
+The revised real_tui_accepts_text_renders_proxy_response_and_exits_cleanly passes
+locally, as do8 attachment-provenance cases, the virtual blocking-worker case and
+841 library cases on the intermediate tree. Final all-target/rebased validation
+and native CI remain independent gates.
+
+Implementation observations retained separately from product diagnoses: the new
+heartbeat test initially held an immutable deadline borrow too long (fixed by a
+future scope); the crash expectation initially called a pending result interrupted
+(the correct retained fact is not_started); explicit virtual advancement must
+pass the timer wheel's tick while a real blocked worker prevents auto-advance.
+The first virtual file-worker experiments stalled and their owned shells were
+stopped, then explicit advances were corrected. PTY experiments exposed paused
+index polling that stopped draining the terminal and a blocking foreign-writer
+call; these were fixture coordination failures, not evidence of a product deadline
+regression. Clippy rejected duplicate includes of the connection-count helper;
+it is now loaded once per integration harness. No test timeout suppression,
+automatic retry, reduced assertion or production timer patch hides those failures.
+
+scripts/check-test-layout.py runs the watchdog policy on all native CI jobs and
+both standard check scripts. Its six Python tests cover short/long raw guards,
+production exclusion, nested/platform test modules, path overrides, aliases,
+comments/raw strings, manual deadlines, and exact allowance growth/staleness.
+The checker is lexical, not a full Rust macro expander. The committed reason list
+pins existing file/function/fingerprint counts; copying a deferred timeout adds
+an unapproved occurrence, and deleting one requires removing its stale allowance.
+At the current snapshot132 #41-owned occurrences are deliberately deferred and14
+intentional helper/virtual-clock/non-gating workload occurrences remain allowed.
+This is not a claim that #41's legacy short waits are already migrated. The
+initial #41 diff did not include src/frontend/control_tests.rs; a later read-only
+recheck did, so that file's #77 changes were withdrawn. Only src/lib.rs test-module
+wiring overlaps the latest #41 file set. No other worktree was edited.
+
+All database/process/provider fixtures use disposable data and local mocks. No
+paid API, user configuration, installed binary, live owner, schema/worker/queue or
+new package is used. Successful local checks do not replace the required two
+three-OS manual branch CI runs and the final main gate.

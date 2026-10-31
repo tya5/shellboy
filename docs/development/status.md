@@ -1471,3 +1471,25 @@ exits0:1835/0/32 (lib915/integration910/termination7/crash3), layout93/Python9/
 fmt/strict all-target Clippy. Both native parent-shell cleanup variants pass.
 This does not explain the earlier intermittent missing-signal diagnostic.
 Local main contains D2 only; push and main three-OS CI remain unperformed.
+
+## Shared test watchdogs (#77, 2026-10-31)
+
+Non-#41 fixture guards now use tests/support/watchdog.rs: one60-second budget,
+label/call-site diagnostics, synchronous barrier/PTY guards and explicit virtual
+clock tests. The classifier, product deadlines/graces, schema and dependencies
+are unchanged. File groups are committed independently. Short quiet windows use
+post-operation channel/connection counts or explicit blocked-future polls;
+attachment preparation now waits for existing Changed notifications. Native PTY
+capture waits for actual labels/colors, drains output while awaiting saved index
+state, and does not infer idle from a short no-output window.
+
+Five native force-kill milestones exercise saved-result retention, uncommitted
+rollback, interrupted/not-started repair and idempotent reopen. Unix SIGKILL was
+qualified locally; the Windows Job-object path awaits native branch CI.
+The standard layout gate now runs the lexical test deadline policy and its
+reasoned, fingerprint/count-bounded allowance list.132 existing occurrences in
+#41-owned files remain deferred, not fixed;14 deliberate shared-guard, injected
+clock or non-gating measurement occurrences are documented separately. #41 was
+notified; only minimal cfg(test) lib-module wiring overlaps its current files.
+Local targeted tests and Python mutation tests pass; final full/rebased checks,
+two complete native branch runs and main CI are independent pending gates.
