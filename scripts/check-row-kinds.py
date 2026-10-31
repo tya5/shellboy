@@ -99,7 +99,8 @@ def main():
                         static = scene("static-kinds", lambda s: "ROW_FIXTURE_USER" in s and
                                        "ROW_FIXTURE_SUMMARY" in s and "Fixture child" in s and
                                        "UNKNOWN_OBSERVATION" in s)
-                        assert all(mark in static for mark in ["›", "⬦", "⁂", "◌"])
+                        # The synthetic input is external CLI, not a TUI human receipt.
+                        assert all(mark in static for mark in ["⇥", "⬦", "⁂", "◌"])
                         assert "⁂ 通知" in static and "子の回答" in static
                         terminal.send("/switch visual-shell-metadata\r")
                         scene("shell-metadata", lambda s: all(f"METADATA_{kind}" in s for kind in
