@@ -5053,3 +5053,48 @@ below when complete. Physical glyph rendering/fonts, actual IME/OS clipboard and
 Windows ConPTY remain unverified. The user delegates CI and main integration to
 worker4; no workflow_dispatch is run by this worker. Do not merge before mark
 selection and approval.
+
+### Final #91 local handoff qualification (2026-10-31)
+
+The final Rust/scripts/tests source is a2c7b40ce2c34b059dc5d16e83dba1a0af484d55,
+rebased on main 5fc5cc0c6d67e8986d220e09f1cd7cbe60b207bc (#76/E/#74).
+Environment: macOS26.3.1(a)/25D771280a ARM64, debug, Python3.12.7/pyte0.8.2.
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 sh scripts/check.sh exits0: 1,956 Rust
+passed (1,008+929+12+7), 0 failed, 33 ignored; 94 integration-layout suites,
+watchdog policy, 20 Python tests, fmt and strict all-target Clippy pass.
+Binary/visual_fixture build, Python compile and git diff --check also pass.
+The final regression preserves inherited line foreground/italic styling as well
+as explicit span colors, emphasis and link identity while overriding background.
+
+Three real product builds select only External's candidate index, 0/1/2.
+Each runs 80/140 columns x dark/light/NO_COLOR: 18 accepted Unix PTY sessions.
+Every session validates band cell backgrounds, name/no-name and wrapped/code/link
+input, /copy, item copy and original-panel copy against stored canonical text.
+Those 54 decoded OSC52 copy checks exclude marks, names and padding. The source
+is restored exactly to A, rebuilt, and its six sessions independently repeated.
+The comparison manifest fingerprints the tracked Rust/scripts/examples/tests
+and Cargo inputs, records per-candidate binary hashes, and verifies exact source
+restoration. The final A binary hash is 1e3b3be21c2787a8025c347ecba6ea5054a2441815155e9a3861d035222e9e42.
+
+Earlier a0f7022/d0a92bf-based checks and captures are separate observations, not
+additional accepted final sessions. Safe-driver failures exposed both ambiguous
+Esc handling and a false-positive original-page predicate (main body/footer had
+the same words). The driver now awaits the actual panel title and sender fact;
+cleanup preserves primary failures and clears item focus before normal exit.
+An intermediate assertion expecting identical binary hashes across separate
+links also failed; no binary reproducibility guarantee or product regression was
+inferred. Final qualification binds each actual binary hash and checked source
+content, not equality between independently rebuilt binaries.
+
+Evidence: /tmp/issue-91-check-handoff.log, /tmp/issue-91-build-handoff.log,
+/tmp/issue-91-pty-A-handoff-restored/, /tmp/issue-91-mark-comparison-handoff/,
+/tmp/issue-91-script-grep-full.txt and /tmp/issue-91-clipboard-audit-after.txt.
+Screens and raw bytes remain synthetic temporary artifacts, not repository data.
+The new #94.1 record-delta helper is used on these records to verify no baseline
+lines were deleted. Functional/cell observations do not establish P1 performance,
+physical fonts/terminals, actual IME/OS clipboard or Windows ConPTY success.
+No resumed test writes the host clipboard or real user data/config; no installed
+binary, release/tag or paid product API is used. Knowledge search is separate
+from product verification. This worker does not dispatch CI, integrate main or
+close the issue; worker4 owns CI/integration after user mark selection/review.
+Keep the branch and worktree until confirmed main integration.
