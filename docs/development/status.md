@@ -1,5 +1,23 @@
 # Development status
 
+## G bounded latest Thread message facts
+
+Core raw-read/preparation refactor6280bca and display integrationc3608f0 share
+canonical input/answer semantics. Display scalars are capped before copying and
+the two payload walks plus sender JSON share64KiB. Unknown excerpts/senders
+carry exact limit witnesses while saved body availability/originals remain.
+Preparation runs after the readonly snapshot; CLI wrappers keep their unlimited
+source/scalar contract. Native domain8/0, actual inspection12/0 and strict
+all-target Clippy pass. The real F8 foreign-Thread fixture receives its source
+facts while another connection holds an immediate writer transaction. No
+additional schema, worker, queue or public API was introduced.
+
+This is not complete Thread/G9 qualification: last-compaction preparation and
+header/total query bounds remain, together with the remaining G5 retained-page
+inventory, P3/P6/native-wheel and eventual review/3OS/main admission. The earlier
+full-standard/native-form evidence belongs to its recorded source. No push,
+installation, release or user-data change.
+
 ## G integration with main805efc9: local standard checkpoint
 
 Merged main's #87 canonical code-copy/contextual help and #102 saved boundary

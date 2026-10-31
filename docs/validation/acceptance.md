@@ -1,5 +1,34 @@
 # Validation record
 
+## G latest Thread messages: bounded raw/preparation checkpointc3608f0
+
+Native macOS/Rust1.99.1, one shared root target/job, incremental disabled/two
+test threads, announced in #41: `cargo test --locked --lib thread_observation::latest::`
+passes8/0; `cargo test --locked --lib frontend::inspection_tests::` passes12/0;
+strict `cargo clippy --locked --all-targets -- -D warnings` succeeds. The
+domain refactor and display integration are separate commits6280bca/c3608f0.
+No full-standard/current-source3OS/native-form/P3/P6 claim follows these checks.
+
+Assertions retain canonical natural text, latest ordering, sender whitelist and
+512-character excerpts; raw facts prepare after closing the DB. Actual statement
+counts are4 for complete input+answer,3 when a source exceeds the shared64KiB
+allowance,1 for a rejected saved timestamp and0 for invalid display scope.
+An opaque2MiB answer never enters its excerpt query; its body remains available,
+display excerpt is unknown and the canonical CLI still returns its retained
+text. Individually legal30KiB/20KiB/30KiB sources exercise the aggregate budget;
+an oversized sender does not consume the remaining budget or hide a legal input
+excerpt. A1MiB timestamp rejects display copying without changing the CLI value.
+Existing bundled-SQLite plan assertions still require exact Thread/node index
+seeks without history scan/temp sort.
+
+The actual UI/form/frontend fixture opens a foreign Thread while a separate
+connection holds BEGIN IMMEDIATE. It receives the exact answer ID, true saved
+availability and limited-field witness, without changing the viewing Thread;
+after releasing the writer the canonical excerpt is still intact. This proves
+the readonly display route and retained source, not physical-terminal/Windows
+performance. Last-compaction/header work and the remaining G5/G9/P3/P6 gates
+remain open; there are no provider calls or user-data changes.
+
 ## G plus main805efc9: full local standard at Rust source51772d2
 
 Native macOS/Rust1.99.1, `sh scripts/check.sh`:2276 passed/0 failed/35 ignored.

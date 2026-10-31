@@ -726,6 +726,14 @@ units below; names describe scope, not a new engine/framework.
 
 ### G remaining saved-read coverage inventory (not implementation evidence)
 
+Latest Thread auxiliary checkpointc3608f0: input/answer raw reads and canonical
+preparation are shared; display scalar/source guards and off-snapshot decode are
+implemented. Domain8/0, actual frontend inspection12/0 and strict all-target
+Clippy pass, including foreign-Thread F8 reads during an immediate writer lock.
+Body availability/originals remain distinct from unknown limited excerpts.
+Last-compaction/header bounds and the other rows below remain open; this is not
+a complete Thread projection, G9 cost proof or final G source qualification.
+
 Latest integration checkpoint: Rust source51772d2 merges main805efc9 (#87/#102)
 and passes full native standard2276/0/35, Python70/layout95/watchdog/fmt/strict
 all-target Clippy. Canonical Run wait facts and chooser geometry/wheel/copy
@@ -761,7 +769,7 @@ Read-only initial routes and their native tests remain separately qualified.
 
 | Route/result | Mutable facts and retained evidence | Remaining connection/qualification |
 | --- | --- | --- |
-| ThreadGet | Exact target settings, lifecycle, selected path, last input/answer/compaction; retain captured form target | Share current-view header in the same readonly snapshot; retain canonical additional fields and independently observed usage/context. |
+| ThreadGet | Exact target settings, lifecycle, selected path, last input/answer/compaction; retain captured form target | Shared header/independent usage are connected. Input/answer now use canonical shared raw/preparation with bounded source/scalar copies atc3608f0; actual held-writer frontend route passes. Last-compaction preparation and header/query/source limits remain to qualify. |
 | RunGet / TurnGet | Lifecycle, ownership, recovery, saved usage, owned work | Reuse extracted scalar/JSON guards; exact Thread dependencies, independent3s usage, late/stop/retry tests. |
 | ShellGet / MessageGet / RevisitGet | Native execution/delivery/Revisit state; immutable command or accepted message source | Reuse extracted readers; committed lifecycle/delivery/owner-output invalidation without retargeting the viewer. |
 | OperationGet | Immutable acceptance/expiry versus current downstream delivery/compaction | Subscribe to receipt/downstream changes and expiry; never replay an operation while observing it. |
