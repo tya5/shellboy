@@ -886,7 +886,17 @@ impl Details {
     }
     pub fn key(&mut self, key: KeyEvent, view: &ThreadView, next: &mut u64) -> Outcome {
         self.sync_node(view);
-        match key.code {
+        let code = match key.code {
+            KeyCode::Char(letter)
+                if !key.modifiers.intersects(
+                    crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::ALT,
+                ) =>
+            {
+                KeyCode::Char(letter.to_ascii_lowercase())
+            }
+            code => code,
+        };
+        match code {
             KeyCode::Esc => return Outcome::Close,
             KeyCode::Char('r') if !matches!(self.mode, Mode::Original) => {
                 self.invalidate_sources();
@@ -1984,6 +1994,31 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn readonly_detail_original_and_copy_accept_shifted_letters() {
+        let ui = state();
+        for (letter, modifiers) in [
+            ('o', crossterm::event::KeyModifiers::NONE),
+            ('O', crossterm::event::KeyModifiers::SHIFT),
+        ] {
+            let mut details = Details::new(ui.view(), false);
+            assert!(matches!(
+                details.key(KeyEvent::new(KeyCode::Char(letter), modifiers), ui.view(), &mut 0),
+                Outcome::Action(action) if matches!(&*action, UiAction::LoadOriginal { .. })
+            ));
+        }
+        for (letter, modifiers) in [
+            ('c', crossterm::event::KeyModifiers::NONE),
+            ('C', crossterm::event::KeyModifiers::SHIFT),
+        ] {
+            let mut details = Details::new(ui.view(), false);
+            assert!(matches!(
+                details.key(KeyEvent::new(KeyCode::Char(letter), modifiers), ui.view(), &mut 0),
+                Outcome::Action(action) if matches!(&*action, UiAction::CopyText { .. })
+            ));
+        }
+    }
+
     #[test]
     fn long_field_preview_leaves_neighbors_visible_and_copy_keeps_the_complete_value() {
         let mut ui = state();

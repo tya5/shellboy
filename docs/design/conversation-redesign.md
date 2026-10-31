@@ -1042,3 +1042,47 @@ At the minimum eight-column viewport the inset leaves six content cells; the
 selection banner uses the compact "固定" label rather than disappearing or
 painting over the margin. Wider headers keep the existing full freeze label,
 time and resume guidance according to their available content width.
+
+## Contextual keys and canonical copy (#87)
+
+The #87 UI work may precede F/G (the user's 2026-10-31 decision). G builds on
+this work; no Core state, event/protocol or persistent format changes are needed.
+A small UI operation/key vocabulary owns key labels and descriptions shared by
+help, readonly detail controls and contextual bottom-row hints. Readonly shortcut
+letters accept either case; editable form/query text retains its actual case.
+Hints contain 2-4 available actions for the actual owner/focus, use configured
+send/newline bindings, and drop low-priority/rightmost actions with F1 as the
+narrow fallback. Notices/recovery retain priority. Hint text is cached by owner,
+focus/state, width and bindings, not rebuilt on elapsed-time repaint. Popup hints
+must describe their real modes, including available original-page navigation.
+Activity/elapsed/recovery facts belong to #85; only the key-hint surface changes.
+
+Focused history c/C copies the canonical whole answer; o/O opens its original.
+Code choices use b/B, with numbered copy labels and a bounded transient chooser;
+choosing a block uses canonical Markdown parser extents, never displayed/folded
+text or language labels. Bare /copy prefers the single code block, opens choices
+for several blocks, and copies the body if there is no block. /copy all explicitly
+copies the full body; explicit /copy NODE [zero-based-index] remains available.
+Display block numbers are one-based. A chosen answer precedes the viewport anchor,
+then the last loaded answer when no focus exists. Source identity is exact and
+late choice responses must not replace another thread/focus's active operation.
+
+Copy summaries include Unicode character counts and block number or original
+page/continuation facts. OSC52 reports only that a terminal request was sent, not
+that the host clipboard accepted it. The existing body/page copy limit remains
+64KiB; larger bodies offer original-page navigation rather than partial success.
+Explicit complete-code retrieval may paginate within a finite UI copy budget;
+unavailable/tombstoned/incomplete or over-budget source is an actionable error,
+never a successful partial block. All source reads/Markdown work remain off the
+main UI OS thread in existing workers; no new worker/queue/poller is introduced.
+Code-copy decoration/hit targets are display-only and cannot enter canonical text,
+selection copies, source offsets or model input.
+
+Image guidance advertises /image and /attach without probing the host clipboard.
+An empty paste is not proof of an image; guidance may state available operations,
+not infer clipboard contents. Actual image acquisition stays explicit. Help and
+slash descriptions teach copy/attachment paths near the start; failures suggest
+/attach. Synthetic PTYs use fixed OSC52 output captured by pipes and synthetic
+clipboard adapters/files only, never real OS clipboard reads or writes. Native
+80/wide, dark/light/NO_COLOR/vt100 and changed send-key scenes must demonstrate
+bottom-row hints; P1 interaction performance is compared separately from replay.
