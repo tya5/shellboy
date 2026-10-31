@@ -5546,3 +5546,28 @@ Exact-source standard/doc-role/bundled-guide checks and CI integration are
 reported in #5. These local startup fixtures do not qualify Windows nested Jobs,
 parent-owned shell termination, normal shutdown, all crash boundaries or a real
 provider. Later stages must establish those separately before declaring #5 done.
+
+### Stage 2 restart and readiness-failure fixture correction
+
+After the 20:34 owner restart, worktree/branch state was inspected before any
+rerun. Only the expected startup-row specification and process fixture were
+uncommitted. The completed #95 serialized check/push had saved exit 0 before
+shutdown; interrupted work is not counted as a passing run. Stage 2 is rebased
+onto main containing #91/#93 and approved #96, without the private stage 3 draft.
+
+The initial failed-ready fixture timed out because Tokio 1.54.1 Command::output
+unconditionally replaces stdout/stderr with pipes (process/mod.rs:1065 onward).
+That bypassed its configured read-only stdout handle, so serve correctly stayed
+alive after successful readiness. The fixture now uses spawn/wait_with_output
+and explicitly pipes stderr, preserving the read-only handle. It retains the
+shared 60-second watchdog and exact output/cleanup assertions; production
+startup, shutdown and timeout behavior are not changed to accommodate the test.
+
+The first rerun after restart also identified an old non-serve normal executable
+in the previously shared target: its actual --help lacked serve, and all four
+new subprocess tests rejected its stdout. That run is not serve qualification.
+An explicit local bin rebuild and serve-help check precede subsequent process
+checks; prior shared-target artifact identity is not inferred from Git HEAD.
+The actual corrected process results, standard check, record delta and exact
+submitted SHA are recorded in issue #5. Windows/Linux native execution, nested
+Jobs, parent termination and shutdown/crash boundaries remain later gates.

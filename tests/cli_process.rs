@@ -541,6 +541,8 @@ async fn headless_ready_accepts_cli_after_stdin_eof_and_rejects_duplicate_owner(
             .env("SHELLBOY_INSTANCE_ID", "parent-instance")
             .env("SHELLBOY_THREAD_ID", "parent-thread")
             .env("SHELLBOY_RUN_ID", "parent-run")
+            .env("SHELLBOY_TURN_ID", "parent-turn")
+            .env("SHELLBOY_EXECUTION_ID", "parent-execution")
             .env("SHELLBOY_ORIGIN_TOKEN", "parent-token")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
