@@ -2168,3 +2168,23 @@ initial UI boundary; bottom-line presentation belongs to #85 to avoid #41 F/G.
   actual same-SHA main-push reuse. Mock API fixtures are not live verification.
 - Revisit only with measured build-sharing savings and separately fixed tests;
   do not reintroduce split execution as part of this reuse-only change.
+
+## #95 ordering boundaries (2026-10-31, review required)
+
+The Windows split failure recorded three saved attempts, not three proven HTTP
+sends; its assertion omitted per-attempt phase/status and actual JSONL. Do not
+infer the original CI timeline or duplicate provider charges from that count.
+A separate deterministic counterexample is real: a ready permanent header loses
+to an expired header timer, fabricating a status-free retryable failure. Preserve
+ready response facts after cancellation, before the local header deadline. Keep
+pending-header timeout, unknown-transport retry policy and strict total deadlines.
+
+For E, the prior simultaneous-deadline guard misses pending selected changes
+while an older read has no refresh deadline. Reserve the existing next joint read
+and wait for an older browser ticket before selected admission; otherwise its
+pending IDs can be consumed independently. This uses existing dirty/inflight
+state and notification wakeups, no new queue, worker, epoch or timer. Codex was
+notified in #41 comment 6541664736. Exact CI ticket traces are unavailable; source
+counterexamples and red/green virtual-clock tests, not rerun success, justify the
+changes. Require user Core review and delegated Windows split repeats before
+claiming qualification. No #5 implementation or CI-sharding change is included.
