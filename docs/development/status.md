@@ -1903,3 +1903,15 @@ fixture tests and3 shared-helper tests. This includes2 new state tests. The new
 retention fixture now observes the visible row before opening it, matching the
 actual retention contract; the initial missing-observation failure is retained.
 Watch frontend/overlay wiring and native UI proof remain pending.
+
+
+## F bounded slow-lineage diagnostics
+
+The existing bounded diagnostics writer accepts a single numeric/boolean
+LineageQuerySlow aggregate only at >=50ms, with at most2 roots/514 discovered
+witnesses and saturating elapsed microseconds. Fast reads log nothing, and
+ordinary events omit the optional payload. No content, per-descendant event,
+new queue or worker is added. Native macOS `cargo test --locked --lib diagnostics::`
+passes6/0/0 (1021 filtered), including existing history transition-only logging,
+shutdown, usage and repair diagnostics. The new async test uses the common60s
+watchdog. No actual slow workload or P4 timing gate is claimed by this test.

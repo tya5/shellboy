@@ -27,6 +27,7 @@ pub enum DiagnosticEvent {
     StorageLimit,
     IndexPaused,
     UsageTotalsSlow,
+    LineageQuerySlow,
     UiHistory,
 }
 
@@ -87,6 +88,16 @@ fn slow_usage_trace(
         elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
     })
 }
+
+/// Aggregate descendant-query observation, with no descendant or content strings.
+#[derive(Debug, Clone, Copy, Serialize)]
+struct LineageSlowTrace {
+    elapsed_us: u64,
+    roots: u8,
+    discovered: u16,
+    truncated: bool,
+}
+const LINEAGE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(50);
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct DiagnosticIds {
@@ -209,6 +220,8 @@ struct Entry {
     usage_slow: Option<UsageSlowTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ui_history: Option<UiHistoryTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lineage_slow: Option<LineageSlowTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -286,6 +299,7 @@ struct Record {
     tool_repair: Option<ToolRepairFailure>,
     usage_slow: Option<UsageSlowTrace>,
     ui_history: Option<UiHistoryTrace>,
+    lineage_slow: Option<LineageSlowTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -324,6 +338,7 @@ impl Diagnostics {
                     tool_repair,
                     usage_slow,
                     ui_history,
+                    lineage_slow,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -339,6 +354,7 @@ impl Diagnostics {
                         tool_repair,
                         usage_slow,
                         ui_history,
+                        lineage_slow,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -508,6 +524,7 @@ impl Diagnostics {
             tool_repair: None,
             usage_slow: None,
             ui_history: Some(trace),
+            lineage_slow: None,
         });
     }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
@@ -526,6 +543,7 @@ impl Diagnostics {
             tool_repair: Some(failure),
             usage_slow: None,
             ui_history: None,
+            lineage_slow: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -548,6 +566,37 @@ impl Diagnostics {
             tool_repair: None,
             usage_slow: Some(usage_slow),
             ui_history: None,
+            lineage_slow: None,
+        });
+    }
+    /// One aggregate observation after the query; fast queries emit nothing at any level.
+    pub(crate) fn record_lineage_query(
+        &self,
+        ids: DiagnosticIds,
+        elapsed: std::time::Duration,
+        roots: usize,
+        discovered: usize,
+        truncated: bool,
+    ) {
+        if elapsed < LINEAGE_SLOW_THRESHOLD {
+            return;
+        }
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::LineageQuerySlow,
+            ids,
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: Some(LineageSlowTrace {
+                elapsed_us: u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                roots: roots.min(2) as u8,
+                discovered: discovered.min(514) as u16,
+                truncated,
+            }),
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -625,6 +674,7 @@ impl Diagnostics {
             tool_repair: None,
             usage_slow: None,
             ui_history: None,
+            lineage_slow: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -638,6 +688,7 @@ impl Diagnostics {
             tool_repair,
             usage_slow,
             ui_history,
+            lineage_slow,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -667,6 +718,7 @@ impl Diagnostics {
                     tool_repair,
                     usage_slow,
                     ui_history,
+                    lineage_slow,
                 })
                 .is_err()
         }) {
@@ -1020,5 +1072,91 @@ mod usage_slow_tests {
             rows.iter()
                 .all(|row| row["ids"].as_object().unwrap().is_empty())
         );
+    }
+}
+
+#[cfg(test)]
+mod lineage_slow_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn only_slow_aggregate_queries_reach_the_existing_writer_with_fixed_bounded_fields() {
+        crate::test_watchdog::watchdog("bounded slow lineage diagnostics and writer shutdown", async {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        for elapsed in [
+            std::time::Duration::ZERO,
+            std::time::Duration::from_millis(49),
+            std::time::Duration::from_micros(49_999),
+        ] {
+            diagnostics.record_lineage_query(
+                DiagnosticIds::default(),
+                elapsed,
+                usize::MAX,
+                usize::MAX,
+                true,
+            );
+        }
+        diagnostics.record_lineage_query(
+            DiagnosticIds {
+                thread_id: Some("00000000-0000-4000-8000-000000000001".into()),
+                ..Default::default()
+            },
+            std::time::Duration::from_millis(50),
+            1,
+            257,
+            false,
+        );
+        diagnostics.record_lineage_query(
+            DiagnosticIds::default(),
+            std::time::Duration::MAX,
+            usize::MAX,
+            usize::MAX,
+            true,
+        );
+        diagnostics.record(DiagnosticEvent::Startup, DiagnosticIds::default());
+        diagnostics.shutdown().await;
+        let content = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let rows = content
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 3, "all sub-threshold calls must emit no event");
+        assert_eq!(rows[0]["event"], "lineage_query_slow");
+        assert_eq!(
+            rows[0]["lineage_slow"],
+            serde_json::json!({"elapsed_us":50000,"roots":1,"discovered":257,"truncated":false})
+        );
+        assert_eq!(
+            rows[1]["lineage_slow"],
+            serde_json::json!({"elapsed_us":u64::MAX,"roots":2,"discovered":514,"truncated":true})
+        );
+        for row in &rows[..2] {
+            let fields = row.as_object().unwrap();
+            assert_eq!(
+                fields
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>(),
+                std::collections::BTreeSet::from(["at", "event", "ids", "dropped", "lineage_slow"])
+            );
+            assert!(
+                row["lineage_slow"]
+                    .as_object()
+                    .unwrap()
+                    .values()
+                    .all(|value| value.is_number() || value.is_boolean())
+            );
+        }
+        assert_eq!(
+            rows[0]["ids"]["thread_id"],
+            "00000000-0000-4000-8000-000000000001"
+        );
+        assert!(
+            rows[2].get("lineage_slow").is_none(),
+            "existing events must not gain null payload fields"
+        );
+        assert!(!diagnostics.has_failed());
+        }).await.expect("lineage diagnostic watchdog");
     }
 }

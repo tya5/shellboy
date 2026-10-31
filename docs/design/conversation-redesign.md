@@ -689,3 +689,22 @@ a claim about total process or Watch memory. Reads remain exact-ID batches
 (max128); JSON/text projection runs on the existing finite presentation worker
 after the caller-owned readonly transaction ends. Shared summaries/titles may
 only be reused from that same transaction. No new worker/queue/table is added.
+
+
+### F Watch discovery-page ownership
+
+Canonical Watch discovery is an explicit paged read on the existing finite
+presentation pool and current-view progress admission semaphore. It opens a
+short readonly WAL transaction; release it before title/JSON/text projection.
+Assign the observation sequence before asynchronous admission, then retain
+generation/cursor/root fences so a late page cannot overwrite newer patches.
+Check cancellation before admission/open and after collection. Discovery limits
+retained candidate metadata to4096 and title witnesses to128, with existing
+per-page title-source budgets; these are retained-result bounds, not a claim
+that priority sorting touches at most4096 SQLite rows. Ordinary Changed patches
+remain exact-ID reads and do not rediscover the whole candidate page.
+
+Lineage query diagnostics add one fixed numeric/boolean aggregate only when
+the measured read takes at least50ms, through the existing bounded diagnostic
+writer. No titles, query bodies or per-descendant records are logged; no new
+queue or worker is added. This event is observational, not a lifecycle event.
