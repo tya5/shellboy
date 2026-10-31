@@ -1,7 +1,6 @@
 //! Real separate CLI -> owner commit/Changed -> frontend -> drawn current view.
 //! Every config, credential/endpoint and DB is temporary; HTTP is loopback-only.
-#[path = "support/watchdog.rs"]
-mod test_watchdog;
+use crate::test_watchdog::watchdog;
 use ratatui::{Terminal, backend::TestBackend};
 use serde_json::{Value, json};
 use shellboy::{
@@ -14,7 +13,6 @@ use shellboy::{
     ui::{UiAction, UiState, UiUpdate},
 };
 use std::{path::PathBuf, sync::Arc, time::Instant};
-use test_watchdog::watchdog;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{broadcast, mpsc, oneshot},
