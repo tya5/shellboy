@@ -142,6 +142,37 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
     })
 }
 
+type RawCurrentAndViews = (
+    Vec<(String, ReceiptStatus)>,
+    Result<RawVisible, StorageError>,
+    Option<Result<view_read::RawBatch, StorageError>>,
+);
+
+// Production coupled collector: all consumers use this caller's connection and
+// read sequence; the same-Thread inspector borrows the already-read header Arc.
+fn read_current_and_views_tx(
+    db: &Connection,
+    thread: &str,
+    ids: &[String],
+    tool_scope: Option<ToolObservation>,
+    waits: Option<&[(String, String)]>,
+    sequence: u64,
+    views: &view_read::Tickets,
+) -> Result<RawCurrentAndViews, StorageError> {
+    let receipts = receipt_states_tx(db, ids)?;
+    let visible = read_visible_tx(db, thread, tool_scope, waits, sequence);
+    let facts = if views.is_empty() {
+        None
+    } else {
+        Some(view_read::read_shared_tx(
+            db,
+            views,
+            visible.as_ref().ok().map(|raw| &raw.details),
+        ))
+    };
+    Ok((receipts, visible, facts))
+}
+
 pub(super) async fn run(
     query: Query,
     control: Arc<Control>,
@@ -185,12 +216,8 @@ pub(super) async fn run(
         let view_scopes=super::view_read::prepare_requests(&views).await;
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
-            let receipts=receipt_states_tx(db,&ids)?;
-            // Keep typed per-surface errors until the display mapper can distinguish
-            // retryable WAL contention from a true storage failure.
-            let visible=read_visible_tx(db,&target,tool_scope,waits.as_deref(),sequence);
-            let facts=if view_scopes.is_empty() {None}else{Some(super::view_read::read_shared_tx(db,&view_scopes,visible.as_ref().ok().map(|raw|&raw.details)))};
-            Ok((receipts,visible,facts))
+            // Keep typed per-surface failures; do not reinterpret WAL contention.
+            read_current_and_views_tx(db,&target,&ids,tool_scope,waits.as_deref(),sequence,&view_scopes)
         }).await;
         drop(_progress_permit);
         let (receipts,visible,browser_result,sequence)=match checked_storage(&control,read).await {
@@ -645,6 +672,158 @@ mod tests {
         );
         assert_eq!(after.info.pending.total, 0);
         assert!(after_sequence > before_sequence);
+        owner.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn p3_coupled_snapshot_reuses_header_sequence_and_cancelled_consumers_add_no_sql() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        owner.db.call(|db| {
+            db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','coupled title','/','','p','m','now');
+                INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','t','child title','/','','p','m','now');
+                INSERT INTO run(id,thread_id,state,created_at)VALUES('child-run','child','live','now');")?;
+            Ok(())
+        }).await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let mut browser = browser::Browser::default();
+        browser
+            .observe(7, String::new(), Some("t".into()), true)
+            .unwrap();
+        let mut descendants = lineage_observer::Observer::default();
+        descendants.observe(9, vec!["t".into()]).unwrap();
+        let mut inspection = inspection_state::Observation::default();
+        let target = crate::ui::InspectionTarget::Thread("t".into());
+        let context = crate::ui::ManagementContext {
+            epoch: 11,
+            owner_draft: "synthetic".into(),
+            owner_thread: Some("t".into()),
+        };
+        inspection.install(11, context.clone(), target.clone(), None);
+        inspection.observe(&context, &target, true);
+        let at = tokio::time::Instant::now();
+        let tickets = view_read::Tickets {
+            browser: Some(browser.take(at).unwrap()),
+            descendants: Some(descendants.take(at).unwrap()),
+            inspection: Some(inspection.take_metadata(at).unwrap()),
+            inspection_services: Some(inspection_read::Services::new(&control)),
+            ..Default::default()
+        };
+        let collect = tickets.clone();
+        let ((visible, facts, current_only_count), sequence) = snapshot::read_sequenced(
+            owner.db.path().to_path_buf(),
+            CancellationToken::new(),
+            move |db, sequence| {
+                assert!(!db.is_autocommit());
+                assert_eq!(
+                    db.pragma_query_value(None, "query_only", |row| row.get::<_, i64>(0))?,
+                    1
+                );
+                let trace = super::super::sql_trace::Statements::new(db);
+                let _ = read_current_and_views_tx(
+                    db,
+                    "t",
+                    &[],
+                    None,
+                    Some(&[]),
+                    sequence,
+                    &view_read::Tickets::default(),
+                )?;
+                let current_only_count = trace.count();
+                let mut without_inspector = collect.clone();
+                without_inspector.inspection = None;
+                let _ = read_current_and_views_tx(
+                    db,
+                    "t",
+                    &[],
+                    None,
+                    Some(&[]),
+                    sequence,
+                    &without_inspector,
+                )?;
+                let before_full = trace.count();
+                let browser_count = before_full - current_only_count;
+                let (_, visible, facts) =
+                    read_current_and_views_tx(db, "t", &[], None, Some(&[]), sequence, &collect)?;
+                let full_count = trace.count() - before_full;
+                let before_standalone = trace.count();
+                let _ = inspection_read::read_scoped_tx(
+                    db,
+                    &target,
+                    None,
+                    collect.inspection_services.as_ref(),
+                    None,
+                )?;
+                let standalone_inspector_count = trace.count() - before_standalone;
+                assert_eq!(
+                    standalone_inspector_count, 7,
+                    "one header + four compaction + two latest-message queries"
+                );
+                assert_eq!(
+                    full_count,
+                    browser_count + standalone_inspector_count - 1,
+                    "the coupled inspector must not query the explicit-title header again"
+                );
+                assert!(
+                    full_count <= 64,
+                    "fixed four-consumer fixture statement bound: {full_count}"
+                );
+                Ok((
+                    visible?,
+                    facts.expect("visible tickets").expect("shared collection"),
+                    current_only_count,
+                ))
+            },
+        )
+        .await
+        .unwrap();
+        let frame = project(visible, 80).unwrap();
+        assert_eq!(frame.details.title, "coupled title");
+        assert_eq!(frame.info.read_revision, sequence);
+        let prepared = view_read::prepare(facts, sequence, &tickets);
+        let (updates, received) = std::sync::mpsc::sync_channel(16);
+        view_read::complete(
+            control.diagnostics(),
+            &mut browser,
+            &mut descendants,
+            &mut inspection,
+            &updates,
+            tickets.clone(),
+            Ok((prepared, sequence)),
+        )
+        .await;
+        let presentation = inspection.take_presentation().unwrap();
+        assert_eq!(presentation.metadata.sequence, sequence);
+        assert_eq!(presentation.metadata.value["title"], "coupled title");
+        assert!(received.try_iter().any(|update|matches!(update,UiUpdate::BrowserPatch{patch,..} if patch.read_sequence==sequence)));
+        let descendant = descendants.snapshots().next().unwrap();
+        assert_eq!(descendant.root, "t");
+        assert_eq!(descendant.threads, ["child"]);
+        assert_eq!(descendant.active, 1);
+        tickets.browser.as_ref().unwrap().stop.cancel();
+        tickets.descendants.as_ref().unwrap().stop.cancel();
+        tickets.inspection.as_ref().unwrap().stop.cancel();
+        let (_, later_sequence) = snapshot::read_sequenced(
+            owner.db.path().to_path_buf(),
+            CancellationToken::new(),
+            move |db, sequence| {
+                let trace = super::super::sql_trace::Statements::new(db);
+                let (_, visible, facts) =
+                    read_current_and_views_tx(db, "t", &[], None, Some(&[]), sequence, &tickets)?;
+                assert!(visible.is_ok() && facts.is_some());
+                assert_eq!(
+                    trace.count(),
+                    current_only_count,
+                    "cancelled browser/count/inspector consumers add zero SQL"
+                );
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        assert!(later_sequence > sequence);
+        drop(control);
         owner.shutdown().await.unwrap();
     }
 }
