@@ -4123,3 +4123,13 @@ There are no index-preview implementation/test changes in this task; the cause i
 unproven. Preserve the failure and any same-SHA failed-job rerun as separate facts
 in #80. A follow-up also qualifies CLI help's default saved-state description with
 its live owner-memory exception. No test guard, assertion or retry policy is relaxed.
+
+The same-SHA failed-job rerun of first candidate dd416b7 succeeded (41168775635,
+attempt 2). After #82 integration/help correction, candidate 3e43896's run
+41170243551 attempt 1 passed Windows/Linux but macOS failed the existing parent-PTY
+termination test's required scope=signal diagnostic row. Its unchanged failed-job
+rerun also succeeded (attempt 2); no timing/assertion/runtime relaxation is made.
+The attempted main push after qualification was safely rejected non-fast-forward
+when other work landed during the pre-push standard check. Rebase retains the
+complete upstream records and requalifies the combined SHA; run links/results
+remain in #80 rather than changing qualified source recursively.
