@@ -672,17 +672,15 @@ async fn headless_failed_ready_write_closes_endpoint_and_releases_owner() {
         let config = root.path().join("config.toml");
         std::fs::write(&config, "").unwrap();
         let data = root.path().join("child");
-        let output_path = root.path().join("read-only-stdout.jsonl");
-        std::fs::write(&output_path, "").unwrap();
-        // A read-only inherited handle deterministically rejects the first write.
+        // Invalid stdout handles can silently discard writes; use a real broken pipe.
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .args(["serve", "--data-dir"])
             .arg(&data)
             .arg("--config")
             .arg(config)
-            .stdout(std::process::Stdio::from(
-                std::fs::File::open(&output_path).unwrap(),
-            ))
+            .stdout(std::process::Stdio::from(writer))
             .kill_on_drop(true)
             .stderr(std::process::Stdio::piped())
             .spawn()
@@ -692,7 +690,6 @@ async fn headless_failed_ready_write_closes_endpoint_and_releases_owner() {
             .unwrap();
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
-        assert!(std::fs::read(&output_path).unwrap().is_empty());
         let text = String::from_utf8(output.stderr).unwrap();
         assert_eq!(text.lines().count(), 1, "{text}");
         let error: Value = serde_json::from_str(&text).unwrap();

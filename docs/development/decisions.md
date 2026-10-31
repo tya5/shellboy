@@ -2357,3 +2357,12 @@ No exec-in-place transfer, inherited live shell handover, reconnect protocol or
 late TUI attach is introduced. #82 cleanup ownership remains unchanged. Stage 2
 only provides explicit terminal-free startup and existing CLI access; stage 3
 will separately define shutdown acceptance/reply ordering before implementation.
+
+### #5 stdout failure observation correction
+
+The read-only handle fixture is superseded: Rust stdout may discard EBADF as a
+successful write. Use the standard portable pipe writer with its reader already
+closed to obtain a real BrokenPipe, without a production injection hook or
+scheduling sleep. Verify cleanup at the real failed-write boundary, retaining
+the existing shared watchdog and assertions. This changes the fixture, not
+startup/shutdown behavior, and does not broaden stage 2 into handover/reconnect.

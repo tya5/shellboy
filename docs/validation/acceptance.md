@@ -5571,3 +5571,18 @@ checks; prior shared-target artifact identity is not inferred from Git HEAD.
 The actual corrected process results, standard check, record delta and exact
 submitted SHA are recorded in issue #5. Windows/Linux native execution, nested
 Jobs, parent termination and shutdown/crash boundaries remain later gates.
+
+### Correction to the inherited stdout fault fixture
+
+The fresh serve binary passes missing/invalid startup, non-UTF-8 cleanup and
+EOF/duplicate-owner tests. The read-only stdout fixture still waited because
+Rust stdout can treat EBADF as a silent sink on Unix: a standalone native probe
+with the exact writeln/flush pattern returned Ok for read-only stdout, but
+BrokenPipe for a writer whose reader was dropped. Thus read-only stdout was not
+proof of a failed ready write; do not classify that timeout as a product cleanup
+deadlock. Preserve the failed attempt and replace the fixture with portable
+std::io::pipe, dropping its reader before spawn. Keep explicit spawn plus piped
+stderr (Tokio output would replace the configured writer), the shared watchdog,
+and exact error/endpoint/lock/database integrity assertions. Production behavior
+is unchanged. The final fresh-source process and standard results are recorded
+in issue #5; earlier read-only fixture descriptions are superseded by this note.
