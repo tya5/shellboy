@@ -49,7 +49,10 @@ mod tests {
         let args: crate::protocol::ShellToolArgs =
             serde_json::from_value(json!({"command":"true"})).unwrap();
         assert!(args.description.is_none());
-        for raw in [json!({"command":"true"}), json!({"command":"true","description":""})] {
+        for raw in [
+            json!({"command":"true"}),
+            json!({"command":"true","description":""}),
+        ] {
             let args: crate::protocol::ShellToolArgs = serde_json::from_value(raw).unwrap();
             assert_eq!(args.command, "true");
             assert!(label(args.description.as_deref()).is_none());
@@ -73,12 +76,22 @@ mod request_tests {
             request["tools"][0]["parameters"]["properties"]["description"]["maxLength"],
             80
         );
-        assert_eq!(request["tools"][0]["parameters"]["required"], serde_json::json!(["command", "description"]));
+        assert_eq!(
+            request["tools"][0]["parameters"]["required"],
+            serde_json::json!(["command", "description"])
+        );
         let mut required_only = request.clone();
         required_only["tools"][0]["parameters"]["required"] = serde_json::json!(["command"]);
-        assert_eq!(serde_json::to_vec(&request).unwrap().len() - serde_json::to_vec(&required_only).unwrap().len(), 14);
+        assert_eq!(
+            serde_json::to_vec(&request).unwrap().len()
+                - serde_json::to_vec(&required_only).unwrap().len(),
+            14
+        );
         crate::model::configure_shell_description(&mut request, false);
-        assert_eq!(request["tools"][0]["parameters"]["required"], serde_json::json!(["command"]));
+        assert_eq!(
+            request["tools"][0]["parameters"]["required"],
+            serde_json::json!(["command"])
+        );
         assert!(
             request["tools"][0]["parameters"]["properties"]
                 .get("description")
