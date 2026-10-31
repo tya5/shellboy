@@ -1664,3 +1664,20 @@ synthetic128-node/50-tool/50-Thread data with asserted live Run/completed Turn.
 It will compare direct refresh+explicit List read with E's paired read and count
 writer closure time separately from readonly connection lifetime. No P3 result
 is inferred from its compilation or from the parallel CI windows.
+
+## E repaired-source branch checks green on3OS (2026-10-31)
+
+Ordinary jobs in41166258538 pass at7c6f4d6: Linux1905/0/31,
+macOS1904/0/32, Windows1780/0/24. Artifact source hashes and the actual
+16-mutation paired-snapshot success line were verified on all3. CBC's original
+Linux/Windows failures stay recorded; the Linux raw-save fixture now also passes.
+Formal Unix P2/P5 remain in their acknowledged observation windows. Report values
+separately for producer3 versus original producer1; no cross-run CPU attribution.
+
+P3 preparation is moving to normal-release subject binaries so cfg(test) helper
+paths do not affect the measured production read pipeline. Preserved and stopped
+the initial libtest-only build before any accepted observation; no zero-test
+selector or compilation is counted as P3 success. The normal binary uses only
+private temporary hooks, asserted synthetic state/population, per-sample saved
+title changes and the shared60s deadlock guard. This is a direct read-pipeline
+cost fixture, not a UI event-loop or future F/G/all-consumer performance claim.

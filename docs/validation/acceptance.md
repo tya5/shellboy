@@ -4122,3 +4122,20 @@ Explicitly corrected to the same full SHA in a new workflow. Preserve both runs.
 Windows native jobs may complete successfully by uploading unavailable.json;
 that never qualifies ConPTY performance. Main and the installed binary remain
 unchanged. #41 comments6538653546/6538662493 distinguish launch/correction.
+
+## Repaired E ordinary three-OS branch gate (2026-10-31)
+
+Workflow41166258538 at exact7c6f4d6 now has all3 ordinary checks successful.
+Downloaded native-test-timings artifacts and verified each source_sha, empty
+failures and actual harness logs: Linux1905/0/31, macOS1904/0/32,
+Windows1780/0/24 (passed/failed/ignored). The real16-mutation test
+frontend_reactivity::selected_header_and_open_browser_share_one_changed_snapshot_without_reload
+passes on all3, directly addressing CBC's Linux/Windows paired-snapshot failure.
+Linux runtime::raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdown
+also passes, addressing CBC's old8s fixture guard failure without relaxing saved
+attempt/shutdown facts. #41 interim report6538791783 records the same evidence.
+
+Native Unix P2/P5 jobs have finished both builds and entered formal observation;
+no performance values are available at this checkpoint. The Windows native jobs
+upload explicit unavailable.json at both widths, not a ConPTY measurement.
+Main admission and main CI remain separate later gates; main is unchanged.
