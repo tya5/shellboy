@@ -68,7 +68,7 @@ impl TargetWitnesses {
     }
     pub fn relevant(&self, committed: Option<&[String]>) -> bool {
         match (self, committed) {
-            (Self::Known(ids), Some(changed)) if changed.len() <= MAX_TARGETS => {
+            (Self::Known(ids), Some(changed)) if !ids.is_empty() && changed.len() <= MAX_TARGETS => {
                 ids.iter().any(|id| changed.contains(id))
             }
             // Lost/unknown scope is explicit and conservative, never permission.
@@ -76,7 +76,7 @@ impl TargetWitnesses {
         }
     }
     pub fn available(&self) -> bool {
-        matches!(self, Self::Known(_))
+        matches!(self, Self::Known(ids) if !ids.is_empty())
     }
 }
 
@@ -213,6 +213,9 @@ mod tests {
         large.push('x');
         assert!(TargetWitnesses::Known(vec![large]).metadata_bytes().is_none());
         assert!(TargetWitnesses::Unavailable.relevant(Some(&[])));
+        let empty = TargetWitnesses::Known(vec![]);
+        assert!(!empty.available());
+        assert!(empty.relevant(Some(&["thread:new".into()])));
     }
 
     #[test]

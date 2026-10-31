@@ -239,6 +239,11 @@ mod tests {
             DateTime::from_timestamp(1, 0).unwrap(), TargetWitnesses::Unavailable).unwrap();
         assert_eq!(notice(&captured, &identity(1)).freshness, Freshness::Unavailable);
         assert!(!notice(&captured, &identity(1)).confirmation_enabled);
+        let empty = ConfirmationCapture::prepare(identity(1), ObservationKind::Index,
+            Arc::new(json!({})), DateTime::from_timestamp(1, 0).unwrap(),
+            TargetWitnesses::Known(vec![])).unwrap();
+        assert_eq!(notice(&empty, &identity(1)).freshness, Freshness::Unavailable);
+        assert!(!notice(&empty, &identity(1)).confirmation_enabled);
         let captured = capture(1, ObservationKind::Index);
         let pending = prepare_confirmation_notice(&captured, &identity(1), true, false, true);
         assert!(!pending.confirmation_enabled);
