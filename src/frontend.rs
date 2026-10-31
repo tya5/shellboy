@@ -3076,6 +3076,9 @@ async fn run_with_delivery(
                 None => {}
             },
             event=ui_subscription.receiver.recv()=> match event {
+                Ok(EngineEvent::MemoryProbe {owner,reply}) => {
+                    if ui_subscription.belongs_to(owner) && !reply.is_closed() { update(&updates, UiUpdate::MemoryProbe(reply)).await; }
+                },
                 Ok(EngineEvent::Changed { thread_id, recovery }) => {
                     status_dirty |= status_enabled;
                     if recovery && control.store.config.ui.bell {
@@ -3797,6 +3800,8 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
+                last_answer: None,
+                last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,
@@ -3809,6 +3814,8 @@ mod stream_tests {
                 excerpt: String::new(),
             },
             ThreadSummary {
+                last_answer: None,
+                last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,

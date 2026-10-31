@@ -529,6 +529,7 @@ mod frame_delivery_tests {
                 source_ids: Vec::new(),
             }),
             Command::Wait(crate::protocol::WaitArgs {
+                after: None,
                 conditions: vec![crate::protocol::WaitCondition::RunEnded { run_id: "r".into() }],
                 timeout_ms: 0,
             }),

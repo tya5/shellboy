@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use shellboy::storage::{DbWorker, StorageError};
 
-const DROP_HOT_INDEXES: &str = "DROP INDEX thread_parent; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
+const DROP_HOT_INDEXES: &str = "DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
 
 fn schema(db: &Connection) -> rusqlite::Result<Vec<(String, String, String)>> {
     db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name")?
@@ -105,7 +105,12 @@ async fn hot_query_plans_use_expected_access_paths() {
             ("SELECT id FROM shell_execution WHERE state IN ('exited','failed','stopped') AND COALESCE(ended_at,started_at)>'now' ORDER BY COALESCE(ended_at,started_at),rowid LIMIT 128", "shell_terminal_time"),
         ] {
             let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?.query_map([], |r| r.get::<_, String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(plan.iter().any(|line| line.contains(expected)), "expected {expected}: {plan:?}");
+            if expected=="one_live_run" {
+                // Either named index still seeks the exact Thread/state prefix.
+                assert!(plan.iter().any(|line| (line.contains("one_live_run") || line.contains("wait_run_state")) && line.contains("SEARCH run") && line.contains("thread_id=?")),"{plan:?}");
+            } else {
+                assert!(plan.iter().any(|line| line.contains(expected)), "expected {expected}: {plan:?}");
+            }
         }
         Ok(())
     }).await.unwrap();
@@ -125,8 +130,8 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
     }).await.unwrap();
     worker.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX thread_parent; DELETE FROM schema_migration WHERE version=16; PRAGMA user_version=15;
-        CREATE TRIGGER reject_parent_ledger BEFORE INSERT ON schema_migration WHEN NEW.version=16
+    db.execute_batch("DROP INDEX thread_parent; DELETE FROM schema_migration WHERE version=17; PRAGMA user_version=16;
+        CREATE TRIGGER reject_parent_ledger BEFORE INSERT ON schema_migration WHEN NEW.version=17
         BEGIN SELECT RAISE(ABORT,'injected ledger failure after index creation'); END;").unwrap();
     db.close().unwrap();
     assert!(matches!(
@@ -137,7 +142,7 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        15
+        16
     );
     assert_eq!(
         db.query_row(
@@ -150,7 +155,7 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
     );
     assert_eq!(
         db.query_row(
-            "SELECT count(*) FROM schema_migration WHERE version=16",
+            "SELECT count(*) FROM schema_migration WHERE version=17",
             [],
             |r| r.get::<_, i64>(0)
         )
@@ -178,7 +183,7 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
         let upgraded = DbWorker::open(&path).await.unwrap();
         upgraded.call({let expected=expected.clone();move|db| {
             assert_eq!(schema(db)?,expected);
-            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=16", [], |r|r.get::<_,String>(0))?,"0016_thread_parent");
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=17", [], |r|r.get::<_,String>(0))?,"0017_thread_parent");
             let children=db.prepare("SELECT id FROM thread WHERE parent_thread_id=?1 ORDER BY id")?.query_map(["parent"],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
             assert_eq!(children,["child"]);
             let plan=db.prepare("EXPLAIN QUERY PLAN SELECT min(id) FROM thread WHERE parent_thread_id=?1 AND id>?2")?.query_map(["parent","a"],|r|r.get::<_,String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;

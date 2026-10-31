@@ -269,7 +269,7 @@ mod tests {
         }
     }
     #[test]
-    fn receipt_fence_is_thread_scoped_and_searches_receipt_target_index() {
+    fn receipt_fence_is_thread_scoped_and_uses_a_thread_prefix_seek() {
         let mut db = fixture();
         copy(&db, "op", "admitted", "applied", "submitted");
         let tx = db.transaction().unwrap();
@@ -294,7 +294,8 @@ mod tests {
             .unwrap();
         assert!(
             plan.iter().any(
-                |line| line.contains("SEARCH binding USING INDEX receipt_target")
+                |line| (line.contains("SEARCH binding USING INDEX receipt_target")
+                    || line.contains("SEARCH binding USING INDEX receipt_thread_order"))
                     && line.contains("target_thread_id=?")
             ),
             "{plan:?}"

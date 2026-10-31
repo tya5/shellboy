@@ -585,7 +585,7 @@ async fn pre_marker_history_without_admission_evidence_is_not_resurrected_on_new
     // migrate it. No read-time compatibility fallback is exercised or added.
     let path = root.path().join("data").join("shellboy.db");
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("BEGIN IMMEDIATE; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DELETE FROM schema_migration WHERE version>=13; PRAGMA user_version=12; COMMIT;").unwrap();
+    db.execute_batch("BEGIN IMMEDIATE; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DELETE FROM schema_migration WHERE version>=13; PRAGMA user_version=12; COMMIT;").unwrap();
     drop(db);
     let owner = open(root.path()).await;
     let control = Control::new(&owner, root.path().into());

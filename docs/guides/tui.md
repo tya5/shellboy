@@ -414,3 +414,17 @@ recovery line shows saved facts; F8 Run/Turn context has retry count, failure
 time/stage, protected replay sizes and attachment sizes (null when unknown).
 Only applicable edit/detach/restore choices are listed, without recommendations.
 No recovery dashboard is added ahead of #41/#58.
+
+### Conversation row legend
+
+The help legend and conversation renderer share one mark table. `▸` is an
+answer, `▹` a request, `⏵` a running tool, `◌` an unavailable observation,
+`✓`/`✗`/`⊘` terminal outcomes, `⁂` a notification, `⬦` a summary and `↪` a
+spill. Input-source marks keep their explicit human/parent/model labels.
+Background shell rows say so and show the saved background reason when known;
+live seconds use the saved shell start, not the latest model Turn start.
+Select a notification with Tab/arrow keys and press Enter to follow its loaded
+shell row or child conversation. A shell outside the bounded displayed history
+reports that limit; F6 retains the full saved references. F7 remains HTTP links.
+Unlike row groups have nonselectable spacing; consecutive tools stay dense.
+The `◉` work-region heading is reserved for #86, not drawn by this change.

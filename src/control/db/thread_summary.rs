@@ -154,6 +154,8 @@ pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
     ThreadSummary {
+        last_answer: None,
+        last_input: None,
         activity: prepare_activity(&raw.activity),
         thread_id: raw.thread_id,
         title,

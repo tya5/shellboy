@@ -104,6 +104,24 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 
 Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. An answered parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check its answer notification and retrieve the original text.
 
+
+### Wait for any child Thread
+
+Use one wait for several child Threads, not a repeated ThreadList comparison:
+
+```sh
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]'
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]' --after 'CURSOR'
+```
+
+Keep `result.cursor` even on timeout and pass it with unchanged conditions.
+Read `result.snapshot.changes`; `snapshot.more` means continue with that cursor.
+This also catches a finish/restart or recovery/resume between calls and survives
+owner restart. `satisfied` does not imply success or authorize recovery/retry.
+ThreadList/Get expose `last_answer` separately from `last_input`, including the
+latter's saved sender and self-asserted label. See [Delegation](delegation.md#waiting-for-several-threads)
+for bounds, current-state baselines and result/original-content inspection.
+
 ## Distinguish acceptance from completion
 
 CLI `ok:true` means that the operation succeeded, not that a sent request has an answer. In `message send` results, inspect `message_id`, `delivery_status`, `assignment`, and optional `run_id` / `turn_id`. Do not equate `accepted` with `applied`; track `held` / `pending` using `message get`.
@@ -361,6 +379,12 @@ When sending to another data directory, use `--sender-label` to name yourself;
 Origin is stripped across owners, so the receiver sees `external_cli` plus that
 unverified name, not your authenticated model identity.
 
+## Storage and resources
+
+Shell raw output can expire (default seven days / total 1GiB); large output consumes that budget. Preserve needed results in a durable file or answer rather than relying on later raw reads.
+Managed clipboard images can also expire (default seven days / total 256MiB); their exposed absolute `path` has the same lifecycle, not permanent availability. Active selections, drafts and send pins protect them.
+Collection keeps history references/reasons, not the reclaimed content; conversations have no automatic expiry. See [Recovery and storage](recovery-and-storage.md) and [Configuration](configuration.md) for retention, GC and cache budgets.
+
 ## Queued messages and human Turn interruption
 
 `shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
@@ -378,3 +402,20 @@ get and shell read/list through the shell tool. Watch unread state is session
 local, and bounded descendant counts may be lower bounds; neither establishes
 an exhaustive or durable work inventory. Thread ancestry differs from Run
 ownership. Recheck exact saved IDs/state before acting on a reported target.
+
+### Owner memory observation
+
+Use `shellboy status --memory` for on-demand owner cache accounting and native
+process memory, without activity filters. It does not call a model or embedding
+endpoint. Inspect each value and unavailable_reason; null means unknown, not zero.
+Existing retained/limit/entry figures exclude some working or live/pinned memory
+and are not additive with OS footprint/RSS. Do not infer a leak or total heap from
+these snapshots alone. The observation does not change cache limits or purge data.
+
+### Conversation row legend
+
+Conversation rows use a shared display-only legend (`/help`): `⏵` running,
+`◌` unavailable, `✓`/`✗`/`⊘` outcomes, `⁂` notification and `⬦` summary.
+A background label is a saved launch/release fact, not model concurrency.
+Notifications show saved identity/outcome; Enter follows the loaded shell row
+or saved child Thread. Missing names are not inferred from similar commands.

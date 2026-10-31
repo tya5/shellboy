@@ -1128,3 +1128,61 @@ async fn saved_readback_options_are_typed_bounded_and_observational() {
     .await
     .expect("saved-readback CLI fixture watchdog");
 }
+
+#[tokio::test]
+async fn status_memory_is_typed_read_only_and_excludes_activity_filters() {
+    let command =
+        crate::test_watchdog::watchdog("memory CLI conversion", convert(&["status", "--memory"]))
+            .await
+            .unwrap();
+    assert!(matches!(command,Command::Status(ref a) if a.memory));
+    command.validate().unwrap();
+    for option in [
+        vec!["--thread", "t"],
+        vec!["--all"],
+        vec!["--limit", "5"],
+        vec!["--since", "2026-10-31T00:00:00Z"],
+    ] {
+        let mut args = vec!["shellboy", "status", "--memory"];
+        args.extend(option);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+}
+
+#[tokio::test]
+async fn thread_wait_after_cursor_maps_to_the_shared_contract_and_bounds_targets() {
+    let command=convert(&["wait","--conditions-json",r#"[{"type":"thread_settled","thread_ids":["child-a","child-b"],"states":["completed","recovery_wait","failed","stopped"]}]"#,"--after","cursor","--timeout-ms","0"]).await;
+    let Command::Wait(args) = command else {
+        panic!("expected wait")
+    };
+    assert_eq!(args.after.as_deref(), Some("cursor"));
+    assert_eq!(args.timeout_ms, 0);
+    assert!(
+        matches!(&args.conditions[0],shellboy::protocol::WaitCondition::ThreadSettled{thread_ids,..} if thread_ids.len()==2)
+    );
+    let conditions=serde_json::json!([{"type":"thread_settled","thread_ids":(0..65).map(|i|format!("t{i}")).collect::<Vec<_>>(),"states":["completed"]}]).to_string();
+    let cli = Cli::try_parse_from(["shellboy", "wait", "--conditions-json", &conditions]).unwrap();
+    assert_eq!(
+        cli.into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    let cli = Cli::try_parse_from([
+        "shellboy",
+        "wait",
+        "--conditions-json",
+        r#"[{"type":"run_ended","run_id":"r"}]"#,
+        "--after",
+        "cursor",
+    ])
+    .unwrap();
+    assert_eq!(
+        cli.into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+}

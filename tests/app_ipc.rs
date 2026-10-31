@@ -66,6 +66,20 @@ async fn restart_records_uncertainty_without_reexecuting_or_killing_pids() {
         }
     );
     assert_eq!(values.1.1, 0);
+    second.db.call(|db| {
+        let text: String = db.query_row(
+            "SELECT json_extract(payload_json,'$.text') FROM node WHERE kind='interruption_context' ORDER BY rowid DESC LIMIT 1",
+            [], |r| r.get(0),
+        )?;
+        let snapshot: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let shell = &snapshot["change"]["shells"]["items"][0];
+        assert_eq!(shell["execution_id"], "s");
+        assert_eq!(shell["startup_state"], if cfg!(unix) { "failed" } else { "stopped" });
+        if cfg!(unix) { assert_eq!(shell["os_state"], "unverified"); }
+        else { assert!(shell.get("os_state").is_none()); }
+        assert_eq!(shell["result_uncertain"], true);
+        Ok(())
+    }).await.unwrap();
     second.shutdown().await.unwrap();
 }
 

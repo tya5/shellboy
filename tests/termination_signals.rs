@@ -468,37 +468,31 @@ impl Fixture {
     }
     fn assert_graceful(&self) {
         self.assert_graceful_database();
-        let records = self
-            .log()
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .collect::<Vec<_>>();
-        assert!(records.iter().any(|v| v["shutdown"]["scope"] == "signal"));
-        assert!(
-            records
-                .iter()
-                .any(|v| v["shutdown"]["scope"] == "owner"
-                    && v["shutdown"]["stage"] == "diagnostics")
-        );
+        validate_shutdown_diagnostics(&self.log());
+        if let Some(native) = self.owner.native_group {
+            assert!(
+                unsafe { libc::kill(-native, 0) } < 0
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH),
+                "owned native process group remains: {}",
+                self.shutdown_diagnostic()
+            );
+        }
     }
-    async fn wait_signal_log(&mut self) {
-        crate::test_watchdog::watchdog("tests/termination_signals.rs: wait_signal_log", async {
-            loop {
+    async fn wait_listener_closed(&mut self) {
+        crate::test_watchdog::watchdog("shutdown listener endpoint removed", async {
+            while self.root.path().join("data/endpoint.json").exists() {
                 self.owner.drain();
-                if self.log().contains("signal_term") {
-                    break;
-                }
                 assert!(self.owner.child.try_wait().unwrap().is_none());
                 sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("first OS signal was not observed");
+        .expect("first OS signal did not close the listener");
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn term_and_hup_stop_native_shell_and_save_results_before_success_exit() {
-    for (signal, stage) in [(libc::SIGTERM, "signal_term"), (libc::SIGHUP, "signal_hup")] {
+    for signal in [libc::SIGTERM, libc::SIGHUP] {
         let mut fixture = Fixture::running().await;
         fixture.owner.signal(signal);
         let status = fixture.owner.exited().await;
@@ -508,7 +502,6 @@ async fn term_and_hup_stop_native_shell_and_save_results_before_success_exit() {
             fixture.shutdown_diagnostic()
         );
         fixture.assert_graceful();
-        assert!(fixture.log().contains(stage));
         fixture.owner.native_group = None;
     }
 }
@@ -583,7 +576,6 @@ async fn actual_parent_shell_pty_close_kills_term_ignoring_owned_groups_without_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn eof_without_a_controlling_terminal_signal_still_drains_owner() {
     let mut fixture = Fixture::running_with(None, true, false, 2000).await;
-    let native = fixture.owner.native_group.unwrap();
     drop(fixture.owner.terminal.take());
     let status = fixture.owner.exited().await;
     assert!(
@@ -591,21 +583,14 @@ async fn eof_without_a_controlling_terminal_signal_still_drains_owner() {
         "noncontrolling PTY EOF: {status}\n{}",
         fixture.shutdown_diagnostic()
     );
-    fixture.assert_graceful_database();
-    // Shutdown drains accepted diagnostics, but try_send may have dropped any
-    // record before that drain. Durable DB/process facts are the success gate.
+    fixture.assert_graceful();
     for line in fixture.log().lines() {
         let record: Value = serde_json::from_str(line).unwrap();
         if record["shutdown"]["scope"] == "signal" {
             assert_eq!(record["shutdown"]["stage"], "terminal_lost");
-            assert_eq!(record["shutdown"]["boundary"], "begin");
         }
     }
-    assert!(
-        unsafe { libc::kill(-native, 0) } < 0
-            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH),
-        "owned native process group remains"
-    );
+
     fixture.owner.native_group = None;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -615,7 +600,7 @@ async fn second_signal_forces_without_waiting_for_blocked_database_cleanup() {
     let hold = rusqlite::Connection::open(fixture.database()).unwrap();
     hold.execute_batch("BEGIN IMMEDIATE").unwrap();
     fixture.owner.signal(libc::SIGTERM);
-    fixture.wait_signal_log().await;
+    fixture.wait_listener_closed().await;
     fixture.owner.signal(libc::SIGTERM);
     let status = fixture.owner.exited().await;
     assert_eq!(status.code(), Some(1));
@@ -634,7 +619,7 @@ async fn second_signal_forces_without_waiting_for_blocked_database_cleanup() {
 async fn term_followed_by_duplicate_hup_finishes_configured_native_grace() {
     let mut fixture = Fixture::running_with(None, true, true, 5500).await;
     fixture.owner.signal(libc::SIGTERM);
-    fixture.wait_signal_log().await;
+    fixture.wait_listener_closed().await;
     for _ in 0..2 {
         fixture.owner.signal(libc::SIGHUP);
         sleep(Duration::from_millis(20)).await;
@@ -719,3 +704,34 @@ async fn one_signal_deadline_is_enforced_even_when_the_main_thread_is_stalled() 
 
 #[path = "support/watchdog.rs"]
 pub(crate) mod test_watchdog;
+
+// Admission can drop any diagnostic record; durable/process assertions above
+// remain mandatory even when no line reached the writer.
+fn validate_shutdown_diagnostics(log: &str) {
+    for line in log.lines() {
+        let record: Value = serde_json::from_str(line).unwrap();
+        if record["shutdown"]["scope"] == "signal" {
+            assert_eq!(record["shutdown"]["boundary"], "begin");
+            assert!(matches!(
+                record["shutdown"]["stage"].as_str(),
+                Some("signal_term" | "signal_hup" | "terminal_lost")
+            ));
+        }
+    }
+}
+#[test]
+fn shutdown_diagnostics_are_optional_but_present_signal_records_are_validated() {
+    validate_shutdown_diagnostics("");
+    validate_shutdown_diagnostics(
+        r#"{"shutdown":{"scope":"signal","stage":"signal_term","boundary":"begin"}}"#,
+    );
+}
+
+#[test]
+fn malformed_present_signal_diagnostics_are_not_accepted() {
+    for (stage, boundary) in [("unknown", "begin"), ("signal_term", "end")] {
+        let line =
+            json!({"shutdown":{"scope":"signal","stage":stage,"boundary":boundary}}).to_string();
+        assert!(std::panic::catch_unwind(|| validate_shutdown_diagnostics(&line)).is_err());
+    }
+}

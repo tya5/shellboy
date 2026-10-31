@@ -182,10 +182,11 @@ back up before opening with a new build. Old v0.4.0/schema14 binaries cannot ope
 schema 15, and no installed owner or user database is upgraded by validation.
 
 
-### F parent lookup index (local schema 16 candidate)
+### F parent lookup index (local schema17 candidate)
 
-At origin/main e933054, conversation schema is 15. The F-only local candidate
-adds `thread_parent(parent_thread_id,id)` in isolated startup migration 0016.
+At origin/main a0f7022, conversation schema is16; its Thread observation
+indexes remain unchanged. The F-only local candidate
+adds `thread_parent(parent_thread_id,id)` in isolated startup migration0017.
 Successor seeks for bounded descendant traversal require this covering index;
 existing updated-at and Run indexes do not cover parent membership. It costs
 one entry per Thread and index maintenance on parent/id changes. No table,
@@ -194,6 +195,6 @@ and ledger. The upgrade transaction atomically commits DDL, ledger and version;
 failed admission rolls them all back. Saved conversations are unchanged.
 Before a release containing this upgrade, stop the owner and take a complete
 data-directory backup (including any SQLite WAL/SHM files) before opening it
-with the new binary. Older binaries reject schema 16. Recheck main's actual
-version and migration names immediately before F admission; 16 is not reserved
+with the new binary. Older binaries reject schema17. Recheck main's actual
+version and migration names immediately before F admission;17 is not reserved
 against independent work. This primitive alone does not expose descendant UI.

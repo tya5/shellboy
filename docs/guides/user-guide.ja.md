@@ -179,8 +179,19 @@ palette = "dark"
 F8の分類は現在の「この会話で」「よく使う」「すべての操作」です。人向け名・CLI名・
 関連するslashで絞り込み、対象IDや引数をfieldごとに入力して履歴・Run・shell・索引・
 保存へ進めます。[画面操作](tui.md#read-source-text-and-links-from-details)に詳細なキーと
-コピー範囲をまとめています。固定の実行中区画・見守りモード・操作フォームの改善は
+コピー範囲をまとめています。見守りモード・操作フォームの改善は
 後続の段階であり、この会話レイアウトの変更に含まれるものではありません。
+
+### 保存済み使用量の確認
+
+- F8の「使用量 · 合計」で確認でき、必要なら子会話も含められます。
+  CLIは `shellboy usage get --thread THREAD_ID --include-children` です。
+  この会話だけなら最後のflagを外します。
+- 保存済み記録の合計で、請求額や実働時間ではありません。時間の種類は
+  重なり、未報告・未記録の使用量は0ではなく不明として表示します。
+- 重いと感じたら `<data_dir>/logs/shellboy.log` の
+  `event=usage_totals_slow` を確認します。100ms以上の集計だけが出ます。
+  更新やsnapshotの詳しい挙動は[画面操作](tui.md#saved-usage-details)にあります。
 
 ## 4. 接続・モデルを変える
 
@@ -198,16 +209,16 @@ F8の分類は現在の「この会話で」「よく使う」「すべての操
 
 ## 5. 子へ委譲する
 
-「サブエージェントを使って」と言うだけで、モデルがShellboyの子Thread操作を正確に理解する保証はありません。Agent Guideは自動注入されません。checkoutにある実在する絶対パスを指定して、まず読ませます。
+「サブエージェントを使って」と言うだけで、モデルがShellboyの子Thread操作を正確に理解する保証はありません。ガイドは実行ファイルに同梱されています。モデルには短い入口の案内が渡り、必要なときに自分でガイドを読みます。全文が毎回の指示に展開されるわけではなく、checkoutやリポジトリのパスも不要です。確実に手順を読ませたいときはガイドIDを書きます。
 
 ```text
-まず /path/to/shellboy/docs/guides/agent-guide.md と
-/path/to/shellboy/docs/guides/delegation.md をshellで読んでください。
+まず shellboy docs get --id shellboy/agent-guide と
+shellboy docs get --id shellboy/delegation をshellで読んでください。
 その手順で所有する子Threadを作り、調査だけを委譲してください。
 子の依頼を送った後は割当と完了状態を確認し、原文を取得して結果をまとめてください。
 ```
 
-binaryだけを別フォルダーへ置いた場合、docsが一緒に存在するとは限りません。ガイドの実際の保存先へ書き換えてください。親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。
+親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。
 
 Threadの`AGENTS.md`参照先は作業上の指示です。新しいルートThreadの既定はcwdの`AGENTS.md`で、新Turnの準備で読み、同じTurnのretryは保存済みsnapshotを使います。Agent Guideは操作の説明書、リポジトリ直下の`AGENTS.md`はそのリポジトリの作業指示で、用途が異なります。
 
@@ -223,23 +234,41 @@ Ctrl+Cは現在会話のRunと所有する背景処理の停止です。Escは�
 
 削除前にF8の「会話 · 削除影響」で、動作中Run・子孫・共有や出典・添付参照を確認できます。照会だけでは削除せず、容量の回収見積もりは未対応です。受付や圧縮結果を見失った場合はF8の「操作 · 受付結果」で対象operationを照会し、後続状態も確認します。詳しくは[復旧・保存](recovery-and-storage.md)を参照してください。
 
-## 保存済み使用量の確認
-
-- F8の「使用量 · 合計」で確認でき、必要なら子会話も含められます。
-  CLIは `shellboy usage get --thread THREAD_ID --include-children` です。
-  この会話だけなら最後のflagを外します。
-- 保存済み記録の合計で、請求額や実働時間ではありません。時間の種類は
-  重なり、未報告・未記録の使用量は0ではなく不明として表示します。
-- 重いと感じたら `<data_dir>/logs/shellboy.log` の
-  `event=usage_totals_slow` を確認します。100ms以上の集計だけが出ます。
-  更新やsnapshotの詳しい挙動は[画面操作](tui.md#saved-usage-details)にあります。
-
 ### 推定に頼らない復旧
 
 復旧待ちではF8のRun/Turn詳細で失敗と再試行の記録を確認します。
 `/compact-max` は要約APIを使わず保護外を縮小します。再送は別の
 `/retry` で行い、追加料金が発生することがあります。省いた本文は
 `/restore` で戻せます。token推定と75kの閾値はなくなりました。
+最後に成功したときの実測使用量と時刻は `shellboy thread get` で確認できます。
+
+## 保存とリソース
+
+会話・回答・推論・要約はデータディレクトリに保存され、自動では期限切れ削除しません。
+shellの生出力と管理されたクリップボード画像は別に扱います。
+
+- 終了したshellの生出力：既定7日 / 合計1GiB（`retention.tool_raw_days`、`tool_raw_bytes`）。
+- 管理画像：既定7日 / 合計256MiB（`retention.clipboard_days`、`clipboard_bytes`）。
+
+動作中のshell、pin、選択中の画像、保存済み下書きなどは回収から保護されます。
+回収後も履歴の参照と読めない理由は残りますが、生の内容は復元できません。
+管理PNGは `<data_dir>/managed/clipboard/` にありますが、絶対 `path` は恒久保存先ではありません。GCは外部の原本を消しません。
+
+ownerの動作中にGCが自動で動き、処理後およそ1分で次の回収を始めます。
+生出力・履歴のDB処理は最大128件単位で進み、1分に128件という上限ではありません。
+回収で空いたSQLiteのページは再利用します。自動VACUUMでDBファイルを縮めることはありません。
+容量を減らすには `shellboy storage status` → `shellboy storage collect` で確認・回収し、
+不要な会話を `shellboy thread delete-preview --thread THREAD_ID` で確かめてから
+`shellboy thread delete --thread THREAD_ID` で消します。回収は保護・共有を尊重し、
+previewは読取りだけで回収容量を見積もりません。詳しくは[復旧・保存](recovery-and-storage.md)を参照してください。
+
+RAMの `[cache]` の上限は既定で `body_bytes` 32MiB、`layout_bytes` 16MiB、
+`history_bytes` 32MiB、`attachment_base64_bytes` 64MiBです。
+設定を小さくしてownerを再起動できます。`0` は保持cacheを無効にしますが、
+処理中の作業メモリや保存済み履歴はなくさず、プロセス全体のメモリ上限でもありません。
+`shellboy status --memory` でownerのcache内訳とOSのプロセスメモリをその場で確認できます。
+不明値は0でなくnullです。cacheの値をfootprint/RSSに足してはいけません。
+設定は[Configuration](configuration.md#all-sections-and-defaults)、観測の詳細は[CLI参照](cli-reference.md)を参照してください。
 
 ## 安全の考え方
 
@@ -297,3 +326,13 @@ F6は選んだ作業の詳細フォーム、`o`は子の会話、Escは入力欄
 閉じた画面・別の画面に覆われた場合・会話切替では抜粋の購読を止めます。
 F2の画面固定は従来どおりです。3件を超える作業や詳しい保存情報は`/status`やF8で
 確認できます。
+
+### 会話の行の印
+
+`▸` は回答、`▹` は呼出し、`⏵` は実行中、`◌` は観測不明、
+`✓`・`✗`・`⊘` は終了結果、`⁂` は通知、`⬦` は要約、`↪` は退避です。
+背景の shell は「背景」と表示し、分かる場合は背景へ移した理由も出します。
+経過時間は保存された shell の開始時刻を基準にします。
+通知を Tab・矢印キーで選び、Enter で元の tool 行や子の会話へ移れます。
+元の行が表示範囲外なら、その旨を表示します。F6 で保存済みの参照を確認できます。
+種類の境目の空行は選択対象ではなく、続く tool の行は詰めたままです。

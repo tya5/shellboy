@@ -291,6 +291,14 @@ pub(super) fn owner_event(
     payload: Value,
 ) -> Result<(), crate::storage::StorageError> {
     let owner:Option<(String,String)>=tx.query_row("SELECT parent.id,parent.thread_id FROM run child JOIN run parent ON parent.id=child.owner_run_id WHERE child.id=?1",[child_run],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+    if owner.is_none()
+        && kind == "child_recovery_wait"
+        && let Some(thread) = payload.get("thread_id").and_then(Value::as_str)
+    {
+        // Retain the same recovery fact for root Runs too; no parent delivery.
+        // recovery_reason_json is cleared on resume, but a cursor must not miss it.
+        tx.execute("INSERT OR IGNORE INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![event_id,kind,json!({"run_id":child_run}).to_string(),thread,payload.to_string(),now()])?;
+    }
     if let Some((run, thread)) = owner {
         tx.execute("INSERT OR IGNORE INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![event_id,kind,json!({"run_id":child_run}).to_string(),thread,run,payload.to_string(),now()])?;
         tx.execute(

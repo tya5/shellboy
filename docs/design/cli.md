@@ -266,3 +266,23 @@ These operations run on read-only WAL snapshots through the existing finite
 presentation admission, not the writer's queue. No new tables, workers or queues.
 Derived indexes and their measured sizes are documented in acceptance. Query-plan
 tests must seek persistent tables; ephemeral materialized/JSON iterators may scan.
+
+## On-demand owner memory (#80)
+
+`status --memory` is an owner-wide read-only observation, exclusive with activity
+filters. It reports existing body/layout/attachment/replay cache accounting
+(retained bytes, configured limits and existing entry counts), not a new heap
+estimator. Protected working bodies and live/pinned shared allocations remain
+separate from budgeted retention. Cache values and OS metrics are not additive.
+
+Only this request collects memory facts. UI-owned counters travel through existing
+UI event/update delivery, with one request-completion responder; no new work queue,
+worker, sampler or periodic log is introduced. UI only reads its existing bounded
+cache accounting; native process sampling and other cache stats run outside the
+DB/UI lane through existing finite control-file admission. Missing UI, unavailable
+native metrics and unsupported OSes are explicit null/unknown, never guessed.
+macOS uses proc_pid_rusage footprint/resident bytes, Linux reads RSS/PSS from proc,
+and Windows uses current-process working set/private usage. No cache caps change.
+
+F8 presentation is deferred to overlapping #41. This first version does not
+investigate leaks, optimize request-copy peaks or collect per-allocation data.

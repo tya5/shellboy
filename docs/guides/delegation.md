@@ -105,3 +105,34 @@ shellboy run stop --run CHILD_RUN_ID
 Retry and stop are alternatives; the example does not instruct running both consecutively. An ordinary model message to a child in `recovery_wait` is held, not substituted for automatic recovery. After restart, earlier Runs are not automatically executed again. Decide on new execution using interruption information, stored answers, and unprocessed messages. Retain IDs of unexecuted instruction messages when stopping.
 
 In PowerShell, use `$env:SHELLBOY_THREAD_ID`. Adapt single-quoted JSON examples to the shell's argument passing; see [Shell](shell.md). These delegation command examples have not been verified on physical Windows hardware.
+
+## Waiting for several Threads
+
+For completed work or a recovery decision in any child, use one bounded wait:
+
+```sh
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]'
+```
+
+Read `result.snapshot.changes` for the Thread/Run/state/stored time and keep
+`result.cursor`, including after a timeout. Continue with the **same conditions**:
+
+```sh
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]' --after 'CURSOR'
+```
+
+`--after` catches saved transitions between calls, including a completed Run
+followed by new work or recovery followed by resume. It survives owner restart.
+`snapshot.more=true` means continue immediately with that cursor for the rest;
+each reply contains at most64 changes and each request names at most64 Threads.
+No-after is a current-state observation plus a new baseline, not a replay of all
+past completions. An empty Thread has no settled Run. `satisfied` is not success:
+inspect failed/stopped/recovery records before deciding what to do. The wait does
+not stop or resume work. Changing conditions or losing a source anchor rejects
+the cursor rather than silently skipping records. No background poller is needed.
+
+ThreadList/Get also separate `last_answer` (latest own final Turn answer, with
+Turn/node/time/excerpt) from `last_input` (latest durably accepted input, including
+held/cancelled, with receipt state and credential-free sender/label). The latter
+does not prove application or model completion. Existing `excerpt` is unchanged.
+Labels remain self-asserted; inspect originals by node ID when needed.

@@ -1,5 +1,38 @@
 # Development status
 
+## CI observation ordering (#89)
+
+Three intermittent observations are traced to test boundaries: index-context
+metadata can commit independently of preview; starting-stop acknowledgment is
+not live-handle publication; shutdown diagnostics can be dropped at admission.
+Tests now fence registration and observe saved facts/notifications, and use
+native/process cleanup instead of requiring log presence. No production shell
+or lifeline ordering, timeout, retry or assert-on-durable-result is relaxed.
+Exact-source native CI and integration results are tracked in issue #89.
+
+## Shell metadata palette follow-up (#83)
+
+The shared row table now chooses muted routine shell metadata versus attention
+for failure/nonzero exits/cancellation. Static headers and cached live seconds
+share that rule, with unchanged NO_COLOR metadata. Native 80-column PTY checks
+cover dark/light/plain/fallback; evidence and limits are recorded in acceptance.
+
+## Storage/resource guide refresh (#81)
+
+Both User Guides summarize current retention, automatic collection, storage
+cleanup, cache budgets and on-demand owner memory. Delegation uses bundled guide
+IDs; usage/Esc explanations now align across languages. The Agent Guide warns
+against relying on retained raw output or managed paths. F8 naming stays with #41.
+Documentation validation and implementation sources are recorded in acceptance.
+
+## On-demand owner memory (#80)
+
+CLI status --memory returns existing body/layout/attachment/replay cache accounting
+and native process metrics through existing UI delivery and control-file slots.
+Unknown values remain null with reasons. No periodic sampler, cap changes or new
+work queue/worker is introduced. Synthetic cache-growth/held-writer/on-demand tests
+pass; native exact-source checks are tracked in #80. F8 display stays with #41.
+
 ## Attachment list file admission review (#79)
 
 Read-only attachment rows now leave the projection closure and its connection
@@ -2080,3 +2113,73 @@ help token check now validates consecutive command words, retaining exact-token
 boundaries for names containing spaces. Full standard after embedded-guide
 changes is pending. F work is saved separately while approved E admission takes
 priority; no F main admission or installed/default-data change.
+
+## E latest-main local checks complete
+
+Merge10d6df8 includes main2327636 (#79/#82/#84). Standard native macOS passes
+1915/0/33, Python18/layout93/watchdog/fmt/strict Clippy. The unchanged upstream
+#84 actual-PTY checker passes8 configurations/80 captures using8 local mock
+requests. Main-relative diff secret scan is clean. Combined-source qualification
+and exact timing/OS limits are in acceptance; do not reuse old SHA timing claims.
+E is locally reviewable and publication still waits for separate approval.
+F has a separate local planning-only branch0d375f0 with F1–F16 requirement/proof
+rows; no F/G code or transferred #83–#87 work is bundled into E. No additional
+push, release, install or user-data change has occurred.
+
+### #83 conversation rows: local qualification complete, review pending
+
+Single EAW=N mark/label/color and spacing table; live/saved background shell
+facts and saved-start clocks; factual notifications and Enter source navigation.
+No Core/protocol/storage or #86 region rendering change. Standard check passes
+1,887 Rust tests / 0 failures / 33 ignored; actual final native PTY passes
+8 sessions / 56 completed screens across 80/140, dark/light/NO_COLOR/vt100.
+Incremental P1 against main e933054: worst p95 5.135ms, largest delta1.747ms;
+all three interleaved pairs meet 8ms/+2ms. Details and failures are in acceptance.
+Branch three-OS CI/review/main admission are not claimed by local validation.
+Missing names and off-window source lookup are explicitly deferred to #88.
+
+## Thread observation and #82 review follow-up (#74, 2026-10-31)
+
+The separate #82 follow-up binds startup shell snapshot facts instead of SQL
+source replacement. Inclusive close_from(2) clarifies that guardian stderr is
+already closed; regression tests cover EOF before guardian release and normal
+release/reap/output-drain completion. Unix snapshot failed/unverified JSON and
+non-Unix stopped/no-OS-claim behavior are asserted directly.
+
+Thread wait adds64-target/64-change bounds, explicit settled-state filters and an
+instance-independent scoped cursor. Indexed Run/recovery streams retain finish/
+restart and recovery/resume transitions between calls. Root recovery retains the
+same existing fact without delivery. ThreadList/Get keep excerpt and separate
+own-final-answer from received-input/sender facts. Schema16 adds only four lookup
+indexes. #80/#83 main work is preserved; no rendering or composer logic changes.
+
+Focused SQL-plan, gap/restart, cycle, schema-upgrade, CLI and loopback observations
+pass during implementation; final combined standard/native gates are reported
+by exact SHA in issue74, separately from these focused results. The first version
+omits a subscription/UI watcher, idle-without-Run state and fork-only ancestor
+answer expansion. Excerpts bound returned text/fragments, not all JSON parsing.
+No paid provider, installed binary, owner restart or user data is used/changed.
+
+
+## Approved E admission refresh
+
+Reviewer/user approval6540583854 permits E admission only after latest-main
+standard checks and exact-candidate three-OS CI. The fetched main is a0f7022
+(descends from requested8e5d5f9), including #74's schema16/indexed observations
+and the #83/#84/#89 changes. Merge preserves the new canonical last-answer/input
+projections alongside E's shared summary/readonly bounded display contract.
+The row vocabulary and composer are unchanged from this main. Combined-source
+validation is pending; no CI result or performance value is inherited by this
+new merge. F remains separately saved at b41135c, not included in E.
+
+
+## F preparation against E admission candidate
+
+Local F merges E candidate d0a92bf, including main a0f7022 and #83/#84/#89.
+The main row vocabulary is retained; F adds only its scoped completion hints
+to the current composer. Main schema16 Thread observation indexes are retained;
+the unpublished F parent index is now migration17. Whole-target cargo check
+passes on native macOS; combined standard checks and native CI are pending.
+E exact-candidate CI41181650657 is running; neither E nor F is admitted by
+this preparation record. F publication follows E admission; F main still needs
+review, and G remains separate. No installed binary or user data is changed.

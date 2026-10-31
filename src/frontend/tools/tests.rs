@@ -120,7 +120,7 @@ async fn call_and_background_result_share_current_exit_facts_and_failed_reads_cl
             assert!(tool.heading().starts_with(match code {
                 Some(0) => "✓ #2 printf fixture",
                 Some(_) => "✗ #2 printf fixture",
-                None => "· #2 printf fixture",
+                None => "◌ #2 printf fixture",
             }));
             assert!(tool.heading().contains("返却時 背景継続"));
         }

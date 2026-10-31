@@ -1358,6 +1358,7 @@ async fn shell_output_wait_wakes_after_commit_while_shell_and_model_remain_block
     let request = Request::new(
         operation.clone(),
         Command::Wait(WaitArgs {
+            after: None,
             conditions: vec![WaitCondition::ShellOutput {
                 execution_id: execution.clone(),
                 cursor: empty.cursor,
@@ -1479,6 +1480,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     let waited = command(
         &control,
         Command::Wait(WaitArgs {
+            after: None,
             conditions: vec![WaitCondition::ShellEnded {
                 execution_id: execution.clone(),
             }],
@@ -1530,6 +1532,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     let completed = command(
         &control,
         Command::Wait(WaitArgs {
+            after: None,
             conditions: vec![
                 WaitCondition::TurnCompleted {
                     turn_id: accepted.turn_id.unwrap(),
@@ -2330,6 +2333,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
                 .request(Request::new(
                     operation,
                     Command::Wait(WaitArgs {
+                        after: None,
                         conditions: vec![WaitCondition::ShellEnded {
                             execution_id: execution,
                         }],

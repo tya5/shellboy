@@ -130,7 +130,6 @@ pub async fn deliver(
 mod tests {
     use super::*;
     use crate::{app::OwnerLock, storage::DbWorker};
-    use std::time::Duration;
     async fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
@@ -150,14 +149,14 @@ mod tests {
             let db = rusqlite::Connection::open(path).unwrap();
             // Prepare an older supported fixture before startup. No second
             // writer remains to race the production 2-second busy timeout.
-            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX thread_parent; DROP INDEX shell_started_readback; DROP INDEX shell_owner_started_readback; DROP INDEX compact_operation_thread; DROP INDEX automatic_compaction_turn; DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; COMMIT;").unwrap();
+            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX thread_parent; DROP INDEX wait_run_state; DROP INDEX wait_recovery_thread; DROP INDEX thread_answer_latest; DROP INDEX receipt_thread_order; DROP INDEX shell_started_readback; DROP INDEX shell_owner_started_readback; DROP INDEX compact_operation_thread; DROP INDEX automatic_compaction_turn; DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; COMMIT;").unwrap();
         }).await.unwrap();
         let token = CancellationToken::new();
         let cancel = token.clone();
         let initializing_data = data.clone();
         let (send, progress) = watch::channel(StartupStage::Configuration);
-        let result = tokio::time::timeout(
-            Duration::from_secs(10),
+        let result = crate::test_watchdog::watchdog(
+            "cancelled startup finishes migration before releasing owner",
             initialize_reporting(
                 Some(config),
                 Some(data.clone()),

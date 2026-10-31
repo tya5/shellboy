@@ -15,10 +15,9 @@ Shellboyへの改名では旧名の実行名・環境変数・既定保存先へ
 
 ## Current conversation storage
 
-The F preparation branch uses conversation schema 16: selected-path admission
-(13), Turn interruption/draft indexes (14), readback indexes (15), and the parent
-Thread covering index (16). Standalone RAG remains schema3. Recheck numbering
-before F main admission. The existing migration2
+Conversation schema17 records selected-path admission (13), Turn interruption
+and draft indexes (14), derived readback indexes (15), and bounded Thread
+observation lookup indexes (16), and the F parent lookup index (17); standalone RAG remains schema3. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;
 no new index/migration is required for that B+C query. F separately requires
 the parent index; see [storage](storage.md). Historical version
@@ -285,3 +284,20 @@ presentation pool and read-only WAL snapshots. Schema 15 adds four justified
 indexes, not tables/workers/queues; see storage and CLI designs for costs, boundary
 semantics and explicit retention/unknown coverage. Unreleased main functionality
 requires a matching new owner/CLI, not merely the published v0.4.0 executable.
+
+## On-demand owner memory (#80)
+
+Adopt the [CLI owner memory observation](cli.md#on-demand-owner-memory-80) and
+[wire routing](protocol.md#owner-memory-observation-80). Existing budgeted cache
+accounting and native OS facts are observed only on request, outside the DB worker.
+Unknown values remain unknown; no cache cap, schema, worker or work queue is added.
+F8 presentation and untracked allocator/request-copy investigations are separate.
+
+## Bounded Thread observations (#74)
+
+Adopt [Thread observations](thread-observation.md) for cursor-bearing Thread
+settlement waits and separate own-final-answer/received-input projections.
+The existing Run, recovery event, receipt and Turn facts remain authoritative;
+root recovery retains the existing event without parent delivery so resume does
+not erase an unobserved transition. Schema16 adds lookup indexes, not tables.
+No new worker, queue or model-facing tool is introduced.

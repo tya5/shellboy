@@ -95,6 +95,7 @@ async fn performance_ten_shells_ten_lifecycle_waits() {
                 control,
                 format!("benchmark-wait-{i}"),
                 WaitArgs {
+                    after: None,
                     conditions: vec![WaitCondition::ShellEnded {
                         execution_id: format!("s{i}"),
                     }],
