@@ -9,6 +9,14 @@ generation POSTs until expiry; owner restart forgets it. Unknown 429 retains
 normal retries. Bottom-line TUI work is deferred to #85; activity/chrome are
 unchanged. Loopback/virtual-clock checks pass; exact-source CI is tracked in #76.
 
+## Batched native CI (#92)
+
+Exact-SHA main-push reuse is guarded by first-attempt successful native-job
+evidence from the read-only Actions API. Windows has explicit measured module
+partitions and a cross-job full-inventory/disjoint-union audit; four test threads
+are unchanged. Branch CI/reviewer approval and live main-push reuse qualification
+remain pending; see acceptance for measurement source and untested cases.
+
 ## CI observation ordering (#89)
 
 Three intermittent observations are traced to test boundaries: index-context

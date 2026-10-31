@@ -115,3 +115,48 @@ same-SHA failed-job rerun for diagnosis, retaining both failure and rerun eviden
 there is no automatic retry or assumption that the initial failure was harmless.
 See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57)
 and [publication gates](publication.md#release-validation-gates-57).
+
+
+## Batched integration and exact-SHA CI reuse (#92)
+
+The integration owner does not build Rust locally on the memory-constrained
+integration host. Authors retain the local standard-check gate. The integration
+owner verifies approval, rebases each candidate on current main in an owned
+worktree, returns conflicts to the author, and accumulates a batch on an
+`integration/*` branch. Push that branch and explicitly dispatch ordinary Rust
+checks (`windows_test_threads=default`, not the Windows-only experiment).
+After all native checks and the Windows inventory audit pass on the first
+attempt, fetch again and fast-forward main to **that same SHA**. If main moved,
+rebuild the batch and repeat CI. A main push still creates a workflow run: its
+read-only Actions API gate records the qualifying run URL in logs and summary,
+then skips expensive native jobs. Missing evidence or an API error executes all
+checks. Manual dispatch always executes checks; reuse-only or rerun successes
+never qualify as fresh evidence. See the [design](../design/ci-test-performance.md#exact-sha-reuse-and-integration-batches-92).
+
+Bisect failing batches by constituent branch, preserving the failed run URLs
+and test names. Return the failing branch to its author and qualify the passing
+subset separately. A rerun is diagnosis, not evidence that a failed batch passed.
+Comment each issue with its integrated SHA and passing CI run; the reviewer
+closes issues and authors clean up their branches/worktrees.
+
+Windows now has two native jobs with four test threads each. Their explicit
+module ownership is in `scripts/windows-test-shards.json`, selected using native
+module timings. Add every new integration module there; unknown Cargo harnesses
+also fail closed until assigned. Each runner still builds and inventories all
+Cargo targets, executes its assigned identities (including reporting ignored
+identities), and uploads its complete inventory and execution subset. The audit
+requires identical inventories and an exact disjoint union, so splitting cannot
+silently remove or double-execute a test. Linux/macOS run all targets unchanged.
+For local diagnosis of shard selection, use:
+
+```sh
+python scripts/test-timings.py --output .local/windows-1 --windows-shard 1
+python scripts/test-timings.py --output .local/windows-2 --windows-shard 2
+python scripts/check-windows-shards.py .local/windows-1/results.json .local/windows-2/results.json
+```
+
+Run these commands on Windows; the audit rejects non-Windows evidence. The
+ordinary local check scripts remain full-suite checks. The lightweight reuse
+logic has separate Node built-in tests, executed by Linux CI with
+`node --test scripts/tests/ci-reuse.test.cjs`; Node is not a product dependency.
+Measurement and release jobs are unchanged. No higher concurrency is adopted.

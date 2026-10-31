@@ -1,5 +1,29 @@
 # Validation record
 
+## Batched native CI (#92, in progress)
+
+Measurement source `efc10e5b89d8ac5e3e117f0ed6b1db151c95ae79`, Windows four
+threads, first-attempt run [41182264568](https://github.com/tya5/shellboy/actions/runs/41182264568)
+passed with no runner failures. Ordinary harness times: library103.812s,
+integration146.219s, crash recovery2.000s; no-test harnesses each about0.016s.
+The earlier main run41180500687 reported library75.813s/integration223.765s,
+so a library/integration-only split would not balance these observed samples.
+The follow-up measures every Windows integration module separately, including
+process startup. Greedy assignment with library/other harnesses initially on
+shard1 yields isolated-duration sums147.686s/147.688s. This is an assignment
+heuristic, not a promise of concurrent job wall time; final split-job durations
+must be reported separately. No test body, fixture or thread count is changed.
+
+The new coverage gate compares complete same-source native inventories and
+ignored identities with the disjoint union of selected identities; harness
+summary counts must match the selected subset. Python fixtures cover dropped,
+duplicated, ignored, mismatched-source and unknown-target cases. Node fixtures
+cover exact-SHA success, wrong SHA/repository, reruns, partial/skipped jobs and
+API failure. These new tests and the final three-OS workflow are not yet qualified.
+No local Rust build/test was performed on the8GB integration host. Live main-push
+reuse and the unqualified-main-SHA full-run path remain untested pending review
+and authorized integration; mocked gate cases do not establish those live paths.
+
 ## #41 D2 owned work and output (local)
 
 Final source807ac97 passes native macOS arm64/Rust1.99.1 standard checks:

@@ -29,3 +29,7 @@ errors = check_watchdogs(root, json.loads((root / 'scripts/test-watchdog-allowan
 if errors:
     raise SystemExit('\n'.join(errors))
 print('Test watchdog policy: no unapproved real-time guards')
+
+from windows_shards import check_layout, load
+check_layout(root, load())
+print("Windows shards: every integration module has exactly one owner")

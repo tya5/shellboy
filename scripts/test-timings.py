@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from windows_shards import load as load_shards, selection as shard_selection
 
 
 def run(command, log):
@@ -52,9 +53,11 @@ def main():
     mode.add_argument('--inventory-only', action='store_true')
     mode.add_argument('--profile-only', action='store_true', help='inventory plus isolated profiles, without full suite execution')
     parser.add_argument('--compare', type=Path, help='same-OS baseline results.json; require identical tests/ignored sets')
-    parser.add_argument('--per-suite', action='store_true', help='measure integration modules in separate processes')
+    parser.add_argument('--windows-shard', choices=['1', '2'], help='execute an explicit partition; inventory all targets')
     parser.add_argument('--per-test', default='', help='comma-separated suite names for extra isolated-process profiles')
     args = parser.parse_args()
+    if args.windows_shard and (args.inventory_only or args.profile_only or args.per_test):
+        parser.error('--windows-shard requires ordinary execution without isolated profiles')
     if args.inventory_only and args.per_test:
         parser.error('--inventory-only cannot execute --per-test; use --profile-only')
     if not Path('Cargo.toml').is_file():
@@ -65,6 +68,8 @@ def main():
               'cpu_count': os.cpu_count(), 'python': sys.version,
               'runner_image': {key: os.environ.get(key) for key in ['ImageOS', 'ImageVersion']},
               'harnesses': [], 'isolated_tests': [], 'failures': []}
+    if args.windows_shard:
+        record.update(windows_shard=args.windows_shard, executed_tests=[], executed_ignored=[])
     result_path = args.output / 'results.json'
 
     def save():
@@ -103,16 +108,25 @@ def main():
             item = {'target': target, 'tests': len(names), 'ignored': len(ignored)}
             all_tests.extend(identities(target, names))
             all_ignored.extend(identities(target, ignored))
+            selected, filters = names, []
+            if args.windows_shard:
+                selected, filters = shard_selection(target, names, args.windows_shard, load_shards())
+                if filters is None:
+                    record['harnesses'].append(item)
+                    continue
+                record['executed_tests'].extend(identities(target, selected))
+                record['executed_ignored'].extend(identities(target, [n for n in ignored if n in selected]))
+                item['selected_tests'] = len(selected)
             if not (args.inventory_only or args.profile_only):
                 print(f'Running {target} ({len(names)} tests, {len(ignored)} ignored)', flush=True)
-                item.update(run([binary], args.output / f'harness-{number:03d}.log'))
+                item.update(run([binary, *filters], args.output / f'harness-{number:03d}.log'))
                 # A successful process running zero tests must not replace a suite.
                 text = (args.output / item['log']).read_text(encoding='utf-8', errors='replace')
                 summary = re.search(r'test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored;', text)
                 if summary:
                     item['passed'], item['failed'] = int(summary[2]), int(summary[3])
                     reported_ignored = int(summary[4])
-                    if item['passed'] + item['failed'] + reported_ignored != len(names):
+                    if item['passed'] + item['failed'] + reported_ignored != len(selected):
                         record['failures'].append({'target': target, 'reason': 'test count mismatch'})
                 else:
                     record['failures'].append({'target': target, 'reason': 'missing harness summary'})
@@ -128,15 +142,6 @@ def main():
                         print('Failed test: ' + json.dumps(name, ensure_ascii=True), flush=True)
                     print(text[-16000:], flush=True)
                 print(f"  {item['seconds']:.3f}s, exit {item['exit_code']}", flush=True)
-            if args.per_suite and target == 'test:integration':
-                for suite in sorted({name.partition('::')[0] for name in names}):
-                    sample = {'target': target, 'suite': suite, 'mode': 'isolated module; four concurrent tests'}
-                    sample.update(run([binary, suite + '::'], args.output / f'suite-{suite}.log'))
-                    record.setdefault('suite_timings', []).append(sample)
-                    if sample['exit_code']:
-                        record['failures'].append(sample)
-                    print(f"  module {suite}: {sample['seconds']:.3f}s, exit {sample['exit_code']}", flush=True)
-                    save()
             for test in names:
                 suite = test.partition('::')[0] if target == 'test:integration' else target.partition(':')[2]
                 discovered_suites.add(suite)

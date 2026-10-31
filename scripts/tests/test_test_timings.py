@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).parents[1]))
+
 spec = importlib.util.spec_from_file_location('test_timings', Path(__file__).parents[1] / 'test-timings.py')
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)

@@ -221,3 +221,30 @@ Minimal cfg(test) module wiring is shared infrastructure, not a rewrite of #41.
 A source scanner in the standard checks rejects new raw test timeouts and
 real-time deadline assertions, including newly added occurrences in deferred
 files. Its allowlist gives a reason for each intentionally retained occurrence.
+
+## Exact-SHA reuse and integration batches (#92)
+
+Keep both main push and manual Rust checks triggers. On main push only, a
+read-only Actions API lookup may reuse a completed successful first-attempt run
+of this repository's `ci.yml` on exactly the same SHA. Require actual successful
+Linux, macOS, both Windows shard jobs and the shard-inventory audit; a skipped
+job, Windows-only experiment, rerun or reuse-only push is not qualifying evidence.
+Log the source run URL in the job log and summary. API errors, absent evidence
+and unexpected responses fail open to the full checks, never to reuse.
+Manual dispatch always executes checks. Measurement/release workflows are unchanged.
+
+The integration owner accumulates approved commits on current main, returns
+conflicting branches to their authors without resolving their code, dispatches
+one ordinary three-OS batch and fast-forwards main to that exact passing SHA.
+If main moved, rebuild/recheck the batch. Bisect failing batches by constituent
+branch, returning failures with test names and run URLs; land passing subsets.
+Do not treat a failed-job rerun as batch qualification. Report intermittent
+failures with their original evidence rather than retrying into success.
+
+Windows retains four test threads per process and two independently scheduled
+jobs. Measure modules before choosing their assignment. Each job inventories
+all Cargo harnesses; the audit requires identical full inventories/ignored sets
+and an exact disjoint union of executed identities, including ignored tests.
+The source-layout check rejects unassigned or duplicate integration modules;
+new Cargo harnesses must also have explicit ownership. Linux/macOS still execute
+all targets. Exact timing and assignment evidence belongs in acceptance.
