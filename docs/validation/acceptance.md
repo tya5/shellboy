@@ -4075,3 +4075,33 @@ to #41 and recorded in #79; no F6 rendering files are edited here. That is remai
 scope, not a claim of a completed TUI test. The old #78 unpublished draft branch was
 removed after user authorization; no tags, releases, installed binary or user DB
 are touched by this task. Status/acceptance old lines are preserved and audited.
+
+## E after canonical #77/#79 main integration (2026-10-31)
+
+Exact local source0b7bd73 merges main0d4f63a through79d8be2. On native macOS,
+`CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`
+completed with1904 Rust successes,0 failures,32 ignored, Python18 successes,
+layout93 registered suites, watchdog policy, fmt and strict all-target Clippy.
+Library969/0/13, integration918/0/16, termination10/0/1, force-kill7/0/2;
+other binary/example targets contain0 tests. The raw log is retained privately
+as issue-41-e-main77-standard.log. New documentation-only ledger edits are
+separate from this exact-source test claim.
+
+Canonical #77 helper wiring occurs once. Removed9 obsolete exact allowances;
+retained6 explicit supplied-Instant samples in3 pure UI debounce/coverage tests
+with fingerprint/count reasons. They do not sleep or assert a real-time response
+budget. #71 auto_history, #54 conditional tick and #79 managed attachment path
+contracts remain intact. E adds no schema migration, worker or queue.
+
+This result does not overwrite CBC's failed native Linux/Windows CI, qualify
+repaired-source performance, or repeat the earlier6 native UI captures at this
+new source. E's remaining gates include repaired-source three-OS CI, Mac P5
+40commits/s, P3 and the P2 strict-bin/CPU review. Main remains unmodified by this
+work; no new push, release, install or user-data change is implied.
+
+Gitleaks8.30.1 redacted directory scan reported one existing synthetic fixture:
+`src/readback/tests.rs:97`, rule `curl-auth-header`, literal
+`SECRET-DO-NOT-RETURN` used to assert command redaction. Inspected the fixture and
+its negative assertion; it is not a credential. No broad ignore or source change
+was added. The E documentation diff scan reports0 findings. Directory scan is
+not described as zero findings, and this is not a full-history scan.

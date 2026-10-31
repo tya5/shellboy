@@ -17,7 +17,7 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local live UI/ownership/wait/output and delivery source807ac97 qualifies1777/0/32 plus6 actual PTYs; P2/P5/global planner and applicable native gates pending |
-| E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Local tree-cache/viewport foundation qualified; summary patches and native gates pending |
+| E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Implemented locally; initial three-OS CI exposed repaired same-deadline admission race. Rebased #77/#79 check, repaired-source CI and P3/P5 qualification remain gates; main admission awaits Claude |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
 
@@ -178,6 +178,12 @@ this design update proves neither implementation nor measurement.
 
 ### Required comparison ledger (baseline main1fec7f0)
 
+Historical P1/P7 use the baseline above. The first dispatched E P2/P5 pair uses
+the dispatch-time main912b2e2 and candidatecbc9960, as explicitly reported in
+[comment6538392801](https://github.com/tya5/shellboy/issues/41#issuecomment-6538392801).
+Do not relabel those values as a comparison against1fec7f0 or the later repaired
+and rebased candidate. Qualification gaps remain unchecked below.
+
 - [x] P1 B+C:128 nodes/50 tool rows, focus/open-close UI+draw p95<=8ms and<=baseline+2ms.
 - [ ] P2 D/F: silent background shell10min, <=1 redraw/sec,0 DB jobs/tick, CPU no worse.
 - [ ] P3 Each applicable increment: visible Changed jobs and DB-worker time with
@@ -334,7 +340,8 @@ measurement implementation/dispatch remains open, not hidden behind old samples.
 
 ## E standalone admission ledger (2026-10-31)
 
-This ledger covers List mode only, based on D2 plus main15037c1 (#75, schema15). F Watch,
+This ledger covers List mode only, currently rebased onto main0d4f63a
+(#75/#77/#79, schema15) in local merge79d8be2. F Watch,
 descendant counts/migrations and G catalogue/forms/management observation are
 excluded. A row identifies implementation and proof, not an automatic release
 or push approval. Reviewer Claude owns the E push decision after the ledger is
@@ -350,9 +357,9 @@ must not be inferred from D2 or the combined development branch.
 | E5 | Stable selected identity/screen anchor, collapse/filter/tree cache, bounded overlays, canonical cursor/watermark and late page/patch fences. Off-page selection remains explicitly unconfirmed until exact observation. | `ui::threads` reactive/coverage/off-page suites and `thread_browser` integration; no Watch behavior included. |
 | E6 | Shared saved activity classification, color and noncolor labels; current selected excerpt only; sanitized bounded titles and no blank fallback labels. | Existing classification/render tests plus Merged E+#75 native80/140 dark/light/NO_COLOR captures pass6/6. Native Windows terminal UX remains untested. |
 | E7 | Preserve #71 auto-history admission and #73 summary behavior; preserve #54 conditional tick and dirty status retry. | E changes no `src/index` or Program Status implementation; tick guard remains `progress_running || usage_waiting || (status_enabled && status_dirty)`. Merged sourcea0d8865 standard1891/0/32 passes. |
-| E8 | #77 single60s helper, notification-driven actual UI updates and scheduled visible-action wakeups; report latency without asserting machine speed. | Exact helper imported from #77 c2a5c9e; its policy scanner finds no raw guards in E browser/snapshot/refresh or frontend_reactivity fixtures. #77 branch-wide cleanup is not merged here. |
-| E9 | P3 visible List plus selected conversation coalescing/DB cost; P5 hidden40-batch/s output workload. | Paired-sequence and no-reload functional assertions exist. Actual before/after cost and long CI measurement remain pending; they are not established by these assertions. |
-| E10 | Exact-source standard check, secret scan, reviewer decision and ordinary3-OS main CI, then #41 scope report. | Standard1891/0/32 passes on merged sourcea0d8865; native6/6 after the merge; final secret scan recorded below. No E push or main CI yet. |
+| E8 | #77 single60s helper, notification-driven actual UI updates and scheduled visible-action wakeups; report latency without asserting machine speed. | Main #77 is merged. Standard layout/policy gate passes at0b7bd73; obsolete allowances for9 converted guards removed. Six exact occurrences in3 pure-clock UI tests remain reasoned/fingerprinted samples, not runtime watchdogs. No broad exception. |
+| E9 | P3 visible List plus selected conversation coalescing/DB cost; P5 hidden40-batch/s output workload. | InitialCBC Linux P5 meets40commits/s with0 UI reads/draws; Mac16.62–17.77 does not. Full12pair report6538392801 records values and source limits. P3 and repaired-source load qualification remain open; strict shared-sequence tests are functional evidence only. |
+| E10 | Exact-source standard check, secret scan, reviewer decision and ordinary3-OS main CI, then #41 scope report. | Rebased local0b7bd73 passes1904/0/32 plus Python18, fmt/strict Clippy/layout. CBC-only published measurement run41160746679 failed ordinary Linux/Windows tests; local repairs await new exact-source CI. No E main admission or main CI; later Claude approval remains required. |
 
 Canonical open/filter/pagination still uses the existing CLI title/excerpt path
 inside the readonly task. That path can issue per-row queries and scan filtered
@@ -380,6 +387,18 @@ Sources: review comments6536761757,6536813721,6536844049,6536999852 and
 Copying a code block is UI/Frontend composition of the existing saved-original
 read and Markdown extraction path, not justification for a new Core operation,
 worker, table, parser or storage format.
+
+## Additional conversation spacing review
+
+[Comment6538457249](https://github.com/tya5/shellboy/issues/41#issuecomment-6538457249)
+adds a small optional presentation improvement, tracked separately from E's
+browser admission. It is not implemented or verified by E's existing tests.
+
+| ID | Requested outcome | Required evidence / placement |
+| --- | --- | --- |
+| B-S1 | One presentation rule controls blank spacing at item-kind transitions, including answer/tool and notification boundaries; adjacent tool rows remain compact. | Adopt the concrete pair rules in conversation design before implementation; one shared layout policy. No saved nodes or extra selectable rows. Separate reviewable B presentation follow-up, after E's independent admission. |
+| B-S2 | Padding participates in the same measured layout and viewport/focus mapping as drawing; F6/F7 still resolve actual saved items and blank lines cannot receive focus. | Boundary, wrapped text, scroll anchor and focus tests, plus actual80-column PTY captures. |
+| B-S3 | Long-conversation scrolling retains P1 performance. | Repeat the applicable128-node/50-tool-row workload against the same baseline; do not infer speed from screenshots or a single layout test. |
 
 
 ### E merge of concurrent main #75

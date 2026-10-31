@@ -1614,3 +1614,18 @@ clock or non-gating measurement occurrences are documented separately. #41 was
 notified; only minimal cfg(test) lib-module wiring overlaps its current files.
 Local targeted tests and Python mutation tests pass; final full/rebased checks,
 two complete native branch runs and main CI are independent pending gates.
+
+## E canonical-main integration checkpoint (2026-10-31)
+
+Local E0b7bd73 includes main0d4f63a (#77 shared watchdog policy and #79 managed
+paths) through79d8be2. Complete native macOS standard check passes1904/0/32,
+Python18/layout93/fmt/strict Clippy. See acceptance for per-target counts and
+exact-source limits. E8–E10 ledger rows now distinguish repaired local success
+from publishedCBC's failed Linux/Windows jobs and partial P2/P5 qualification.
+
+Latest #41 comment6538457249 is tracked as B-S1–B-S3: one item-kind spacing
+policy, nonselectable padding with consistent scroll/focus geometry, and80-column
+PTY/P1 proof. It is an optional separate B presentation follow-up after E,
+not silently included in E or treated as implemented. F/G remain independent.
+Remote measurement branch remainsCBC; subsequent publication/main admission
+awaits delegated-reviewer approval. No installed binary or user data changed.
