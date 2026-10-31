@@ -490,7 +490,8 @@ fn grouped_text_wire_roundtrip_preserves_absent_null_empty_and_cursor_values() {
     let absent: UsageGetArgs = serde_json::from_value(json!({})).unwrap();
     let nulls: UsageGetArgs = serde_json::from_value(json!({
         "group_by": null, "timezone": null, "cursor": null
-    })).unwrap();
+    }))
+    .unwrap();
     assert_eq!(absent, nulls);
     for raw in [
         json!({"group_by":"thread","timezone":"UTC","cursor":"opaque"}),
@@ -505,11 +506,15 @@ fn grouped_text_wire_roundtrip_preserves_absent_null_empty_and_cursor_values() {
         let again: UsageGetArgs = serde_json::from_value(saved).unwrap();
         assert_eq!(typed, again);
     }
-    let empty: UsageGetArgs = serde_json::from_value(json!({"group_by":"thread","timezone":""})).unwrap();
+    let empty: UsageGetArgs =
+        serde_json::from_value(json!({"group_by":"thread","timezone":""})).unwrap();
     assert!(validate(&empty).is_err());
     let mut empty_cursor = args("thread");
     empty_cursor.cursor = Some("".into());
-    assert_eq!(read(&fixture(), &empty_cursor, "f").unwrap_err().code, ErrorCode::CursorExpired);
+    assert_eq!(
+        read(&fixture(), &empty_cursor, "f").unwrap_err().code,
+        ErrorCode::CursorExpired
+    );
     assert!(serde_json::from_value::<UsageGetArgs>(json!({"group_by":7})).is_err());
     assert!(serde_json::from_value::<UsageGetArgs>(json!({"cursor":[]})).is_err());
     assert!(serde_json::from_value::<UsageGetArgs>(json!({"unexpected":true})).is_err());
