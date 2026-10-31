@@ -72,7 +72,13 @@ Excluded attachments do not automatically return when capacity becomes available
 
 Copy an image to the OS clipboard, then run `/image` or its alias `/paste-image` in the TUI. This differs from ordinary text paste. A background worker retrieves the image and produces PNG, then adds the prepared image to the original draft. If you switch or edit drafts during this operation, a late result does not silently enter a different draft.
 
-Only clipboard images are saved as managed PNGs under Shellboy's data directory. This managed content allows later reuse of the original clipboard image; it does not copy ordinary external attachments. References from drafts, selected Threads, forks, and in-flight sends protect images from reclamation. Sending holds a pin; eviction from cache does not release the content until actual use ends.
+Managed clipboard images have the same absolute `path` in add/list results and
+request metadata as ordinary attachments. They remain writable; later sends use
+the same current-content hash comparisons and change records. List observations
+include `unavailable_reason` when a path is missing or reclaimed. These facts do
+not keep a file available or replace the next send's read.
+
+Only clipboard images are saved as managed PNGs under Shellboy's data directory. This managed content allows later reuse of the saved clipboard image; it does not copy ordinary external attachments. References from drafts, selected Threads, forks, and in-flight sends protect images from reclamation. Sending holds a pin; eviction from cache does not release the content until actual use ends.
 
 Managed images removed from selection or drafts become candidates for age/capacity reclamation. Even after reclamation, history retains references and the reason for unavailability, but content cannot be restored. Shellboy does not unlink external files during this reclamation. Clipboard availability depends on OS and desktop/remote environment.
 

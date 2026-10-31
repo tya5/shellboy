@@ -291,10 +291,15 @@ Write/EOF/stop validate model Run ownership and reject side effects on independe
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `attachment add [--thread THREAD] --path PATH --kind image\|file` | **Array** of attachment details (attachment_id/source_node_id/delivery_status/thread_id/path/kind/selected/managed/unavailable_reason). Even one addition uses `result[0].attachment_id`. Selects external path references, read at model-request time |
-| `attachment list [--thread THREAD]` | Attachment-detail array; inspect saved selection IDs |
+| `attachment list [--thread THREAD]` | Attachment-detail array; absolute path and current unavailable_reason for ordinary and managed images; inspect saved selection IDs |
 | `attachment remove [--thread THREAD] --attachment ATTACHMENT` | attachment_id/removed; deselects without deleting external files |
 
 `shellboy attach PATH --kind image|file [--thread THREAD]` aliases add with positional path; kind remains required. Relative CLI attachment paths become absolute against CLI startup cwd. See [attachments](attachments.md) for image/PDF/file support, model capability, changes/missing files, and compaction exclusion. Successful add does not mean API delivery completed.
+
+Managed clipboard images use the same absolute `path` as ordinary attachments.
+Files remain writable; changes are recorded by the next send's hash comparison.
+Existing retention can reclaim unused managed files; inspect `unavailable_reason`.
+A list result is a current observation, not a pin or guarantee of later access.
 
 Add/list elements return `source_node_id` and `delivery_status` (accepted/held/applied/cancelled). A separate attachment-add node is saved; shell-origin additions enter the path at a safe boundary after the complete tool group. Add acceptance JSON is neither a human-message receipt nor proof the model read it. Resending unfolds at the original position instead of moving attachments to the latest message. Same-ID/same-request replay checks saved outcomes before current Thread/file preflight, returning the original result even if the Thread was deleted after acceptance. Initial request checks and caller authentication still apply. See [attachment guide](attachments.md).
 

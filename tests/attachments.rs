@@ -1118,3 +1118,244 @@ async fn context_exclusion_notices_are_bounded_retryable_and_make_progress() {
         }).await.unwrap();
     }
 }
+
+async fn observed_list(f: &Fixture) -> Vec<shellboy::protocol::AttachmentDetails> {
+    use shellboy::{control::db::Store, protocol::*};
+    let store = Store::new(
+        f.db.clone(),
+        std::sync::Arc::new(Config::default()),
+        f.path.clone(),
+        "instance-test".into(),
+    );
+    let result = store
+        .execute(
+            Request::new(
+                uuid::Uuid::new_v4().to_string(),
+                Command::AttachmentList(ThreadTarget {
+                    thread_id: Some("thread".into()),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    serde_json::from_value(result.result).unwrap()
+}
+
+#[tokio::test]
+async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
+    timeout(Duration::from_secs(60), async {
+        use std::io::Write;
+        let mut config = Config::default();
+        config.retention.clipboard_bytes = 1;
+        let f = Fixture::new(config).await;
+        let image = f
+            .service
+            .save_clipboard_pixels(
+                ClipboardPixels {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![2, 4, 6, 255],
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let path = image.path.clone();
+        assert!(path.is_absolute());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let mut plan = f
+            .service
+            .plan_add("thread", vec![], CancellationToken::new())
+            .await
+            .unwrap();
+        plan.files.push(image.planned());
+        let added = f.register(plan).await.unwrap();
+        assert_eq!(added[0].path, path.to_str().unwrap());
+        assert!(added[0].managed && added[0].unavailable_reason.is_none());
+        let attachment = added[0].attachment_id.clone();
+        drop(image);
+        let log_path = f.path.join("observations.jsonl");
+        let mut log = std::fs::File::create(&log_path).unwrap();
+        let initial = f.prepare().await;
+        let first_hash = initial.manifest[0].content_hash.clone();
+        let metadata: serde_json::Value = serde_json::from_str(
+            initial.placements[0].content[0]["text"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("[Shellboy attachment metadata] ")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(metadata["path"], path.to_str().unwrap());
+        assert!(metadata["unavailable_reason"].is_null());
+        writeln!(
+            log,
+            "{}",
+            serde_json::to_string(&initial.manifest[0]).unwrap()
+        )
+        .unwrap();
+        drop(f.adopt(initial, true).await);
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[12, 34, 56, 255, 1, 2, 3, 255])
+                .unwrap();
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        assert_eq!(
+            std::fs::read(&observed_list(&f).await[0].path).unwrap(),
+            bytes
+        );
+        let changed = f.prepare().await;
+        assert!(changed.manifest[0].changed);
+        assert_eq!(changed.manifest[0].previous_hash, first_hash);
+        assert_ne!(changed.manifest[0].content_hash, first_hash);
+        assert!(
+            changed
+                .notices
+                .iter()
+                .any(|s| s.contains("attachment changed update"))
+        );
+        writeln!(
+            log,
+            "{}",
+            serde_json::to_string(&changed.manifest[0]).unwrap()
+        )
+        .unwrap();
+        drop(f.adopt(changed, true).await);
+        std::fs::remove_file(&path).unwrap();
+        assert!(observed_list(&f).await[0].unavailable_reason.is_some());
+        let missing = f.prepare().await;
+        assert_eq!(missing.manifest[0].state, "unavailable");
+        let metadata: serde_json::Value = serde_json::from_str(
+            missing.placements[0].content[0]["text"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("[Shellboy attachment metadata] ")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(metadata["path"], path.to_str().unwrap());
+        assert!(metadata["unavailable_reason"].is_string());
+        writeln!(
+            log,
+            "{}",
+            serde_json::to_string(&missing.manifest[0]).unwrap()
+        )
+        .unwrap();
+        drop(missing);
+        std::fs::write(&path, &bytes).unwrap();
+        f.remove(attachment).await;
+        loop {
+            let n =
+                f.db.call(|db| {
+                    Ok(db.query_row("SELECT count(*) FROM runtime_pin", [], |r| {
+                        r.get::<_, i64>(0)
+                    })?)
+                })
+                .await
+                .unwrap();
+            if n == 0 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let report = f.service.collect_managed(chrono::Utc::now()).await.unwrap();
+        assert_eq!(report.deleted.len(), 1);
+        let deleted = observed_list(&f).await;
+        assert_eq!(deleted[0].path, path.to_str().unwrap());
+        assert!(
+            deleted[0]
+                .unavailable_reason
+                .as_deref()
+                .unwrap()
+                .contains("clipboard retention")
+        );
+        assert!(!path.exists());
+        log.flush().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&log_path).unwrap().lines().count(),
+            3
+        );
+        f.db.call(|db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM operation_receipt", [], |r| r
+                    .get::<_, i64>(0))?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        f.db.shutdown().await.unwrap();
+    })
+    .await
+    .expect("managed attachment facts watchdog");
+}
+
+#[tokio::test]
+async fn attachment_list_seeks_existing_indexes_and_does_not_wait_for_writer() {
+    timeout(Duration::from_secs(60), async {
+        let f = Fixture::new(Config::default()).await;
+        f.add("regular.txt", b"ordinary").await;
+        f.db.call(|db| {
+            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {}", ATTACHMENT_LIST_SQL))?;
+            let details = plan
+                .query_map(["thread"], |r| r.get::<_, String>(3))?
+                .collect::<Result<Vec<_>, _>>()?;
+            for alias in ["s", "a", "m"] {
+                assert!(
+                    details
+                        .iter()
+                        .any(|s| s.starts_with(&format!("SEARCH {alias} "))),
+                    "{details:?}"
+                );
+                assert!(
+                    !details
+                        .iter()
+                        .any(|s| s.starts_with(&format!("SCAN {alias} "))),
+                    "{details:?}"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let (ready, waiting) = tokio::sync::oneshot::channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        let db = f.db.clone();
+        let blocked = tokio::spawn(async move {
+            db.call(move |_| {
+                ready.send(()).unwrap();
+                gate.recv().unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap()
+        });
+        waiting.await.unwrap();
+        let items = observed_list(&f).await;
+        assert_eq!(items.len(), 1);
+        assert!(items[0].unavailable_reason.is_none());
+        release.send(()).unwrap();
+        blocked.await.unwrap();
+        std::fs::remove_file(f.path.join("regular.txt")).unwrap();
+        assert!(observed_list(&f).await[0].unavailable_reason.is_some());
+        f.db.shutdown().await.unwrap();
+    })
+    .await
+    .expect("attachment observation watchdog");
+}

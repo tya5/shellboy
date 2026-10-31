@@ -216,6 +216,7 @@ impl Store {
                 | Command::TurnGet(_)
                 | Command::CompactList(_)
                 | Command::ShellList(_)
+                | Command::AttachmentList(_)
         ) {
             let mut store = self.clone();
             store.usage_context = crate::usage_totals::read_context();
@@ -231,6 +232,13 @@ impl Store {
                 db.pragma_update(None, "query_only", true)
                     .map_err(sql_error)?;
                 let tx = db.transaction().map_err(sql_error)?;
+                if let Command::AttachmentList(args) = &request.command {
+                    let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
+                    let mut items = crate::attachments::list_tx(&tx, &thread)?;
+                    tx.commit().map_err(sql_error)?;
+                    crate::attachments::observe_paths(&mut items);
+                    return MutationResult::value(items);
+                }
                 let value = store.dispatch(
                     &tx,
                     &request.command,

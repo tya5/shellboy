@@ -67,3 +67,17 @@ path外通知は既存一覧既定値と同じ最大50件の候補を一回に�
 file_prepare_timeout_msは、DBから選択内容を取得した後、一回のprepare内のfile worker枠待ち＋実体読取りに共有する期限とする。DB取得時間まで含めた要求全体のdeadlineではない。同じpathの重複を一度だけ読む現在の順序を保ち、途中で期限に達すれば残りはunavailableとして同じ要求を継続する。各ファイルで期限を更新して総待機をファイル数倍へ延ばす案は採らない。開始済みI/Oは実終了まで既存permit/pinを持ち、timeoutで追加workerを起こさない。個別の再試行は次の明示要求で行い、準備に新しいtimer/設定/queueを足さない。
 
 managed PNGはtemp本文のsync→rename→Unixの両親directoryのsyncを有限file worker内で行い、その成功後にDBのreadyを保存する。親dir同期失敗も既存failed経路へ返す。Windowsのstd rename経路は維持し、Unixのdirectory fsyncと同じ電源断保証は表明しない。実機の電源断耐久性はこの機能試験で検証済みと扱わない。
+
+## Managed paths as ordinary attachment paths (#79)
+
+Managed clipboard images retain the ordinary absolute `path` field in add/list
+results. Per-request attachment metadata exposes that same path and any observed
+unavailability. Managed and external files share preparation, current-byte reads,
+per-Thread/ID successful-send hash baselines and change notices. Do not change
+permissions, introduce exports or add a retention pin merely to display a path.
+List joins managed lifecycle state through its existing unique path index and
+observes filesystem availability outside the DB writer, on the existing finite
+presentation worker. This is an observation, not a lease or future-read guarantee.
+Existing selection/draft/fork/inflight reclamation rules remain unchanged.
+F6 path presentation is delegated to the overlapping #41 display work; #79 does
+not modify its rendering files in this first version.

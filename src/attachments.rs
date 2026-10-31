@@ -573,7 +573,7 @@ impl AttachmentService {
                     }
                 }
             }
-            let metadata = json!({"type":"input_text","text":format!("[Shellboy attachment metadata] {}",json!({"attachment_id":s.id,"source_node_id":s.source_node_id,"source_element_index":s.source_element_index,"content_hash":manifest.content_hash,"previous_hash":manifest.previous_hash,"state":manifest.state,"first_inclusion":manifest.first_inclusion,"version":"current read for this request"}))});
+            let metadata = json!({"type":"input_text","text":format!("[Shellboy attachment metadata] {}",json!({"attachment_id":s.id,"path":s.path,"unavailable_reason":manifest.error.as_deref().or(s.reason.as_deref()),"source_node_id":s.source_node_id,"source_element_index":s.source_element_index,"content_hash":manifest.content_hash,"previous_hash":manifest.previous_hash,"state":manifest.state,"first_inclusion":manifest.first_inclusion,"version":"current read for this request"}))});
             let mut content = vec![metadata];
             content.extend(expansion);
             if s.detached {
@@ -659,8 +659,26 @@ fn exclusion_notice(selection: &Selected, thread: &str, reason: &str) -> Value {
 fn delivery_status(db: &Connection, thread: &str, source: &str) -> rusqlite::Result<String> {
     db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2) THEN 'applied' ELSE COALESCE((SELECT status FROM attachment_delivery WHERE thread_id=?1 AND node_id=?2),'accepted') END",params![thread,source],|r|r.get(0))
 }
+pub const ATTACHMENT_LIST_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 ORDER BY s.selected_order,a.id";
+
+/// Filesystem observations run only on a file/display worker, not the DB lane.
+pub(crate) fn observe_paths(items: &mut [AttachmentDetails]) {
+    for item in items {
+        if item.unavailable_reason.is_some() {
+            continue;
+        }
+        item.unavailable_reason = match std::fs::metadata(&item.path) {
+            Ok(meta) if meta.is_file() => {
+                std::fs::File::open(&item.path).err().map(|e| e.to_string())
+            }
+            Ok(_) => Some("Attachment path is not a regular file".into()),
+            Err(error) => Some(error.to_string()),
+        };
+    }
+}
+
 pub fn list_tx(db: &Connection, thread_id: &str) -> Result<Vec<AttachmentDetails>, ApiError> {
-    let mut statement=db.prepare("SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id WHERE s.thread_id=?1 ORDER BY s.selected_order,a.id").map_err(sql_error)?;
+    let mut statement = db.prepare(ATTACHMENT_LIST_SQL).map_err(sql_error)?;
     statement
         .query_map([thread_id], |r| {
             let kind: String = r.get(2)?;
@@ -678,7 +696,14 @@ pub fn list_tx(db: &Connection, thread_id: &str) -> Result<Vec<AttachmentDetails
                 },
                 managed: r.get::<_, String>(3)? == "managed_clipboard",
                 selected: r.get::<_, String>(4)? == "active",
-                unavailable_reason: r.get(5)?,
+                unavailable_reason: match r.get::<_, Option<String>>(7)? {
+                    Some(state) if state != "ready" => Some(format!(
+                        "{} ({state})",
+                        r.get::<_, Option<String>>(8)?
+                            .unwrap_or_else(|| "Managed attachment unavailable".into())
+                    )),
+                    _ => r.get(5)?,
+                },
             })
         })
         .map_err(sql_error)?
