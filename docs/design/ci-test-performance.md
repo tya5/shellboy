@@ -221,3 +221,30 @@ Minimal cfg(test) module wiring is shared infrastructure, not a rewrite of #41.
 A source scanner in the standard checks rejects new raw test timeouts and
 real-time deadline assertions, including newly added occurrences in deferred
 files. Its allowlist gives a reason for each intentionally retained occurrence.
+
+
+## Exact-SHA reuse and integration batches (#92)
+
+Keep both main push and manual Rust checks triggers. On main push only, a
+read-only Actions API lookup may reuse a completed successful first-attempt run
+of this repository's `ci.yml` on exactly the same SHA. Require actual successful
+`check (ubuntu-latest)`, `check (macos-latest)` and `check (windows-latest)` jobs;
+a skipped job, Windows-only experiment, rerun or reuse-only push is not qualifying
+evidence. Log the source run URL in the job log and summary. API errors, absent
+evidence and unexpected responses run the full checks instead of reusing.
+Manual dispatch always executes checks. Measurement/release jobs are unchanged.
+
+The integration owner accumulates approved commits on current main, returns
+conflicting branches to their authors without resolving their code, dispatches
+one ordinary three-OS batch and fast-forwards main to that exact passing SHA.
+If main moved, rebuild/recheck the batch. Bisect failing batches by constituent
+branch, returning failures with test names and run URLs; land passing subsets.
+Do not treat a failed-job rerun as batch qualification. Report intermittent
+failures with their original evidence rather than retrying into success.
+
+The reviewer narrowed #92 to reuse only on 2026-10-31 after observing limited
+benefit from two Windows jobs: repeated all-target build/link work outweighed
+the execution split. Keep the original single Windows job and four test threads;
+remove experimental partition tooling and its coverage audit. The two failures
+exposed during split execution are tracked separately in #95 and do not block
+reuse qualification under the original unsplit native configuration.

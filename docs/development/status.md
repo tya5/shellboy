@@ -1,5 +1,23 @@
 # Development status
 
+## Exact-SHA CI reuse (#92)
+
+Main push may reuse actual first-attempt successful three-OS native checks on
+its exact SHA via the read-only Actions API. Missing or failed API evidence runs
+all checks, and manual dispatch always runs native checks. The reviewer approved
+reuse only; Windows retains the original single job/four test threads. Rejected
+split experiments and #95 failures are retained in acceptance. Native unsplit
+qualification and live main-push reuse remain pending on the reuse-only source.
+
+## Explicit usage-limit recovery (#76)
+
+Known future usage-limit resets now bypass automatic resend/reduction and enter
+existing recovery wait with UTC reset/window facts in run get and reason text.
+One shared fixed-size in-memory slot per configured connection blocks later
+generation POSTs until expiry; owner restart forgets it. Unknown 429 retains
+normal retries. Bottom-line TUI work is deferred to #85; activity/chrome are
+unchanged. Loopback/virtual-clock checks pass; exact-source CI is tracked in #76.
+
 ## CI observation ordering (#89)
 
 Three intermittent observations are traced to test boundaries: index-context
@@ -2268,8 +2286,19 @@ F67cc688, including candidate-only Watch; the local2s smoke is fixture proof
 only. Native P3 combined-consumer characterization is in progress.
 
 The specified2,000-row Watch allocation profile and its limits are recorded in
-[acceptance](../validation/acceptance.md#f-follow-up-qualification-and-parallel-handoff).
+[F qualification](../validation/conversation-redesign-f.md).
 It does not confuse the64KiB source budget with total UI memory or claim RSS.
 Parallel Shellboy #85–#87/#90 and issue5 coordination follows
 [the current plan](issue-41-plan.md#parallel-admission-coordination-6541457457).
 G uses #87 if already admitted; the later side resolves the named overlaps.
+
+
+## Latest-main F admission preparation
+
+F integrates main9b4ae34, retaining #76 usage/cooldown behavior and #92
+exact-SHA CI reuse. Source950c9ed ordinary3OS CI41187246963 is green; the
+combined source is not yet qualified. F's next migration remains17 (main16).
+F retains #83's row vocabulary, #84 paste/composer and #71/#54 conditions.
+Native P3 across List/global Watch/scoped Watch and Program Status on/off is
+now characterized at67cc688 in the F record; native long CI41186128587 is
+still executing. No F/G main admission or installed-binary change is implied.

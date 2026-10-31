@@ -100,6 +100,12 @@ impl HttpModelClient {
         events: Option<Events>,
         thread: Option<&str>,
     ) -> Result<ModelResponse, AttemptFailure> {
+        if cancel.is_cancelled() {
+            return Err(cancelled().into());
+        }
+        if let Some(fact) = self.active_usage_limit() {
+            return Err(fact.error().into());
+        }
         let mut deadline = Deadline::new(
             ApiEndpoint::Responses,
             &self.connection,
@@ -120,6 +126,9 @@ impl HttpModelClient {
         )
         .await
         .map_err(|mut failure| {
+            if let Some(fact) = failure.error.usage_limit.as_deref().copied() {
+                self.remember_usage_limit(fact);
+            }
             if let Some(raw) = &mut failure.raw_response {
                 crate::usage::normalize_response(raw);
             }
@@ -235,6 +244,27 @@ impl HttpModelClient {
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
                 .and_then(parse_retry_after);
+            let limit = (status.as_u16() == 429)
+                .then(|| {
+                    response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| {
+                            crate::model::usage_limit::UsageLimit::retry_after_header(
+                                v,
+                                chrono::Utc::now(),
+                            )
+                        })
+                })
+                .flatten();
+            if let Some(fact) = limit {
+                // The header already establishes the cooldown; do not wait for
+                // an error body that may be stalled or arbitrarily large.
+                let mut error = fact.error();
+                error.status = Some(429);
+                return Err(error.into());
+            }
             return Err(http_error(response, &mut context).await.into());
         }
         let content_type = response

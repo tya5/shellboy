@@ -69,11 +69,17 @@ struct ClientPool {
     generation: u64,
     issued: u64,
 }
+struct TimedUsageLimit {
+    fact: super::usage_limit::UsageLimit,
+    observed: tokio::time::Instant,
+    wait: std::time::Duration,
+}
 #[derive(Clone)]
 pub struct HttpModelClient {
     pool: Arc<RwLock<ClientPool>>,
     connection: Connection,
     connection_name: String,
+    usage_limit: Arc<std::sync::Mutex<Option<TimedUsageLimit>>>,
 }
 impl HttpModelClient {
     /// Count the actual dialect input, not discarded Responses-only replay items.
@@ -102,7 +108,41 @@ impl HttpModelClient {
             })),
             connection,
             connection_name: name.into(),
+            usage_limit: Arc::new(std::sync::Mutex::new(None)),
         })
+    }
+    fn active_usage_limit(&self) -> Option<super::usage_limit::UsageLimit> {
+        let mut slot = self.usage_limit.lock().expect("usage limit lock poisoned");
+        if slot
+            .as_ref()
+            .is_some_and(|timed| timed.observed.elapsed() >= timed.wait)
+        {
+            *slot = None;
+        }
+        slot.as_ref().map(|timed| {
+            let mut fact = timed.fact;
+            fact.locally_blocked = true;
+            fact
+        })
+    }
+    fn remember_usage_limit(&self, fact: super::usage_limit::UsageLimit) {
+        let Some(at) = chrono::DateTime::from_timestamp(fact.resets_at, 0) else {
+            return;
+        };
+        let Ok(wait) = at.signed_duration_since(chrono::Utc::now()).to_std() else {
+            return;
+        };
+        let mut slot = self.usage_limit.lock().expect("usage limit lock poisoned");
+        if slot
+            .as_ref()
+            .is_none_or(|old| wait >= old.wait.saturating_sub(old.observed.elapsed()))
+        {
+            *slot = Some(TimedUsageLimit {
+                fact,
+                observed: tokio::time::Instant::now(),
+                wait,
+            });
+        }
     }
     fn build_client(connection: &Connection) -> Result<Client, ModelError> {
         Client::builder()

@@ -632,3 +632,28 @@ These are the Thread's own saved facts, not expansion of fork-only ancestors.
 Existing list paging/limits remain unchanged. Held/cancelled input is still a
 received fact, not proof that the model consumed it; sender labels do not grant
 permissions. Reclaimed bodies retain identity/time with an empty excerpt.
+
+### Known usage-limit resets (#76)
+
+When a response explicitly reports `usage_limit_reached` with a valid future
+`resets_at` (Unix seconds) or `resets_in_seconds`, the Turn enters recovery wait
+without automatic resend. The same applies to HTTP 429 with a valid Retry-After
+above 600 seconds. Generic 429 without these facts retains ordinary retry rules.
+OpenAI-shaped error.type/code, one JSON error.message wrapper and LiteLLM's
+`litellm.RateLimitError` plus complete JSON suffix are supported; arbitrary prose
+is not interpreted as quota evidence.
+
+`run get --run ID` exposes `context.recovery_reason.details.usage_limit`: kind,
+`resets_at` epoch seconds, `resets_at_utc`, optional `limit_window_minutes`, and
+`locally_blocked`. The existing reason string also shows the UTC reset. Wait
+until that time, or use `/model` to choose another connection/model. There is
+no automatic switch or restart at reset. Changing only the model on the same
+connection does not bypass the connection-wide cooldown.
+
+The owner remembers at most one fixed-size reset fact per configured connection
+in memory. Other conversations on that connection fail locally without POST
+until expiry; their saved failed attempt is marked locally_blocked and has no
+HTTP observation. Owner restart forgets the memory; already-in-flight requests
+are not cancelled. Input preparation is not skipped. Embeddings and model-list
+requests are outside this first version. Short bottom-line TUI rendering is
+tracked separately in #85; use run get/the existing recovery reason for now.

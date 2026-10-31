@@ -1,5 +1,36 @@
 # Validation record
 
+## Exact-SHA CI reuse (#92, reuse-only qualification pending)
+
+On 2026-10-31 the reviewer approved reuse and explicitly dropped Windows
+partitioning: two-job wall times7.3/8.5min (other samples7.8/8.1min) did not
+materially improve the earlier8.9min unsplit job, because each job repeated
+all-target build/link work. The final tree preserves the main baseline's full
+single-job Windows execution, timing runner, layout checks and Python tests;
+there is no partition manifest, selector, batching helper or shard audit.
+
+Retain experimental provenance, not as proof for the final source:
+- Measurement efc10e5/run41182264568 passed; library103.812s and integration146.219s.
+- Candidate39577ff/run41184106926 failed Python Unicode subprocess sibling imports.
+- Candidate7f339a7/run41184263185 rejected unassigned visible support modules.
+- Candidatefa1e26b/run41184815121 rejected ambiguous libtest substring skips.
+- Candidate1fa0e95/run41185378870 passed three OSes and the former inventory audit
+  (1846 Windows identities,24 ignored); execution128.032/182.828s, independent
+  all-target builds173.578/182.484s. This was not the final reuse-only layout.
+- Rebalanced4355953/run41186034007 passed Linux/macOS/Windows1 but failed Windows2:
+  frontend_reactivity::selected_header_and_open_browser_share_one_changed_snapshot_without_reload
+  observed read sequences44/43; response_retries::stalled_permanent_error_body_is_not_retried
+  observed request counts3/1. Per reviewer, #95 owns their separate diagnosis;
+  no assertion was weakened, excluded or retried into qualification.
+
+The reuse gate's Node fixtures cover exact-SHA success, wrong SHA/repository,
+reruns, skipped/incomplete/Windows-only native jobs and API failures. Require
+new first-attempt native three-OS checks in the original unsplit configuration
+before main integration. Actual main-push reuse and the no-prior-success main
+push fallback remain untested live until authorized integration; mocked gate
+cases do not establish those paths. No local Rust build/test was performed on
+the8GB integration host. Final exact-source results will also be linked in #92.
+
 ## #41 D2 owned work and output (local)
 
 Final source807ac97 passes native macOS arm64/Rust1.99.1 standard checks:
@@ -4860,6 +4891,57 @@ old one_live_run or new wait_run_state named index, with an explicit Thread
 SEARCH predicate; unrelated plan checks remain unchanged. Production migration
 stays strict and source-preservation/rollback/reopen assertions are retained.
 
+## #76 explicit usage-limit and connection-cooldown qualification
+
+2026-10-31, native macOS 26.3.1 arm64 / Rust 1.99.1. Temporary synthetic owners
+and loopback HTTP only. No real provider, account limit, paid request, user DB,
+installed binary, running owner, settings, tag or Release is changed by testing.
+Build jobs are capped at 2 and test threads at 4. New expiry tests advance Tokio
+time; guards use the shared 60-second watchdog, not latency thresholds.
+
+- Typed future integer resets_at (preferred) / positive resets_in_seconds with
+  exact usage_limit_reached type/code; direct and LiteLLM JSON-message/raw-text
+  wrappers are tested. Missing, stale, fractional/string/overflow timestamps,
+  unknown codes and prose are not inferred into quota facts. Relative seconds
+  round upward; fractional-current-time boundaries and zero relative reset are
+  tested. Retry-After seconds and RFC2822/IMF-style HTTP dates retain facts.
+- Owner loopback scenarios cover six shapes: direct absolute, LiteLLM message,
+  relative, long 429 Retry-After delta, long 429 HTTP-date, raw LiteLLM text.
+  Each saves recovery_wait with one initial attempt and no automatic_retry;
+  run get contains kind/UTC reset/window when present and /model guidance.
+  A second Thread on the same connection recovers locally without POST; its
+  fact has locally_blocked=true and no fabricated HTTP observation. Advancing
+  Tokio by 3,602 seconds then allows a third Thread's ordinary successful POST.
+  The real request JSONL per fixture is 0->1->1->2 lines. A long-header case
+  withholds its advertised error body and proves recovery does not require it.
+- Unknown 429 with no quota/reset fact retains ordinary retry (explicit zero
+  Retry-After avoids real sleep), completes with two attempts, and logs 0->2
+  request lines. Existing unknown-429/backoff/overflow/partial-output/stop tests
+  also pass: the response_retries module has 24 passing tests. Non-quota 503
+  above the existing ten-minute ceiling retains its independent defer policy.
+- Shared-client tests cover both Responses and Chat Completions error paths,
+  locally blocked second invocation without a live server, per-connection clone
+  sharing/isolation, rejected unconfigured keys, later-deadline retention,
+  virtual expiry, and empty slots in a fresh owner-scoped client table. Two
+  configured connections still have exactly two entries, each with one fixed
+  optional fact/time/duration slot; no timer, table, worker or queue is added.
+
+Local standard check succeeds: Rust 1,894 passed / 0 failed / 33 ignored, layout
+93, Python 18, fmt/strict Clippy. Rebase and exact-source native CI are separate
+gates reported in issue #76. Initial development checks exposed an unboxed
+error-size increase and a wrongly populated raw-text fixture; both were fixed
+without suppressing Clippy, extending watchdogs or weakening assertions.
+
+The first version does not infer other provider shapes, forecast limits, switch
+connections, resume automatically, cancel already-in-flight calls or skip input
+preparation. The generation gate includes summaries but excludes embedding and
+model-list traffic. Long 429 headers return before body parsing, so those cases
+do not extract body-specific plan/window details. Real-provider compatibility
+is unverified. src/ui/activity.rs and src/ui/chrome.rs are untouched; #85 tracks
+the deferred short status display, with the data contract in its comment
+6540361176. Existing reason text and run get already expose the reset.
+
+
 
 ## F latest-main integration qualification (source742d523)
 
@@ -4913,61 +4995,8 @@ is authorized after E admission; F main admission is separately gated on review.
 
 ## F follow-up qualification and parallel handoff
 
-Source950c9ed has a successful isolated-target native macOS standard check:
-2,019 passed/0 failed/35 ignored (lib1072/0/15, integration928/0/17,
-termination12/0/1, forced7/0/2), Python18, format, strict all-target Clippy and
-layout/watchdog gates. All three new cancellation tests are explicitly present
-in both the compiled inventory and successful harness output. A prior shared
-target run reused the67cc688 unit artifact (1069 passes, missing those tests);
-that run is discarded as evidence for950c9ed. The earlier focused249/0/3 run
-proved the two then-existing cancellation checks, not the later partial-consumer
-SQL case. That third case now passes and observes one actual root-count SQL
-while a cancelled Watch part is omitted. Gitleaks67cc688..950c9ed: no leaks.
-
-The F branch advances to950c9ed and starts exact-source ordinary3OS
-CI41187246963. Main remains unchanged. CI41186128587 separately runs
-formal P2/P5 before d0a92bf/after67cc688 on Linux/macOS80/140 with3 P5
-producers (P2 one). Watch has no baseline counterpart and is explicitly a
-candidate-only observation. Native Windows performance stays unavailable.
-Local2s smoke validates all8 available scenarios, actual producer counts and
-source/binary/harness witnesses: P5 draws/UI writer jobs/readonly opens all0;
-these short windows do not qualify long-window P2/P5.
-
-### Requested-live heap characterization, source67cc688
-
-A private release example (no cfg(test), dev-dependency feature union) wraps
-System GlobalAlloc and measures allocator-requested live bytes at object
-boundaries. It uses actual WatchState/ThreadBrowser methods, not estimated
-String lengths. Fixture:2,000 rows,160 emoji title/parent,512 emoji recovery,
-160 emoji answer;36-byte synthetic identities and short synthetic timestamps.
-Full Browser loads40 pages of50 and actually draws/scrolls every row through
-140x40 TestBackend, then retains2,000 seen identities. Two cycles are observed.
-An earlier unrelated-full-unit-LTO probe was interrupted before producing any
-result; it is not a successful sample. The dedicated example binary witness
-is341c5407c07605d1138841dde3b69bc80fc7f80c38cb53dda0b7b6c17d7d6b2c.
-
-| Allocated component/stage | Observed requested-live delta, bytes |
-| --- | ---: |
-| WatchState metadata |5,230,576 in both cycles|
-| WatchState after details/seen |21,570,272 in both cycles|
-| WatchState closed cache |21,570,272; bounded entries remain cached|
-| Empty WatchState reopen, seen retained |365,920 in both cycles|
-| WatchState dropped |0 in both cycles|
-| Full Browser metadata |10,142,336 in both cycles|
-| Full Browser visited details + seen + two draw buffers |27,709,696 /27,691,400|
-| Full Browser closed, buffers still held |27,539,064 /27,520,768|
-| Full Browser and buffers dropped |18,296 first cycle /0 second cycle|
-
-The first full-draw residual is unattributed process allocation; the next cycle
-shows no additional residual. This does not prove absence of every leak. These
-values are a specified cache-shape observation, not RSS, allocator usable size,
-a hard bound for all work/string shapes, whole owner/UI-state heap, or native
-other-OS evidence. The64KiB source-witness budget never claimed total Watch
-memory. No allocator hook, runtime API, dependency, cache policy, new worker or
-queue is added to the product. Raw source patches/manifests/binary/logs remain
-local; no user data, clipboard or paid endpoint was involved.
-
-User coordination6541457457 permits Shellboy #85–#87/#90 to start before F/G.
-The later side rebases the named small UI overlaps; G uses admitted #87 as its
-base, and F adapts startup fixture lines if issue5's shared owner assembly lands
-first. F/G main gates and the narrowed #41 scope remain unchanged.
+Detailed source-specific F standard/CI, native Watch, P4, retained allocation
+and combined-consumer P3 observations are maintained in
+[the F qualification record](conversation-redesign-f.md). Discarded shared-target
+evidence is kept separate from the isolated950c9ed success. Main admission
+still requires the latest combined source gates and reviewer approval.

@@ -2159,6 +2159,35 @@ not a claim of zero source-JSON parsing cost. No table/worker/queue/dependency i
 added. #80 and #83 were integrated before shared files were edited; UI changes
 are optional DTO initialization only, not rendering/row/composer behavior.
 
+## #76: Minimal fact-only usage-limit cooldown (2026-10-31, active)
+
+Use only explicit usage_limit_reached plus a future valid integer reset, or
+HTTP 429 Retry-After above the existing 600-second automatic-wait ceiling.
+Generic 429 and other HTTP statuses are not inferred to be plan quotas.
+Keep one fixed optional fact/monotonic observation/duration per configured
+shared client, never a growing map of arbitrary provider keys or persistent
+state. Reuse owner lifetime; expiry is lazy and restart forgets memory.
+Retain the later concurrently observed reset. Fail locally before HTTP but
+preserve the existing attempt/recovery path and mark the absence of sending.
+No auto-switch/resume or input-preparation optimization. Header facts suffice
+without a possibly stalled error body. Existing reason text/run get are the
+initial UI boundary; bottom-line presentation belongs to #85 to avoid #41 F/G.
+
+
+## 2026-10-31: Reuse-only CI integration (#92)
+
+- Status: active; reviewer-approved scope replaces the proposed Windows split.
+- Decision: reuse first-attempt successful three-OS checks on the exact main-push
+  SHA, with read-only API evidence, logged source run and full-check fallback.
+  Preserve manual execution and the original unsplit four-thread Windows job.
+- Reason: repeating build/link work in two Windows jobs gave little wall-time
+  benefit. The two surfaced test failures move to #95; their assertions remain.
+- Validation: qualify the final unsplit source on all three OSes, then verify
+  actual same-SHA main-push reuse. Mock API fixtures are not live verification.
+- Revisit only with measured build-sharing savings and separately fixed tests;
+  do not reintroduce split execution as part of this reuse-only change.
+
+
 
 ## F parent-index renumbering after latest-main integration
 

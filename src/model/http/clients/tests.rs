@@ -691,3 +691,127 @@ async fn sse_terminal_drain_cancellation_is_prompt_and_preserves_final_raw() {
     assert_eq!(failure.partial_text, "retained streamed text");
     assert_eq!(failure.raw_response.unwrap()["status"], "completed");
 }
+
+#[tokio::test(start_paused = true)]
+async fn usage_limit_slots_are_connection_bounded_shared_and_expire_on_tokio_clock() {
+    let mut config = Config::default();
+    config.connections.insert(
+        "one".into(),
+        Connection {
+            base_url: "http://127.0.0.1:1/v1".into(),
+            ..Default::default()
+        },
+    );
+    config.connections.insert(
+        "two".into(),
+        Connection {
+            base_url: "http://127.0.0.1:1/v1".into(),
+            ..Default::default()
+        },
+    );
+    let clients = HttpClients::new(&config);
+    assert_eq!(clients.entries.len(), 2);
+    let one = clients.get("one").unwrap();
+    let fact = crate::model::usage_limit::UsageLimit::parse(
+        &json!({"error":{
+        "type":"usage_limit_reached","resets_in_seconds":3600}}),
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    one.remember_usage_limit(fact);
+    let mut earlier = fact;
+    earlier.resets_at -= 3000;
+    one.remember_usage_limit(earlier);
+    assert_eq!(one.active_usage_limit().unwrap().resets_at, fact.resets_at);
+    assert!(clients.get("unconfigured").is_err());
+    assert!(
+        clients
+            .get("one")
+            .unwrap()
+            .active_usage_limit()
+            .unwrap()
+            .locally_blocked
+    );
+    assert!(clients.get("two").unwrap().active_usage_limit().is_none());
+    assert!(
+        HttpClients::new(&config)
+            .get("one")
+            .unwrap()
+            .active_usage_limit()
+            .is_none()
+    );
+    tokio::time::advance(std::time::Duration::from_secs(3599)).await;
+    assert!(one.active_usage_limit().is_some());
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    assert!(one.active_usage_limit().is_none());
+}
+
+#[tokio::test]
+async fn usage_limit_http_error_is_shared_by_responses_and_chat_completions() {
+    for api in [
+        crate::config::Api::Responses,
+        crate::config::Api::ChatCompletions,
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connection = Connection {
+            api,
+            base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+            ..Default::default()
+        };
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut head = String::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).await.unwrap();
+                head.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            assert!(head.starts_with(if api == crate::config::Api::Responses {
+                "POST /v1/responses "
+            } else {
+                "POST /v1/chat/completions "
+            }));
+            let length: usize = head
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|n| n.trim().parse().unwrap())
+                })
+                .unwrap();
+            reader.read_exact(&mut vec![0; length]).await.unwrap();
+            let body = json!({"error":{"type":"usage_limit_reached","resets_in_seconds":3600}})
+                .to_string();
+            reader.get_mut().write_all(format!("HTTP/1.1 429 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+        });
+        let client = HttpModelClient::new(connection).unwrap();
+        let failure = crate::test_watchdog::watchdog(
+            "quota dialect HTTP fact",
+            client.response(
+                response_request("synthetic", vec![], None, false),
+                CancellationToken::new(),
+                None,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(failure.facts.status, Some(429));
+        assert!(failure.error.usage_limit.is_some());
+        task.await.unwrap();
+        let failure = client
+            .response(
+                response_request("synthetic", vec![], None, false),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(failure.error.usage_limit.unwrap().locally_blocked);
+        assert!(failure.facts.http_observation.is_none());
+    }
+}
