@@ -4063,3 +4063,11 @@ The published #41 branch overlaps F8/frontend/UI files. Only minimal request/rep
 plumbing is included here; F8 display, leak investigation, untracked SQLite/heap
 estimation and request-copy/peak optimization are deferred. No real owner/data-dir,
 installed binary, tag or Release is modified by verification.
+
+The first #80 branch CI (dd416b7, run 41168775635 attempt 1) passed Windows/Linux
+but macOS failed the existing cli_process durable-retransmission test's index
+preview metadata assertion: (0,0,1) versus baseline (0,0,0). New memory tests passed.
+There are no index-preview implementation/test changes in this task; the cause is
+unproven. Preserve the failure and any same-SHA failed-job rerun as separate facts
+in #80. A follow-up also qualifies CLI help's default saved-state description with
+its live owner-memory exception. No test guard, assertion or retry policy is relaxed.
