@@ -2304,9 +2304,24 @@ now characterized at67cc688 in the F record; native long CI41186128587 is
 still executing. No F/G main admission or installed-binary change is implied.
 
 
-## F Watch narrow-field follow-up
+## F Watch field priority and visible formatting follow-up
 
-A focused regression reproduces long titles hiding activity state and long
-commands hiding factual work age. Watch now reserves those fields before
-flexible text, without changing Core facts or read/tick policy. Combined
-qualification is pending; previous CI retains its original source SHA.
+The narrow Watch regression reproduced missing state/work-age text with long
+source titles or commands. Presentation now reserves those factual fields
+before flexible text. A separate 2,000-row algorithmic regression reproduced
+formatting all rows for an eight-row viewport. The follow-up keeps fixed-height
+Ratatui placeholders offscreen and formats neighborhoods around the previous
+viewport and current selection, preserving Home/End scrolling. Focused and
+combined qualification of this follow-up are in progress; previous successful
+CI and performance observations retain their original source SHAs.
+
+Integrated F source ecfa56b (including main9b4ae34) separately passes the native
+macOS standard:2,024 Rust tests,0 failed,35 ignored; the compiled inventory
+contains all3 cancellation regressions. The #92 CI-reuse Node suite passes12.
+This result precedes the Watch field/viewport follow-up and does not qualify
+that newer source. Published F950c9ed exact-source3OS CI41187246963 is green.
+
+The combined Watch module passes12 focused tests, including both regressions
+at80/140 columns and Home/End/Page navigation. The first compile emitted an
+unused doc-comment warning; the comment now annotates its intended helper.
+The standard check for the final source remains pending.

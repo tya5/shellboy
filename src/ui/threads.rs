@@ -1901,10 +1901,32 @@ impl ThreadBrowser {
         let selected = self.selected_position();
         {
             let watch = self.watch.borrow();
+            // Ratatui needs every row's height to resolve scrolling, but only
+            // rows near the previous viewport or new selection need text.
+            // Separate bands keep Home/End from formatting the intervening list.
+            let row_count = self.rows().len();
+            let offset = self
+                .table_state
+                .borrow()
+                .offset()
+                .min(row_count.saturating_sub(capacity));
+            let margin = capacity.saturating_add(1);
+            let visible_band = offset.saturating_sub(1)..offset.saturating_add(margin);
+            let selection_band = selected.map(|index| {
+                index.saturating_sub(margin)..index.saturating_add(margin).saturating_add(1)
+            });
             let rows = self
                 .rows()
                 .iter()
-                .filter_map(|row| {
+                .enumerate()
+                .filter_map(|(position, row)| {
+                    if !visible_band.contains(&position)
+                        && !selection_band
+                            .as_ref()
+                            .is_some_and(|band| band.contains(&position))
+                    {
+                        return Some(Row::default().height(height as u16));
+                    }
                     let summary = &self.items[row.index];
                     let detail = watch.row(&summary.thread_id)?;
                     let current = active_thread == Some(summary.thread_id.as_str());
@@ -2059,6 +2081,11 @@ fn one_line(text: &str) -> String {
         .join(" ")
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static WATCH_LINE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Keep factual state and clocks visible before fitting flexible source text.
 /// Uses the same shared frame/table geometry as List; no additional row state.
 fn watch_lines(
@@ -2068,6 +2095,8 @@ fn watch_lines(
     uncertainty: &str,
     width: usize,
 ) -> (Line<'static>, Line<'static>) {
+    #[cfg(test)]
+    WATCH_LINE_BUILDS.with(|count| count.set(count.get() + 1));
     use ratatui::style::Modifier;
     let marker = fit(&format!("{marker} "), width);
     let status_width = row
@@ -4748,6 +4777,58 @@ mod watch_integration_tests {
                             && line.contains("秒")
                             && line.contains("printf")),
                         "work age/command disappeared: {text}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn watch_formats_only_viewport_neighborhoods_and_keeps_actual_visible_rows() {
+        use crate::activity::ActivityPhase::Tools;
+        for width in [80, 140] {
+            let mut browser = ThreadBrowser::default();
+            browser.open_watch(String::new(), None, None);
+            let rows = (0..2000)
+                .map(|n| {
+                    let mut item = row(&format!("{n:04}"), Tools);
+                    item.title = format!("ROW_{n:04}");
+                    item
+                })
+                .collect::<Vec<_>>();
+            let summaries = rows
+                .iter()
+                .map(|item| {
+                    WatchSummary::prepare(item)
+                        .with_identity(Some(format!("run-{}", item.thread_id)), None)
+                })
+                .collect();
+            let generation = browser.generation;
+            browser.apply(generation, 10, None, rows, vec![], None, vec![], None);
+            browser.apply_watch_summaries(generation, 10, summaries);
+            for key in [
+                KeyCode::Home,
+                KeyCode::End,
+                KeyCode::PageUp,
+                KeyCode::Up,
+                KeyCode::PageDown,
+                KeyCode::Down,
+                KeyCode::Home,
+            ] {
+                browser.key(KeyEvent::new(key, KeyModifiers::NONE));
+                WATCH_LINE_BUILDS.with(|count| count.set(0));
+                let text = paint(&browser, width, 28);
+                let capacity = browser.table_body_rows.get();
+                let built = WATCH_LINE_BUILDS.with(std::cell::Cell::get);
+                assert!(
+                    built <= 4 * capacity + 8,
+                    "formatted {built} rows for {capacity} viewport rows"
+                );
+                let ids = browser.watch_visible_ids.borrow();
+                assert!(!ids.is_empty());
+                for id in ids.iter() {
+                    assert!(
+                        text.contains(&format!("ROW_{id}")),
+                        "visible {id} was not rendered at {width}: {text}"
                     );
                 }
             }

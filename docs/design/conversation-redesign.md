@@ -832,3 +832,9 @@ command/recovery/answer detail. A long command must not push a known work age
 off the edge. This changes presentation only: no Core fields, clock source,
 read cadence, worker, queue or dependency changes. Existing original/detail
 navigation retains full facts when the row uses an ellipsis.
+
+Watch formats text only near the previous viewport and current selection.
+Offscreen rows retain their fixed heights as empty Ratatui rows, so selection
+and Home/End scrolling retain native table geometry without formatting every
+loaded title on each draw. Both neighborhoods have a one-row margin; no new
+cache or persistent state is introduced.
