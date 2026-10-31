@@ -75,6 +75,77 @@ pub(super) fn index_pause_notice(event: &serde_json::Value) -> Option<(String, V
     ))
 }
 
+// Named copy keys for #35; facts and identity are supplied separately.
+enum NoticeText {
+    ShellEnded,
+    ChildAnswer,
+    ChildEnded,
+    ChildReport,
+    Delivered,
+    UnknownResult,
+}
+impl NoticeText {
+    fn text(self) -> &'static str {
+        match self {
+            Self::ShellEnded => "shell 終了",
+            Self::ChildAnswer => "子の回答",
+            Self::ChildEnded => "子の作業終了",
+            Self::ChildReport => "子の途中報告",
+            Self::Delivered => "モデルに渡した · Enter 参照先",
+            Self::UnknownResult => "結果未記録",
+        }
+    }
+}
+fn continuation_title(kind: &str, event: &serde_json::Value) -> Option<String> {
+    let key = match kind {
+        "shell_ended" => NoticeText::ShellEnded,
+        "child_turn_completed" => NoticeText::ChildAnswer,
+        "child_run_ended" => NoticeText::ChildEnded,
+        "child_report" => NoticeText::ChildReport,
+        _ => return None,
+    };
+    let payload = event.get("payload").unwrap_or(event);
+    let identity = payload
+        .get(if kind == "shell_ended" {
+            "execution_id"
+        } else {
+            "thread_id"
+        })
+        .and_then(serde_json::Value::as_str)
+        .map(|id| super::sanitize_plain(&id.chars().take(16).collect::<String>(), 0).0)
+        .unwrap_or_else(|| "対象未記録".into());
+    let mut parts = vec![format!("{} · {identity}", key.text())];
+    if let Some(name) = payload.get("title").and_then(serde_json::Value::as_str) {
+        parts.push(
+            super::sanitize_plain(&short(name, 80), 0)
+                .0
+                .replace(['\n', '\r'], " "),
+        );
+    }
+    if let Some(command) = payload.get("command").and_then(serde_json::Value::as_str) {
+        parts.push(
+            super::sanitize_plain(&short(command, 80), 0)
+                .0
+                .replace(['\n', '\r'], " "),
+        );
+    }
+    if let Some(code) = payload.get("exit_code").and_then(serde_json::Value::as_i64) {
+        parts.push(format!("終了 {code}"));
+    } else if let Some(state) = payload.get("state").and_then(serde_json::Value::as_str) {
+        parts.push(super::sanitize_plain(&short(state, 24), 0).0);
+    } else if kind == "shell_ended" || kind == "child_run_ended" {
+        parts.push(NoticeText::UnknownResult.text().into());
+    }
+    if let Some(ms) = payload
+        .get("elapsed_ms")
+        .and_then(serde_json::Value::as_u64)
+    {
+        parts.push(format!("{}秒", ms / 1000));
+    }
+    parts.push(NoticeText::Delivered.text().into());
+    Some(parts.join(" · "))
+}
+
 pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
     use serde_json::Value;
     if let Some((title, _)) = index_pause_notice(event) {
@@ -94,17 +165,9 @@ pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
         .get("event_id")
         .and_then(Value::as_str)
         .is_some_and(|id| !id.trim().is_empty())
+        && let Some(title) = continuation_title(kind, event)
     {
-        let continuation = match kind {
-            "shell_ended" => Some("コマンド結果を受けて続行"),
-            "child_turn_completed" => Some("子の回答を受けて続行"),
-            "child_run_ended" => Some("子の作業終了を受けて続行"),
-            "child_report" => Some("子の途中報告を受けて続行"),
-            _ => None,
-        };
-        if let Some(title) = continuation {
-            return title.into();
-        }
+        return title;
     }
     if routine_index_ready(event) {
         return "検索索引 · 利用可能".into();
@@ -385,5 +448,20 @@ fn section_label(section: &str) -> &str {
         "cancelled_waits" => "中断した待機観測",
         "pending_operations_with_unknown_targets" => "対象不明の受付",
         _ => "対象",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn continuation_has_saved_identity_outcome_and_duration_without_inventing_name() {
+        let event = serde_json::json!({"event_id":"saved", "payload":{"execution_id":"execution-complete-id", "exit_code":7, "elapsed_ms":316000}});
+        let title = title("shell_ended", &event);
+        assert!(title.contains("execution-comple"));
+        assert!(
+            title.contains("終了 7") && title.contains("316秒") && title.contains("モデルに渡した")
+        );
+        assert!(!title.contains("背景") && !title.contains("check.sh"));
     }
 }

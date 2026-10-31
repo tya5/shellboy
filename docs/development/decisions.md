@@ -1985,3 +1985,17 @@ the DB lane. There is no periodic sampler or new production counter. OS failures
 and absent UI ownership remain null with reasons. No allocator/SQLite estimation,
 leak diagnosis or request-copy optimization is included. F8 display is delegated
 to #41 because its published branch overlaps the diagnostic/rendering files.
+
+## 2026-10-31: minimal conversation row vocabulary (#83)
+
+Adopt a single display table with EAW=N marks rather than ambiguous `●`/`◇`/
+`◐`; reuse palette roles and named copy keys, without a translation framework.
+Keep spacing in display/source-row maps, not storage or item counts. Live
+seconds repaint cached rows from a saved-start/monotonic observation, with no
+DB poller or Markdown relayout. Correlate notification sources only in the
+bounded loaded view; do not hydrate shell output merely by selecting a notice.
+Choose Enter navigation because baseline F7 is HTTP-only. Do not alter #86's
+region rendering. Defer missing command/child names and off-window source
+lookup to a bounded read-projection follow-up, rather than changing Core events.
+No dialog, new worker, queue, schema, protocol or
+theme setting is required. Existing pending DTO work in #74 is not modified.

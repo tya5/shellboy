@@ -4133,3 +4133,32 @@ The attempted main push after qualification was safely rejected non-fast-forward
 when other work landed during the pre-push standard check. Rebase retains the
 complete upstream records and requalifies the combined SHA; run links/results
 remain in #80 rather than changing qualified source recursively.
+
+### 2026-10-31: #83 row vocabulary, pre-rebase native observations
+
+macOS 26.3.1 (a), build25D771280a, arm64 debug; CARGO_BUILD_JOBS=2 and
+RUST_TEST_THREADS=2. No release build, installed-binary change or user data.
+- Focused presentation 34/34 and existing history-interaction 8/8 passed before
+  the additional explicit notification-navigation regression was added.
+- `python3 scripts/check-row-kinds.py --binary target/debug/shellboy --fixture
+  target/debug/examples/visual_fixture --out /tmp/issue-83-pty-fifth`: exit0,
+  actual Unix PTY + pyte + synthetic loopback SSE, 8 sessions / 56 completed
+  screens, 80/140 columns, dark/light/NO_COLOR/TERM=vt100. A real background
+  read coexisted with two consecutive foreground successes; saved-start seconds,
+  marks, dense tools, factual delivery notices, Enter source jump and explicit
+  output expansion/close were observed. Static summary/input/child notice/
+  unavailable rows used a separate synthetic conversation, not model replay.
+- All16 table entries have Unicode EAW=N and ordinary/CJK width1 (including
+  repeated source arrow). Canonical text, source anchors and item identities
+  remain independent of generated nonselectable blanks.
+- First PTY attempt fed a deliberately unmatched visual tool result into model
+  replay and correctly entered recovery. Separate static/live scenes fix the
+  fixture. Attempts2/3 misselected or misqualified the baseline HTTP-only F7
+  overlay and hit shutdown watchdogs. Enter navigation supersedes that approach.
+  Attempt4 had a whitespace-sensitive wrapped-label assertion; normalized text
+  fixed the driver. No failed attempt is counted as product acceptance.
+- First standard check: Python18/layout/watchdog checks passed; strict Clippy
+  rejected a nested if and the new navigation test had usize vs u64. Corrected;
+  full standard/rebase validation and matched-baseline P1/3OS CI remain pending.
+- Physical terminal glyphs, real IME/clipboard and Windows ConPTY are unverified.
+  Native OS CI is not physical terminal UX. Missing name/source enrichment: #88.

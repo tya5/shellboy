@@ -197,6 +197,16 @@ impl Page {
         page.note("長文の折りたたみ表示も、送信時は全文を送ります。");
         page.note("貼付けだけでは送信しません。貼付けた / から始まる文も本文として扱います。");
 
+        page.section("会話の行の印");
+        for kind in crate::presentation::rows::RowKind::ALL {
+            let (mark, label, _) = kind.spec();
+            page.entry(mark, label);
+        }
+        page.note("背景は並行して続く shell です。経過は保存された開始時刻が基準です。通知を選んで Enter で元の行・子の会話へ移れます。");
+        page.note(
+            "種類の境目は空行で分け、続く tool は詰めて表示します。空行は選択対象ではありません。",
+        );
+
         page.section("履歴の整理・検索の管理");
         page.entry(
             "/fork [項目ID]",

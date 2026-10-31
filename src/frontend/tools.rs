@@ -28,6 +28,8 @@ pub(super) struct CallSource {
     call_node_id: Option<String>,
     result_node_id: Option<String>,
     elapsed_ms: Option<u64>,
+    started_at: Option<String>,
+    background: bool,
 }
 
 // The node's saved group uses the existing (group_id, call_id) primary key.
@@ -48,7 +50,9 @@ SELECT c.ordinal,
        (SELECT r.node_id FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id),
        CASE WHEN json_valid(s.shell_json) AND json_type(s.shell_json,'$.completion.elapsed_ms')='integer'
          AND json_extract(s.shell_json,'$.completion.elapsed_ms')>=0
-         THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END
+         THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END,
+       substr(s.started_at,1,128),
+       CASE WHEN json_valid(c.arguments_json) THEN json_extract(c.arguments_json,'$.background')=1 ELSE 0 END
 FROM tool_call c LEFT JOIN shell_execution s ON s.id=c.operation_id
     AND s.turn_id=(SELECT turn_id FROM tool_group WHERE id=c.group_id)
 WHERE c.group_id=COALESCE(
@@ -155,6 +159,8 @@ fn read_tx_reference(
                     call_node_id: row.get(8)?,
                     result_node_id: row.get(9)?,
                     elapsed_ms: row.get::<_, Option<i64>>(10)?.map(|value| value as u64),
+                    started_at: row.get(11)?,
+                    background: row.get::<_, Option<bool>>(12)?.unwrap_or(false),
                 })
             })
             .optional()?;
@@ -275,7 +281,9 @@ calls AS MATERIALIZED (
         COALESCE(r.status,c.state) AS result_state,r.node_id AS result_node_id,
         s.state AS shell_state,s.exit_code,
         CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.completion.elapsed_ms')='integer'
-          AND json_extract(s.shell_json,'$.completion.elapsed_ms')>=0 THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END END AS elapsed_ms
+          AND json_extract(s.shell_json,'$.completion.elapsed_ms')>=0 THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END END AS elapsed_ms,
+        substr(s.started_at,1,128) AS started_at,
+        CASE WHEN json_valid(c.arguments_json) THEN json_extract(c.arguments_json,'$.background')=1 ELSE 0 END AS background
  FROM keys JOIN tool_call c ON c.group_id=keys.group_id AND c.call_id=keys.call_id
  JOIN tool_group g ON g.id=c.group_id
  LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id
@@ -301,7 +309,7 @@ item_calls AS MATERIALIZED (
 )
 SELECT requested.node_id,c.call_id,c.ordinal,c.command,
  c.result_state,c.shell_state,c.result_node_id IS NOT NULL,c.group_id,c.exit_code,c.operation_id,
- o.node_id,c.result_node_id,c.elapsed_ms,priors.reason
+ o.node_id,c.result_node_id,c.elapsed_ms,priors.reason,c.started_at,c.background
 FROM requested JOIN calls c ON c.group_id=requested.group_id AND c.call_id=requested.call_id
 LEFT JOIN node source ON source.id=requested.node_id
 LEFT JOIN first_items first ON first.group_id=c.group_id AND first.call_id=c.call_id
@@ -432,6 +440,8 @@ fn read_sources_batch(
                 result_node_id: row.get(11)?,
                 elapsed_ms: row.get::<_, Option<i64>>(12)?.map(|value| value as u64),
                 prior_reason: row.get(13)?,
+                started_at: row.get(14)?,
+                background: row.get::<_, Option<bool>>(15)?.unwrap_or(false),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -485,6 +495,23 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
                 other => other.into(),
             });
             tool.current_exit_code = source.shell_exit_code;
+            tool.started_at = source.started_at.clone();
+            tool.elapsed_observation = source
+                .started_at
+                .as_deref()
+                .and_then(|saved| chrono::DateTime::parse_from_rfc3339(saved).ok())
+                .map(|start| {
+                    let ms = chrono::Utc::now()
+                        .signed_duration_since(start)
+                        .num_milliseconds()
+                        .max(0) as u64;
+                    (
+                        std::time::Duration::from_millis(ms),
+                        std::time::Instant::now(),
+                    )
+                });
+            tool.background = source.background
+                || (source.released && source.shell_state.as_deref() == Some("running"));
             if block.kind == BlockKind::ToolCall {
                 // A call has no saved shell-result code. The linked terminal
                 // result means "result available"; its current code is separate.
@@ -663,7 +690,14 @@ mod identity_tests {
         assert_eq!(tool.result_node_id.as_deref(), Some("result"));
         assert_eq!(tool.elapsed_ms, Some(123));
         let serialized = serde_json::to_value(tool).unwrap();
-        for field in ["group_id", "call_node_id", "result_node_id"] {
+        for field in [
+            "group_id",
+            "call_node_id",
+            "result_node_id",
+            "started_at",
+            "background",
+            "elapsed_observation",
+        ] {
             assert!(serialized.get(field).is_none());
         }
         control.shutdown().await.unwrap();

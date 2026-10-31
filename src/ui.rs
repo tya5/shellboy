@@ -5121,15 +5121,27 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         area,
     );
 }
-fn draw_conversation(frame: &mut Frame<'_>, area: Rect, history: &HistoryLayout, scroll: usize) {
-    let paragraph = Paragraph::new(presentation::borrowed(
-        &history.styled[scroll.min(history.styled.len())
-            ..history
-                .styled
-                .len()
-                .min(scroll.saturating_add(area.height.saturating_sub(2) as usize))],
-    ))
-    .wrap(Wrap { trim: false });
+fn draw_conversation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    history: &HistoryLayout,
+    scroll: usize,
+    view: &ThreadView,
+) {
+    let start = scroll.min(history.styled.len());
+    let end = history
+        .styled
+        .len()
+        .min(scroll.saturating_add(area.height.saturating_sub(2) as usize));
+    let mut visible = presentation::borrowed(&history.styled[start..end]);
+    presentation::paint_live_times(
+        &mut visible,
+        &history.sources[start..end],
+        view,
+        area.width.saturating_sub(2),
+        Instant::now(),
+    );
+    let paragraph = Paragraph::new(visible).wrap(Wrap { trim: false });
     let paragraph =
         paragraph.block(Block::default().padding(ratatui::widgets::Padding::uniform(1)));
     frame.render_widget(paragraph, area);
@@ -5369,7 +5381,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             body_area,
         );
     } else {
-        draw_conversation(frame, body_area, &history, scroll);
+        draw_conversation(frame, body_area, &history, scroll, view);
         history_interaction::highlight(
             frame,
             body_area,

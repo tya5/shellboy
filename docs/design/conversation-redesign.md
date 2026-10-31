@@ -582,3 +582,35 @@ slots. Every marker snapshot includes all observed displayed executions (at most
 so replacing it cannot lose an earlier different shell's activity. Receipts and
 business-operation outcomes keep their ordered critical delivery. This adds no
 channel or capacity; raw UI-channel deliveries remain separately bounded.
+
+## Conversation row vocabulary (#83)
+
+The display-only `presentation::rows` table owns marks, keyed labels, colors and
+item-boundary spacing. Use East Asian Width=N marks, checked at ordinary and CJK
+width: `›` human, `↳` parent/other model (with explicit labels), `↺` self, `↻`
+Revisit, `▸` answer, `▹` request, `⏵` running, `◌` unavailable, `✓` success,
+`✗` failure, `⊘` cancellation, `⁂` notification, `⬦` summary, `↪` spill and `◉`
+reserved for the #86 work-region heading. The old ambiguous-width `●`, `◇` and
+`◐` are not chosen. Distinct shapes plus labels work without color. Existing
+palette roles are reused; no new theme configuration or translation framework.
+
+Insert one nonselectable display blank between unlike body/tool/notice/
+replacement groups, including within mixed answer/tool nodes. Consecutive tools
+stay dense; original Markdown blank lines remain original content. Blank rows
+participate in layout/source-anchor calculations but never gain an item key.
+No canonical text, item identity, protocol or saved state is changed.
+
+Continuation notifications show saved target identity and available exit/state/
+duration facts, then explicit model-delivery wording. Missing names, commands or
+results are shown as unavailable rather than inferred. Selecting a notification and pressing Enter follows the loaded tool row
+by exact execution identity or opens the saved child Thread. A shell outside
+the bounded layout reports unavailable, retaining full F6 facts and sources.
+F7 remains HTTP links on this baseline; it is not used for this navigation.
+Loaded matching tool sources are correlated without a database read. Richer names absent from saved notification payloads
+are tracked in #88 as a separate bounded read-projection task, not a new Core event.
+
+This minimum does not draw the #86 work region or change its height/selection.
+History timing uses saved starts in existing bounded tool correlation, painted
+through the existing UI animation cadence; it must not introduce a DB poller or
+per-second Markdown/layout rebuild. Physical terminal glyphs and P1 performance
+must be distinguished from native synthetic PTY/test results.

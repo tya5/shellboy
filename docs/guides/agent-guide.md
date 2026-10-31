@@ -377,3 +377,11 @@ endpoint. Inspect each value and unavailable_reason; null means unknown, not zer
 Existing retained/limit/entry figures exclude some working or live/pinned memory
 and are not additive with OS footprint/RSS. Do not infer a leak or total heap from
 these snapshots alone. The observation does not change cache limits or purge data.
+
+### Conversation row legend
+
+Conversation rows use a shared display-only legend (`/help`): `⏵` running,
+`◌` unavailable, `✓`/`✗`/`⊘` outcomes, `⁂` notification and `⬦` summary.
+A background label is a saved launch/release fact, not model concurrency.
+Notifications show saved identity/outcome; Enter follows the loaded shell row
+or saved child Thread. Missing names are not inferred from similar commands.

@@ -109,6 +109,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ("visual-scroll-wrap", "スクロール・日本語の折り返し", vec![
                 ("assistant_response", answer(&(1..=40).map(|i| format!("P{i:03} 日本語の折り返し位置を確認します。幅が変わっても、ホイールは文字数ではなく実際に表示される行で動きます。絵文字🙂と結合文字e\u{301}も含めます。")).collect::<Vec<_>>().join("\n\n"))),
             ]),
+            ("visual-row-kinds", "Row vocabulary synthetic fixture", vec![
+                ("user", json!({"role":"user","content":"ROW_FIXTURE_USER"})),
+                ("summary", json!({"source_node_ids":["visual-row-kinds-node-0"],"item":{"role":"developer","content":"ROW_FIXTURE_SUMMARY"}})),
+                ("event", event("child_turn_completed", json!({"thread_id":"visual-tree-child-39","title":"Fixture child","answer_node_id":"visual-tree-child-39-answer"}))),
+                ("tool_result", json!({"item":{"type":"function_call_output","call_id":"unknown","output":json!({"command":"UNKNOWN_OBSERVATION","status":"observation_unavailable"}).to_string()}})),
+            ]),
             ("visual-scroll-body", "スクロール・本文取得window境界", vec![
                 ("assistant_response", answer(&format!("```text\n{}\n```", (1..=2000).map(|i| format!("B{i:05} bounded source window preserves the visible rows while loading more. ")).collect::<Vec<_>>().join("\n")))),
             ]),

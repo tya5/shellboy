@@ -43,10 +43,22 @@ fn trim_markers_remain_visible_replacement_notices_with_immutable_source_text() 
 #[test]
 fn persisted_result_notifications_explain_continuation_and_keep_the_original_evidence() {
     for (kind, expected) in [
-        ("shell_ended", "コマンド結果を受けて続行"),
-        ("child_turn_completed", "子の回答を受けて続行"),
-        ("child_run_ended", "子の作業終了を受けて続行"),
-        ("child_report", "子の途中報告を受けて続行"),
+        (
+            "shell_ended",
+            "shell 終了 · source-execution · 結果未記録 · モデルに渡した · Enter 参照先",
+        ),
+        (
+            "child_turn_completed",
+            "子の回答 · source-thread · モデルに渡した · Enter 参照先",
+        ),
+        (
+            "child_run_ended",
+            "子の作業終了 · source-thread · 結果未記録 · モデルに渡した · Enter 参照先",
+        ),
+        (
+            "child_report",
+            "子の途中報告 · source-thread · モデルに渡した · Enter 参照先",
+        ),
     ] {
         let event = json!({"event_id":"saved-notification","kind":kind,"payload":{"execution_id":"source-execution","thread_id":"source-thread"}});
         let payload =
@@ -806,7 +818,7 @@ fn shell_outcome_marker_and_attention_use_current_code_without_overwriting_saved
     for (code, marker, attention, label) in [
         (Some(0), "✓", false, "終了 0"),
         (Some(7), "✗", true, "終了 7"),
-        (None, "·", false, "終了（コード不明）"),
+        (None, "◌", false, "終了（コード不明）"),
     ] {
         let tool = ToolPresentation {
             ordinal: Some(1),

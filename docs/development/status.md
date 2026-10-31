@@ -1552,3 +1552,13 @@ The minimum version omits a confirmation dialog and per-character provenance;
 reloaded/recalled source text stays conservative. Local standard checks and
 eight native PTY sessions pass; native CI/integration are tracked in #84 and
 acceptance, separately from unmeasured P1 latency and physical terminals.
+
+### #83 conversation rows: implementation pending final admission checks
+
+Single EAW=N mark/label/color and spacing table; live/saved background shell
+facts and saved-start clocks; factual notifications and Enter source navigation.
+No Core/protocol/storage or #86 region rendering change. Actual native PTY:
+8 sessions / 56 completed screens across 80/140, dark/light/NO_COLOR/vt100.
+Initial standard check found a test-only usize/u64 mismatch and collapsible-if;
+both are corrected, not yet a full-check pass. Final rebase/check/P1/CI pending.
+Missing names and off-window source lookup are explicitly deferred to #88.
