@@ -2013,3 +2013,39 @@ selected view/browser with an unowned descendant count in one read sequence,
 all10 Watch widget/integration tests and the5 private mutation tests. Exact
 source/proof and remaining native/performance/guide gates are recorded next;
 local success is not F main admission or native Windows/physical-terminal proof.
+
+
+## F runtime candidate9d3494f — local standard proof
+
+Native macOS/Rust1.99.1; product/test Rust source9d3494f (including private Core
+guard8206c20). `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh
+scripts/check.sh` passes: lib1042/0/15, integration922/0/17, termination10/0/1,
+forced-shutdown7/0/2 and three zero-test harnesses, totaling1981 pass/0 fail/
+35ignored. Python18, layout93, common watchdog policy, formatter and strict
+all-target Clippy also pass. Diff gitleaks8.30.1 reports0 findings. The source
+remains unchanged by this proof-only documentation update; no installed binary,
+main, default data or external provider is changed.
+
+Prior failed attempts are retained: formatting whitespace after watchdog wrapping;
+a collapsible match lint; then standard3 lib1040/1/15 exposed an actual resize
+race. Invalidating Watch paint/detail scope fixed it, and all10 focused widget
+tests plus standard4 pass. A separate new footer regression reproduced clipping
+of positive descendant counts behind long facts; reserving the count width
+before fitting fixes that test in standard4. No assertion was weakened to hide
+either product failure.
+
+The existing combined-view test keeps its identity and now also observes an
+unowned child Thread while the writer is blocked: selected history/header,
+browser patch and descendant count share the same read sequence with no writer
+admission. This is functional same-snapshot proof, not native F-wide P3 cost or
+latency measurement. The ordinary E actual CLI/reactivity suite also remains
+green in the full check; a real-CLI scoped Watch/retry-race fixture is still to
+be ported and run.
+
+Remaining F admission gates: complete guides/help/completion, actual scoped Watch
+CLI lifecycle and cancellation/contention cases, bounded retained-memory account,
+lookup-index evidence/final schema numbering, native80/wide theme/terminal review,
+and applicable P2/P3/P4/P5 with native/manual CI. The2 explicit P4 timing/stress
+tests are ignored, not qualified. E main admission still awaits separate review
+approval; F/G are not admitted. Windows/Linux ordinary CI and physical terminals
+are untested for this source. #83–#87 remain outside this work.

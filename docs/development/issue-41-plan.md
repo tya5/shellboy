@@ -42,7 +42,7 @@ when updating main; do not import the archived combined F/G development branch.
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | D2 shipped in main per6539106715; cross-increment P2/P3/P5 measurements remain tracked with E/F, not a new D admission or transferred display work |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Implemented locally; initial three-OS CI exposed repaired same-deadline admission race. Rebased #77/#79 check, repaired-source CI and P3/P5 qualification remain gates; main admission awaits Claude |
-| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
+| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Local runtime9d3494f; standard1981/0/35. Remaining guides/native/performance/CI gates below; not main-admitted |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
 
 Each increment must be usable independently. A requirement that crosses these
@@ -561,3 +561,19 @@ cases and5 shared-refresh cases pass;6 real CLI/reactivity cases retain the
 strict16 paired observations with no reload. List has no Watch summary/detail
 projection. Full F4 is still pending the browser/count broker and actual Watch
 UI consumers; helper tests do not establish combined F P3 or long-window P2/P5.
+
+
+### F runtime candidate9d3494f
+
+The local runtime now wires F1–F11's main paths and private exact-target actions.
+Standard1981/0/35 plus Python18/layout93/strict Clippy/gitleaks pass on native
+macOS. A blocked-writer test pairs selected view, browser and actual unowned
+descendant count at one sequence. Resize late-response and footer clipping
+failures were reproduced and fixed without weakening expected behavior.
+
+This does not close the F rows wholesale: F4 runtime cost/cancellation/contending
+consumers, F6 retained-memory account, F7 real CLI stale retry scenario, F12
+remaining measured lookup indexes/final numbering, F15 native P2–P5 and F16
+guides/visual/three-OS admission remain pending. Current ordinary E CLI cases
+remain green at this F source, distinct from a new scoped Watch lifecycle proof.
+E permission/main order and transferred #83–#87 exclusions are unchanged.
