@@ -5231,3 +5231,41 @@ future selected description/command/ID inspection surface; existing exact source
 expanded/original and F6 diagnostic references remain intact. #99's timeout and
 closed-preview ownership corrections are NOT claimed by this #98 result and
 must be handed off separately as review-required.
+## #95 ready-header and pending-selected ordering
+
+2026-10-31, native macOS arm64 / Rust 1.99.1. Original evidence is split Windows
+run41186034007 at4355953: permanent-body test asserted three saved attempts vs one;
+E step8 observed browser44/view43. Per-attempt status/phase and ticket admission
+traces were not retained in those assertions. Their exact original timeline and
+number of HTTP sends cannot be reconstructed from these messages alone. HTTP/E
+Rust/test sources match the main5fc5cc0 investigation base; main9b4ae34 later adds
+CI reuse only. No failed-job rerun, ignore or timeout extension is a fix here.
+
+The generation-header virtual-clock test fails before the product change at an
+exact500ms tie: a ready400 response becomes a status-free timeout. After changing
+only selection priority it preserves400/401/403/422; cancellation still wins,
+pending headers still expire, and prior strict total-budget/heartbeat tests pass.
+The real-owner permanent-body fixture holds Tokio auto-advance with one test-only
+blocking-pool gate, awaits actual header reception, then advances the clock and
+awaits saved recovery via notifications. The server holds an incomplete declared
+body with no bytes, isolating this header/body boundary. It resumes normal time
+only after recovery is committed. Every status keeps one failed attempt, known
+permanent status, no retry marker and request JSONL0->1, never an extra POST.
+The initial fixture conversion released virtual time too early and tripped its
+virtual watchdog before DB progress; it was corrected with the event fence, not
+by increasing the existing500ms product settings or the shared60s watchdog.
+
+E's new virtual-clock test fails with the old standalone admission rule after an
+older browser ticket completes while a selected change remains pending. The fix
+blocks standalone admission for that selected dirty Thread and postpones selected
+admission/timer while its prior browser ticket owns the one-flight slot. Foreign
+and browser-only deadlines remain available. The original separate-CLI test is
+unchanged:16 edits, exact one observation, equal sequence and no list reload. It
+passes three focused native macOS runs,48 real CLI edits total; paint times are
+recorded, not speed thresholds. Existing one-transaction collection is unchanged.
+
+Full standard/doc-role checks, final SHA, record-line audit and delegated native
+qualification are recorded in #95. Three runs of the split Windows layout are
+requested from worker4; local macOS results are not Windows evidence. Real
+providers, charges and the historical CI's exact scheduling remain unverified.
+No user DB, installed owner/binary, release/tag or #5 branch is modified by #95.
