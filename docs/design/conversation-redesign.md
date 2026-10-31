@@ -174,6 +174,15 @@ from the current clap command tree; parser help/version and UI launch are not
 operations. Do not hide missing commands by testing only the
 old OpKind.ALL inventory. Introduce no successful stub for an unsupported form.
 
+Standalone forms call existing docs/config/RAG/exec clients on the existing
+bounded command admission and workers. They never parse CLI strings or read
+process-global stdin. The CLI RAG wrapper alone owns stdin; the shared RAG
+entrypoint accepts owned UTF-8 text or an explicit file. Keep its16MiB input
+limit, form1MiB total budget, provenance/hash validation and explicit confirmation.
+No new Core command, protocol action, worker, queue, table or job engine is added.
+Immutable client results identify their completion time and explicit repeat route;
+this does not exempt mutable saved owner inspections from G's reactive inventory.
+
 Section headings are separate nonselectable rows, visually distinct from actions.
 Selection, page movement and N/M count use actions only and never stop on a header.
 Rename the residual category to Other operations; hide headings while filtering.

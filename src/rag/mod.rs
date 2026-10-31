@@ -250,25 +250,115 @@ pub async fn execute(
     data_dir: Option<PathBuf>,
     cwd: &Path,
 ) -> Value {
+    // This CLI wrapper alone may consume the process terminal/pipe. UI callers
+    // always use execute_with_text and can never fall back to global stdin.
+    let text = match cli_text(&options, &mut tokio::io::stdin()).await {
+        Ok(text) => text,
+        Err(error) => return failure(error),
+    };
+    execute_with_text(options, config, data_dir, cwd, text).await
+}
+fn failure(error: Error) -> Value {
+    json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":error.code,"message":error.message}})
+}
+async fn cli_text<R: tokio::io::AsyncRead + Unpin>(
+    options: &RagOptions,
+    input: &mut R,
+) -> Result<Option<String>> {
+    use tokio::io::AsyncReadExt;
+    let RagCommand::Ingest {
+        text_file,
+        text_stdin,
+        ..
+    } = &options.command
+    else {
+        return Ok(None);
+    };
+    if !*text_stdin {
+        return Ok(None);
+    }
+    if text_file.is_some() {
+        return Err(err(
+            "invalid_argument",
+            "Choose text-file or text-stdin, not both",
+        ));
+    }
+    let mut bytes = Vec::new();
+    input
+        .take(MAX_INPUT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .await?;
+    if bytes.len() > MAX_INPUT {
+        return Err(err("input_limit", "Input exceeds 16 MiB"));
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| err("invalid_argument", "Derived text must be UTF-8"))
+}
+fn validate_owned_text(options: &RagOptions, text: Option<&str>) -> Result<()> {
+    match &options.command {
+        RagCommand::Ingest {
+            text_file,
+            text_stdin,
+            ..
+        } => {
+            if text.is_some() && text_file.is_some() {
+                return Err(err(
+                    "invalid_argument",
+                    "Choose owned text or text-file, not both",
+                ));
+            }
+            if text.is_none() && (*text_stdin || text_file.is_none()) {
+                return Err(err(
+                    "invalid_argument",
+                    "Owned text is required; this entrypoint never reads stdin",
+                ));
+            }
+            if text.is_some_and(|text| text.len() > MAX_INPUT) {
+                return Err(err("input_limit", "Input exceeds 16 MiB"));
+            }
+        }
+        _ if text.is_some() => {
+            return Err(err(
+                "invalid_argument",
+                "Owned input is only supported for ingest",
+            ));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+/// Shared standalone/UI entrypoint. All input is owned or an explicit file;
+/// there is no terminal reader anywhere below this boundary.
+pub(crate) async fn execute_with_text(
+    options: RagOptions,
+    config: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
+    cwd: &Path,
+    text: Option<String>,
+) -> Value {
+    if let Err(error) = validate_owned_text(&options, text.as_deref()) {
+        return failure(error);
+    }
     let cwd = cwd.to_path_buf();
     let handle = tokio::runtime::Handle::current();
-    match tokio::task::spawn_blocking(move || handle.block_on(run(options, config, data_dir, &cwd)))
-        .await
+    match tokio::task::spawn_blocking(move || {
+        handle.block_on(run(options, config, data_dir, &cwd, text))
+    })
+    .await
     {
         Ok(Ok(value)) => value,
-        Ok(Err(error)) => {
-            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":error.code,"message":error.message}})
-        }
-        Err(_) => {
-            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":"worker_failed","message":"Standalone retrieval worker failed"}})
-        }
+        Ok(Err(error)) => failure(error),
+        Err(_) => failure(err("worker_failed", "Standalone retrieval worker failed")),
     }
 }
+
 async fn run(
     options: RagOptions,
     config: Option<PathBuf>,
     data_dir: Option<PathBuf>,
     cwd: &Path,
+    owned_text: Option<String>,
 ) -> Result<Value> {
     let directory = crate::config::resolve_cli_data_dir(
         data_dir.as_deref(),
@@ -301,7 +391,7 @@ async fn run(
             source_file,
             kind,
             text_file,
-            text_stdin,
+            text_stdin: _,
             metadata_file,
         } => store::ingest(
             &context.database,
@@ -309,7 +399,7 @@ async fn run(
             &absolute(&source_file, cwd),
             kind,
             text_file.as_deref().map(|p| absolute(p, cwd)).as_deref(),
-            text_stdin,
+            owned_text,
             metadata_file
                 .as_deref()
                 .map(|p| absolute(p, cwd))
@@ -335,5 +425,178 @@ async fn run(
         )
     } else {
         Ok(json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":true,"result":value}))
+    }
+}
+
+#[cfg(test)]
+mod owned_ingest_tests {
+    use super::*;
+    fn options(
+        db: PathBuf,
+        source: PathBuf,
+        text_file: Option<PathBuf>,
+        stdin: bool,
+    ) -> RagOptions {
+        RagOptions {
+            db: Some(db),
+            command: RagCommand::Ingest {
+                id: "derived".into(),
+                source_file: source,
+                kind: IngestKind::Summary,
+                text_file,
+                text_stdin: stdin,
+                metadata_file: None,
+            },
+        }
+    }
+    #[tokio::test]
+    async fn owned_ingest_and_cli_file_share_provenance_and_body_hash() {
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("source.bin");
+        let text = root.path().join("derived.txt");
+        std::fs::write(&original, b"original bytes").unwrap();
+        std::fs::write(&text, "Derived 日本語 text").unwrap();
+        let first = root.path().join("file.db");
+        let second = root.path().join("owned.db");
+        let data = Some(root.path().join("data"));
+        for path in [&first, &second] {
+            let value = execute_with_text(
+                RagOptions {
+                    db: Some(path.clone()),
+                    command: RagCommand::Init,
+                },
+                None,
+                data.clone(),
+                root.path(),
+                None,
+            )
+            .await;
+            assert_eq!(value["ok"], true, "{value}");
+        }
+        let file = execute(
+            options(first.clone(), original.clone(), Some(text), false),
+            None,
+            data.clone(),
+            root.path(),
+        )
+        .await;
+        let owned = execute_with_text(
+            options(second.clone(), original, None, true),
+            None,
+            data.clone(),
+            root.path(),
+            Some("Derived 日本語 text".into()),
+        )
+        .await;
+        assert_eq!(file["ok"], true, "{file}");
+        assert_eq!(owned["ok"], true, "{owned}");
+        let mut provenances = Vec::new();
+        for (path, ingested) in [(first, &file), (second, &owned)] {
+            let value = execute_with_text(
+                RagOptions {
+                    db: Some(path),
+                    command: RagCommand::Inspect {
+                        id: ingested["result"]["document_id"].as_str().unwrap().into(),
+                    },
+                },
+                None,
+                data.clone(),
+                root.path(),
+                None,
+            )
+            .await;
+            assert_eq!(value["ok"], true, "{value}");
+            provenances.push(value["result"]["provenance"].clone());
+        }
+        assert_eq!(provenances[0], provenances[1]);
+        assert_eq!(
+            provenances[0]["derived_body_hash"],
+            hash("Derived 日本語 text".as_bytes())
+        );
+    }
+    #[tokio::test]
+    async fn owned_entrypoint_rejects_missing_conflicting_and_oversize_input_before_creating_db() {
+        let root = tempfile::tempdir().unwrap();
+        let db = root.path().join("must-not-exist.db");
+        let source = root.path().join("missing-source");
+        let data = Some(root.path().join("data"));
+        let missing = execute_with_text(
+            options(db.clone(), source.clone(), None, true),
+            None,
+            data.clone(),
+            root.path(),
+            None,
+        )
+        .await;
+        assert_eq!(missing["ok"], false);
+        assert_eq!(missing["error"]["code"], "invalid_argument");
+        assert!(
+            missing["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("never reads stdin")
+        );
+        let conflict = execute_with_text(
+            options(db.clone(), source.clone(), Some("text.txt".into()), true),
+            None,
+            data.clone(),
+            root.path(),
+            Some("owned".into()),
+        )
+        .await;
+        assert_eq!(conflict["error"]["code"], "invalid_argument");
+        let too_large = execute_with_text(
+            options(db.clone(), source, None, false),
+            None,
+            data.clone(),
+            root.path(),
+            Some("x".repeat(MAX_INPUT + 1)),
+        )
+        .await;
+        assert_eq!(too_large["error"]["code"], "input_limit");
+        let non_ingest = execute_with_text(
+            RagOptions {
+                db: Some(db.clone()),
+                command: RagCommand::Init,
+            },
+            None,
+            data,
+            root.path(),
+            Some("unused".into()),
+        )
+        .await;
+        assert_eq!(non_ingest["error"]["code"], "invalid_argument");
+        assert!(!db.exists());
+    }
+    #[tokio::test]
+    async fn cli_injectable_input_keeps_utf8_limit_and_explicit_source_validation() {
+        use tokio::io::AsyncReadExt;
+        let command = options("unused.db".into(), "source".into(), None, true);
+        let mut valid = "日本語".as_bytes();
+        assert_eq!(
+            cli_text(&command, &mut valid).await.unwrap(),
+            Some("日本語".into())
+        );
+        let mut invalid = &b"\xff"[..];
+        assert_eq!(
+            cli_text(&command, &mut invalid).await.err().unwrap().code,
+            "invalid_argument"
+        );
+        let mut large = tokio::io::repeat(b'x').take(MAX_INPUT as u64 + 1);
+        assert_eq!(
+            cli_text(&command, &mut large).await.err().unwrap().code,
+            "input_limit"
+        );
+        let conflict = options(
+            "unused.db".into(),
+            "source".into(),
+            Some("text.txt".into()),
+            true,
+        );
+        let mut empty = tokio::io::empty();
+        assert_eq!(
+            cli_text(&conflict, &mut empty).await.err().unwrap().code,
+            "invalid_argument"
+        );
     }
 }

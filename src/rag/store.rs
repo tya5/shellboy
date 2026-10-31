@@ -607,7 +607,7 @@ pub(super) fn ingest(
     source_file: &Path,
     kind: IngestKind,
     text_file: Option<&Path>,
-    stdin: bool,
+    owned_text: Option<String>,
     metadata_file: Option<&Path>,
 ) -> Result<Value> {
     if id.is_empty() || id.len() > 512 {
@@ -616,23 +616,18 @@ pub(super) fn ingest(
             "Ingest id must contain 1..=512 bytes",
         ));
     }
-    let bytes = if stdin {
-        use std::io::Read;
-        let mut bytes = Vec::new();
-        std::io::stdin()
-            .take(MAX_INPUT as u64 + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() > MAX_INPUT {
+    let text = if let Some(text) = owned_text {
+        if text.len() > MAX_INPUT {
             return Err(err("input_limit", "Input exceeds 16 MiB"));
         }
-        bytes
+        text
     } else {
-        bounded_read(
-            text_file.ok_or_else(|| err("invalid_argument", "Specify text-file or text-stdin"))?,
-        )?
+        let bytes = bounded_read(
+            text_file.ok_or_else(|| err("invalid_argument", "Specify text-file or owned text"))?,
+        )?;
+        String::from_utf8(bytes)
+            .map_err(|_| err("invalid_argument", "Derived text must be UTF-8"))?
     };
-    let text = String::from_utf8(bytes)
-        .map_err(|_| err("invalid_argument", "Derived text must be UTF-8"))?;
     let metadata = metadata_file
         .map(|p| {
             bounded_read(p).and_then(|b| {
