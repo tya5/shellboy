@@ -3703,3 +3703,31 @@ pass. Cause remains unproven, not claimed fixed by this task. No retries/timeout
 were relaxed to hide it. No user DB, installed binary, owner or public tag/Release
 is changed. Real-provider billing/quality and giant real-history latency remain
 unverified; readbacks report retained facts, not recovered deleted data.
+
+
+### E+#75 complete local standard (a0d8865)
+
+Native macOS ARM64, Rust1.99.1, `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`,
+`RUST_TEST_THREADS=2`: `sh scripts/check.sh` passes1891/0/32, comprising lib965/13
+ignored, integration916/17, termination7/1 and crash3/1. Layout93, Python9, fmt
+and strict all-target Clippy pass. This follows the deterministic pending-title
+regression1/0 and the earlier exact-source3e09e48 standard1881/0/32. The two
+intermediate finalization failures remain in the preceding record.
+
+The merged main15037c1 includes #75/schema15 and the shared finite presentation
+pool. #71 and Program Status source paths have no E changes; #54's conditional
+tick guard is identical to main. #75's run41157762817 is green on three OSes,
+not an E CI result. E adds no migration and no F/G implementation. E full P3/P5,
+physical Windows terminal UX and E main CI remain open.
+
+
+### E+#75 native follow-up
+
+The explicit `cargo build --locked --bin shellboy` at sourcea0d8865 and all six
+native macOS PTY cases pass after the #75 merge (80/140 × dark/light/NO_COLOR).
+The binary SHA-256 is8cd9c247d4deb445c0789eaa7ed499b88d1830a7ff86000e78d300a46a599bbf.
+Real CLI rename/add/delete updates the open List without manual reload; adding
+an earlier row retains the selected screen anchor, changes the count, and makes
+the new row selectable by Up. Every fixture exits0; no paid/default-store or
+clipboard action occurs. This supersedes the pre-#75 native scope for these
+specific behaviors, not physical Windows UX or full performance acceptance.

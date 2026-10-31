@@ -1488,3 +1488,32 @@ successes/1 failure). A deterministic readonly pre/post-admission test and an
 explicit admission wait are being qualified; no final-candidate success is yet
 claimed. Preserve both failed logs. E is not pushed. Long P2/P5 tooling remains a
 separate local branch, including a P5 window with List actually visible.
+
+
+### #41 E + main #75 qualification
+
+Sourcea0d8865 includes main15037c1 and passes the complete native macOS standard
+check:1891 passed/0 failed/32 ignored (lib965/13 ignored, integration916/17,
+termination7/1, crash3/1), layout93, Python9, fmt and strict all-target Clippy.
+The deterministic pending-title/admission regression and the corrected first-send
+fixture both pass. The earlier failures remain recorded above; this result does
+not erase them. Main #75 ordinary three-OS run41157762817 also succeeds, distinct
+from this local E result.
+
+E itself adds no schema change; #75 supplies schema15. Later F parent/view-lookup
+migration proposals must be renumbered at admission (currently16/17). Final E
+native binary qualification is being repeated after the merge. E remains local;
+P3 comparison and full P5 windows are pending. Required copy/paste/code-block and
+image discovery additions are tracked under G-C1–G-C6, without G implementation.
+
+
+### E+#75 native follow-up
+
+The explicit `cargo build --locked --bin shellboy` at sourcea0d8865 and all six
+native macOS PTY cases pass after the #75 merge (80/140 × dark/light/NO_COLOR).
+The binary SHA-256 is8cd9c247d4deb445c0789eaa7ed499b88d1830a7ff86000e78d300a46a599bbf.
+Real CLI rename/add/delete updates the open List without manual reload; adding
+an earlier row retains the selected screen anchor, changes the count, and makes
+the new row selectable by Up. Every fixture exits0; no paid/default-store or
+clipboard action occurs. This supersedes the pre-#75 native scope for these
+specific behaviors, not physical Windows UX or full performance acceptance.
