@@ -6272,3 +6272,27 @@ Workspace2.7GiB/.local2.6GiB and disk free162GiB were then observed separately.
 No new semantic code followed qualification. Next build must use the one root
 location and be announced in #41 before long Rust/clippy work. No three-OS,
 G5/G6/P3/P6/final native-layout or complete-G admission is established here.
+
+## G private context-usage reader extraction (partial qualification)
+
+Native macOS/Rust1.99.1, base2322b57 plus the shared-reader extraction:
+`cargo test --locked --lib compaction::context_usage::` passes5/0; the existing
+`compaction::edit::tests::legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows`
+passes1/0; `cargo clippy --locked --lib -- -D warnings` passes. An initial
+`context_metrics` test-name filter matched0 tests and is explicitly not a
+passing regression claim. Build start was announced in #41. A single root
+CARGO_TARGET_DIR, one build job and incremental disabled were used after clean.
+
+Assertions cover manual expected canonical latest-by-rowid/current-profile/model
+selection, unknown newest usage without fallback, raw replacement timestamp
+comparison, exactly two reads in a caller-owned transaction and preparation
+after DB shutdown. Huge/malformed/negative/out-of-range usage JSON normalizes
+as before without rewriting saved bytes. A1.2MiB timestamp and1MiB model/profile
+cell reject bounded display reads while canonical reads retain their existing
+contract. Invalid limits/oversized display identity fail before a table exists.
+Captured scope stays distinct from the public result. No real API/user data.
+
+This qualification does not prove bounded total latest-attempt/replacement SQL
+work or connect the live inspector: G9 query plans/cost and G5/G6 shared/adopted
+reads remain mandatory. No full-standard/P3/P6/three-OS result is established for
+this extraction. The earlier2194/0/35 run remains scoped to0a5569b.

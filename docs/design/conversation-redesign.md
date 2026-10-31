@@ -250,6 +250,19 @@ Initial explicit F8 reads use the existing admission/pool and report their read
 scope/time. This intermediate route is not completion of live target subscriptions
 or the final joint current/browser/inspector snapshot; those remain mandatory.
 
+Saved Thread context usage shares one private compaction reader and formatter
+with canonical context_metrics: latest completed attempt by saved rowid for the
+current profile/model, unchanged replacement-time comparison, and unknown usage
+remaining null. Read only the five normalized usage scalars, never copy the raw
+usage JSON. Return the captured Thread/profile/model beside the prepared value
+so a later3s observation cannot appear current under changed settings. A caller-
+owned readonly snapshot may impose512-byte saved scalar cells before String
+materialization; canonical CLI has no new scalar cap. An oversized display cell
+makes the observation unavailable, never a fabricated empty identity or zero.
+These initial shared helpers do not themselves connect live subscriptions or
+prove constant query work; qualify latest-attempt/replacement SQL in G9. Keep the
+existing latest-order/eligibility semantics, without a new schema or cache table.
+
 The next extraction covers saved Run/Turn metadata. Their initial explicit reads
 must retain canonical saved usage totals in the same readonly transaction; normal
 reactive refresh later separates metadata500ms and usage3s. Run metadata copies

@@ -17,6 +17,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 mod bounded;
+pub(crate) mod context_usage;
 use bounded::SummaryBudget;
 mod edit;
 mod keys;

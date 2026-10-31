@@ -148,24 +148,12 @@ impl Compactor {
     }
     pub async fn context_metrics(&self, thread: &str) -> Result<Value, ApiError> {
         let thread = thread.to_owned();
-        self.database.call(move |db| {
-            let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)", [&thread], |r|r.get(0))?;
-            if !exists { return Err(StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable"))); }
-            let sql = format!("SELECT a.id,{},a.started_at,a.ended_at,
-                EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
-                  WHERE tr.thread_id=t.id AND r.created_at>a.started_at)
-                FROM thread t JOIN turn u ON u.thread_id=t.id JOIN model_attempt a ON a.turn_id=u.id
-                WHERE t.id=?1 AND a.state='completed' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
-                ORDER BY a.rowid DESC LIMIT 1",crate::usage::sql_projection("a.usage_json"));
-            let latest=db.query_row(&sql,[thread],|row| Ok(json!({
-                "attempt_id":row.get::<_,String>(0)?,
-                "input_tokens":crate::usage::StandardUsage::read(row,1)?.input_tokens,
-                "cached_tokens":crate::usage::StandardUsage::read(row,1)?.cached_tokens,
-                "started_at":row.get::<_,String>(6)?, "ended_at":row.get::<_,Option<String>>(7)?,
-                "next_request_pending":row.get::<_,bool>(8)?
-            }))).optional()?;
-            Ok(json!({"last_successful_attempt":latest}))
-        }).await.map_err(storage_error)
+        let raw = self
+            .database
+            .call(move |db| super::context_usage::read_context_usage_tx(db, &thread, None))
+            .await
+            .map_err(storage_error)?;
+        Ok(super::context_usage::prepare_context_usage(raw).0)
     }
     async fn replacement_sources(
         &self,

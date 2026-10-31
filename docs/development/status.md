@@ -2936,3 +2936,23 @@ Next connect the extracted readonly facts to G5/G6 visibility/notifications/shar
 admission, finish context/status/history/readback coverage and G9–G12 evidence.
 The expanded command-level inventory prevents blanket snapshot exemptions.
 No G push/main/release/install/user-data admission is claimed.
+
+## G context-usage shared read checkpoint
+
+Canonical Compactor::context_metrics and future readonly display reads now share
+one private compaction reader and formatter. Latest completed/current profile/
+model/rowid ordering, replacement-time comparison and unknown usage semantics
+are retained. Raw usage JSON never crosses the DB boundary; only normalized
+scalars do. Canonical calls impose no new saved-cell limit. Display callers
+may request1..512-byte cells; oversize means InputLimit before owned String
+materialization, not an empty identity or invented zero. Preparation returns
+captured Thread/profile/model separately for later settings-aware adoption.
+
+Native targeted tests5/0 plus the existing canonical large-usage/baseline
+regression1/0 and strict library Clippy pass. An initial `context_metrics`
+name filter matched zero tests; it is not counted as evidence and was replaced
+by the actual existing regression name. No fresh full-standard/three-OS success
+is claimed for this new source. The2194-test standard belongs to0a5569b.
+G5/G6 live wiring and G9 query-cost/index qualification remain open; no new
+Core operation/schema/worker/queue. Build start was posted to #41; the sequential
+clean rebuild used only root target (about1.9GiB afterward). No G push/install.
