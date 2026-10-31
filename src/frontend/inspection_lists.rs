@@ -535,6 +535,28 @@ mod tests {
         );
     }
     #[test]
+    fn temporary_g_dispatcher_uses_the_same_caller_snapshot_and_no_writes() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        let before = db.total_changes();
+        let scope = capture_list_scope(
+            &Command::Status(StatusArgs::default()),
+            Arc::new(json!({"items":[{"kind":"run","id":"gone","thread_id":"known"}]})),
+            &[],
+        )
+        .unwrap();
+        assert!(read_list_facts_tx(&db, scope.clone()).is_err());
+        let tx = db.transaction().unwrap();
+        let raw = super::super::inspection_read::read_retained_list_tx(&tx, scope).unwrap();
+        let value = super::super::inspection_read::prepare_retained_list(raw).unwrap();
+        assert_eq!(value["current"]["missing_ids"][0]["id"], "gone");
+        assert_eq!(value["current"]["sql_statements"], 1);
+        assert_eq!(value["status_membership"]["sql_statements"], 12);
+        assert_eq!(value["status_membership"]["unconfirmed"], true);
+        tx.commit().unwrap();
+        assert_eq!(db.total_changes(), before);
+    }
+    #[test]
     fn capture_checks_text_and_structure_before_cloning() {
         let command = Command::ThreadList(serde_json::from_value(json!({})).unwrap());
         let value =
