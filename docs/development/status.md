@@ -2012,3 +2012,11 @@ conditions cover actual foreground/background/completed shells plus focused
 opened/closed rows. The final focus fallback is bold, not a new left marker;
 headings keep their columns. Opened notices use the shared muted indentation.
 #99's preview lifetime/closed-error issue remains separate and requires review.
+
+## Terminal-owned URL and file opening (#103)
+
+The TUI guide and both User Guides explain terminal link gestures, default
+WezTerm file URLs and optional bare-path rules. The Agent Guide asks for absolute
+file URLs only when asking a user to open a file/folder. No path detector,
+existence check, launcher or product setting is added; source/bundle validation
+limits and the user's terminal observation are separated in acceptance.
