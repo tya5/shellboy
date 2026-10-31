@@ -1,151 +1,84 @@
+# Validation branch only; never merge this workflow/tooling into main.
 name: Rust checks
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
-    inputs:
-      diagnostics:
-        description: Repeat native overflow, proxy and attachment observations
-        type: boolean
-        default: false
-      performance:
-        description: Compare baseline/current Windows timings and four-thread contention
-        type: boolean
-        default: false
-      windows_test_threads:
-        description: Windows threads (4 selects Windows-only experiment; default/2 check all OSes)
-        type: choice
-        options: ['default', '2', '4']
-        default: 'default'
-      baseline_ref:
-        description: Baseline commit for the optional Windows comparison
-        type: string
-        default: '0469ca03fe97191b91d10cb0ba78ac5d612bb97f'
 permissions:
   contents: read
   actions: read
 jobs:
-  reuse:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      reuse: ${{ steps.evidence.outputs.reuse }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Find successful exact-SHA native checks
-        id: evidence
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const reuse = require('./scripts/ci-reuse.cjs');
-            await reuse({github, context, core});
-  check:
-    needs: reuse
-    if: always() && needs.reuse.outputs.reuse != 'true'
+  windows:
+    name: Windows split (${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.windows_test_threads == '4' && '["windows-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
-    runs-on: ${{ matrix.os }}
+        shard: ['1', '2']
+    runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      RUST_TEST_THREADS: '4'
+    defaults:
+      run:
+        working-directory: subject
     steps:
       - uses: actions/checkout@v4
         with:
+          path: subject
+          ref: 0850374da0adc2af9e51ca7a7051d5bc20187f81
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: tooling
+          persist-credentials: false
+      - name: Verify exact product source and record separate tooling provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 0850374da0adc2af9e51ca7a7051d5bc20187f81
+          echo "Product source: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Validation tooling: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - name: Install pinned Rust toolchain
         shell: bash
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          workspaces: subject -> target
           shared-key: native-v1
           cache-on-failure: true
-      - name: Check complete integration layout
-        run: python scripts/check-test-layout.py
-      - name: Check timing runner failure gates
-        run: python -m unittest discover -s scripts/tests
-      - name: Check exact-SHA reuse failure gates
-        if: runner.os == 'Linux'
-        run: node --test scripts/tests/ci-reuse.test.cjs
+      - name: Check product integration layout and fixture failure gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/check-test-layout.py
+          python -m unittest discover -s scripts/tests
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --locked --all-targets --keep-going -- -D warnings
-      - name: Diagnose native Windows overflow recovery
-        if: runner.os == 'Windows' && inputs.diagnostics == true
-        run: cargo test --locked --test integration runtime_features::both_overflow_retries_preserve_call_groups_and_never_execute_saved_tools_twice -- --exact --nocapture
-      - name: Select measured Windows fixture concurrency
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          SELECTED_TEST_THREADS: ${{ inputs.windows_test_threads == '2' && '2' || '4' }}
-        run: '"RUST_TEST_THREADS=$env:SELECTED_TEST_THREADS" >> $env:GITHUB_ENV'
-      - name: Tests
-        run: python scripts/test-timings.py --output .local/ci-timings
-      - name: Observe closed-proxy retry phases and timings
-        if: inputs.diagnostics == true
-        run: cargo test --locked --test integration response_upload_recovery::refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens -- --exact --nocapture
-      - name: Repeat attachment preparation observations in fresh processes
-        if: inputs.diagnostics == true
-        shell: bash
-        run: |
-          set -euo pipefail
-          for observation in 1 2; do
-            echo "Attachment preparation observation ${observation}/2"
-            cargo test --locked --test integration attachment_provenance:: -- --nocapture
-          done
+      - name: Execute original split ownership with four test threads
+        run: python ../tooling/scripts/test-timings.py --windows-shard ${{ matrix.shard }} --output .local/ci-timings
+      - name: Check freshly built bundled guides without owner or API
+        run: python scripts/check-docs.py --binary target/debug/shellboy.exe --out .local/ci-timings/bundled-docs.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-test-timings-${{ runner.os }}
-          path: .local/ci-timings
+          name: windows-split-${{ matrix.shard }}
+          path: subject/.local/ci-timings
           include-hidden-files: true
-  measure:
-    if: github.event_name == 'workflow_dispatch' && inputs.performance == true
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - sample: before
-            threads: '2'
-          - sample: after
-            threads: '2'
-          - sample: after-four-threads
-            threads: '4'
-    runs-on: windows-latest
-    timeout-minutes: 40
-    env:
-      RUST_TEST_THREADS: ${{ matrix.threads }}
+  inventory:
+    name: Windows split inventory audit
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          path: tooling
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: subject
-          ref: ${{ matrix.sample == 'before' && inputs.baseline_ref || github.sha }}
-          persist-credentials: false
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: rustup toolchain install 1.99.1 --profile minimal
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: subject -> target
-          shared-key: native-v1
-          cache-on-failure: true
-      - name: Record all-target and isolated test timings
-        working-directory: subject
-        shell: bash
-        run: |
-          profile=()
-          if [[ "${{ matrix.sample }}" != after-four-threads ]]; then
-            profile=(--per-test storage,index,control_db)
-          fi
-          python ../tooling/scripts/test-timings.py --output "$RUNNER_TEMP/test-performance-${{ matrix.sample }}" "${profile[@]}"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-performance-${{ matrix.sample }}
-          path: ${{ runner.temp }}/test-performance-${{ matrix.sample }}
+          pattern: windows-split-*
+          path: .local/audit
+      - name: Require exact disjoint full inventory and ignored-set coverage
+        run: >-
+          python scripts/check-windows-shards.py
+          .local/audit/windows-split-1/results.json
+          .local/audit/windows-split-2/results.json
