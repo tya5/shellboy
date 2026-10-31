@@ -29,6 +29,7 @@ impl super::UiState {
     pub(super) fn show_help(&mut self, page: Page) -> Vec<super::UiAction> {
         self.help_cache.clear();
         self.invalidate_popup_paint();
+        self.help_above_popups = false;
         self.help_page = page;
         self.help_scroll = 0;
         self.help_visible = true;
@@ -53,9 +54,54 @@ impl Page {
     pub fn guide(config: &Config) -> Self {
         let mut page = Guide { rows: Vec::new() };
         page.section("よく使う操作");
-        page.entry("F1 / /help", "操作ガイドを開く");
-        page.entry(&config.ui.send_key, "次の区切りでメッセージを渡す");
-        page.entry(&config.ui.newline_keys.join(" / "), "入力中に改行する");
+        use super::key_hints::Action;
+        for action in [
+            Action::Help,
+            Action::Send,
+            Action::Newline,
+            Action::Commands,
+            Action::History,
+            Action::Threads,
+            Action::Interrupt,
+            Action::Stop,
+        ] {
+            page.entry(&action.binding(config), action.description());
+        }
+        page.entry("/help", "操作ガイドを開く（F1と同じ）");
+        page.section("回答をコピーする");
+        page.entry(
+            &format!(
+                "{} → {}",
+                Action::History.binding(config),
+                Action::Copy.binding(config)
+            ),
+            "焦点を当てた項目の原文を丸ごとコピーする",
+        );
+        page.entry(
+            &format!(
+                "{} → {}",
+                Action::History.binding(config),
+                Action::Code.binding(config)
+            ),
+            Action::Code.description(),
+        );
+        page.entry(
+            "o → c",
+            "詳細から原文を開き、表示中の原文ページをコピーする",
+        );
+        page.entry(
+            "/copy",
+            "焦点（なければ読んでいる位置）のコードが1つならコピー、複数なら番号を選ぶ。コードなしなら本文全体",
+        );
+        page.entry("/copy all", "コードだけでなく本文全体をコピーする");
+        page.note("番号の表示は1始まり。/copy 項目ID 番号の指定は0始まりです。64KiBを超える本文はoで原文、nで続き、pで先頭を確認します。F2は見えている画面だけの範囲選択です。");
+        page.section("画像やファイルを添付する");
+        page.entry(
+            "/image",
+            "クリップボードの画像を下書きに添付する（送信はしない）",
+        );
+        page.entry("/attach パス", "画像やファイルを下書きに添付する");
+        page.note("普通の貼り付けは文字です。画像を取り出せない環境では /attach パス を使います。添付の印・状態は下書きで確認し、上限は設定のlimitsに従います。");
         if !config.ui.send_key.eq_ignore_ascii_case("Ctrl+U")
             && !config
                 .ui
@@ -476,15 +522,30 @@ mod tests {
             "よく使う操作",
             "Ctrl+Enter",
             "次の区切りでメッセージを渡す",
-            "入力中に改行する",
+            "改行",
             "Ctrl+C",
-            "Ctrl+Q",
-            "会話を読む・切り替える",
+            "回答をコピーする",
             "Esc",
         ] {
             assert!(first.contains(expected), "{expected}: {first}");
         }
         assert!(!first.contains("型付き") && !first.contains("cache"));
+        let all = ui
+            .help_page
+            .lines(76)
+            .iter()
+            .flat_map(|line| &line.spans)
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        for expected in [
+            "Ctrl+Q",
+            "会話を読む・切り替える",
+            "画像やファイルを添付する",
+            "/image",
+            "/attach",
+        ] {
+            assert!(all.contains(expected), "{expected}");
+        }
         for _ in 0..30 {
             key(&mut ui, KeyCode::PageDown);
             screen(&mut ui, 80, 24);

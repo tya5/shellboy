@@ -285,6 +285,7 @@ impl UiState {
         }
     }
     pub(super) fn queue_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
+        let key = key_hints::readonly_key(key);
         let count = self
             .queue_popup
             .archives

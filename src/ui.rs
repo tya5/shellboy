@@ -17,6 +17,9 @@ use crate::{
 pub mod activity;
 mod bell;
 mod chrome;
+mod code_copy;
+pub(crate) use code_copy::caption as code_copy_caption;
+pub use code_copy::{CopyBlock, CopyOffer};
 mod composer;
 mod details;
 pub mod live_work;
@@ -32,6 +35,7 @@ pub(crate) use history_items::ItemState as PreviewItemState;
 pub use history_items::{ItemKey, Preview as ToolPreview};
 mod input;
 pub mod inspection;
+mod key_hints;
 mod lifecycle;
 mod management;
 pub use inspection::{InspectionFieldAnchor, InspectionPart, InspectionSnapshot, InspectionTarget};
@@ -438,18 +442,20 @@ pub enum CopyScope {
     ManagementPage { has_more: bool },
     Value,
     Body,
-    CodeBlock,
+    CodeBlock { index: usize },
 }
 impl CopyScope {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::OriginalPage { has_more: true } => "原文の現在ページ（続きあり）",
-            Self::OriginalPage { has_more: false } => "原文の現在ページ（このページのみ）",
-            Self::ManagementPage { has_more: true } => "管理詳細の現在ページ（続きあり）",
-            Self::ManagementPage { has_more: false } => "管理詳細の現在ページ（このページのみ）",
-            Self::Value => "項目の完全な値",
-            Self::Body => "本文全体",
-            Self::CodeBlock => "コードブロック全体",
+            Self::OriginalPage { has_more: true } => "原文の現在ページ（続きあり）".into(),
+            Self::OriginalPage { has_more: false } => "原文の現在ページ（このページのみ）".into(),
+            Self::ManagementPage { has_more: true } => "管理詳細の現在ページ（続きあり）".into(),
+            Self::ManagementPage { has_more: false } => {
+                "管理詳細の現在ページ（このページのみ）".into()
+            }
+            Self::Value => "項目の完全な値".into(),
+            Self::Body => "本文全体".into(),
+            Self::CodeBlock { index } => format!("コードの塊 {}", index.saturating_add(1)),
         }
     }
 }
@@ -560,6 +566,11 @@ pub enum UiAction {
     CopyText {
         text: String,
         scope: CopyScope,
+    },
+    LoadCopyChoices {
+        node_id: String,
+        request_id: u64,
+        cancel: tokio_util::sync::CancellationToken,
     },
     LoadOriginal {
         node_id: String,
@@ -724,6 +735,11 @@ pub enum UiAction {
         node_id: String,
         code_block: Option<usize>,
     },
+    CopySelected {
+        node_id: String,
+        code_block: Option<usize>,
+        source_hash: String,
+    },
     PasteImage {
         draft_id: String,
         revision: u64,
@@ -887,6 +903,11 @@ pub enum UiUpdate {
         generation: u64,
         request_id: u64,
         result: Result<Option<RecalledPrompt>, String>,
+    },
+    CopyChoices {
+        node_id: String,
+        request_id: u64,
+        result: Result<CopyOffer, String>,
     },
     OriginalPage {
         request_id: u64,
@@ -1577,6 +1598,7 @@ pub struct UiState {
     #[cfg(test)]
     retention_passes: usize,
     animation: activity::Animation,
+    key_hints: key_hints::Cache,
     pub views: BTreeMap<String, ThreadView>,
     pub active: String,
     thread_browser: threads::ThreadBrowser,
@@ -1584,6 +1606,8 @@ pub struct UiState {
     pub selection_mode: bool,
     selection_frozen_at: Option<String>,
     pub help_visible: bool,
+    // F1 can temporarily cover a popup without discarding its selection/source.
+    help_above_popups: bool,
     help_page: help::Page,
     help_scroll: u16,
     viewport: Rect,
@@ -1679,6 +1703,7 @@ impl UiState {
             diagnostics: None,
             bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
+            key_hints: key_hints::Cache::default(),
             views: BTreeMap::from([(active.clone(), view)]),
             active,
             thread_browser: threads::ThreadBrowser::default(),
@@ -1686,6 +1711,7 @@ impl UiState {
             selection_mode: false,
             selection_frozen_at: None,
             help_visible: false,
+            help_above_popups: false,
             help_page: help::Page::guide(config),
             help_scroll: 0,
             viewport: Rect::default(),
@@ -2596,6 +2622,22 @@ impl UiState {
                     && let Some(details) = &mut self.details
                 {
                     details.accept_links(request_id, result);
+                }
+            }
+            UiUpdate::CopyChoices {
+                node_id,
+                request_id,
+                result,
+            } => {
+                if let Some(mut details) = self.details.take() {
+                    let action = details.copy_choices.as_mut().and_then(|choices| {
+                        choices.accept(self.view(), request_id, &node_id, result)
+                    });
+                    if let Some(action) = action {
+                        self.deferred_actions.push(action);
+                    } else {
+                        self.details = Some(details);
+                    }
                 }
             }
             UiUpdate::OriginalPage {
@@ -4472,21 +4514,33 @@ impl UiState {
                 }]
             }
             "/copy" => {
-                let mut parts = argument.split_whitespace();
-                let node_id = parts
-                    .next()
-                    .map(str::to_owned)
-                    .or_else(|| self.view().anchor.node_id.clone())
-                    .or_else(|| self.view().nodes().last().map(|n| n.node_id.clone()));
-                let code_block = parts.next().and_then(|s| s.parse().ok());
-                node_id
-                    .map(|node_id| {
-                        vec![UiAction::Copy {
-                            node_id,
-                            code_block,
-                        }]
-                    })
-                    .unwrap_or_else(|| self.command_error("コピー対象node-idがありません"))
+                let parts = argument.split_whitespace().collect::<Vec<_>>();
+                match parts.as_slice() {
+                    [] => self.choose_code(true),
+                    ["all"] => self
+                        .copy_target()
+                        .map(|node_id| {
+                            vec![UiAction::Copy {
+                                node_id,
+                                code_block: None,
+                            }]
+                        })
+                        .unwrap_or_else(|| self.command_error("コピー対象の回答がありません")),
+                    [node] => vec![UiAction::Copy {
+                        node_id: (*node).into(),
+                        code_block: None,
+                    }],
+                    [node, index] => match index.parse::<usize>() {
+                        Ok(index) => vec![UiAction::Copy {
+                            node_id: (*node).into(),
+                            code_block: Some(index),
+                        }],
+                        Err(_) => self.command_error(
+                            "コード番号は0以上の整数です。/copy [all | node-id [番号]]",
+                        ),
+                    },
+                    _ => self.command_error("/copy [all | node-id [番号]]"),
+                }
             }
             "/select" => {
                 self.selection_mode = !self.selection_mode;
@@ -5037,12 +5091,30 @@ impl UiState {
             _ => vec![],
         }
     }
+    fn draw_help(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let body = popup::panel_recorded(
+            frame,
+            area,
+            self.help_page.title,
+            self.help_page.context,
+            HELP_FOOTER,
+            &self.aux_popup_paint,
+        );
+        self.help_scroll = self
+            .help_cache
+            .render(frame, body, 0, self.help_scroll, || {
+                self.help_page.lines(popup::reader_width(body)).into_owned()
+            });
+    }
     fn draw_overlays(
         &mut self,
         frame: &mut Frame<'_>,
         area: Rect,
     ) -> Vec<crate::terminal_links::LinkRegion> {
         let mut link_regions = Vec::new();
+        if self.help_visible && !self.help_above_popups {
+            self.draw_help(frame, area);
+        }
         let status = self
             .views
             .get(&self.active)
@@ -5057,6 +5129,10 @@ impl UiState {
         }
         if let Some(models) = &mut self.models {
             models.draw(frame, area);
+            link_regions.clear();
+        }
+        if self.help_visible && self.help_above_popups {
+            self.draw_help(frame, area);
             link_regions.clear();
         }
         if self.is_quitting() {
@@ -5662,7 +5738,14 @@ fn draw_input(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(state.palette.muted())),
+                .border_style(Style::default().fg(state.palette.muted()))
+                .title_bottom(
+                    if state.view().draft.text.is_empty() && input_area.width >= 60 {
+                        "/image 画像を添付 · /attach パス"
+                    } else {
+                        ""
+                    },
+                ),
         ),
         input_area,
     );
@@ -5726,24 +5809,10 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     {
         spans.push(Span::raw(format!(" · {label}")));
     }
-    let mut lines = chrome::footer_lines(
-        view,
-        area.width,
-        state.selection_mode,
-        state.palette,
-        spans,
-        notice,
-    );
-    if view.items.active
-        && let Some(line) = lines.get_mut(1)
-    {
-        *line = Line::from("↑↓ 項目 · Space 開閉 · o 原文 · c コピー · Esc 入力");
-    }
-    if view.live_work.active
-        && let Some(line) = lines.get_mut(1)
-    {
-        *line = Line::from("↑↓ 作業 · Space 出力 · F6 詳細 · o 子へ · Esc 入力");
-    }
+    let hints = state
+        .key_hints
+        .text(state.hint_context(), area.width, &state.config);
+    let lines = chrome::footer_lines(view, area.width, &hints, state.palette, spans, notice);
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -5928,24 +5997,6 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         state
             .thread_browser
             .draw(frame, popup_area, active, notice_visible);
-    }
-    if state.help_visible {
-        let body = popup::panel_recorded(
-            frame,
-            popup_area,
-            state.help_page.title,
-            state.help_page.context,
-            HELP_FOOTER,
-            &state.aux_popup_paint,
-        );
-        state.help_scroll = state
-            .help_cache
-            .render(frame, body, 0, state.help_scroll, || {
-                state
-                    .help_page
-                    .lines(popup::reader_width(body))
-                    .into_owned()
-            });
     }
     let overlay_links = state.draw_overlays(frame, popup_area);
     state.visible_links = overlay_links;
@@ -6653,6 +6704,7 @@ mod layout_cache_tests {
         let snapshot = ActivitySnapshot {
             timing: Default::default(),
             tool_running: false,
+            waiting_reason: None,
             live_work: None,
             revisit: None,
             context_reduction: None,

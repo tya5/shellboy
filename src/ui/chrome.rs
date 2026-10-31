@@ -132,7 +132,7 @@ fn header(view: &ThreadView, width: u16, selection: bool) -> String {
 pub(super) fn footer_lines(
     view: &ThreadView,
     width: u16,
-    selection: bool,
+    hints: &str,
     palette: super::theme::Palette,
     mut activity_spans: Vec<ratatui::text::Span<'static>>,
     notice: Option<(&str, bool)>,
@@ -154,6 +154,14 @@ pub(super) fn footer_lines(
         facts.push(limit);
     }
 
+    if let Some(reason) = view
+        .activity
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.waiting_reason.as_ref())
+    {
+        facts.push(super::activity::context_wait_label(reason));
+    }
     if !view.follow {
         facts.push(if view.unseen {
             "↓ new".into()
@@ -256,7 +264,7 @@ pub(super) fn footer_lines(
         }
         activity_spans.push(Span::styled(facts, Style::default().fg(palette.muted())));
     }
-    let (hint, error) = notice.unwrap_or((if selection { "F2/Esc" } else { "F1 help" }, false));
+    let (hint, error) = notice.unwrap_or((hints, false));
     let notice_style = if error && !palette.plain() {
         Style::default().fg(super::theme::ATTENTION)
     } else {
@@ -264,7 +272,13 @@ pub(super) fn footer_lines(
     };
     vec![
         Line::from(activity_spans),
-        Line::styled(fit(hint, usize::from(width), false), notice_style),
+        Line::styled(fit(hint, usize::from(width), false), notice_style).alignment(
+            if notice.is_some() {
+                ratatui::layout::Alignment::Left
+            } else {
+                ratatui::layout::Alignment::Right
+            },
+        ),
     ]
 }
 
@@ -319,7 +333,11 @@ pub(super) fn welcome(
                 true
             )
         )),
-        Line::from("/ でコマンド候補 · F1 操作ガイド"),
+        Line::from(if width >= 55 {
+            "/ コマンド · /image 画像を添付 · F1 操作ガイド"
+        } else {
+            "/ コマンド · F1 操作ガイド"
+        }),
     ]
 }
 
@@ -611,18 +629,18 @@ mod tests {
             assert!(metadata.content.contains("fixture-link"));
             assert!(metadata.content.ends_with("/project"));
             assert_eq!(metadata.style.fg, Some(palette.muted()));
-            let rows = footer_lines(ui.view(), 100, false, palette, vec![Span::raw("✓")], None);
+            let rows = footer_lines(ui.view(), 100, "F1", palette, vec![Span::raw("✓")], None);
             let text = rows
                 .iter()
                 .flat_map(|line| line.spans.iter())
                 .map(|span| span.content.as_ref())
                 .collect::<String>();
-            assert!(text.contains("待ち 2") && text.contains("F1 help"));
+            assert!(text.contains("待ち 2") && text.contains("F1"));
             assert!(!text.contains("追従") && !text.contains("F6") && !text.contains("F8"));
             let rows = footer_lines(
                 ui.view(),
                 100,
-                false,
+                "F1",
                 palette,
                 vec![],
                 Some(("saved operation failed", true)),
@@ -735,7 +753,7 @@ mod terminal_time_tests {
             let lines = footer_lines(
                 &view,
                 200,
-                false,
+                "F1",
                 crate::ui::theme::Palette::from_capabilities(
                     crate::config::PaletteMode::Dark,
                     false,
@@ -755,5 +773,56 @@ mod terminal_time_tests {
                 "{text}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod context_wait_footer_tests {
+    use super::*;
+    #[test]
+    fn footer_shows_saved_boundary_owner_and_removes_it_on_fresh_empty_snapshot() {
+        let config = crate::config::Config::default();
+        let mut view = crate::ui::view::ThreadView::new(&config, std::path::PathBuf::from("/"));
+        let reason = crate::protocol::RunWaitReason {
+            kind: "context_edit_boundary".into(),
+            operation_id: "fixture".into(),
+            action: "summary".into(),
+            accepted_at: "saved".into(),
+            operation_count: 1,
+        };
+        let palette = crate::ui::theme::Palette::from_capabilities(
+            crate::config::PaletteMode::Dark,
+            false,
+            true,
+        );
+        view.activity.accept(
+            1,
+            crate::ui::activity::ActivitySnapshot {
+                phase: crate::activity::ActivityPhase::Running,
+                run_id: Some("r".into()),
+                waiting_reason: Some(reason),
+                ..Default::default()
+            },
+        );
+        let text = footer_lines(&view, 140, "", palette, vec![], None)
+            .iter()
+            .flat_map(|l| &l.spans)
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+        assert!(text.contains("会話要約の完了待ち"), "{text}");
+        view.activity.accept(
+            2,
+            crate::ui::activity::ActivitySnapshot {
+                phase: crate::activity::ActivityPhase::AwaitingModel,
+                run_id: Some("r".into()),
+                ..Default::default()
+            },
+        );
+        let text = footer_lines(&view, 140, "", palette, vec![], None)
+            .iter()
+            .flat_map(|l| &l.spans)
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+        assert!(!text.contains("会話要約の完了待ち"), "{text}");
     }
 }

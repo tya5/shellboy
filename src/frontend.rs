@@ -6,6 +6,7 @@ use admission::{spawn_read, spawn_work};
 mod browser;
 mod browser_read;
 mod client_operations;
+mod copying;
 mod draft_images;
 mod draft_saver;
 mod header;
@@ -488,7 +489,7 @@ enum BackgroundResult {
     },
     Copied {
         scope: CopyScope,
-        result: Result<CopyOutcome, ApiError>,
+        result: Result<(CopyOutcome, usize), ApiError>,
     },
     Command {
         work_status: bool,
@@ -1233,9 +1234,15 @@ async fn run_with_delivery(
                         action => break action,
                     }
                 };
+                let (action, expected_copy_hash) = match action {
+                    UiAction::CopySelected { node_id, code_block, source_hash } =>
+                        (UiAction::Copy { node_id, code_block }, Some(source_hash)),
+                    other => (other, None),
+                };
                 let has_submission = submission.is_some();
                 #[cfg(test)] stream_metrics::FRONTEND_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 match action {
+                    UiAction::CopySelected { .. } => unreachable!("copy selection normalized before dispatch"),
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
                     }
@@ -2599,7 +2606,7 @@ async fn run_with_delivery(
                                 let pixels = clipboard.capture(timeout, cancel.clone()).await?;
                                 attachments.save_clipboard_pixels(pixels, cancel).await
                             }
-                            .await;
+                            .await.map_err(image_acquisition_error);
                             command_outcome(&outcomes, submission, &result).await;
                             {
                                 let _ = sender
@@ -2623,6 +2630,22 @@ async fn run_with_delivery(
                             "待機の観測を取消しました。対象処理は継続します",
                         )
                         .await;
+                    }
+                    UiAction::LoadCopyChoices { node_id, request_id, cancel } => {
+                        let control = control.clone();
+                        let sender = updates.worker();
+                        let read_node = node_id.clone();
+                        if cancel.is_cancelled() { continue; }
+                        if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
+                            tokio::select! { biased; _=cancel.cancelled()=>{}, _=async {
+                                let result = checked_storage(&control, copying::choices(&control, read_node.clone()).await).await
+                                    .map_err(|error| error.to_string());
+                                update(&sender, UiUpdate::CopyChoices { node_id: read_node, request_id, result }).await;
+                            } => {} }
+                        }) {
+                            update(&updates, UiUpdate::CopyChoices { node_id, request_id,
+                                result: Err("原文読込キューが満杯です。Esc後に再操作してください".into()) }).await;
+                        }
                     }
                     UiAction::LoadOriginal {
                         node_id,
@@ -2813,6 +2836,7 @@ async fn run_with_delivery(
                         let sender = background_tx.clone();
                         let cancel = cancel.child_token();
                         spawn_work(&mut workers, permit, async move {
+                            let characters = text.chars().count();
                             let result = clipboard
                                 .copy(
                                     text,
@@ -2821,7 +2845,7 @@ async fn run_with_delivery(
                                     control.store.config.io.file_prepare_timeout_ms,
                                     cancel,
                                 )
-                                .await;
+                                .await.map(|outcome| (outcome, characters));
                             let _ = sender
                                 .send(BackgroundResult::Copied { scope, result })
                                 .await;
@@ -2831,8 +2855,8 @@ async fn run_with_delivery(
                         node_id,
                         code_block,
                     } => {
-                        let scope = if code_block.is_some() {
-                            CopyScope::CodeBlock
+                        let scope = if let Some(index) = code_block {
+                            CopyScope::CodeBlock { index }
                         } else {
                             CopyScope::Body
                         };
@@ -2863,7 +2887,8 @@ async fn run_with_delivery(
                         let cancel = cancel.child_token();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
-                                let text = copy_source(&control, node_id, code_block).await?;
+                                let text = checked_storage(&control, copying::text(&control, node_id, code_block, expected_copy_hash).await).await?;
+                                let characters = text.chars().count();
                                 clipboard
                                     .copy(
                                         text,
@@ -2872,7 +2897,7 @@ async fn run_with_delivery(
                                         control.store.config.io.file_prepare_timeout_ms,
                                         cancel,
                                     )
-                                    .await
+                                    .await.map(|outcome| (outcome, characters))
                             }
                             .await;
                             command_outcome(&outcomes, submission, &result).await;
@@ -3205,18 +3230,18 @@ async fn run_with_delivery(
                 },
                 Some(BackgroundResult::Copied {
                     scope,
-                    result: Ok(CopyOutcome::OsCopied),
-                }) => status(&updates, None, format!("{}をコピーしました", scope.label())).await,
+                    result: Ok((CopyOutcome::OsCopied, characters)),
+                }) => status(&updates, None, format!("{}をコピーしました（{characters}文字）", scope.label())).await,
                 Some(BackgroundResult::Copied {
                     scope,
-                    result: Ok(CopyOutcome::TerminalRequest(bytes)),
+                    result: Ok((CopyOutcome::TerminalRequest(bytes), characters)),
                 }) => {
                     update(&updates, UiUpdate::TerminalRequest { bytes }).await;
                     status(
                         &updates,
                         None,
                         format!(
-                            "OSC52: {}のコピー要求を端末へ送りました（完了未確認）",
+                            "OSC52: {}のコピー要求を端末へ送りました（{characters}文字・完了未確認）",
                             scope.label()
                         ),
                     )
@@ -3964,39 +3989,22 @@ impl RawNode {
         }
     }
 }
+fn image_acquisition_error(mut error: ApiError) -> ApiError {
+    error
+        .message
+        .push_str("。画像ファイルがあれば /attach パス で下書きに添付できます");
+    error
+}
 pub async fn copy_source(
     control: &Control,
     node_id: String,
     code_block: Option<usize>,
 ) -> Result<String, ApiError> {
-    let result = async {
-    let body = crate::history::History::new(control.store.database.clone())
-        .get(HistoryGetArgs { final_answer_only: false,
-            node_id,
-            limit_bytes: MAX_BODY_BYTES,
-            cursor: None,
-            encoding: DEFAULT_ENCODING.into(),
-        })
-        .await?;
-    if let Some(reason) = body.tombstone_reason {
-        return Err(ApiError::new(
-            ErrorCode::OutputExpired,
-            format!("Original body unavailable: {reason}"),
-        ));
-    }
-    if let Some(index) = code_block {
-        return source_code_block(&body.text,index,body.next_cursor.is_none()).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"Requested complete code block is outside the available body; retrieve the original by history get"));
-    }
-    if body.next_cursor.is_some() {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Body exceeds the 64KiB copy limit; retrieve/save the original with history get",
-        ));
-    }
-    Ok(body.text)
-
-    }.await;
-    checked_storage(control, result).await
+    checked_storage(
+        control,
+        copying::text(control, node_id, code_block, None).await,
+    )
+    .await
 }
 pub fn fenced_code_block(text: &str, index: usize) -> Option<String> {
     source_code_block(text, index, true)

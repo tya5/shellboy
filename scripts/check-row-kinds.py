@@ -94,7 +94,7 @@ def main():
                         return text
 
                     try:
-                        scene("ready", lambda s: "F1 help" in s)
+                        scene("ready", lambda s: "Ctrl+T 会話" in s)
                         terminal.send("/switch visual-row-kinds\r")
                         static = scene("static-kinds", lambda s: "ROW_FIXTURE_USER" in s and
                                        "ROW_FIXTURE_SUMMARY" in s and "Fixture child" in s and
@@ -157,7 +157,7 @@ def main():
                         # The unavailable-tool visual scene is deliberately not
                         # valid model replay. Start a fresh synthetic conversation.
                         terminal.send("/new\r")
-                        scene("new-conversation", lambda s: "F1 help" in s and "UNKNOWN_OBSERVATION" not in s)
+                        scene("new-conversation", lambda s: "Ctrl+T 会話" in s and "UNKNOWN_OBSERVATION" not in s)
                         terminal.send("ROW_FIXTURE_START\r")
                         live = scene("background-and-foreground", lambda s: "ROW_FIXTURE_DONE" in s and
                                      "⏵ read fixture_line" in s and "背景" in s and "printf FAST_ONE" in s and "printf FAST_TWO" in s)
@@ -192,7 +192,7 @@ def main():
                         terminal.send("\t\x1b[A\x1b[A\x1b[A\r ")
                         scene("notice-jump-open-tool", lambda s: "│ BACKGROUND_DONE" in s)
                         terminal.send(" \t")
-                        scene("tool-closed-input", lambda s: "│ BACKGROUND_DONE" not in s and "F1 help" in s)
+                        scene("tool-closed-input", lambda s: "│ BACKGROUND_DONE" not in s and "Ctrl+T 会話" in s)
                         results.append({"case": name, "observations": observations, "execution_id": execution, "metadata_colors": {kind: cells[-1][1] for kind, cells in metadata.items()}})
                     except Exception:
                         (out / "failure.txt").write_text(terminal.text() + "\n")

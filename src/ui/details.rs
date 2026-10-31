@@ -1,4 +1,5 @@
 //! Transient selected-node detail navigation; canonical viewport/draft stay unchanged.
+use super::key_hints::Action;
 use super::popup::Item as ListItem;
 use super::theme;
 use super::{ThreadView, UiAction, UiNode, popup};
@@ -43,6 +44,7 @@ pub(super) struct Details {
     reader_cache: std::cell::RefCell<popup::ReaderCache>,
     reader_revision: u64,
     pub node_id: String,
+    pub(super) copy_choices: Option<super::code_copy::Choices>,
     source_node_ids: Vec<String>,
     item_key: Option<super::ItemKey>,
     item_history_revision: Option<u64>,
@@ -445,6 +447,7 @@ impl Details {
             paint: Cell::new(None),
             reader_cache: Default::default(),
             reader_revision: 0,
+            copy_choices: None,
             source_node_ids: vec![node_id.clone()],
             item_key: None,
             item_history_revision: None,
@@ -607,7 +610,7 @@ impl Details {
         self.sources_stale = Some(safe(reason));
     }
     pub(super) fn refresh_wait(&self, now: Instant) -> Option<Duration> {
-        (self.sources_dirty && !self.links_pending).then(|| {
+        (self.copy_choices.is_none() && self.sources_dirty && !self.links_pending).then(|| {
             self.last_sources_request.map_or(Duration::ZERO, |last| {
                 Duration::from_millis(500).saturating_sub(now.saturating_duration_since(last))
             })
@@ -620,7 +623,8 @@ impl Details {
         next: &mut u64,
         now: Instant,
     ) -> Option<UiAction> {
-        if !self.sources_dirty
+        if self.copy_choices.is_some()
+            || !self.sources_dirty
             || self.links_pending
             || self.last_sources_request.is_some_and(|last| {
                 now.saturating_duration_since(last) < Duration::from_millis(500)
@@ -898,6 +902,9 @@ impl Details {
         self.paint.get()
     }
     pub(super) fn wheel(&mut self, delta: isize, view: &ThreadView) -> bool {
+        if let Some(choices) = &mut self.copy_choices {
+            return choices.matches(view) && choices.wheel(delta);
+        }
         if matches!(self.mode, Mode::Original) {
             let old = self.scroll.get();
             let new = popup::move_reader(old, delta, self.reader_cache.borrow().bounds().maximum);
@@ -914,11 +921,36 @@ impl Details {
         self.selected = popup::move_selection(old, delta, count);
         old != self.selected
     }
+    pub(super) fn hint_context(&self) -> super::key_hints::Context {
+        use super::key_hints::Context;
+        if let Some(choices) = &self.copy_choices {
+            return choices.hint_context();
+        }
+        match self.mode {
+            Mode::Original if self.original.is_none() => Context::OriginalPending,
+            Mode::Original => Context::Original {
+                next: self
+                    .original
+                    .as_ref()
+                    .is_some_and(|b| b.next_cursor.is_some()),
+            },
+            Mode::Fields => Context::Fields,
+            _ => Context::Details,
+        }
+    }
     pub fn key(&mut self, key: KeyEvent, view: &ThreadView, next: &mut u64) -> Outcome {
+        if let Some(choices) = &mut self.copy_choices {
+            return if choices.matches(view) {
+                choices.key(key)
+            } else {
+                Outcome::Close
+            };
+        }
         self.sync_node(view);
-        match key.code {
+        let code = super::key_hints::readonly_key(key).code;
+        match code {
             KeyCode::Esc => return Outcome::Close,
-            KeyCode::Char('r') if !matches!(self.mode, Mode::Original) => {
+            code if Action::Refresh.matches(code) && !matches!(self.mode, Mode::Original) => {
                 self.invalidate_sources();
                 if !self.links_pending
                     && let Some(thread) = view.thread_id.clone()
@@ -951,13 +983,15 @@ impl Details {
                 self.selected = 0;
                 self.scroll.set(0);
             }
-            KeyCode::Char('o') => return Outcome::Action(Box::new(self.original(None, next))),
-            KeyCode::Char('n') if matches!(self.mode, Mode::Original) => {
+            code if Action::Original.matches(code) => {
+                return Outcome::Action(Box::new(self.original(None, next)));
+            }
+            code if Action::NextPage.matches(code) && matches!(self.mode, Mode::Original) => {
                 if let Some(cursor) = self.original.as_ref().and_then(|b| b.next_cursor.clone()) {
                     return Outcome::Action(Box::new(self.original(Some(cursor), next)));
                 }
             }
-            KeyCode::Char('p') if matches!(self.mode, Mode::Original) => {
+            code if Action::FirstPage.matches(code) && matches!(self.mode, Mode::Original) => {
                 return Outcome::Action(Box::new(self.original(None, next)));
             }
             KeyCode::PageDown if matches!(self.mode, Mode::Original) => self.scroll.set(
@@ -980,13 +1014,15 @@ impl Details {
             KeyCode::PageUp => self.selected = self.selected.saturating_sub(self.page.get()),
             KeyCode::Up => self.selected = self.selected.saturating_sub(1),
             KeyCode::Down => self.selected = self.selected.saturating_add(1),
-            KeyCode::Char('v' | 'V') if matches!(self.mode, Mode::Fields) => {
+            code if Action::Fields.matches(code) && matches!(self.mode, Mode::Fields) => {
                 self.internal_fields = !self.internal_fields;
                 self.selected = 0;
                 self.scroll.set(0);
             }
-            KeyCode::Char('a') => return Outcome::Operation(super::operations::OpKind::HistoryGet),
-            KeyCode::Char('c') => {
+            code if Action::Operations.matches(code) => {
+                return Outcome::Operation(super::operations::OpKind::HistoryGet);
+            }
+            code if Action::Copy.matches(code) => {
                 let text = match self.mode {
                     Mode::Nodes => Some(self.node_id.clone()),
                     Mode::Fields => {
@@ -1078,6 +1114,9 @@ impl Details {
         Outcome::None
     }
     fn sync_node(&mut self, view: &ThreadView) {
+        if self.copy_choices.is_some() {
+            return;
+        }
         if matches!(self.mode, Mode::Nodes)
             && let Some(node) = view
                 .nodes()
@@ -1104,6 +1143,10 @@ impl Details {
         area: Rect,
         view: &ThreadView,
     ) -> Vec<crate::terminal_links::LinkRegion> {
+        if let Some(choices) = &self.copy_choices {
+            choices.draw(frame, area, &self.paint);
+            return vec![];
+        }
         let count = match self.mode {
             Mode::Nodes => view.nodes().len(),
             Mode::Fields => self.fields(view).len(),
@@ -1151,13 +1194,7 @@ impl Details {
                 safe(&self.node_id)
             )
         };
-        let footer = if matches!(self.mode, Mode::Original) {
-            "Esc 戻る · ↑↓/PgUp/PgDn スクロール\nN 次page · P 先頭再取得 · O 再取得 · C 原文copy · F6 項目 · F7 リンク"
-        } else if matches!(self.mode, Mode::Fields) {
-            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nR 再取得 · O 原文 · C 値copy · V 要点/内部項目 · A 操作"
-        } else {
-            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nR 再取得 · O 原文 · C 値copy · A 操作 · F6 項目 · F7 リンク"
-        };
+        let footer = super::key_hints::detail_footer(self.hint_context());
         let mut body = popup::panel_recorded(frame, area, mode, &context, footer, &self.paint);
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
             frame.render_widget(
@@ -2019,6 +2056,31 @@ mod tests {
         }
     }
     #[test]
+    fn readonly_detail_original_and_copy_accept_shifted_letters() {
+        let ui = state();
+        for (letter, modifiers) in [
+            ('o', crossterm::event::KeyModifiers::NONE),
+            ('O', crossterm::event::KeyModifiers::SHIFT),
+        ] {
+            let mut details = Details::new(ui.view(), false);
+            assert!(matches!(
+                details.key(KeyEvent::new(KeyCode::Char(letter), modifiers), ui.view(), &mut 0),
+                Outcome::Action(action) if matches!(&*action, UiAction::LoadOriginal { .. })
+            ));
+        }
+        for (letter, modifiers) in [
+            ('c', crossterm::event::KeyModifiers::NONE),
+            ('C', crossterm::event::KeyModifiers::SHIFT),
+        ] {
+            let mut details = Details::new(ui.view(), false);
+            assert!(matches!(
+                details.key(KeyEvent::new(KeyCode::Char(letter), modifiers), ui.view(), &mut 0),
+                Outcome::Action(action) if matches!(&*action, UiAction::CopyText { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn long_field_preview_leaves_neighbors_visible_and_copy_keeps_the_complete_value() {
         let mut ui = state();
         let value = format!("本文先頭\n{}本文末尾", "中間の行\n".repeat(80));
@@ -2468,7 +2530,7 @@ mod tests {
             assert!(visible.contains("本文:"));
             assert!(!visible.contains("項目 1 › 項目 1"));
             assert!(!visible.contains("呼出し群ID: null"));
-            assert!(visible.contains("O 原文"));
+            assert!(visible.contains("o 原文"));
         }
         assert!(
             matches!(details.key(KeyEvent::new(KeyCode::Char('o'),KeyModifiers::NONE),ui.view(),&mut next),

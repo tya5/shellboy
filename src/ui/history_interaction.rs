@@ -192,6 +192,7 @@ impl UiState {
         self.dirty = true;
     }
     pub(super) fn history_focus_key(&mut self, key: KeyEvent) -> Option<Vec<UiAction>> {
+        let key = key_hints::readonly_key(key);
         if !self.composer_active() {
             return None;
         }
@@ -262,8 +263,11 @@ impl UiState {
                     .unwrap_or_else(|| self.toggle_history_item()),
             ),
             KeyCode::Char(' ') => Some(self.toggle_history_item()),
-            KeyCode::Char('o') => Some(self.open_history_details(false, true)),
-            KeyCode::Char('c') => Some(
+            code if key_hints::Action::Code.matches(code) => Some(self.choose_code(false)),
+            code if key_hints::Action::Original.matches(code) => {
+                Some(self.open_history_details(false, true))
+            }
+            code if key_hints::Action::Copy.matches(code) => Some(
                 self.selected_history_item()
                     .map(|item| UiAction::Copy {
                         node_id: item.primary_node_id.clone(),

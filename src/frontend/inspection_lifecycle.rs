@@ -64,6 +64,7 @@ const TURN_SQL: &str =
 FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1";
 
 struct RawRun {
+    waiting_reason: Option<crate::protocol::RunWaitReason>,
     scalar_overflow: bool,
     thread: String,
     state: String,
@@ -136,6 +137,7 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
             let mut raw = db
                 .query_row(RUN_SQL, rusqlite::params![id, JSON_BYTES as i64], |row| {
                     Ok(RawRun {
+                        waiting_reason: None,
                         scalar_overflow: row.get(12)?,
                         thread: row.get(0)?,
                         state: row.get(1)?,
@@ -157,6 +159,9 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
                 })
                 .optional()?
                 .ok_or_else(missing)?;
+            if !raw.scalar_overflow {
+                raw.waiting_reason = crate::readback::run_wait_reason(db, &raw.thread, id)?;
+            }
             (raw.owned_runs, raw.runs_limited) = owned(db, OWNED_RUNS, id)?;
             (raw.executions, raw.executions_limited) = owned(db, OWNED_EXECUTIONS, id)?;
             RawBody::Run(raw)
@@ -292,6 +297,7 @@ pub(super) fn prepare(raw: Raw) -> Result<super::inspection_saved::PreparedSaved
             (
                 thread,
                 encoded(RunDetails {
+                    waiting_reason: raw.waiting_reason,
                     usage_totals: None,
                     context,
                     run_id: id.clone(),
@@ -466,6 +472,30 @@ mod tests {
         }
     }
     #[test]
+    fn saved_run_inspection_preserves_context_boundary_wait_and_its_removal() {
+        let db = fixture();
+        db.execute_batch("UPDATE turn SET state='running' WHERE id='u';
+          INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('boundary','fixture','{}','hash','completed','{\"result\":{\"context_edit\":{\"action\":\"summary\"}}}','2026-10-31T12:38:20Z');
+          INSERT INTO app_meta(key,value)VALUES('compact.inflight.foreign','[\"boundary\"]');").unwrap();
+        let expected = canonical(&db, &run());
+        let trace = Statements::new(&db);
+        let raw = read_tx(&db, &run()).unwrap();
+        assert_eq!(trace.count(), 5);
+        drop(trace);
+        let prepared = prepare(raw).unwrap();
+        assert_eq!(prepared.value, expected);
+        assert_eq!(prepared.value["waiting_reason"]["operation_id"], "boundary");
+        assert_eq!(prepared.value["waiting_reason"]["action"], "summary");
+        db.execute(
+            "DELETE FROM app_meta WHERE key='compact.inflight.foreign'",
+            [],
+        )
+        .unwrap();
+        let cleared = prepare(read_tx(&db, &run()).unwrap()).unwrap();
+        assert_eq!(cleared.value, canonical(&db, &run()));
+        assert!(cleared.value.get("waiting_reason").is_none());
+    }
+    #[test]
     fn exact_saved_metadata_matches_canonical_and_uses_bounded_query_count() {
         let db = fixture();
         seed_owned(&db, 0, 8);
@@ -480,7 +510,7 @@ mod tests {
                 assert_eq!(
                     trace.count(),
                     if matches!(command, Command::RunGet(_)) {
-                        3
+                        4
                     } else {
                         1
                     }

@@ -64,6 +64,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 ("user", json!({"role":"user","content":"長い説明でも段落と字下げを保ち、元の本文へ戻れるように表示してください。"})),
                 ("assistant_response", answer(&(1..=24).map(|index| format!("第{index}段落。受付と処理の完了は異なる観測です。保存された依頼と実行結果を区別し、必要なときに原文と識別子を確認します。長い説明は内容を削らず端末幅で折り返し、段落の区切りから続きの位置を追えるようにします。日本語、English、結合文字e\u{301}と絵文字🙂を含みます。")).collect::<Vec<_>>().join("\n\n"))),
             ]),
+            ("visual-copy-one", "Canonical code copy: one long block", vec![
+                ("assistant_response", answer(&format!("Before the prompt.\n\n```text\n{}```\n\nAfter the prompt.", "prompt 日本語 e\u{301}🙂\n".repeat(800)))),
+            ]),
+            ("visual-copy-many", "Canonical code copy: numbered blocks", vec![
+                ("assistant_response", answer("First block:\n\n```rust\nlet first = 1;\n```\n\nSecond block:\n\n```text\nsecond 日本語 e\u{301}🙂\n```\n")),
+            ]),
+            ("visual-copy-none", "Canonical code copy: plain body", vec![
+                ("assistant_response", answer("Plain 日本語 e\u{301}🙂 body.")),
+            ]),
             ("visual-markdown", "Markdown・表・リンク", vec![
                 ("user",json!({"role":"user","content":"# この見出し記号は入力原文です\n* 箇条書きに変換せず表示してください。"})),
                 ("assistant_response",answer("# 表示の確認 🙂\n\n**重要な結論** と *補足説明* を区別します。`inline_code()` は本文と違う表示です。\n\n> 引用された日本語の文章です。\n\n1. 最初の項目\n2. 二番目の項目\n\n| 対象 | 状態 | 次の操作 |\n|---|---|---|\n| 日本語の入力 | 保存済み | 回答を待つ |\n| shellの長い出力 | 取得可能 | 原文を開く |\n\n```rust\nfn main() {\n    println!(\"日本語・emoji 🙂\");\n}\n```\n\n[表示名のあるリンク](https://example.com/docs?q=unicode%20text) と裸URL https://example.com/status を確認します。\n\n長いURL: https://example.com/oauth/authorize?client_id=synthetic-visual-fixture&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback&scope=read%20write%20history&state=this-is-a-synthetic-value-for-wrap-and-copy-check-not-a-credential\n")),

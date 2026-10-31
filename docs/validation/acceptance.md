@@ -6336,3 +6336,124 @@ This qualification does not prove bounded total latest-attempt/replacement SQL
 work or connect the live inspector: G9 query plans/cost and G5/G6 shared/adopted
 reads remain mandatory. No full-standard/P3/P6/three-OS result is established for
 this extraction. The earlier2194/0/35 run remains scoped to0a5569b.
+## Context-edit wait observation (#102)
+
+Reconstruction/prototype only; exact operation timing/source references and log
+coverage limitation are in#102. Existing safe-boundary policy is retained, with
+read-only waiting_reason projection and queue-start invalidation. Synthetic SSE
+with controlled foreground/background stdin, plus virtual-clock readback cases,
+are not yet run. No Rust build/standard/CI or integration claim. #99 preview/read
+ownership is preserved. No actual provider or user DB mutation was performed.
+#102 reader2/footer1/gated-SSE1 pass. Standard2,076/0/35, Python70/layout94/
+fmt/strict Clippy/policy and bin build pass on checked source3817003/base66d2746.
+Fixture compile corrections add the optional snapshot field and use current
+Control::new; no production scheduling/order/timeout change. Full evidence in#102.
+
+### #102 post-review qualification scope
+
+The owned macOS chain `41eadd51-1a25-441b-881d-210b2ceabb24` qualified source
+`6b8c0c818628bd8724eee5c0b8c06d6b2ef03bec` on base
+`1ee0d8405323c4ce50c542e4dc8090422faaf2b7`: targeted footer test,
+`sh scripts/check.sh`, and `cargo build --locked --bin shellboy` all passed
+with `CARGO_BUILD_JOBS=2` and `RUST_TEST_THREADS=2`. It exited 0 and released
+at 2026-10-31T17:06:27Z, with process-group cleanup confirmed. This supersedes
+neither preserved historical source records nor native cross-OS qualification.
+
+The subsequent review correction omits damaged auxiliary wait witnesses and adds
+`damaged_wait_witness_does_not_block_run_get_or_projection` (eight cases).
+Only formatting and `git diff --check` have run for that correction; the new
+regression and standard check await the next allocated gate. The preceding
+full/bin result does not qualify this changed source. No additional Rust/bin,
+PTY, quiet chain, installed binary change, provider call or user DB mutation ran.
+
+Ancestry clarification: `bc9582d` was the observed fetched `origin/main`, not the
+checked source's ancestor. The checked source descends from `1ee0d84`. A final
+rebase attempt encountered conflicts in `docs/design/control.md` and
+`tests/runtime_features.rs` while replaying the initial feature commit; it was
+aborted without retaining partial integration. Latest-main integration and its
+native CI remain separate, with the integrator. No whole-stack equivalence claim.
+## #87 stage 1: contextual hints and readonly navigation
+
+macOS arm64, Rust 1.99.1, synthetic temporary databases only. UI-focused tests
+passed 352/0 (3 ignored) before the shared readonly-key helper gained an explicit
+Ctrl/Alt preservation test. Subsequent full library run passed 1013/0 (13 ignored).
+Width 0..179, configured send/newline invalidation and unchanged-cache reuse,
+notice precedence in history focus, real original-page continuation availability,
+and F1 popup return are covered. Initial standard runs exposed old label/help
+expectations and an F1 Thread-information regression; those are corrected, and
+ui::dense_thread_rows_and_selected_preview_stay_compact passes independently.
+The last full run did NOT pass: frontend::persisted_output_identity_is_delivered_
+before_each_history_window hit its existing 60-second watchdog after 927 other
+integration passes (17 ignored). No watchdog/test-state weakening is applied;
+a final latest-main check remains required. Evidence: /tmp/issue-87-check-final.log,
+/tmp/issue-87-check-verified.log, /tmp/issue-87-thread-f1-test.log.
+
+Native PTYs using the existing standard-library helper passed 16 combinations:
+80/140 columns; dark/light/NO_COLOR/vt100; default Enter and custom Ctrl+Enter
+send bindings. All cover empty composer/image guidance, typing/newline keys,
+completion, F2 long-answer escape guidance and return. Eight default-binding
+cases also cover canonical saved Markdown, history focus, details, uppercase O/C,
+real OSC52 bytes (not a host clipboard claim), F1 over original and Esc return.
+Separate loopback SSE holds an actual Turn open and confirms Esc interruption /
+Ctrl+C stopping hints at both widths. Evidence: /tmp/issue-87-hints-pty-v5/
+(manifest includes the binary hash) and /tmp/issue-87-running-pty/. Earlier PTY
+attempts used incorrect predicates (newline alias rendering, an offscreen heading,
+an old popup title, and clipped notice suffix); their failed observations remain
+in /tmp/issue-87-hints-pty*.log. No product fix is inferred from those harness
+predicate corrections. The final source adds pending-original suppression and
+preserves Thread-browser F1 information; a rebuilt final-source capture and
+latest-main standard check are still required before final qualification.
+
+No paid provider, real clipboard/image acquisition, user data/config, installed
+binary, release, Core event/schema or protocol change is part of this stage.
+Windows/Linux native PTYs and measured P1 interaction comparison remain untested.
+The canonical code-copy chooser, numbered block targets, /copy preference/all,
+finite complete-block retrieval, copy character counts and image-failure /attach
+alternatives remain pending; these observations do not establish #87 completion.
+
+Latest-main continuation: the task branch is rebased onto the exact #91 B main
+parent afe4c087. The only rebase conflict was additive design text; the incoming
+#93 contract and main's E/#91 qualification text are retained. The rebuilt native
+PTY matrix passed all 16 cases again at /tmp/issue-87-hints-pty-rebased-v2/;
+manifest and current binary SHA-256 agree at
+8ec5c970fbcd8856f117e809d58137370c1ed7cf4d73f77a681995ac86839df0.
+The captured selection row uses the corrected "history c" guidance rather than
+forcing Tab (which would leave an already-focused history). The actual running
+Turn scenes also pass at /tmp/issue-87-running-pty-rebased/. The first rebased
+harness run appended a second [ui] table to main's now-OSC52-safe fixture and was
+rejected by TOML before spawn; the corrected driver appends only bell/palette/
+bindings to the fixture's existing table. Product safety was not relaxed.
+
+A latest-main RUST_TEST_THREADS=2 sh scripts/check.sh is still running at this
+recording point (/tmp/issue-87-check-rebased.log); Python41, watchdog/layout,
+format and Clippy have passed, and the Rust tests are in progress. No full
+standard-check success or all-OS result is claimed yet. Resource coordination
+now defers any additional Rust build/check until worker1's #96 check releases
+the host; already-running processes are not interrupted. This supersedes the
+earlier final-source-capture gap only, not the pending standard check/P1 or
+canonical code-copy implementation gaps.
+
+Final stage-1 standard-check result: the existing latest-main check completed
+exit0. RUST_TEST_THREADS=2 sh scripts/check.sh passed Python41, integration-layout/
+watchdog policy, format and Clippy. Rust results: library1016 passed/13 ignored,
+integration936 passed/17 ignored, live-thread-patch12 passed/1 ignored,
+usage-aggregates7 passed/2 ignored; total1971 passed/0 failed/33 ignored.
+Evidence: /tmp/issue-87-check-rebased.log, execution
+513db94c-5cc0-4132-8538-df43a3d4652f. The selection-guidance regression is included.
+This supersedes the pending-check status above; it does not establish the cause
+of the earlier frontend watchdog failure, OS-wide success, P1 performance or
+completion of the remaining canonical code-copy/image-failure work. No Rust
+process remains from this task. Both worker1 and worker2 received one concrete
+slot-released notice so #85's quiet observation can proceed; no new Rust run is
+started during that observation.
+
+### #87 Remaining Copy/Image Paths: Qualification Pending
+
+Additional WIP code extends the already-qualified contextual-key stage with a
+canonical chooser, numbered assistant captions, source-digest validation, Unicode
+copy counts and image-failure `/attach` advice. Static formatting/layout and Python
+syntax checks pass; compilation, new source/ownership tests, full standard check,
+P1 measurements and the new `scripts/check-code-copy.py` real PTY matrix remain
+pending. Earlier stage-1 PTY captures do not prove these additional behaviors.
+Only synthetic fixtures and intercepted OSC52 are planned; no installed binary,
+real clipboard, paid model request or user data is part of this qualification.

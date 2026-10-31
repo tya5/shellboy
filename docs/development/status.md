@@ -2984,3 +2984,48 @@ is claimed for this new source. The2194-test standard belongs to0a5569b.
 G5/G6 live wiring and G9 query-cost/index qualification remain open; no new
 Core operation/schema/worker/queue. Build start was posted to #41; the sequential
 clean rebuild used only root target (about1.9GiB afterward). No G push/install.
+## Context-edit driver wait (#102)
+
+Saved summary end time matches the reported request gap; current/afe4c08 source
+shares the existing Thread boundary. Draft exposes protected inflight reason in
+run get/footer, with no new lifecycle state. Gated SSE/background reproduction,
+virtual-clock and malformed/terminal tests are written but not yet compiled.
+#99 owns preview read/fetched-at behavior; no duplicate fix here. Evidence in#102.
+Targeted saved-wait/virtual-clock/footer/gated-SSE cases and final standard/bin
+qualification pass on main66d2746. Review/merged-source CI remain coordinator
+gates; actual source/result and fixture corrections are recorded in#102.
+
+### #102 review correction: auxiliary witness damage
+
+Missing/malformed inflight metadata, receipts, or action facts now omit only
+`waiting_reason`; SQL failures still propagate. One table-driven regression
+checks Run get's shared `run_details` result/JSON and selected activity projection
+for eight damaged/missing witness cases. No boundary ordering or source mutation
+was added. Review correction is formatted and diff-checked; its Rust regression
+and standard check are deferred to the next allocated gate, not claimed passed.
+## Contextual bottom-row guidance (#87, stage 1)
+
+Readonly detail case handling is followed by a UI-only key vocabulary and cached
+2-4-action hints for composer, running Turn, history/live-work focus, selection,
+completions and popup modes. Configured send/newline keys are projected; notices
+retain priority and hints are right-aligned with whole-action reduction to F1.
+F1 can cover and return to a popup without discarding it. Help puts copying and
+attachments near the start; empty composer and /image discovery teach explicit
+image acquisition without probing the clipboard. Recovery contents/active filter
+and activity facts remain with #85. Validation and remaining scope are recorded
+in acceptance; this is not completion of #87's canonical code-copy chooser,
+numbered block targets, bare /copy preference, complete-block retrieval, copy
+counts or image-failure alternatives. Core/schema/protocol remain unchanged.
+
+### #87 Remaining Canonical Copy And Image Guidance (In Progress)
+
+The existing Details overlay now hosts a bounded, cancellation-owned code chooser.
+Bare `/copy` prefers a sole complete canonical code block; B/digits select multiple
+blocks without entering a node ID, and `/copy all` preserves whole-body access.
+Complete assistant code surfaces show numbered captions, copy feedback includes
+Unicode counts, and clipboard image failures retain facts and suggest `/attach`.
+Canonical page/source/clipboard limits are explicit; source digests reject changed
+numbered targets. New parser, ownership, source-limit and real-DB tests are written.
+These additional changes have passed formatting/static layout only, not compilation,
+standard checks or real PTY qualification yet. Earlier stage-1 validation does not
+qualify these additional paths. Rust qualification is queued after #91 and W2 work.

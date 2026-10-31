@@ -699,6 +699,7 @@ impl ManagementPopup {
             .max(1)
     }
     pub(super) fn key(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Outcome {
+        let key = key_hints::readonly_key(key);
         let refresh = matches!(key.code, KeyCode::Char('r' | 'R'))
             && (key.modifiers.contains(KeyModifiers::CONTROL)
                 || (!matches!(

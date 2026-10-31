@@ -19,6 +19,8 @@ impl UiState {
             Some(Overlay::Shutdown)
         } else if self.confirmation.is_some() {
             Some(Overlay::Confirmation)
+        } else if self.help_visible && self.help_above_popups {
+            Some(Overlay::Help)
         } else if self.models.is_some() {
             Some(Overlay::Models)
         } else if self.operations.is_some() {
@@ -278,6 +280,11 @@ impl UiState {
         if let Some(actions) = self.global_key(key) {
             return actions;
         }
+        if self.top_overlay() == Some(Overlay::Help)
+            && matches!(key.code, KeyCode::F(6) | KeyCode::F(7) | KeyCode::F(8))
+        {
+            self.help_visible = false;
+        }
         if let Some(
             owner @ (Overlay::Confirmation
             | Overlay::Selection
@@ -468,6 +475,20 @@ impl UiState {
             self.confirmation = None;
             let mut actions = self.persist_all();
             actions.push(UiAction::Quit);
+            return Some(actions);
+        }
+        if key.code == KeyCode::F(1)
+            && self.confirmation.is_none()
+            && self.top_overlay() != Some(Overlay::Threads)
+        {
+            self.selection_mode = false;
+            if self.top_overlay() == Some(Overlay::Help) {
+                self.help_visible = false;
+                return Some(vec![]);
+            }
+            let above = self.top_overlay().is_some();
+            let actions = self.show_help(help::Page::guide(&self.config));
+            self.help_above_popups = above;
             return Some(actions);
         }
         // Terminal selection shortcuts may consume Ctrl+C before it reaches us;

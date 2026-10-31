@@ -1399,7 +1399,7 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
         CopyScope::ManagementPage { has_more: false },
         CopyScope::Value,
         CopyScope::Body,
-        CopyScope::CodeBlock,
+        CopyScope::CodeBlock { index: 0 },
     ] {
         for outcome in 0..3 {
             sender
@@ -1426,15 +1426,23 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
             let text = result.unwrap();
             match outcome {
                 0 => {
-                    assert_eq!(text, format!("{}をコピーしました", scope.label()));
+                    assert_eq!(
+                        text,
+                        format!(
+                            "{}をコピーしました（{}文字）",
+                            scope.label(),
+                            raw.chars().count()
+                        )
+                    );
                     assert!(terminal.is_empty());
                 }
                 1 => {
                     assert_eq!(
                         text,
                         format!(
-                            "OSC52: {}のコピー要求を端末へ送りました（完了未確認）",
-                            scope.label()
+                            "OSC52: {}のコピー要求を端末へ送りました（{}文字・完了未確認）",
+                            scope.label(),
+                            raw.chars().count()
                         )
                     );
                     assert_eq!(terminal, [b"fixture OSC52 request".to_vec()]);
@@ -1855,4 +1863,101 @@ async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_op
     );
     assert_eq!(rows[0]["usage_slow"]["trigger"], "open");
     drop(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_changed_source() {
+    use crate::protocol::ErrorCode;
+    let (_root, owner, control, server) = fixture().await;
+    let code = "日本語 e\u{301}🙂\n";
+    let long = format!("{}\n\n```text\n{code}```\n", "prose ".repeat(12000));
+    let large_block = format!("```text\n{}\n```", "x".repeat(70000));
+    owner.db.call(move |db| {
+        let tx = db.transaction()?;
+        for (id, text) in [("copy-long", long), ("copy-large-block", large_block),
+            ("copy-too-large", "x".repeat(1024 * 1024 + 1))] {
+            crate::history::append_node(&tx, "thread", id, Some("target-run"), "assistant_response",
+                &serde_json::json!({"role":"assistant","content":[{"type":"output_text","text":text}]}), "now")?;
+        }
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let offer = super::copying::choices(&control, "copy-long".into())
+        .await
+        .unwrap();
+    assert_eq!(offer.blocks.len(), 1);
+    assert_eq!(offer.blocks[0].chars, code.chars().count());
+    assert_eq!(
+        super::copying::text(
+            &control,
+            "copy-long".into(),
+            Some(0),
+            Some(offer.source_hash.clone())
+        )
+        .await
+        .unwrap(),
+        code
+    );
+    assert_eq!(
+        super::copying::text(&control, "copy-long".into(), None, None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InputLimit
+    );
+    assert_eq!(
+        super::copying::text(&control, "copy-long".into(), Some(8), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        super::copying::text(&control, "copy-long".into(), Some(128), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InputLimit
+    );
+    assert_eq!(
+        super::copying::text(&control, "copy-large-block".into(), Some(0), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InputLimit
+    );
+    assert_eq!(
+        super::copying::choices(&control, "copy-too-large".into())
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InputLimit
+    );
+    owner
+        .db
+        .call(|db| {
+            let payload = serde_json::json!({"role":"assistant","content":"```text\nchanged\n```"}).to_string();
+            db.execute(
+                "UPDATE node SET payload_json=?1,payload_bytes=?2,body_hash=?3,payload_revision=payload_revision+1 WHERE id='copy-long'",
+                rusqlite::params![payload, payload.len() as i64, crate::digest::sha256_hex(payload.as_bytes())],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        super::copying::text(
+            &control,
+            "copy-long".into(),
+            Some(0),
+            Some(offer.source_hash)
+        )
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::TargetUnavailable
+    );
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
 }

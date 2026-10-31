@@ -306,6 +306,13 @@ prefixes of129 before sorting. Recovery reason and Revisit share64KiB. Saved
 scalar cells are bounded to512 bytes before materialization; an oversized scalar
 makes this projection explicitly unavailable rather than silently changing an
 identity, timestamp or lifecycle fact. This initial extraction adds no schema/index.
+On main805efc9, Run details also contain #102's saved context-boundary wait
+reason. Reuse the canonical readback helper in the same readonly snapshot;
+do not silently omit it in the F8 projection. This adds one protected-key query
+and, only when that witness exists, one exact operation-receipt query (Run
+metadata total4 or5, Turn metadata1). G9 must also qualify the helper's copied
+scalars/source work; the extra calls are not permission for repeated whole-owner
+requests or a new observer/worker.
 The canonical latest-Turn ordering uses(created_at,id); the existing Run/time
 index does not cover the ID tie-breaker. G9 must measure tied timestamps and
 qualify bounded lookup or extend the existing index before G admission. Initial
@@ -1286,3 +1293,100 @@ At the minimum eight-column viewport the inset leaves six content cells; the
 selection banner uses the compact "固定" label rather than disappearing or
 painting over the margin. Wider headers keep the existing full freeze label,
 time and resume guidance according to their available content width.
+
+## Contextual keys and canonical copy (#87)
+
+The #87 UI work may precede F/G (the user's 2026-10-31 decision). G builds on
+this work; no Core state, event/protocol or persistent format changes are needed.
+A small UI operation/key vocabulary owns key labels and descriptions shared by
+help, readonly detail controls and contextual bottom-row hints. Readonly shortcut
+letters accept either case; editable form/query text retains its actual case.
+Hints contain 2-4 available actions for the actual owner/focus, use configured
+send/newline bindings, and drop low-priority/rightmost actions with F1 as the
+narrow fallback. Notices/recovery retain priority. Hint text is cached by owner,
+focus/state, width and bindings, not rebuilt on elapsed-time repaint. Popup hints
+must describe their real modes, including available original-page navigation.
+Activity/elapsed/recovery facts belong to #85; only the key-hint surface changes.
+
+Focused history c/C copies the canonical whole answer; o/O opens its original.
+Code choices use b/B, with numbered copy labels and a bounded transient chooser;
+choosing a block uses canonical Markdown parser extents, never displayed/folded
+text or language labels. Bare /copy prefers the single code block, opens choices
+for several blocks, and copies the body if there is no block. /copy all explicitly
+copies the full body; explicit /copy NODE [zero-based-index] remains available.
+Display block numbers are one-based. A chosen answer precedes the viewport anchor,
+then the last loaded answer when no focus exists. Source identity is exact and
+late choice responses must not replace another thread/focus's active operation.
+
+Copy summaries include Unicode character counts and block number or original
+page/continuation facts. OSC52 reports only that a terminal request was sent, not
+that the host clipboard accepted it. The existing body/page copy limit remains
+64KiB; larger bodies offer original-page navigation rather than partial success.
+Explicit complete-code retrieval may paginate within a finite UI copy budget;
+unavailable/tombstoned/incomplete or over-budget source is an actionable error,
+never a successful partial block. All source reads/Markdown work remain off the
+main UI OS thread in existing workers; no new worker/queue/poller is introduced.
+Code-copy decoration/hit targets are display-only and cannot enter canonical text,
+source-based copies, source offsets or model input. F2 terminal-native selection
+still copies visible presentation, not a canonical whole block; b or /copy uses
+canonical source instead.
+
+Image guidance advertises /image and /attach without probing the host clipboard.
+An empty paste is not proof of an image; guidance may state available operations,
+not infer clipboard contents. Actual image acquisition stays explicit. Help and
+slash descriptions teach copy/attachment paths near the start; failures suggest
+/attach. Synthetic PTYs use fixed OSC52 output captured by pipes and synthetic
+clipboard adapters/files only, never real OS clipboard reads or writes. Native
+80/wide, dark/light/NO_COLOR/vt100 and changed send-key scenes must demonstrate
+bottom-row hints; P1 interaction performance is compared separately from replay.
+
+### Contextual hint implementation boundaries (#87, stage 1)
+
+The second row is right-aligned only when no notice is present. Existing notice
+priority is input rejection, operation outcome, active recovery, then hints;
+history/live-work focus cannot replace a selected notice. Activity facts and the
+resolved-recovery filter remain #85's responsibility. Hints drop whole actions
+from the right, retaining F1 at two columns and hiding below two columns. Safety
+confirmation/shutdown keep their own panel instructions rather than advertising
+an unavailable F1. The one-entry UI cache uses owner/mode, width and actual
+send/newline bindings; elapsed ticks cannot invalidate it.
+
+F1 explicitly raised over a popup temporarily covers that popup without deleting
+its source, form or selection. A UI-only help-layer flag distinguishes that case
+from ordinary readouts in the existing stack. Esc/F1 restores the prior owner;
+confirmation and shutdown retain precedence. Editable model/filter/form text is
+not case-normalized. Readonly detail, management and queue letters accept either
+case. Form Tab means next field, not completion, and Enter retains the existing
+send/validation/confirmation path. Empty composer image guidance is static and
+width-conditional; it never infers clipboard contents or acquires an image.
+The Thread browser retains its existing F1 selected-Thread information action;
+its F1 fallback is contextual information, not an unrelated global help page.
+
+### Canonical code selection bounds (#87, stage 2)
+
+The existing Details popup hosts a separate transient code-selection view; it
+never shares the field/link cursor. Preparation uses the existing bounded read
+slots and presentation worker. At most 1MiB, 64 canonical history pages and 128
+code blocks are inspected; clipboard payloads still have the 64KiB bound. An
+incomplete source, repeated cursor, unavailable body or exceeded bound fails
+without copying a prefix. Only numbered, sanitized 80-character previews and
+Unicode counts reach the UI. Canonical text is read again for an explicit copy.
+The request is bound to draft, Thread generation, selected item and node/request
+identity; a late response cannot open a chooser or copy for another focus.
+Bare /copy auto-selects a sole block or the whole body when no block exists;
+b/B always opens numbered choices. Enter/c or digits 1-9 select a block, 0 copies
+the whole body, Esc closes. /copy all selects the whole body explicitly. Source
+reads and Markdown parsing are never done by UI drawing or key handlers.
+Code offers carry a digest of the complete canonical source. A chosen block is
+reread and checked against that digest before clipboard work, so a changed body
+cannot silently change the numbered target. Closing the chooser cancels pending
+preparation even before admission; no additional read pool is introduced. Copy
+feedback reports the exact Unicode scalar count handed to the adapter and a
+one-based block number. Image acquisition/preparation errors retain the original
+code/details and suggest an existing image file via /attach, without probing on
+ordinary paste or claiming that every environment supports clipboard images.
+Complete assistant Markdown projections add numbered copy captions beside code
+surfaces, using the same one-based parser order as the canonical chooser. These
+captions are rendered decoration only; partial/evicted projections do not claim
+global block numbers. The b shortcut opens that answer's numbered chooser, then
+one digit copies the selected full block without typing a node identity.

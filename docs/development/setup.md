@@ -276,3 +276,13 @@ fixture and driver are opt-in development tools; no product debug command exists
 
 Conflict forecast: `python3 scripts/dev/conflict-forecast.py [REF ...] [--json]` (Git2.40+).
 Textual prediction only; files/index/refs unchanged, loose objects permitted. See `--help`.
+
+### Canonical Code Copy PTY Qualification
+
+After building `shellboy` and `visual_fixture`, run
+`python3 scripts/check-code-copy.py --binary target/debug/shellboy --fixture target/debug/examples/visual_fixture --out /tmp/UNIQUE-code-copy-capture`.
+The eight-case 80/140-column dark/light/NO_COLOR/vt100 matrix creates disposable
+histories, decodes intercepted OSC52 bytes, and checks sole/numbered/full-body
+copy plus cancellation without a host clipboard or provider call. The only
+real-time bound is the shared 60-second watchdog. Raw terminal and text snapshots
+stay outside the repository, with binary SHA-256 provenance in the manifest.

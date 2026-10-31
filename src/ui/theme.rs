@@ -30,6 +30,8 @@ pub(crate) const CODE_LABEL: Color = Color::Cyan;
 pub(crate) const CODE_TEXT: Color = Color::Rgb(208, 214, 223);
 pub(crate) const CODE_BACKGROUND: Color = Color::Rgb(30, 34, 40);
 pub(crate) const CODE_CAPTION: Color = Color::Rgb(137, 151, 169);
+// Private non-RGB marker stripped before drawing; never a link or source character.
+pub(crate) const COPY_DECORATION: Color = Color::Indexed(252);
 pub(crate) const ACTIVITY_HIGHLIGHT: Color = Color::LightCyan;
 pub(crate) fn activity_pulse(level: f64) -> Color {
     Color::Rgb(

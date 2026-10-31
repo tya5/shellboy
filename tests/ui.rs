@@ -372,7 +372,7 @@ fn test_backend_renders_status_modes_and_native_unicode_cursor() {
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let rendered = screen_text(&terminal);
     assert!(rendered.trim_start().starts_with('·'));
-    assert!(rendered.contains("F1 help"));
+    assert!(rendered.contains("送信") && rendered.contains("改行") && rendered.contains("F1"));
     assert!(!rendered.contains("追従中"));
     assert!(rendered.replace(' ', "").contains("日本語"));
     ui.event(key(KeyCode::F(2)));

@@ -168,6 +168,7 @@ impl Control {
                     break;
                 }
             };
+            self.changed(thread);
             let result = if guard.is_none() {
                 Err(ApiError::new(
                     ErrorCode::InvalidState,

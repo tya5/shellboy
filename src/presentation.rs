@@ -555,6 +555,7 @@ fn style_code_regions(
     marker: &str,
     source: &str,
     width: u16,
+    copy_offset: Option<usize>,
 ) -> Vec<Line<'static>> {
     fn contents(line: &Line<'_>) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
@@ -567,7 +568,9 @@ fn style_code_regions(
         }
         lines
     }
-    let mut sources = markdown_code_blocks(source).map(|block| block.text);
+    let mut sources = markdown_code_blocks(source)
+        .map(|block| block.text)
+        .enumerate();
     let mut output = Vec::new();
     let mut code: Option<(String, Vec<Line<'static>>)> = None;
     let background = crate::ui::theme::CODE_BACKGROUND;
@@ -575,7 +578,7 @@ fn style_code_regions(
         let content = contents(&line);
         if let Some(at) = content.find(marker) {
             if let Some((language, mut body)) = code.take() {
-                let original = sources.next().unwrap_or_default();
+                let (index, original) = sources.next().unwrap_or_default();
                 let expected = source_lines(&original)
                     .into_iter()
                     .map(|text| {
@@ -599,13 +602,24 @@ fn style_code_regions(
                         })
                         .collect();
                 }
-                if !matches!(language.as_str(), "" | "text" | "plaintext" | "plain") {
+                if copy_offset.is_some()
+                    || !matches!(language.as_str(), "" | "text" | "plaintext" | "plain")
+                {
+                    let label = copy_offset.map_or_else(
+                        || language.clone(),
+                        |offset| crate::ui::code_copy_caption(offset + index, &language),
+                    );
                     let mut caption = Line::from(Span::styled(
-                        language.clone(),
+                        label,
                         Style::default().fg(crate::ui::theme::CODE_CAPTION),
                     ));
                     let padding = usize::from(width).saturating_sub(caption.width());
                     caption.spans.insert(0, Span::raw(" ".repeat(padding)));
+                    if copy_offset.is_some() {
+                        for span in &mut caption.spans {
+                            span.style.underline_color = Some(crate::ui::theme::COPY_DECORATION);
+                        }
+                    }
                     output.push(caption.style(Style::default().bg(background)));
                 }
                 for mut line in body {
@@ -647,6 +661,20 @@ fn style_code_regions(
 /// Run only on a bounded presentation worker, including when width changes.
 /// Markdown syntax/layout is delegated to tui-markdown; parser tokens remain source/link metadata.
 pub fn render_markdown(presentation: &mut NodePresentation, width: u16) {
+    let copy_labels = presentation.kind == PresentationKind::Assistant
+        && !presentation.details_omitted
+        && presentation.body_omitted_chars == 0
+        && !presentation.body_extent_unknown
+        && !presentation.body_evicted
+        && presentation
+            .blocks
+            .first()
+            .is_some_and(|b| b.source_start == 0)
+        && presentation
+            .blocks
+            .iter()
+            .all(|b| b.source_exact && matches!(b.kind, BlockKind::Prose | BlockKind::Reasoning));
+    let mut copy_offset = 0;
     for block in &mut presentation.blocks {
         if !matches!(block.kind, BlockKind::Prose | BlockKind::Reasoning) {
             block.rendered = None;
@@ -689,7 +717,14 @@ pub fn render_markdown(presentation: &mut NodePresentation, width: u16) {
                     .collect(),
             })
             .collect();
-        let mut lines = style_code_regions(lines, &marker, &block.text, width);
+        let mut lines = style_code_regions(
+            lines,
+            &marker,
+            &block.text,
+            width,
+            copy_labels.then_some(copy_offset),
+        );
+        copy_offset += markdown_code_blocks(&block.text).count();
         for line in &mut lines {
             expand_tabs(line);
         }
@@ -1306,5 +1341,53 @@ mod stream_projection_tests {
         assert!(p.blocks[1].rendered.is_some());
         assert!(p.metadata_bytes() <= MAX_METADATA_BYTES);
         assert!(raw.contains('\t'));
+    }
+}
+
+#[cfg(test)]
+mod copy_caption_tests {
+    use super::*;
+    #[test]
+    fn code_numbers_are_render_only_and_partial_sources_do_not_claim_global_numbers() {
+        let text = "```rust\nlet one = 1;\n```\n\n```\ntwo\n```\n";
+        let mut p = project(
+            "assistant",
+            &serde_json::json!({"role":"assistant","content":text}),
+            text,
+            0,
+        );
+        let raw = p.blocks.iter().map(|b| b.text.clone()).collect::<Vec<_>>();
+        render_markdown(&mut p, 78);
+        let rendered = |p: &NodePresentation| {
+            p.blocks
+                .iter()
+                .filter_map(|b| b.rendered.as_ref())
+                .flat_map(|r| &r.lines)
+                .flat_map(|l| &l.spans)
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        let shown = rendered(&p);
+        assert!(
+            shown.contains("[1] コピー") && shown.contains("[2] コピー"),
+            "{shown}"
+        );
+        assert_eq!(
+            p.blocks.iter().map(|b| b.text.clone()).collect::<Vec<_>>(),
+            raw
+        );
+        p.body_extent_unknown = true;
+        render_markdown(&mut p, 78);
+        assert!(!rendered(&p).contains("[1] コピー"));
+        let tail = "```\ntwo\n```\n";
+        let offset = text[..text.find(tail).unwrap()].chars().count();
+        let mut partial = project(
+            "assistant",
+            &serde_json::json!({"role":"assistant","content":text}),
+            tail,
+            offset,
+        );
+        render_markdown(&mut partial, 78);
+        assert!(!rendered(&partial).contains("[1] コピー"));
     }
 }
