@@ -1108,3 +1108,19 @@ send/validation/confirmation path. Empty composer image guidance is static and
 width-conditional; it never infers clipboard contents or acquires an image.
 The Thread browser retains its existing F1 selected-Thread information action;
 its F1 fallback is contextual information, not an unrelated global help page.
+
+### Canonical code selection bounds (#87, stage 2)
+
+The existing Details popup hosts a separate transient code-selection view; it
+never shares the field/link cursor. Preparation uses the existing bounded read
+slots and presentation worker. At most 1MiB, 64 canonical history pages and 128
+code blocks are inspected; clipboard payloads still have the 64KiB bound. An
+incomplete source, repeated cursor, unavailable body or exceeded bound fails
+without copying a prefix. Only numbered, sanitized 80-character previews and
+Unicode counts reach the UI. Canonical text is read again for an explicit copy.
+The request is bound to draft, Thread generation, selected item and node/request
+identity; a late response cannot open a chooser or copy for another focus.
+Bare /copy auto-selects a sole block or the whole body when no block exists;
+b/B always opens numbered choices. Enter/c or digits 1-9 select a block, 0 copies
+the whole body, Esc closes. /copy all selects the whole body explicitly. Source
+reads and Markdown parsing are never done by UI drawing or key handlers.

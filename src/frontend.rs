@@ -6,6 +6,7 @@ use admission::{spawn_read, spawn_work};
 mod browser;
 mod browser_read;
 mod draft_images;
+mod copying;
 mod draft_saver;
 mod header;
 mod history_reader;
@@ -2439,6 +2440,19 @@ async fn run_with_delivery(
                         )
                         .await;
                     }
+                    UiAction::LoadCopyChoices { node_id, request_id } => {
+                        let control = control.clone();
+                        let sender = updates.worker();
+                        let read_node = node_id.clone();
+                        if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
+                            let result = checked_storage(&control, copying::choices(&control, read_node.clone()).await).await
+                                .map_err(|error| error.to_string());
+                            update(&sender, UiUpdate::CopyChoices { node_id: read_node, request_id, result }).await;
+                        }) {
+                            update(&updates, UiUpdate::CopyChoices { node_id, request_id,
+                                result: Err("原文読込キューが満杯です。Esc後に再操作してください".into()) }).await;
+                        }
+                    }
                     UiAction::LoadOriginal {
                         node_id,
                         cursor,
@@ -3757,39 +3771,8 @@ impl RawNode {
         }
     }
 }
-pub async fn copy_source(
-    control: &Control,
-    node_id: String,
-    code_block: Option<usize>,
-) -> Result<String, ApiError> {
-    let result = async {
-    let body = crate::history::History::new(control.store.database.clone())
-        .get(HistoryGetArgs { final_answer_only: false,
-            node_id,
-            limit_bytes: MAX_BODY_BYTES,
-            cursor: None,
-            encoding: DEFAULT_ENCODING.into(),
-        })
-        .await?;
-    if let Some(reason) = body.tombstone_reason {
-        return Err(ApiError::new(
-            ErrorCode::OutputExpired,
-            format!("Original body unavailable: {reason}"),
-        ));
-    }
-    if let Some(index) = code_block {
-        return source_code_block(&body.text,index,body.next_cursor.is_none()).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"Requested complete code block is outside the available body; retrieve the original by history get"));
-    }
-    if body.next_cursor.is_some() {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Body exceeds the 64KiB copy limit; retrieve/save the original with history get",
-        ));
-    }
-    Ok(body.text)
-
-    }.await;
-    checked_storage(control, result).await
+pub async fn copy_source(control: &Control, node_id: String, code_block: Option<usize>) -> Result<String, ApiError> {
+    checked_storage(control, copying::text(control, node_id, code_block).await).await
 }
 pub fn fenced_code_block(text: &str, index: usize) -> Option<String> {
     source_code_block(text, index, true)

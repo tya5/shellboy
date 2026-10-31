@@ -17,6 +17,8 @@ use crate::{
 pub mod activity;
 mod bell;
 mod chrome;
+mod code_copy;
+pub use code_copy::CopyBlock;
 mod composer;
 mod details;
 pub mod live_work;
@@ -545,6 +547,10 @@ pub enum UiAction {
         text: String,
         scope: CopyScope,
     },
+    LoadCopyChoices {
+        node_id: String,
+        request_id: u64,
+    },
     LoadOriginal {
         node_id: String,
         cursor: Option<String>,
@@ -872,6 +878,11 @@ pub enum UiUpdate {
         generation: u64,
         request_id: u64,
         result: Result<Option<RecalledPrompt>, String>,
+    },
+    CopyChoices {
+        node_id: String,
+        request_id: u64,
+        result: Result<Vec<CopyBlock>, String>,
     },
     OriginalPage {
         request_id: u64,
@@ -2531,6 +2542,14 @@ impl UiState {
                     && let Some(details) = &mut self.details
                 {
                     details.accept_links(request_id, result);
+                }
+            }
+            UiUpdate::CopyChoices { node_id, request_id, result } => {
+                if let Some(mut details) = self.details.take() {
+                    let action = details.copy_choices.as_mut().and_then(|choices|
+                        choices.accept(self.view(), request_id, &node_id, result));
+                    if let Some(action) = action { self.deferred_actions.push(action); }
+                    else { self.details = Some(details); }
                 }
             }
             UiUpdate::OriginalPage {
@@ -4322,21 +4341,18 @@ impl UiState {
                 }]
             }
             "/copy" => {
-                let mut parts = argument.split_whitespace();
-                let node_id = parts
-                    .next()
-                    .map(str::to_owned)
-                    .or_else(|| self.view().anchor.node_id.clone())
-                    .or_else(|| self.view().nodes().last().map(|n| n.node_id.clone()));
-                let code_block = parts.next().and_then(|s| s.parse().ok());
-                node_id
-                    .map(|node_id| {
-                        vec![UiAction::Copy {
-                            node_id,
-                            code_block,
-                        }]
-                    })
-                    .unwrap_or_else(|| self.command_error("コピー対象node-idがありません"))
+                let parts = argument.split_whitespace().collect::<Vec<_>>();
+                match parts.as_slice() {
+                    [] => self.choose_code(true),
+                    ["all"] => self.copy_target().map(|node_id| vec![UiAction::Copy { node_id, code_block: None }])
+                        .unwrap_or_else(|| self.command_error("コピー対象の回答がありません")),
+                    [node] => vec![UiAction::Copy { node_id: (*node).into(), code_block: None }],
+                    [node, index] => match index.parse::<usize>() {
+                        Ok(index) => vec![UiAction::Copy { node_id: (*node).into(), code_block: Some(index) }],
+                        Err(_) => self.command_error("コード番号は0以上の整数です。/copy [all | node-id [番号]]"),
+                    },
+                    _ => self.command_error("/copy [all | node-id [番号]]"),
+                }
             }
             "/select" => {
                 self.selection_mode = !self.selection_mode;

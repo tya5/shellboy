@@ -41,6 +41,7 @@ enum Mode {
 }
 pub(super) struct Details {
     pub node_id: String,
+    pub(super) copy_choices: Option<super::code_copy::Choices>,
     source_node_ids: Vec<String>,
     item_key: Option<super::ItemKey>,
     item_history_revision: Option<u64>,
@@ -440,6 +441,7 @@ impl Details {
             .unwrap_or_default();
         let revision = source_revision(view, &node_id);
         Self {
+            copy_choices: None,
             source_node_ids: vec![node_id.clone()],
             item_key: None,
             item_history_revision: None,
@@ -602,7 +604,7 @@ impl Details {
         self.sources_stale = Some(safe(reason));
     }
     pub(super) fn refresh_wait(&self, now: Instant) -> Option<Duration> {
-        (self.sources_dirty && !self.links_pending).then(|| {
+        (self.copy_choices.is_none() && self.sources_dirty && !self.links_pending).then(|| {
             self.last_sources_request.map_or(Duration::ZERO, |last| {
                 Duration::from_millis(500).saturating_sub(now.saturating_duration_since(last))
             })
@@ -615,7 +617,7 @@ impl Details {
         next: &mut u64,
         now: Instant,
     ) -> Option<UiAction> {
-        if !self.sources_dirty
+        if self.copy_choices.is_some() || !self.sources_dirty
             || self.links_pending
             || self.last_sources_request.is_some_and(|last| {
                 now.saturating_duration_since(last) < Duration::from_millis(500)
@@ -887,6 +889,7 @@ impl Details {
     }
     pub(super) fn hint_context(&self) -> super::key_hints::Context {
         use super::key_hints::Context;
+        if self.copy_choices.is_some() { return Context::CodeChoices; }
         match self.mode {
             Mode::Original if self.original.is_none() => Context::OriginalPending,
             Mode::Original => Context::Original {
@@ -900,6 +903,7 @@ impl Details {
         }
     }
     pub fn key(&mut self, key: KeyEvent, view: &ThreadView, next: &mut u64) -> Outcome {
+        if let Some(choices) = &mut self.copy_choices { return choices.key(key); }
         self.sync_node(view);
         let code = super::key_hints::readonly_key(key).code;
         match code {
@@ -1066,6 +1070,7 @@ impl Details {
         Outcome::None
     }
     fn sync_node(&mut self, view: &ThreadView) {
+        if self.copy_choices.is_some() { return; }
         if matches!(self.mode, Mode::Nodes)
             && let Some(node) = view
                 .nodes()
@@ -1092,6 +1097,7 @@ impl Details {
         area: Rect,
         view: &ThreadView,
     ) -> Vec<crate::terminal_links::LinkRegion> {
+        if let Some(choices) = &self.copy_choices { choices.draw(frame, area); return vec![]; }
         let count = match self.mode {
             Mode::Nodes => view.nodes().len(),
             Mode::Fields => self.fields(view).len(),
