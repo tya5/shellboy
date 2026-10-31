@@ -1477,3 +1477,45 @@ async fn successful_attempt_admission_notifies_after_preparing_browser_read_with
     drop(snapshot);
     close(control, owner).await;
 }
+
+#[tokio::test]
+async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
+    crate::test_watchdog::watchdog("stop/driver retirement ownership handoff", async {
+        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let snapshot = ready(&control, &accepted).await;
+        let prepared = Arc::new(control.attachments.prepare_at_revision(
+            &accepted.thread_id, CancellationToken::new(), false, snapshot.selection,
+        ).await.unwrap());
+        assert!(admit_attempt(&control, &snapshot, "held-no-http", prepared, 0, 0).await.unwrap());
+        let run = accepted.run_id.as_ref().unwrap();
+        let slot = control.live.register_or_nudge_driver(
+            &accepted.thread_id, run.clone(), &control.stop, false,
+        ).await.unwrap();
+        // The driver's outcome is already chosen, but its owned slot still exists.
+        let stopped = control.store.execute(Request::new(
+            format!("{}:stop", owner.instance_id), Command::RunStop(RunTarget { run_id:run.clone() }),
+        ), None).await.unwrap();
+        assert_eq!(stopped.stop_runs, vec![run.clone()]);
+        control.stop_run(run).await;
+        assert!(slot.stop.is_cancelled());
+        let target = run.clone();
+        let before: (String,String) = control.store.database.call(move |db| Ok(db.query_row(
+            "SELECT r.state,a.state FROM run r JOIN turn u ON u.run_id=r.id JOIN model_attempt a ON a.turn_id=u.id WHERE r.id=?1",
+            [target], |r| Ok((r.get(0)?,r.get(1)?)),
+        )?)).await.unwrap();
+        assert_eq!(before, ("stopping".into(), "inflight".into()));
+        control.retire_driver(accepted.thread_id.clone(), slot).await;
+        let target = run.clone();
+        control.store.database.call(move |db| {
+            let state:String = db.query_row("SELECT state FROM run WHERE id=?1", [&target], |r|r.get(0))?;
+            assert_eq!(state, "stopped", "retired driver must not abandon its accepted stop");
+            let state:String=db.query_row("SELECT state FROM turn WHERE run_id=?1", [&target], |r|r.get(0))?;
+            assert_eq!(state,"stopped");
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM model_attempt WHERE state='inflight'", [], |r|r.get::<_,i64>(0))?,0);
+            Ok(())
+        }).await.unwrap();
+        drop(snapshot);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
