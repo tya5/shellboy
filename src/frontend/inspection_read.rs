@@ -26,7 +26,7 @@ pub(super) struct RawInspection {
 }
 enum Body {
     Thread(Arc<header::RawHeader>, [Option<Value>; 3]),
-    Lifecycle(super::inspection_lifecycle::Raw),
+    Lifecycle(Box<super::inspection_lifecycle::Raw>),
     Saved(super::inspection_saved::RawSaved, Option<u64>),
     Attachments(super::inspection_attachments::Raw),
     Operation(super::inspection_operation::RawOperation),
@@ -104,16 +104,20 @@ pub(super) fn read_scoped_tx(
                 ];
                 Body::Thread(header, extra)
             }
-            InspectionTarget::Run(id) => Body::Lifecycle(super::inspection_lifecycle::read_tx(
-                db,
-                &Command::RunGet(RunTarget { run_id: id.clone() }),
-            )?),
-            InspectionTarget::Turn(id) => Body::Lifecycle(super::inspection_lifecycle::read_tx(
-                db,
-                &Command::TurnGet(TurnTarget {
-                    turn_id: id.clone(),
-                }),
-            )?),
+            InspectionTarget::Run(id) => {
+                Body::Lifecycle(Box::new(super::inspection_lifecycle::read_tx(
+                    db,
+                    &Command::RunGet(RunTarget { run_id: id.clone() }),
+                )?))
+            }
+            InspectionTarget::Turn(id) => {
+                Body::Lifecycle(Box::new(super::inspection_lifecycle::read_tx(
+                    db,
+                    &Command::TurnGet(TurnTarget {
+                        turn_id: id.clone(),
+                    }),
+                )?))
+            }
             InspectionTarget::Shell(id) => Body::Saved(
                 super::inspection_saved::read_tx(
                     db,
@@ -208,7 +212,7 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             )
         }
         Body::Lifecycle(raw) => {
-            let prepared = super::inspection_lifecycle::prepare(raw)?;
+            let prepared = super::inspection_lifecycle::prepare(*raw)?;
             limited_fields = prepared.limited_fields;
             observed_at = prepared.observed_at;
             (prepared.thread.unwrap_or_default(), prepared.value)
