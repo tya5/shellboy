@@ -2570,3 +2570,17 @@ consults the existing refreshing set; real Changed/epoch handling stays intact.
 The strict original 16-edit paired observation test remains byte-identical and
 passes three native macOS runs. Exact final checks and new native qualification
 are tracked in #95; no claim that the old Windows schedule was fully traced.
+
+
+## F approved: integrated source qualified locally; #100 retained separately
+
+Approval6543719886 permits F main after exact integrated-source3OS CI. Source
+2b9514e includes main9fd7b1c display changes and #95 tick/pending-read guards;
+standard2047/0/35, Python66 passes. The same test-only #100 screen reproduction
+fails cycle0 in F (membership intact, row hidden until reopen), not watchdog;
+worker1 owns its correction after F admission per the approval. Do not confuse
+the passing membership regression with a visual fix. The
+[F qualification](../validation/conversation-redesign-f.md#approved-f-on-main9fd7b1c-with-95-and-100-qualification)
+records both outcomes. Exact-source3OS and main push follow; no release/install.
+After F, start G on then-current main without waiting for #87 (6543753689);
+later side reconciles overlap, and G P6 time is observation only.

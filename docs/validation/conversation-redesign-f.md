@@ -376,3 +376,43 @@ lines. This is local evidence only; no exact-source remote CI or main admission
 is claimed for dcfe4ba. Review6543263300 remains pending. Reconcile any later
 main changes, especially the separately reviewed #95 read-admission correction,
 before final admission. G remains after F main; archived G work is untouched.
+
+
+## Approved F on main9fd7b1c, with #95 and #100 qualification
+
+Reviewer6543719886 authorizes F admission after exact integrated-source3OS CI.
+Preparation merges main9fd7b1c (#98/#91/#93/#96/#94), retaining both the F
+browser-mode design and #98 row/focus design. `ui/presentation.rs`,
+`presentation/rows.rs`, `control/driver.rs` and `frontend/update_delivery.rs`
+are byte-identical to that main. F schema17 remains the index-only migration.
+
+Source `2b9514e5a4d0809275eb95fed177ccea4d3bddf6` passed native macOS
+`sh scripts/check.sh`: **2047 passed/0 failed/35 ignored**, Python66,
+layout/watchdog/fmt/strict all-target Clippy. Actual harness lines include the
+unchanged strict paired snapshot integration, the #95 fixed-order pending-read
+case, tick/epoch guards and the32-CLI-edit running-row membership case.
+The #95 tick correction714b515 is retained, and its parent62106f5 admission
+rules are adapted to F's shared browser/descendant path: pending selected facts
+reserve a joint snapshot; neither standalone deadline consumes its browser
+slot while the selected work is pending. No new worker/state/timer is added.
+Initial standard attempts v1/v2 were deliberately interrupted (exit130) while
+completing that source adaptation; only v3's terminal0 is qualification.
+
+**#100 remains reproducible in F and is not fixed here.** The exact test-only
+reproduction from the other owner's3de75eb (base main9fd7b1c) was copied into a
+private probe, executed against F2b9514e production and the standard-built F CLI,
+then removed byte-for-byte from the submitted tree. It fails at cycle0 with
+`canonical row remains; reopening restored it`, exit101 after2.87s; this is an
+assertion failure, not watchdog. The CLI/internal membership still contains the
+worker; the drawn top row is hidden and reopening restores it. The separate
+membership test's success therefore does not prove visible-row correctness.
+Raw synthetic screen/log/private test snapshot remain local. No user's data,
+real model/API or physical Windows TUI was used. Per6543719886 condition2,
+worker1 will fix #100 on admitted F; do not close that issue or describe F as
+fixing it. Normal3OS CI does not include this known-red diagnostic probe and
+must not be portrayed as proving #100 corrected.
+
+G follows F without waiting for #87 under6543753689, superseding the earlier
+conditional #87-base instruction. The later integrating side resolves shared
+popup/overlay/help changes. G P6 times are observations only; count/cache/frame
+limits remain gates. No new performance rerun is required.
