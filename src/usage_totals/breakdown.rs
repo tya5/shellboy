@@ -38,7 +38,7 @@ fn offset(zone: &str) -> Result<Option<FixedOffset>, ApiError> {
 }
 pub(crate) fn validate(a: &UsageGetArgs) -> Result<(), ApiError> {
     if let Some(group) = &a.group_by {
-        if !matches!(group.as_str(), "hour" | "day" | "thread") {
+        if !matches!(group.as_ref(), "hour" | "day" | "thread") {
             return Err(invalid("group_by must be hour, day, or thread"));
         }
         offset(a.timezone.as_deref().unwrap_or("local"))?;

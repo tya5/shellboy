@@ -768,10 +768,10 @@ impl Cli {
             CliCommand::Usage {
                 command: UsageCommand::Get(a),
             } => C::UsageGet(wire::UsageGetArgs {
-                group_by: a.group_by,
-                timezone: a.timezone,
+                group_by: a.group_by.map(String::into_boxed_str),
+                timezone: a.timezone.map(String::into_boxed_str),
                 limit: a.limit,
-                cursor: a.cursor,
+                cursor: a.cursor.map(String::into_boxed_str),
                 since: a.since,
                 until: a.until,
                 thread_id: a.thread_id,

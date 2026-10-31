@@ -227,7 +227,7 @@ fn group_cursor_bounds_scope_owner_filters_and_watermark() {
     let first = read(&db, &a, "f").unwrap();
     assert_eq!(first["items"].as_array().unwrap().len(), 1);
     assert_eq!(first["more"], true);
-    a.cursor = first["next_cursor"].as_str().map(str::to_owned);
+    a.cursor = first["next_cursor"].as_str().map(Into::into);
     assert_eq!(
         read(&db, &a, "other-owner").unwrap_err().code,
         ErrorCode::CursorExpired
@@ -291,7 +291,7 @@ fn row_cap_continuation_and_empty_filtered_pages_are_honest() {
     );
     assert_eq!(v["scan_truncated"], true);
     assert_eq!(v["more"], true);
-    a.cursor = v["next_cursor"].as_str().map(str::to_owned);
+    a.cursor = v["next_cursor"].as_str().map(Into::into);
     let v = read(&db, &a, "f").unwrap();
     assert_eq!(v["scanned_candidates"], 1);
     assert_eq!(v["more"], false);
@@ -323,7 +323,7 @@ fn maximum_groups_and_validation_bounds() {
     let v = read(&db, &a, "f").unwrap();
     assert_eq!(v["items"].as_array().unwrap().len(), 168);
     assert_eq!(v["more"], true);
-    a.cursor = v["next_cursor"].as_str().map(str::to_owned);
+    a.cursor = v["next_cursor"].as_str().map(Into::into);
     assert_eq!(
         read(&db, &a, "f").unwrap()["items"]
             .as_array()
@@ -475,4 +475,12 @@ fn fractional_boundaries_are_exact_after_coarse_utc_string_comparison() {
         v["items"][0]["model_attempts"]["completed"]["input_tokens"]["known_sum"],
         20
     );
+}
+
+#[test]
+fn grouped_arguments_keep_the_shared_command_under_the_enum_size_budget() {
+    assert!(std::mem::size_of::<crate::protocol::Command>() <= 200);
+    let value = serde_json::to_value(args("thread")).unwrap();
+    assert_eq!(value["group_by"], "thread");
+    assert_eq!(value["timezone"], "UTC");
 }
