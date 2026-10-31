@@ -5780,3 +5780,28 @@ That expectation was corrected to exact source text; v6 dispatch passed before
 the standard and again within it. No watchdog was increased or failure retried
 without a code/fixture correction. These are not completion of G's live update/
 shared-read/domain coverage, P3/P6, native-layout or three-OS gates.
+
+## G7 bounded storage facts and separate physical observation
+
+This commit on c3b3a17 adopts the private GC observation reader and an initial
+explicit frontend storage read. Native macOS, Rust1.99.1, synthetic temporary
+SQLite/files only. GC observation suite8/0, actual blocked-writer management
+route1/0, strict library Clippy, fmt and watchdog policy pass. Tests compare
+small complete values/retention eligibility with canonical CLI accounting,
+prove bounded actual SQL work with100000 scalar rows, retain incomplete lower
+bounds/overflow/unknown values, separate physical timestamps, bound directory
+entries, reject symlink traversal and exercise the existing finite file pool.
+The management fixture releases its writer and shuts down before asserting;
+storage has no invented Thread scope and its read adds no operation receipts.
+
+The first policy check rejected five ad-hoc positive file deadlines from the
+archive. They now use the shared60s Deadline helper through its new at method;
+explicit expired-input coverage remains intentional. Two fixture compile errors
+used nonexistent/default StorageArgs constructors, corrected to the actual
+StorageArgs{category:None}; no public type/default was added. Initial explicit
+storage still reports saved totals separately from its physical sample. Current
+CLI's exhaustive scalar protocol and collection/eligibility are unchanged; the
+existing frontend assertion now verifies the new byte-observation value and
+complete flag instead of the old exact-scalar presentation. Integration/full
+standard on this unit, live refresh cadence/visibility/cancellation, P3/P6/native
+popup screens and three-OS qualification remain unperformed.

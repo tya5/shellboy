@@ -878,7 +878,14 @@ mod tests {
                     .await
                     .unwrap(),
                 );
-                values
+                let storage = super::super::management_request(
+                    &control,
+                    Command::StorageStatus(crate::protocol::StorageArgs { category: None }),
+                    tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+                (values, storage)
             })
             .await;
         // Always release before asserting so the intentional red cannot strand
@@ -894,7 +901,10 @@ mod tests {
             .unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
-        let values = observed.unwrap();
+        let (values, storage) = observed.unwrap();
+        assert!(storage["logical"]["bytes"].as_u64().is_some());
+        assert_eq!(storage["physical_observation"]["available"], true);
+        assert!(storage["view_observation"].get("thread_id").is_none());
         assert_eq!(before, after);
         assert_eq!(values[0]["execution_id"], "shell");
         assert_eq!(values[0]["command"], "printf done");

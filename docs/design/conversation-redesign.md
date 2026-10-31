@@ -300,6 +300,24 @@ that exact selection; a missing saved selection never means the entire Thread
 has no attachments. Resolve Thread from the selected record itself, never the
 viewer/current Thread. Source-node references continue to the original node.
 
+The saved storage view uses existing category/retention expressions beside GC,
+with at most1024 scalar rows per category index,128 execution candidates and1024
+output witnesses in total. It reports per-value completeness/lower-bound reasons;
+no raw payload or output bytes are copied. SQLite reusable-page facts are saved
+DB observations, not filesystem samples. Physical sampling is separately owned
+by the existing GC file worker, with finite directory entry budgets and the
+configured file-preparation deadline; no new worker/queue/timer is added. An
+initial explicit storage read may request one sample. Later reactive metadata
+reads must not resample physical storage; visible physical changes are separately
+coalesced and sampled no more than once per3s. TUI capacity fields use byte observations such as /logical/bytes plus /logical/
+complete, rather than disguising an incomplete prefix as an exact scalar total.
+Canonical exhaustive CLI StorageStatus scalar fields, storage status/collection
+and mutation eligibility remain unchanged. StorageStatus's shared category input
+remains non-filtering, matching the canonical status route; collection owns that
+category selector. Core placement
+keeps private retention/pin/quota/path/file-worker policy in its existing owner;
+frontend owns presentation, visibility and observation lifetime.
+
 Private domain helpers are permitted only where they avoid duplicating canonical
 schema/semantics: index saved views know private space/pause/failure keys and must
 not call the heavyweight full-status/provider path; GC observations know category

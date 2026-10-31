@@ -1114,7 +1114,12 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         _ => None,
     })
     .await;
-    assert!(!field(&shown, "/logical_live_bytes").is_empty());
+    assert!(
+        field(&shown, "/logical/bytes")
+            .parse::<u64>()
+            .is_ok_and(|bytes| bytes > 0)
+    );
+    assert_eq!(field(&shown, "/logical/complete"), "true");
     send.send(UiAction::Manage(Command::IndexStatus(IndexArgs {
         dimensions: None,
         scope: Some(IndexScope::All),

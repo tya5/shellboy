@@ -37,6 +37,10 @@ impl Deadline {
             waiting_for,
         }
     }
+    /// Pass the same safety budget to APIs that require an absolute deadline.
+    pub fn at(&self) -> std::time::Instant {
+        self.started + WATCHDOG
+    }
     pub fn expired(&self) -> bool {
         self.started.elapsed() >= WATCHDOG
     }

@@ -2718,3 +2718,17 @@ See acceptance for retained red tests and their corrections. Next connect these
 readers to the saved-target observer/joint read plan and complete remaining
 index/storage/deletion/status/history/readback freshness and G9/G10/G11/G12 gates.
 G remains local, not admitted; no release/install/user-data change.
+
+## G7 storage observation extraction
+
+Storage's initial UI read now collects finite saved category/retention/pin facts
+through readonly WAL snapshots and prepares them off the DB lane. One explicit
+physical sample uses the existing GC file pool and its configured deadline;
+read time and per-field completeness remain separate. No worker/queue/table/
+protocol/index is added. Core placement and numeric caps are adopted in the
+conversation design. Native GC tests8/0, blocked-writer route1/0 and strict library
+Clippy pass; full standard/integration/live observers remain unqualified for this
+new source. Latest fetched main66d2746 includes #5 Windows termination changes;
+merge it after this independent local checkpoint and preserve F/#95/#100 guards.
+Next continue the saved-target observer/joint read plan and remaining domain
+coverage. G remains local; no release/install/user-data change.

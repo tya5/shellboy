@@ -14,6 +14,7 @@ use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 mod history;
+pub(crate) mod observation;
 mod usage;
 use history::history_step;
 use usage::{logical_usage, physical_usage};

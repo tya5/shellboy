@@ -15,6 +15,7 @@ mod inspection_attachments;
 mod inspection_lifecycle;
 mod inspection_operation;
 mod inspection_saved;
+mod inspection_storage;
 mod lineage;
 mod lineage_observer;
 mod live_output;
@@ -182,6 +183,12 @@ async fn management_request_trigger(
     cancel: CancellationToken,
     trigger: crate::usage_totals::UsageTrigger,
 ) -> Result<Value, ApiError> {
+    if matches!(command, Command::StorageStatus(_)) {
+        return match inspection_storage::request(control, cancel).await {
+            Ok(value) => Ok(value),
+            Err(error) => Ok(serde_json::json!({"error":error})),
+        };
+    }
     if inspection_attachments::supports(&command)
         && let Command::AttachmentList(args) = &command
         && let Some(thread) = &args.thread_id
