@@ -238,7 +238,11 @@ impl Termination {
                             }
                         } else {std::future::pending::<()>().await}
                     }=>{observed.force(true).await;break;},
-                    source=os.recv()=>observed.signal(source.into()),
+                    source=os.recv()=> {
+                #[cfg(unix)]
+                let source = source.into();
+                observed.signal(source);
+            },
                     _=observed.notify.notified()=>{},
                 }
             }
