@@ -368,3 +368,12 @@ unverified name, not your authenticated model identity.
 Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` exposes its saved delivery/context; applied means path admission, not a successful answer. To cancel unread input explicitly, use `shellboy message cancel --message MESSAGE_ID` (repeat `--message` for up to 128 fixed IDs). Humans may cancel any sender's input; models may cancel only input sent by their own Thread. Check each returned outcome: another input may already have been admitted. Same-operation replay returns the saved outcomes. Cancellation does not wake the model. `archive_draft_id` identifies a durable source available to a human through TUI `/restore list` or `/restore draft ID`; restoration does not execute or send anything automatically.
 
 A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background work; a later genuine shell/child completion may wake a Turn after Esc. Revisit reservations are discarded on human interruption. Automatic time-based backgrounding is not enabled.
+
+### Owner memory observation
+
+Use `shellboy status --memory` for on-demand owner cache accounting and native
+process memory, without activity filters. It does not call a model or embedding
+endpoint. Inspect each value and unavailable_reason; null means unknown, not zero.
+Existing retained/limit/entry figures exclude some working or live/pinned memory
+and are not additive with OS footprint/RSS. Do not infer a leak or total heap from
+these snapshots alone. The observation does not change cache limits or purge data.

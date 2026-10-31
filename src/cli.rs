@@ -291,6 +291,9 @@ pub struct ListOptions {
     after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nUse operation get --operation ID to inspect an operation receipt.\nGuide: shellboy docs get --id shellboy/agent-guide"
 )]
 pub struct StatusOptions {
+    /// Query the running owner's cache accounting and native process memory.
+    #[arg(long, conflicts_with_all = ["thread_id", "run_id", "since", "state", "all", "limit", "cursor"])]
+    pub memory: bool,
     /// Exact Thread; model callers default to their own Thread.
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
@@ -734,6 +737,7 @@ impl Cli {
         };
         let command = match command {
             CliCommand::Status(a) => C::Status(wire::StatusArgs {
+                memory: a.memory,
                 thread_id: a.thread_id,
                 run_id: a.run_id,
                 since: a.since,

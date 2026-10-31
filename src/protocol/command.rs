@@ -11,7 +11,14 @@ pub(crate) enum CommandRoute {
 impl Command {
     fn name_and_route(&self) -> (&'static str, CommandRoute) {
         match self {
-            Self::Status(_) => ("status", CommandRoute::StatusProjection),
+            Self::Status(a) => (
+                "status",
+                if a.memory {
+                    CommandRoute::Runtime
+                } else {
+                    CommandRoute::StatusProjection
+                },
+            ),
             Self::ModelList(_) => ("model.list", CommandRoute::Runtime),
             Self::ThreadList(_) => ("thread.list", CommandRoute::Database),
             Self::ThreadGet(_) => ("thread.get", CommandRoute::Database),
@@ -74,6 +81,7 @@ impl Command {
     /// May owner shutdown drop the runtime action before receipt finalization?
     pub(crate) fn runtime_cancellable(&self) -> bool {
         match self {
+            Self::Status(a) => a.memory,
             Self::ModelList(_)
             | Self::IndexPreview(_)
             | Self::HistorySearch(_)
@@ -85,8 +93,7 @@ impl Command {
             | Self::IndexProbe(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => true,
-            Self::Status(_)
-            | Self::ThreadList(_)
+            Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::CompactList(_)
             | Self::ShellList(_)

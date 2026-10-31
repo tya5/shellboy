@@ -1961,3 +1961,15 @@ Escaped groups, intentional guardian tampering, kernel-stop latency and observin
 old-version survivors are outside this minimum implementation. Windows Job and
 normal owner shutdown policies are not changed. Revisit the helper layout only
 if native tests or a future shell runtime change invalidate these bounds.
+
+## #80 minimal on-demand memory (2026-10-31, active)
+
+Source: issue #80 and the user's scoped implementation request. Choose the status
+--memory flag, existing cache budget accounting and native process APIs. UI cache
+figures use the existing event/update queues and a per-request completion responder;
+that responder is reply plumbing, not an additional work/admission queue. Native
+reads reuse the existing control-file slots, after UI counter capture and outside
+the DB lane. There is no periodic sampler or new production counter. OS failures
+and absent UI ownership remain null with reasons. No allocator/SQLite estimation,
+leak diagnosis or request-copy optimization is included. F8 display is delegated
+to #41 because its published branch overlaps the diagnostic/rendering files.

@@ -21,6 +21,7 @@ impl UiUpdate {
             | Self::SavedMessage { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
             Self::ProgramStatus(_)
+            | Self::MemoryProbe(_)
             | Self::LiveWorkObserved { .. }
             | Self::LiveWorkPreview { .. }
             | Self::DetailSourcesChanged { .. }
