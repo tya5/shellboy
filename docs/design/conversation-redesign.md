@@ -1148,3 +1148,9 @@ history item focus/open state reveals the command; details and raw provenance
 continue to expose the real command. Losing focus restores the compact label.
 No independent selection, lifecycle or disclosure state is introduced. Description
 text is not evidence that the actual command is safe or matches its explanation.
+
+Command metadata keeps its existing 512-character bound. Focus/disclosure labels
+that text as a preview and supplies an exact-call command-original action (`o`).
+F6/original reuse the existing read-only, cursor-bounded source pages to reach
+all command text, including adjacent calls and long-command tails. Do not eagerly
+materialize all calls or increase aggregate preview retention for this label.

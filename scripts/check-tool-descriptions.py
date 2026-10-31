@@ -82,8 +82,10 @@ def main():
                                 scene('focused', lambda s: 'コマンド（プレビュー）' in s and 'printf CMD_DESCRIBED' in s)
                                 terminal.send(' ')
                                 scene('expanded', lambda s: 'コマンド原文' in s and 'printf CMD_DESCRIBED' in s)
+                                terminal.send('\x1b[17~')
+                                scene('details', lambda s: 'CMD_DESCRIBED' in s and 'F6' in s)
                                 terminal.send('o')
-                                scene('original', lambda s: 'CMD_DESCRIBED' in s and 'arguments' in s or 'CMD_DESCRIBED' in s and 'command' in s)
+                                scene('original', lambda s: 'CMD_DESCRIBED' in s and ('arguments' in s or 'command' in s))
                                 terminal.send('\x1b\x1b')
                                 terminal.send('\x1b\x1b')
                             else:
