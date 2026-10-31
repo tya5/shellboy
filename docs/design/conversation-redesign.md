@@ -273,7 +273,9 @@ observe current execution/retention facts without another raw-output read.
 
 
 Retained history integration uses the existing management detail Arc for original
-JSON/body pages and the existing inspection metadata Arc for current facts.
+JSON/body pages and one separately bounded, last-presented inspection metadata
+Arc for current facts. A later read cannot change which metadata a displayed
+request ID resolves; publish the new metadata Arc with that exact presentation.
 Current field pointers live under `/current_source`; detail/follow resolution
 selects that metadata Arc without serializing or copying the original body again.
 A retained inspection does not clear the management detail on each read. The UI

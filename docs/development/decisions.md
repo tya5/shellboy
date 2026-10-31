@@ -2461,3 +2461,34 @@ Reason: exposing these as normal current-owner forms would contradict main's
 adopted transport boundary. Revisit if supported TUI/other-owner lifecycle
 semantics are added; this is a reviewer-visible integration judgment, not a new
 Core capability or silent coverage omission.
+
+## Retained history current facts: separate presented metadata, no second body cache
+
+G reuses the original management-detail Arc unchanged and retains one small,
+last-presented metadata Arc for `/current_source` pointers. Resolving against the
+latest read before presentation would pair a displayed request ID with future
+facts, so publication and detail adoption share the existing presentation fence.
+Metadata is bounded by200 source IDs,128KiB encoded input, scalar/copy/channel
+limits and the existing detail retention budget. The UI retains at most256
+original field descriptors, never another original body. New-result/owner exit
+releases these references; hiding cancels reads through the existing visibility
+scope. The one RetainedInspectionStarted delivery carries only request identity
+and the finite typed scope on the existing bounded update channel; no new queue,
+worker, persisted state or Core operation is introduced.
+
+HistoryGet supplies no selection Thread. Origin provenance and the current UI
+owner are not authority to invent one; current selection remains unscoped.
+HistoryList retains its literal Thread. Wire list snippets do not supply a
+selection revision, so observation reports the actual current revision without
+claiming the old list cursor is still valid. Node revision matches likewise do
+not authorize raw output or prove external file availability.
+
+Current history observations conservatively coalesce existing Thread changes
+while visible, plus existing GC availability invalidation. This avoids a new
+persistent node-to-observer index or per-node notification protocol. The cost is
+one bounded metadata refresh on unrelated committed changes, at the existing
+500ms cadence; quiet/hidden views must still admit zero work. Revisit this choice
+if actual combined-consumer P3/count tests show excessive admission. Narrow it
+using already-known exact dependencies before adding infrastructure. Initial
+explicit payload/list reads and the other saved routes still require their own
+readonly/source-cost qualification; this helper is not a blanket completion.
