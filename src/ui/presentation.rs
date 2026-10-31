@@ -1307,7 +1307,10 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     } else {
         tool.exit_code
     };
-    let disclosure = format!("{state}:{code:?}:{}", tool.requires_attention());
+    let kind = if state == "exited" && code.is_none() { RowKind::Unknown }
+        else { crate::presentation::rows::tool_kind(state, tool.requires_attention()) };
+    // Progress and metadata refinements must not undo an explicit close.
+    let disclosure = format!("{kind:?}");
     match tool.output_revision {
         Some((sequence, complete)) => format!("{disclosure}|output:{sequence}:{complete}"),
         None => disclosure,
@@ -4000,6 +4003,16 @@ mod conversation_item_tests {
                 .collect::<Vec<_>>(),
             original
         );
+    }
+    #[test]
+    fn equivalent_terminal_metadata_does_not_reset_a_closed_disclosure() {
+        let mut saved=tool("one","failed");saved.exit_code=Some(1);
+        let mut observed=saved.clone();observed.current_state=Some("exited".into());observed.current_exit_code=Some(1);
+        assert_eq!(tool_outcome(&saved),tool_outcome(&observed));
+        let mut success=tool("one","completed");
+        let before=tool_outcome(&success);success.current_state=Some("exited".into());success.current_exit_code=Some(0);
+        assert_eq!(before,tool_outcome(&success));
+        assert_ne!(tool_outcome(&saved),tool_outcome(&success));
     }
     #[test]
     fn duplicate_result_outcomes_cannot_reopen_a_closed_canonical_header() {
