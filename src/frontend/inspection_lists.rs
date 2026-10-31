@@ -114,6 +114,11 @@ pub(super) fn capture_list_scope(
         if id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
             return Err(bad("Captured row identity exceeds scalar limit"));
         }
+        let copies = if route == Route::Status { 2 } else { 1 };
+        text_bytes = text_bytes.saturating_add(id.len() * copies);
+        if text_bytes > status::TEXT_BYTES {
+            return Err(bad("Captured identities exceed metadata channel"));
+        }
         ids.push(id.into());
         if route == Route::Status {
             let kind = row["kind"]
@@ -135,6 +140,15 @@ pub(super) fn capture_list_scope(
                         {
                             return Err(bad("Compact source identity exceeds scalar limit"));
                         }
+                        if compact.len() >= status::MAX_IDS {
+                            return Err(bad("Compact associations exceed200"));
+                        }
+                        text_bytes = text_bytes
+                            .saturating_add(id.len())
+                            .saturating_add(source.len());
+                        if text_bytes > status::TEXT_BYTES {
+                            return Err(bad("Compact associations exceed metadata channel"));
+                        }
                         compact.push(retained::RetainedSource {
                             event_id: id.into(),
                             source_id: source.into(),
@@ -148,6 +162,15 @@ pub(super) fn capture_list_scope(
                 {
                     return Err(bad("Compact attempt identity exceeds scalar limit"));
                 }
+                if compact.len() >= status::MAX_IDS {
+                    return Err(bad("Compact associations exceed200"));
+                }
+                text_bytes = text_bytes
+                    .saturating_add(id.len())
+                    .saturating_add(source.len());
+                if text_bytes > status::TEXT_BYTES {
+                    return Err(bad("Compact associations exceed metadata channel"));
+                }
                 compact.push(retained::RetainedSource {
                     event_id: id.into(),
                     source_id: source.into(),
@@ -155,6 +178,13 @@ pub(super) fn capture_list_scope(
                 });
             }
             if row["record_kind"] == "retained_replacement" {
+                if compact.len() >= status::MAX_IDS {
+                    return Err(bad("Compact associations exceed200"));
+                }
+                text_bytes = text_bytes.saturating_add(id.len() * 2);
+                if text_bytes > status::TEXT_BYTES {
+                    return Err(bad("Compact associations exceed metadata channel"));
+                }
                 compact.push(retained::RetainedSource {
                     event_id: id.into(),
                     source_id: id.into(),
@@ -166,6 +196,10 @@ pub(super) fn capture_list_scope(
     status::validate_ids(&ids)?;
     if compact.len() > status::MAX_IDS {
         return Err(bad("Captured compact source associations exceed200"));
+    }
+    text_bytes = text_bytes.saturating_add(changed_threads.iter().map(String::len).sum::<usize>());
+    if text_bytes > status::TEXT_BYTES {
+        return Err(bad("Notification IDs exceed metadata channel"));
     }
     let mut threads = changed_threads.iter().cloned().collect::<BTreeSet<_>>();
     let explicit = match command {
