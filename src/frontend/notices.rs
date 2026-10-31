@@ -38,7 +38,7 @@ events AS MATERIALIZED (
  CASE WHEN json_valid(payload) THEN json_extract(payload,'$.run_id') END AS run_id FROM events
 )
 SELECT refs.node_id,refs.kind,refs.execution_id,
- substr(CASE WHEN json_valid(c.arguments_json) THEN json_extract(c.arguments_json,'$.command') END,1,512),
+ substr(CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.command')='text' THEN json_extract(c.arguments_json,'$.command') END END,1,120),
  CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.background') IN ('true','false') THEN json_extract(c.arguments_json,'$.background') END END,
  c.group_id,c.call_id,r.node_id,
  COALESCE(refs.saved_thread,child.thread_id),substr(t.title,1,80),t.deleted_at,t.id,s.id,original.deleted_reason

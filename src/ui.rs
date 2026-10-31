@@ -197,7 +197,7 @@ impl UiNode {
             reasoning_ranges: vec![],
             presentation: NodePresentation {
                 kind: self.presentation.kind.clone(),
-                title: self.presentation.title.clone(),
+                title: if notice_fields.is_empty() {String::new()} else {self.presentation.title.clone()},
                 blocks,
                 fields: notice_fields,
                 ..Default::default()

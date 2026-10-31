@@ -254,3 +254,14 @@ histories, decodes intercepted OSC52 bytes, and checks sole/numbered/full-body
 copy plus cancellation without a host clipboard or provider call. The only
 real-time bound is the shared 60-second watchdog. Raw terminal and text snapshots
 stay outside the repository, with binary SHA-256 provenance in the manifest.
+
+### Notification Reference PTYs
+
+After building, copy `shellboy` and `visual_fixture` into the worktree's
+`.local-bin` directory in the same shared Rust allocation. Run
+`python3 scripts/check-notice-references.py --binary .local-bin/shellboy --fixture .local-bin/visual_fixture --out NEW_TEMP_DIRECTORY`.
+It creates disposable synthetic databases and captures sixteen 80/140-column
+shell/child scenes across dark/light/NO_COLOR/vt100, including exact original
+access, duplicate short names, reactive rename and deletion. It never uses user
+data, real providers or the host clipboard. The only timeout is the shared 60s
+watchdog; observations are not latency acceptance gates.
