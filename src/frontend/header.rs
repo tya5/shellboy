@@ -15,6 +15,7 @@ pub(super) struct RawHeader {
     details: ThreadDetails,
     updated_at: String,
     title: Option<TitleWitness>,
+    recovery_limited: bool,
 }
 #[derive(Default)]
 pub(super) struct TitleWitness {
@@ -71,27 +72,29 @@ const PENDING_PREFIX: &str = "accepted AS MATERIALIZED (
 )";
 
 pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, StorageError> {
-    let (details, updated_at) = db.query_row(
+    let (details, updated_at, recovery_limited) = db.query_row(
         "SELECT t.title,t.cwd,t.profile_id,t.model_id,t.effort,t.parent_thread_id,t.agents_path,t.updated_at,
-                r.id,u.id,u.recovery_reason_json,
+                r.id,u.id,CASE WHEN octet_length(u.recovery_reason_json)<=65536 THEN u.recovery_reason_json END,
                 (SELECT count(*) FROM run child WHERE child.owner_run_id=r.id AND child.state IN ('live','stopping')),
-                (SELECT count(*) FROM shell_execution s WHERE s.owner_run_id=r.id AND s.state IN ('starting','running','stopping'))
+                (SELECT count(*) FROM shell_execution s WHERE s.owner_run_id=r.id AND s.state IN ('starting','running','stopping')),
+                COALESCE(octet_length(u.recovery_reason_json)>65536,0)
          FROM thread t LEFT JOIN run r ON r.thread_id=t.id AND r.state IN ('live','stopping')
          LEFT JOIN turn u ON u.thread_id=t.id AND u.run_id=r.id AND u.state IN ('preparing','running','waiting','recovery_wait')
          WHERE t.id=?1 AND t.deleted_at IS NULL",
-        [thread], |row| Ok((ThreadDetails { last_answer: None, last_input: None,
-            last_compaction:None,thread_id:thread.into(), title:row.get(0)?, cwd:row.get(1)?, connection:row.get(2)?,
+        [thread], |row| Ok((ThreadDetails { last_answer:None,last_input:None,last_compaction:None,
+            thread_id:thread.into(), title:row.get(0)?, cwd:row.get(1)?, connection:row.get(2)?,
             model:row.get(3)?, effort:row.get(4)?, parent_id:row.get(5)?, agents_path:row.get(6)?,
             run_id:row.get(8)?,turn_id:row.get(9)?,recovery_reason:row.get(10)?,
             children_count:row.get::<_,i64>(11)? as u64,shells_count:row.get::<_,i64>(12)? as u64,
             usage_totals:None,context_usage:None,context:None,
-        },row.get::<_,String>(7)?)),
+        },row.get::<_,String>(7)?,row.get::<_,bool>(13)?)),
     ).optional()?.ok_or_else(||ApiError::new(ErrorCode::ThreadNotFound,"Thread not found"))?;
     let title = read_title_tx(db, thread, &details.title)?;
     Ok(RawHeader {
         details,
         updated_at,
         title,
+        recovery_limited,
     })
 }
 
@@ -167,37 +170,51 @@ fn read_candidates(
 }
 
 impl RawHeader {
-    /// Called on the existing finite presentation worker after the transaction.
-    pub(super) fn prepare(self) -> ThreadDetails {
-        let Self {
-            mut details,
-            updated_at,
-            title,
-        } = self;
-        if let Some(title) = title {
-            details.title = title.prepare();
+    pub(super) fn thread_id(&self) -> &str {
+        &self.details.thread_id
+    }
+    /// Borrow raw title witnesses: sharing this header never duplicates source JSON.
+    pub(super) fn prepare(&self) -> ThreadDetails {
+        self.prepare_inspection().0
+    }
+    pub(super) fn prepare_inspection(&self) -> (ThreadDetails, Vec<String>) {
+        let mut details = self.details.clone();
+        let mut limited = Vec::new();
+        if let Some(title) = &self.title {
+            let (value, is_limited) = title.prepare_outcome();
+            details.title = value;
+            if is_limited {
+                limited.push("title".into());
+            }
+        }
+        if self.recovery_limited {
+            details.recovery_reason = Some(
+                "取得範囲外: 保存された復旧理由は64KiBを超えています。Turn原文で確認してください。"
+                    .into(),
+            );
+            limited.push("recovery_reason".into());
         }
         details.context = Some(ExecutionContext {
             state: "active".into(),
             parent_thread_id: details.parent_id.clone(),
-            updated_at: Some(updated_at),
+            updated_at: Some(self.updated_at.clone()),
             thread_id: Some(details.thread_id.clone()),
             ..Default::default()
         });
-        details
+        (details, limited)
     }
 }
 impl TitleWitness {
-    pub(super) fn prepare(self) -> String {
+    pub(super) fn prepare(&self) -> String {
         self.prepare_outcome().0
     }
-    fn prepare_outcome(self) -> (String, bool) {
+    fn prepare_outcome(&self) -> (String, bool) {
         let mut user = false;
-        for (index, source) in [self.path, self.pending].into_iter().enumerate() {
+        for (index, source) in [&self.path, &self.pending].into_iter().enumerate() {
             if index == 1 && source.truncated {
                 return (LIMITED.into(), true);
             }
-            for candidate in source.rows {
+            for candidate in &source.rows {
                 if !candidate.user {
                     continue;
                 }
@@ -207,7 +224,8 @@ impl TitleWitness {
                 }
                 let title = candidate
                     .body
-                    .and_then(|body| serde_json::from_str(&body).ok())
+                    .as_deref()
+                    .and_then(|body| serde_json::from_str(body).ok())
                     .and_then(|body| crate::control::db::title_from_user_payload(&body));
                 if let Some(title) = title {
                     return (title, false);
@@ -479,6 +497,7 @@ impl RawTitles {
         let mut limited = Vec::new();
         for (id, (stored, witness)) in self.entries {
             let (title, is_limited) = witness
+                .as_ref()
                 .map(TitleWitness::prepare_outcome)
                 .unwrap_or((stored, false));
             if is_limited {

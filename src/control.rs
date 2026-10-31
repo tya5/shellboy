@@ -1630,6 +1630,14 @@ mod shell_lifecycle_tests;
 mod progress_tests;
 
 impl Control {
+    /// Existing completion hint, not proof of a mutation. Display consumers
+    /// reread saved facts without issuing another Control request.
+    pub(crate) fn diagnostics(&self) -> &crate::diagnostics::Diagnostics {
+        &self.diagnostics
+    }
+    pub(crate) fn saved_observation_hint(&self) -> &Notify {
+        &self.changed
+    }
     pub(crate) fn shell_output_notification(&self) -> &Notify {
         &self.shell_output_changed
     }

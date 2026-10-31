@@ -414,7 +414,9 @@ pub(super) fn follow(
                 .map_err(|_| unavailable())?
         };
         return match command {
-            Command::RunGet(_)
+            Command::UsageGet(_)
+            | Command::OperationGet(_)
+            | Command::RunGet(_)
             | Command::TurnGet(_)
             | Command::MessageGet(_)
             | Command::ThreadGet(_)

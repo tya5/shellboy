@@ -325,6 +325,10 @@ impl IndexService {
         }
         Ok(())
     }
+    /// Saved index changes only; never consume the worker wake permit.
+    pub(crate) async fn saved_changed(&self) {
+        self.saved_changed.notified().await;
+    }
     fn publish_saved(&self, changed: bool) {
         if changed {
             self.saved_changed.notify_one();

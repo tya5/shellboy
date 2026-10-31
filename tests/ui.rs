@@ -1579,16 +1579,27 @@ fn structured_management_focus_pages_and_wait_cancel_use_typed_worker_actions() 
         }],
         omitted: true,
     });
-    assert!(
-        matches!(&command_actions(&ui.event(key(KeyCode::Enter)))[..], [UiAction::LoadManagementDetail{request_id:7,pointer,cursor:None}] if pointer.is_empty())
-    );
+    let first_detail = ui.event(key(KeyCode::Enter));
+    let first_detail_id = match &command_actions(&first_detail)[..] {
+        [
+            UiAction::LoadManagementDetail {
+                request_id: 7,
+                pointer,
+                cursor: None,
+                detail_request_id,
+            },
+        ] if pointer.is_empty() => *detail_request_id,
+        other => panic!("unexpected detail request: {other:?}"),
+    };
     ui.apply(UiUpdate::ManagementDetail {
+        detail_request_id: first_detail_id,
         request_id: 6,
         pointer: "".into(),
         text: "stale".into(),
         next_cursor: None,
     });
     ui.apply(UiUpdate::ManagementDetail {
+        detail_request_id: first_detail_id,
         request_id: 7,
         pointer: "".into(),
         text: "complete value".into(),
@@ -1601,7 +1612,16 @@ fn structured_management_focus_pages_and_wait_cancel_use_typed_worker_actions() 
     assert!(
         matches!(&command_actions(&next)[..], [UiAction::LoadManagementDetail { cursor: Some(cursor), .. }] if cursor == "next")
     );
+    let next_detail_id = match &command_actions(&next)[..] {
+        [
+            UiAction::LoadManagementDetail {
+                detail_request_id, ..
+            },
+        ] => *detail_request_id,
+        other => panic!("unexpected next detail: {other:?}"),
+    };
     ui.apply(UiUpdate::ManagementDetail {
+        detail_request_id: next_detail_id,
         request_id: 7,
         pointer: "".into(),
         text: "last detail page".into(),
@@ -3697,10 +3717,19 @@ fn tab_in_management_detail_does_not_move_the_hidden_field_selection() {
             },
         ],
     });
-    assert!(
-        matches!(&command_actions(&enter(&mut ui))[..],[UiAction::LoadManagementDetail {pointer,..}] if pointer=="/first")
-    );
+    let first_action = enter(&mut ui);
+    let first_id = match &command_actions(&first_action)[..] {
+        [
+            UiAction::LoadManagementDetail {
+                pointer,
+                detail_request_id,
+                ..
+            },
+        ] if pointer == "/first" => *detail_request_id,
+        other => panic!("unexpected first detail: {other:?}"),
+    };
     ui.apply(UiUpdate::ManagementDetail {
+        detail_request_id: first_id,
         request_id: 7,
         pointer: "/first".into(),
         text: "full one".into(),
@@ -3750,11 +3779,20 @@ fn omitted_long_and_deep_metadata_use_the_complete_value_reader_for_copy() {
             fields,
             omitted: true,
         });
-        assert!(
-            matches!(&command_actions(&ui.event(key(KeyCode::Char('c'))))[..],
-            [UiAction::LoadManagementDetail { request_id:392, pointer:actual, cursor:None }] if actual == &pointer)
-        );
+        let requested = ui.event(key(KeyCode::Char('c')));
+        let detail_id = match &command_actions(&requested)[..] {
+            [
+                UiAction::LoadManagementDetail {
+                    request_id: 392,
+                    pointer: actual,
+                    cursor: None,
+                    detail_request_id,
+                },
+            ] if actual == &pointer => *detail_request_id,
+            other => panic!("unexpected copy request: {other:?}"),
+        };
         ui.apply(UiUpdate::ManagementDetail {
+            detail_request_id: detail_id,
             request_id: 392,
             pointer,
             text: "完全な原文の値".into(),

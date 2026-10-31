@@ -1615,15 +1615,26 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
         }))),
     })
     .unwrap();
+    send.try_send(UiAction::ObserveInspection {
+        context: context.clone(),
+        target: crate::ui::InspectionTarget::Usage(UsageGetArgs {
+            thread_id: Some("thread".into()),
+            ..Default::default()
+        }),
+        visible: true,
+        revision: 1,
+    })
+    .unwrap();
     async fn number(incoming: &std::sync::mpsc::Receiver<UiUpdate>, expected: &str) -> u64 {
-        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        crate::test_watchdog::watchdog("saved usage update", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     if let UiUpdate::ScopedManagement { context, update } = update
-                        && let UiUpdate::StructuredManagement {
-                            request_id, fields, ..
+                        && let UiUpdate::InspectionSnapshot {
+                            request_id,
+                            snapshot,
                         } = *update
-                        && fields.iter().any(|f| {
+                        && snapshot.fields.iter().any(|f| {
                             f.key == "/model_attempts/completed/input_tokens/known_sum"
                                 && f.value == expected
                         })
@@ -1657,7 +1668,7 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
     });
     let next = number(&incoming, "20").await;
     assert_ne!(first, next, "refresh invalidates old field-follow identity");
-    send.try_send(UiAction::CloseUsageDetails { epoch: 2 })
+    send.try_send(UiAction::HideInspection { revision: 2 })
         .unwrap();
     send.try_send(UiAction::Quit).unwrap();
     finish_bridge(bridge, &incoming).await;

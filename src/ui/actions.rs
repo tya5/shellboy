@@ -20,7 +20,7 @@ struct Controls {
     interrupts: BTreeSet<(String, String)>,
     active_cancel: Option<String>,
     cancel_wait: bool,
-    close_usage: Option<u64>,
+    inspection_hidden: Option<u64>,
     wait: bool,
     force: bool,
     alive: bool,
@@ -120,9 +120,10 @@ impl ActionSender {
                 | UiAction::Cancel { .. }
                 | UiAction::InterruptTurn { .. }
                 | UiAction::CancelWait
-                | UiAction::CloseUsageDetails { .. }
                 | UiAction::WaitForShutdown
                 | UiAction::ForceQuit
+                | UiAction::ObserveInspection { visible: false, .. }
+                | UiAction::HideInspection { .. }
         ) {
             return if controls.quit_requested {
                 Err(mpsc::error::TrySendError::Closed(action))
@@ -167,15 +168,20 @@ impl ActionSender {
                 }
                 controls.interrupts.insert((thread_id, turn_id));
             }
-            UiAction::CancelWait => controls.cancel_wait = true,
-            UiAction::CloseUsageDetails { epoch } => {
-                if controls
-                    .close_usage
-                    .is_none_or(|old| epoch.wrapping_sub(old) < (1_u64 << 63))
-                {
-                    controls.close_usage = Some(epoch);
+            UiAction::ObserveInspection {
+                visible: false,
+                revision,
+                ..
+            }
+            | UiAction::HideInspection { revision } => {
+                if controls.inspection_hidden.is_none_or(|old| {
+                    let delta = revision.wrapping_sub(old);
+                    delta != 0 && delta < (1_u64 << 63)
+                }) {
+                    controls.inspection_hidden = Some(revision);
                 }
             }
+            UiAction::CancelWait => controls.cancel_wait = true,
             UiAction::WaitForShutdown => controls.wait = true,
             UiAction::ForceQuit => controls.force = true,
             _ => unreachable!(),
@@ -259,8 +265,9 @@ impl ActionReceiver {
             controls.force = false;
             return Some(UiAction::ForceQuit);
         }
-        if let Some(epoch) = controls.close_usage.take() {
-            return Some(UiAction::CloseUsageDetails { epoch });
+
+        if let Some(revision) = controls.inspection_hidden.take() {
+            return Some(UiAction::HideInspection { revision });
         }
         if controls.cancel_wait {
             controls.cancel_wait = false;
@@ -408,19 +415,33 @@ mod output_admission_tests {
 }
 
 #[cfg(test)]
-mod usage_close_tests {
+mod inspection_hide_tests {
     use super::*;
-    #[tokio::test]
-    async fn closing_usage_details_is_coalesced_and_survives_full_normal_admission() {
+    #[test]
+    fn hide_coalesces_in_priority_slot_when_ordinary_queue_is_full() {
         let (send, mut receive) = channel(1);
-        send.try_send(UiAction::RenderWidth { width: 80 }).unwrap();
-        send.try_send(UiAction::CloseUsageDetails { epoch: 5 })
+        send.normal.try_send(UiAction::CancelWait).unwrap();
+        for revision in [5, 4] {
+            send.try_send(UiAction::ObserveInspection {
+                context: crate::ui::ManagementContext {
+                    epoch: 1,
+                    owner_draft: "d".into(),
+                    owner_thread: Some("t".into()),
+                },
+                target: crate::ui::InspectionTarget::Run("r".into()),
+                visible: false,
+                revision,
+            })
             .unwrap();
-        send.try_send(UiAction::CloseUsageDetails { epoch: 4 })
-            .unwrap();
+        }
         assert!(matches!(
-            receive.recv_with_admission(false).await,
-            Some(UiAction::CloseUsageDetails { epoch: 5 })
+            receive.take_control(),
+            Some(UiAction::HideInspection { revision: 5 })
+        ));
+        assert!(receive.take_control().is_none());
+        assert!(matches!(
+            receive.normal.try_recv(),
+            Ok(UiAction::CancelWait)
         ));
     }
 }

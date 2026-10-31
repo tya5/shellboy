@@ -75,11 +75,6 @@ impl UiState {
             self.active_view_mut().clear_operation_notice();
         }
         let status_before = self.view().status.clone();
-        let usage_before = self.management.usage_snapshot;
-        let owner_before = self.management.owner.clone();
-        let epoch_before = self.management.epoch;
-        let frame_before = self.management.is_some();
-        let had_operations = self.operations.is_some();
         let closes_management = matches!(&event,Event::Key(key) if key.code==KeyCode::Esc)
             && self.top_popup().is_none();
         if closes_management {
@@ -91,7 +86,7 @@ impl UiState {
         let input_owner = self.active.clone();
         let selection_before = self.selection_mode;
         let follow_before = self.view().follow;
-        let mut actions = self.event_inner(event);
+        let actions = self.event_inner(event);
         if self.selection_mode != selection_before {
             self.selection_frozen_at = self
                 .selection_mode
@@ -116,21 +111,6 @@ impl UiState {
         }
         if !self.composer_active() {
             self.immediate_chord = false;
-        }
-        let closed_operations = had_operations && self.operations.is_none();
-        let frame_hidden = frame_before
-            && (self.management.is_none() || self.top_overlay() != Some(Overlay::Management));
-        let scope_invalidated = owner_before.is_some()
-            && (owner_before != self.management.owner || epoch_before != self.management.epoch);
-        if usage_before
-            && (closes_management || closed_operations || frame_hidden || scope_invalidated)
-        {
-            if self.management.epoch == epoch_before {
-                self.management.epoch = self.management.epoch.wrapping_add(1);
-            }
-            actions.push(UiAction::CloseUsageDetails {
-                epoch: self.management.epoch,
-            });
         }
         if self.active == input_owner && self.view().status != status_before {
             self.active_view_mut()
@@ -168,19 +148,7 @@ impl UiState {
                 action => action,
             }
         }
-        fn usage_read(action: &UiAction) -> bool {
-            match action {
-                UiAction::SubmittedCommand { action, .. } => usage_read(action),
-                UiAction::Command(command) | UiAction::Manage(command) => matches!(
-                    command,
-                    Command::UsageGet(_)
-                        | Command::ThreadGet(_)
-                        | Command::RunGet(_)
-                        | Command::TurnGet(_)
-                ),
-                _ => false,
-            }
-        }
+
         fn starts_scope(action: &UiAction) -> bool {
             match action {
                 UiAction::SubmittedCommand { action, .. } => starts_scope(action),
@@ -191,7 +159,6 @@ impl UiState {
         if actions.iter().any(needs_scope) {
             if actions.iter().any(starts_scope) {
                 self.management.epoch = self.management.epoch.wrapping_add(1);
-                self.management.usage_snapshot = actions.iter().any(usage_read);
             }
             let current = ManagementContext {
                 epoch: self.management.epoch,
@@ -208,6 +175,9 @@ impl UiState {
                 .into_iter()
                 .map(|action| scope(action, &context))
                 .collect();
+        }
+        for action in &mut actions {
+            self.stamp_inspection_action(action);
         }
         actions
     }
@@ -1180,95 +1150,5 @@ mod tests {
         ui.dirty = false;
         ui.event(mouse(MouseEventKind::ScrollDown, 10, 10));
         assert!(!ui.dirty, "blocked wheel must not redraw the popup");
-    }
-}
-
-#[cfg(test)]
-mod usage_close_tests {
-    use super::*;
-    #[test]
-    fn f8_close_invalidates_a_scoped_usage_cache_without_interrupting_core() {
-        let mut ui = UiState::new(
-            &crate::config::Config::default(),
-            std::path::PathBuf::from("."),
-        );
-        ui.open_operations(None);
-        ui.management.usage_snapshot = true;
-        ui.management.owner = Some(ManagementContext {
-            epoch: ui.management.epoch,
-            owner_draft: ui.view().draft.draft_id.clone(),
-            owner_thread: None,
-        });
-        let actions = ui.event(Event::Key(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE)));
-        assert!(ui.operations.is_none());
-        assert!(
-            actions
-                .iter()
-                .any(|a| matches!(a, UiAction::CloseUsageDetails { .. }))
-        );
-        assert!(!actions.iter().any(|a| matches!(
-            a,
-            UiAction::Cancel { .. } | UiAction::Command(Command::RunStop(_))
-        )));
-    }
-}
-
-#[cfg(test)]
-mod displayed_usage_close_tests {
-    use super::*;
-    #[tokio::test]
-    async fn real_result_popup_esc_and_f8_close_capture_owner_before_it_is_cleared() {
-        for key in [KeyCode::Esc, KeyCode::F(8)] {
-            let mut ui = UiState::new(
-                &crate::config::Config::default(),
-                std::path::PathBuf::from("."),
-            );
-            let command = UiAction::Command(Command::UsageGet(crate::protocol::UsageGetArgs {
-                thread_id: Some("t".into()),
-                ..Default::default()
-            }));
-            let issued = ui.scope_management_actions(vec![command]);
-            let context = match &issued[0] {
-                UiAction::ManagementIntent { context, .. } => context.clone(),
-                _ => panic!("scoped query"),
-            };
-            let reply = || UiUpdate::ScopedManagement {
-                context: context.clone(),
-                update: Box::new(UiUpdate::StructuredManagement {
-                    work_status: false,
-                    request_id: 1,
-                    title: "usage".into(),
-                    fields: crate::presentation::fields_of_value(
-                        &serde_json::json!({"model_attempts":{"completed":{"input_tokens":{"known_sum":10}}}}),
-                    ),
-                    omitted: false,
-                }),
-            };
-            ui.apply(reply());
-            assert_eq!(ui.top_overlay(), Some(Overlay::Management));
-            let (send, mut receive) = crate::ui::actions::channel(1);
-            send.try_send(issued.into_iter().next().unwrap()).unwrap();
-            let actions = ui.event(Event::Key(KeyEvent::new(key, KeyModifiers::NONE)));
-            assert!(ui.management.owner.is_none());
-            assert!(!ui.management.is_some());
-            let close = actions
-                .into_iter()
-                .find(|a| matches!(a, UiAction::CloseUsageDetails { .. }))
-                .expect("actual result closure notifies frontend");
-            send.try_send(close).unwrap();
-            let closed = match receive.recv_with_admission(false).await.unwrap() {
-                UiAction::CloseUsageDetails { epoch } => epoch,
-                _ => panic!("priority close"),
-            };
-            assert_ne!(closed, context.epoch);
-            assert!(
-                matches!(receive.recv_with_admission(true).await,Some(UiAction::ManagementIntent{context:old,..}) if old==context)
-            );
-            ui.apply(reply());
-            assert!(
-                !ui.management.is_some(),
-                "late scoped result cannot reopen the closed popup"
-            );
-        }
     }
 }

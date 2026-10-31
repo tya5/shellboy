@@ -16,7 +16,7 @@ pub(super) struct Query {
 }
 
 struct RawVisible {
-    details: header::RawHeader,
+    details: Arc<header::RawHeader>,
     history: RawHistory,
     before_cursor: Result<Option<String>, ApiError>,
     sources: message_metadata::SourceFacts,
@@ -55,7 +55,7 @@ fn read_visible_tx(
         )
         .into());
     }
-    let details = header::read_tx(db, thread)?;
+    let details = Arc::new(header::read_tx(db, thread)?);
     let (mut history, before_cursor) = history_reader::query_current_tx(db, thread)?;
     let page_ids = history.source_ids().map(str::to_owned).collect::<Vec<_>>();
     let mut sources = message_metadata::read_tx(db, Some(thread), &page_ids)?;
@@ -182,14 +182,14 @@ pub(super) async fn run(
         };
         let target=thread.clone();
         let waits=control.pending_wait_sources();
-        let view_scopes=views.clone();
+        let view_scopes=super::view_read::prepare_requests(&views).await;
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             let receipts=receipt_states_tx(db,&ids)?;
             // Keep typed per-surface errors until the display mapper can distinguish
             // retryable WAL contention from a true storage failure.
             let visible=read_visible_tx(db,&target,tool_scope,waits.as_deref(),sequence);
-            let facts=if view_scopes.is_empty() {None}else{Some(super::view_read::read_tx(db,&view_scopes))};
+            let facts=if view_scopes.is_empty() {None}else{Some(super::view_read::read_shared_tx(db,&view_scopes,visible.as_ref().ok().map(|raw|&raw.details)))};
             Ok((receipts,visible,facts))
         }).await;
         drop(_progress_permit);
@@ -207,7 +207,7 @@ pub(super) async fn run(
                 None=>Err(ApiError::new(ErrorCode::InvalidState,"Visible observations unavailable")),
             };
             let result=checked_storage(&control,result).await;
-            let _=sender.send(BackgroundResult::ViewFacts {tickets:views.clone(),result}).await;
+            let _=sender.send(BackgroundResult::ViewFacts {tickets:views.clone(),result:result.map(Box::new)}).await;
         }
         let result=async {
             let raw=checked_storage(&control,visible).await?;
@@ -323,20 +323,15 @@ mod tests {
                 ..Default::default()
             }],
         };
-        let (raw, receipts) = owner
+        let (raw, receipts, admitted_sequence) = owner
             .db
             .call(move |db| {
                 let tx = db.transaction()?;
                 let receipts = receipt_states_tx(&tx, &["queued".into()])?;
-                let raw = read_visible_tx(
-                    &tx,
-                    "t",
-                    Some(scope),
-                    Some(&[]),
-                    message_queue::read_revision(),
-                )?;
+                let admitted_sequence = message_queue::read_revision();
+                let raw = read_visible_tx(&tx, "t", Some(scope), Some(&[]), admitted_sequence)?;
                 tx.commit()?;
-                Ok((raw, receipts))
+                Ok((raw, receipts, admitted_sequence))
             })
             .await
             .unwrap();
@@ -352,7 +347,8 @@ mod tests {
         assert_eq!(frame.details.model, "m");
         assert_eq!(frame.info.pending.total, 1);
         assert_eq!(frame.info.pending.items[0].message_id, "queued");
-        assert!(frame.info.read_revision > 0);
+        assert!(admitted_sequence > 0);
+        assert_eq!(frame.info.read_revision, admitted_sequence);
         assert!(
             frame
                 .nodes
@@ -524,6 +520,7 @@ mod tests {
                     views: view_read::Tickets {
                         browser: Some(ticket),
                         descendants: Some(descendant_ticket),
+                        ..Default::default()
                     },
                 },
                 control.clone(),
@@ -543,7 +540,7 @@ mod tests {
         while let Ok(result) = results.try_recv() {
             match result {
                 BackgroundResult::ViewFacts { result, .. } => {
-                    let (prepared, sequence) = result.unwrap();
+                    let (prepared, sequence) = *result.unwrap();
                     let patch = prepared.browser.unwrap().unwrap().patch.unwrap();
                     assert_eq!(patch.read_sequence, sequence);
                     let observed = prepared.descendants.unwrap().unwrap();

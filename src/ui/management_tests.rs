@@ -85,6 +85,9 @@ fn leaving_a_detail_page_drops_its_late_page_without_invalidating_the_whole_fram
     ui.apply(report(owner.clone(), "current"));
     let state = ui.management.structured_mut().unwrap();
     state.detail = Some(management::ManagementPage {
+        observed_at: "synthetic".into(),
+        source_request_id: 1,
+        stale: None,
         pointer: "/run_id".into(),
         text: "first page".into(),
         next_cursor: Some("next".into()),
@@ -96,6 +99,7 @@ fn leaving_a_detail_page_drops_its_late_page_without_invalidating_the_whole_fram
     ui.apply(UiUpdate::ScopedManagement {
         context: owner,
         update: Box::new(UiUpdate::ManagementDetail {
+            detail_request_id: 0,
             request_id: 1,
             pointer: "/run_id".into(),
             text: "late page".into(),

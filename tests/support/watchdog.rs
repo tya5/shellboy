@@ -41,6 +41,25 @@ impl Deadline {
     pub fn at(&self) -> std::time::Instant {
         self.started + WATCHDOG
     }
+    /// Wait for the next fixture event within this one shared safety budget.
+    #[track_caller]
+    pub fn receive<T>(
+        &self,
+        receiver: &std::sync::mpsc::Receiver<T>,
+    ) -> Result<T, std::sync::mpsc::RecvTimeoutError> {
+        let result = receiver.recv_timeout(
+            self.at()
+                .saturating_duration_since(std::time::Instant::now()),
+        );
+        if result.is_err() {
+            eprintln!(
+                "test watchdog/channel closed: waiting for {} at {}",
+                self.waiting_for,
+                Location::caller()
+            );
+        }
+        result
+    }
     pub fn expired(&self) -> bool {
         self.started.elapsed() >= WATCHDOG
     }

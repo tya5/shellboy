@@ -16,7 +16,11 @@ mod inspection_deletion;
 mod inspection_index;
 mod inspection_lifecycle;
 mod inspection_operation;
+mod inspection_physical;
+mod inspection_presentation;
+mod inspection_read;
 mod inspection_saved;
+mod inspection_state;
 mod inspection_storage;
 mod lineage;
 mod lineage_observer;
@@ -290,6 +294,56 @@ async fn management_status(
     )
     .await;
 }
+
+fn inspection_target(command: &Command, context: &ManagementContext) -> Option<InspectionTarget> {
+    match command {
+        Command::UsageGet(args) => Some(InspectionTarget::Usage(args.clone())),
+        Command::OperationGet(args) => Some(InspectionTarget::Operation(args.operation_id.clone())),
+        Command::ThreadGet(args) => args
+            .thread_id
+            .clone()
+            .or_else(|| context.owner_thread.clone())
+            .map(InspectionTarget::Thread),
+        Command::AttachmentList(args) => {
+            args.thread_id
+                .clone()
+                .map(|thread_id| InspectionTarget::Attachments {
+                    thread_id,
+                    attachment_id: None,
+                })
+        }
+        Command::RunGet(args) => Some(InspectionTarget::Run(args.run_id.clone())),
+        Command::TurnGet(args) => Some(InspectionTarget::Turn(args.turn_id.clone())),
+        Command::ShellGet(args) => Some(InspectionTarget::Shell(args.execution_id.clone())),
+        Command::MessageGet(args) => Some(InspectionTarget::Message(args.message_id.clone())),
+        Command::RevisitGet(args) => args.run_id.clone().map(InspectionTarget::Revisit),
+        Command::StorageStatus(_) => Some(InspectionTarget::Storage),
+        Command::ThreadDeletePreview(args) => Some(InspectionTarget::Deletion(args.clone())),
+        Command::IndexStatus(args) => Some(InspectionTarget::Index(args.clone())),
+        _ => None,
+    }
+}
+
+async fn start_inspection(
+    management: &mut management_state::Management,
+    updates: &(impl UpdateTarget + ?Sized),
+    context: ManagementContext,
+    generation: u64,
+    target: InspectionTarget,
+    title: String,
+    submission: Option<CommandSubmission>,
+) {
+    management.begin_result();
+    management
+        .inspection
+        .install(generation, context.clone(), target.clone(), submission);
+    management_update(
+        updates,
+        Some(context),
+        UiUpdate::InspectionStarted { target, title },
+    )
+    .await;
+}
 async fn status(
     sender: &(impl UpdateTarget + ?Sized),
     thread_id: Option<String>,
@@ -356,13 +410,27 @@ enum ThreadPageResult {
     Watch(watch_page::PreparedPage),
 }
 enum BackgroundResult {
+    InspectionPhysical {
+        ticket: inspection_physical::Ticket,
+        result: Result<Value, ApiError>,
+    },
+    InspectionResolved {
+        generation: u64,
+        context: ManagementContext,
+        target: InspectionTarget,
+        title: String,
+    },
+    InspectionPresented {
+        ticket: inspection_state::Presentation,
+        result: Result<inspection_presentation::Prepared, ApiError>,
+    },
     ProgramStatus {
         epoch: u64,
         result: Result<program_status::Projected, ApiError>,
     },
     ViewFacts {
         tickets: view_read::Tickets,
-        result: Result<(view_read::Prepared, u64), ApiError>,
+        result: Result<Box<(view_read::Prepared, u64)>, ApiError>,
     },
     ThreadPage {
         generation: u64,
@@ -425,12 +493,6 @@ enum BackgroundResult {
     Command {
         work_status: bool,
         context: Option<ManagementContext>,
-        generation: u64,
-        title: String,
-        result: Result<management::Report, ApiError>,
-    },
-    UsageRefresh {
-        context: ManagementContext,
         generation: u64,
         title: String,
         result: Result<management::Report, ApiError>,
@@ -772,6 +834,8 @@ async fn run_with_delivery(
     let observed_control = control.clone();
     let mut output_signal = Box::pin(observed_control.shell_output_notification().notified());
     output_signal.as_mut().enable();
+    let mut owner_signal = Box::pin(observed_control.saved_observation_hint().notified());
+    owner_signal.as_mut().enable();
     let mut ipc_failure = server.failures();
     let mut watch_ipc_failure = true;
     let mut control_tasks = JoinSet::new();
@@ -824,6 +888,42 @@ async fn run_with_delivery(
     let mut initialize = Some(UiUpdate::Initialize { cwd });
     let mut draft_failure = None;
     loop {
+        if let Some(submission) = management.inspection.take_retired_submission() {
+            command_outcome::<()>(
+                &updates,
+                Some(submission),
+                &Err(ApiError::new(
+                    ErrorCode::InvalidState,
+                    "Inspection was closed before read admission",
+                )),
+            )
+            .await;
+        }
+        if let Some(ticket) = management.inspection.take_presentation() {
+            let present = ticket.clone();
+            let sender = background_tx.clone();
+            let budget = control
+                .store
+                .config
+                .cache
+                .body_bytes
+                .min(MAX_FRAME_BYTES as u64) as usize;
+            if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
+                let prepare = present.clone();
+                let result =
+                    presentation_work(move || inspection_presentation::prepare(&prepare, budget))
+                        .await
+                        .and_then(|value| value);
+                let _ = sender
+                    .send(BackgroundResult::InspectionPresented {
+                        ticket: present,
+                        result,
+                    })
+                    .await;
+            }) {
+                management.inspection.presentation_refused(&ticket);
+            }
+        }
         live_output.retain(selection.active_thread.as_deref(), &selection.generations);
         if let Some(value) = initialize.take() {
             initialize = updates.defer(value);
@@ -832,33 +932,6 @@ async fn run_with_delivery(
             receipt_batch.drain(&mut pending, &updates);
         }
         draft_saver.pump_delivery(&mut draft_failure, &updates);
-        if let Some(watch) = management.usage_ready()
-            && let Ok(permit) = command_slots.clone().try_acquire_owned()
-        {
-            management.usage_begin_refresh(watch.generation);
-            let control = control.clone();
-            let sender = background_tx.clone();
-            spawn_work(&mut workers, permit, async move {
-                let title = command_title(&watch.command);
-                let response = management_request_trigger(
-                    &control,
-                    watch.command,
-                    CancellationToken::new(),
-                    crate::usage_totals::UsageTrigger::Changed,
-                )
-                .await;
-                let result =
-                    prepare_management(response, control.store.config.cache.body_bytes).await;
-                let _ = sender
-                    .send(BackgroundResult::UsageRefresh {
-                        context: watch.context,
-                        generation: watch.generation,
-                        title,
-                        result,
-                    })
-                    .await;
-            });
-        }
 
         while !updates.backpressured() {
             let Some(thread) = dirty_threads
@@ -891,8 +964,14 @@ async fn run_with_delivery(
                 let at = tokio::time::Instant::now();
                 view_read_next = Some(at + Duration::from_millis(500));
                 view_read::Tickets {
+                    coverage_request: None,
+                    inspection_services: Some(inspection_read::Services::new(&control)),
                     browser: browser.take(at),
                     descendants: descendants.take(at),
+                    inspection: management.inspection.take_metadata(at),
+                    inspection_usage: management
+                        .inspection
+                        .take_usage(at, control.diagnostics().clone()),
                 }
             } else {
                 view_read::Tickets::default()
@@ -980,6 +1059,7 @@ async fn run_with_delivery(
             })
             .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         let live_deadline = live_output.deadline();
+        let physical_deadline = management.inspection.physical_deadline();
         let watch_output_deadline = browser.output_deadline();
         let browser_deadline = standalone_browser_deadline(
             &browser,
@@ -989,6 +1069,12 @@ async fn run_with_delivery(
         )
         .into_iter()
         .chain(descendants.deadline().filter(|_| {
+            selection
+                .active_thread
+                .as_ref()
+                .is_none_or(|thread| !dirty_threads.contains(thread))
+        }))
+        .chain(management.inspection.deadline().filter(|_| {
             selection
                 .active_thread
                 .as_ref()
@@ -1007,7 +1093,7 @@ async fn run_with_delivery(
                 }
                 if let Ok(permit)=read_slots.clone().try_acquire_owned() {
                     let at=tokio::time::Instant::now();
-                    let tickets=view_read::Tickets {browser:browser.take(at),descendants:descendants.take(at)};
+                    let tickets=view_read::Tickets {coverage_request:None,inspection_services:Some(inspection_read::Services::new(&control)),browser:browser.take(at),descendants:descendants.take(at),inspection:management.inspection.take_metadata(at),inspection_usage:management.inspection.take_usage(at,control.diagnostics().clone())};
                     if !tickets.is_empty() {
                         view_read_next=Some(at+Duration::from_millis(500));
                         let control=control.clone();let results=background_tx.clone();
@@ -1015,15 +1101,40 @@ async fn run_with_delivery(
                         read_workers.spawn(async move {
                             let _permit=permit;
                             let result=view_read::read(&control,&tickets,progress_slots,stop).await;
-                            let _=results.send(BackgroundResult::ViewFacts {tickets,result}).await;
+                            let _=results.send(BackgroundResult::ViewFacts {tickets,result:result.map(Box::new)}).await;
                         });
                     }
                 }
+            },
+            _=tokio::time::sleep_until(physical_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
+                if physical_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
+                if let Ok(permit)=read_slots.clone().try_acquire_owned()
+                    && let Some(ticket)=management.inspection.take_physical(tokio::time::Instant::now()) {
+                    let source=control.clone();let sender=background_tx.clone();
+                    read_workers.spawn(async move {
+                        let _permit=permit;
+                        let result=inspection_physical::read(&source,&ticket).await;
+                        let _=sender.send(BackgroundResult::InspectionPhysical {ticket,result}).await;
+                    });
+                }
+            },
+            _=owner_signal.as_mut(),if management.inspection.watches_owner_state()=>{
+                owner_signal.set(observed_control.saved_observation_hint().notified());
+                owner_signal.as_mut().enable();
+                management.inspection.owner_state_hint();
+            },
+            _=control.index.saved_changed(),if management.inspection.watches_index()=>{
+                management.inspection.index_changed();
             },
             _=output_signal.as_mut()=>{
                 output_signal.set(observed_control.shell_output_notification().notified());
                 output_signal.as_mut().enable();
                 browser.output_notified();
+                management.inspection.output_notified();
+                if let Some(execution)=management.inspection.output_execution() {
+                    let markers=control.committed_output_markers(&[execution]).await?;
+                    management.inspection.output_markers(&markers,false);
+                }
                 if let Some(ids)=live_output.executions() {
                     let markers=control.committed_output_markers(&ids).await?;
                     if let Some(value)=live_output.markers(markers) {update(&updates,value).await;}
@@ -1048,6 +1159,7 @@ async fn run_with_delivery(
             _=tokio::time::sleep_until(refresh_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if refresh_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{},
             _=control.gc.availability_changed()=> {
+                management.inspection.availability_changed();
                 if let Some(thread)=selection.active_thread.as_ref()
                     && let Some(generation)=selection.generations.get(thread).copied()
                 {
@@ -1126,6 +1238,20 @@ async fn run_with_delivery(
                 match action {
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
+                    }
+                    UiAction::HideInspection {revision} => management.inspection.hide_at(revision),
+                    UiAction::ObserveInspection {context,target,visible,revision} => {
+                        management.inspection.observe_at(&context,&target,visible,revision);
+                        if visible && let Some(execution)=management.inspection.output_execution() {
+                            let markers=control.committed_output_markers(&[execution]).await?;
+                            management.inspection.output_markers(&markers,true);
+                        }
+                    }
+                    UiAction::NextInspectionWindow {context,request_id,target} => {
+                        let result=if request_id==management.request_id {
+                            management.inspection.next_index_window(&context,&target)
+                        } else {Err(ApiError::new(ErrorCode::InvalidState,"Index observation changed; use the currently displayed window"))};
+                        if let Err(error)=result {management_status(&updates,Some(context),error).await;}
                     }
                     UiAction::Quit => {
                         // Also covers ordinary Tokio action receivers used by
@@ -1538,6 +1664,29 @@ async fn run_with_delivery(
                         });
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
+                        if let Some(scope) = context.clone() && let Some(target) = inspection_target(&command, &scope) {
+                            let generation = management.next_generation();
+                            start_inspection(&mut management,&updates,scope,generation,target,command_title(&command),submission).await;
+                            // A submitted slash read owns one admitted result and
+                            // input acknowledgment even if its display is covered.
+                            // Subsequent observation still follows visible scope.
+                            if has_submission && let Ok(permit)=read_slots.clone().try_acquire_owned() {
+                                let at=tokio::time::Instant::now();
+                                let tickets=view_read::Tickets {
+                                    inspection_services:Some(inspection_read::Services::new(&control)),
+                                    inspection:management.inspection.take_initial_metadata(at),
+                                    inspection_usage:management.inspection.take_initial_usage(at,control.diagnostics().clone()),
+                                    ..Default::default()
+                                };
+                                let source=control.clone();let sender=background_tx.clone();let snapshot_slots=progress_slots.clone();let stop=read_cancel.clone();
+                                read_workers.spawn(async move {
+                                    let _permit=permit;
+                                    let result=view_read::read(&source,&tickets,snapshot_slots,stop).await;
+                                    let _=sender.send(BackgroundResult::ViewFacts {tickets,result:result.map(Box::new)}).await;
+                                });
+                            }
+                            continue;
+                        }
                         let title = command_title(&command);
                         let mutation = !command.is_read_only();
                         let notice_owner = management::NoticeOwner::capture(
@@ -1566,7 +1715,6 @@ async fn run_with_delivery(
                             continue;
                         };
                         let generation = management.next_generation();
-                        management.watch_usage(&command,context.as_ref(),generation);
                         let stop = matches!(command, Command::RunStop(_));
                         let work_status = management::work_status(&command);
                         let control = control.clone();
@@ -1974,7 +2122,6 @@ async fn run_with_delivery(
                         }
                     }
                     UiAction::ActivateDraft { draft_id } => {
-                        management.close_usage();
                         selection.activate_draft(draft_id);
                         streams.clear();
                         stream_retry = None;
@@ -1986,7 +2133,6 @@ async fn run_with_delivery(
                         known_view,
                         preview_sources,
                     } => {
-                        management.close_usage();
                         selection.select_thread(thread_id.clone(), generation);
                         ui_subscription.select(Some(&thread_id));
                         streams.clear();
@@ -2469,7 +2615,6 @@ async fn run_with_delivery(
                             }
                         });
                     }
-                    UiAction::CloseUsageDetails { epoch } => management.close_usage_at(epoch),
                     UiAction::CancelWait => {
                         management.cancel_wait();
                         status(
@@ -2558,6 +2703,16 @@ async fn run_with_delivery(
                                     return;
                                 }
                             };
+                            if let Some(scope)=context.clone() {
+                                let resolved=match &target {
+                                    management::FollowTarget::Command(command)=>inspection_target(command,&scope).map(|target|(target,command_title(command))),
+                                    management::FollowTarget::Attachment {thread_id,attachment_id}=>Some((InspectionTarget::Attachments {thread_id:thread_id.clone(),attachment_id:Some(attachment_id.clone())},"添付の参照".into())),
+                                };
+                                if let Some((target,title))=resolved {
+                                    let _=sender.send(BackgroundResult::InspectionResolved {generation,context:scope,target,title}).await;
+                                    return;
+                                }
+                            }
                             let (title,work_status,response)=match target {
                                 management::FollowTarget::Command(command)=> {
                                     let title=command_title(&command);
@@ -2603,24 +2758,21 @@ async fn run_with_delivery(
                     }
                     UiAction::LoadManagementDetail {
                         request_id,
+                        detail_request_id,
                         pointer,
                         cursor,
                     } => {
                         if request_id != management.request_id {
-                            management_status(
-                                &updates,
-                                context.clone(),
-                                "管理結果が更新されました。現在の結果から選択してください",
-                            )
-                            .await;
+                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:"管理結果が更新されました。現在の同じ対象を再取得してください".into()}).await;
                             continue;
                         }
                         let Some(value) = management.detail.clone() else {
-                            management_status(&updates,context.clone(),"詳細は本文cache予算を超えたため未保持。対象IDから原文pageを取得するか範囲を絞って再照会してください").await;
+                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:"詳細は本文cache予算を超えたため未保持。対象IDから原文pageを取得するか範囲を絞って再照会してください".into()}).await;
                             continue;
                         };
                         let sender = updates.worker();
                         let worker_context = context.clone();
+                        let refused_pointer = pointer.clone();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let selected = pointer.clone();
                             match presentation_work(move || {
@@ -2634,6 +2786,7 @@ async fn run_with_delivery(
                                         worker_context.clone(),
                                         UiUpdate::ManagementDetail {
                                             request_id,
+                                            detail_request_id,
                                             pointer,
                                             text,
                                             next_cursor,
@@ -2642,12 +2795,11 @@ async fn run_with_delivery(
                                     .await
                                 }
                                 Ok(Err(error)) | Err(error) => {
-                                    management_status(&sender, worker_context.clone(), error).await
+                                    management_update(&sender,worker_context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:error.to_string()}).await
                                 }
                             }
                         }) {
-                            management_status(&updates, context.clone(), "詳細読込キューが満杯です")
-                                .await;
+                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer:refused_pointer,error:"詳細読込キューが満杯です".into()}).await;
                         }
                     }
                     UiAction::CopyText { text, scope } => {
@@ -2887,7 +3039,24 @@ async fn run_with_delivery(
                     }
                 }
                 Some(BackgroundResult::ViewFacts {tickets,result})=>{
-                    view_read::complete(&owner.diagnostics,&mut browser,&mut descendants,&updates,tickets,result).await;
+                    view_read::complete(control.diagnostics(),&mut browser,&mut descendants,&mut management.inspection,&updates,tickets,result.map(|value|*value)).await;
+                },
+                Some(BackgroundResult::InspectionPhysical {ticket,result})=>{
+                    management.inspection.complete_physical(&ticket,result);
+                },
+                Some(BackgroundResult::InspectionResolved {generation,context,target,title})=>{
+                    if management.accepts(generation) {start_inspection(&mut management,&updates,context,generation,target,title,None).await;}
+                },
+                Some(BackgroundResult::InspectionPresented {ticket,result})=>{
+                    if !management.accepts(ticket.generation) || !management.inspection.presentation_finished(&ticket) {continue;}
+                    match result {
+                        Ok(prepared)=>{
+                            let request_id=management.begin_result();
+                            management.detail=prepared.report.detail.map(Arc::new);
+                            management_update(&updates,Some(ticket.context),UiUpdate::InspectionSnapshot {request_id,snapshot:prepared.snapshot}).await;
+                        },
+                        Err(error)=>management_status(&updates,Some(ticket.context),error).await,
+                    }
                 },
                 Some(BackgroundResult::ThreadPage {generation,requested_cursor,stop,result})=>{
                     if !stop.is_cancelled()&&browser.generation()==Some(generation) {
@@ -3055,23 +3224,7 @@ async fn run_with_delivery(
                 }
                 Some(BackgroundResult::Copied {
                     result: Err(error), ..
-                }) => status(&updates, None, error).await,
-                Some(BackgroundResult::UsageRefresh{context,generation,title,result})=>{
-                    if !management.accepts(generation) || !management.usage_accepts(generation){continue;}
-                    match result {
-                        Ok(report)=>{
-                            management.usage_finished(generation,report.detail.as_ref());
-                            let request_id=management.begin_result();
-                            management.detail=report.detail.map(Arc::new);
-                            management_update(&updates,Some(context),UiUpdate::StructuredManagement{work_status:false,request_id,title,fields:report.fields,omitted:report.omitted}).await;
-                        },
-                        Err(error)=>{
-                            management.usage_finished(generation,None);
-                            management_status(&updates,Some(context),error).await;
-                        },
-                    }
-                },
-                Some(BackgroundResult::Command {
+                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command {
                     work_status,
                     context,
                     generation,
@@ -3081,11 +3234,9 @@ async fn run_with_delivery(
                     if !management.accepts(generation) {
                         continue;
                     }
-                    management.usage_finished(generation,None);
                     let management_id = management.begin_result();
                     match result {
                         Ok(report) => {
-                            management.usage_finished(generation,report.detail.as_ref());
                             management.detail = report.detail.map(Arc::new);
                             management_update(
                                 &updates,
@@ -3182,7 +3333,7 @@ async fn run_with_delivery(
                         dirty_threads.insert(parent);
                     }
                     browser.changed(&thread_id);descendants.changed(&thread_id);
-                    management.usage_changed(&thread_id);
+                    management.inspection.changed(&thread_id);
                     streams.invalidate(&thread_id);
                     selection.changed(&thread_id);
                     receipt_delivery::changed(&mut pending, &thread_id);
@@ -3227,7 +3378,7 @@ async fn run_with_delivery(
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     status_dirty |= status_enabled;
-                    management.usage_lagged();
+                    management.inspection.resync();
                     descendants.resync();browser.request_resync("会話一覧の変更通知を取りこぼしました。最新のページから再取得します");
                     #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
@@ -3268,7 +3419,7 @@ async fn run_with_delivery(
                     });
                 }
             },
-            _=tick.tick(),if selection.progress_running || management.usage_waiting() || (status_enabled && status_dirty)=> {
+            _=tick.tick(),if selection.progress_running || (status_enabled && status_dirty)=> {
                 status_ready = true;
                 if let Some(thread)=selection.periodic_refresh_thread(&refreshing) {
                     dirty_threads.insert(thread);
@@ -3284,6 +3435,18 @@ async fn run_with_delivery(
     drop(live_output);
     drop(browser);
     drop(descendants);
+    management.inspection.close();
+    if let Some(submission) = management.inspection.take_retired_submission() {
+        command_outcome(
+            &updates,
+            Some(submission),
+            &Err::<(), _>(ApiError::new(
+                ErrorCode::InvalidState,
+                "Inspection closed before its read was admitted",
+            )),
+        )
+        .await;
+    }
     selection.cancel.cancel();
     cancel.cancel();
     drop(background_rx);
@@ -3956,6 +4119,8 @@ mod stream_tests {
 
 #[cfg(test)]
 pub(crate) mod control_tests;
+#[cfg(test)]
+mod inspection_tests;
 
 #[cfg(test)]
 mod notice_tests {

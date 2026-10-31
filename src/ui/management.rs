@@ -9,11 +9,17 @@ pub(super) enum ManagementMode {
     Attachments,
 }
 pub(super) struct ManagementPage {
+    pub(super) source_request_id: u64,
+    pub(super) observed_at: String,
+    pub(super) stale: Option<String>,
     pub(super) pointer: String,
     pub(super) text: String,
     pub(super) next_cursor: Option<String>,
 }
 pub(super) struct StructuredManagementState {
+    pub(super) detail_request_id: u64,
+    pub(super) preserve_detail_scroll: bool,
+    pub(super) detail_error: Option<String>,
     pub(super) request_id: u64,
     pub(super) fields: Vec<PresentationField>,
     pub(super) selected: usize,
@@ -44,12 +50,13 @@ impl IndexPreviewState {
     }
 }
 pub struct ManagementPopup {
+    pub(super) inspection: Option<inspection::State>,
+    inspection_detail: Option<UiAction>,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     reader_cache: std::cell::RefCell<popup::ReaderCache>,
     reader_revision: u64,
     frame: Option<ManagementFrame>,
     pub(super) owner: Option<ManagementContext>,
-    pub(super) usage_snapshot: bool,
     pub(super) mode: ManagementMode,
     pub(super) epoch: u64,
     pub(super) scope: Option<IndexArgs>,
@@ -59,12 +66,13 @@ pub struct ManagementPopup {
 impl Default for ManagementPopup {
     fn default() -> Self {
         Self {
+            inspection: None,
+            inspection_detail: None,
             paint: Default::default(),
             reader_cache: Default::default(),
             reader_revision: 0,
             frame: None,
             owner: None,
-            usage_snapshot: false,
             mode: ManagementMode::General,
             epoch: 0,
             scope: None,
@@ -81,6 +89,253 @@ pub(super) enum Outcome {
     Confirm { command: Command, detail: String },
 }
 impl ManagementPopup {
+    pub(super) fn start_inspection(&mut self, target: InspectionTarget, title: String) {
+        // Pending cost intents belong to their exact Index selection. Admitted
+        // operations are tracked elsewhere and are never cancelled here.
+        let same_index_scope = matches!(&target,InspectionTarget::Index(args) if self.mode==ManagementMode::Index && self.scope.as_ref().map_or_else(||args==&IndexArgs::default(),|current|current==args));
+        if !same_index_scope {
+            self.pending = None;
+            self.reset_preview();
+            self.scope = None;
+        }
+        self.open_structured(title, 0, vec![], false, false);
+        if let InspectionTarget::Index(args) = &target {
+            self.mode = ManagementMode::Index;
+            self.scope = Some(args.clone());
+        } else if matches!(target, InspectionTarget::Attachments { .. }) {
+            self.mode = ManagementMode::Attachments;
+        } else {
+            self.mode = ManagementMode::General;
+        }
+        let desired = match &target {
+            InspectionTarget::Attachments {
+                thread_id,
+                attachment_id: Some(id),
+            } => Some(InspectionFieldAnchor {
+                pointer: String::new(),
+                entity: Some(("attachment_selection".into(), format!("{thread_id}/{id}"))),
+                relative_pointer: "/attachment_id".into(),
+                stable: true,
+            }),
+            _ => None,
+        };
+        let mut state = inspection::State::new(target);
+        state.unavailable_selection = desired;
+        self.inspection = Some(state);
+        self.inspection_detail = None;
+    }
+    pub(super) fn patch_inspection(
+        &mut self,
+        request_id: u64,
+        snapshot: InspectionSnapshot,
+    ) -> bool {
+        let Some(inspection) = self.inspection.as_ref() else {
+            return false;
+        };
+        if (inspection.has_snapshot
+            && self
+                .structured()
+                .is_some_and(|state| request_id <= state.request_id))
+            || inspection.target != snapshot.target
+            || snapshot.metadata_sequence < inspection.metadata_sequence
+            || inspection
+                .usage_sequence
+                .is_some_and(|old| snapshot.usage_sequence.is_none_or(|new| new < old))
+            || snapshot.fields.len() > 256
+            || snapshot.anchors.len() > 256
+        {
+            return false;
+        }
+        let selected = if inspection.reset_selection {
+            None
+        } else {
+            inspection.unavailable_selection.clone().or_else(|| {
+                self.structured()
+                    .and_then(|state| state.fields.get(state.selected))
+                    .and_then(|field| {
+                        inspection
+                            .anchors
+                            .iter()
+                            .find(|anchor| anchor.pointer == field.key)
+                    })
+                    .cloned()
+            })
+        };
+        let selected_index = selected
+            .as_ref()
+            .and_then(|old| snapshot.anchors.iter().find(|new| old.same_source(new)))
+            .and_then(|anchor| {
+                snapshot
+                    .fields
+                    .iter()
+                    .position(|field| field.key == anchor.pointer)
+            });
+        let detail_anchor = inspection.detail_anchor.clone();
+        let mapped = detail_anchor
+            .as_ref()
+            .and_then(|old| snapshot.anchors.iter().find(|new| old.same_source(new)))
+            .map(|anchor| anchor.pointer.clone());
+        let Some(frame) = self.frame.as_mut() else {
+            return false;
+        };
+        let Some(state) = frame.structured.as_mut() else {
+            return false;
+        };
+        let detail_consumer = inspection.detail_requested
+            || state.detail.is_some()
+            || state.pending_pointer.is_some()
+            || self.inspection_detail.is_some();
+        state.selected = selected_index
+            .unwrap_or_else(|| state.selected.min(snapshot.fields.len().saturating_sub(1)));
+        state.fields = snapshot.fields;
+        state.omitted = snapshot.omitted;
+        state.request_id = request_id;
+        state.detail_request_id = state.detail_request_id.wrapping_add(1);
+        state.pending_pointer = None;
+        self.inspection_detail = None;
+        let inspection = self.inspection.as_mut().unwrap();
+        inspection.reset_selection = false;
+        inspection.selection_unavailable = selected.is_some() && selected_index.is_none();
+        inspection.unavailable_selection = inspection
+            .selection_unavailable
+            .then(|| selected.clone())
+            .flatten();
+        inspection.metadata_sequence = snapshot.metadata_sequence;
+        inspection.usage_sequence = snapshot.usage_sequence;
+        inspection.metadata_observed_at = snapshot.metadata_observed_at;
+        inspection.usage_observed_at = snapshot.usage_observed_at;
+        inspection.anchors = snapshot.anchors;
+        inspection.has_snapshot = true;
+        if inspection
+            .metadata_error
+            .as_ref()
+            .is_some_and(|(seq, _)| *seq < snapshot.metadata_sequence)
+        {
+            inspection.metadata_error = None;
+        }
+        if inspection
+            .usage_error
+            .as_ref()
+            .is_some_and(|(seq, _)| snapshot.usage_sequence.is_some_and(|new| new > *seq))
+        {
+            inspection.usage_error = None;
+        }
+        inspection.detail_pointer = mapped.clone();
+        if let Some(detail) = state.detail.as_mut() {
+            detail.stale = Some(
+                if mapped.is_some() {
+                    "新しい保存状態の詳細を取得中"
+                } else {
+                    "参照元が消失・一意に確認できません"
+                }
+                .into(),
+            );
+        }
+        if detail_consumer && let Some(pointer) = mapped {
+            state.pending_pointer = Some(pointer.clone());
+            state.preserve_detail_scroll = state.detail.is_some();
+            self.inspection_detail = Some(UiAction::LoadManagementDetail {
+                request_id,
+                detail_request_id: state.detail_request_id,
+                pointer,
+                cursor: None,
+            });
+        }
+        self.paint.set(None);
+        true
+    }
+    pub(super) fn fail_inspection(
+        &mut self,
+        target: InspectionTarget,
+        part: InspectionPart,
+        sequence: u64,
+        observed_at: String,
+        error: String,
+    ) -> bool {
+        let Some(state) = self
+            .inspection
+            .as_mut()
+            .filter(|state| state.target == target)
+        else {
+            return false;
+        };
+        let prefix = error.chars().take(512).collect::<String>();
+        let message = format!(
+            "{} · {}",
+            observed_at,
+            crate::presentation::sanitize_plain(&prefix, 0).0
+        );
+        match part {
+            InspectionPart::Metadata => {
+                if sequence < state.metadata_sequence
+                    || state
+                        .metadata_error
+                        .as_ref()
+                        .is_some_and(|(old, _)| sequence < *old)
+                {
+                    return false;
+                }
+                state.metadata_error = Some((sequence, message));
+            }
+            InspectionPart::Usage => {
+                if state.usage_sequence.is_some_and(|old| sequence < old)
+                    || state
+                        .usage_error
+                        .as_ref()
+                        .is_some_and(|(old, _)| sequence < *old)
+                {
+                    return false;
+                }
+                state.usage_error = Some((sequence, message));
+            }
+        }
+        if let Some(page) = self
+            .frame
+            .as_mut()
+            .and_then(|frame| frame.structured.as_mut())
+            .and_then(|state| state.detail.as_mut())
+        {
+            page.stale = Some("更新に失敗・以前の取得内容".into());
+        }
+        true
+    }
+    pub(super) fn fail_detail(
+        &mut self,
+        request_id: u64,
+        detail_request_id: u64,
+        pointer: &str,
+        error: &str,
+    ) -> bool {
+        let Some(state) = self.structured_mut() else {
+            return false;
+        };
+        if state.request_id != request_id
+            || state.detail_request_id != detail_request_id
+            || state.pending_pointer.as_deref() != Some(pointer)
+        {
+            return false;
+        }
+        let prefix = error.chars().take(512).collect::<String>();
+        let reason = crate::presentation::sanitize_plain(&prefix, 0).0;
+        state.pending_pointer = None;
+        state.detail_error = Some(reason.clone());
+        if let Some(page) = &mut state.detail {
+            page.stale = Some(format!("詳細の更新に失敗: {reason}"));
+        }
+        true
+    }
+    pub(super) fn take_inspection_detail(&mut self) -> Option<UiAction> {
+        self.inspection_detail.take()
+    }
+    pub(super) fn detail_rejected(&mut self, reason: &str) {
+        if let Some(state) = self.structured_mut() {
+            state.pending_pointer = None;
+            if let Some(page) = &mut state.detail {
+                page.stale = Some(reason.into());
+            }
+        }
+        self.inspection_detail = None;
+    }
     pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
         self.paint.get()
     }
@@ -90,7 +345,12 @@ impl ManagementPopup {
         {
             let old = state.selected;
             state.selected = popup::move_selection(old, delta, state.fields.len());
-            return old != state.selected;
+            let changed = old != state.selected;
+            if changed && let Some(inspection) = self.inspection.as_mut() {
+                inspection.selection_unavailable = false;
+                inspection.unavailable_selection = None;
+            }
+            return changed;
         }
         let maximum = self.reader_cache.borrow().bounds().maximum;
         if let Some(view) = self.view_mut() {
@@ -124,6 +384,8 @@ impl ManagementPopup {
         self.frame.as_mut()?.structured.as_mut()
     }
     pub(super) fn open_text(&mut self, view: ManagementView) {
+        self.inspection = None;
+        self.inspection_detail = None;
         self.reset_reader();
         self.frame = Some(ManagementFrame {
             view,
@@ -138,6 +400,8 @@ impl ManagementPopup {
         omitted: bool,
         work_status: bool,
     ) {
+        self.inspection = None;
+        self.inspection_detail = None;
         self.reset_reader();
         if work_status {
             self.mode = ManagementMode::Status;
@@ -151,6 +415,9 @@ impl ManagementPopup {
                 scroll: 0,
             },
             structured: Some(StructuredManagementState {
+                detail_request_id: 0,
+                preserve_detail_scroll: false,
+                detail_error: None,
                 request_id,
                 fields,
                 selected: 0,
@@ -163,6 +430,7 @@ impl ManagementPopup {
     pub(super) fn accept_detail(
         &mut self,
         request_id: u64,
+        detail_request_id: u64,
         pointer: String,
         text: String,
         next_cursor: Option<String>,
@@ -170,18 +438,30 @@ impl ManagementPopup {
         if let Some(frame) = &mut self.frame
             && let Some(state) = &mut frame.structured
             && state.request_id == request_id
+            && state.detail_request_id == detail_request_id
             && state.pending_pointer.as_deref() == Some(&pointer)
         {
             self.paint.set(None);
             self.reader_cache.get_mut().clear();
             self.reader_revision = self.reader_revision.wrapping_add(1);
             state.detail = Some(ManagementPage {
+                source_request_id: request_id,
+                observed_at: self
+                    .inspection
+                    .as_ref()
+                    .map(|state| state.metadata_observed_at.clone())
+                    .unwrap_or_default(),
+                stale: None,
                 pointer,
                 text,
                 next_cursor,
             });
             state.pending_pointer = None;
-            frame.view.scroll = 0;
+            state.detail_error = None;
+            if !state.preserve_detail_scroll {
+                frame.view.scroll = 0;
+            }
+            state.preserve_detail_scroll = false;
         }
     }
     pub(super) fn append_text(&mut self, title: String, text: String) {
@@ -205,8 +485,11 @@ impl ManagementPopup {
         self.reset_reader();
         self.epoch = self.epoch.wrapping_add(1);
         self.frame = None;
+        self.inspection = None;
+        self.inspection_detail = None;
+        self.paint.set(None);
+        self.reader_cache.get_mut().clear();
         self.owner = None;
-        self.usage_snapshot = false;
         self.mode = ManagementMode::General;
         self.scope = None;
         self.reset_preview();
@@ -351,13 +634,29 @@ impl ManagementPopup {
             target
         )
     }
+    fn has_next_inspection_window(&self) -> bool {
+        self.inspection
+            .as_ref()
+            .is_some_and(|inspection| matches!(inspection.target, InspectionTarget::Index(_)))
+            && self.structured().is_some_and(|state| {
+                state.fields.iter().any(|field| {
+                    field.key == "/management/coverage_window/next_cursor"
+                        && !field.value.is_empty()
+                        && field.value != "null"
+                })
+            })
+    }
     fn hints(&self) -> &'static str {
         let list_mode = self
             .structured()
             .is_some_and(|value| value.detail.is_none());
         match self.mode {
             ManagementMode::Index => {
-                "Esc 戻る · ↑↓/PgUp/PgDn 閲覧\nS 状態 · P 費用preview · B backfill · T retry · R rebuild"
+                if self.has_next_inspection_window() {
+                    "Esc 戻る · ↑↓/PgUp/PgDn 閲覧 · Ctrl+R 更新 · N 次window\nS 状態 · P 費用preview · B backfill · T retry · R rebuild"
+                } else {
+                    "Esc 戻る · ↑↓/PgUp/PgDn 閲覧 · Ctrl+R 更新\nS 状態 · P 費用preview · B backfill · T retry · R rebuild"
+                }
             }
             ManagementMode::Attachments if list_mode => {
                 "Esc 戻る · Tab 選択 · Enter 詳細 · C コピー\nS 保存済み一覧 · R 再読込 · 選択解除は戻って /detach ID"
@@ -400,6 +699,58 @@ impl ManagementPopup {
             .max(1)
     }
     pub(super) fn key(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Outcome {
+        let refresh = matches!(key.code, KeyCode::Char('r' | 'R'))
+            && (key.modifiers.contains(KeyModifiers::CONTROL)
+                || (!matches!(
+                    self.mode,
+                    ManagementMode::Index | ManagementMode::Attachments
+                ) && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)));
+        if refresh && let (Some(inspection), Some(context)) = (&self.inspection, &self.owner) {
+            return Outcome::Actions(vec![UiAction::ObserveInspection {
+                context: context.clone(),
+                target: inspection.target.clone(),
+                visible: true,
+                revision: 0,
+            }]);
+        }
+        if key.code == KeyCode::Char('n')
+            && key.modifiers.is_empty()
+            && self.mode == ManagementMode::Index
+            && self
+                .structured()
+                .is_some_and(|state| state.detail.is_none())
+            && self.has_next_inspection_window()
+        {
+            let (Some(context), Some(inspection), Some(state)) = (
+                self.owner.clone(),
+                self.inspection.as_mut(),
+                self.frame
+                    .as_mut()
+                    .and_then(|frame| frame.structured.as_mut()),
+            ) else {
+                return Outcome::Actions(vec![]);
+            };
+            let target = inspection.target.clone();
+            let request_id = state.request_id;
+            inspection.reset_selection = true;
+            inspection.selection_unavailable = false;
+            inspection.unavailable_selection = None;
+            inspection.detail_anchor = None;
+            inspection.detail_pointer = None;
+            inspection.detail_requested = false;
+            state.selected = 0;
+            state.pending_pointer = None;
+            state.detail_request_id = state.detail_request_id.wrapping_add(1);
+            self.inspection_detail = None;
+            self.paint.set(None);
+            return Outcome::Actions(vec![UiAction::NextInspectionWindow {
+                context,
+                request_id,
+                target,
+            }]);
+        }
         if self.mode == ManagementMode::Received
             && key.code == KeyCode::Enter
             && let Some(field) = self.structured().and_then(|s| s.fields.get(s.selected))
@@ -473,13 +824,76 @@ impl ManagementPopup {
         }
     }
     fn navigate(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Vec<UiAction> {
+        let has_detail = self
+            .structured()
+            .is_some_and(|state| state.detail.is_some());
+        if let Some(inspection) = self.inspection.as_mut() {
+            if has_detail && key.code == KeyCode::Esc {
+                inspection.detail_requested = false;
+                inspection.detail_anchor = None;
+                inspection.detail_pointer = None;
+            }
+            if !has_detail
+                && matches!(
+                    key.code,
+                    KeyCode::Up
+                        | KeyCode::Down
+                        | KeyCode::PageUp
+                        | KeyCode::PageDown
+                        | KeyCode::Tab
+                        | KeyCode::BackTab
+                )
+            {
+                inspection.selection_unavailable = false;
+                inspection.unavailable_selection = None;
+            }
+            if inspection.selection_unavailable
+                && (matches!(key.code, KeyCode::Enter | KeyCode::Char('o' | 's'))
+                    || (!has_detail && key.code == KeyCode::Char('c')))
+            {
+                return vec![];
+            }
+        }
+        let starts_field_detail = !has_detail
+            && (key.code == KeyCode::Enter
+                || (key.code == KeyCode::Char('c')
+                    && self
+                        .structured()
+                        .and_then(|state| state.fields.get(state.selected))
+                        .is_some_and(|field| field.value_omitted)));
+        if starts_field_detail {
+            let anchor = self
+                .structured()
+                .and_then(|state| state.fields.get(state.selected))
+                .and_then(|field| {
+                    self.inspection.as_ref().and_then(|inspection| {
+                        inspection
+                            .anchors
+                            .iter()
+                            .find(|anchor| anchor.pointer == field.key)
+                    })
+                })
+                .cloned();
+            if let Some(inspection) = self.inspection.as_mut() {
+                inspection.detail_requested = true;
+                inspection.detail_pointer = anchor.as_ref().map(|anchor| anchor.pointer.clone());
+                inspection.detail_anchor = anchor;
+            }
+        }
+        let inspection_pointer = self
+            .inspection
+            .as_ref()
+            .and_then(|state| state.detail_pointer.clone());
         let is_status = self.mode == ManagementMode::Status;
         let is_index = self.mode == ManagementMode::Index;
+        let is_attachments = self.mode == ManagementMode::Attachments;
         if let Some(structured) = self.structured_mut() {
             if structured.detail.is_none() {
                 let mode = match key.code {
                     KeyCode::Char('o') => Some(ManagementFollow::Inspect),
-                    KeyCode::Char('s') if !is_index => Some(ManagementFollow::Read),
+                    KeyCode::Char('s') if !is_index && !is_attachments => {
+                        Some(ManagementFollow::Read)
+                    }
                     KeyCode::Char('r') if is_status => Some(ManagementFollow::Refresh),
                     KeyCode::Char('n') if is_status => Some(ManagementFollow::Next),
                     _ => None,
@@ -537,9 +951,13 @@ impl ManagementPopup {
                     }
                     if let Some(field) = structured.fields.get(structured.selected) {
                         if field.value_omitted {
+                            structured.detail_request_id =
+                                structured.detail_request_id.wrapping_add(1);
+                            structured.preserve_detail_scroll = false;
                             structured.pending_pointer = Some(field.key.clone());
                             return vec![UiAction::LoadManagementDetail {
                                 request_id: structured.request_id,
+                                detail_request_id: structured.detail_request_id,
                                 pointer: field.key.clone(),
                                 cursor: None,
                             }];
@@ -552,9 +970,12 @@ impl ManagementPopup {
                 }
                 KeyCode::Enter => {
                     if let Some(field) = structured.fields.get(structured.selected) {
+                        structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
+                        structured.preserve_detail_scroll = false;
                         structured.pending_pointer = Some(field.key.clone());
                         return vec![UiAction::LoadManagementDetail {
                             request_id: structured.request_id,
+                            detail_request_id: structured.detail_request_id,
                             pointer: field.key.clone(),
                             cursor: None,
                         }];
@@ -562,11 +983,15 @@ impl ManagementPopup {
                 }
                 KeyCode::Char('n') => {
                     if let Some(page) = &structured.detail
+                        && page.source_request_id == structured.request_id
                         && let Some(cursor) = &page.next_cursor
                     {
+                        structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
+                        structured.preserve_detail_scroll = false;
                         structured.pending_pointer = Some(page.pointer.clone());
                         return vec![UiAction::LoadManagementDetail {
                             request_id: structured.request_id,
+                            detail_request_id: structured.detail_request_id,
                             pointer: page.pointer.clone(),
                             cursor: Some(cursor.clone()),
                         }];
@@ -574,10 +999,20 @@ impl ManagementPopup {
                 }
                 KeyCode::Char('p') => {
                     if let Some(page) = &structured.detail {
-                        structured.pending_pointer = Some(page.pointer.clone());
+                        let pointer = inspection_pointer.clone().or_else(|| {
+                            (page.source_request_id == structured.request_id)
+                                .then(|| page.pointer.clone())
+                        });
+                        let Some(pointer) = pointer else {
+                            return vec![];
+                        };
+                        structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
+                        structured.preserve_detail_scroll = false;
+                        structured.pending_pointer = Some(pointer.clone());
                         return vec![UiAction::LoadManagementDetail {
                             request_id: structured.request_id,
-                            pointer: page.pointer.clone(),
+                            detail_request_id: structured.detail_request_id,
+                            pointer,
                             cursor: None,
                         }];
                     }
@@ -585,6 +1020,7 @@ impl ManagementPopup {
                 KeyCode::Esc if structured.detail.is_some() => {
                     structured.detail = None;
                     structured.pending_pointer = None;
+                    structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
                     return vec![];
                 }
                 _ => {}
@@ -596,7 +1032,14 @@ impl ManagementPopup {
         ) && self.mode != management::ManagementMode::Index
         {
             if self.mode == management::ManagementMode::Attachments
-                && let Some(thread_id) = thread_id.clone()
+                && let Some(thread_id) = self
+                    .inspection
+                    .as_ref()
+                    .and_then(|inspection| match &inspection.target {
+                        InspectionTarget::Attachments { thread_id, .. } => Some(thread_id.clone()),
+                        _ => None,
+                    })
+                    .or_else(|| thread_id.clone())
             {
                 return match key.code {
                     KeyCode::Char('s') => {
@@ -642,9 +1085,23 @@ impl ManagementPopup {
             if let Some(structured) = &content.structured {
                 if let Some(page) = &structured.detail {
                     let title = format!("{} · 詳細", view.title);
-                    let context = format!("参照 {}", page.pointer);
-                    let body =
-                        popup::panel(frame, area, &title, &context, MANAGEMENT_DETAIL_FOOTER);
+                    let context = format!(
+                        "参照 {} · 取得 {}{}",
+                        page.pointer,
+                        page.observed_at,
+                        page.stale
+                            .as_ref()
+                            .map(|reason| format!(" · 旧内容: {reason}"))
+                            .unwrap_or_default()
+                    );
+                    let body = popup::panel_recorded(
+                        frame,
+                        area,
+                        &title,
+                        &context,
+                        MANAGEMENT_DETAIL_FOOTER,
+                        &self.paint,
+                    );
                     reader_scroll = Some(self.reader_cache.borrow_mut().render(
                         frame,
                         body,
@@ -677,6 +1134,16 @@ impl ManagementPopup {
                             _ => status.to_owned(),
                         }
                     );
+                    let context = if let Some(inspection) = &self.inspection {
+                        format!("{} · {context}", inspection.label())
+                    } else {
+                        context
+                    };
+                    let context = if let Some(error) = &structured.detail_error {
+                        format!("詳細未更新: {error} · {context}")
+                    } else {
+                        context
+                    };
                     let body = popup::panel_recorded(
                         frame,
                         area,

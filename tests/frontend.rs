@@ -1917,6 +1917,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     );
     assert!(field(&fields, "/text").contains("詳細"));
     send.send(UiAction::LoadManagementDetail {
+        detail_request_id: 1,
         request_id: report_id,
         pointer: "/text".into(),
         cursor: None,
@@ -2110,6 +2111,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await;
     assert_eq!(field(&outcome, "/status"), "interrupted");
     send.send(UiAction::LoadManagementDetail {
+        detail_request_id: 1,
         request_id: report_id,
         pointer: "/text".into(),
         cursor: None,

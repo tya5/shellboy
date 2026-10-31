@@ -306,14 +306,6 @@
   {
     "file": "src/frontend/control_tests.rs",
     "rule": "raw-timeout",
-    "fingerprint": "813d84359b47c5ee69c67baf8b701316b951320ac91a52ea3835985bf11e6fd4",
-    "function": "number",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing number occurrence only, migrate on #41 integration."
-  },
-  {
-    "file": "src/frontend/control_tests.rs",
-    "rule": "raw-timeout",
     "fingerprint": "8e4199d50d837b8ce9217f3afabd696209ab49c455a9133504e441b87781213c",
     "function": "slash_queue_rejection_and_domain_error_recover_input_but_success_releases_it",
     "count": 1,
@@ -656,6 +648,54 @@
     "reason": "Pure animation state test passes a future Instant as data; it neither waits for real time nor asserts real-time latency."
   },
   {
+    "file": "src/ui/threads.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "871593855182259306b744eeeb32221b42d13a9018cb1120e044fb1c7d596457",
+    "function": "sequence_metadata_overflow_schedules_one_resync_and_retires_old_generation",
+    "count": 1,
+    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
+  },
+  {
+    "file": "src/ui/threads.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "962475bb2d5938e10c6e6ee0755addc470ece339ea4d9f9ab3a0f7a3ecd0cede",
+    "function": "sequence_metadata_overflow_schedules_one_resync_and_retires_old_generation",
+    "count": 1,
+    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
+  },
+  {
+    "file": "src/ui/threads.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "c2038e1308b195e28e1ab4c966ff70c1d0c71241cf3a071a6a07aa24957eaa8f",
+    "function": "covered_pagination_retries_same_cursor_once_unless_success_was_already_accepted",
+    "count": 1,
+    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
+  },
+  {
+    "file": "src/ui/threads.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "d4bbc0fb798caa4d875a012c01dab35c178f864a34c34a4d1d828ac1249dd996",
+    "function": "covered_pagination_retries_same_cursor_once_unless_success_was_already_accepted",
+    "count": 1,
+    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
+  },
+  {
+    "file": "src/ui/threads.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "e74479a5f16a912b2ecdf5272b6e4f8e3709addd56e93f5b20741224ec919735",
+    "function": "actual_ui_filter_covered_before_deadline_resumes_one_latest_page_request",
+    "count": 1,
+    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
+  },
+  {
+    "file": "src/ui/threads.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "fda88db924ae456a32a9f91db6aeb6be997f04f0ae3378ee3a695e306289477b",
+    "function": "covered_pagination_retries_same_cursor_once_unless_success_was_already_accepted",
+    "count": 1,
+    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
+  },
+  {
     "file": "tests/attachments.rs",
     "rule": "wall-deadline",
     "fingerprint": "2757169064da75923fe6cda13fc53ebfc0b551bad13be8294561c1019ed231a5",
@@ -970,6 +1010,14 @@
   {
     "file": "tests/support/watchdog.rs",
     "rule": "raw-timeout",
+    "fingerprint": "462c12cf8b8a62f1c5c842d34984f85b5710ebeb5c2a90e42fb5c012b92ddd9c",
+    "function": "receive",
+    "count": 1,
+    "reason": "Shared Deadline implementation: event-driven fixture receives use the remaining part of the one WATCHDOG budget; no per-fixture time or speed exception."
+  },
+  {
+    "file": "tests/support/watchdog.rs",
+    "rule": "raw-timeout",
     "fingerprint": "7839cfdd97b01c9d4db328743c87a3cf68d01a879bb2d9fb6b3036a24e30a382",
     "function": "watchdog",
     "count": 1,
@@ -1054,53 +1102,5 @@
     "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "962475bb2d5938e10c6e6ee0755addc470ece339ea4d9f9ab3a0f7a3ecd0cede",
-    "function": "sequence_metadata_overflow_schedules_one_resync_and_retires_old_generation",
-    "count": 1,
-    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
-  },
-  {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "871593855182259306b744eeeb32221b42d13a9018cb1120e044fb1c7d596457",
-    "function": "sequence_metadata_overflow_schedules_one_resync_and_retires_old_generation",
-    "count": 1,
-    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
-  },
-  {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "fda88db924ae456a32a9f91db6aeb6be997f04f0ae3378ee3a695e306289477b",
-    "function": "covered_pagination_retries_same_cursor_once_unless_success_was_already_accepted",
-    "count": 1,
-    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
-  },
-  {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "d4bbc0fb798caa4d875a012c01dab35c178f864a34c34a4d1d828ac1249dd996",
-    "function": "covered_pagination_retries_same_cursor_once_unless_success_was_already_accepted",
-    "count": 1,
-    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
-  },
-  {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "c2038e1308b195e28e1ab4c966ff70c1d0c71241cf3a071a6a07aa24957eaa8f",
-    "function": "covered_pagination_retries_same_cursor_once_unless_success_was_already_accepted",
-    "count": 1,
-    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
-  },
-  {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "e74479a5f16a912b2ecdf5272b6e4f8e3709addd56e93f5b20741224ec919735",
-    "function": "actual_ui_filter_covered_before_deadline_resumes_one_latest_page_request",
-    "count": 1,
-    "reason": "Pure supplied UI clock sample passed to take_filter_request/take_deferred_actions_at; fixed future offsets exercise debounce/coverage semantics without sleep, elapsed comparison or a real-time success deadline."
   }
 ]
