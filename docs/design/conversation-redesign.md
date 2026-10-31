@@ -46,7 +46,23 @@ Add the frontend configuration enum ui.palette = "dark" | "light", default dark,
 
 Capability resolution happens before the UI loop: NO_COLOR wins and uses plain text plus spacing; known 256/truecolor terminals use the chosen palette; other terminals use reverse/separator fallback. Do not probe terminal background using blocking terminal I/O. NO_COLOR may also need nonchromatic selection cues, so retain markers, labels and borders rather than relying on color.
 
-Human messages are full-width bands covering every wrapped content line, with the saved time muted at the right where space permits. Parent/self/Revisit inputs have a source marker independent of color. Do not classify every role=user as a human: use receipt sender/origin and the saved Revisit event facts. Width reduction sacrifices the timestamp before the message content. Plain mode uses the human marker and blank separators.
+Input bands have three structural parts: a left source mark, body spans, and
+optional right metadata (source label, self-reported sender label, saved HH:MM).
+Only the body participates in source anchors, selection/copy and F6 original;
+metadata never enters canonical text. Keep existing parent/self/other/Revisit
+marks and move their disambiguating labels to metadata. External/unknown input
+gets a distinct width-one mark from the shared row table, not `入力 ·`.
+The external mark is provisional pending user choice among ⤷ / ⇥ / ⤳; do not
+integrate #91 on main until selected. All candidates must pass width_cjk == 1.
+
+Bands cover every span and wrapped row, including code/link spans and padding:
+override backgrounds only, preserving foreground/bold/underline/link identity.
+Plain mode supplies no band background. Build metadata after wrapping the body;
+drop the whole optional metadata group when it cannot fit without sacrificing
+body, and never repeat it on continuation rows. Sender labels come only from
+existing bounded receipt facts, remain unverified, and keep F6's original sender
+inspection. Cache accounting and display projection stamps include that label.
+No schema/protocol, DB query/worker/queue, model input or copy API is added.
 
 The fixed header uses a different band or bottom rule from user bands. Title is prominent, activity has symbol/color, and connection/model/cwd are muted right-side fields. Cwd truncates from the beginning. Footer and composer have their own separators. Narrow width drops optional metadata instead of wrapping the fixed chrome unpredictably.
 

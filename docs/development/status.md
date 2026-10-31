@@ -1948,3 +1948,25 @@ Full latest-main local validation passes1,960/0/33, layout94, Python18, fmt/Clip
 and watchdog policy. Native wheel/paused-update/shutdown passes; worker4 owns
 review-required integration/CI. The src/ui.rs change is only line1728 in
 prepare_visible_render_width (function1697-1795), no rendering logic rewrite.
+
+## Exact batch text replacement (#94.3)
+
+The standard-library stdin-JSON source editor validates all file/rule matches
+before staging any changes. Nonunique/missing matches never partially edit a
+batch. Same-file rules are sequential; explicit roots, UTF-8/newline preservation,
+atomic renames, guarded rollback and reported recovery originals bound failures.
+The helper is already used to edit its own implementation/tests. Developer
+scripts only; Core/storage/protocol/clipboard and installed binaries are untouched.
+
+#94.3's JSON-only submission is superseded by the user's literal-block revision.
+Use --blocks/--marker for normal whole-line changes and JSON for substrings;
+both feed the same all-or-nothing match preflight. Quoted-heredoc and delimiter
+failure checks are included. The superseded b2c5b186 must not be integrated.
+## Input band structure and external mark review (#91)
+
+Input rows separate the source mark, canonical body, and optional muted metadata.
+Sender labels use existing bounded receipt facts and display identity; wrapping
+and source/copy operations do not absorb decoration. Every span receives only
+the band background override. The external mark remains provisional (⤷ / ⇥ / ⤳).
+Native validation and the clipboard-fixture incident are recorded in acceptance.
+Main integration is blocked pending user choice; CI/integration belongs to worker4.

@@ -70,6 +70,13 @@ fn color(node: &UiNode) -> Color {
 // RGB; this non-RGB value is ignored by hit-testing and stripped by borrowed().
 const EXCERPT_GAP_MARKER: Color = Color::Indexed(255);
 const OUTPUT_ROW_MARKER: Color = Color::Indexed(254);
+const INPUT_DECORATION_MARKER: Color = Color::Indexed(253);
+
+fn body_spans<'a>(line: &'a Line<'_>) -> impl Iterator<Item = &'a Span<'a>> {
+    line.spans
+        .iter()
+        .filter(|span| span.style.underline_color != Some(INPUT_DECORATION_MARKER))
+}
 
 #[derive(Clone, Copy)]
 enum LineRole {
@@ -609,6 +616,10 @@ fn node_lines_with_header(
                     }
                     Span::raw("  ")
                 };
+                let mut marker = marker;
+                if node.role == "user" {
+                    marker.style.underline_color = Some(INPUT_DECORATION_MARKER);
+                }
                 row.spans.insert(0, marker);
             }
             lines.push(row);
@@ -991,9 +1002,7 @@ pub(super) fn history_with_cache(
                 lines.push(line);
                 continue;
             }
-            let text = line
-                .spans
-                .iter()
+            let text = body_spans(&line)
                 .map(|s| s.content.as_ref())
                 .collect::<String>();
             let text = source_candidate(&text);
@@ -1035,7 +1044,7 @@ pub(super) fn history_with_cache(
             // the natural-language pieces, so use their first real text span
             // rather than sending formatted prose back to the block's start.
             let matched = whole.or_else(|| {
-                line.spans.iter().find_map(|span| {
+                body_spans(&line).find_map(|span| {
                     let part = source_candidate(&span.content);
                     (!part.is_empty())
                         .then(|| node.text[byte..search_end].find(part))
@@ -1060,7 +1069,7 @@ pub(super) fn history_with_cache(
                                 .flatten()
                                 .map(|found| (start + found, text.len()))
                                 .or_else(|| {
-                                    line.spans.iter().find_map(|span| {
+                                    body_spans(&line).find_map(|span| {
                                         let part = source_candidate(&span.content);
                                         (!part.is_empty())
                                             .then(|| source.find(part))
@@ -1086,7 +1095,7 @@ pub(super) fn history_with_cache(
                 let mut end = start + length;
                 if &node.text[start..end] != text {
                     let mut after_first = false;
-                    for span in &line.spans {
+                    for span in body_spans(&line) {
                         let part = source_candidate(&span.content);
                         if part.is_empty() {
                             continue;
@@ -1143,74 +1152,108 @@ pub(super) fn history_with_cache(
     let (lines, sources) = quiet_section_tails(view, lines, sources, width);
     (lines, links, sources)
 }
-fn input_marker(node: &UiNode) -> String {
+fn input_kind(node: &UiNode) -> RowKind {
     use crate::presentation::InputSource;
-    let kind = match node.presentation.input_source {
-        InputSource::Human | InputSource::Unknown => RowKind::Human,
+    match node.presentation.input_source {
+        InputSource::Human => RowKind::Human,
+        InputSource::Unknown => RowKind::External,
         InputSource::Parent => RowKind::Parent,
         InputSource::SelfModel => RowKind::SelfModel,
         InputSource::OtherModel => RowKind::OtherModel,
         InputSource::Revisit => RowKind::Revisit,
-    };
-    if matches!(node.presentation.input_source, InputSource::Human) {
-        format!("{} ", kind.mark())
-    } else {
-        format!(
-            "{} {} · ",
-            kind.mark(),
-            if node.presentation.input_source == InputSource::Unknown {
-                "入力"
-            } else {
-                kind.spec().1
-            }
-        )
     }
+}
+fn input_marker(node: &UiNode) -> String {
+    format!("{} ", input_kind(node).mark())
+}
+
+struct InputBandRow {
+    mark: Option<Span<'static>>,
+    body: Line<'static>,
+    metadata: Option<Span<'static>>,
+}
+impl InputBandRow {
+    fn into_line(mut self, width: u16, style: Style) -> Line<'static> {
+        let decoration = |text| Span::styled(text, style.underline_color(INPUT_DECORATION_MARKER));
+        self.body.style = self.body.style.patch(style);
+        self.body.style.bg = style.bg;
+        for span in &mut self.body.spans {
+            span.style.bg = style.bg;
+        }
+        if let Some(mut mark) = self.mark {
+            mark.style.bg = style.bg;
+            self.body.spans.insert(0, mark);
+        }
+        let used = self.body.width();
+        if let Some(mut metadata) = self
+            .metadata
+            .filter(|value| used + value.width() + 2 <= usize::from(width))
+        {
+            self.body.spans.push(decoration(
+                " ".repeat(usize::from(width) - used - metadata.width()),
+            ));
+            metadata.style.bg = style.bg;
+            self.body.spans.push(metadata);
+        } else if used < usize::from(width) {
+            self.body
+                .spans
+                .push(decoration(" ".repeat(usize::from(width) - used)));
+        }
+        self.body
+    }
+}
+fn input_metadata(node: &UiNode, palette: theme::Palette) -> Option<Span<'static>> {
+    use crate::presentation::InputSource;
+    let mut parts = Vec::new();
+    if !matches!(
+        node.presentation.input_source,
+        InputSource::Human | InputSource::Unknown
+    ) {
+        parts.push(input_kind(node).spec().1.to_owned());
+    }
+    if let Some(label) = node.presentation.input_sender_label.as_deref() {
+        let label = crate::presentation::sanitize_plain(label, 0).0;
+        let label: String = label.chars().take(64).collect();
+        if !label.trim().is_empty() {
+            parts.push(label.replace(['\n', '\r'], " "));
+        }
+    }
+    if let Some(time) = node
+        .presentation
+        .created_at
+        .as_deref()
+        .and_then(|saved| saved.get(11..16))
+        .filter(|value| value.is_ascii() && !value.is_empty())
+    {
+        parts.push(time.to_owned());
+    }
+    (!parts.is_empty()).then(|| {
+        Span::styled(
+            parts.join(" · "),
+            Style::default()
+                .fg(palette.muted())
+                .underline_color(INPUT_DECORATION_MARKER),
+        )
+    })
 }
 fn user_band(lines: &mut [Line<'static>], node: &UiNode, width: u16, palette: theme::Palette) {
     if node.role != "user" {
         return;
     }
-    use unicode_width::UnicodeWidthStr;
-    let style = palette.user_band(node.presentation.input_source);
-    for line in &mut *lines {
-        line.style = line.style.patch(style);
-        let used = line.width();
-        if used < usize::from(width) {
-            line.spans
-                .push(Span::styled(" ".repeat(usize::from(width) - used), style));
+    let mut metadata = input_metadata(node, palette);
+    for line in lines {
+        let mut body = std::mem::take(line);
+        let mark = body
+            .spans
+            .first()
+            .is_some_and(|span| span.style.underline_color == Some(INPUT_DECORATION_MARKER))
+            .then(|| body.spans.remove(0));
+        *line = InputBandRow {
+            mark,
+            body,
+            metadata: metadata.take(),
         }
-    }
-    if let (Some(first), Some(saved)) = (lines.first_mut(), node.presentation.created_at.as_deref())
-    {
-        let time = saved
-            .get(11..16)
-            .filter(|value| value.is_ascii())
-            .unwrap_or("");
-        if !time.is_empty() {
-            let body_width = first
-                .spans
-                .iter()
-                .map(|span| span.content.trim_end().width())
-                .sum::<usize>();
-            if body_width + time.width() + 2 <= usize::from(width) {
-                // The trailing padding is display-only and yields before the body.
-                if first
-                    .spans
-                    .last()
-                    .is_some_and(|span| span.content.chars().all(|ch| ch == ' '))
-                {
-                    first.spans.pop();
-                }
-                let used = first.width();
-                first.spans.push(Span::styled(
-                    " ".repeat(usize::from(width).saturating_sub(used + time.width())),
-                    style,
-                ));
-                first
-                    .spans
-                    .push(Span::styled(time.to_owned(), style.fg(palette.muted())));
-            }
-        }
+        .into_line(width, palette.user_band(node.presentation.input_source));
     }
 }
 fn node_region(view: &ThreadView, node: &UiNode) -> ItemRegion {
@@ -1376,9 +1419,7 @@ fn append_item_rows(
     for line in hanging_wrap(chunk, width.max(1)) {
         // Raw display copies are not canonical text. Only exact saved substrings
         // advance original character offsets; decoration keeps the previous one.
-        let plain = line
-            .spans
-            .iter()
+        let plain = body_spans(&line)
             .map(|span| span.content.as_ref())
             .collect::<String>();
         let candidate = source_candidate(plain.trim_end());
@@ -4171,6 +4212,131 @@ mod conversation_item_tests {
             .filter_map(|row| row.item.as_ref().map(|item| item.key.clone()))
             .collect::<BTreeSet<_>>();
         assert_eq!(keys.len(), 2);
+    }
+    #[test]
+    fn input_band_parts_override_only_background_and_omit_metadata_before_body() {
+        use crate::config::PaletteMode;
+        let mut value = node("external", "code link", vec![]);
+        value.role = "user".into();
+        value.presentation.input_source = InputSource::Unknown;
+        value.presentation.input_sender_label = Some("Claude（レビュア）".into());
+        value.presentation.created_at = Some("2026-10-31T12:34:00Z".into());
+        let link = crate::terminal_links::marker_color(0);
+        let code_style = Style::default()
+            .fg(Color::Yellow)
+            .bg(Color::Black)
+            .add_modifier(Modifier::BOLD);
+        let link_style = Style::default()
+            .fg(Color::Blue)
+            .bg(Color::Black)
+            .add_modifier(Modifier::UNDERLINED)
+            .underline_color(link);
+        for mode in [PaletteMode::Dark, PaletteMode::Light] {
+            for no_color in [false, true] {
+                let palette = theme::Palette::from_capabilities(mode, no_color, true);
+                let mark = Span::styled(
+                    input_marker(&value),
+                    Style::default().underline_color(INPUT_DECORATION_MARKER),
+                );
+                let mut lines = vec![
+                    Line::from(vec![
+                        mark,
+                        Span::styled("code ", code_style),
+                        Span::styled("link", link_style),
+                    ]),
+                    Line::from("continuation"),
+                ];
+                user_band(&mut lines, &value, 80, palette);
+                let expected_bg = palette.user_band(InputSource::Unknown).bg;
+                for line in &lines {
+                    assert_eq!(line.width(), 80);
+                    assert_eq!(line.style.bg, expected_bg);
+                    assert!(line.spans.iter().all(|s| s.style.bg == expected_bg));
+                }
+                let body = body_spans(&lines[0]).collect::<Vec<_>>();
+                assert_eq!(
+                    body.iter().map(|s| s.content.as_ref()).collect::<String>(),
+                    "code link"
+                );
+                assert_eq!(body[0].style.fg, code_style.fg);
+                assert!(body[0].style.add_modifier.contains(Modifier::BOLD));
+                assert_eq!(body[1].style.underline_color, Some(link));
+                assert!(body[1].style.add_modifier.contains(Modifier::UNDERLINED));
+                assert!(plain(&lines).contains("Claude（レビュア） · 12:34"));
+                assert!(!plain(&lines[1..]).contains("Claude"));
+                assert_eq!(
+                    lines[0].spans.last().unwrap().style.fg,
+                    Some(palette.muted())
+                );
+                let mut narrow = vec![Line::from("untruncated")];
+                user_band(&mut narrow, &value, 11, palette);
+                assert_eq!(plain(&narrow), "untruncated");
+                assert_eq!(body_spans(&narrow[0]).count(), 1);
+            }
+        }
+    }
+    #[test]
+    fn input_band_all_sources_keep_body_anchors_and_display_metadata_only_once() {
+        for input in [
+            InputSource::Human,
+            InputSource::Unknown,
+            InputSource::Parent,
+            InputSource::SelfModel,
+            InputSource::OtherModel,
+            InputSource::Revisit,
+        ] {
+            let mut user = node("input", "first\nClaude · 12:34\nlast", vec![]);
+            user.role = "user".into();
+            user.presentation.kind = PresentationKind::User;
+            user.presentation.input_source = input;
+            user.presentation.input_sender_label = Some("Claude".into());
+            user.presentation.created_at = Some("2026-10-31T12:34:00Z".into());
+            let original = user.text.clone();
+            let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+            *view.nodes_mut_for_test() = vec![user];
+            let (lines, _, sources) = history(&view, 80);
+            let rows = lines
+                .iter()
+                .zip(sources.iter())
+                .filter(|(line, source)| source.item.is_some() && !line.spans.is_empty())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                rows.len(),
+                3,
+                "{input:?}: {:?}",
+                rows.iter()
+                    .map(|(line, source)| (line.to_string(), source.offset))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                rows.iter()
+                    .map(|(_, source)| source.offset)
+                    .collect::<Vec<_>>(),
+                [0, 6, 21]
+            );
+            assert!(!plain(&lines).contains("入力 ·"));
+            assert_eq!(view.nodes()[0].text, original);
+            for (i, (line, _)) in rows.iter().enumerate() {
+                let body = body_spans(line)
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>();
+                assert_eq!(body, original.lines().nth(i).unwrap());
+                assert_eq!(
+                    line.spans
+                        .iter()
+                        .filter(|s| s.content.contains("Claude")
+                            && s.style.underline_color == Some(INPUT_DECORATION_MARKER))
+                        .count(),
+                    usize::from(i == 0)
+                );
+            }
+            assert!(
+                borrowed(&lines)
+                    .iter()
+                    .flat_map(|line| &line.spans)
+                    .all(|span| span.style.underline_color.is_none())
+            );
+        }
     }
     #[test]
     fn failed_tool_opens_reason_without_execution_and_user_bands_fill_wrapped_rows() {

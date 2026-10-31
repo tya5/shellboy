@@ -75,7 +75,7 @@ def main():
         parser.error('Use a fresh, stopped visual_fixture')
     (root / '.observability-cli').write_text('synthetic-observability-v1\n')
     # All fixture writes precede owner startup. No live DB mutation is used.
-    (root / 'config.toml').write_text("default_connection='visual'\ndefault_model='offline-fixture'\n[connections.visual]\nbase_url='http://127.0.0.1:9/v1'\n")
+    (root / 'config.toml').write_text("default_connection='visual'\ndefault_model='offline-fixture'\n[connections.visual]\nbase_url='http://127.0.0.1:9/v1'\n[ui]\ncopy_backend='osc52'\n")
     external = root / 'synthetic-external.txt'
     external.write_text('Synthetic external attachment must survive Thread deletion.\n')
     original_hash = hashlib.sha256(external.read_bytes()).hexdigest()
@@ -114,7 +114,7 @@ def main():
     facts = {}
 
     def cli(label, *words, error=None):
-        result = subprocess.run([binary, '--data-dir', str(root / 'data'), *words], env=env, capture_output=True, text=True, timeout=30)
+        result = subprocess.run([binary, '--config', str(root / 'config.toml'), '--data-dir', str(root / 'data'), *words], env=env, capture_output=True, text=True, timeout=30)
         value = json.loads(result.stdout)
         assert value['ok'] == (error is None), (label, value)
         assert result.returncode == (0 if error is None else 1), (label, result.returncode)

@@ -80,6 +80,9 @@ def main():
     root = args.fixture_root.resolve()
     if not (root / ".shellboy-visual-fixture").is_file():
         parser.error("Refusing an unmarked data directory; create it with visual_fixture")
+    from fixture_safety import require_osc52, reject_gui_clipboard_input
+    require_osc52(root / "config.toml")
+    reject_gui_clipboard_input(args.command, args.keys, args.draft)
     config = tomllib.loads((root / "config.toml").read_text())
     if any(not v.get("base_url", "").startswith("http://127.0.0.1:")
            or v.get("api_key_env") for v in config.get("connections", {}).values()):
