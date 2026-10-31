@@ -2782,3 +2782,14 @@ parent background/nested Job coverage remains stage 4, not an inferred result.
 TUI termination maps the shared Unix signal type only on Unix; Windows keeps its
 existing Source directly. No TUI policy, protocol or shutdown ordering changes.
 The pure-stage3 resubmission excludes stage4 and unlanded UI work; checks in #5.
+
+## G synchronized with main66d2746 atb9c29f2
+
+Main's #5 shutdown/Unix cfg and #99 preview lifetime changes are merged. Preserve
+them when continuing G; do not replay the archive frontend over current files.
+Typed catalogue captions classify the new headless-only OwnerShutdown explicitly;
+serve/shutdown are separately inventoried lifecycle commands, not fake TUI forms.
+Native library1186/0/15, the selected storage/history-detail integration1/0 and
+strict all-target Clippy pass. This is not a new full-standard/3OS claim. G5/G6
+notifications/visibility/late/cancel/shared admission, remaining G7 domain reads,
+and G9–G12 gates are open. No G push/main admission/release/install/user-data change.

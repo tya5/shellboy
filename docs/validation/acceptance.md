@@ -5922,3 +5922,26 @@ issue comment, not review-required status or all-OS/native testing limits.
 
 Simplified --attr-source helper:4 synthetic cases pass on native Git2.50.1.
 Latest-main standard passes2,056/0/35 and Python70; details in#104. Other OS Git/CI remain unqualified.
+
+## G reconciliation on main66d2746
+
+Merge b9c29f2 retains main's #5 termination/admission/Unix cfg and #99 preview
+lifetime work. Merge conflicts were module declarations and the old caption
+match: keep both operations/os_signals modules and typed captions. Core now
+rejects OwnerShutdown through TUI; catalogue returns explicit None for that
+no-form command, with an exhaustive match and no panic. Fresh clap inventory
+checks64 executable paths:62 applicable bindings plus explicitly tracked serve/
+shutdown lifecycle controls and their global options. The integration decision
+is documented in the design/decision log, not a silently missing successful form.
+
+Native macOS on b9c29f2: library1186/0/15, selected structured-history/details UI
+integration1/0 and strict all-target Clippy pass. The catalogue/lifecycle tests,
+main's TUI shutdown refusal/replay test, and blocked-writer saved-storage route
+all executed successfully. Initial merge compilation found an old test comparing
+a nonoptional catalogue ID; wrapping the same expected identity in Some corrected
+the fixture, without changing its assertion. The storage UI assertion intentionally
+checks /logical/bytes >0 and /logical/complete=true instead of the old scalar
+presentation; canonical CLI StorageStatus fields are unchanged. Diff checks retain
+main-identical os_signals, owner_shutdown, preview_reads, streams and tools files.
+Full standard and three-OS/runtime qualification for this merged source remain
+unperformed; earlier full standards qualify their own sources only.
