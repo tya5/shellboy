@@ -313,6 +313,20 @@ mod tests {
         budget.observe("other", 2);
         assert_eq!(budget.used, 0);
     }
+    #[tokio::test(start_paused = true)]
+    async fn retry_after_delay_uses_virtual_time_not_runner_speed() {
+        let delay = RetryBudget::default()
+            .delay(8, Duration::from_millis(10), Some(Duration::from_secs(1)))
+            .unwrap();
+        assert_eq!(delay, Duration::from_secs(1));
+        let wait = tokio::time::sleep(delay);
+        tokio::pin!(wait);
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        tokio::time::advance(Duration::from_millis(999)).await;
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        tokio::time::advance(Duration::from_millis(2)).await;
+        wait.await;
+    }
     #[test]
     fn server_wait_is_not_shortened_by_exponential_cap() {
         let budget = RetryBudget::default();

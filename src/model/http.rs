@@ -561,7 +561,7 @@ mod observation_tests {
             net::TcpListener,
             sync::oneshot,
         };
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        crate::test_watchdog::watchdog("src/model/http.rs: error_body_bytes_refresh_transport_observation_before_timeout", async {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let client = HttpModelClient::for_connection("error_body_fixture", Connection {
                 base_url: format!("http://{}/v1", listener.local_addr().unwrap()),

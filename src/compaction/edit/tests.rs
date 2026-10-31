@@ -935,7 +935,7 @@ async fn legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows() 
 #[tokio::test]
 async fn search_hints_follow_embedding_settings_for_explicit_and_maximal_omission() {
     use clap::Parser;
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("src/compaction/edit/tests.rs: search_hints_follow_embedding_settings_for_explicit_and_maximal_omission", async {
         for embeddings in [false, true] {
             for maximal in [false, true] {
                 let mut fixture = Fixture::new().await;

@@ -6,7 +6,6 @@ use tokio::{
     net::TcpListener,
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::{Duration, timeout},
 };
 
 async fn summary_server(
@@ -155,7 +154,7 @@ async fn omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and
     }).await.unwrap();
     assert_eq!(raw_parts(&fixture).await, 1);
     assert_eq!(
-        timeout(Duration::from_secs(5), server)
+        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and_raw_provenance", server)
             .await
             .unwrap()
             .unwrap(),
@@ -214,7 +213,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
         let args = summary_args("middle-a", "middle-b");
         let request =
             tokio::spawn(async move { compactor.edit("t", &args, CancellationToken::new()).await });
-        timeout(Duration::from_secs(5), requests.recv())
+        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_but_keeps_raw_part", requests.recv())
             .await
             .unwrap()
             .unwrap();
@@ -234,7 +233,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
                 .unwrap();
         }
         release.send(()).unwrap();
-        let error = timeout(Duration::from_secs(5), request)
+        let error = crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_but_keeps_raw_part", request)
             .await
             .unwrap()
             .unwrap()
@@ -263,7 +262,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
             .await
             .unwrap();
         assert_eq!(
-            timeout(Duration::from_secs(5), server)
+            crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_but_keeps_raw_part", server)
                 .await
                 .unwrap()
                 .unwrap(),
@@ -322,7 +321,7 @@ async fn explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_chara
     }
     assert_eq!(raw_parts(&fixture).await, 3);
     assert_eq!(
-        timeout(Duration::from_secs(5), server)
+        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_character_partitioning", server)
             .await
             .unwrap()
             .unwrap(),

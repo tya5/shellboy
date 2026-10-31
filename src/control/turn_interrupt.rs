@@ -377,8 +377,7 @@ mod tests {
         let barrier = tokio::spawn(async move {
             db.call(move |_| {
                 entered.send(()).unwrap();
-                blocked
-                    .recv_timeout(std::time::Duration::from_secs(15))
+                crate::test_watchdog::blocking_recv("release interrupt DB barrier", &blocked)
                     .unwrap();
                 Ok(())
             })

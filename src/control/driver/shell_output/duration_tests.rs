@@ -8,7 +8,7 @@ use crate::{
     protocol::{Command, ExecutionTarget, ShellWriteArgs},
 };
 use rusqlite::OptionalExtension;
-use tokio::time::{Duration, Instant, timeout};
+use tokio::time::Instant;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn monotonic_duration_ignores_wall_clock_changes_and_survives_restart() {
@@ -22,7 +22,7 @@ async fn monotonic_duration_ignores_wall_clock_changes_and_survives_restart() {
             .to_string()
             .into();
     reply.send(response).unwrap();
-    let execution = timeout(Duration::from_secs(3), async {
+    let execution = crate::test_watchdog::watchdog("src/control/driver/shell_output/duration_tests.rs: monotonic_duration_ignores_wall_clock_changes_and_survives_restart", async {
         loop {
             let row=control.store.database.call(|db|Ok(db.query_row("SELECT s.id FROM shell_execution s WHERE s.state='running' AND EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id AND o.bytes=CAST('START' AS BLOB))",[],|r|r.get::<_,String>(0)).optional()?)).await.unwrap();
             if let Some(execution) = row { break execution; }

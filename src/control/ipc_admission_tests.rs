@@ -1,6 +1,5 @@
 //! The real dispatcher must retain work admission after its observer disappears.
 use super::*;
-use std::time::Duration;
 use tokio::sync::{Semaphore, oneshot};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -42,29 +41,32 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
             .await
         }));
     }
-    tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
-            let count = owner
-                .db
-                .call(|db| {
-                    Ok(db.query_row(
-                        "SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                        [],
-                        |r| r.get::<_, i64>(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            if count == 24 {
-                break;
+    crate::test_watchdog::watchdog(
+        "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
+        async {
+            loop {
+                let count = owner
+                    .db
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
+                            [],
+                            |r| r.get::<_, i64>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if count == 24 {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
-    let status = tokio::time::timeout(
-        Duration::from_secs(60),
+    let status = crate::test_watchdog::watchdog(
+        "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
         crate::ipc::call(
             &owner.loaded.data_dir,
             Command::Status(StatusArgs::default()),
@@ -91,8 +93,8 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
         still_pending, 24,
         "status must bypass live waiters, not wait for their expiry"
     );
-    let stopped = tokio::time::timeout(
-        Duration::from_secs(60),
+    let stopped = crate::test_watchdog::watchdog(
+        "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
         crate::ipc::call(
             &owner.loaded.data_dir,
             Command::RunStop(RunTarget {
@@ -108,7 +110,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     assert!(stopped.ok, "{stopped:?}");
     for client in clients {
         assert!(
-            tokio::time::timeout(Duration::from_secs(60), client)
+            crate::test_watchdog::watchdog("src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available", client)
                 .await
                 .unwrap()
                 .unwrap()
@@ -195,7 +197,7 @@ base_url="http://127.0.0.1:1/v1"
     }
     drop(send);
     dispatcher.await.unwrap();
-    tokio::time::timeout(Duration::from_secs(2), async {
+    crate::test_watchdog::watchdog("src/control/ipc_admission_tests.rs: disconnected_ipc_mutations_retain_all_32_permits_until_evaluation_completes", async {
         while control.active_requests.load(Ordering::Acquire) != 32 {
             tokio::task::yield_now().await;
         }
@@ -211,7 +213,7 @@ base_url="http://127.0.0.1:1/v1"
     );
     release.send(()).unwrap();
     gate.receive().await.unwrap();
-    let permit = tokio::time::timeout(Duration::from_secs(2), next)
+    let permit = crate::test_watchdog::watchdog("src/control/ipc_admission_tests.rs: disconnected_ipc_mutations_retain_all_32_permits_until_evaluation_completes", next)
         .await
         .unwrap()
         .unwrap();

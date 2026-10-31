@@ -2,7 +2,6 @@
 use super::*;
 use crate::control::shell_lifecycle_tests::{answer, fixture_with_settings, incoming, start, tool};
 use rusqlite::OptionalExtension;
-use tokio::time::{Duration, timeout};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn successful_incomplete_output_is_saved_and_cancels_unexecuted_calls() {
@@ -21,7 +20,7 @@ async fn successful_incomplete_output_is_saved_and_cancels_unexecuted_calls() {
         .into();
     response["output"].as_array_mut().unwrap().push(second);
     reply.send(response).unwrap();
-    let execution=timeout(Duration::from_secs(3),async {
+    let execution=crate::test_watchdog::watchdog("src/control/driver/shell_output/drain_tests.rs: successful_incomplete_output_is_saved_and_cancels_unexecuted_calls",async {
         loop {
             let row=control.store.database.call(|db|Ok(db.query_row("SELECT s.id FROM shell_execution s WHERE s.state='running' AND EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id AND o.bytes=CAST('START' AS BLOB))",[],|r|r.get::<_,String>(0)).optional()?)).await.unwrap();
             if let Some(execution)=row {break execution;}
@@ -52,7 +51,7 @@ async fn successful_incomplete_output_is_saved_and_cancels_unexecuted_calls() {
     });
     db_held.await.unwrap();
     let write = handle.write("GO\n", "UTF-8").await;
-    let ended = timeout(Duration::from_secs(3), async {
+    let ended = crate::test_watchdog::watchdog("src/control/driver/shell_output/drain_tests.rs: successful_incomplete_output_is_saved_and_cancels_unexecuted_calls", async {
         while !handle.is_finished() {
             tokio::task::yield_now().await;
         }
