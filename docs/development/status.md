@@ -2584,3 +2584,11 @@ the passing membership regression with a visual fix. The
 records both outcomes. Exact-source3OS and main push follow; no release/install.
 After F, start G on then-current main without waiting for #87 (6543753689);
 later side reconciles overlap, and G P6 time is observation only.
+
+## Remaining approved #95 work on admitted F
+
+F already contains periodic-poll and pending-selected admission guards. Retain
+that frontend unchanged; do not replay the E browser state over F. A separate
+candidate adds only the still-missing approved HTTP header classification/tests
+and backward-navigation fixture/regression. #100 remains a separate review.
+Source-retention proof, fresh local checks and exact SHA are reported in #95.

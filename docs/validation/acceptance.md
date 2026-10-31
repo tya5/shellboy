@@ -5518,3 +5518,27 @@ the old CI lacks the full admission/tick trace needed to prove its exact past
 interleaving or exclude all other contributors. Standard/doc checks and final
 SHA are reported in #95. Native Windows/Linux validation on this new source is
 still an integration gate, not inferred from local success or old split runs.
+
+## #95 remaining approved changes on F, without E-state replay
+
+Base is admitted F fff2076. Ancestor checks confirm periodic-echo8677807 and
+pending-selected307e531 are already incorporated. The new candidate leaves
+src/frontend.rs, browser.rs and selection.rs byte-identical to that F base.
+Do not interpret a whole E-tree diff as remaining work: F has new Watch/schema/
+UI behavior that must remain intact.
+
+The four remaining files (model/http/deadline.rs, tests/response_retries.rs,
+frontend/control_tests.rs and ui/view.rs) are unchanged between9fd7b1c and F.
+Apply only their previously approved9fd->b01dfe0 delta. After application, each
+of these four files compares byte-identical to approved b01dfe0, while the F
+frontend guard files compare byte-identical to F. No manual source adaptation,
+new policy, #100 viewport/stale-ID patch, reproduction or #103 documentation is
+mixed into this branch. Remaining navigation changes are test-only, preserving
+all existing product retention semantics and assertions.
+
+The source includes ready-header priority with expired-entry no-poll safety,
+paused-clock permanent-error/no-extra-request tests and the pinned-tool fixture
+intent-before-dispatch correction with its tail-hydration-order regression.
+Fresh local standard/doc-role/bin/docs results and SHA are recorded in #95.
+Old0ce ordinary/split successes remain valid only for old source; native/split
+qualification of this post-F candidate is a new integration gate.

@@ -2330,3 +2330,12 @@ class; three local original integration runs are separate regression evidence,
 not historical Windows scheduling proof. The old product's three green split
 runs do not cancel its failed ordinary Windows run. This source change requires
 Core review and fresh exact-source native CI by the integration worker.
+
+## #95 post-F alignment: preserve incorporated guards (2026-10-31)
+
+Use F as the source of truth for browser observation. Its admitted8677807 and
+307e531 already retain the approved periodic/pending-selected rules. Remaining
+approved work is HTTP classification plus navigation tests, not a replay of the
+old E frontend. Restrict the source delta to four independently byte-compared
+files and retain all F guard/state modules exactly. #100 is a separate review;
+prior0ce qualification is not reusable as proof for this new product source.
