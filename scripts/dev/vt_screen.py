@@ -204,6 +204,7 @@ class Screen:
                 elif char == '8':
                     self.x, self.y = self.saved
                 elif char == 'c':
+                    self.normal = None
                     self.reset()
                 else:
                     raise ValueError('Unsupported escape: ' + repr(char))
