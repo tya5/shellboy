@@ -2213,3 +2213,15 @@ notified in #41 comment 6541664736. Exact CI ticket traces are unavailable; sour
 counterexamples and red/green virtual-clock tests, not rerun success, justify the
 changes. Require user Core review and delegated Windows split repeats before
 claiming qualification. No #5 implementation or CI-sharding change is included.
+
+### #95 third observation: backward-window intent (fixture-side)
+
+The pinned-tool fixture dispatched an ordinal0 non-tail window while still
+following the newest page, and only disabled follow after waiting for that old
+node. That is a circular prerequisite when the initial tail is not yet in the
+cache: on_history_window correctly requests a real tail rather than replacing
+a following frame with a non-tail slice. When the tail is already cached, merge
+can cover the tail and hide the fixture mistake. Establish paused navigation and
+its anchor before dispatch, matching actual backward navigation. Keep the exact
+old guards and body/metadata assertions. A pure two-order regression checks both
+states without time; no UI product policy changes for this third case.

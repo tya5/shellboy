@@ -1994,3 +1994,7 @@ The user selected B (⇥) on 2026-10-31. The common External/外から row and t
 driver default now use B; an explicit regression assertion binds mark/label/CJK
 width. The prior A branch remains historical, not the integration candidate.
 The selected branch is being requalified and sent to worker4 as visually approved.
+#95's third pinned-tool observation is a fixture navigation-intent ordering error:
+pause before dispatching a non-tail window, not after waiting for its reply.
+Two-order pure-state coverage and the original retained-body assertions remain;
+no UI retention change or longer guard is used for that case.
