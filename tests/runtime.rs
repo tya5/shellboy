@@ -1,5 +1,6 @@
 #![cfg(unix)]
 //! Real local HTTP + SQLite + shell vertical paths; no production credentials.
+use crate::test_watchdog::watchdog;
 use serde_json::{Value, json};
 use shellboy::{app::DataOwner, control::Control, protocol::*};
 use std::{sync::Arc, time::Duration};
@@ -173,7 +174,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     let table = table.to_owned();
     let id = id.to_owned();
     let wanted = wanted.to_owned();
-    let result = timeout(Duration::from_secs(8), async {
+    let result = watchdog("saved runtime state", async {
         loop {
             let table = table.clone();
             let id = id.clone();
@@ -197,7 +198,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     })
     .await;
     if result.is_err() {
-        let diagnostic = timeout(Duration::from_millis(250), control.store.database.call(|db| {
+        let diagnostic = watchdog("saved runtime state diagnostics", control.store.database.call(|db| {
             let turns = db.prepare("SELECT id,state,generation FROM turn ORDER BY rowid")?
                 .query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -211,7 +212,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     }
 }
 async fn close(control: Arc<Control>, owner: DataOwner, server: JoinHandle<()>) {
-    timeout(Duration::from_secs(8), control.shutdown())
+    watchdog("runtime fixture shutdown", control.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -1090,7 +1091,7 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
         .send(tool("while :; do printf flood; sleep 0.01; done", false))
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(5), async {
+    watchdog("raw save failure observation", async {
         loop {
             if let shellboy::control::EngineEvent::Error { error, .. } =
                 events.recv().await.unwrap()
@@ -1116,13 +1117,7 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
         ))
         .await;
     assert_eq!(reply.error.unwrap().code, ErrorCode::InvalidState);
-    assert!(
-        timeout(Duration::from_millis(75), requests.recv())
-            .await
-            .is_err(),
-        "storage failure must not initiate another model request"
-    );
-    let shutdown = timeout(Duration::from_secs(8), control.shutdown())
+    let shutdown = watchdog("failed-save owner shutdown", control.shutdown())
         .await
         .unwrap()
         .unwrap_err();
@@ -1130,6 +1125,18 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
         shutdown.code,
         ErrorCode::SaveFailed,
         "normal and failed-save shutdown remain distinguishable"
+    );
+    let run = accepted.run_id.clone().unwrap();
+    let attempts = owner.db.call(move |db| {
+        Ok(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.run_id=?1",[run],|row|row.get::<_,i64>(0))?)
+    }).await.unwrap();
+    assert_eq!(
+        attempts, 1,
+        "save failure must not create another model attempt"
+    );
+    assert!(
+        requests.try_recv().is_err(),
+        "after owned work drains, no additional model request may have been sent"
     );
     owner.shutdown().await.unwrap();
     server.abort();
