@@ -977,22 +977,41 @@ async fn seed_pinned_tool_history(control: &std::sync::Arc<crate::control::Contr
 
 fn request_pinned_history_navigation(ui: &mut crate::ui::UiState) -> Vec<UiAction> {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let first = ui.view().nodes().first().expect("initial history body completed");
-    let anchor = ViewAnchor { node_id: Some(first.node_id.clone()), char_offset: first.base_char_offset };
+    let first = ui
+        .view()
+        .nodes()
+        .first()
+        .expect("initial history body completed");
+    let anchor = ViewAnchor {
+        node_id: Some(first.node_id.clone()),
+        char_offset: first.base_char_offset,
+    };
     assert!(ui.view().first_ordinal > 0);
     ui.view_mut().follow = false;
     ui.view_mut().anchor = anchor;
     // Use the actual navigation owner: it registers scroll.request/view_revision
     // before dispatch. A handcrafted LoadHistoryWindow lacks that read fence.
-    let actions = ui.event(Event::Key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE)));
-    assert_eq!(actions.iter().filter(|a| matches!(a, UiAction::LoadHistoryWindow { .. })).count(), 1);
+    let actions = ui.event(Event::Key(KeyEvent::new(
+        KeyCode::PageUp,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, UiAction::LoadHistoryWindow { .. }))
+            .count(),
+        1
+    );
     actions
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body()
 {
-    use crate::{protocol::Command, ui::{UiState,UiUpdate}};
+    use crate::{
+        protocol::Command,
+        ui::{UiState, UiUpdate},
+    };
     let (root, owner, control, server) = fixture().await;
     seed_pinned_tool_history(&control).await;
     let mut ui = UiState::new(&control.store.config, root.path().into());
@@ -1009,17 +1028,19 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     for action in ui.select_thread("thread".into()) {
         sender.try_send(action).unwrap();
     }
-    let mut initial_history_reads=0;
+    let mut initial_history_reads = 0;
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             while let Ok(update) = incoming.try_recv() {
-                initial_history_reads+=usize::from(matches!(&update,UiUpdate::History{thread_id,..} if thread_id=="thread"));
+                initial_history_reads += usize::from(
+                    matches!(&update,UiUpdate::History{thread_id,..} if thread_id=="thread"),
+                );
                 ui.apply(update);
                 for action in ui.take_deferred_actions() {
                     sender.try_send(action).unwrap();
                 }
             }
-            if initial_history_reads>0 && ui.view().total_nodes == 61 && !ui.view().loading {
+            if initial_history_reads > 0 && ui.view().total_nodes == 61 && !ui.view().loading {
                 break;
             }
             tokio::task::yield_now().await;
@@ -1030,7 +1051,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     for action in request_pinned_history_navigation(&mut ui) {
         sender.try_send(action).unwrap();
     }
-    let mut required_window_reads=0;
+    let mut required_window_reads = 0;
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             while let Ok(update) = incoming.try_recv() {
@@ -1053,9 +1074,15 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     })
     .await
     .unwrap();
-    assert!(required_window_reads>0,"the requested source window must complete, not just a metadata notification");
+    assert!(
+        required_window_reads > 0,
+        "the requested source window must complete, not just a metadata notification"
+    );
     // Pin only after the required history read has actually supplied the node.
-    ui.view_mut().anchor = ViewAnchor { node_id: Some("call-node".into()), char_offset: 0 };
+    ui.view_mut().anchor = ViewAnchor {
+        node_id: Some("call-node".into()),
+        char_offset: 0,
+    };
     let original = ui
         .view()
         .nodes()
@@ -1959,39 +1986,132 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pinned_history_navigation_keeps_a_required_window_after_a_newer_read() {
-    use crate::ui::{UiState,UiUpdate};
-    let(root,owner,control,server)=fixture().await;
+    use crate::ui::{UiState, UiUpdate};
+    let (root, owner, control, server) = fixture().await;
     seed_pinned_tool_history(&control).await;
-    let mut legacy=UiState::new(&control.store.config,root.path().into());
-    let mut navigated=UiState::new(&control.store.config,root.path().into());
-    let _=legacy.select_thread("thread".into());let _=navigated.select_thread("thread".into());
-    let generation=legacy.view().generation;
-    let(updates,incoming)=std::sync::mpsc::sync_channel(128);
-    let reader=super::HistoryReader::new(&control,&updates,80);
-    reader.page(&super::Reply::new("thread",generation),None,None).await.unwrap();
-    let initial=incoming.try_iter().find(|u|matches!(u,UiUpdate::History{..})).unwrap();
-    legacy.apply(initial.clone());navigated.apply(initial);
-    assert_eq!(legacy.view().total_nodes,61);assert_eq!(legacy.view().first_ordinal,11);
-    assert!(!legacy.view().nodes().iter().any(|n|n.node_id=="call-node"));
-    legacy.view_mut().follow=false;legacy.view_mut().anchor=ViewAnchor{node_id:Some("call-node".into()),char_offset:0};
-    reader.window(&super::WindowReply::new("thread",generation,legacy.view().view_revision),
-        super::history_reader::WindowRequest::new(0,0,false,legacy.view().selection_revision)).await.unwrap();
-    let unsolicited=incoming.try_iter().find(|u|matches!(u,UiUpdate::HistoryWindow{..})).unwrap();
-    let actions=request_pinned_history_navigation(&mut navigated);
-    let UiAction::LoadHistoryWindow{view_revision,ordinal,char_offset,from_end,selection_revision,..}=actions.into_iter().find(|a|matches!(a,UiAction::LoadHistoryWindow{..})).unwrap() else {unreachable!()};
-    reader.window(&super::WindowReply::new("thread",generation,view_revision),
-        super::history_reader::WindowRequest::new(ordinal,char_offset,from_end,selection_revision)).await.unwrap();
-    let required=incoming.try_iter().find(|u|matches!(u,UiUpdate::HistoryWindow{..})).unwrap();
-    assert!(matches!(&required,UiUpdate::HistoryWindow{nodes,..} if nodes.iter().any(|n|n.node_id=="call-node")));
+    let mut legacy = UiState::new(&control.store.config, root.path().into());
+    let mut navigated = UiState::new(&control.store.config, root.path().into());
+    let _ = legacy.select_thread("thread".into());
+    let _ = navigated.select_thread("thread".into());
+    let generation = legacy.view().generation;
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let reader = super::HistoryReader::new(&control, &updates, 80);
+    reader
+        .page(&super::Reply::new("thread", generation), None, None)
+        .await
+        .unwrap();
+    let initial = incoming
+        .try_iter()
+        .find(|u| matches!(u, UiUpdate::History { .. }))
+        .unwrap();
+    legacy.apply(initial.clone());
+    navigated.apply(initial);
+    assert_eq!(legacy.view().total_nodes, 61);
+    assert_eq!(legacy.view().first_ordinal, 11);
+    assert!(
+        !legacy
+            .view()
+            .nodes()
+            .iter()
+            .any(|n| n.node_id == "call-node")
+    );
+    legacy.view_mut().follow = false;
+    legacy.view_mut().anchor = ViewAnchor {
+        node_id: Some("call-node".into()),
+        char_offset: 0,
+    };
+    reader
+        .window(
+            &super::WindowReply::new("thread", generation, legacy.view().view_revision),
+            super::history_reader::WindowRequest::new(
+                0,
+                0,
+                false,
+                legacy.view().selection_revision,
+            ),
+        )
+        .await
+        .unwrap();
+    let unsolicited = incoming
+        .try_iter()
+        .find(|u| matches!(u, UiUpdate::HistoryWindow { .. }))
+        .unwrap();
+    let actions = request_pinned_history_navigation(&mut navigated);
+    let UiAction::LoadHistoryWindow {
+        view_revision,
+        ordinal,
+        char_offset,
+        from_end,
+        selection_revision,
+        ..
+    } = actions
+        .into_iter()
+        .find(|a| matches!(a, UiAction::LoadHistoryWindow { .. }))
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    reader
+        .window(
+            &super::WindowReply::new("thread", generation, view_revision),
+            super::history_reader::WindowRequest::new(
+                ordinal,
+                char_offset,
+                from_end,
+                selection_revision,
+            ),
+        )
+        .await
+        .unwrap();
+    let required = incoming
+        .try_iter()
+        .find(|u| matches!(u, UiUpdate::HistoryWindow { .. }))
+        .unwrap();
+    assert!(
+        matches!(&required,UiUpdate::HistoryWindow{nodes,..} if nodes.iter().any(|n|n.node_id=="call-node"))
+    );
     // Force the lost-reply order without sleeps, notifications, or timeout variance.
-    reader.page(&super::Reply::new("thread",generation),None,None).await.unwrap();
-    let newer=incoming.try_iter().find(|u|matches!(u,UiUpdate::History{..})).unwrap();
-    let newer_sequence=match &newer{UiUpdate::History{read_revision,..}=>*read_revision,_=>unreachable!()};
-    assert!(matches!(&required,UiUpdate::HistoryWindow{read_revision,..} if *read_revision<newer_sequence));
-    legacy.apply(newer.clone());navigated.apply(newer);
-    legacy.apply(unsolicited);navigated.apply(required);
-    assert!(!legacy.view().nodes().iter().any(|n|n.node_id=="call-node"),"unregistered stale reply is correctly rejected");
-    assert!(navigated.view().nodes().iter().any(|n|n.node_id=="call-node"),"registered navigation remains required despite newer queue facts");
-    assert_eq!(navigated.view().delivery_read_revision,newer_sequence,"queue facts cannot regress");
-    server.shutdown().await.unwrap();control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
+    reader
+        .page(&super::Reply::new("thread", generation), None, None)
+        .await
+        .unwrap();
+    let newer = incoming
+        .try_iter()
+        .find(|u| matches!(u, UiUpdate::History { .. }))
+        .unwrap();
+    let newer_sequence = match &newer {
+        UiUpdate::History { read_revision, .. } => *read_revision,
+        _ => unreachable!(),
+    };
+    assert!(
+        matches!(&required,UiUpdate::HistoryWindow{read_revision,..} if *read_revision<newer_sequence)
+    );
+    legacy.apply(newer.clone());
+    navigated.apply(newer);
+    legacy.apply(unsolicited);
+    navigated.apply(required);
+    assert!(
+        !legacy
+            .view()
+            .nodes()
+            .iter()
+            .any(|n| n.node_id == "call-node"),
+        "unregistered stale reply is correctly rejected"
+    );
+    assert!(
+        navigated
+            .view()
+            .nodes()
+            .iter()
+            .any(|n| n.node_id == "call-node"),
+        "registered navigation remains required despite newer queue facts"
+    );
+    assert_eq!(
+        navigated.view().delivery_read_revision,
+        newer_sequence,
+        "queue facts cannot regress"
+    );
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
 }
