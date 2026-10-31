@@ -1076,7 +1076,9 @@ unavailable/tombstoned/incomplete or over-budget source is an actionable error,
 never a successful partial block. All source reads/Markdown work remain off the
 main UI OS thread in existing workers; no new worker/queue/poller is introduced.
 Code-copy decoration/hit targets are display-only and cannot enter canonical text,
-selection copies, source offsets or model input.
+source-based copies, source offsets or model input. F2 terminal-native selection
+still copies visible presentation, not a canonical whole block; b or /copy uses
+canonical source instead.
 
 Image guidance advertises /image and /attach without probing the host clipboard.
 An empty paste is not proof of an image; guidance may state available operations,

@@ -273,7 +273,13 @@ mod tests {
         for n in [0, 1, 2] {
             let view = view();
             let mut choices = Choices::new(&view, "node".into(), 1, true);
+            assert_eq!(choices.hint_context(), key_hints::Context::CodePending);
             let action = choices.accept(&view, 1, "node", Ok(offer(n)));
+            assert_eq!(choices.hint_context(), if n == 0 {
+                key_hints::Context::CodeBody
+            } else {
+                key_hints::Context::CodeChoices
+            });
             match (n, action) {
                 (
                     0,
