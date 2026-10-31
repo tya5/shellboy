@@ -4,11 +4,19 @@ use crate::{
     protocol::{ApiError, ErrorCode, ThreadDetails},
     storage::StorageError,
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
 const PREFIX_ROWS: usize = 128;
 const SOURCE_BYTES: usize = 128 * 1024;
 const WITNESS_BYTES: usize = 512 * 1024;
+// Current CLI titles allow512 Unicode scalars (at most2048 UTF-8 bytes).
+// Paths need their own allowance: extended Windows paths can exceed512 bytes.
+const IDENTITY_BYTES: usize = 512;
+const TITLE_BYTES: usize = 2048;
+const SETTING_BYTES: usize = 4096;
+const PATH_BYTES: usize = 128 * 1024;
+const EFFORT_BYTES: usize = 64;
+const RECOVERY_BYTES: usize = 64 * 1024;
 const LIMITED: &str = "名称未設定（元本文の取得範囲外）";
 
 pub(super) struct RawHeader {
@@ -71,24 +79,94 @@ const PENDING_PREFIX: &str = "accepted AS MATERIALIZED (
     FROM ordered WHERE eligible
 )";
 
+// Each selected text cell is gated before SQLite hands it to Rust. The final
+// fixed-string witness is inspected first, so an oversized identity/path cannot
+// become NULL/empty or a truncated default in an otherwise successful header.
+const HEADER_SQL: &str = "SELECT
+ CASE WHEN octet_length(t.title)<=?2 THEN t.title END,
+ CASE WHEN octet_length(t.cwd)<=?3 THEN t.cwd END,
+ CASE WHEN octet_length(t.profile_id)<=?4 THEN t.profile_id END,
+ CASE WHEN octet_length(t.model_id)<=?4 THEN t.model_id END,
+ CASE WHEN octet_length(t.effort)<=?6 THEN t.effort END,
+ CASE WHEN octet_length(t.parent_thread_id)<=?5 THEN t.parent_thread_id END,
+ CASE WHEN octet_length(t.agents_path)<=?3 THEN t.agents_path END,
+ CASE WHEN octet_length(t.updated_at)<=?5 THEN t.updated_at END,
+ CASE WHEN octet_length(r.id)<=?5 THEN r.id END,
+ CASE WHEN octet_length(u.id)<=?5 THEN u.id END,
+ CASE WHEN octet_length(u.recovery_reason_json)<=?7 THEN u.recovery_reason_json END,
+ (SELECT count(*) FROM run child WHERE child.owner_run_id=r.id AND child.state IN ('live','stopping')),
+ (SELECT count(*) FROM shell_execution s WHERE s.owner_run_id=r.id AND s.state IN ('starting','running','stopping')),
+ COALESCE(octet_length(u.recovery_reason_json)>?7,0),
+ CASE WHEN octet_length(t.title)>?2 THEN 'title'
+      WHEN octet_length(t.cwd)>?3 THEN 'cwd'
+      WHEN octet_length(t.profile_id)>?4 THEN 'connection'
+      WHEN octet_length(t.model_id)>?4 THEN 'model'
+      WHEN octet_length(t.effort)>?6 THEN 'effort'
+      WHEN octet_length(t.parent_thread_id)>?5 THEN 'parent_id'
+      WHEN octet_length(t.agents_path)>?3 THEN 'agents_path'
+      WHEN octet_length(t.updated_at)>?5 THEN 'updated_at'
+      WHEN octet_length(r.id)>?5 THEN 'run_id'
+      WHEN octet_length(u.id)>?5 THEN 'turn_id' END
+ FROM thread t LEFT JOIN run r ON r.thread_id=t.id AND r.state IN ('live','stopping')
+ LEFT JOIN turn u ON u.thread_id=t.id AND u.run_id=r.id AND u.state IN ('preparing','running','waiting','recovery_wait')
+ WHERE t.id=?1 AND t.deleted_at IS NULL";
+
+fn header_scalar_limit(field: &str) -> StorageError {
+    ApiError::new(
+        ErrorCode::InputLimit,
+        format!("Saved Thread header {field} exceeds its display scalar limit"),
+    )
+    .hint("Use CLI thread get to read the complete saved value; no truncated setting was adopted")
+    .into()
+}
+fn header_params(thread: &str) -> (&str, i64, i64, i64, i64, i64, i64) {
+    (
+        thread,
+        TITLE_BYTES as i64,
+        PATH_BYTES as i64,
+        SETTING_BYTES as i64,
+        IDENTITY_BYTES as i64,
+        EFFORT_BYTES as i64,
+        RECOVERY_BYTES as i64,
+    )
+}
 pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, StorageError> {
-    let (details, updated_at, recovery_limited) = db.query_row(
-        "SELECT t.title,t.cwd,t.profile_id,t.model_id,t.effort,t.parent_thread_id,t.agents_path,t.updated_at,
-                r.id,u.id,CASE WHEN octet_length(u.recovery_reason_json)<=65536 THEN u.recovery_reason_json END,
-                (SELECT count(*) FROM run child WHERE child.owner_run_id=r.id AND child.state IN ('live','stopping')),
-                (SELECT count(*) FROM shell_execution s WHERE s.owner_run_id=r.id AND s.state IN ('starting','running','stopping')),
-                COALESCE(octet_length(u.recovery_reason_json)>65536,0)
-         FROM thread t LEFT JOIN run r ON r.thread_id=t.id AND r.state IN ('live','stopping')
-         LEFT JOIN turn u ON u.thread_id=t.id AND u.run_id=r.id AND u.state IN ('preparing','running','waiting','recovery_wait')
-         WHERE t.id=?1 AND t.deleted_at IS NULL",
-        [thread], |row| Ok((ThreadDetails { last_answer:None,last_input:None,last_compaction:None,
-            thread_id:thread.into(), title:row.get(0)?, cwd:row.get(1)?, connection:row.get(2)?,
-            model:row.get(3)?, effort:row.get(4)?, parent_id:row.get(5)?, agents_path:row.get(6)?,
-            run_id:row.get(8)?,turn_id:row.get(9)?,recovery_reason:row.get(10)?,
-            children_count:row.get::<_,i64>(11)? as u64,shells_count:row.get::<_,i64>(12)? as u64,
-            usage_totals:None,context_usage:None,context:None,
-        },row.get::<_,String>(7)?,row.get::<_,bool>(13)?)),
-    ).optional()?.ok_or_else(||ApiError::new(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    if thread.is_empty() || thread.len() > IDENTITY_BYTES {
+        return Err(header_scalar_limit("thread_id"));
+    }
+    let mut statement = db.prepare(HEADER_SQL)?;
+    let mut rows = statement.query(header_params(thread))?;
+    let row = rows
+        .next()?
+        .ok_or_else(|| ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"))?;
+    if let Some(field) = row.get::<_, Option<String>>(14)? {
+        return Err(header_scalar_limit(&field));
+    }
+    let details = ThreadDetails {
+        last_answer: None,
+        last_input: None,
+        last_compaction: None,
+        thread_id: thread.into(),
+        title: row.get(0)?,
+        cwd: row.get(1)?,
+        connection: row.get(2)?,
+        model: row.get(3)?,
+        effort: row.get(4)?,
+        parent_id: row.get(5)?,
+        agents_path: row.get(6)?,
+        run_id: row.get(8)?,
+        turn_id: row.get(9)?,
+        recovery_reason: row.get(10)?,
+        children_count: row.get::<_, i64>(11)? as u64,
+        shells_count: row.get::<_, i64>(12)? as u64,
+        usage_totals: None,
+        context_usage: None,
+        context: None,
+    };
+    let updated_at = row.get::<_, String>(7)?;
+    let recovery_limited = row.get::<_, bool>(13)?;
+    drop(rows);
+    drop(statement);
     let title = read_title_tx(db, thread, &details.title)?;
     Ok(RawHeader {
         details,
@@ -739,6 +817,182 @@ mod browser_title_batch_tests {
         assert!(
             plan.iter().any(|p| p.contains("receipt_target")),
             "{plan:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod header_scalar_bound_tests {
+    use super::*;
+    use crate::frontend::sql_trace::Statements;
+    use rusqlite::{StatementStatus, params};
+
+    fn fixture() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','Known','/','','p','m','now')",[]).unwrap();
+        db
+    }
+    #[test]
+    fn boundary_scalars_keep_cli_identity_paths_title_recovery_and_exact_live_counts() {
+        let db = fixture();
+        let title = "😀".repeat(512);
+        let path = "x".repeat(PATH_BYTES);
+        let setting = "s".repeat(SETTING_BYTES);
+        let effort = "e".repeat(EFFORT_BYTES);
+        let parent = "p".repeat(IDENTITY_BYTES);
+        let run = "r".repeat(IDENTITY_BYTES);
+        let turn = "u".repeat(IDENTITY_BYTES);
+        let updated = "d".repeat(IDENTITY_BYTES);
+        let empty = serde_json::json!({"message":""}).to_string();
+        let recovery =
+            serde_json::json!({"message":"x".repeat(RECOVERY_BYTES-empty.len())}).to_string();
+        assert_eq!(title.len(), TITLE_BYTES);
+        assert_eq!(recovery.len(), RECOVERY_BYTES);
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','','p','m','now')",[&parent]).unwrap();
+        db.execute("UPDATE thread SET title=?1,cwd=?2,agents_path=?2,profile_id=?3,model_id=?3,effort=?4,parent_thread_id=?5,updated_at=?6 WHERE id='t'",params![title,path,setting,effort,parent,updated]).unwrap();
+        db.execute(
+            "INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,'t','live','now')",
+            [&run],
+        )
+        .unwrap();
+        db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES(?1,'t',?2,'recovery_wait','now',?3)",params![turn,run,recovery]).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','/','','p','m','now')").unwrap();
+        db.execute("INSERT INTO run(id,thread_id,state,owner_run_id,created_at)VALUES('child-run','child','live',?1,'now')",[&run]).unwrap();
+        db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('e',?1,?2,'operation','running','/','{}','UTF-8','UTF-8','open','now')",params![run,turn]).unwrap();
+        let expected = crate::control::db::thread_details(&db, "t").unwrap();
+        let trace = Statements::new(&db);
+        let raw = read_tx(&db, "t").unwrap();
+        assert_eq!(
+            trace.count(),
+            1,
+            "an explicit title requires only the bounded header query"
+        );
+        drop(trace);
+        let (actual, limited) = raw.prepare_inspection();
+        assert!(limited.is_empty());
+        assert_eq!(actual.children_count, 1);
+        assert_eq!(actual.shells_count, 1);
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
+    #[test]
+    fn header_overflow_fails_before_copying_or_title_discovery_and_never_changes_canonical_values()
+    {
+        let db = fixture();
+        let trace = Statements::new(&db);
+        for target in [String::new(), "x".repeat(IDENTITY_BYTES + 1)] {
+            assert!(
+                matches!(read_tx(&db,&target),Err(StorageError::Operation(e)) if e.code==ErrorCode::InputLimit)
+            );
+        }
+        assert_eq!(trace.count(), 0, "invalid target scope must perform no SQL");
+        drop(trace);
+        for (column, field, limit, pointer) in [
+            ("title", "title", TITLE_BYTES, "/title"),
+            ("cwd", "cwd", PATH_BYTES, "/cwd"),
+            ("agents_path", "agents_path", PATH_BYTES, "/agents_path"),
+            ("profile_id", "connection", SETTING_BYTES, "/connection"),
+            ("model_id", "model", SETTING_BYTES, "/model"),
+            ("effort", "effort", EFFORT_BYTES, "/effort"),
+            (
+                "updated_at",
+                "updated_at",
+                IDENTITY_BYTES,
+                "/context/updated_at",
+            ),
+        ] {
+            let db = fixture();
+            let saved = "x".repeat(limit + 1);
+            db.execute("UPDATE thread SET title='' WHERE id='t'", [])
+                .unwrap();
+            db.execute(
+                &format!("UPDATE thread SET {column}=?1 WHERE id='t'"),
+                [&saved],
+            )
+            .unwrap();
+            let trace = Statements::new(&db);
+            let error = read_tx(&db, "t").err().unwrap().into_api_error();
+            assert_eq!(error.code, ErrorCode::InputLimit, "{column}");
+            assert!(error.message.contains(field), "{}", error.message);
+            assert_eq!(
+                trace.count(),
+                1,
+                "overflow must not discover a fallback title: {column}"
+            );
+            drop(trace);
+            let canonical =
+                serde_json::to_value(crate::control::db::thread_details(&db, "t").unwrap())
+                    .unwrap();
+            assert_eq!(
+                canonical
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_str),
+                Some(saved.as_str()),
+                "{column}"
+            );
+        }
+    }
+    #[test]
+    fn header_query_seeks_owned_indexes_and_cost_does_not_grow_with_foreign_rows() {
+        let db = fixture();
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','waiting','now');
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('foreign','/','','p','m','now');").unwrap();
+        let measure = |db: &Connection| {
+            let mut statement = db.prepare(HEADER_SQL).unwrap();
+            let rows = statement
+                .query_map(header_params("t"), |row| {
+                    Ok((row.get::<_, i64>(11)?, row.get::<_, i64>(12)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(rows, vec![(0, 0)]);
+            (
+                statement.get_status(StatementStatus::VmStep),
+                statement.get_status(StatementStatus::FullscanStep),
+            )
+        };
+        let before = measure(&db);
+        db.execute_batch("WITH RECURSIVE seq(n)AS(VALUES(0)UNION ALL SELECT n+1 FROM seq WHERE n<1999)
+            INSERT INTO run(id,thread_id,state,created_at)SELECT 'foreign-r-'||n,'foreign','completed','now' FROM seq;
+            WITH RECURSIVE seq(n)AS(VALUES(0)UNION ALL SELECT n+1 FROM seq WHERE n<1999)
+            INSERT INTO turn(id,thread_id,run_id,state,created_at)SELECT 'foreign-u-'||n,'foreign','foreign-r-'||n,'completed','now' FROM seq;
+            WITH RECURSIVE seq(n)AS(VALUES(0)UNION ALL SELECT n+1 FROM seq WHERE n<1999)
+            INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+            SELECT 'foreign-e-'||n,'foreign-r-0','foreign-u-0','foreign-operation-'||n,'running','/','{}','UTF-8','UTF-8','open','now' FROM seq;").unwrap();
+        assert_eq!(measure(&db), before);
+        let plans = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {HEADER_SQL}"))
+            .unwrap()
+            .query_map(header_params("t"), |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for alias in ["t", "r", "u", "child", "s"] {
+            assert!(
+                plans
+                    .iter()
+                    .any(|plan| plan.starts_with(&format!("SEARCH {alias} "))),
+                "{alias}: {plans:?}"
+            );
+            assert!(
+                !plans
+                    .iter()
+                    .any(|plan| plan.starts_with(&format!("SCAN {alias} "))),
+                "{alias}: {plans:?}"
+            );
+        }
+        assert!(
+            plans.iter().any(|plan| plan.contains("runs_by_owner")),
+            "{plans:?}"
+        );
+        assert!(
+            plans.iter().any(|plan| plan.contains("shell_active_owner")),
+            "{plans:?}"
         );
     }
 }
