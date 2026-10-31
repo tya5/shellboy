@@ -285,7 +285,7 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     })
     .await
     .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/frontend_activity.rs: activity_delivery_rejects_a_previous_thread_after_a_slow_database_read", async {
         loop {
             if let Ok(UiUpdate::Activity {
                 thread_id,
@@ -307,7 +307,7 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     let blocked = tokio::spawn(async move {
         db.call(move |_| {
             let _ = entered.send(());
-            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            crate::test_watchdog::blocking_recv("release DB barrier", &release_rx).unwrap();
             Ok(())
         })
         .await
@@ -327,7 +327,7 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     tokio::time::sleep(Duration::from_millis(30)).await;
     release.send(()).unwrap();
     blocked.await.unwrap().unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/frontend_activity.rs: activity_delivery_rejects_a_previous_thread_after_a_slow_database_read", async {
         loop {
             match incoming.try_recv() {
                 Ok(UiUpdate::Activity {
@@ -356,7 +356,7 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     .await
     .unwrap();
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(5), bridge)
+    crate::test_watchdog::watchdog("tests/frontend_activity.rs: activity_delivery_rejects_a_previous_thread_after_a_slow_database_read", bridge)
         .await
         .unwrap()
         .unwrap()
@@ -492,7 +492,7 @@ async fn failed_activity_read_delivers_observation_loss_through_the_real_fronten
         ipc::LocalServer,
         ui::{UiAction, UiUpdate},
     };
-    use std::time::Duration;
+
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config, "").unwrap();
@@ -531,7 +531,7 @@ async fn failed_activity_read_delivers_observation_loss_through_the_real_fronten
     })
     .await
     .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_delivers_observation_loss_through_the_real_frontend", async {
         loop {
             if let Ok(UiUpdate::Activity { snapshot, .. }) = incoming.try_recv() {
                 assert!(snapshot.turn_in_progress);
@@ -550,7 +550,7 @@ async fn failed_activity_read_delivers_observation_loss_through_the_real_fronten
     })
     .await
     .unwrap();
-    let lost = tokio::time::timeout(Duration::from_secs(5), async {
+    let lost = crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_delivers_observation_loss_through_the_real_frontend", async {
         loop {
             if let Ok(UiUpdate::ActivityUnavailable {
                 thread_id,
@@ -571,7 +571,7 @@ async fn failed_activity_read_delivers_observation_loss_through_the_real_fronten
     .await
     .unwrap();
     send.send(UiAction::Quit).await.unwrap();
-    let ended = tokio::time::timeout(Duration::from_secs(5), bridge)
+    let ended = crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_delivers_observation_loss_through_the_real_frontend", bridge)
         .await
         .unwrap()
         .unwrap();

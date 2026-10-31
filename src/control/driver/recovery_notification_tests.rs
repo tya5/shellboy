@@ -1,5 +1,4 @@
 use super::*;
-use std::time::Duration;
 
 #[tokio::test]
 async fn recovery_attention_is_committed_once_per_transition_and_silent_for_stale_or_stopped_turns()
@@ -154,7 +153,7 @@ async fn frontend_delivers_background_and_child_recovery_without_selecting_them(
     ));
     // Initialize confirms subscription. Leave the UI on its empty draft: the
     // recovering Thread has no frontend selection/generation or pending send.
-    tokio::time::timeout(Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("src/control/driver/recovery_notification_tests.rs: frontend_delivers_background_and_child_recovery_without_selecting_them", async {
         loop {
             if matches!(incoming.try_recv(), Ok(UiUpdate::Initialize { .. })) {
                 break;
@@ -169,14 +168,17 @@ async fn frontend_delivers_background_and_child_recovery_without_selecting_them(
         .await
         .unwrap();
     async fn expect_bell(incoming: &std::sync::mpsc::Receiver<UiUpdate>) {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                if matches!(incoming.try_recv(), Ok(UiUpdate::RecoveryBell)) {
-                    break;
+        crate::test_watchdog::watchdog(
+            "src/control/driver/recovery_notification_tests.rs: expect_bell",
+            async {
+                loop {
+                    if matches!(incoming.try_recv(), Ok(UiUpdate::RecoveryBell)) {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
     }
@@ -198,12 +200,15 @@ async fn frontend_delivers_background_and_child_recovery_without_selecting_them(
     recover(&control, &child, error, None).await.unwrap();
     expect_bell(&incoming).await;
     sender.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(Duration::from_secs(15), async {
-        while !bridge.is_finished() {
-            while incoming.try_recv().is_ok() {}
-            tokio::task::yield_now().await;
-        }
-    })
+    crate::test_watchdog::watchdog(
+        "src/control/driver/recovery_notification_tests.rs: expect_bell",
+        async {
+            while !bridge.is_finished() {
+                while incoming.try_recv().is_ok() {}
+                tokio::task::yield_now().await;
+            }
+        },
+    )
     .await
     .unwrap();
     bridge.await.unwrap().unwrap();

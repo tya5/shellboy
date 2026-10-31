@@ -4,7 +4,6 @@ use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    time::timeout,
 };
 
 pub(super) async fn fixture(
@@ -195,8 +194,7 @@ async fn human_acceptance_between_next_and_prepare_refreshes_source_before_http(
         body
     });
     let client = HttpModelClient::new(control.store.config.connections["fixture"].clone()).unwrap();
-    timeout(
-        Duration::from_secs(5),
+    crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: human_acceptance_between_next_and_prepare_refreshes_source_before_http",
         client.response(request, CancellationToken::new(), None),
     )
     .await
@@ -374,8 +372,7 @@ async fn client_initialization_failure_recovers_once_instead_of_rekicking_prepar
         turn: Arc::new(tokio::sync::Mutex::new(None)),
     };
     assert_eq!(
-        timeout(
-            Duration::from_secs(5),
+        crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: client_initialization_failure_recovers_once_instead_of_rekicking_preparation",
             drive(control.clone(), accepted.thread_id.clone(), slot.clone())
         )
         .await
@@ -385,8 +382,7 @@ async fn client_initialization_failure_recovers_once_instead_of_rekicking_prepar
         ErrorCode::ConfigInvalid
     );
     for _ in 0..3 {
-        timeout(
-            Duration::from_secs(5),
+        crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: client_initialization_failure_recovers_once_instead_of_rekicking_preparation",
             drive(control.clone(), accepted.thread_id.clone(), slot.clone()),
         )
         .await
@@ -1195,7 +1191,7 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
         )
         .await
     });
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: interrupted_reserved_call_finishes_its_pair_without_native_creation", async {
         loop {
             let reserved = control
                 .store
@@ -1225,7 +1221,7 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
     *gate = true;
     binding.cancel.cancel();
     drop(gate);
-    timeout(Duration::from_secs(60), task)
+    crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: interrupted_reserved_call_finishes_its_pair_without_native_creation", task)
         .await
         .unwrap()
         .unwrap()
@@ -1326,7 +1322,7 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
         let stop = slot.stop.clone();
         let running = tokio::spawn(drive(control.clone(), snapshot.thread.clone(), slot));
         stop.cancel();
-        timeout(Duration::from_secs(60), running)
+        crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking", running)
             .await
             .unwrap()
             .unwrap()

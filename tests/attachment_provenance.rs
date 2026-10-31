@@ -6,7 +6,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::{mpsc, oneshot},
-    time::timeout,
 };
 struct Incoming {
     body: Value,
@@ -90,10 +89,19 @@ fn incoming<'a>(
 ) -> impl std::future::Future<Output = Incoming> + 'a {
     let caller = std::panic::Location::caller();
     async move {
-        match timeout(Duration::from_secs(60), receive.recv()).await {
+        match crate::test_watchdog::watchdog(
+            "tests/attachment_provenance.rs: incoming",
+            receive.recv(),
+        )
+        .await
+        {
             Ok(Some(value)) => value,
             result => {
-                let diagnostic = timeout(Duration::from_secs(5), progress(control, thread)).await;
+                let diagnostic = crate::test_watchdog::watchdog(
+                    "tests/attachment_provenance.rs: incoming",
+                    progress(control, thread),
+                )
+                .await;
                 panic!(
                     "loopback request watchdog at {}:{}; receive={}; persisted phase after timeout={diagnostic:?}",
                     caller.file(),
@@ -127,8 +135,9 @@ async fn progress(control: &Control, thread: &str) -> Value {
     }).await.unwrap()
 }
 async fn settled(control: &Control, thread: &str) {
+    let mut changes = control.subscribe();
     let target = thread.to_owned();
-    let result = timeout(Duration::from_secs(5), async {
+    let result = crate::test_watchdog::watchdog("tests/attachment_provenance.rs: settled", async {
         loop {
             let target = target.clone();
             if control.store.database.call(move |db| Ok(db.query_row(
@@ -137,11 +146,18 @@ async fn settled(control: &Control, thread: &str) {
             )?)).await.unwrap() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            match changes.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+                Err(error) => panic!("state notifications closed: {error}"),
+            }
         }
     }).await;
     if result.is_err() {
-        let diagnostic = timeout(Duration::from_secs(1), progress(control, thread)).await;
+        let diagnostic = crate::test_watchdog::watchdog(
+            "tests/attachment_provenance.rs: settled",
+            progress(control, thread),
+        )
+        .await;
         panic!(
             "Thread did not settle within the fixture watchdog; observed after timeout: {diagnostic:?}"
         );
@@ -258,7 +274,8 @@ async fn ordered_draft(
     let turn = accepted["turn_id"].as_str().unwrap().to_owned();
     // Observe this accepted Turn's actual preparation rejection, rather than
     // treating an absence of active Turns as proof that the intended pause ran.
-    let paused = timeout(Duration::from_secs(5), async {
+    let mut changes = control.subscribe();
+    let paused = crate::test_watchdog::watchdog("tests/attachment_provenance.rs: ordered_draft", async {
         loop {
             let target = turn.clone();
             let state = control.store.database.call(move |db| {
@@ -268,13 +285,20 @@ async fn ordered_draft(
             }).await.unwrap();
             if state.0 == "recovery_wait" { break state; }
             assert!(matches!(state.0.as_str(), "preparing" | "running" | "waiting"), "unexpected ordered-fixture preparation phase: {state:?}");
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            match changes.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+                Err(error) => panic!("state notifications closed: {error}"),
+            }
         }
     }).await;
     let (_, reason, snapshot, attempts) = match paused {
         Ok(state) => state,
         Err(_) => {
-            let diagnostic = timeout(Duration::from_secs(1), progress(control, &thread)).await;
+            let diagnostic = crate::test_watchdog::watchdog(
+                "tests/attachment_provenance.rs: ordered_draft",
+                progress(control, &thread),
+            )
+            .await;
             panic!(
                 "ordered fixture did not reach its explicit invalid-AGENTS preparation pause within the watchdog; observed={diagnostic:?}"
             );
@@ -828,7 +852,7 @@ async fn authenticated_shell_attachment_is_replayed_once_after_every_result_in_i
         {"type":"function_call","call_id":"attach-call","name":"shell","arguments":json!({"command":command,"background":false}).to_string()},
         {"type":"function_call","call_id":"tail-call","name":"shell","arguments":json!({"command":"printf TOOL_GROUP_TAIL","background":false}).to_string()}
     ]}))).unwrap();
-    let next = match timeout(Duration::from_secs(5), receive.recv()).await {
+    let next = match crate::test_watchdog::watchdog("tests/attachment_provenance.rs: authenticated_shell_attachment_is_replayed_once_after_every_result_in_its_tool_group", receive.recv()).await {
         Ok(Some(next)) => next,
         other => {
             let diagnostic=control.store.database.call(|db|{
@@ -992,7 +1016,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
         ))
         .unwrap();
     let mut compact_state = Value::Null;
-    let compact_finished = timeout(Duration::from_secs(5), async {
+    let compact_finished = crate::test_watchdog::watchdog("tests/attachment_provenance.rs: compacted_attachment_source_is_replaced_without_sending_its_file_entity", async {
         loop {
             let state = request(
                 &control,

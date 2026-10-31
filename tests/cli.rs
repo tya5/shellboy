@@ -1068,7 +1068,7 @@ async fn compact_summary_limit_overrides_are_typed_and_summary_only() {
 
 #[tokio::test]
 async fn saved_readback_options_are_typed_bounded_and_observational() {
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("saved readback CLI schema", async {
         let c = convert(&[
             "shell",
             "list",

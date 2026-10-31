@@ -8,8 +8,6 @@ use shellboy::{
 use shellboy::{protocol::ErrorCode, shell::*};
 #[cfg(unix)]
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
-#[cfg(unix)]
-use tokio::time::timeout;
 
 #[cfg(unix)]
 fn config() -> Config {
@@ -41,7 +39,7 @@ async fn collect(
     mut execution: ShellExecution,
 ) -> (Vec<(u64, OutputStream, Vec<u8>)>, ShellCompletion) {
     let mut chunks = Vec::new();
-    let result = timeout(Duration::from_secs(5), async {
+    let result = crate::test_watchdog::watchdog("tests/shell.rs: collect", async {
         while let Some(ShellEvent::Output(chunk)) = execution.events.recv().await {
             chunks.push((chunk.sequence, chunk.stream, chunk.bytes.clone()));
         }
@@ -197,10 +195,13 @@ async fn stop_is_idempotent_and_independent_of_a_blocked_stdin_writer() {
     let mut input = args("trap '' TERM; printf ready; sleep 30");
     input.stdin_open = true;
     let mut execution = spawn(&cfg, input).await;
-    let ShellEvent::Output(ready) = timeout(Duration::from_secs(2), execution.events.recv())
-        .await
-        .unwrap()
-        .unwrap();
+    let ShellEvent::Output(ready) = crate::test_watchdog::watchdog(
+        "tests/shell.rs: stop_is_idempotent_and_independent_of_a_blocked_stdin_writer",
+        execution.events.recv(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(ready.bytes, b"ready");
     drop(ready);
     let writer = execution.handle.clone();
@@ -213,10 +214,13 @@ async fn stop_is_idempotent_and_independent_of_a_blocked_stdin_writer() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     execution.handle.stop();
     execution.handle.stop();
-    let write = timeout(Duration::from_secs(1), write_task)
-        .await
-        .unwrap()
-        .unwrap();
+    let write = crate::test_watchdog::watchdog(
+        "tests/shell.rs: stop_is_idempotent_and_independent_of_a_blocked_stdin_writer",
+        write_task,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_ne!(write.status, StdinWriteStatus::Complete);
     let (_, done) = collect(execution).await;
     assert_eq!(done.state, ShellState::Stopped);
@@ -297,14 +301,17 @@ async fn byte_backpressure_does_not_block_stop_or_starve_stderr_only_output() {
     tokio::time::sleep(Duration::from_millis(30)).await;
     execution.handle.stop();
     let mut completion = execution.completion.clone();
-    timeout(Duration::from_secs(2), async {
-        loop {
-            if completion.borrow().is_some() {
-                break;
+    crate::test_watchdog::watchdog(
+        "tests/shell.rs: byte_backpressure_does_not_block_stop_or_starve_stderr_only_output",
+        async {
+            loop {
+                if completion.borrow().is_some() {
+                    break;
+                }
+                completion.changed().await.unwrap();
             }
-            completion.changed().await.unwrap();
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     let (_, done) = collect(execution).await;
@@ -347,7 +354,7 @@ async fn last_handle_drop_requests_cleanup_and_natural_exit_kills_term_ignoring_
         mut completion,
     } = execution;
     drop(handle);
-    timeout(Duration::from_secs(2), async {
+    crate::test_watchdog::watchdog("tests/shell.rs: last_handle_drop_requests_cleanup_and_natural_exit_kills_term_ignoring_child", async {
         while events.recv().await.is_some() {}
         loop {
             if let Some(done) = completion.borrow().clone() {
@@ -416,14 +423,17 @@ async fn successful_exit_keeps_its_state_when_output_drain_is_incomplete() {
     .await;
     // Hold the bounded output queue unconsumed until the real supervisor's
     // finite drain ends. The child can write 64 bytes to the OS pipe and exit.
-    timeout(Duration::from_secs(3), async {
-        loop {
-            if execution.completion.borrow().is_some() {
-                break;
+    crate::test_watchdog::watchdog(
+        "tests/shell.rs: successful_exit_keeps_its_state_when_output_drain_is_incomplete",
+        async {
+            loop {
+                if execution.completion.borrow().is_some() {
+                    break;
+                }
+                execution.completion.changed().await.unwrap();
             }
-            execution.completion.changed().await.unwrap();
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     let (_, done) = collect(execution).await;
@@ -447,37 +457,43 @@ async fn stop_after_reaped_natural_exit_does_not_relabel_the_process_as_stopped(
     let mut execution=spawn(&cfg,args("printf '%s\\n' \"$$\"; printf 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")).await;
     let mut held = Vec::new();
     let mut prefix = Vec::new();
-    let pid = timeout(Duration::from_secs(3), async {
-        loop {
-            let Some(ShellEvent::Output(chunk)) = execution.events.recv().await else {
-                panic!("fixture must emit PID");
-            };
-            prefix.extend_from_slice(&chunk.bytes);
-            held.push(chunk);
-            if let Some(at) = prefix.iter().position(|&b| b == b'\n') {
-                break std::str::from_utf8(&prefix[..at])
-                    .unwrap()
-                    .parse::<i32>()
-                    .unwrap();
+    let pid = crate::test_watchdog::watchdog(
+        "tests/shell.rs: stop_after_reaped_natural_exit_does_not_relabel_the_process_as_stopped",
+        async {
+            loop {
+                let Some(ShellEvent::Output(chunk)) = execution.events.recv().await else {
+                    panic!("fixture must emit PID");
+                };
+                prefix.extend_from_slice(&chunk.bytes);
+                held.push(chunk);
+                if let Some(at) = prefix.iter().position(|&b| b == b'\n') {
+                    break std::str::from_utf8(&prefix[..at])
+                        .unwrap()
+                        .parse::<i32>()
+                        .unwrap();
+                }
             }
-        }
-    })
+        },
+    )
     .await
     .unwrap();
-    timeout(Duration::from_secs(3), async {
-        loop {
-            // Signal zero observes the actual direct child's reap, not a sleep
-            // estimate. Retained byte permits keep the later drain pending.
-            if unsafe { libc::kill(pid, 0) } != 0 {
-                assert_eq!(
-                    std::io::Error::last_os_error().raw_os_error(),
-                    Some(libc::ESRCH)
-                );
-                break;
+    crate::test_watchdog::watchdog(
+        "tests/shell.rs: stop_after_reaped_natural_exit_does_not_relabel_the_process_as_stopped",
+        async {
+            loop {
+                // Signal zero observes the actual direct child's reap, not a sleep
+                // estimate. Retained byte permits keep the later drain pending.
+                if unsafe { libc::kill(pid, 0) } != 0 {
+                    assert_eq!(
+                        std::io::Error::last_os_error().raw_os_error(),
+                        Some(libc::ESRCH)
+                    );
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     assert!(

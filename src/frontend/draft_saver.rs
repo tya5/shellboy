@@ -289,7 +289,7 @@ mod tests {
         // turn: gating pump on main_ready would leave this snapshot unsaved.
         saver.pump_delivery(&mut failure, &updates);
         assert!(failure.is_none());
-        tokio::time::timeout(Duration::from_secs(2), async {
+        crate::test_watchdog::watchdog("src/frontend/draft_saver.rs: pumping_persists_backlog_while_ui_outbox_has_no_main_capacity", async {
             loop {
                 let saved: bool = owner
                     .db
@@ -322,7 +322,7 @@ mod tests {
         let (results, _incoming) = mpsc::channel(1);
         let mut saver = DraftSaver::new(control.clone(), results);
         saver.worker.abort();
-        tokio::time::timeout(Duration::from_secs(2), saver.sender.closed())
+        crate::test_watchdog::watchdog("src/frontend/draft_saver.rs: closed_worker_projects_one_failure_across_ticks_and_keeps_newest_snapshot", saver.sender.closed())
             .await
             .unwrap();
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
@@ -434,7 +434,7 @@ mod tests {
         let (results, _incoming) = mpsc::channel(1);
         let mut saver = DraftSaver::new(control.clone(), results);
         saver.worker.abort();
-        tokio::time::timeout(Duration::from_secs(2), saver.sender.closed())
+        crate::test_watchdog::watchdog("src/frontend/draft_saver.rs: closed_worker_reports_its_unsaved_owner_and_cannot_return_success_on_shutdown", saver.sender.closed())
             .await
             .unwrap();
         assert!(saver.enqueue(

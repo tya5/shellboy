@@ -14,14 +14,12 @@ use std::{
     collections::{BTreeMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::oneshot,
     task::{JoinHandle, JoinSet},
-    time::timeout,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -293,15 +291,14 @@ async fn explicit_candidate_serializes_first_request_keeps_active_search_and_reu
     let (entered, release) = f.proxy.hold_next_explicit();
     let service = f.service.clone();
     let first = tokio::spawn(async move { service.process_one(CancellationToken::new()).await });
-    let request = timeout(Duration::from_secs(60), entered)
+    let request = crate::test_watchdog::watchdog("tests/index_dimensions.rs: explicit_candidate_serializes_first_request_keeps_active_search_and_reuses_its_vector", entered)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(request["dimensions"], 3);
     assert_eq!(request["input"].as_array().unwrap().len(), 1);
     assert!(
-        !timeout(
-            Duration::from_secs(60),
+        !crate::test_watchdog::watchdog("tests/index_dimensions.rs: explicit_candidate_serializes_first_request_keeps_active_search_and_reuses_its_vector",
             f.service.process_one(CancellationToken::new())
         )
         .await
@@ -340,7 +337,7 @@ async fn explicit_candidate_serializes_first_request_keeps_active_search_and_reu
     );
     release.send(()).unwrap();
     assert!(
-        timeout(Duration::from_secs(60), first)
+        crate::test_watchdog::watchdog("tests/index_dimensions.rs: explicit_candidate_serializes_first_request_keeps_active_search_and_reuses_its_vector", first)
             .await
             .unwrap()
             .unwrap()
@@ -452,7 +449,7 @@ async fn first_dimension_refusal_or_mismatch_stops_candidate_without_touching_ac
         let service = f.service.clone();
         let first =
             tokio::spawn(async move { service.process_one(CancellationToken::new()).await });
-        let request = timeout(Duration::from_secs(60), entered)
+        let request = crate::test_watchdog::watchdog("tests/index_dimensions.rs: first_dimension_refusal_or_mismatch_stops_candidate_without_touching_active_space", entered)
             .await
             .unwrap()
             .unwrap();
@@ -465,7 +462,7 @@ async fn first_dimension_refusal_or_mismatch_stops_candidate_without_touching_ac
         );
         release.send(()).unwrap();
         assert!(
-            timeout(Duration::from_secs(60), first)
+            crate::test_watchdog::watchdog("tests/index_dimensions.rs: first_dimension_refusal_or_mismatch_stops_candidate_without_touching_active_space", first)
                 .await
                 .unwrap()
                 .unwrap()
@@ -783,7 +780,7 @@ async fn superseded_dimension_failure_cannot_stop_or_pause_new_candidate() {
     let (entered, release) = f.proxy.hold_next_explicit();
     let service = f.service.clone();
     let first = tokio::spawn(async move { service.process_one(CancellationToken::new()).await });
-    let request = timeout(Duration::from_secs(60), entered)
+    let request = crate::test_watchdog::watchdog("tests/index_dimensions.rs: superseded_dimension_failure_cannot_stop_or_pause_new_candidate", entered)
         .await
         .unwrap()
         .unwrap();
@@ -795,7 +792,7 @@ async fn superseded_dimension_failure_cannot_stop_or_pause_new_candidate() {
         .unwrap();
     release.send(()).unwrap();
     assert!(
-        timeout(Duration::from_secs(60), first)
+        crate::test_watchdog::watchdog("tests/index_dimensions.rs: superseded_dimension_failure_cannot_stop_or_pause_new_candidate", first)
             .await
             .unwrap()
             .unwrap()

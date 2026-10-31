@@ -5,7 +5,6 @@ use std::{fs::OpenOptions, io::Write, path::Path};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    time::{Duration, timeout},
 };
 
 fn args(to: &str) -> ContextEditArgs {
@@ -77,15 +76,15 @@ async fn setup(responses: Vec<String>, log: &Path) -> (Fixture, tokio::task::Joi
     (f, server)
 }
 async fn edit(f: &Fixture, a: &ContextEditArgs) -> Result<ContextEditResult, ApiError> {
-    timeout(
-        Duration::from_secs(60),
+    crate::test_watchdog::watchdog(
+        "src/compaction/edit/bounded_tests.rs: edit",
         f.compactor.edit("t", a, CancellationToken::new()),
     )
     .await
     .expect("summary fixture watchdog")
 }
 async fn finish(f: Fixture, server: tokio::task::JoinHandle<()>) {
-    timeout(Duration::from_secs(60), server)
+    crate::test_watchdog::watchdog("src/compaction/edit/bounded_tests.rs: finish", server)
         .await
         .expect("mock server watchdog")
         .unwrap();
@@ -310,8 +309,7 @@ async fn automatic_second_stage_uses_reduction_limits_and_never_adopts_oversize_
     f.compactor = Compactor::new(f.db.clone(), Arc::new(config));
     let before = f.path().await;
     let snapshot = f.compactor.snapshot("t", true).await.unwrap();
-    let e = timeout(
-        Duration::from_secs(60),
+    let e = crate::test_watchdog::watchdog("src/compaction/edit/bounded_tests.rs: automatic_second_stage_uses_reduction_limits_and_never_adopts_oversize_text",
         f.compactor
             .summarize_snapshot(snapshot, 0..1, CancellationToken::new()),
     )

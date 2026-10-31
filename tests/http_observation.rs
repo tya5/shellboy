@@ -10,7 +10,7 @@ use shellboy::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    time::{Duration, sleep, timeout},
+    time::{Duration, sleep},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -75,8 +75,7 @@ async fn header_deadline_records_source_consumption_without_claiming_peer_delive
         read_body(&mut s).await;
         sleep(Duration::from_secs(2)).await;
     });
-    let failure = timeout(
-        Duration::from_secs(3),
+    let failure = crate::test_watchdog::watchdog("tests/http_observation.rs: header_deadline_records_source_consumption_without_claiming_peer_delivery",
         client.response(request(), CancellationToken::new(), None),
     )
     .await
@@ -119,8 +118,7 @@ async fn header_deadline_does_not_cut_post_header_silence_and_success_has_latenc
         sleep(Duration::from_millis(350)).await;
         s.write_all(body.as_bytes()).await.unwrap();
     });
-    let response = timeout(
-        Duration::from_secs(3),
+    let response = crate::test_watchdog::watchdog("tests/http_observation.rs: header_deadline_does_not_cut_post_header_silence_and_success_has_latency",
         client.response(request(), CancellationToken::new(), None),
     )
     .await
@@ -143,8 +141,8 @@ async fn body_stall_records_received_headers_and_uses_body_idle_setting() {
         s.write_all(head(200, 100, false).as_bytes()).await.unwrap();
         sleep(Duration::from_secs(2)).await;
     });
-    let failure = timeout(
-        Duration::from_secs(3),
+    let failure = crate::test_watchdog::watchdog(
+        "tests/http_observation.rs: body_stall_records_received_headers_and_uses_body_idle_setting",
         client.response(request(), CancellationToken::new(), None),
     )
     .await
@@ -181,8 +179,8 @@ async fn stopped_request_reader_records_unconsumed_source_bytes() {
         None,
         false,
     );
-    let failure = timeout(
-        Duration::from_secs(5),
+    let failure = crate::test_watchdog::watchdog(
+        "tests/http_observation.rs: stopped_request_reader_records_unconsumed_source_bytes",
         client.response(large, CancellationToken::new(), None),
     )
     .await
@@ -219,7 +217,7 @@ async fn failed_attempt_retires_keepalive_pool_and_retry_uses_fresh_generation()
             .unwrap();
         let mut byte = [0; 1];
         assert_eq!(
-            timeout(Duration::from_secs(2), first.read(&mut byte))
+            crate::test_watchdog::watchdog("tests/http_observation.rs: failed_attempt_retires_keepalive_pool_and_retry_uses_fresh_generation", first.read(&mut byte))
                 .await
                 .unwrap()
                 .unwrap(),
@@ -257,8 +255,7 @@ async fn connection_refused_is_before_body_source_and_not_a_partial_upload() {
     let client = client(&listener, 1000, 1000);
     drop(listener);
     for _ in 0..3 {
-        let failure = timeout(
-            Duration::from_secs(3),
+        let failure = crate::test_watchdog::watchdog("tests/http_observation.rs: connection_refused_is_before_body_source_and_not_a_partial_upload",
             client.response(request(), CancellationToken::new(), None),
         )
         .await
@@ -301,8 +298,7 @@ async fn completed_unauthorized_response_does_not_retire_a_reusable_pool() {
         .await
         .unwrap_err();
     assert_eq!(failure.error.status, Some(401));
-    let response = timeout(
-        Duration::from_secs(3),
+    let response = crate::test_watchdog::watchdog("tests/http_observation.rs: completed_unauthorized_response_does_not_retire_a_reusable_pool",
         client.response(request(), CancellationToken::new(), None),
     )
     .await
@@ -345,8 +341,7 @@ async fn model_list_and_embedding_transport_errors_do_not_retire_responses_pool(
             .await
             .is_err()
     );
-    let response = timeout(
-        Duration::from_secs(3),
+    let response = crate::test_watchdog::watchdog("tests/http_observation.rs: model_list_and_embedding_transport_errors_do_not_retire_responses_pool",
         client.response(request(), CancellationToken::new(), None),
     )
     .await
@@ -383,8 +378,7 @@ async fn cancelling_a_responses_request_does_not_retire_its_profile_pool() {
     received.await.unwrap();
     cancel.cancel();
     assert_eq!(task.await.unwrap().unwrap_err().error.kind, "cancelled");
-    let response = timeout(
-        Duration::from_secs(3),
+    let response = crate::test_watchdog::watchdog("tests/http_observation.rs: cancelling_a_responses_request_does_not_retire_its_profile_pool",
         client.response(request(), CancellationToken::new(), None),
     )
     .await

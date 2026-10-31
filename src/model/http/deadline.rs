@@ -251,6 +251,36 @@ mod tests {
         );
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn heartbeat_resets_idle_deadline_on_a_controlled_clock() {
+        let config = Connection {
+            stream_idle_timeout_ms: 1000,
+            request_timeout_ms: 1000,
+            ..Connection::default()
+        };
+        let mut deadline = Deadline::new(ApiEndpoint::Responses, &config, "heartbeat").unwrap();
+        let cancel = CancellationToken::new();
+        for _ in 0..6 {
+            {
+                let heartbeat = deadline.wait(
+                    &cancel,
+                    "heartbeat",
+                    tokio::time::sleep(Duration::from_millis(250)),
+                );
+                tokio::pin!(heartbeat);
+                assert!(futures_util::poll!(&mut heartbeat).is_pending());
+                tokio::time::advance(Duration::from_millis(250)).await;
+                heartbeat.await.unwrap();
+            }
+            deadline.received();
+        }
+        let idle = deadline.wait(&cancel, "no more heartbeat", std::future::pending::<()>());
+        tokio::pin!(idle);
+        assert!(futures_util::poll!(&mut idle).is_pending());
+        tokio::time::advance(Duration::from_millis(1000)).await;
+        assert_eq!(idle.await.unwrap_err().kind, "timeout");
+    }
+
     #[test]
     fn catalog_cap_and_disabled_stream_do_not_change_other_endpoint_budgets() {
         let config = Connection {

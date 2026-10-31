@@ -834,8 +834,8 @@ mod frame_delivery_tests {
                     .unwrap()
                     .unwrap();
                 client.write_all(&bytes).await.unwrap();
-                let error = tokio::time::timeout(
-                    FRAME_READ_TIMEOUT + std::time::Duration::from_secs(1),
+                let error = crate::test_watchdog::watchdog(
+                    "src/ipc.rs: partial_request_prefix_and_payload_time_out_without_dispatch",
                     task,
                 )
                 .await

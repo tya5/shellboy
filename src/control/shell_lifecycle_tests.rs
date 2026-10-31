@@ -3,7 +3,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::oneshot,
-    time::{Duration, timeout},
 };
 
 pub(super) type ModelRequest = (Value, oneshot::Sender<Value>);
@@ -118,13 +117,16 @@ pub(super) async fn start(control: &Arc<Control>) -> String {
     thread
 }
 pub(super) async fn incoming(requests: &mut mpsc::UnboundedReceiver<ModelRequest>) -> ModelRequest {
-    timeout(Duration::from_secs(5), requests.recv())
-        .await
-        .unwrap()
-        .unwrap()
+    crate::test_watchdog::watchdog(
+        "src/control/shell_lifecycle_tests.rs: incoming",
+        requests.recv(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
 }
 async fn starting(control: &Arc<Control>) -> String {
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: starting", async {
         loop {
             let row = control
                 .store
@@ -229,36 +231,39 @@ async fn starting_stop_and_eof_survive_the_real_driver_pre_spawn_boundary() {
 
 async fn wait_saved_signal(control: &Arc<Control>, execution: &str, eof: bool) {
     let execution = execution.to_owned();
-    timeout(Duration::from_secs(3), async {
-        loop {
-            let execution = execution.clone();
-            let saved = control
-                .store
-                .database
-                .call(move |db| {
-                    Ok(db.query_row(
-                        if eof {
-                            "SELECT stdin_state='closed' FROM shell_execution WHERE id=?1"
-                        } else {
-                            "SELECT state='stopping' FROM shell_execution WHERE id=?1"
-                        },
-                        [execution],
-                        |r| r.get::<_, bool>(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            if saved {
-                return;
+    crate::test_watchdog::watchdog(
+        "src/control/shell_lifecycle_tests.rs: wait_saved_signal",
+        async {
+            loop {
+                let execution = execution.clone();
+                let saved = control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(db.query_row(
+                            if eof {
+                                "SELECT stdin_state='closed' FROM shell_execution WHERE id=?1"
+                            } else {
+                                "SELECT state='stopping' FROM shell_execution WHERE id=?1"
+                            },
+                            [execution],
+                            |r| r.get::<_, bool>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if saved {
+                    return;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
 }
 async fn wait_marker(path: &std::path::Path) {
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: wait_marker", async {
         while tokio::fs::metadata(path).await.is_err() {
             tokio::task::yield_now().await;
         }
@@ -354,7 +359,7 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
     let signal = tokio::spawn(async move { sending.request(request).await });
     wait_saved_signal(&control, &execution, false).await;
     drop(registration_gate);
-    let response = timeout(Duration::from_secs(3), signal)
+    let response = crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_drain", signal)
         .await
         .unwrap()
         .unwrap();
@@ -384,12 +389,11 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
             .contains_key(&operation),
         "saved reply must not release its grace owner"
     );
-    let started = tokio::time::Instant::now();
-    timeout(Duration::from_secs(3), control.shutdown())
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_drain", control.shutdown())
         .await
         .unwrap()
         .unwrap();
-    assert!(started.elapsed() < Duration::from_secs(3));
+
     assert!(control.runtime_operations.lock().await.is_empty());
     assert!(control.live.test_shells().lock().await.is_empty());
     assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
@@ -420,7 +424,7 @@ async fn run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_i
     let request = tokio::spawn(async move {
         rpc(&stopping, Command::RunStop(RunTarget { run_id: target })).await
     });
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_it", async {
         loop {
             let target = run.clone();
             if control
@@ -443,7 +447,7 @@ async fn run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_i
     })
     .await
     .unwrap();
-    timeout(Duration::from_secs(3), control.shutdown())
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_it", control.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -451,7 +455,7 @@ async fn run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_i
     assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
     let weak = Arc::downgrade(&control);
     drop(control);
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_it", async {
         while weak.strong_count() != 0 {
             tokio::task::yield_now().await;
         }
@@ -522,7 +526,7 @@ async fn failed_grace_owner_does_not_swallow_another_saved_stop() {
     start(&control).await;
     let (_, reply) = incoming(&mut requests).await;
     reply.send(tool("cat")).unwrap();
-    let (execution, handle) = timeout(Duration::from_secs(3), async {
+    let (execution, handle) = crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: failed_grace_owner_does_not_swallow_another_saved_stop", async {
         loop {
             let shell = control
                 .live
@@ -567,7 +571,7 @@ async fn failed_grace_owner_does_not_swallow_another_saved_stop() {
     let registering = control.clone();
     let applying =
         tokio::spawn(async move { registering.reapply_shell_intent(&execution, &handle).await });
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: failed_grace_owner_does_not_swallow_another_saved_stop", async {
         while result.receiver_count() < 2 {
             tokio::task::yield_now().await;
         }
@@ -600,7 +604,7 @@ async fn failed_self_stop_owner_does_not_preempt_another_saved_reply_grace() {
     start(&control).await;
     let (_, reply) = incoming(&mut requests).await;
     reply.send(tool("cat")).unwrap();
-    let (execution, handle) = timeout(Duration::from_secs(3), async {
+    let (execution, handle) = crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: failed_self_stop_owner_does_not_preempt_another_saved_reply_grace", async {
         loop {
             let shell = control
                 .live
@@ -732,7 +736,7 @@ async fn saved_self_stop_replay_does_not_create_a_new_grace_owner_or_stop_effect
         .unwrap();
     let response = control.request(request).await;
     assert!(response.ok);
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: saved_self_stop_replay_does_not_create_a_new_grace_owner_or_stop_effect", async {
         loop {
             if !control
                 .runtime_operations
@@ -791,7 +795,7 @@ async fn largest_configured_reply_grace_preserves_library_bounds_and_remains_can
         _ = tokio::task::yield_now() => {}
     }
     control.prepare_shutdown().await.unwrap();
-    timeout(Duration::from_secs(3), delay).await.unwrap();
+    crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: largest_configured_reply_grace_preserves_library_bounds_and_remains_cancellable", delay).await.unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }

@@ -492,7 +492,7 @@ async fn dequeued_stale_stream_ack_is_returned_without_reviving_old_attempt() {
         presentation: Default::default(),
         ack: Some(ack.clone()),
     });
-    tokio::time::timeout(std::time::Duration::from_secs(1), ack.notified())
+    crate::test_watchdog::watchdog("tests/ui_scroll_stream.rs: dequeued_stale_stream_ack_is_returned_without_reviving_old_attempt", ack.notified())
         .await
         .unwrap();
     assert!(ui.view().nodes().is_empty());

@@ -153,7 +153,7 @@ mod tests {
         assert!(images.accept_image(ticket));
         images.insert("draft".into(), 1, image);
         images.forget_threads(&HashSet::from(["thread".into()]), &[]);
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("src/frontend/draft_images.rs: forgetting_a_deleted_thread_releases_its_managed_image_pin", async {
             loop {
                 let resource = id.clone();
                 let pinned: bool = control.store.database.call(move |db| Ok(db.query_row(

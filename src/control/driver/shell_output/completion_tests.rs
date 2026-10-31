@@ -5,7 +5,6 @@ use crate::control::{
 };
 use crate::protocol::{Command, ExecutionTarget};
 use rusqlite::OptionalExtension;
-use tokio::time::{Duration, timeout};
 
 fn call(command: &str) -> Value {
     let mut response = tool(command);
@@ -36,7 +35,7 @@ async fn actual_signal_and_forced_completion_survive_model_event_get_and_restart
         if forced {
             // The saved READY bytes are an actual process/DB boundary: TERM
             // cannot arrive before its ignore handler has been installed.
-            let execution=timeout(Duration::from_secs(3),async {
+            let execution=crate::test_watchdog::watchdog("src/control/driver/shell_output/completion_tests.rs: actual_signal_and_forced_completion_survive_model_event_get_and_restart",async {
                 loop {
                     let row=control.store.database.call(|db| {
                         Ok(db.query_row("SELECT s.id FROM shell_execution s WHERE s.state='running' AND EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id)",[],|row|row.get::<_,String>(0)).optional()?)

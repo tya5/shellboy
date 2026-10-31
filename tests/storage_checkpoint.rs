@@ -112,16 +112,17 @@ async fn read_only_idle_jobs_do_not_checkpoint() {
 }
 
 async fn wait_for_attempt(db: &DbWorker, count: &AtomicUsize, expected: usize) {
-    let observed = tokio::time::timeout(Duration::from_secs(5), async {
-        while count.load(Ordering::SeqCst) < expected {
-            // Checkpoints run only at idle opportunities, never on a timer.
-            // Keep driving the actor rather than assuming a fixed sleep made
-            // one particular read job eligible on every scheduler.
-            read_job(db).await;
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await;
+    let observed =
+        crate::test_watchdog::watchdog("tests/storage_checkpoint.rs: wait_for_attempt", async {
+            while count.load(Ordering::SeqCst) < expected {
+                // Checkpoints run only at idle opportunities, never on a timer.
+                // Keep driving the actor rather than assuming a fixed sleep made
+                // one particular read job eligible on every scheduler.
+                read_job(db).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
     assert!(
         observed.is_ok(),
         "idle checkpoint not observed: expected {expected}, actual {}",

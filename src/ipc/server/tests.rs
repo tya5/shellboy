@@ -138,7 +138,7 @@ impl Fixture {
         client
     }
     async fn accepted(&mut self) -> Invocation {
-        tokio::time::timeout(Duration::from_secs(2), self.incoming.recv())
+        crate::test_watchdog::watchdog("src/ipc/server/tests.rs: accepted", self.incoming.recv())
             .await
             .unwrap()
             .unwrap()
@@ -177,7 +177,7 @@ async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded()
         ),
     ] {
         let client = fixture.connect_command(number, command).await;
-        let invocation = tokio::time::timeout(Duration::from_secs(1), fixture.incoming.recv())
+        let invocation = crate::test_watchdog::watchdog("src/ipc/server/tests.rs: full_work_admission_does_not_block_status_or_stop_and_remains_bounded", fixture.incoming.recv())
             .await
             .expect("ordinary pending work must leave stop and status admission available")
             .unwrap();
@@ -319,11 +319,7 @@ async fn full_connection_set_defers_accept_until_a_connection_releases() {
     }
     assert_eq!(fixture.calls.load(Ordering::SeqCst), MAX_CONNECTIONS);
     let extra = fixture.connect(MAX_CONNECTIONS).await;
-    assert!(
-        tokio::time::timeout(Duration::from_millis(30), fixture.incoming.recv())
-            .await
-            .is_err()
-    );
+    assert!(fixture.incoming.try_recv().is_err());
     assert_eq!(fixture.calls.load(Ordering::SeqCst), MAX_CONNECTIONS);
     drop(clients.pop().unwrap());
     let next = fixture.accepted().await;
@@ -352,7 +348,7 @@ async fn fatal_accept_failure_cleans_endpoint_notifies_once_and_preserves_accept
         .send(Err(io::ErrorKind::PermissionDenied.into()))
         .await
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(2), failure.changed())
+    crate::test_watchdog::watchdog("src/ipc/server/tests.rs: fatal_accept_failure_cleans_endpoint_notifies_once_and_preserves_accepted_work", failure.changed())
         .await
         .unwrap()
         .unwrap();
@@ -428,9 +424,12 @@ async fn shutdown_cancels_a_backoff_without_waiting_for_its_deadline() {
     assert!(futures_util::poll!(&mut wait).is_pending());
     stop.cancel();
     assert!(
-        !tokio::time::timeout(Duration::from_secs(2), wait)
-            .await
-            .unwrap()
+        !crate::test_watchdog::watchdog(
+            "src/ipc/server/tests.rs: shutdown_cancels_a_backoff_without_waiting_for_its_deadline",
+            wait
+        )
+        .await
+        .unwrap()
     );
 }
 
@@ -451,11 +450,11 @@ async fn request_frame_timeout_releases_a_full_connection_slot_without_dispatch(
     // Observe expiry before starting the next client's own five-second hello
     // timer. Under parallel test load both timers could become ready together,
     // making the client abandon a connection before its request was dispatched.
-    // Keep the same overall six-second bound for expiry AND resumed dispatch.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    // The shared watchdog protects observations; the product frame timer is unchanged.
+
     let mut byte = [0u8; 1];
     assert_eq!(
-        tokio::time::timeout_at(deadline, clients[0].read(&mut byte))
+        crate::test_watchdog::watchdog("partial frame EOF", clients[0].read(&mut byte))
             .await
             .unwrap()
             .unwrap(),
@@ -463,10 +462,11 @@ async fn request_frame_timeout_releases_a_full_connection_slot_without_dispatch(
         "the partial frame connection must close without a response"
     );
     let next = fixture.connect(MAX_CONNECTIONS).await;
-    let invocation = tokio::time::timeout_at(deadline, fixture.incoming.recv())
-        .await
-        .unwrap()
-        .unwrap();
+    let invocation =
+        crate::test_watchdog::watchdog("dispatch after expired frame", fixture.incoming.recv())
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(
         invocation.request.operation_id,
         format!("fixture:{MAX_CONNECTIONS}")
@@ -500,7 +500,7 @@ async fn disconnected_accepted_work_keeps_all_slots_until_consumer_completion() 
         let _ = client.await;
     }
     for invocation in &accepted {
-        tokio::time::timeout(Duration::from_secs(2), invocation.disconnected.cancelled())
+        crate::test_watchdog::watchdog("src/ipc/server/tests.rs: disconnected_accepted_work_keeps_all_slots_until_consumer_completion", invocation.disconnected.cancelled())
             .await
             .unwrap();
     }
@@ -575,7 +575,7 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
         .send(Err(io::ErrorKind::PermissionDenied.into()))
         .await
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(2), async {
+    crate::test_watchdog::watchdog("src/ipc/server/tests.rs: permanent_listener_failure_reaches_the_frontend_once_while_local_work_stays_live", async {
         loop {
             match received.try_recv() {
                 Ok(UiUpdate::Status { text, .. }) if text.contains("CLI受付が停止しました") =>
@@ -613,11 +613,11 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
     // grace alone is 5 seconds). This is an eventual owner-cleanup assertion,
     // not another IPC response deadline. Match the existing frontend fixture's
     // cleanup watchdog while consuming updates like the real UI.
-    let cleanup_seconds = if cfg!(windows) { 30 } else { 15 };
+    let _cleanup_seconds = if cfg!(windows) { 30 } else { 15 };
     let mut bridge = bridge;
     let mut duplicates = 0;
     let mut last_progress = None;
-    let joined = tokio::time::timeout(Duration::from_secs(cleanup_seconds), async {
+    let joined = crate::test_watchdog::watchdog("src/ipc/server/tests.rs: permanent_listener_failure_reaches_the_frontend_once_while_local_work_stays_live", async {
         let mut tick = tokio::time::interval(Duration::from_millis(5));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {

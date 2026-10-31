@@ -9,7 +9,7 @@ use shellboy::{
 };
 
 async fn bounded<T>(future: impl std::future::Future<Output = T>) -> T {
-    tokio::time::timeout(std::time::Duration::from_secs(120), future)
+    crate::test_watchdog::watchdog("tests/recovery_paths.rs: bounded", future)
         .await
         .expect("finite recovery fixture deadline")
 }
@@ -138,7 +138,7 @@ async fn wait_registered(
     operation: &str,
     task: &mut tokio::task::JoinHandle<Response<Value>>,
 ) {
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("tests/recovery_paths.rs: wait_registered", async {
         loop {
             let key = format!("wait.pending.{operation}");
             let registered = owner.db.call(move |db| {
@@ -430,7 +430,7 @@ async fn shutdown_context_save_failure_is_cached_but_wait_and_run_still_drain() 
         serde_json::to_value(&failure).unwrap(),
         "the failed capture is not retried after cancellation removed its evidence"
     );
-    let shutdown = tokio::time::timeout(std::time::Duration::from_secs(5), control.shutdown())
+    let shutdown = crate::test_watchdog::watchdog("tests/recovery_paths.rs: shutdown_context_save_failure_is_cached_but_wait_and_run_still_drain", control.shutdown())
         .await
         .unwrap()
         .unwrap_err();

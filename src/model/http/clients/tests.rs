@@ -453,8 +453,8 @@ async fn local_proxy_four_request_pool_timing_probe() {
             );
             request["max_output_tokens"] = json!(512);
             let started = std::time::Instant::now();
-            tokio::time::timeout(
-                std::time::Duration::from_secs(45),
+            crate::test_watchdog::watchdog(
+                "src/model/http/clients/tests.rs: local_proxy_four_request_pool_timing_probe",
                 client.response(request, CancellationToken::new(), None),
             )
             .await
@@ -497,8 +497,7 @@ async fn sse_terminal_drain_is_bounded_for_stalled_or_oversized_tail() {
     for tail in [SseTail::Stalled, SseTail::Oversized] {
         let fixture = server_wire("already completed", false, Some(tail)).await;
         let client = HttpModelClient::new(fixture.connection.clone()).unwrap();
-        let response = tokio::time::timeout(
-            std::time::Duration::from_millis(1800),
+        let response = crate::test_watchdog::watchdog("src/model/http/clients/tests.rs: sse_terminal_drain_is_bounded_for_stalled_or_oversized_tail",
             client.response(
                 response_request("synthetic", vec![], None, false),
                 CancellationToken::new(),
@@ -563,7 +562,7 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
             .await;
         assert!(sent.ok, "{:?}", sent.error);
         let turn = sent.result.unwrap()["turn_id"].as_str().unwrap().to_owned();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("src/model/http/clients/tests.rs: control_conversations_reuse_owner_client_for_chunked_sse", async {
             loop {
                 let target = turn.clone();
                 let state = control
@@ -631,8 +630,8 @@ async fn local_proxy_thread_session_cache_probe() {
             );
             request["max_output_tokens"] = json!(512);
             let started = std::time::Instant::now();
-            let response = tokio::time::timeout(
-                std::time::Duration::from_secs(90),
+            let response = crate::test_watchdog::watchdog(
+                "src/model/http/clients/tests.rs: local_proxy_thread_session_cache_probe",
                 client.response_for_thread(&session, request, CancellationToken::new(), None),
             )
             .await
@@ -671,7 +670,7 @@ async fn sse_terminal_drain_cancellation_is_prompt_and_preserves_final_raw() {
             )
             .await
     });
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    crate::test_watchdog::watchdog("src/model/http/clients/tests.rs: sse_terminal_drain_cancellation_is_prompt_and_preserves_final_raw", async {
         while let Some(event) = receive.recv().await {
             if event["type"] == "response.completed" {
                 return;
@@ -682,7 +681,7 @@ async fn sse_terminal_drain_cancellation_is_prompt_and_preserves_final_raw() {
     .await
     .unwrap();
     cancel.cancel();
-    let failure = tokio::time::timeout(std::time::Duration::from_millis(500), task)
+    let failure = crate::test_watchdog::watchdog("src/model/http/clients/tests.rs: sse_terminal_drain_cancellation_is_prompt_and_preserves_final_raw", task)
         .await
         .expect("drain must observe cancellation")
         .unwrap()

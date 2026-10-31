@@ -37,8 +37,7 @@ mod usage;
 
 pub mod usage_totals;
 
+pub(crate) mod readback;
 #[cfg(test)]
 #[path = "../tests/support/watchdog.rs"]
 pub(crate) mod test_watchdog;
-
-pub(crate) mod readback;

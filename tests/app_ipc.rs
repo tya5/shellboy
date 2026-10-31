@@ -106,8 +106,8 @@ async fn local_handshake_reply_and_cancelled_observation() {
     let invocation = receive.recv().await.unwrap();
     client.abort();
     let _ = client.await;
-    tokio::time::timeout(
-        std::time::Duration::from_secs(1),
+    crate::test_watchdog::watchdog(
+        "tests/app_ipc.rs: local_handshake_reply_and_cancelled_observation",
         invocation.disconnected.cancelled(),
     )
     .await

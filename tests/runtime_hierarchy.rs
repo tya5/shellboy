@@ -8,7 +8,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::timeout,
 };
 
 static FIXTURE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -144,7 +143,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     .unwrap()
 }
 async fn incoming(receiver: &mut mpsc::UnboundedReceiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), receiver.recv())
+    crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: incoming", receiver.recv())
         .await
         .unwrap()
         .unwrap()
@@ -163,7 +162,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     let table = table.to_owned();
     let id = id.to_owned();
     let wanted = wanted.to_owned();
-    timeout(Duration::from_secs(8), async {
+    crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: state", async {
         loop {
             let table = table.clone();
             let id = id.clone();
@@ -189,7 +188,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     .unwrap();
 }
 async fn close(control: Arc<Control>, owner: DataOwner, server: JoinHandle<()>) {
-    timeout(Duration::from_secs(8), control.shutdown())
+    crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: close", control.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -250,7 +249,7 @@ async fn child_thread(control: &Arc<Control>, parent: &str) -> String {
         .to_owned()
 }
 async fn process_started(path: &std::path::Path) -> i32 {
-    timeout(Duration::from_secs(8), async {
+    crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: process_started", async {
         loop {
             if let Ok(text) = tokio::fs::read_to_string(path).await
                 && let Ok(pid) = text.trim().parse()
@@ -395,7 +394,7 @@ async fn stopping_parent_reaps_real_grandchildren_but_keeps_independent_run_and_
         }),
     )
     .await;
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: stopping_parent_reaps_real_grandchildren_but_keeps_independent_run_and_rejects_late_answers", async {
         while alive(pids[3]) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -674,11 +673,14 @@ async fn model_cli_cannot_stop_or_write_to_an_independent_live_run() {
     )
     .await;
     command(&control, Command::RunStop(RunTarget { run_id: target_run })).await;
-    timeout(Duration::from_secs(5), async {
-        while alive(pid) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
+    crate::test_watchdog::watchdog(
+        "tests/runtime_hierarchy.rs: model_cli_cannot_stop_or_write_to_an_independent_live_run",
+        async {
+            while alive(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        },
+    )
     .await
     .unwrap();
     drop(independent_held);

@@ -5,12 +5,11 @@ use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    time::timeout,
 };
 
 async fn cli(directory: &std::path::Path, args: &[&str]) -> Value {
-    let output = timeout(
-        Duration::from_secs(15),
+    let output = crate::test_watchdog::watchdog(
+        "tests/tool_repair_isolation.rs: cli",
         tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .kill_on_drop(true)
             .arg("--data-dir")
@@ -111,7 +110,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
     )
     .await;
     let broken_turn = broken["turn_id"].as_str().unwrap().to_owned();
-    let reason = timeout(Duration::from_secs(15),async {
+    let reason = crate::test_watchdog::watchdog("tests/tool_repair_isolation.rs: bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion",async {
         loop {
             let turn = broken_turn.clone();
             let reason = owner.db.call(move|db| {
@@ -129,9 +128,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
     assert!(reason.contains("delete the affected Thread"), "{reason}");
     assert!(!reason.contains("Restart Shellboy"));
     assert!(
-        timeout(Duration::from_millis(100), listener.accept())
-            .await
-            .is_err(),
+        futures_util::FutureExt::now_or_never(listener.accept()).is_none(),
         "unresolved group must fail locally before any HTTP connection"
     );
     let forked = cli(
@@ -186,7 +183,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
         ],
     )
     .await;
-    let body = timeout(Duration::from_secs(15), model)
+    let body = crate::test_watchdog::watchdog("tests/tool_repair_isolation.rs: bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion", model)
         .await
         .unwrap()
         .unwrap();
@@ -198,7 +195,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
     assert_eq!(input[call + 1]["type"], "function_call_output");
     assert_eq!(input[call + 1]["call_id"], "call-good");
     let run = accepted["run_id"].as_str().unwrap().to_owned();
-    timeout(Duration::from_secs(15), async {
+    crate::test_watchdog::watchdog("tests/tool_repair_isolation.rs: bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion", async {
         loop {
             let target = run.clone();
             if control

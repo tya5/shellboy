@@ -685,8 +685,7 @@ mod tests {
         };
         // Deliberately reverse explicit request IDs: auto-restore must still
         // use original receipt order, including equal timestamps.
-        tokio::time::timeout(
-            Duration::from_secs(60),
+        crate::test_watchdog::watchdog("src/frontend/message_queue.rs: unknown_held_input_is_listed_cancelled_and_restored_in_receipt_order_across_restart",
             cancel(
                 &control,
                 &send,

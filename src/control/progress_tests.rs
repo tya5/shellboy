@@ -2,7 +2,6 @@ use super::shell_lifecycle_tests::{
     answer, fixture, fixture_with_settings, incoming, rpc, start, tool,
 };
 use super::*;
-use tokio::time::{Duration, timeout};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn missing_attachment_before_snapshot_recovers_once_without_driver_restart_storm() {
@@ -33,7 +32,7 @@ async fn missing_attachment_before_snapshot_recovers_once_without_driver_restart
         }).await.unwrap();
         let mut events = control.subscribe();
         control.kick_quiet(thread).await;
-        let first = timeout(Duration::from_secs(3), async {
+        let first = crate::test_watchdog::watchdog("src/control/progress_tests.rs: missing_attachment_before_snapshot_recovers_once_without_driver_restart_storm", async {
             loop {
                 if let EngineEvent::Error { error, .. } = events.recv().await.unwrap() {
                     break error;
@@ -119,7 +118,7 @@ async fn completed_shell_cannot_be_backgrounded_while_excerpt_is_loading() {
     reply
         .send(tool("head -c 2097152 /dev/zero | tr '\\000' x"))
         .unwrap();
-    let boundary = timeout(Duration::from_secs(5), observed_pin).await;
+    let boundary = crate::test_watchdog::watchdog("src/control/progress_tests.rs: completed_shell_cannot_be_backgrounded_while_excerpt_is_loading", observed_pin).await;
     // Always release the actor before asserting or awaiting shutdown.
     let background = if boundary.is_ok() {
         Some(control.background(&thread).await)
@@ -181,7 +180,7 @@ async fn in_process_edit_does_not_wait_for_a_shell_caller_reply_grace() {
             )
             .await
     });
-    let completed = timeout(Duration::from_secs(3), &mut pending).await;
+    let completed = crate::test_watchdog::watchdog("src/control/progress_tests.rs: in_process_edit_does_not_wait_for_a_shell_caller_reply_grace", &mut pending).await;
     // Red-baseline cleanup closes admission to interrupt the 60s grace; this
     // occurs only after measuring whether the edit finished by itself.
     let success = match completed {

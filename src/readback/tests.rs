@@ -410,8 +410,7 @@ pub(crate) fn watchdog(f: impl FnOnce() + Send + 'static) {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
         let _ = tx.send(result);
     });
-    let result = rx
-        .recv_timeout(std::time::Duration::from_secs(60))
+    let result = crate::test_watchdog::blocking_recv("synchronous saved readback fixture", &rx)
         .expect("saved-readback fixture watchdog");
     worker.join().unwrap();
     if let Err(panic) = result {
@@ -421,7 +420,7 @@ pub(crate) fn watchdog(f: impl FnOnce() + Send + 'static) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn readonly_commands_complete_while_writer_is_held_without_provider_or_receipt_writes() {
-    tokio::time::timeout(std::time::Duration::from_secs(60),async {
+    crate::test_watchdog::watchdog("readonly readback with writer held",async {
   use crate::{storage::DbWorker,control::db::Store,config::Config,protocol::*};
   use std::sync::Arc;
   use tokio::{net::TcpListener,io::AsyncWriteExt};

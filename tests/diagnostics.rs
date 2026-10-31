@@ -173,7 +173,7 @@ async fn streamed_fixture(malformed_final: bool) {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
-        time::{Duration, timeout},
+        time::Duration,
     };
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -271,7 +271,7 @@ async fn streamed_fixture(malformed_final: bool) {
     let accepted: MessageAccepted = serde_json::from_value(sent.result.unwrap()).unwrap();
     let turn = accepted.turn_id.unwrap();
     let check_turn = turn.clone();
-    let attempt = timeout(Duration::from_secs(10), async {
+    let attempt = crate::test_watchdog::watchdog("tests/diagnostics.rs: streamed_fixture", async {
         loop {
             let target = check_turn.clone();
             let attempt = control.store.database.call(move |db| {
@@ -283,7 +283,7 @@ async fn streamed_fixture(malformed_final: bool) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }).await.unwrap();
-    timeout(Duration::from_secs(5), server)
+    crate::test_watchdog::watchdog("tests/diagnostics.rs: streamed_fixture", server)
         .await
         .unwrap()
         .unwrap();

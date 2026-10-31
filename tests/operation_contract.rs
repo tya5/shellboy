@@ -1104,7 +1104,7 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
         let accepted = control.request(req.clone()).await;
         assert!(accepted.ok, "{accepted:?}");
         assert_eq!(accepted.result.as_ref().unwrap()["status"], "queued");
-        let outcome = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        let outcome = crate::test_watchdog::watchdog("tests/operation_contract.rs: queued_middle_omit_and_restore_apply_once_with_durable_downstream_results", async {
             loop {
                 let status = control
                     .request(request(

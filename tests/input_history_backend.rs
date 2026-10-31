@@ -11,7 +11,7 @@ async fn recalled(
     incoming: &Receiver<UiUpdate>,
     expected_id: u64,
 ) -> Result<Option<RecalledPrompt>, String> {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("tests/input_history_backend.rs: recalled", async {
         loop {
             match incoming.try_recv() {
                 Ok(UiUpdate::RecalledInput {
@@ -117,7 +117,7 @@ async fn persisted_recall_uses_db_worker_and_errors_do_not_fail_viewport_loading
     let blocked = tokio::spawn(async move {
         db.call(move |_| {
             let _ = entered_tx.send(());
-            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            crate::test_watchdog::blocking_recv("release DB barrier", &release_rx).unwrap();
             Ok(())
         })
         .await
@@ -137,7 +137,7 @@ async fn persisted_recall_uses_db_worker_and_errors_do_not_fail_viewport_loading
     release_tx.send(()).unwrap();
     blocked.await.unwrap().unwrap();
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(10), bridge)
+    crate::test_watchdog::watchdog("tests/input_history_backend.rs: persisted_recall_uses_db_worker_and_errors_do_not_fail_viewport_loading", bridge)
         .await
         .unwrap()
         .unwrap()

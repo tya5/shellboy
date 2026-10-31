@@ -107,7 +107,7 @@ async fn performance_ten_shells_ten_lifecycle_waits() {
             .unwrap()
         }));
     }
-    tokio::time::timeout(Duration::from_secs(10),async {
+    crate::test_watchdog::watchdog("src/control/driver/shell_output/performance_tests.rs: performance_ten_shells_ten_lifecycle_waits",async {
         loop {
             let count=owner.db.call(|db| Ok(db.query_row("SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.benchmark-wait-%'",[],|r|r.get::<_,i64>(0))?)).await.unwrap();
             if count==10 { break; } tokio::task::yield_now().await;

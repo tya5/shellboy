@@ -6,7 +6,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::{mpsc, oneshot},
-    time::timeout,
 };
 struct Incoming {
     body: Value,
@@ -104,7 +103,7 @@ fn answer(text: &str) -> Value {
     json!({"id":uuid::Uuid::new_v4().to_string(),"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text}]}]})
 }
 async fn incoming(receive: &mut mpsc::Receiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), receive.recv())
+    crate::test_watchdog::watchdog("tests/revisit.rs: incoming", receive.recv())
         .await
         .unwrap()
         .unwrap()
@@ -156,7 +155,7 @@ async fn begin(control: &Arc<Control>, thread: &str) -> MessageAccepted {
 }
 async fn run_state(control: &Control, run: &str, expected: &str) {
     let run = run.to_owned();
-    timeout(Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("tests/revisit.rs: run_state", async {
         loop {
             let id = run.clone();
             let (state, reason): (String, Option<String>) = control
@@ -259,9 +258,7 @@ async fn normal_completion_delivers_once_and_allows_many_cycles_unless_explicitl
         run_state(&control, &run, "completed").await;
         assert_eq!(event_count(&control, &run).await, cycles as i64);
         assert!(
-            timeout(Duration::from_millis(100), receive.recv())
-                .await
-                .is_err(),
+            receive.try_recv().is_err(),
             "consumed reservation must not fire again"
         );
         let id = run.clone();
@@ -307,17 +304,13 @@ async fn recovery_wait_preserves_reservation_and_only_normal_completion_fires_it
         ))
         .unwrap();
     let target = run.clone();
-    timeout(Duration::from_secs(10),async {loop {let id=target.clone();let recovery=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state='recovery_wait')",[id],|r|r.get::<_,bool>(0))?)).await.unwrap();if recovery{break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    crate::test_watchdog::watchdog("tests/revisit.rs: recovery_wait_preserves_reservation_and_only_normal_completion_fires_it",async {loop {let id=target.clone();let recovery=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state='recovery_wait')",[id],|r|r.get::<_,bool>(0))?)).await.unwrap();if recovery{break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
     assert_eq!(event_count(&control, &run).await, 0);
     assert_eq!(
         saved(&control, &run).await["pending"]["text"],
         "AFTER_RECOVERY_ONLY"
     );
-    assert!(
-        timeout(Duration::from_millis(100), receive.recv())
-            .await
-            .is_err()
-    );
+    assert!(receive.try_recv().is_err());
     request(
         &control,
         Command::RunRetry(RunTarget {
@@ -361,11 +354,7 @@ async fn stopping_a_held_request_drops_pending_without_firing() {
     assert!(saved(&control, &run).await["pending"].is_null());
     assert_eq!(event_count(&control, &run).await, 0);
     let _ = held.reply.send((200, answer("Late response")));
-    assert!(
-        timeout(Duration::from_millis(100), receive.recv())
-            .await
-            .is_err()
-    );
+    assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -616,9 +605,7 @@ async fn startup_captures_pending_instruction_then_drops_it_without_automatic_de
         "human"
     );
     assert!(
-        timeout(Duration::from_millis(100), receive.recv())
-            .await
-            .is_err(),
+        receive.try_recv().is_err(),
         "startup must not resume reservation"
     );
     let fresh = begin(&control, &thread).await;
@@ -702,17 +689,13 @@ async fn pending_revisit_waits_for_owned_background_shell_then_fires() {
         .unwrap();
     // Wait for the Turn to complete before testing the owned-work gate.
     let id = run.clone();
-    timeout(Duration::from_secs(10),async{loop{let target=id.clone();let done=control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap();if done{break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    crate::test_watchdog::watchdog("tests/revisit.rs: pending_revisit_waits_for_owned_background_shell_then_fires",async{loop{let target=id.clone();let done=control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap();if done{break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
     assert_eq!(event_count(&control, &run).await, 0);
     assert_eq!(
         saved(&control, &run).await["pending"]["text"],
         "AFTER_OWNED_SHELL_FINISHES"
     );
-    assert!(
-        timeout(Duration::from_millis(100), receive.recv())
-            .await
-            .is_err()
-    );
+    assert!(receive.try_recv().is_err());
     request(
         &control,
         Command::ShellEof(ExecutionTarget {
@@ -916,7 +899,7 @@ async fn child_revisit_finishes_before_parent_receives_child_completion_and_its_
     // Child Turn completion may independently wake the parent before the
     // child's Revisit request reaches the proxy. Route by the real Thread
     // session header, rather than assuming a cross-Thread HTTP arrival order.
-    let child_revisit = timeout(Duration::from_secs(20), async {
+    let child_revisit = crate::test_watchdog::watchdog("tests/revisit.rs: child_revisit_finishes_before_parent_receives_child_completion_and_its_own_revisit", async {
         for _ in 0..8 {
             let next = incoming(&mut receive).await;
             let parent_id = parent_run.clone();
@@ -939,7 +922,7 @@ async fn child_revisit_finishes_before_parent_receives_child_completion_and_its_
         .reply
         .send((200, answer("Child verified all work")))
         .unwrap();
-    let parent_revisit = timeout(Duration::from_secs(20), async {
+    let parent_revisit = crate::test_watchdog::watchdog("tests/revisit.rs: child_revisit_finishes_before_parent_receives_child_completion_and_its_own_revisit", async {
         for _ in 0..8 {
             let next = incoming(&mut receive).await;
             assert_eq!(next.session.as_deref(), Some(parent_thread.as_str()));
@@ -993,7 +976,7 @@ async fn registration_racing_normal_completion_is_either_delivered_or_rejected_a
         let thread = thread(&control).await;
         let run = begin(&control, &thread).await.run_id.unwrap();
         let held = incoming(&mut receive).await;
-        let (_, registration) = timeout(Duration::from_secs(20), async {
+        let (_, registration) = crate::test_watchdog::watchdog("tests/revisit.rs: registration_racing_normal_completion_is_either_delivered_or_rejected_as_terminal", async {
             tokio::join!(
                 async {
                     held.reply
@@ -1034,9 +1017,7 @@ async fn registration_racing_normal_completion_is_either_delivered_or_rejected_a
             assert_eq!(event_count(&control, &run).await, 0);
         }
         assert!(
-            timeout(Duration::from_millis(100), receive.recv())
-                .await
-                .is_err(),
+            receive.try_recv().is_err(),
             "no duplicate delivery after either serialized outcome"
         );
         control.shutdown().await.unwrap();
@@ -1057,8 +1038,7 @@ async fn queued_user_input_and_cancel_keep_the_same_run_without_premature_revisi
     let held = incoming(&mut receive).await;
     request(&control, set(&run, "CANCEL_BEFORE_QUEUED_INPUT_COMPLETES")).await;
     let followup: MessageAccepted = serde_json::from_value(
-        timeout(
-            Duration::from_secs(20),
+        crate::test_watchdog::watchdog("tests/revisit.rs: queued_user_input_and_cancel_keep_the_same_run_without_premature_revisit",
             request(
                 &control,
                 Command::MessageSend(MessageSendArgs {
@@ -1115,11 +1095,7 @@ async fn queued_user_input_and_cancel_keep_the_same_run_without_premature_revisi
         receipts, 2,
         "both accepted user messages retain their own receipt"
     );
-    assert!(
-        timeout(Duration::from_millis(100), receive.recv())
-            .await
-            .is_err()
-    );
+    assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

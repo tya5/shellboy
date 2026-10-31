@@ -3866,3 +3866,212 @@ standard:1891/0/32 (lib965/13ignored, integration916/17, termination7/1, crash3/
 layout93, Python11, fmt and strict all-target Clippy. The16-change shared-snapshot
 case and stronger post-drain raw-save assertion pass. This source is not pushed
 or run in new native CI. P3 and laterF/G are not established by these results.
+
+## State-based test watchdog migration (#77)
+
+2026-10-31, native macOS ARM64, Rust1.99.1, based on main b581283.
+The single tests/support/watchdog.rs WATCHDOG is60seconds. Async guards label the
+awaited operation and caller while returning the original Result; existing
+saved-progress diagnostics remain. Synchronous PTY loops and DB barrier receives
+reuse that budget. Controlled-clock tests check the helper, Retry-After policy,
+heartbeat idle refresh and file-worker timeout ownership without native latency
+assertions. Production timer/grace/busy settings and runtime behavior are unchanged.
+
+Non-#41 integration/unit files were migrated in separate Core/transport,
+presentation, HTTP, lifecycle and native-process commits. The four reported
+flaky fixture paths use the shared helper (recovery_paths, response_retries,
+response_upload_recovery, attachment_provenance). The ordered invalid-AGENTS
+preparation pause subscribes before inspecting saved state and reinspects on
+Changed/lag rather than polling the DB every5ms. Existing notification-based retry
+and upload waits keep their saved-phase assertions. Negative HTTP observations
+count queued connections after the operation's completion signal; channel checks
+follow completed operations/persisted phases, with final attempt counts retained.
+Explicitly blocked native/DB work uses future polling instead of20/30ms absence.
+The former ignored minute-long outage fixture now checks seven explicit failures
+and the preserved retry budget with a small test-configured cap; exact delay
+policy is checked on a virtual clock, not by counting attempts that fit in61s.
+No product limit was changed.
+
+Native shutdown qualification varies five named persisted boundaries: before
+Control shutdown, while shutdown awaits a held DB job, while an uncommitted
+transaction is held, after Control drains, and while owner close awaits the DB.
+The fixture child is really killed (SIGKILL on Unix; TerminateJobObject on Windows).
+It contains synthetic completed/running/pending tool facts, not a real provider
+or a model request. Reopen verifies original result identity/payload byte equality,
+rollback, interrupted running output, not_started pending output, integrity/FK
+checks, unchanged shell count and no repeated repair on a second reopen. This
+samples transaction/shutdown boundaries, not every CPU instruction or real power
+loss. Existing real-native-shell SIGKILL and native signal cases remain.
+macOS focused forced-boundary test passes all five positions. Windows is a
+separate required native gate, not inferred from the Unix result.
+
+Native disposable PTY coverage uses output predicates, not700ms color samples or
+500ms silence as success. Static-idle frame behavior is tested via the deterministic
+draw budget. The fixture continues draining its master while waiting for saved
+index retry status and runs its deliberately foreign slave writer concurrently
+with master draining, avoiding test-created PTY backpressure deadlocks. Escape
+uses an unambiguous CSI-u key frame, not a sleep to disambiguate a lone ESC.
+The revised real_tui_accepts_text_renders_proxy_response_and_exits_cleanly passes
+locally, as do8 attachment-provenance cases, the virtual blocking-worker case and
+841 library cases on the intermediate tree. Final all-target/rebased validation
+and native CI remain independent gates.
+
+Implementation observations retained separately from product diagnoses: the new
+heartbeat test initially held an immutable deadline borrow too long (fixed by a
+future scope); the crash expectation initially called a pending result interrupted
+(the correct retained fact is not_started); explicit virtual advancement must
+pass the timer wheel's tick while a real blocked worker prevents auto-advance.
+The first virtual file-worker experiments stalled and their owned shells were
+stopped, then explicit advances were corrected. PTY experiments exposed paused
+index polling that stopped draining the terminal and a blocking foreign-writer
+call; these were fixture coordination failures, not evidence of a product deadline
+regression. Clippy rejected duplicate includes of the connection-count helper;
+it is now loaded once per integration harness. No test timeout suppression,
+automatic retry, reduced assertion or production timer patch hides those failures.
+
+scripts/check-test-layout.py runs the watchdog policy on all native CI jobs and
+both standard check scripts. Its seven Python tests cover short/long raw guards,
+production exclusion, nested/platform test modules, path overrides, aliases,
+comments/raw strings, manual deadlines, and exact allowance growth/staleness.
+The checker is lexical, not a full Rust macro expander. The committed reason list
+pins existing file/function/fingerprint counts; copying a deferred timeout adds
+an unapproved occurrence, and deleting one requires removing its stale allowance.
+At the current snapshot135 #41-owned occurrences are deliberately deferred and14
+intentional helper/virtual-clock/non-gating workload occurrences remain allowed.
+This is not a claim that #41's legacy short waits are already migrated. The
+initial #41 diff did not include src/frontend/control_tests.rs; a later read-only
+recheck did, so that file's #77 changes were withdrawn. Only src/lib.rs test-module
+wiring overlaps the latest #41 file set. No other worktree was edited.
+
+All database/process/provider fixtures use disposable data and local mocks. No
+paid API, user configuration, installed binary, live owner, schema/worker/queue or
+new package is used. Successful local checks do not replace the required two
+three-OS manual branch CI runs and the final main gate.
+
+
+### Rebased D2 and admission facts
+
+The branch rebased onto main4a6b839, including D2's shared readers. Only appended
+status/acceptance sections conflicted; the complete upstream histories were kept
+before #77's sections. The exact deferred allowance inventory was reinspected
+against the integrated #41 sources:134 deferred occurrences plus14 deliberate
+exceptions. A new parser regression prevents cfg(test) arguments/parameters from
+incorrectly capturing the following production function. Production-token audit
+(excluding test scopes) found no differences in31 changed src files; the remaining
+src/lib.rs change is only the cfg(test) shared module registration.
+
+One all-target run exposed a fixture mistake in the observer-cancellation
+migration: polling a spawned JoinHandle as pending does not prove its inner owned
+worker has been admitted (receipt count0 instead of1). The unchanged substantive
+fixture/assertions now live in control::ipc_admission_tests, where it can inspect
+existing private active-request/admission-closed facts without a new production
+hook. It waits for admission before dropping observation and for shutdown closure
+before releasing the blocked DB, then verifies exactly1 receipt and no live
+Run/active Turn. The focused test passes. This is not a weakened count assertion
+or another scheduling delay. The original integration test was moved, not copied
+or dropped. The source checker also rejected an injected1ms test timeout in a new
+support file; the temporary poison file was removed after that failure check.
+
+
+### First native candidate observations
+
+Candidate c2a5c9e passes the rebased local standard check:1852 passed/0 failed/
+32 ignored, layout93, Python16, fmt/strict Clippy. Manual branch runs41156089976
+and41156092253 both passed macOS/Linux but failed Windows Clippy before Tests:
+old Duration and timeout imports remained in Windows-only tests/shell_windows.rs.
+These are #77 migration errors, not flaky timeouts; both imports are removed.
+Neither failed run counts toward the required two all-OS successful observations.
+Azure log download temporarily returned503 ServerBusy/egress limits; a later
+job-log read confirmed the exact unused imports. No job/test retry hid the errors.
+Native Windows runtime/Job-object execution still requires the corrected gates.
+
+
+### Corrected candidate native gates
+
+Candidate3460132 passes manual all-OS runs41157071532 and41157073871, both on
+attempt1 with macOS/Linux/Windows checks successful. The Windows-only imports
+are fixed, and the native Job-object branch is included in its passing standalone
+crash target. Rebased local standard check remains1852/0/32 with layout93,
+Python16/fmt/strict Clippy. Before integration main advanced to15037c1 (#75,
+readback/schema indexes), so these gates are retained as candidate evidence and
+the combined final tree will be checked independently rather than assuming the
+older pair qualifies new production/schema code.
+
+
+### Readback combined-tree guard alignment
+
+Main15037c1 added three new raw readback test guards outside the deferred set;
+CLI/readonly observations now use the shared async helper and the synchronous
+readback test wrapper delegates to shared blocking_recv. Its new storage migration
+guard is already60s but src/storage.rs is #41-owned, so that exact occurrence is
+recorded as deferred (now135 deferred +14 deliberate). No #75 production code or
+migration was changed. Rebase conflicts were only src/lib.rs's appended module
+declarations (readback plus cfg(test) test_watchdog both retained) and validation
+appendices (complete upstream prefix retained). New combined native gates follow.
+
+
+### Final repaint capture observation
+
+A local latest-main preflight retained all runtime assertions but caught one
+manual-repaint fixture failure: capture stopped at draft bytes before the
+footer's pause arrow had arrived. The capture predicate now includes that same
+pre-existing arrow requirement, so the assertions inspect the full required
+facts rather than race a partial PTY read. No350ms wait or relaxed assertion was
+restored, and production rendering is unchanged. Final combined-source native
+qualification is repeated after this fixture correction.
+
+
+### Output-driven repaint refresh
+
+On candidate b387323, run41161117185 passed all three OSes; run41161114836
+failed Linux's native PTY while waiting for the post-retry unpaused management
+frame. The first requested repaint can precede the asynchronous status reply;
+later cursor-diff bytes need not repeat an unchanged label. The observer now
+requests a further repaint after actual received output, retains only the latest
+clear-frame bytes, and requires all expected labels within that frame. It does
+not reinstate120ms settling windows or join labels across unrelated frames. The
+same60s guard protects liveness. This fixture failure is retained, not relabelled
+as an unrelated Windows flake. Main's independent noncontrolling-EOF diagnostic
+follow-up ad6c54b is preserved during rebase; it is not a #77 production change.
+
+## #79 managed clipboard path qualification (2026-10-31)
+
+Scope: keep the existing absolute path field for add/list, expose it in current
+request metadata, and report managed lifecycle/missing-file facts with ordinary
+unavailable_reason semantics. Existing managed preparation already used the same
+successful-send hash comparisons as external files; tests establish that parity
+rather than adding a second baseline or immutable-file rule. No permission,
+schema/index, export, lease, table, worker or queue is added.
+
+On native macOS arm64/Rust 1.99.1, 25 attachment integration tests pass. A temporary
+RGBA PNG is created through save_clipboard_pixels, registered with its ordinary
+reference, listed, and read by an actual native shell (sh on Unix; the native CI
+Windows fixture uses PowerShell). The path is absolute; Unix permissions remain
+0600. Replacing its bytes produces changed=true, before/after hashes and a separate
+change notice; disappearance produces unavailable metadata and list reason. After
+selection removal and release of existing pins, the same reclamation code deletes
+it, with path and clipboard-retention/deleted reason still visible in the list.
+Three actual prepared manifests are recorded in a synthetic observations.jsonl
+(0 to 3 rows). No provider/HTTP request is made, and list does not create operation
+receipts (0 to 0). This is not a real OS clipboard or real-provider format test.
+
+The actual list SQL's EXPLAIN QUERY PLAN requires SEARCH, not SCAN, for selection,
+attachment-ref and managed-file aliases, using existing Thread/ID/unique-path
+indexes. No extra index is needed. A deliberately held DB writer does not block
+the read-only list; ordinary missing external files use the same observation path.
+File observations run after ending the read-only transaction through the existing
+two-slot presentation admission; they do not pin files or guarantee future access.
+
+New tests use #77's shared 60-second watchdog, with no speed threshold or retry.
+Initial validation caught a test argument-type typo and a regression where copying
+huge detached paths into new metadata starved the existing 64-KiB exclusion notice
+budget. Detached references now keep their pre-existing bounded path notice without
+duplicating that path. The unchanged bounded-notice/progress regression test passes.
+Full standard/role/bundled-doc checks and exact-source native CI are recorded in #79.
+
+Before editing, origin/main...origin/issue-41/e-ci-review was checked: F6 rendering
+and frontend files overlap. Per user authorization, F6 path presentation is deferred
+to #41 and recorded in #79; no F6 rendering files are edited here. That is remaining
+scope, not a claim of a completed TUI test. The old #78 unpublished draft branch was
+removed after user authorization; no tags, releases, installed binary or user DB
+are touched by this task. Status/acceptance old lines are preserved and audited.

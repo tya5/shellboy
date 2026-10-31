@@ -4,7 +4,6 @@ use shellboy::{config::Connection, model::http::HttpModelClient};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    time::{Duration, timeout},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -53,8 +52,7 @@ async fn successful_small_and_large_request_header_latency() {
         let mut observations = Vec::new();
         for _ in 0..SAMPLES {
             let request = json!({"model":"fixture", "input":[{"role":"user","content":"x".repeat(characters)}], "tools":[]});
-            let response = timeout(
-                Duration::from_secs(7),
+            let response = crate::test_watchdog::watchdog("tests/http_header_measurement.rs: successful_small_and_large_request_header_latency",
                 client.response(request, CancellationToken::new(), None),
             )
             .await
@@ -80,8 +78,11 @@ async fn successful_small_and_large_request_header_latency() {
                 "observations":observations, "provider_requests":0})
         );
     }
-    timeout(Duration::from_secs(2), server)
-        .await
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "tests/http_header_measurement.rs: successful_small_and_large_request_header_latency",
+        server,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 }

@@ -1,5 +1,14 @@
 # Development status
 
+## Managed clipboard paths (#79)
+
+Managed images use the existing path field in CLI results and current request
+metadata. Attachment list observes lifecycle/filesystem availability outside the
+writer lane. Permissions, successful-send hashes and reclamation rules are shared
+with existing attachment behavior. Targeted synthetic tests pass; exact-source
+standard/native checks are tracked in #79. F6 path display is delegated to #41
+because its published display branch overlaps; no rendering changes are included.
+
 ## README overview (#78)
 
 The user selected candidate C: 89 colors, mean original-channel error about
@@ -1583,3 +1592,25 @@ Its performance is not relabelled with CBC's measurements. Remote measurement
 branch staysCBC; no main push, release, install or default-data change occurred.
 P3, Mac40Hz qualification, strict clock-bin interpretation and F/G remain open.
 Claude's later main-admission approval is required; #41 is not complete.
+
+## Shared test watchdogs (#77, 2026-10-31)
+
+Non-#41 fixture guards now use tests/support/watchdog.rs: one60-second budget,
+label/call-site diagnostics, synchronous barrier/PTY guards and explicit virtual
+clock tests. The classifier, product deadlines/graces, schema and dependencies
+are unchanged. File groups are committed independently. Short quiet windows use
+post-operation channel/connection counts or explicit blocked-future polls;
+attachment preparation now waits for existing Changed notifications. Native PTY
+capture waits for actual labels/colors, drains output while awaiting saved index
+state, and does not infer idle from a short no-output window.
+
+Five native force-kill milestones exercise saved-result retention, uncommitted
+rollback, interrupted/not-started repair and idempotent reopen. Unix SIGKILL was
+qualified locally; the Windows Job-object path awaits native branch CI.
+The standard layout gate now runs the lexical test deadline policy and its
+reasoned, fingerprint/count-bounded allowance list.135 existing occurrences in
+#41-owned files remain deferred, not fixed;14 deliberate shared-guard, injected
+clock or non-gating measurement occurrences are documented separately. #41 was
+notified; only minimal cfg(test) lib-module wiring overlaps its current files.
+Local targeted tests and Python mutation tests pass; final full/rebased checks,
+two complete native branch runs and main CI are independent pending gates.

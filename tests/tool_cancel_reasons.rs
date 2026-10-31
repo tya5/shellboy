@@ -2,13 +2,12 @@
 //! Real local HTTP + SQLite + shell vertical paths; no production credentials.
 use serde_json::{Value, json};
 use shellboy::{app::DataOwner, control::Control, protocol::*};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::timeout,
 };
 
 struct Reply {
@@ -140,7 +139,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     .unwrap()
 }
 async fn incoming(receiver: &mut mpsc::UnboundedReceiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), receiver.recv())
+    crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: incoming", receiver.recv())
         .await
         .unwrap()
         .unwrap()
@@ -168,18 +167,20 @@ async fn check(scenario: Scenario, expected: &str) {
         {"type":"function_call","id":"third","call_id":"third-call","name":"shell","arguments":json!({"command":"printf also-must-not-run","background":false}).to_string()}
     ]}))).ok().unwrap();
     match scenario {
-        Scenario::HumanBackground => timeout(Duration::from_secs(5), async {
-            loop {
-                if control.background(&accepted.thread_id).await.is_ok() {
-                    break;
+        Scenario::HumanBackground => {
+            crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: check", async {
+                loop {
+                    if control.background(&accepted.thread_id).await.is_ok() {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap(),
+            })
+            .await
+            .unwrap()
+        }
         Scenario::NewInput => {
-            timeout(Duration::from_secs(5),async {
+            crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: check",async {
                 loop {
                     let running=control.store.database.call(|db| Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE state='running')",[],|r|r.get::<_,bool>(0))?)).await.unwrap();
                     if running {break;} tokio::task::yield_now().await;
@@ -256,7 +257,7 @@ async fn check(scenario: Scenario, expected: &str) {
             "model replay must contain the committed cancellation facts"
         );
     }
-    timeout(Duration::from_secs(8), control.shutdown())
+    crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: check", control.shutdown())
         .await
         .unwrap()
         .unwrap();
