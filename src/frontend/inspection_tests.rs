@@ -1,5 +1,5 @@
 //! Actual UI form -> frontend -> committed Control notification -> UI projection.
-//! Synthetic local fixtures only; this is neither CLI nor native-latency proof.
+//! Synthetic local fixtures; mutations cross real local IPC (no subprocess CLI or native-latency proof).
 use super::*;
 use crate::ui::{
     InspectionSnapshot, InspectionTarget, ManagementContext, UiAction, UiState, UiUpdate,
@@ -7,6 +7,23 @@ use crate::ui::{
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::sync::mpsc::Receiver;
+
+// Use the public local transport with the exact generated operation/origin.
+// Fixture SQL only prepares synthetic starting data.
+async fn external_request(control: &Control, request: Request) -> Response<Value> {
+    let data_dir = control.store.database.path().parent().unwrap();
+    let operation_id = request.operation_id;
+    let response = crate::ipc::call(
+        data_dir,
+        request.command,
+        Some(operation_id.clone()),
+        request.origin,
+    )
+    .await
+    .expect("fixture external IPC request must reach the bound owner");
+    assert_eq!(response.operation_id, operation_id);
+    response
+}
 
 struct NoClipboard;
 impl ClipboardBackend for NoClipboard {
@@ -202,16 +219,18 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
         db.execute("UPDATE app_meta SET value=?1 WHERE key='compact.result.foreign-restore'",[serde_json::json!({"state":"completed","ended_at":"2026-10-31T00:02:00Z","outcome":{"result":{"omitted_nodes":0,"opaque":"x".repeat(1024*1024)}}}).to_string()])?;
         Ok(())
     }).await.unwrap();
-    let changed = control
-        .request(super::operation(
+    let changed = external_request(
+        &control,
+        super::operation(
             &control,
             Command::ThreadSet(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("updated under oversized compaction".into()),
                 ..Default::default()
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(changed.ok, "{:?}", changed.error);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, proofs| {
         proofs.last().is_some_and(|proof| {
@@ -344,14 +363,16 @@ async fn f8_foreign_run_inspection_tracks_real_stop_without_switching_conversati
     let old_usage = initial.snapshot.usage_sequence.unwrap();
     // The real public Control reducer commits the foreign state and publishes
     // its actual Changed event. No synthetic notification or observer.changed.
-    let stopped = control
-        .request(super::operation(
+    let stopped = external_request(
+        &control,
+        super::operation(
             &control,
             Command::RunStop(RunTarget {
                 run_id: "independent-run".into(),
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(stopped.ok, "actual stop failed: {:?}", stopped.error);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, proofs| {
         proofs.last().is_some_and(|proof| {
@@ -475,16 +496,18 @@ async fn f8_storage_separates_saved_metadata_from_physical_samples_and_refreshes
         .unwrap()
         .parse::<u64>()
         .unwrap();
-    let changed = control
-        .request(super::operation(
+    let changed = external_request(
+        &control,
+        super::operation(
             &control,
             Command::ThreadSet(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("synthetic changed title".into()),
                 ..Default::default()
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(
         changed.ok,
         "foreign metadata commit failed: {:?}",
@@ -496,14 +519,16 @@ async fn f8_storage_separates_saved_metadata_from_physical_samples_and_refreshes
     })
     .await;
     let after_metadata = proofs.last().unwrap().snapshot.metadata_sequence;
-    let collected = control
-        .request(super::operation(
+    let collected = external_request(
+        &control,
+        super::operation(
             &control,
             Command::StorageCollect(StorageArgs {
                 category: Some(StorageCategory::Raw),
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(
         collected.ok,
         "actual collection failed: {:?}",
@@ -565,14 +590,16 @@ async fn f8_delete_preview_refreshes_live_blocker_after_actual_stop_without_dele
         matches!(initial.target,InspectionTarget::Deletion(ref args) if args.thread_id=="thread" && !args.descendants)
     );
     assert_eq!(field(&initial, "/blockers/live_run_count"), Some("1"));
-    let stopped = control
-        .request(super::operation(
+    let stopped = external_request(
+        &control,
+        super::operation(
             &control,
             Command::RunStop(RunTarget {
                 run_id: "target-run".into(),
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(stopped.ok, "actual stop failed: {:?}", stopped.error);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
         p.last().is_some_and(|p| {
@@ -985,7 +1012,7 @@ async fn visible_storage_observes_real_pending_runtime_receipt_before_held_probe
     tokio::pin!(hint);
     hint.as_mut().enable();
     let requester = control.clone();
-    let execution = tokio::spawn(async move { requester.request(request).await });
+    let execution = tokio::spawn(async move { external_request(&requester, request).await });
     crate::test_watchdog::watchdog("saved inspection fixture", hint.as_mut())
         .await
         .unwrap();
@@ -1129,14 +1156,16 @@ async fn f8_standalone_usage_reads_foreign_run_root_and_follows_real_saved_stop(
             .any(|f| f.key.starts_with("/usage_totals") || f.key.starts_with("/context_usage"))
     );
     assert_eq!(first.context.owner_thread.as_deref(), Some("thread"));
-    let stopped = control
-        .request(super::operation(
+    let stopped = external_request(
+        &control,
+        super::operation(
             &control,
             Command::RunStop(RunTarget {
                 run_id: "independent-run".into(),
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(stopped.ok, "{:?}", stopped.error);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
         p.last()
@@ -1308,15 +1337,17 @@ async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no
     );
     assert_eq!(first.context.owner_thread.as_deref(), Some("thread"));
     assert!(first.snapshot.usage_sequence.is_none());
-    let removed = control
-        .request(super::operation(
+    let removed = external_request(
+        &control,
+        super::operation(
             &control,
             Command::AttachmentRemove(crate::protocol::AttachmentRemoveArgs {
                 thread_id: Some("independent".into()),
                 attachment_id: "saved-attachment".into(),
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(removed.ok, "{:?}", removed.error);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
         p.last().is_some_and(|p| {
@@ -1565,14 +1596,16 @@ async fn f8_operation_and_saved_reference_react_to_actual_message_cancel_without
     );
     assert_eq!(followed.context.owner_thread.as_deref(), Some("thread"));
     let before = followed.snapshot.metadata_sequence;
-    let cancelled = control
-        .request(super::operation(
+    let cancelled = external_request(
+        &control,
+        super::operation(
             &control,
             Command::MessageCancel(crate::protocol::MessageCancelArgs {
                 message_ids: vec!["op-message".into()],
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(cancelled.ok, "{:?}", cancelled.error);
     assert_eq!(
         cancelled.result.unwrap()["items"][0]["outcome"],
@@ -1644,16 +1677,18 @@ async fn f8_history_body_retains_original_detail_while_current_source_facts_chan
     assert_eq!(scope.nodes, vec![("retained-history".into(), Some(7))]);
     assert!(scope.thread_id.is_none());
     control.store.database.call(|db|{db.execute_batch("UPDATE node SET payload_json=NULL,payload_revision=8,deleted_reason='synthetic collection' WHERE id='retained-history';")?;Ok(())}).await.unwrap();
-    let changed = control
-        .request(super::operation(
+    let changed = external_request(
+        &control,
+        super::operation(
             &control,
             Command::ThreadSet(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("source observation fixture change".into()),
                 ..Default::default()
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(changed.ok, "{:?}", changed.error);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
         p.last().is_some_and(|p| {
@@ -1755,16 +1790,18 @@ async fn f8_history_list_keeps_captured_foreign_page_when_selected_path_changes(
         })
         .await
         .unwrap();
-    let changed = control
-        .request(super::operation(
+    let changed = external_request(
+        &control,
+        super::operation(
             &control,
             Command::ThreadSet(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("changed path fixture".into()),
                 ..Default::default()
             }),
-        ))
-        .await;
+        ),
+    )
+    .await;
     assert!(changed.ok, "{:?}", changed.error);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
         p.last().is_some_and(|p| {
