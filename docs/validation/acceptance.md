@@ -4284,8 +4284,10 @@ on the exact candidate; native branch CI must pass before main integration.
 
 ## 2026-10-31 storage/resource guide audit (#81)
 
-- Scope: documentation only, against main `0ca4ec5` after reviewed #83 was
-  fast-forwarded unchanged. #83 main CI `41175347395` passes on all three OSes.
+- Scope: documentation only. Initial audit used reviewed #83 main `0ca4ec5`
+  (main CI `41175347395` passes on all three OSes). Revalidated on `0e53156`
+  including accepted #89 and the separately committed shell-metadata follow-up;
+  retention/cache/docs-system implementation sources remain unchanged.
 - Requirements: #81 body and its two additional comments. Both User Guides
   explain storage/GC/cache/memory and bundled delegation IDs; Esc, last-successful
   usage and the usage-section placement are aligned. Only the stale live-work
@@ -4305,6 +4307,18 @@ on the exact candidate; native branch CI must pass before main integration.
 - Python document/script tests: 18 pass. All 33 Japanese-guide local links and
   fragment targets pass an ad-hoc check (the initial checker mishandled same-file
   fragments; correcting its path resolution fixes the checker, not guide text).
-  Standard check and rebuilt bundled-guide inspection are pending. No release
-  build, performance/PTY rerun, terminal/IME/clipboard/ConPTY verification or
-  real-data GC is performed for this documentation change.
+- Rebased candidate `32c0673`: standard check passes 1,891 Rust tests / zero
+  failures / 33 ignored, layout 93 suites, Python 18, fmt and strict Clippy.
+  `scripts/check-docs.py` against its rebuilt debug binary passes 33 offline CLI
+  checks: 13 guides, three categories, 141 resolved bundled links, valid hashes
+  and UTF-8 section boundaries. Empty cwd/environment, absent config and no
+  owner/API are independently checked. Japanese local links are 33/33 passing.
+  Evidence: `/tmp/issue-81-check-rebased.log`, `/tmp/issue-81-bundled-docs.json`.
+  Binary SHA256: `b9c153e6f0bc083caa3430ec7234f77e8b4d799faf629878131024342391b852`.
+- The separate metadata commit `0e53156` also passes the post-#89 standard check
+  (1,891 Rust tests) and fresh 80-column PTY at
+  `/tmp/issue-83-metadata-pty-rebased/`. The earlier 1,889-test observation above
+  predates #89; both are retained rather than relabeling old results.
+- No release build, performance/PTY rerun for the guide-only delta, physical
+  terminal/IME/clipboard/ConPTY verification or real-data GC is performed.
+  Exact-SHA three-OS CI/integration outcomes are tracked in #81/#83.
