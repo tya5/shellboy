@@ -176,9 +176,11 @@ impl ActivityView {
         } else if let Some(clock) = &mut self.clock {
             clock.observe(at, false);
         }
-        if snapshot.phase != ActivityPhase::AwaitingModel
-            && snapshot.attempt_id == self.received_attempt
-        {
+        let may_be_pre_inflight = matches!(
+            snapshot.phase,
+            ActivityPhase::AwaitingModel | ActivityPhase::Preparing | ActivityPhase::Running
+        );
+        if !may_be_pre_inflight && snapshot.attempt_id == self.received_attempt {
             self.received_attempt = None;
         }
         if snapshot.phase == ActivityPhase::AwaitingModel {
@@ -206,10 +208,11 @@ impl ActivityView {
             } else {
                 self.receive = None;
             }
-        } else if self
-            .receive
-            .as_ref()
-            .is_some_and(|r| snapshot.attempt_id.as_deref() == Some(&r.attempt))
+        } else if !may_be_pre_inflight
+            && self
+                .receive
+                .as_ref()
+                .is_some_and(|r| snapshot.attempt_id.as_deref() == Some(&r.attempt))
         {
             self.receive = None;
         }
@@ -272,8 +275,12 @@ impl ActivityView {
     /// Keep one candidate when an observation precedes its saved projection.
     pub fn receive_at(&mut self, attempt: &str, at: Instant) -> bool {
         if let Some(snapshot) = &self.snapshot {
-            if snapshot.phase == ActivityPhase::AwaitingModel {
-                if snapshot.attempt_id.as_deref() != Some(attempt) {
+            if matches!(
+                snapshot.phase,
+                ActivityPhase::AwaitingModel | ActivityPhase::Preparing | ActivityPhase::Running
+            ) {
+                if snapshot.attempt_id.is_some() && snapshot.attempt_id.as_deref() != Some(attempt)
+                {
                     // Retain one candidate without demoting the currently observed attempt.
                     match &mut self.early_receive {
                         Some(r) if r.attempt == attempt => {
