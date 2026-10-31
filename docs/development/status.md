@@ -1911,3 +1911,11 @@ The standard-library record-delta tool emits one JSON line for baseline/current
 record lengths and additions/deletions. It fails closed on removed lines or
 unreadable inputs, without fetching or editing records. Usage is in setup;
 Python fixture validation and the scripts-only scope are in acceptance.
+
+## Shared disposable PTY helper (#94.2)
+
+Reusable standard-library transport/VT cells replace the #84 inline Terminal
+and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
+key actions and loopback-only configuration. Native captures and replay are used
+immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
+This is developer tooling only; product Rust, schema and workflows are unchanged.
