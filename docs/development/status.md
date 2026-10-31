@@ -9,6 +9,16 @@ reuse only; Windows retains the original single job/four test threads. Rejected
 split experiments and #95 failures are retained in acceptance. Native unsplit
 qualification and live main-push reuse remain pending on the reuse-only source.
 
+## HTTP/header and paired-view ordering (#95)
+
+Generation header waits preserve an already-ready response before an expired
+local wait, after cancellation. Pending headers and non-generation total limits
+retain their deadlines. Permanent-body tests fence real header reception and use
+Tokio virtual time, checking actual HTTP JSONL as well as saved attempts. E keeps
+a pending selected change for a joint read instead of admitting an independent
+browser snapshot around an older inflight ticket. Core review and split-Windows
+repeat qualification are tracked in #95; #5 stages 2/3 remain held separately.
+
 ## Explicit usage-limit recovery (#76)
 
 Known future usage-limit resets now bypass automatic resend/reduction and enter
