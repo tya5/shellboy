@@ -6010,3 +6010,25 @@ Windows/Linux native PTYs and measured P1 interaction comparison remain untested
 The canonical code-copy chooser, numbered block targets, /copy preference/all,
 finite complete-block retrieval, copy character counts and image-failure /attach
 alternatives remain pending; these observations do not establish #87 completion.
+
+Latest-main continuation: the task branch is rebased onto the exact #91 B main
+parent afe4c087. The only rebase conflict was additive design text; the incoming
+#93 contract and main's E/#91 qualification text are retained. The rebuilt native
+PTY matrix passed all 16 cases again at /tmp/issue-87-hints-pty-rebased-v2/;
+manifest and current binary SHA-256 agree at
+8ec5c970fbcd8856f117e809d58137370c1ed7cf4d73f77a681995ac86839df0.
+The captured selection row uses the corrected "history c" guidance rather than
+forcing Tab (which would leave an already-focused history). The actual running
+Turn scenes also pass at /tmp/issue-87-running-pty-rebased/. The first rebased
+harness run appended a second [ui] table to main's now-OSC52-safe fixture and was
+rejected by TOML before spawn; the corrected driver appends only bell/palette/
+bindings to the fixture's existing table. Product safety was not relaxed.
+
+A latest-main RUST_TEST_THREADS=2 sh scripts/check.sh is still running at this
+recording point (/tmp/issue-87-check-rebased.log); Python41, watchdog/layout,
+format and Clippy have passed, and the Rust tests are in progress. No full
+standard-check success or all-OS result is claimed yet. Resource coordination
+now defers any additional Rust build/check until worker1's #96 check releases
+the host; already-running processes are not interrupted. This supersedes the
+earlier final-source-capture gap only, not the pending standard check/P1 or
+canonical code-copy implementation gaps.
