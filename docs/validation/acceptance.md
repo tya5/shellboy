@@ -1,5 +1,45 @@
 # Validation record
 
+## G saved-inspection composition: native library checkpoint
+
+Native macOS, Rust1.99.1, working source based on1479a59 with the G5/G6
+composition: `cargo test --locked --lib` passes1282/0/15 and
+`cargo clippy --locked --all-targets -- -D warnings` succeeds. One root
+CARGO_TARGET_DIR, incremental disabled, one Cargo build job and two test
+threads were used. The build was announced in #41. The composition is now
+committed at5f17374. The first full `sh scripts/check.sh` passes Python70,
+layout95, watchdog/fmt/strict all-target Clippy and library1282/0/15, then
+fails integration951/1/17. The single failure is the existing structured-history
+end-to-end fixture waiting for a generic Status on an expired detail request;
+the implementation now emits the correctly correlated ManagementDetailFailure.
+Its corrected assertion keeps the exact result ID, detail request ID and pointer
+and rejects replacement bytes masquerading as the old original. Native exact
+rerun passes1/0 (968 filtered out), retaining all original/cursor/hash/wait
+assertions. Later process/example harnesses were not reached;
+no complete-standard success is claimed. No paid API or user database was used.
+
+The actual frontend tests cover foreign Run stop without viewer retargeting,
+usage periods/scope, pending receipt visibility before held external work,
+live deletion blockers, retained index coverage windows, attachment removal and
+managed-file collection, plus operation/downstream cancellation. Unit evidence
+also covers late field pages, hide through saturated input, superseded show
+rejection before target installation, shared initial metadata/usage admission,
+and index commit/rollback/no-op/replay/partial-startup notifications.
+
+Earlier broad runtime runs exposed real missing notifications, corrected through
+existing commit paths. Their remaining fixture corrections preserve the current
+contract: real owner-instance pins survive recovery; managed-file unavailability
+takes precedence over selection exclusion; usage form navigation includes the
+since/until fields. A failed new index window retains the prior counts and
+observation identity under last_observation, without a stale actionable cursor.
+The full library result includes all these regressions.
+
+This is the original twelve-target composition, not complete G5. Thread's
+additional canonical last-input/answer/compaction reads still need bounded
+source/scalar and off-transaction preparation work. Status/list/history/readback
+coverage, G9 query costs, native UI/P3/P6, latest-main reconciliation, three-OS
+CI and complete G admission remain unverified.
+
 ## Exact-SHA CI reuse (#92, reuse-only qualification pending)
 
 On 2026-10-31 the reviewer approved reuse and explicitly dropped Windows

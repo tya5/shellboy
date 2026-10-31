@@ -726,6 +726,18 @@ units below; names describe scope, not a new engine/framework.
 
 ### G remaining saved-read coverage inventory (not implementation evidence)
 
+Local G5/G6 composition update (base1479a59): the original twelve target groups
+are now wired through shared readonly admission, including independent usage
+and physical cadence, revision-ordered visibility and stale retained coverage.
+Complete native library1282/0/15 and strict all-target Clippy pass. Actual
+frontend/form regressions cover committed Run/usage/deletion/index/attachment/
+operation changes and pending receipts before held external I/O. The first
+standard passes these library/Python/Clippy gates but fails one stale-detail
+fixture in integration951/1/17; its corrected exact correlated-failure regression
+now passes1/0. This paragraph does not close the rows below. No G
+push/admission or current-source3OS/native/P3/P6 result is implied. Fetched
+main805efc9 (#87/#102) remains to reconcile after this checkpoint.
+
 The initial twelve archived targets do not close G5. Reconcile this inventory
 with the current typed catalogue before declaring reactive coverage complete.
 The rows below are obligations, not assertions that notifications are connected.

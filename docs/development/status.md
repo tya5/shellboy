@@ -1,5 +1,33 @@
 # Development status
 
+## G saved-inspection composition (local checkpoint, not admission)
+
+The initial twelve saved-target groups now join the existing readonly view
+admission instead of repeating whole Control requests. Metadata uses dirty
+500ms admission; usage and physical samples retain independent dirty3s cadence.
+The UI keeps target/field identity and old observations on failure. A monotonic
+visibility revision and one scalar priority-hide slot prevent saturated ordinary
+input or a delayed show from reviving a hidden observer. Initial submitted
+reads retain their input-acknowledgment contract.
+
+Real frontend/form tests exposed missing attachment-removal, pending-reservation
+and managed-GC availability notifications; these now reuse existing committed
+signals. IndexService has one separate bounded saved-change permit, independent
+of its worker wake. No new public operation, schema, worker or job engine.
+Native library1282/0/15 and strict all-target Clippy pass on the combined working
+source now committed at5f17374. The first full standard passes Python/layout/
+Clippy and library but fails one integration fixture (951 passed/1 failed/17
+ignored): it waits for a generic Status instead of the newly correlated expired
+detail failure. The corrected exact regression now passes1/0 in native integration. See
+acceptance and the G1–G12 ledger for remaining scope.
+
+G5 is not closed: status, generic lists and retained history/readback mutable
+facts still need their own bounded observations. G9 SQL/scalar work, P3/P6,
+native layouts and reviewer/3OS/main admission remain open. Fetched main805efc9
+adds #87/#102 after the currently merged5321310; reconcile it after this
+checkpoint without dropping canonical copy/context-wait behavior. No push,
+release, installation or user-data change is authorized by this checkpoint.
+
 ## Exact-SHA CI reuse (#92)
 
 Main push may reuse actual first-attempt successful three-OS native checks on
