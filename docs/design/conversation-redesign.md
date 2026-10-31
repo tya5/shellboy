@@ -231,6 +231,41 @@ captured; the read result and downstream mutable work remain separate.
 | Native memory, remote model catalog, standalone docs/config/RAG/exec results | These have explicit on-demand/external-source scope and observed/completion time plus refresh/repeat action. Do not start hidden OS/API/file polling or automatically repeat costly/mutating clients. This exception does not apply to saved owner lifecycle fields. |
 | Deletion/index cost confirmations | Retain chosen target/source/time and existing stronger execution guards; changed facts cannot silently authorize a stale destructive/cost preview. |
 
+Inspection visibility has a UI-local monotonic revision, separate from saved
+read sequence and request generation. One scalar hide revision reuses the
+existing priority control mailbox, so hiding a popup retires observation even
+when ordinary input admission is full. The frontend retains one latest desired
+visibility scope/revision across target installation and rejects older queued
+show actions. Reopening/manual refresh uses a newer revision; unchanged frames
+do not emit observations. This adds no Core event, worker, timer or persistence.
+The mailbox slot holds only one u64, is coalesced and drained/dropped with the
+existing ActionReceiver. Initial explicit read outcomes retain existing input
+acknowledgment semantics; subsequent observation work is cancelled on hide.
+Initial scoped Run/Turn/Thread metadata and usage share one snapshot; following
+usage observations keep the independent3s dirty cadence.
+
+Attachment removal returns its existing active-selection change bit and uses
+the existing committed changed_threads delivery only when that bit is true.
+Duplicate removal/replay stays quiet; no extra selection query or new event is
+needed. Runtime and ordered-edit reservations wake the existing owner completion
+hint after a new pending receipt has committed, before waiting on external I/O.
+Saved/pending replay branches do not publish a new reservation transition. These
+hints expose pending facts without changing side-effect/reply-grace ownership.
+Managed-file GC reuses its existing availability signal at each committed
+ready/failed-to-deleting and deleting-to-deleted transition, including when
+later unlink/storage work fails. No-op candidates stay quiet; metadata refresh
+reads saved availability only and never probes external files.
+
+
+The live saved-index consumer has one private coalesced Notify permit owned by
+IndexService, independent of the existing indexing-worker wake. Publish only
+after committed saved changes; read-only status/replay/rollback do not publish.
+It has no payload, queue, worker or persistence, and follows IndexService/owner
+shutdown lifetime. Frontend visibility gates waiting and dirty admission. The
+existing owner completion hint and GC availability notification are reused;
+neither is an authorization or proof that a mutation occurred. Exact reads and
+sequence/generation checks still determine adopted facts.
+
 Frontend owns visibility, cadence, cancellation, generation/sequence adoption,
 retention and presentation. Reads join the existing finite presentation pool and
 readonly WAL snapshot; no I/O, DB work, queue wait or join enters the UI OS thread.
