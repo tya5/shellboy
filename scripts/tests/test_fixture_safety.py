@@ -25,7 +25,7 @@ class FixtureSafetyTests(unittest.TestCase):
         for command in ['/copy node', '/image', '/paste-image']:
             with self.assertRaises(ValueError):
                 safety.reject_gui_clipboard_input([command], [], '')
-        for key in ['c', 'C', '\x19', '\x03', '/copy node\r']:
+        for key in ['c', 'C', '\x19', '\x03', '/copy node\r', '\x1b[99u']:
             with self.assertRaises(ValueError):
                 safety.reject_gui_clipboard_input([], [key], '')
         safety.reject_gui_clipboard_input(['/switch visual-composer'], ['\x1b[C', '\x1b[A', '/at'], '')
