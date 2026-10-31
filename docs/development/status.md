@@ -2253,3 +2253,23 @@ Focused Frontend tests with the fix pass249/0/3, including both new cancellation
 checks. An additional partial-consumer SQL fixture preserves the visible child
 count after Watch closes. Combined standard/CI qualification of this final
 source remains pending; the earlier published CI is not relabelled.
+
+
+## F follow-up qualification and parallel handoff
+
+F950c9ed passes the isolated-target native macOS standard:2019/0/35,
+Python18 and all format/Clippy/layout/watchdog checks. All3 new cancellation
+tests are present in the compiled inventory and pass. The stale shared-target
+attempt is excluded. Exact-source ordinary3OS CI41187246963 is running.
+Main remains unchanged; F main admission still needs reviewer approval.
+
+Formal Linux/macOS P2/P5 CI41186128587 measures baseline d0a92bf and
+F67cc688, including candidate-only Watch; the local2s smoke is fixture proof
+only. Native P3 combined-consumer characterization is in progress.
+
+The specified2,000-row Watch allocation profile and its limits are recorded in
+[acceptance](../validation/acceptance.md#f-follow-up-qualification-and-parallel-handoff).
+It does not confuse the64KiB source budget with total UI memory or claim RSS.
+Parallel Shellboy #85–#87/#90 and issue5 coordination follows
+[the current plan](issue-41-plan.md#parallel-admission-coordination-6541457457).
+G uses #87 if already admitted; the later side resolves the named overlaps.

@@ -4909,3 +4909,65 @@ This proves the retained paste/composer interaction, not full Watch visual
 acceptance or physical Windows UX. Combined F standard2016/0/35 and P4 values
 are recorded above; F native/P2/P3/P5/memory gaps remain open. F publication/CI
 is authorized after E admission; F main admission is separately gated on review.
+
+
+## F follow-up qualification and parallel handoff
+
+Source950c9ed has a successful isolated-target native macOS standard check:
+2,019 passed/0 failed/35 ignored (lib1072/0/15, integration928/0/17,
+termination12/0/1, forced7/0/2), Python18, format, strict all-target Clippy and
+layout/watchdog gates. All three new cancellation tests are explicitly present
+in both the compiled inventory and successful harness output. A prior shared
+target run reused the67cc688 unit artifact (1069 passes, missing those tests);
+that run is discarded as evidence for950c9ed. The earlier focused249/0/3 run
+proved the two then-existing cancellation checks, not the later partial-consumer
+SQL case. That third case now passes and observes one actual root-count SQL
+while a cancelled Watch part is omitted. Gitleaks67cc688..950c9ed: no leaks.
+
+The F branch advances to950c9ed and starts exact-source ordinary3OS
+CI41187246963. Main remains unchanged. CI41186128587 separately runs
+formal P2/P5 before d0a92bf/after67cc688 on Linux/macOS80/140 with3 P5
+producers (P2 one). Watch has no baseline counterpart and is explicitly a
+candidate-only observation. Native Windows performance stays unavailable.
+Local2s smoke validates all8 available scenarios, actual producer counts and
+source/binary/harness witnesses: P5 draws/UI writer jobs/readonly opens all0;
+these short windows do not qualify long-window P2/P5.
+
+### Requested-live heap characterization, source67cc688
+
+A private release example (no cfg(test), dev-dependency feature union) wraps
+System GlobalAlloc and measures allocator-requested live bytes at object
+boundaries. It uses actual WatchState/ThreadBrowser methods, not estimated
+String lengths. Fixture:2,000 rows,160 emoji title/parent,512 emoji recovery,
+160 emoji answer;36-byte synthetic identities and short synthetic timestamps.
+Full Browser loads40 pages of50 and actually draws/scrolls every row through
+140x40 TestBackend, then retains2,000 seen identities. Two cycles are observed.
+An earlier unrelated-full-unit-LTO probe was interrupted before producing any
+result; it is not a successful sample. The dedicated example binary witness
+is341c5407c07605d1138841dde3b69bc80fc7f80c38cb53dda0b7b6c17d7d6b2c.
+
+| Allocated component/stage | Observed requested-live delta, bytes |
+| --- | ---: |
+| WatchState metadata |5,230,576 in both cycles|
+| WatchState after details/seen |21,570,272 in both cycles|
+| WatchState closed cache |21,570,272; bounded entries remain cached|
+| Empty WatchState reopen, seen retained |365,920 in both cycles|
+| WatchState dropped |0 in both cycles|
+| Full Browser metadata |10,142,336 in both cycles|
+| Full Browser visited details + seen + two draw buffers |27,709,696 /27,691,400|
+| Full Browser closed, buffers still held |27,539,064 /27,520,768|
+| Full Browser and buffers dropped |18,296 first cycle /0 second cycle|
+
+The first full-draw residual is unattributed process allocation; the next cycle
+shows no additional residual. This does not prove absence of every leak. These
+values are a specified cache-shape observation, not RSS, allocator usable size,
+a hard bound for all work/string shapes, whole owner/UI-state heap, or native
+other-OS evidence. The64KiB source-witness budget never claimed total Watch
+memory. No allocator hook, runtime API, dependency, cache policy, new worker or
+queue is added to the product. Raw source patches/manifests/binary/logs remain
+local; no user data, clipboard or paid endpoint was involved.
+
+User coordination6541457457 permits Shellboy #85–#87/#90 to start before F/G.
+The later side rebases the named small UI overlaps; G uses admitted #87 as its
+base, and F adapts startup fixture lines if issue5's shared owner assembly lands
+first. F/G main gates and the narrowed #41 scope remain unchanged.
