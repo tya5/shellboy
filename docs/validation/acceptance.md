@@ -2,6 +2,14 @@
 
 ## Batched native CI (#92, in progress)
 
+Candidatefa1e26b run41184815121 passes Linux/macOS but Windows partition
+execution rejects ambiguous substring skip filters (for example cli:: also
+matches docs_cli::). Replace module-substring skips with discovered complete
+identities and libtest --exact inclusion. Bound argument batches to24000 UTF-16
+code units, below the Windows32767 limit; retain every batch log, sum duration
+and summary counts, continue after failures, and audit the unchanged exact union.
+The original failure is retained; no failed-job rerun is qualification.
+
 Candidate7f339a7 run41184263185 passes Linux/macOS and all script gates,
 but both Windows partitions reject `test_watchdog` as unassigned. The runtime
 unknown-module guard works; the source scanner omitted visibility-qualified

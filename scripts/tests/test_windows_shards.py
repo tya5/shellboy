@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from windows_shards import audit, selection, check_layout
+from windows_shards import audit, selection, check_layout, exact_batches
 
 
 class WindowsShardTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class WindowsShardTests(unittest.TestCase):
     def test_module_selection(self):
         selected, args = selection('test:integration', ['one::a', 'two::b'], '1', self.config)
         self.assertEqual(selected, ['one::a'])
-        self.assertEqual(args, ['--skip', 'two::'])
+        self.assertEqual(args, [['--exact', 'one::a']])
 
     def test_nonowned_harness_still_inventoried(self):
         self.assertEqual(selection('lib:shellboy', ['case'], '2', self.config), ([], None))
@@ -46,9 +46,23 @@ class WindowsShardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 selection(target, names, '1', self.config)
 
-    def test_substring_collision_rejected(self):
+    def test_exact_names_avoid_substring_collisions(self):
+        names = ['one::nested::two::case', 'two::case']
+        selected, batches = selection('test:integration', names, '1', self.config)
+        self.assertEqual(selected, names[:1])
+        self.assertEqual(batches, [['--exact', names[0]]])
+
+    def test_exact_batches_preserve_every_identity_with_bounded_arguments(self):
+        import subprocess
+        names = [f'module::case_{number}' for number in range(100)]
+        batches = exact_batches(names, limit=100)
+        self.assertGreater(len(batches), 1)
+        self.assertEqual([name for batch in batches for name in batch[1:]], names)
+        self.assertTrue(all(batch[0] == '--exact' for batch in batches))
+        self.assertTrue(all(len(subprocess.list2cmdline(batch).encode('utf-16-le')) // 2 <= 100
+                            for batch in batches))
         with self.assertRaises(ValueError):
-            selection('test:integration', ['one::nested::two::case'], '1', self.config)
+            exact_batches(['x' * 100], limit=10)
 
     def test_omission_duplicate_failure_or_different_inventory_rejected(self):
         for key, value in [('executed_tests', []), ('executed_tests', ['one', 'two']),

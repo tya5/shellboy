@@ -55,6 +55,27 @@ class TimingGateTests(unittest.TestCase):
                 code = runner.main()
             return code, json.loads((root / 'results/results.json').read_text()), calls
 
+    def test_exact_batch_failure_retains_later_batch_and_combined_log(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / 'combined.log'
+            commands = []
+
+            def execute(command, output):
+                commands.append(command)
+                failed = command[-1] == 'first'
+                output.write_text('test result: ' + ('FAILED. 0 passed; 1 failed;' if failed
+                                  else 'ok. 1 passed; 0 failed;') + ' 0 ignored;\n', encoding='utf-8')
+                return {'command': command, 'seconds': 1.0, 'exit_code': 101 if failed else 0,
+                        'log': output.name}
+
+            with patch.object(runner, 'run', execute):
+                result = runner.run_batches('binary', [['--exact', 'first'], ['--exact', 'second']], log)
+            self.assertEqual(len(commands), 2)
+            self.assertEqual(result['exit_code'], 101)
+            self.assertEqual(result['seconds'], 2.0)
+            self.assertEqual(result['batches'], 2)
+            self.assertEqual(log.read_text(encoding='utf-8').count('test result:'), 2)
+
     def test_added_module_prefix_preserves_identity(self):
         self.assertEqual(runner.identities('test:storage', ['case']),
                          runner.identities('test:integration', ['storage::case']))

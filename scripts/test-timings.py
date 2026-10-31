@@ -19,6 +19,23 @@ def run(command, log):
             'exit_code': result.returncode, 'log': log.name}
 
 
+def run_batches(binary, batches, log):
+    if len(batches) == 1:
+        return run([binary, *batches[0]], log)
+    results = []
+    with log.open('w', encoding='utf-8') as combined:
+        for number, arguments in enumerate(batches):
+            part = log.with_name(f'{log.stem}-part-{number:03d}.log')
+            result = run([binary, *arguments], part)
+            results.append(result)
+            combined.write(part.read_text(encoding='utf-8', errors='replace'))
+            combined.write('\n')
+    return {'commands': [result['command'] for result in results],
+            'seconds': sum(result['seconds'] for result in results),
+            'exit_code': next((result['exit_code'] for result in results if result['exit_code']), 0),
+            'log': log.name, 'batches': len(results)}
+
+
 def identities(target, names):
     """Only the integration module prefix is structural; preserve all other names."""
     result = []
@@ -108,7 +125,7 @@ def main():
             item = {'target': target, 'tests': len(names), 'ignored': len(ignored)}
             all_tests.extend(identities(target, names))
             all_ignored.extend(identities(target, ignored))
-            selected, filters = names, []
+            selected, filters = names, [[]]
             if args.windows_shard:
                 selected, filters = shard_selection(target, names, args.windows_shard, load_shards())
                 if filters is None:
@@ -119,13 +136,14 @@ def main():
                 item['selected_tests'] = len(selected)
             if not (args.inventory_only or args.profile_only):
                 print(f'Running {target} ({len(names)} tests, {len(ignored)} ignored)', flush=True)
-                item.update(run([binary, *filters], args.output / f'harness-{number:03d}.log'))
+                item.update(run_batches(binary, filters, args.output / f'harness-{number:03d}.log'))
                 # A successful process running zero tests must not replace a suite.
                 text = (args.output / item['log']).read_text(encoding='utf-8', errors='replace')
-                summary = re.search(r'test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored;', text)
-                if summary:
-                    item['passed'], item['failed'] = int(summary[2]), int(summary[3])
-                    reported_ignored = int(summary[4])
+                summaries = re.findall(r'test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored;', text)
+                if len(summaries) == item.get('batches', 1):
+                    item['passed'] = sum(int(summary[1]) for summary in summaries)
+                    item['failed'] = sum(int(summary[2]) for summary in summaries)
+                    reported_ignored = sum(int(summary[3]) for summary in summaries)
                     if item['passed'] + item['failed'] + reported_ignored != len(selected):
                         record['failures'].append({'target': target, 'reason': 'test count mismatch'})
                 else:

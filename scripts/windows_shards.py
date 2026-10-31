@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import re
+import subprocess
 
 MANIFEST = Path(__file__).with_name('windows-test-shards.json')
 
@@ -26,18 +27,34 @@ def selection(target, names, shard, config):
         if target not in config['targets']:
             raise ValueError(f'unassigned Windows Cargo target: {target}')
         owner = config['targets'][target]
-        return (list(names), []) if owner == shard else ([], None)
+        return (list(names), [[]]) if owner == shard else ([], None)
     modules = config['modules']
     unknown = {name.partition('::')[0] for name in names} - set(modules)
     if unknown:
         raise ValueError(f'unassigned Windows integration modules: {unknown}')
     selected = [name for name in names if modules[name.partition('::')[0]] == shard]
-    skipped = [module + '::' for module, owner in sorted(modules.items()) if owner != shard]
-    # libtest skip filters are substrings, not anchored module prefixes.
-    actual = [name for name in names if not any(skip in name for skip in skipped)]
-    if actual != selected:
-        raise ValueError('Windows module names have ambiguous libtest skip filters')
-    return selected, [arg for skip in skipped for arg in ['--skip', skip]]
+    return selected, exact_batches(selected) if selected else None
+
+
+def exact_batches(names, limit=24000):
+    """Bound exact-name argument batches below Windows' 32767 UTF-16 limit."""
+    batches, batch = [], ['--exact']
+    for name in names:
+        candidate = [*batch, name]
+        size = len(subprocess.list2cmdline(candidate).encode('utf-16-le')) // 2
+        if size > limit:
+            if len(batch) == 1:
+                raise ValueError('test identity exceeds Windows command-line budget')
+            batches.append(batch)
+            batch = ['--exact', name]
+            if len(subprocess.list2cmdline(batch).encode('utf-16-le')) // 2 > limit:
+                raise ValueError('test identity exceeds Windows command-line budget')
+        else:
+            batch = candidate
+    if len(batch) > 1:
+        batches.append(batch)
+    return batches
+
 
 
 def audit(records):
