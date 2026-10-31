@@ -1371,9 +1371,12 @@ fn tool_metadata(
         parts.push(outcome);
     }
     if let Some(seconds) = elapsed {
-        parts.push(format!("{seconds}秒"));
+        parts.push(crate::presentation::elapsed_text(
+            seconds.saturating_mul(1000),
+            false,
+        ));
     } else if let Some(ms) = tool.elapsed_ms {
-        parts.push(format!("{}.{:01}秒", ms / 1000, (ms % 1000) / 100));
+        parts.push(crate::presentation::elapsed_text(ms, true));
     } else if kind == RowKind::Running && tool.started_at.is_some() {
         parts.push("経過未取得".into());
     }
@@ -2369,17 +2372,19 @@ pub(super) fn paint_live_times(
             })
             .map(|span| {
                 let mut parts = span.content.split(" · ").collect::<Vec<_>>();
-                if parts
-                    .last()
-                    .is_some_and(|part| *part == "経過未取得" || part.ends_with('秒'))
-                {
+                if parts.last().is_some_and(|part| {
+                    *part == "経過未取得" || (part.ends_with('秒') || part.ends_with('分'))
+                }) {
                     parts.pop();
                 }
                 let mut value = parts.join(" · ");
                 if !value.is_empty() {
                     value.push_str(" · ");
                 }
-                value.push_str(&format!("{seconds}秒"));
+                value.push_str(&crate::presentation::elapsed_text(
+                    seconds.saturating_mul(1000),
+                    false,
+                ));
                 value
             })
             .unwrap_or(fallback);
@@ -4353,15 +4358,15 @@ mod conversation_item_tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(shown.contains("⏵ printf synthetic"), "{shown}");
-        assert!(shown.contains("背景（利用者） · 323秒"), "{shown}");
-        assert!(shown.contains("323秒"), "{shown}");
+        assert!(shown.contains("背景（利用者） · 5分23秒"), "{shown}");
+        assert!(shown.contains("5分23秒"), "{shown}");
         assert_eq!(
             painted
                 .iter()
                 .find(|line| line
                     .spans
                     .last()
-                    .is_some_and(|s| s.content.ends_with("323秒")))
+                    .is_some_and(|s| s.content.ends_with("5分23秒")))
                 .unwrap()
                 .spans
                 .last()

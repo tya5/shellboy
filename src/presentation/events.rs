@@ -140,7 +140,7 @@ fn continuation_title(kind: &str, event: &serde_json::Value) -> Option<String> {
         .get("elapsed_ms")
         .and_then(serde_json::Value::as_u64)
     {
-        parts.push(format!("{}秒", ms / 1000));
+        parts.push(super::elapsed_text(ms, false));
     }
     parts.push(NoticeText::Delivered.text().into());
     Some(parts.join(" · "))
@@ -460,7 +460,9 @@ mod tests {
         let title = title("shell_ended", &event);
         assert!(title.contains("execution-comple"));
         assert!(
-            title.contains("終了 7") && title.contains("316秒") && title.contains("モデルに渡した")
+            title.contains("終了 7")
+                && title.contains("5分16秒")
+                && title.contains("モデルに渡した")
         );
         assert!(!title.contains("背景") && !title.contains("check.sh"));
     }

@@ -1,9 +1,42 @@
 //! Display facts and a local animation clock. No lifecycle writes, I/O or tasks.
+mod timing;
 use super::theme;
 use ratatui::{style::Style, text::Span};
 use std::time::{Duration, Instant};
+use timing::PhaseClock;
+pub use timing::SavedTiming;
 
 pub use crate::activity::ActivityPhase;
+/// Stable footer vocabulary for the later #35 translation layer.
+#[derive(Clone, Copy, Debug)]
+pub enum FooterText {
+    Observed,
+    UnknownAge,
+    UsageLimit,
+    RateLimit,
+    RecoveryActions,
+}
+impl FooterText {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Observed => "ui.activity.age.observed",
+            Self::UnknownAge => "ui.activity.age.unknown",
+            Self::UsageLimit => "ui.activity.limit.usage",
+            Self::RateLimit => "ui.activity.limit.rate",
+            Self::RecoveryActions => "ui.activity.limit.actions",
+        }
+    }
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::Observed => "観測 ",
+            Self::UnknownAge => "経過未取得",
+            Self::UsageLimit => "使用量上限",
+            Self::RateLimit => "要求頻度の制限",
+            Self::RecoveryActions => "待つ・時刻後も明示的に再試行 / /model で接続を選ぶ",
+        }
+    }
+}
+
 impl ActivityPhase {
     pub fn is_active(self) -> bool {
         self.motion() != Motion::Still
@@ -35,6 +68,8 @@ impl ActivityPhase {
 /// Existing saved facts for human recovery; never a new lifecycle state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecoverySnapshot {
+    pub resolved: bool,
+    pub usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     pub stage: String,
     pub message: String,
     pub pending_messages: u64,
@@ -42,6 +77,24 @@ pub struct RecoverySnapshot {
     pub live_shells: u64,
     pub uncollected_shells: u64,
     pub stop_reason: Option<String>,
+}
+impl RecoverySnapshot {
+    pub fn limit_summary(&self) -> Option<String> {
+        let limit = self.usage_limit?;
+        let at = chrono::DateTime::from_timestamp(limit.resets_at, 0)?;
+        let kind = match limit.kind {
+            crate::model::usage_limit::LimitKind::UsageLimitReached => FooterText::UsageLimit,
+            crate::model::usage_limit::LimitKind::RateLimitRetryAfter => FooterText::RateLimit,
+        };
+        Some(format!(
+            "{} · {} UTC{}",
+            kind.text(),
+            at.format("%m-%d %H:%M"),
+            limit
+                .limit_window_minutes
+                .map_or(String::new(), |n| format!(" · {n}分枠"))
+        ))
+    }
 }
 /// Counts recorded by the failed attempt before a finite retry wait.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
@@ -54,10 +107,13 @@ pub struct AutomaticRetrySnapshot {
 impl AutomaticRetrySnapshot {
     pub(super) fn label(&self) -> String {
         format!(
-            "（{}/{}） · {}秒待機{} · 再送は重複課金の可能性",
+            "（{}/{}） · {}待機{} · 再送は重複課金の可能性",
             self.number,
             self.limit,
-            self.delay_ms.div_ceil(1000),
+            crate::presentation::elapsed_text(
+                self.delay_ms.div_ceil(1000).saturating_mul(1000),
+                false
+            ),
             if self.partial_response_discarded {
                 " · 途中応答を保存して作り直し"
             } else {
@@ -68,6 +124,8 @@ impl AutomaticRetrySnapshot {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivitySnapshot {
+    pub timing: SavedTiming,
+    pub tool_running: bool,
     /// Saved live-Run Revisit count/reservation, projected by the reader.
     pub revisit: Option<String>,
     /// Saved automatic-trim facts for this Turn/generation, if observed.
@@ -94,7 +152,10 @@ pub(super) struct ActivityView {
     epoch: Option<u64>,
     received_attempt: Option<String>,
     receive: Option<ReceiveObservation>,
+    early_receive: Option<ReceiveObservation>,
     clock: Option<ObservedClock>,
+    phase_clock: Option<PhaseClock>,
+    request_clock: Option<PhaseClock>,
 }
 impl ActivityView {
     #[cfg(test)]
@@ -118,10 +179,22 @@ impl ActivityView {
         } else if let Some(clock) = &mut self.clock {
             clock.observe(at, false);
         }
-        if snapshot.phase != ActivityPhase::AwaitingModel {
+        let may_be_pre_inflight = matches!(
+            snapshot.phase,
+            ActivityPhase::AwaitingModel | ActivityPhase::Preparing | ActivityPhase::Running
+        );
+        if !may_be_pre_inflight && snapshot.attempt_id == self.received_attempt {
             self.received_attempt = None;
         }
         if snapshot.phase == ActivityPhase::AwaitingModel {
+            if self
+                .early_receive
+                .as_ref()
+                .is_some_and(|r| Some(&r.attempt) == snapshot.attempt_id.as_ref())
+            {
+                self.receive = self.early_receive.take();
+                self.received_attempt = snapshot.attempt_id.clone();
+            }
             if let Some(attempt) = &snapshot.attempt_id {
                 if self
                     .receive
@@ -131,17 +204,27 @@ impl ActivityView {
                     self.receive = Some(ReceiveObservation {
                         attempt: attempt.clone(),
                         observed_at: at,
+                        first_at: at,
                         received: false,
                     });
                 }
             } else {
                 self.receive = None;
             }
-        } else {
+        } else if !may_be_pre_inflight
+            && self
+                .receive
+                .as_ref()
+                .is_some_and(|r| snapshot.attempt_id.as_deref() == Some(&r.attempt))
+        {
             self.receive = None;
         }
         let changed = self.snapshot.as_ref() != Some(&snapshot);
         self.snapshot = Some(snapshot);
+        let previous_clock = self.phase_clock.take();
+        self.phase_clock = PhaseClock::observe(self, previous_clock, at);
+        let previous_request = self.request_clock.take();
+        self.request_clock = PhaseClock::request(self, previous_request, at);
         changed
     }
     pub fn unavailable_at(&mut self, epoch: u64, at: Instant) -> bool {
@@ -149,6 +232,9 @@ impl ActivityView {
             return false;
         }
         self.epoch = Some(epoch);
+        self.phase_clock = None;
+        self.request_clock = None;
+        self.early_receive = None;
         let had_receive = self.receive.take().is_some();
         if let Some(clock) = &mut self.clock {
             let running = clock.running;
@@ -159,12 +245,20 @@ impl ActivityView {
         }
     }
     pub fn advance_clock(&mut self, at: Instant) {
+        if let Some(age) = &mut self.phase_clock {
+            age.commit(at);
+        }
+        if let Some(age) = &mut self.request_clock {
+            age.commit(at);
+        }
+
         if let Some(clock) = &mut self.clock
             && clock.running
         {
             clock.observe(at, true);
         }
     }
+    #[cfg(test)]
     pub fn displayed_elapsed_ms(&self) -> Option<u64> {
         self.clock
             .as_ref()
@@ -177,23 +271,35 @@ impl ActivityView {
             .map(|clock| clock.elapsed_at(at).as_millis().min(u64::MAX as u128) as u64)
     }
     pub fn stream(&mut self, attempt: &str) {
-        // A new attempt's first chunk may precede its DB projection, even
-        // while the last Turn still appears completed. Keep one candidate;
-        // phase() requires the matching saved inflight attempt before promotion.
-        if self.snapshot.as_ref().is_none_or(|snapshot| {
-            snapshot.phase != ActivityPhase::AwaitingModel
-                || snapshot.attempt_id.as_deref() == Some(attempt)
-        }) {
-            self.received_attempt = Some(attempt.into());
-        }
+        self.receive_at(attempt, Instant::now());
     }
 
     /// Headers and any body bytes are liveness observations, not assistant text.
     /// Keep one candidate when an observation precedes its saved projection.
     pub fn receive_at(&mut self, attempt: &str, at: Instant) -> bool {
         if let Some(snapshot) = &self.snapshot {
-            if snapshot.phase == ActivityPhase::AwaitingModel {
-                if snapshot.attempt_id.as_deref() != Some(attempt) {
+            if matches!(
+                snapshot.phase,
+                ActivityPhase::AwaitingModel | ActivityPhase::Preparing | ActivityPhase::Running
+            ) {
+                if snapshot.attempt_id.is_some() && snapshot.attempt_id.as_deref() != Some(attempt)
+                {
+                    // Retain one candidate without demoting the currently observed attempt.
+                    match &mut self.early_receive {
+                        Some(r) if r.attempt == attempt => {
+                            r.first_at = r.first_at.min(at);
+                            r.observed_at = r.observed_at.max(at);
+                        }
+                        Some(r) if r.observed_at > at => {}
+                        _ => {
+                            self.early_receive = Some(ReceiveObservation {
+                                attempt: attempt.into(),
+                                first_at: at,
+                                observed_at: at,
+                                received: true,
+                            })
+                        }
+                    }
                     return false;
                 }
             } else if snapshot.attempt_id.as_deref() == Some(attempt) {
@@ -204,17 +310,56 @@ impl ActivityView {
         match &mut self.receive {
             Some(receive) if receive.attempt == attempt => {
                 receive.observed_at = receive.observed_at.max(at);
+                if !receive.received {
+                    receive.first_at = at;
+                }
                 receive.received = true;
             }
             _ => {
                 self.receive = Some(ReceiveObservation {
                     attempt: attempt.into(),
                     observed_at: at,
+                    first_at: at,
                     received: true,
                 })
             }
         }
-        was_visible
+        let before = self.phase();
+        let before_secondary = self.secondary_phase();
+        self.received_attempt = Some(attempt.into());
+        let previous_clock = self.phase_clock.take();
+        self.phase_clock = PhaseClock::observe(self, previous_clock, at);
+        let previous_request = self.request_clock.take();
+        self.request_clock = PhaseClock::request(self, previous_request, at);
+        was_visible || before != self.phase() || before_secondary != self.secondary_phase()
+    }
+
+    pub fn phase_time_note(&self, at: Instant) -> Option<String> {
+        self.phase_clock.as_ref().map(|clock| clock.note(at))
+    }
+    pub fn secondary_phase(&self) -> Option<ActivityPhase> {
+        let s = self.snapshot.as_ref()?;
+        (self.phase() == ActivityPhase::Tools && s.phase == ActivityPhase::AwaitingModel).then(
+            || {
+                if s.attempt_id.is_some() && self.received_attempt == s.attempt_id {
+                    ActivityPhase::Receiving
+                } else {
+                    ActivityPhase::AwaitingModel
+                }
+            },
+        )
+    }
+
+    pub fn secondary_note(&self, at: Instant) -> Option<String> {
+        let phase = self.secondary_phase()?;
+        Some(format!(
+            "{} · {}",
+            phase.label(),
+            self.request_clock.as_ref().map_or_else(
+                || FooterText::UnknownAge.text().to_owned(),
+                |clock| clock.note(at)
+            )
+        ))
     }
 
     pub fn receive_gap_note(&self, now: Instant) -> Option<String> {
@@ -229,10 +374,11 @@ impl ActivityView {
         if seconds < 30 {
             return None;
         }
+        let elapsed = crate::presentation::elapsed_text(seconds.saturating_mul(1000), false);
         Some(if receive.received {
-            format!("最後の受信から{seconds}秒")
+            format!("最後の受信から{elapsed}")
         } else {
-            format!("受信待ち{seconds}秒（画面の観測開始から）")
+            format!("受信待ち{elapsed}（画面の観測開始から）")
         })
     }
 
@@ -240,6 +386,17 @@ impl ActivityView {
         let Some(snapshot) = &self.snapshot else {
             return ActivityPhase::Idle;
         };
+        if snapshot.tool_running
+            && matches!(
+                snapshot.phase,
+                ActivityPhase::AwaitingModel
+                    | ActivityPhase::Running
+                    | ActivityPhase::Retrying
+                    | ActivityPhase::Tools
+            )
+        {
+            return ActivityPhase::Tools;
+        }
         if snapshot.phase == ActivityPhase::AwaitingModel
             && snapshot.attempt_id.is_some()
             && snapshot.attempt_id == self.received_attempt
@@ -256,6 +413,7 @@ impl ActivityView {
 struct ReceiveObservation {
     attempt: String,
     observed_at: Instant,
+    first_at: Instant,
     received: bool,
 }
 
@@ -400,7 +558,8 @@ mod tests {
         // Header arrival, then keepalive/comment/partial-frame bytes use the
         // same transport observation; neither is an assistant text delta.
         assert!(view.receive_at("a", at + Duration::from_secs(31)));
-        assert_eq!(view.phase(), ActivityPhase::AwaitingModel);
+        // #85: header/body liveness changes transport phase, not text progress.
+        assert_eq!(view.phase(), ActivityPhase::Receiving);
         assert_eq!(view.receive_gap_note(at + Duration::from_secs(60)), None);
         assert_eq!(
             view.receive_gap_note(at + Duration::from_secs(61))

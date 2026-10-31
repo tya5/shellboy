@@ -902,16 +902,27 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
         projection.snapshot.phase,
         crate::ui::activity::ActivityPhase::Stopped
     );
-    assert_eq!(
+    assert!(
         projection
             .snapshot
             .recovery
             .as_ref()
-            .unwrap()
-            .stop_reason
-            .as_deref(),
-        Some("explicit_stop")
+            .is_some_and(|r| r.resolved),
+        "#85: explicit saved stop resolves the active recovery footer, not its historical evidence"
     );
+    let stop = control
+        .store
+        .database
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT stop_reason FROM run WHERE id='target-run'",
+                [],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(stop, "explicit_stop");
     // Startup saves a generic interruption reason for every interrupted Turn;
     // it is not proof of a previous recovery_wait state.
     let interrupted = control.store.database.call(|db| {

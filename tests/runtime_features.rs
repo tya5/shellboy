@@ -2922,3 +2922,350 @@ async fn headless_shutdown_requires_explicit_directory_and_final_output_loss_is_
     .await
     .unwrap();
 }
+
+fn serve_quote(path: &std::path::Path) -> String {
+    #[cfg(unix)]
+    {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\"'\"'"))
+    }
+    #[cfg(windows)]
+    {
+        format!("'{}'", path.to_string_lossy().replace('\'', "''"))
+    }
+}
+async fn serve_pid_live(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let output = tokio::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .await
+            .unwrap();
+        let state = String::from_utf8_lossy(&output.stdout);
+        !state.trim().is_empty() && !state.trim_start().starts_with('Z')
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Threading::{
+                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            },
+        };
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code = 0;
+        let ok = GetExitCodeProcess(handle, &mut code);
+        CloseHandle(handle);
+        ok != 0 && code == 259
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_reexecution() {
+    for mode in ["run", "shell", "owner", "owner_kill"] {
+        crate::test_watchdog::watchdog("headless actual background parent/nested ownership", async {
+            let root = tempfile::tempdir().unwrap();
+            let (parent_url, mut parent_requests, parent_proxy) = proxy().await;
+            let (child_url, mut child_requests, child_proxy) = proxy().await;
+            let parent_data = root.path().join("parent");
+            let child_data = root.path().join("child");
+            let parent_config = root.path().join("parent.toml");
+            let child_config = root.path().join("child.toml");
+            for (path, url) in [(&parent_config, parent_url), (&child_config, child_url)] {
+                std::fs::write(path, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n")).unwrap();
+            }
+            let mut parent = HeadlessOwner::start(&parent_data, &parent_config).await;
+            let parent_thread = headless_cli(&parent_data, &["thread", "create"]).await["thread_id"].as_str().unwrap().to_owned();
+            let accepted = headless_cli(&parent_data, &["message", "send", "--thread", &parent_thread, "--text", "start owned background child"]).await;
+            let first = parent_requests.recv().await.unwrap();
+            let parent_log = root.path().join("parent-requests.jsonl");
+            record_headless_request(&parent_log, &first.body);
+            let command = format!("{}{} serve --data-dir {} --config {}",
+                if cfg!(windows) { "& " } else { "" }, serve_quote(std::path::Path::new(env!("CARGO_BIN_EXE_shellboy"))), serve_quote(&child_data), serve_quote(&child_config));
+            first.reply.send((200, json!({"id":"child-owner","status":"completed","output":[{
+                "type":"function_call","call_id":"child-owner","name":"shell",
+                "arguments":json!({"command":command,"background":true}).to_string()
+            }]}))).unwrap();
+            let parent_next = parent_requests.recv().await.unwrap();
+            record_headless_request(&parent_log, &parent_next.body);
+            loop {
+                if child_data.join("endpoint.json").exists() { break; }
+                tokio::task::yield_now().await;
+            }
+            let child_pid = headless_cli(&child_data, &["status", "--memory"]).await["process"]["pid"].as_u64().unwrap() as u32;
+            assert!(serve_pid_live(child_pid).await);
+            let child_thread = headless_cli(&child_data, &["thread", "create"]).await["thread_id"].as_str().unwrap().to_owned();
+            headless_cli(&child_data, &["message", "send", "--thread", &child_thread, "--text", "one counted nested tool"]).await;
+            let child_first = child_requests.recv().await.unwrap();
+            let child_log = root.path().join("child-requests.jsonl");
+            record_headless_request(&child_log, &child_first.body);
+            let effects = root.path().join("effects.txt");
+            let tool_pid_file = root.path().join("tool.pid");
+            #[cfg(unix)]
+            let tool = format!("printf 'once\\n' >> {}; printf '%s' $$ > {}; exec sleep 3600", serve_quote(&effects), serve_quote(&tool_pid_file));
+            #[cfg(windows)]
+            let tool = format!("[IO.File]::AppendAllText({}, \"once`n\"); [IO.File]::WriteAllText({}, [string]$PID); Start-Sleep -Seconds 3600", serve_quote(&effects), serve_quote(&tool_pid_file));
+            child_first.reply.send((200, json!({"id":"nested-tool","status":"completed","output":[{
+                "type":"function_call","call_id":"nested-once","name":"shell","arguments":json!({"command":tool}).to_string()
+            }]}))).unwrap();
+            let tool_pid: u32 = loop {
+                if let Ok(text) = std::fs::read_to_string(&tool_pid_file)
+                    && let Ok(pid) = text.parse() { break pid; }
+                tokio::task::yield_now().await;
+            };
+            assert!(serve_pid_live(tool_pid).await);
+            assert_eq!(std::fs::read_to_string(&effects).unwrap(), "once\n");
+            let execution: String = headless_db(&parent_data).query_row("SELECT id FROM shell_execution ORDER BY rowid DESC LIMIT 1", [], |r| r.get(0)).unwrap();
+            match mode {
+                "run" => { headless_cli(&parent_data, &["run", "stop", "--run", accepted["run_id"].as_str().unwrap()]).await; },
+                "shell" => { headless_cli(&parent_data, &["shell", "stop", "--execution", &execution]).await; },
+                "owner" => { headless_cli(&parent_data, &["shutdown"]).await; },
+                _ => { parent.child.kill().await.unwrap(); },
+            }
+            while serve_pid_live(child_pid).await || serve_pid_live(tool_pid).await { tokio::task::yield_now().await; }
+            drop(parent_next);
+            if matches!(mode, "run" | "shell") { headless_cli(&parent_data, &["shutdown"]).await; }
+            parent.finish(mode != "owner_kill", &root.path().join("parent-stdout.jsonl")).await;
+            let restarted = HeadlessOwner::start(&child_data, &child_config).await;
+            let db = headless_db(&child_data);
+            assert_eq!(db.query_row("PRAGMA quick_check", [], |r| r.get::<_,String>(0)).unwrap(), "ok");
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM tool_result WHERE call_id='nested-once'", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
+            let (state, reason): (String,String) = db.query_row("SELECT state,stop_reason FROM run ORDER BY rowid LIMIT 1", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+            assert_eq!(state, "stopped");
+            assert!(matches!(reason.as_str(), "app_shutdown" | "previous_instance_interrupted"));
+            drop(db);
+            assert_eq!(std::fs::read_to_string(&effects).unwrap(), "once\n");
+            assert_eq!(std::fs::read_to_string(&parent_log).unwrap().lines().count(), 2);
+            assert_eq!(std::fs::read_to_string(&child_log).unwrap().lines().count(), 1);
+            assert!(child_requests.try_recv().is_err());
+            let continued = headless_cli(&child_data, &["message", "send", "--thread", &child_thread, "--text", "continue from saved tool, do not repeat it"]).await;
+            let continuation = child_requests.recv().await.unwrap();
+            record_headless_request(&child_log, &continuation.body);
+            assert!(continuation.body["input"].as_array().unwrap().iter().any(|v| v["type"] == "function_call_output" && v["call_id"] == "nested-once"));
+            continuation.reply.send((200, answer("finished without another tool"))).unwrap();
+            loop {
+                if headless_cli(&child_data, &["run", "get", "--run", continued["run_id"].as_str().unwrap()]).await["state"] == "completed" { break; }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(std::fs::read_to_string(&effects).unwrap(), "once\n");
+            assert_eq!(std::fs::read_to_string(&child_log).unwrap().lines().count(), 2);
+            headless_cli(&child_data, &["shutdown"]).await;
+            restarted.finish(true, &root.path().join("child-restart-stdout.jsonl")).await;
+            eprintln!("nested-parent {}", json!({"mode":mode,"parent_http":2,"child_http_before_continue":1,"child_http":2,"effects":1,"live_processes":0}));
+            parent_proxy.abort(); child_proxy.abort();
+        }).await.unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn headless_ctrl_c_and_repeated_term_drain_or_force_kill_preserve_database() {
+    for force in [false, true] {
+        crate::test_watchdog::watchdog("headless signals at blocked snapshot", async {
+            let root = tempfile::tempdir().unwrap();
+            let config = root.path().join("config.toml");
+            std::fs::write(&config, "").unwrap();
+            let data = root.path().join("data");
+            let mut owner = HeadlessOwner::start(&data, &config).await;
+            let identity = owner.ready["instance_id"].clone();
+            let endpoint: shellboy::app::Endpoint =
+                serde_json::from_slice(&std::fs::read(data.join("endpoint.json")).unwrap())
+                    .unwrap();
+            let hold = rusqlite::Connection::open(data.join("shellboy.db")).unwrap();
+            hold.execute_batch("BEGIN IMMEDIATE").unwrap();
+            let pid = owner.child.id().unwrap() as i32;
+            assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+            loop {
+                if tokio::net::UnixStream::connect(&endpoint.address)
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+            assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+            if force {
+                owner.child.kill().await.unwrap();
+            }
+            hold.execute_batch("ROLLBACK").unwrap();
+            owner.finish(!force, &root.path().join("first.jsonl")).await;
+            let restarted = HeadlessOwner::start(&data, &config).await;
+            assert_ne!(restarted.ready["instance_id"], identity);
+            let db = headless_db(&data);
+            assert_eq!(
+                db.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
+                    .unwrap(),
+                "ok"
+            );
+            for table in ["operation_receipt", "model_attempt", "tool_result"] {
+                assert_eq!(
+                    db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                        .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+            }
+            drop(db);
+            headless_cli(&data, &["shutdown"]).await;
+            restarted
+                .finish(true, &root.path().join("restart.jsonl"))
+                .await;
+        })
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn headless_cli_discovers_recovery_wait_retries_and_stops_without_automatic_post() {
+    crate::test_watchdog::watchdog("headless CLI recovery workflow", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut requests, proxy_task) = proxy().await;
+        let data = root.path().join("data");
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n")).unwrap();
+        let owner = HeadlessOwner::start(&data, &config).await;
+        let thread = headless_cli(&data, &["thread", "create"]).await["thread_id"].as_str().unwrap().to_owned();
+        let log = root.path().join("requests.jsonl");
+        for retry in [true, false] {
+            let sent = headless_cli(&data, &["message", "send", "--thread", &thread, "--text", "request fixture recovery"]).await;
+            let run = sent["run_id"].as_str().unwrap();
+            let incoming = requests.recv().await.unwrap();
+            record_headless_request(&log, &incoming.body);
+            incoming.reply.send((400, json!({"error":{"code":"invalid_request_error","message":"synthetic permanent error"}}))).unwrap();
+            loop {
+                let detail = headless_cli(&data, &["run", "get", "--run", run]).await;
+                if detail["context"]["recovery_reason"].is_object() { break; }
+                tokio::task::yield_now().await;
+            }
+            let listed = headless_cli(&data, &["status", "--thread", &thread]).await;
+            assert!(listed.to_string().contains(run));
+            assert!(requests.try_recv().is_err(), "no automatic POST in recovery");
+            if retry {
+                headless_cli(&data, &["run", "retry", "--run", run]).await;
+                let incoming = requests.recv().await.unwrap();
+                record_headless_request(&log, &incoming.body);
+                incoming.reply.send((200, answer("completed after explicit retry"))).unwrap();
+                loop {
+                    if headless_cli(&data, &["run", "get", "--run", run]).await["state"] == "completed" { break; }
+                    tokio::task::yield_now().await;
+                }
+            } else {
+                headless_cli(&data, &["run", "stop", "--run", run]).await;
+                loop {
+                    if headless_cli(&data, &["run", "get", "--run", run]).await["state"] == "stopped" { break; }
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+        assert_eq!(headless_db(&data).query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r.get::<_,i64>(0)).unwrap(), 3);
+        assert!(requests.try_recv().is_err());
+        headless_cli(&data, &["shutdown"]).await;
+        owner.finish(true, &root.path().join("stdout.jsonl")).await;
+        proxy_task.abort();
+    }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn headless_native_cutpoint_helper() {
+    let Some(root) = std::env::var_os("SB5_NATIVE_CUT_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let cut = std::env::var("SB5_NATIVE_CUT").unwrap();
+    let pause = || {
+        std::fs::write(root.join("cut.jsonl"), format!("{}\n", json!({"cut":cut}))).unwrap();
+        // Only this disposable child parks; the parent kills it at the witness.
+        loop {
+            std::thread::park();
+        }
+    };
+    let desired = cut.clone();
+    let callback = |stage| {
+        if (desired == "startup_database" && stage == shellboy::app::StartupStage::Database)
+            || (desired == "startup_interrupted"
+                && stage == shellboy::app::StartupStage::InterruptedWork)
+        {
+            pause();
+        }
+    };
+    let prepared = shellboy::owner_session::initialize_reporting(
+        Some(root.join("config.toml")),
+        Some(root.join("data")),
+        tokio_util::sync::CancellationToken::new(),
+        callback,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    if cut == "snapshot_committed" {
+        prepared.control.prepare_shutdown().await.unwrap();
+        pause();
+    }
+    if cut == "before_database_close" {
+        prepared.control.shutdown().await.unwrap();
+        pause();
+    }
+    panic!("unknown cutpoint");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn headless_native_startup_snapshot_and_database_close_kills_keep_committed_facts() {
+    crate::test_watchdog::watchdog("native common owner startup/drain cutpoints", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut requests, proxy_task) = proxy().await;
+        let data = root.path().join("data");
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n")).unwrap();
+        let seed = HeadlessOwner::start(&data, &config).await;
+        let thread = headless_cli(&data, &["thread", "create"]).await["thread_id"].as_str().unwrap().to_owned();
+        let sent = headless_cli(&data, &["message", "send", "--thread", &thread, "--text", "committed seed"]).await;
+        let request = requests.recv().await.unwrap();
+        let log = root.path().join("http.jsonl");
+        record_headless_request(&log, &request.body);
+        request.reply.send((200, answer("committed answer"))).unwrap();
+        loop {
+            if headless_cli(&data, &["run", "get", "--run", sent["run_id"].as_str().unwrap()]).await["state"] == "completed" { break; }
+            tokio::task::yield_now().await;
+        }
+        headless_cli(&data, &["shutdown"]).await;
+        seed.finish(true, &root.path().join("seed.jsonl")).await;
+        for cut in ["startup_database", "startup_interrupted", "snapshot_committed", "before_database_close"] {
+            let witness = root.path().join("cut.jsonl");
+            std::fs::write(&witness, "").unwrap();
+            let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "runtime_features::headless_native_cutpoint_helper", "--nocapture"])
+                .env("SB5_NATIVE_CUT_ROOT", root.path()).env("SB5_NATIVE_CUT", cut)
+                .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn().unwrap();
+            loop {
+                if std::fs::read_to_string(&witness).is_ok_and(|s| s.ends_with('\n') && serde_json::from_str::<Value>(&s).is_ok_and(|v| v["cut"] == cut)) { break; }
+                assert!(child.try_wait().unwrap().is_none(), "cutpoint child exited before {cut}");
+                tokio::task::yield_now().await;
+            }
+            child.kill().await.unwrap();
+            child.wait().await.unwrap();
+            let owner = HeadlessOwner::start(&data, &config).await;
+            let db = headless_db(&data);
+            assert_eq!(db.query_row("PRAGMA quick_check", [], |r| r.get::<_,String>(0)).unwrap(), "ok");
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM receipt", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM tool_result", [], |r| r.get::<_,i64>(0)).unwrap(), 0);
+            assert_eq!(db.query_row("SELECT state FROM run WHERE id=?1", [sent["run_id"].as_str().unwrap()], |r| r.get::<_,String>(0)).unwrap(), "completed");
+            drop(db);
+            assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
+            assert!(requests.try_recv().is_err());
+            headless_cli(&data, &["shutdown"]).await;
+            owner.finish(true, &root.path().join(format!("{cut}.jsonl"))).await;
+            eprintln!("native-cut {}", json!({"cut":cut,"witness_rows":1,"http":1,"message_receipts":1,"tool_effects":0}));
+        }
+        proxy_task.abort();
+    }).await.unwrap();
+}

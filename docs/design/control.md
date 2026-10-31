@@ -503,3 +503,20 @@ normal final output records completion/failure; forced termination may omit it.
 SQLite transactions and existing startup repair preserve committed facts; no
 shutdown intent is replayed at next startup. No handover or automatic resume is
 introduced and no completion duration is promised.
+
+## Attempt admission observation
+
+Attempt admission publishes the existing Changed observation only after the
+running/inflight transaction commits, before HTTP can supply a receive event.
+Observers that consumed preparing must not depend on response headers, a selected-
+view timer or another operation to see running. Rejected/conflicting/uncommitted
+admissions publish no success change. This is commit observability, not a new
+Run/Turn transition, request order or periodic notification (#85 CI follow-up).
+
+## Serve signals and nested ownership
+
+Serve observes Unix INT as well as TERM/HUP through its adapter; TUI keyboard and
+force/deadline policy are unchanged. Once drain begins, further TERM/HUP/INT do
+not escalate it; external SIGKILL remains forceful termination. Signal stream
+exhaustion parks rather than panicking. Background serve remains a normal owned
+shell descendant; its own tools keep their ordinary lifeline/Job ownership.

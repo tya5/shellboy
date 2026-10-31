@@ -1222,3 +1222,19 @@ snapshot. Unchanged terminal+complete observations do not reread or mint a new
 "取得" timestamp. Retention generation alone does not invalidate paid display
 text. No animation/draw path reads raw output. Legacy raw-preview constructors
 remain test-only fixtures for bounds/identity tests, not production refresh work.
+
+## Conversation and header background extents (#91)
+
+Conversation bands end one terminal column inside both window edges. The title
+background spans the whole window, but its text uses that same one-column
+horizontal inset. Geometry helpers in the UI theme own these extents. Paint each
+visible user/input row's full band rectangle, independent of its last styled
+span or wrapped text length. Reset the conversation background before content
+painting and restore normal rows' trailing cells from their own line/span style;
+this keeps differential scrolling from inheriting a previous band's edge color.
+Foreground, links, code-surface colors, canonical text and hit positions remain
+separate from background extent. NO_COLOR adds no band colors or new columns.
+At the minimum eight-column viewport the inset leaves six content cells; the
+selection banner uses the compact "固定" label rather than disappearing or
+painting over the margin. Wider headers keep the existing full freeze label,
+time and resume guidance according to their available content width.

@@ -105,6 +105,7 @@ fn frozen_header_label(width: u16, frozen_at: Option<&str>) -> String {
         choices.push("表示固定 · F2/Esc解除".into());
     }
     choices.push("表示固定".into());
+    choices.push("固定".into());
     let label = choices
         .into_iter()
         .find(|label| label.width() <= usize::from(width))
@@ -142,6 +143,17 @@ pub(super) fn footer_lines(
     };
     let phase = view.footer_phase();
     let mut facts = Vec::new();
+    if let Some(limit) = view
+        .activity
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.recovery.as_ref())
+        .filter(|r| !r.resolved)
+        .and_then(|r| r.limit_summary())
+    {
+        facts.push(limit);
+    }
+
     if !view.follow {
         facts.push(if view.unseen {
             "↓ new".into()
@@ -149,12 +161,33 @@ pub(super) fn footer_lines(
             "↓".into()
         });
     }
+    if matches!(
+        phase,
+        super::activity::ActivityPhase::Completed
+            | super::activity::ActivityPhase::Stopped
+            | super::activity::ActivityPhase::Failed
+    ) && let Some(snapshot) = view.activity.snapshot.as_ref()
+        && snapshot.run_id.is_some()
+    {
+        if let Some(offset) = chrono::FixedOffset::east_opt(snapshot.timing.local_offset_seconds) {
+            facts.push(crate::presentation::ended_text(
+                snapshot.timing.ended_at.as_ref(),
+                chrono::Utc::now(),
+                offset,
+            ));
+        } else {
+            facts.push(crate::presentation::TIME_TEXT[3].1.into());
+        }
+    }
     let send = view.sending();
     if let Some((send_phase, count, started)) = send {
         facts.push(format!(
-            "{} {count} · {}s",
+            "{} {count} · {}",
             send_phase.label(),
-            started.elapsed().as_secs()
+            crate::presentation::elapsed_text(
+                started.elapsed().as_secs().saturating_mul(1000),
+                false
+            )
         ));
     } else if view
         .activity
@@ -162,9 +195,9 @@ pub(super) fn footer_lines(
         .as_ref()
         .is_some_and(|snapshot| snapshot.turn_in_progress)
         && phase != super::activity::ActivityPhase::Recovery
-        && let Some(elapsed) = view.activity.displayed_elapsed_ms()
+        && let Some(elapsed) = view.activity.phase_time_note(std::time::Instant::now())
     {
-        facts.push(format!("{}s", elapsed / 1000));
+        facts.push(elapsed);
     }
     if !view
         .activity
@@ -174,6 +207,9 @@ pub(super) fn footer_lines(
         && let Some(work) = view.live_work.footer()
     {
         facts.push(work);
+    }
+    if let Some(secondary) = view.activity.secondary_note(std::time::Instant::now()) {
+        facts.push(secondary);
     }
     if view.pending_messages.total > 0 {
         facts.push(format!("待ち {}", view.pending_messages.total));
@@ -469,7 +505,11 @@ mod tests {
             assert!(ui.help_visible && ui.selection_mode);
             let shown = frame_text(&mut ui, width, height);
             assert!(
-                shown.lines().next().unwrap().contains("表示固定"),
+                shown.lines().next().unwrap().contains(if width < 10 {
+                    "固定"
+                } else {
+                    "表示固定"
+                }),
                 "{width}x{height}: {shown}"
             );
         }
@@ -532,7 +572,9 @@ mod tests {
                 assert!(text.contains('…'));
             }
             let buffer = terminal.backend().buffer();
-            assert_eq!(buffer[(0, 0)].symbol(), "!");
+            assert_eq!(buffer[(0, 0)].symbol(), " ");
+            assert_eq!(buffer[(1, 0)].symbol(), "!");
+            assert_eq!(buffer[(width - 1, 0)].symbol(), " ");
         }
         assert_eq!(ui.view().title, original);
         ui.view_mut().title = "短い題名".into();
@@ -654,5 +696,64 @@ mod tests {
             footer.contains("子孫") && footer.contains("稼働2") && footer.contains("復旧1"),
             "{footer}"
         );
+    }
+}
+
+#[cfg(test)]
+mod terminal_time_tests {
+    use super::*;
+    use crate::{
+        config::Config,
+        ui::{
+            activity::{ActivityPhase, ActivitySnapshot, SavedTiming},
+            view::ThreadView,
+        },
+    };
+    #[test]
+    fn ended_footer_uses_saved_date_only_for_terminal_phases() {
+        let mut view = ThreadView::new(&Config::default(), std::path::PathBuf::from("/"));
+        let at = chrono::DateTime::parse_from_rfc3339("2020-01-02T03:04:00Z").unwrap();
+        for phase in [
+            ActivityPhase::Completed,
+            ActivityPhase::Stopped,
+            ActivityPhase::Failed,
+            ActivityPhase::AwaitingModel,
+        ] {
+            view.activity.accept(
+                1,
+                ActivitySnapshot {
+                    run_id: Some("saved".into()),
+                    phase,
+                    timing: SavedTiming {
+                        ended_at: Some(at),
+                        local_offset_seconds: 9 * 3600,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            );
+            let lines = footer_lines(
+                &view,
+                200,
+                false,
+                crate::ui::theme::Palette::from_capabilities(
+                    crate::config::PaletteMode::Dark,
+                    false,
+                    true,
+                ),
+                vec![],
+                None,
+            );
+            let text = lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.as_ref())
+                .collect::<String>();
+            assert_eq!(
+                text.contains("2020-01-02 12:04"),
+                phase != ActivityPhase::AwaitingModel,
+                "{text}"
+            );
+        }
     }
 }

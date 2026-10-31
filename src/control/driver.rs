@@ -89,6 +89,10 @@ async fn admit_attempt(
     {
         recover(control, snapshot, error.clone(), None).await?;
     }
+    if matches!(result, Ok(true)) {
+        // A hidden observer may already have consumed the preparing snapshot.
+        control.changed(&snapshot.thread);
+    }
     result
 }
 

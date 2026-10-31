@@ -2853,3 +2853,62 @@ the unchanged actual PTY flow1/0 pass using the single root target. The precedin
 failed standard remains recorded; a fresh full check is still required.
 Latest main has advanced to5321310, including #85/#91; merge it before the next
 G checkpoint and preserve its footer/header/real-PTY corrections.
+## Attempt-scoped footer facts (#85)
+
+The shared Core classifier/protocol stays unchanged. Internal selected-view facts
+now keep tool overlap and saved attempt/group age anchors separately; UI timing
+uses the existing monotonic sampling/Animation cadence, not another scheduler.
+Both receive/snapshot delivery orders retain a bounded candidate. Transport
+reception is not assistant text progress. Historical recovery reasons stop owning
+the footer after saved resolution; structured driver recovery errors invalidate
+the reactive view rather than becoming sticky independent operation notices.
+
+Eight native temporary-owner PTY conditions pass through the shared #94 Terminal
+helper:80/140 columns, dark/light/NO_COLOR/vt100,64 completed screens. Tests include
+header/body gates, a synthetic saved running-group overlap marker (not an OS shell
+execution claim), external CLI retry, success and typed usage-limit recovery.
+P1 comparison and final standard/rebase checks remain independent pending gates;
+worker4 owns review-required CI/integration. #87 key hints remain worker3-owned.
+Final serialized validation on source6303d91/mainafe4c08 passes1,972/0/33,
+Python41/layout94/fmt/strict Clippy/policy. Rebuilt native PTYs pass all8/64 again
+with resolved historical panels retained. Quiet P1 passes all three matched pairs;
+loaded-host failures remain recorded. CI/main admission belongs to worker4.
+User follow-ups to #85 are in progress: shared translated-unit elapsed formatter
+across footer/tool/owned-work/notices, plus terminal saved-ended_at time/date.
+71bbad0 admission was put on HOLD; a new ref will supersede the rebased branch.
+CPU/p95 are observations only under the latest policy, not acceptance gates.
+Final F/#98/#100 integration source passes full standard gate and rebuilt native
+8-condition fixture. Shared elapsed/end-time follow-up is ready for review; latest
+results/source and conflict resolution are recorded in #85, with coordinator CI
+still separate. No quiet-slot remeasurement or own CI/main push was performed.
+#85 admission-notification follow-up passes its fixed-order red/green and original
+browser row assertions; full checked source on2954dda passes2,078/0/35 and
+rebuilt8-condition fixture. Current-main integration/Windows qualification remain
+coordinator gates. Detailed failure/source/order evidence is in#85.
+## #5 stage 4 candidate
+
+Parent-owned background serve and nested-tool lifecycle checks, native bootstrap/
+snapshot/pre-DB-close cutpoints and CLI recovery workflow are prepared. Serve
+adds Unix INT to graceful termination without changing TUI policy; repeated TERM
+in drain is not forced termination. Qualification and native-OS limits are in #5.
+
+## #91 band extent follow-up (in progress)
+
+Cell-level baseline captures precede product edits: 80/140 and odd widths,
+dark/light/NO_COLOR, plus live loopback input and scrolling. These synthetic
+inputs did not reproduce the reported one-cell-short continuation; their bands
+already occupy x=1 through width-2. Header text reaching both outer cells is
+confirmed. The correction enforces background extent from source identity rather
+than the final styled span, explicitly resets normal background edges, and uses
+one theme inset for full-width header color with inset text. Synthetic short-line
+and band-to-plain replacement tests are prepared. No candidate Rust check/build
+has run yet. This is not a causal claim about the user's physical-terminal case.
+
+#91 band-extent follow-up supersedes its pending-check note: code 3670eac on main
+19b9f87 passes the standard check (Rust2058 / Python66, zero failures), nine chrome
+checks and the bin/visual-fixture build. Fresh intercepted-OSC52 PTY/VT captures
+pass 27 width/palette/fallback conditions, with live input and scroll-return in
+21 of them. The user-terminal continuation symptom was not reproduced in the
+baseline; exact geometry is enforced without claiming that symptom's root cause.
+Fresh release P1 profiling and native non-macOS/physical-terminal validation
+remain untested. #99 and #87 retain their separate review/qualification scope.

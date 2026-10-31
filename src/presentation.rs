@@ -20,6 +20,8 @@ pub(crate) async fn work<T: Send + 'static>(
     .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Presentation worker failed"))
 }
 
+mod time_text;
+pub use time_text::{TIME_TEXT, elapsed_text, ended_text};
 mod events;
 pub(crate) mod fields;
 mod markdown_links;

@@ -67,3 +67,56 @@ frontendは現在選択中Threadのgenerationを付け、UIはThread/generation�
 Issue #8の受信空白の観測と自動再試行の待機は区別する。Driverが既存model_attempt.error_jsonへ保存したautomatic_retry（number、limit、delay_ms等）を、既存Changedから読取projectionへ反映する。最新attemptがfailed、Turnとattemptのgenerationが一致し、Run live・Turn runningの場合だけ再試行待機を表示する。古いattempt、旧generation、復旧待ち、停止中、終端には適用しない。新しいinflight attemptを保存した後は通常のモデル応答待ちへ戻る。
 
 footerは既存の1行・同じpulseと中立的な活動色を使い、保存済みの回数・上限を `一時的なエラーのため再試行中（1/2）` の形で表示する。表示するカウントは既存snapshotへ加えるUI向けprojectionであり、コア状態・永続表・event・worker・queueは増やさない。待機中はIssue #8のattempt別受信時計を破棄し、新attemptの受信を観測してから新たに計測する。完了・復旧後も古い受信通知で待機表示や受信時計を復活させない。終了時は保存済みの終端/復旧表示を優先し、再試行を経て成功したことだけで警告色を残さない。
+
+## Footer fact correction (#85)
+
+Keep the saved shared activity classifier and all Core states/protocol unchanged.
+A single UI composition gives current tools precedence
+over the current attempt while retaining the attempt as a secondary phase.
+Matching transport receive observations (headers/body liveness, not generated
+assistant content) end the response-wait label, including receive-before-snapshot.
+A new attempt resets its request age using saved started_at. Tool age uses the
+running group's saved creation anchor; receiving age is explicitly observed.
+Other phase durations are explicitly local observations, never the Turn total.
+Clock bases are internal UI facts from the existing shared view read, not timers.
+
+A saved recovery message is current only for failed/recovery_wait state, not
+merely because a historical recovery_reason_json still parses as ApiError.
+Resolved execution recovery disappears on a fresh successful saved-state read;
+independent command failures keep their existing notice ownership. Typed #76
+usage-limit facts supply reset kind/time and wait or /model guidance. A passed
+reset timestamp never promises automatic retry or bypass of connection cooldown.
+
+Structured EngineEvent errors carrying saved recovery facts invalidate the
+existing selected-view read instead of creating an unrelated sticky operation
+notice. The saved RecoverySnapshot owns that footer and its resolution; storage
+or unclassified errors retain their existing notification path. This is frontend
+presentation ownership only: saved errors, diagnostics and Core events do not
+change. No text matching or TTL is used to infer resolution.
+
+Age anchors are data, not independent schedulers: both the primary tool/stage and
+secondary request anchor advance only from the existing UI monotonic now. Saved
+wall timestamps are parsed at snapshot acceptance, not on every footer frame.
+Repeated identical anchors do not reset ages; generation/attempt changes reset
+only the relevant stage. Send acceptance and reflection also have separate local
+stage ages, choosing the oldest pending item of the displayed stage rather than
+an unrelated older pending stage. Unknown or future saved times stay unknown.
+
+## Shared elapsed units and saved terminal time (#85 follow-up)
+
+All human elapsed labels use one presentation formatter, with stable unit keys:
+seconds below a minute, minutes+seconds below an hour, hours+minutes thereafter.
+Tool durations retain tenths below a minute. Stored numeric durations, source
+payloads and copy/original facts stay unchanged. Terminal footer phases append
+only the current saved Run ended_at (never observation time). Convert to the
+viewer offset captured on the presentation worker; same local date shows HH:MM,
+other dates show YYYY-MM-DD HH:MM. Missing/invalid facts explicitly say unknown.
+Formatting a later explicit redraw may age the date label without any idle timer,
+new read or unsolicited frame. Recovery/live phases do not show an older end time.
+Latency/CPU are recorded observations only, not acceptance gates. Acceptance uses
+virtual-clock/frame/read/job count bounds.
+
+The historical one-row initial scope above is not the current layout: current
+chrome::footer_lines returns two quiet rows. #85 owns first-row activity facts and
+recovery content; #87 owns second-row key-hint selection/fit. These additions do
+not reintroduce an earlier row layout or overwrite #87's caller-supplied hint API.

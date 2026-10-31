@@ -6030,3 +6030,224 @@ passes1/0 (5.06s recorded, not an acceptance threshold). Exact paused JSON
 pointer appears immediately after the original-detail action; coverage, spaces,
 definitions and full retained detail are still asserted. All builds use the
 root shared target. No full-standard/three-OS success is inferred.
+## Footer phase/time/recovery qualification (#85)
+
+Starting main9b4ae34, then rebased onto2b3cd91 for the shared #94 capture helper.
+No Core state, schema, public protocol, new worker/queue/scheduler or provider
+retry policy changes. The user authorized starting before F/G; current published
+F overlap was checked, and later integration rebases. Worker3 received the exact
+chrome activity-facts/draw_status recovery wiring ranges before more shared edits;
+key-hint selection/layout/truncation remains #87-owned in a separate worktree.
+
+Pure monotonic-time tests pass for saved attempt age/new attempt vs continuing
+Turn, same-anchor stability and no equality-driven repaint, tool/request overlap,
+both receive/snapshot orders including an older phase in between, stale attempts,
+invalid saved times and lost observation. The existing header-liveness assertion
+was intentionally updated to Receiving as a transport fact, not generated text.
+Snapshot timestamp strings are bounded; wall observation time is excluded from
+semantic snapshot equality. Age anchors are parsed on acceptance, not every draw.
+The existing Core saved-fact classifier and terminal precedence remain intact.
+
+A temporary real-SQL projection test preserves original recovery_reason_json but
+suppresses its active footer after running/completed/stopped saved resolution;
+unresolved failed recovery and typed #76 reset facts remain. The old explicit-stop
+test previously expected a historical reason as active recovery: it now expects
+no active recovery and separately checks the original saved stop_reason. All
+1,011 nonignored library tests passed at that checkpoint. Wrong UsageLimit paths,
+a fully explicit snapshot constructor and an on_receipt fixture signature were
+compile-time test/setup errors, corrected without changing production policy.
+
+The first real PTY run reached successful external CLI retry but still displayed
+provider:fixture failure in the footer. This exposed generic EngineEvent recovery
+errors being promoted to independent Info notices. The corrected frontend defers
+only typed saved-execution recovery/config failures to the existing reactive read;
+storage/unclassified errors keep their existing notification path. No string
+matching or TTL guesses failure resolution. The same native fixture then passed.
+
+Native macOS ARM64/Rust1.99.1, actual PTY with temporary HOME/config/data-dir,
+copy_backend=osc52 and unauthenticated loopback only. Shared scripts/dev/Terminal
+and VT frame decoding are reused; no user clipboard/config/provider/data read.
+The handler gates first headers/body completion, then observes a synthetic saved
+running-group marker while that request is inflight (no early tool execution or
+real OS shell is claimed). It removes the marker before completing, then exercises
+HTTP400 failure, real separate-CLI run retry and success, then typed quota recovery.
+All8 width/palette/fallback conditions pass with4 requests and8 captured stages
+per condition:64 frames total. Captures include separate tool/request ages, no
+active recovery or stale failure footer after successful retry, quota kind/reset
+UTC and explicit wait/retry or /model guidance. A passed reset is not automatic
+resume; the unchanged connection-scoped remembered-limit rule still applies.
+No new short timer, latency pass/fail bound or settling wait is used: only the
+shared capture/CLI60-second watchdog and explicit state/transport gates.
+
+Project knowledge was searched first; it returned the helper procedure, not
+relevant new activity facts. Guide semantic scope was degraded/unready; no index
+rebuild or knowledge mutation was attempted. P1 and final standard/branch handoff
+are separate gates, not inferred from these screenshots or library results.
+
+The existing manual P1 test was reused unchanged:140x40 TestBackend,128 nodes,
+50 tool rows,20 warmups/500 timed interactions, same debug profile. Copied native
+lib-test executables from baseline2b3cd91 and candidate66ac885 were run in three
+interleaved pairs with no compilation during the timed portion. p95 microseconds:
+8350->7327,5713->6935,8919->6300. Candidate observations stay below8ms and relative
++2ms; no speedup is inferred from the noisy baseline (two baseline values exceed
+8ms under shared-machine load). Both preserve131 layout builds,258 unit builds,
+16510 unit hits and all focus-only reuse assertions. This is a current-main
+incremental comparison, not a fresh historical1fec7f0 measurement. Artifact/source
+witnesses and logs are retained in the temporary P1 directory. Source changes
+made during baseline build are restored before any candidate check.
+
+A later source review replaces aggregate MIN on active groups with one existing
+first-match LIMIT1 read (bounded timestamp) so capturing a tool age does not force
+an aggregate full traversal beyond the old EXISTS behavior. A lost-observation
+regression also prevents a new snapshot from fabricating first-byte age: age stays
+unknown until a new receive observation, without counting the unknown gap.
+Older mismatching receive observations cannot displace a newer early candidate.
+
+The first full integration run exposed real compatibility regressions, not flakes:
+a sampled133-second UI observation was not committed to the new phase anchor;
+and removing the entire RecoverySnapshot also removed the intentional historical
+recovery panel after stop. Phase anchors now commit the existing sampled UI time
+and never go backwards. RecoverySnapshot.resolved distinguishes historical panel
+facts from current footer ownership, preserving that panel, original reasons and
+stop details while clearing only active footer/action facts. The unchanged
+frontend_activity suite8, external-CLI reactivity case1 and tui_recovery suite2
+all pass after these corrections. No wait length or assertion of saved history
+was weakened. The native fixture's old 'waiting' expectation after HTTP headers
+was intentionally changed to transport Receiving under the adopted #85 contract.
+The fixture likewise checks absence of active footer recovery, not absence of the
+historical recovery panel. The initial four integration failures are retained in
+logs; they are not covered by the separate #96 unrelated-CI classification.
+
+The later exact-main #91B comparison is NOT a closed P1 gate: baselineafe4c08 and
+candidatef432751, same debug fixture, three interleaved pairs yielded p95us
+8579->9006,8690->8370,8335->10961. Both sides exceed8ms under shared-host load,
+and the third candidate delta exceeds2ms. Cache counts/reuse assertions remain
+identical. All observations are retained, not replaced by the earlier passing
+checkpoint or called a speedup/causal regression diagnosis. Host load around the
+build was10.65/10.27/9.85; one lib-test compilation took11m23s with concurrent
+workers and1 build job. A controlled low-contention paired measurement is needed
+before claiming this P1 admission goal, with no timer/assertion relaxation.
+
+Resource coordination followed the user notice: the already-started final
+receive-order lib build continues at1 job; no subsequent Rust build/check starts
+until worker1 releases the #96 standard-check slot (its current build uses2 jobs).
+The saved native P1 executables need no rebuild to inspect host-contention effects;
+a short quiet observation interval was requested directly. Existing/user processes
+are not interrupted. The previous over-budget P1 numbers remain visible and no
+closed gate is claimed merely from a future rerun.
+
+After explicit slot release from workers1/3 (both holding all new Rust work),
+the already-built baselineafe4c08 and final receiver-fix candidate executables
+were observed without rebuilding,11:27:45-11:27:59UTC. Three interleaved P1 pairs
+p95us:4490->4447,4398->4465,4418->4435. All candidate values satisfy8ms and
++2ms relative goals in this controlled interval; cache counts131/258/16510 and
+focus-reuse assertions remain identical. The earlier over-budget loaded-host
+values remain above, not discarded or called a causal speedup diagnosis.
+Binary hashes, source/diff witnesses and complete logs are in the quiet P1
+capture directory. The two peers were notified once of results and slot release;
+no new local Rust work starts until the next #96/#95 resource slot is released.
+
+A final race test additionally passes Preparing(a)->receive(a)->Preparing(a)->
+Awaiting(a), and the analogous running transition: bytes alone do not invent
+inflight, but the matching later saved inflight projection retains reception.
+All15 activity/time cases pass on that source. The final latest-main standard
+check and rebuilt native matrix are still separate gates after the resource hold.
+
+Shared helpers were reused for record deltas and PTY/VT lifecycle. Another
+extraction candidate was measured from saved shell commands:3 actual lib-test
+artifact-selection/paired-build scripts,4275 characters (the fourth matching
+entry is the measurement query itself and is excluded). A source-witnessed
+paired-artifact helper could remove repeated boilerplate; this task does not
+expand #85 into that new helper implementation.
+
+After the user-reported normal owner restart, the clean worktree/branch and
+completed observations were verified rather than replaying completed operations.
+The final serialized sequence on source6303d91/mainafe4c08 completed exit0:
+CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=2 sh scripts/check.sh gives1,972 passed /
+0 failed /33 ignored, layout94, Python41, fmt, strict Clippy and watchdog policy.
+The debug product was then rebuilt and the actual temporary-owner PTY matrix
+repeated successfully:8 conditions/64 screens,4 loopback requests each, including
+external retry, historical resolved panel and quota guidance. No stopped build is
+claimed as success. The heavy slot was released directly to worker1 afterwards.
+Subsequent changes in this qualification commit are record-only; Rust and fixture
+source blobs remain identical to the fully checked source. CI is not dispatched
+by this worker, and the branch is handed to worker4 as review required.
+
+The user subsequently requested one shared elapsed presentation for footer,
+tool, owned-work and notice durations, retaining subminute tool tenths, and the
+saved ended_at time/date beside terminal phases. These follow-up sources are
+not covered by the earlier green gate until their new validation completes.
+The broader performance-policy update makes p95/CPU observations only; prior
+loaded and quiet values remain recorded, without repeating a quiet measurement.
+Structural job/read/draw counters and virtual-time redraw bounds remain gates.
+Formatter follow-up gates initially found two obsolete expectations (60秒待機
+versus1分0秒 and133s versus2分13秒) and a guide scanner interpreting a dynamic
+completed-time example as a literal navigation label. Expected strings/example
+notation were corrected without weakening duration/source/clock assertions.
+Before integration of main #98, the formatter/end-time follow-up passed targeted
+elapsed/calendar/activity/footer tests, sh scripts/check.sh (1,977/0/33,
+Python66/layout94/fmt/strict Clippy/policy), and the rebuilt native8/64 matrix,
+now requiring a saved terminal HH:MM alongside completed answer frames. Main
+then advanced to9fd7b1c. Its three presentation conflict hunks were resolved by
+retaining #98 tool geometry, body priority and cached release facts, applying only
+the shared formatter and recognizing an existing hour/minute suffix during paint.
+This latest integrated source requires a fresh final gate; earlier green is not
+claimed as that gate. No force push or own native CI is used for the replacement.
+Final source on maind29e0fc passes sh scripts/check.sh:2,064/0/35, Python66,
+layout94/fmt/strict Clippy/policy. Rebuilt actual PTY matrix8/64 also passes,
+including saved completed-time labels. Detailed source/result evidence is in#85.
+Subsequent record-only commit leaves Rust/fixture blobs identical to checked code.
+#85 final owned-chain source8796e5b on2954dda passes standard2,078/0/35,
+Python70/layout94/fmt/strict Clippy/policy plus rebuilt native8/64. JOBS2 and
+TEST_THREADS2 used under reviewer16:24 override; no elapsed-time regression or
+external-process intervention inferred. Current main66d2746 also contains the
+later stage3 stack, which is not covered by this checked-base gate. New source
+review/Windows CI remain distinct; no rerun of failed41214341584 was requested.
+
+### #91 Conversation Band And Header Extent Follow-Up
+
+2026-10-31, macOS arm64 / Rust 1.99.1, single-job Cargo and two test threads.
+Candidate code 3670eacec9365d3cb977835ed39583bb5da7ffed is rebased on main
+19b9f87ef76e6786cbad3128e15e27d8cc6a1224. `sh scripts/check.sh` passes:
+Rust 2058 passed / 0 failed / 35 ignored, Python 66; layout/watchdog, fmt,
+Clippy and all targets pass. The separate chrome preflight passes all nine
+cases. `cargo build --locked --bin shellboy --example visual_fixture` passes.
+Evidence: `/tmp/issue-91-width-qualified-v5.log`, execution
+7e570b9a-a56f-421f-a98c-abb44f2f3181. No installed binary was changed.
+
+Fresh real-process PTY/VT captures pass 27 cases: 80/81/140 columns plus
+79/83/139/141, each dark/light/NO_COLOR; 80/140 additionally use TERM=vt100.
+Every capture checks exact full-width header color with one-column text margins,
+input colors through x=1..width-2, normal outer cells and canonical OSC52 payloads
+for slash/focused/original-page copy. The first 21 cases include synthetic local
+SSE input followed by PageUp and return-to-tail captures; no provider is called.
+The OS clipboard is never touched. Captures are in `/tmp/issue-91-width-after-v5`,
+`/tmp/issue-91-width-odd-after-v5` and `/tmp/issue-91-width-vt100-after-v5`;
+executions ed1d7078-2aee-45d8-86ca-401018681413 and
+8efcf7be-d6eb-4979-8e45-58c51ce24678 both exit0. Binary SHA-256:
+a16294d8b1555fcbe15b00e0e34430fe1bcbe71e9a94a220618984dce0eda949.
+
+The earlier baseline did not reproduce the user's one-cell-short continuation;
+this change enforces the requested geometry, not a proven cause for that physical
+terminal symptom. Before/after synthetic cell evidence is retained separately.
+Validation exposed TestBackend's unpainted wide-glyph continuation slots; the
+full-color invariant is asserted on the actual Frame buffer and real VT cells,
+not those backend placeholders. Earlier failed checks are retained in
+`/tmp/issue-91-width-qualified.log`, `-v2.log`, `-targeted-v3.log` and `-v4.log`:
+the last full run found two old header-position/minimum-banner assumptions.
+The updated contract asserts both blank margins, phase at column one and a
+compact freeze label at eight columns; it does not drop the visibility check.
+
+Untested: physical GUI terminal rendering, real OS clipboard completion, native
+Windows/Linux PTYs and a fresh opt-in release P1 latency/memory profile. The
+standard functional suite is not claimed as that performance measurement. No
+new worker, queue, timer, DB read or source-format field is introduced.
+
+#91 additional explicit trailing-cell qualification: test-only script changes
+assert every live/PageUp/return-to-tail conversation row, not just save colors.
+All 21 live width/palette cases pass again, producing 63 per-scene edge audits:
+colored continuations fill the entire inset, and non-band rows keep both last
+content cells at the normal background. Fresh Python66 also passes. Evidence:
+`/tmp/issue-91-width-edge-audited/`, `/tmp/issue-91-width-edge-audited.log`, execution
+669162aa-3da8-4187-a790-6b0346d02b37 exit0. Product src and binary are unchanged
+from the standard-tested 3670eac; this adds no new Rust qualification claim.
