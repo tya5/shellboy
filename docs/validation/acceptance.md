@@ -4322,3 +4322,53 @@ on the exact candidate; native branch CI must pass before main integration.
 - No release build, performance/PTY rerun for the guide-only delta, physical
   terminal/IME/clipboard/ConPTY verification or real-data GC is performed.
   Exact-SHA three-OS CI/integration outcomes are tracked in #81/#83.
+
+## #76 explicit usage-limit and connection-cooldown qualification
+
+2026-10-31, native macOS 26.3.1 arm64 / Rust 1.99.1. Temporary synthetic owners
+and loopback HTTP only. No real provider, account limit, paid request, user DB,
+installed binary, running owner, settings, tag or Release is changed by testing.
+Build jobs are capped at 2 and test threads at 4. New expiry tests advance Tokio
+time; guards use the shared 60-second watchdog, not latency thresholds.
+
+- Typed future integer resets_at (preferred) / positive resets_in_seconds with
+  exact usage_limit_reached type/code; direct and LiteLLM JSON-message/raw-text
+  wrappers are tested. Missing, stale, fractional/string/overflow timestamps,
+  unknown codes and prose are not inferred into quota facts. Relative seconds
+  round upward; fractional-current-time boundaries and zero relative reset are
+  tested. Retry-After seconds and RFC2822/IMF-style HTTP dates retain facts.
+- Owner loopback scenarios cover six shapes: direct absolute, LiteLLM message,
+  relative, long 429 Retry-After delta, long 429 HTTP-date, raw LiteLLM text.
+  Each saves recovery_wait with one initial attempt and no automatic_retry;
+  run get contains kind/UTC reset/window when present and /model guidance.
+  A second Thread on the same connection recovers locally without POST; its
+  fact has locally_blocked=true and no fabricated HTTP observation. Advancing
+  Tokio by 3,602 seconds then allows a third Thread's ordinary successful POST.
+  The real request JSONL per fixture is 0->1->1->2 lines. A long-header case
+  withholds its advertised error body and proves recovery does not require it.
+- Unknown 429 with no quota/reset fact retains ordinary retry (explicit zero
+  Retry-After avoids real sleep), completes with two attempts, and logs 0->2
+  request lines. Existing unknown-429/backoff/overflow/partial-output/stop tests
+  also pass: the response_retries module has 24 passing tests. Non-quota 503
+  above the existing ten-minute ceiling retains its independent defer policy.
+- Shared-client tests cover both Responses and Chat Completions error paths,
+  locally blocked second invocation without a live server, per-connection clone
+  sharing/isolation, rejected unconfigured keys, later-deadline retention,
+  virtual expiry, and empty slots in a fresh owner-scoped client table. Two
+  configured connections still have exactly two entries, each with one fixed
+  optional fact/time/duration slot; no timer, table, worker or queue is added.
+
+Local standard check succeeds: Rust 1,894 passed / 0 failed / 33 ignored, layout
+93, Python 18, fmt/strict Clippy. Rebase and exact-source native CI are separate
+gates reported in issue #76. Initial development checks exposed an unboxed
+error-size increase and a wrongly populated raw-text fixture; both were fixed
+without suppressing Clippy, extending watchdogs or weakening assertions.
+
+The first version does not infer other provider shapes, forecast limits, switch
+connections, resume automatically, cancel already-in-flight calls or skip input
+preparation. The generation gate includes summaries but excludes embedding and
+model-list traffic. Long 429 headers return before body parsing, so those cases
+do not extract body-specific plan/window details. Real-provider compatibility
+is unverified. src/ui/activity.rs and src/ui/chrome.rs are untouched; #85 tracks
+the deferred short status display, with the data contract in its comment
+6540361176. Existing reason text and run get already expose the reset.

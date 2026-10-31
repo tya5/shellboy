@@ -97,7 +97,8 @@ async fn read_request(stream: &mut TcpStream) -> Value {
     }
 }
 
-async fn proxy() -> (String, mpsc::Receiver<Incoming>, JoinHandle<()>) {
+async fn proxy(log: std::path::PathBuf) -> (String, mpsc::Receiver<Incoming>, JoinHandle<()>) {
+    std::fs::write(&log, "").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let (sender, receiver) = mpsc::channel(8);
@@ -109,8 +110,11 @@ async fn proxy() -> (String, mpsc::Receiver<Incoming>, JoinHandle<()>) {
                     let (mut stream, _) = accepted.unwrap();
                     stream.set_nodelay(true).unwrap();
                     let sender = sender.clone();
+                    let log = log.clone();
                     connections.spawn(async move {
                         let body = read_request(&mut stream).await;
+                        use std::io::Write;
+                        writeln!(std::fs::OpenOptions::new().append(true).open(log).unwrap(), "{}", body).unwrap();
                         let (reply, receive) = oneshot::channel();
                         if sender.send(Incoming { body, reply }).await.is_err() {
                             return;
@@ -176,7 +180,7 @@ impl Fixture {
         text: &str,
     ) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let (url, requests, server) = proxy().await;
+        let (url, requests, server) = proxy(root.path().join("requests.jsonl")).await;
         let config = root.path().join("config.toml");
         let _ = hint;
         let trim_settings = format!("auto_trim_on_disconnect={trim_enabled}\n");
@@ -938,7 +942,7 @@ async fn server_retry_after_over_ten_minutes_is_deferred_instead_of_shortened() 
         .incoming()
         .await
         .reply
-        .send(Reply::error(429, "Retry-After: 601\r\n"))
+        .send(Reply::error(503, "Retry-After: 601\r\n"))
         .ok()
         .unwrap();
     assert_eq!(fixture.settled().await, "recovery_wait");
@@ -1452,6 +1456,191 @@ async fn unreducible_explicit_overflow_recovers_without_any_resend() {
     assert!(
         f.requests.try_recv().is_err(),
         "no outbound request is queued after terminal recovery"
+    );
+    f.close().await;
+}
+
+async fn usage_limit_new_conversation(f: &mut Fixture) {
+    let thread = request(
+        &f.control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    f.accepted = serde_json::from_value(
+        request(
+            &f.control,
+            Command::MessageSend(MessageSendArgs {
+                sender_label: None,
+                now: false,
+                thread_id: Some(thread),
+                text: "synthetic quota observation".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+}
+fn usage_limit_log_lines(f: &Fixture) -> usize {
+    std::fs::read_to_string(f._root.path().join("requests.jsonl"))
+        .unwrap()
+        .lines()
+        .count()
+}
+
+#[tokio::test]
+async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_expires() {
+    for shape in 0..6 {
+        eprintln!("synthetic usage-limit shape {shape}");
+        let mut f = Fixture::new(8, 60_000, 120_000).await;
+        let first = f.incoming().await;
+        assert_eq!(usage_limit_log_lines(&f), 1);
+        let resets_at = chrono::Utc::now().timestamp() + 3600;
+        let fact = json!({"error":{"type":"usage_limit_reached","resets_at":resets_at,"limit_window_minutes":10080}});
+        let body = match shape {
+            0 => fact.to_string(),
+            1 => json!({"error":{"message":format!("litellm.RateLimitError: provider - {fact}")}})
+                .to_string(),
+            2 => {
+                json!({"error":{"type":"usage_limit_reached","resets_in_seconds":3600}}).to_string()
+            }
+            5 => format!("litellm.RateLimitError: provider - {fact}"),
+            _ => {
+                json!({"error":{"type":"rate_limit_error","message":"temporary limit"}}).to_string()
+            }
+        };
+        let header_date = format!(
+            "Retry-After: {}\r\n",
+            chrono::DateTime::from_timestamp(resets_at, 0)
+                .unwrap()
+                .to_rfc2822()
+        );
+        let mut reply = Reply::http(
+            429,
+            "application/json",
+            &body,
+            if shape == 3 {
+                "Retry-After: 3600\r\n"
+            } else if shape == 4 {
+                &header_date
+            } else {
+                ""
+            },
+        );
+        if shape == 3 {
+            // The reset is already known at headers. Withhold the advertised
+            // body until the client closes; success cannot depend on draining it.
+            let end = reply
+                .bytes
+                .windows(4)
+                .position(|w| w == b"\r\n\r\n")
+                .unwrap()
+                + 4;
+            reply.bytes.truncate(end);
+            reply.hold_open = true;
+        }
+        first.reply.send(reply).ok().unwrap();
+        assert_eq!(f.settled().await, "recovery_wait");
+        let run = request(
+            &f.control,
+            Command::RunGet(RunTarget {
+                run_id: f.accepted.run_id.clone().unwrap(),
+            }),
+        )
+        .await;
+        let reason = &run["context"]["recovery_reason"];
+        let limit = &reason["details"]["usage_limit"];
+        assert!(limit["resets_at_utc"].as_str().is_some());
+        assert_eq!(limit["locally_blocked"], false);
+        if shape < 2 {
+            assert_eq!(limit["resets_at"], resets_at);
+            assert_eq!(limit["limit_window_minutes"], 10080);
+        }
+        assert!(
+            reason["message"]
+                .as_str()
+                .unwrap()
+                .contains(limit["resets_at_utc"].as_str().unwrap())
+        );
+        assert!(reason["hint"].as_str().unwrap().contains("/model"));
+        let attempts = f.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        assert!(
+            attempts[0]
+                .1
+                .as_ref()
+                .unwrap()
+                .get("automatic_retry")
+                .is_none()
+        );
+        usage_limit_new_conversation(&mut f).await;
+        assert_eq!(f.settled().await, "recovery_wait");
+        assert_eq!(usage_limit_log_lines(&f), 1);
+        let run = request(
+            &f.control,
+            Command::RunGet(RunTarget {
+                run_id: f.accepted.run_id.clone().unwrap(),
+            }),
+        )
+        .await;
+        assert_eq!(
+            run["context"]["recovery_reason"]["details"]["usage_limit"]["locally_blocked"],
+            true
+        );
+        assert!(run["context"]["recovery_reason"]["details"]["http"].is_null());
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(3602)).await;
+        tokio::time::resume();
+        usage_limit_new_conversation(&mut f).await;
+        f.incoming()
+            .await
+            .reply
+            .send(Reply::success())
+            .ok()
+            .unwrap();
+        assert_eq!(f.settled().await, "completed");
+        assert_eq!(usage_limit_log_lines(&f), 2);
+        f.close().await;
+    }
+}
+
+#[tokio::test]
+async fn unknown_429_keeps_retry_policy_without_inferred_cooldown() {
+    let mut f = Fixture::new(8, 60_000, 120_000).await;
+    // Explicit zero backoff exercises the ordinary retry path without real sleep.
+    f.incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 0\r\n"))
+        .ok()
+        .unwrap();
+    f.incoming()
+        .await
+        .reply
+        .send(Reply::success())
+        .ok()
+        .unwrap();
+    assert_eq!(f.settled().await, "completed");
+    assert_eq!(usage_limit_log_lines(&f), 2);
+    let attempts = f.attempts().await;
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(
+        attempts[0].1.as_ref().unwrap()["automatic_retry"]["number"],
+        1
+    );
+    assert!(
+        attempts[0].1.as_ref().unwrap()["error"]
+            .get("usage_limit")
+            .is_none()
     );
     f.close().await;
 }

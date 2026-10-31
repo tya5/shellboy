@@ -391,3 +391,14 @@ Conversation rows use a shared display-only legend (`/help`): `⏵` running,
 A background label is a saved launch/release fact, not model concurrency.
 Notifications show saved identity/outcome; Enter follows the loaded shell row
 or saved child Thread. Missing names are not inferred from similar commands.
+
+### Known connection cooldowns
+
+If recovery_reason includes `details.usage_limit`, read its `resets_at_utc` and
+optional limit window before retrying. The owner will not automatically resend
+a known usage-limit failure. Other conversations sharing the connection are
+blocked locally until reset; changing only the model on that connection does
+not evade the cooldown. Wait or ask the user to select another connection/model
+with `/model`; do not automatically switch cost or behavior. Expiry permits a
+new explicit request, not automatic resumption. Memory is discarded on owner
+restart. See the CLI reference for the exact supported provider error shapes.

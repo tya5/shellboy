@@ -1,5 +1,14 @@
 # Development status
 
+## Explicit usage-limit recovery (#76)
+
+Known future usage-limit resets now bypass automatic resend/reduction and enter
+existing recovery wait with UTC reset/window facts in run get and reason text.
+One shared fixed-size in-memory slot per configured connection blocks later
+generation POSTs until expiry; owner restart forgets it. Unknown 429 retains
+normal retries. Bottom-line TUI work is deferred to #85; activity/chrome are
+unchanged. Loopback/virtual-clock checks pass; exact-source CI is tracked in #76.
+
 ## CI observation ordering (#89)
 
 Three intermittent observations are traced to test boundaries: index-context

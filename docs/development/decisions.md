@@ -2010,3 +2010,17 @@ registration gate, saved-fact/notification observation, and durable/native
 shutdown gates. Listener teardown is the repeated-signal acknowledgment, not
 its best-effort diagnostic line. This does not claim every native lifecycle
 race is impossible or attribute the missing handle to lifeline termination.
+
+## #76: Minimal fact-only usage-limit cooldown (2026-10-31, active)
+
+Use only explicit usage_limit_reached plus a future valid integer reset, or
+HTTP 429 Retry-After above the existing 600-second automatic-wait ceiling.
+Generic 429 and other HTTP statuses are not inferred to be plan quotas.
+Keep one fixed optional fact/monotonic observation/duration per configured
+shared client, never a growing map of arbitrary provider keys or persistent
+state. Reuse owner lifetime; expiry is lazy and restart forgets memory.
+Retain the later concurrently observed reset. Fail locally before HTTP but
+preserve the existing attempt/recovery path and mark the absence of sending.
+No auto-switch/resume or input-preparation optimization. Header facts suffice
+without a possibly stalled error body. Existing reason text/run get are the
+initial UI boundary; bottom-line presentation belongs to #85 to avoid #41 F/G.

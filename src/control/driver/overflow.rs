@@ -76,7 +76,10 @@ pub(super) async fn retry_or_recover(
         && trim_not_applied
             .as_ref()
             .is_some_and(|o| o["outcome"] != "adopted");
-    let message = if reduction_unavailable {
+    let usage_limit = failure.error.usage_limit.as_deref().copied();
+    let message = if let Some(fact) = usage_limit {
+        fact.error().message
+    } else if reduction_unavailable {
         format!(
             "{} (no further automatic input reduction available)",
             failure.error
@@ -90,10 +93,16 @@ pub(super) async fn retry_or_recover(
         failure.error.to_string()
     };
     let facts = control.compactor.recovery_facts(&snapshot.thread).await?;
-    let error=ApiError::new(ErrorCode::IoFailed,message)
+    let mut error=ApiError::new(ErrorCode::IoFailed,message)
         .hint("Choose an available action; retry may charge again. Saved tools are not re-executed.")
         .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
             "automatic_reduction_unavailable":reduction_unavailable,"last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
+    if let Some(fact) = usage_limit {
+        error.hint = Some("Wait until the reported reset or select another connection/model with /model. No automatic switch or resume.".into());
+        if let Some(details) = &mut error.details {
+            details["usage_limit"] = fact.details();
+        }
+    }
     let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
     if let Some(observation) = trim_not_applied {
         saved["automatic_trim_attempt"] = observation;

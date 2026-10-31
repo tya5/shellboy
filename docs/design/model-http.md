@@ -223,3 +223,41 @@ existing assistant_response persistence and raw/F6 inspection retain them;
 Core does not persist every top-level response property. An otherwise empty
 usage-only answer carries facts on an empty assistant message, not invented text.
 These rules are wire normalization, not legacy Core/data-format fallbacks.
+
+## Explicit reset facts and connection cooldown (#76)
+
+Recognize only structured `usage_limit_reached` in error.type/code with a future
+integer Unix-second resets_at, or positive integer resets_in_seconds. Prefer
+resets_at when both exist. Accept the same object in a JSON error.message, or
+the complete JSON suffix after a literal `litellm.RateLimitError` prefix (one
+wrapper only, bounded by the existing error-body cap). Plain prose, malformed
+values and generic 429 without a reset do not establish quota exhaustion.
+HTTP 429 with valid Retry-After greater than the existing 600-second automatic
+wait ceiling establishes a rate-limit cooldown, not a guessed plan quota.
+
+One fixed-size optional fact/deadline lives in each configured shared HTTP
+client; clones share it, capacity equals configured connections, owner restart
+discards it. Expiry uses Tokio monotonic time anchored to the observed UTC reset.
+No timer, table, worker or queue is added. Already-in-flight calls are not
+cancelled; concurrent facts retain the later deadline. The gate covers Responses
+and Chat Completions generation (including summaries), not embeddings/catalogs.
+Conversation failures enter existing recovery_wait without retry or reduction.
+Cached rejection sends no HTTP; it still saves an ordinary failed local attempt
+with locally_blocked=true and no HTTP observation, not a fabricated provider call.
+
+Recovery details and the existing reason string show type, UTC reset, optional
+window and choices to wait or select another connection/model using /model.
+No auto-switch, auto-resume, usage prediction or extra provider heuristics.
+Bottom-line TUI rendering is deferred to #85 to avoid #41 F/G overlap.
+
+This #76 bounded fact slot is the sole exception to the earlier client-reuse
+section's no-additional-runtime-cache/mutex statement. Relative durations are
+rounded up to a UTC second (never retry early); HTTP-date resets retain their
+exact second. Invalid/truncated error bodies do not establish body-based facts.
+The connection gate does not skip existing input preparation, and switching
+only the model on the same blocked connection does not bypass it.
+
+A long 429 Retry-After is sufficient at headers: return its rate-limit fact
+without waiting for the error body. Consequently that case does not extract
+body-specific plan/window details. Body-based quota recognition still requires
+a complete valid supported object. This avoids waiting on a stalled error body.
