@@ -2722,6 +2722,8 @@ mod patch_tests {
     use super::*;
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
+            last_answer: None,
+            last_input: None,
             thread_id: id.into(),
             title: title.into(),
             cwd: "/synthetic".into(),
