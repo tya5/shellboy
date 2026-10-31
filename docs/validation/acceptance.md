@@ -2,6 +2,14 @@
 
 ## Batched native CI (#92, in progress)
 
+First complete candidate39577ff failed run41184106926 on all OSes at
+`test_unicode_failure_survives_strict_ascii_child_output`: its isolated Python
+`-c` process did not have the runner's sibling-module directory on sys.path after
+introducing windows_shards. No Rust test executed in that run. Add the actual
+script directory to that synthetic subprocess just as direct script execution
+does, preserving strict-ASCII setup and all Unicode/result assertions. Retain
+the failed run; qualify the fix on a new SHA, not a failed-job rerun.
+
 Measurement source `efc10e5b89d8ac5e3e117f0ed6b1db151c95ae79`, Windows four
 threads, first-attempt run [41182264568](https://github.com/tya5/shellboy/actions/runs/41182264568)
 passed with no runner failures. Ordinary harness times: library103.812s,

@@ -102,6 +102,7 @@ import importlib.util
 import subprocess
 import sys
 from unittest.mock import patch
+sys.path.insert(0, {str(Path(runner.__file__).resolve().parent)!r})
 spec = importlib.util.spec_from_file_location('test_timings', {str(Path(runner.__file__).resolve())!r})
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
@@ -124,6 +125,8 @@ sys.exit(code)
                                            cwd=Path(__file__).resolve().parents[2],
                                            capture_output=True, check=False)
                 self.assertEqual(completed.returncode, 1, completed.stderr.decode('utf-8', errors='replace'))
+                self.assertTrue((output / 'results.json').is_file(),
+                                completed.stderr.decode('utf-8', errors='replace'))
                 result = json.loads((output / 'results.json').read_text(encoding='utf-8'))
                 self.assertEqual(result['failures'], [{'target': 'test:integration',
                                                       'exit_code': 101, 'tests': sorted(names)}])
