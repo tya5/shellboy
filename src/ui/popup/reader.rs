@@ -33,6 +33,10 @@ impl ReaderCache {
     pub fn retained_bytes(&self) -> usize {
         self.bytes
     }
+    #[cfg(test)]
+    pub(in crate::ui) fn build_count(&self) -> usize {
+        self.builds
+    }
     pub fn bounds(&self) -> ReaderBounds {
         self.bounds
     }
@@ -54,11 +58,22 @@ impl ReaderCache {
             self.bounds = ReaderBounds::default();
             return 0;
         }
-        if self.key != Some((revision, width)) {
-            let lines = prepare();
-            self.rebuild(revision, width, &lines);
-        }
+        self.prepare(revision, width, prepare);
         self.paint(frame, area, requested)
+    }
+    /// Prepare once for source revision/width; geometry can use this row count
+    /// without rewrapping the source on every keyboard or wheel operation.
+    pub fn prepare(
+        &mut self,
+        revision: u64,
+        width: u16,
+        make_lines: impl FnOnce() -> Vec<Line<'static>>,
+    ) -> usize {
+        let width = width.max(1);
+        if self.key != Some((revision, width)) {
+            self.rebuild(revision, width, &make_lines());
+        }
+        self.rows.len()
     }
     fn rebuild(&mut self, revision: u64, width: u16, lines: &[Line<'static>]) {
         self.rows = Vec::new();
@@ -191,7 +206,6 @@ fn row_bytes(row: &Line<'_>) -> usize {
             })
             .sum::<usize>()
 }
-#[cfg(test)]
 pub(in crate::ui) fn reader_cached(
     frame: &mut Frame<'_>,
     area: Rect,

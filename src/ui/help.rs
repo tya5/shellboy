@@ -27,6 +27,8 @@ struct Guide {
 
 impl super::UiState {
     pub(super) fn show_help(&mut self, page: Page) -> Vec<super::UiAction> {
+        self.help_cache.clear();
+        self.invalidate_popup_paint();
         self.help_page = page;
         self.help_scroll = 0;
         self.help_visible = true;

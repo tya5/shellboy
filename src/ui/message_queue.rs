@@ -65,6 +65,7 @@ impl PendingMessage {
 }
 #[derive(Default)]
 pub(super) struct QueuePopup {
+    paint: std::cell::Cell<Option<popup::PaintBounds>>,
     pub visible: bool,
     pub selected: usize,
     pub archives: Option<Vec<(String, String)>>,
@@ -73,17 +74,28 @@ pub(super) struct QueuePopup {
     pub archive_error: Option<String>,
 }
 impl QueuePopup {
+    pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
+        self.paint.get()
+    }
+    pub(super) fn wheel(&mut self, delta: isize, pending_count: usize) -> bool {
+        let count = self.archives.as_ref().map_or(pending_count, Vec::len);
+        let old = self.selected;
+        self.selected = popup::move_selection(old, delta, count);
+        old != self.selected
+    }
+
     pub(super) fn draw(&self, frame: &mut Frame<'_>, area: Rect, pending: &PendingMessages) {
         if !self.visible {
             return;
         }
         if let Some(archives) = &self.archives {
-            let body = popup::panel(
+            let body = popup::panel_recorded(
                 frame,
                 area,
                 "保存した下書き",
                 &format!("{}件 · /restore draft ID", archives.len()),
                 "Esc 戻る · ↑↓ 選択 · Enter 入力欄へ復元 · R 再取得",
+                &self.paint,
             );
             let items = if archives.is_empty() {
                 vec![popup::Item::new(if self.archive_loading {
@@ -121,12 +133,13 @@ impl QueuePopup {
             pending.total,
             pending.items.len()
         );
-        let body = popup::panel(
+        let body = popup::panel_recorded(
             frame,
             area,
             "反映待ち",
             &context,
             "Esc 戻る · ↑↓ 選択 · Enter 状態 · O 原文\nD 選択を取消 · A 表示中のIDを取消",
+            &self.paint,
         );
         let items = if pending.items.is_empty() {
             vec![popup::Item::new("反映待ちはありません")]

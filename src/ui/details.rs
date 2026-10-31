@@ -39,6 +39,9 @@ enum Mode {
     Original,
 }
 pub(super) struct Details {
+    paint: Cell<Option<popup::PaintBounds>>,
+    reader_cache: std::cell::RefCell<popup::ReaderCache>,
+    reader_revision: u64,
     pub node_id: String,
     source_node_ids: Vec<String>,
     item_key: Option<super::ItemKey>,
@@ -439,6 +442,9 @@ impl Details {
             .unwrap_or_default();
         let revision = source_revision(view, &node_id);
         Self {
+            paint: Cell::new(None),
+            reader_cache: Default::default(),
+            reader_revision: 0,
             source_node_ids: vec![node_id.clone()],
             item_key: None,
             item_history_revision: None,
@@ -801,9 +807,11 @@ impl Details {
     }
     pub fn accept(&mut self, request_id: u64, body: HistoryBody, display: Vec<Line<'static>>) {
         if request_id == self.request_id && body.node_id == self.node_id {
+            self.paint.set(None);
             self.original = Some(body);
             self.original_observed_at =
                 Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            self.reader_revision = self.reader_revision.wrapping_add(1);
             self.original_lines = display;
             self.scroll.set(0);
         }
@@ -844,6 +852,8 @@ impl Details {
         if self.node_id == node_id {
             return;
         }
+        self.paint.set(None);
+        self.reader_cache.get_mut().clear();
         self.original = None;
         self.original_lines.clear();
         self.original_observed_at = None;
@@ -883,6 +893,26 @@ impl Details {
             cursor,
             request_id: self.request_id,
         }
+    }
+    pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
+        self.paint.get()
+    }
+    pub(super) fn wheel(&mut self, delta: isize, view: &ThreadView) -> bool {
+        if matches!(self.mode, Mode::Original) {
+            let old = self.scroll.get();
+            let new = popup::move_reader(old, delta, self.reader_cache.borrow().bounds().maximum);
+            self.scroll.set(new);
+            return old != new;
+        }
+        let count = match self.mode {
+            Mode::Nodes => view.nodes().len(),
+            Mode::Fields => self.fields(view).len(),
+            Mode::Links => self.links(view).len(),
+            Mode::Original => 0,
+        };
+        let old = self.selected;
+        self.selected = popup::move_selection(old, delta, count);
+        old != self.selected
     }
     pub fn key(&mut self, key: KeyEvent, view: &ThreadView, next: &mut u64) -> Outcome {
         self.sync_node(view);
@@ -1000,6 +1030,8 @@ impl Details {
                         self.scroll.set(0);
                         self.original = None;
                         self.original_lines = Vec::new();
+                        self.reader_revision = self.reader_revision.wrapping_add(1);
+                        self.reader_cache.get_mut().clear();
                         return Outcome::Action(Box::new(self.load_sender(next)));
                     }
                 }
@@ -1126,7 +1158,7 @@ impl Details {
         } else {
             "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nR 再取得 · O 原文 · C 値copy · A 操作 · F6 項目 · F7 リンク"
         };
-        let mut body = popup::panel(frame, area, mode, &context, footer);
+        let mut body = popup::panel_recorded(frame, area, mode, &context, footer, &self.paint);
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
             frame.render_widget(
                 ratatui::widgets::Paragraph::new("表示が更新されました。node参照を維持しています")
@@ -1275,11 +1307,13 @@ impl Details {
                 } else {
                     &loading
                 };
-                self.scroll.set(popup::reader_prepared(
+                self.scroll.set(popup::reader_cached(
                     frame,
                     body,
-                    super::presentation::borrowed(lines),
+                    lines,
                     self.scroll.get(),
+                    &mut self.reader_cache.borrow_mut(),
+                    self.reader_revision,
                 ));
                 return vec![];
             }
@@ -2699,5 +2733,54 @@ mod tests {
             .filter(|ch| !ch.is_whitespace())
             .collect::<String>();
         assert!(compact.contains("名乗り：leader"), "{shown}");
+    }
+    #[test]
+    fn wheel_links_and_original_only_move_owned_offsets_and_preserve_copy_source() {
+        use crossterm::event::{Event, MouseEvent, MouseEventKind};
+        let mut ui = state();
+        ui.details = Some(Details::new(ui.view(), true));
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut ui))
+            .unwrap();
+        let bounds = ui.details.as_ref().unwrap().paint_bounds().unwrap();
+        let wheel = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: bounds.body.x,
+            row: bounds.body.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(ui.event(wheel.clone()).is_empty());
+        assert_eq!(ui.details.as_ref().unwrap().selected, 3);
+        assert!(ui.dirty);
+        ui.details.as_mut().unwrap().mode = Mode::Original;
+        let original = "paid original row\n".repeat(4000);
+        let prepared = original
+            .lines()
+            .map(|line| Line::from(line.to_owned()))
+            .collect::<Vec<_>>();
+        let details = ui.details.as_mut().unwrap();
+        details.original_lines = prepared;
+        details.reader_revision += 1;
+        details.original=Some(serde_json::from_value(serde_json::json!({"node_id":"source-node","kind":"assistant_response","text":original,"context":{"state":"present","node_id":"source-node","created_at":"2026-10-30T00:00:00Z"},"provenance":{"kind":"assistant_response","created_at":"2026-10-30T00:00:00Z","source_revision":0},"source_node_ids":[],"previous_node_ids":[],"next_node_ids":[]})).unwrap());
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut ui))
+            .unwrap();
+        let before = ui
+            .details
+            .as_ref()
+            .unwrap()
+            .original
+            .as_ref()
+            .unwrap()
+            .text
+            .clone();
+        for _ in 0..60 {
+            assert!(ui.event(wheel.clone()).is_empty());
+        }
+        let details = ui.details.as_ref().unwrap();
+        assert_eq!(details.scroll.get(), 180);
+        assert_eq!(details.original.as_ref().unwrap().text, before);
+        assert!(details.reader_cache.borrow().retained_bytes() <= 8 * 1024 * 1024);
     }
 }

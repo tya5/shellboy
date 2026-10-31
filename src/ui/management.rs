@@ -44,6 +44,9 @@ impl IndexPreviewState {
     }
 }
 pub struct ManagementPopup {
+    paint: std::cell::Cell<Option<popup::PaintBounds>>,
+    reader_cache: std::cell::RefCell<popup::ReaderCache>,
+    reader_revision: u64,
     frame: Option<ManagementFrame>,
     pub(super) owner: Option<ManagementContext>,
     pub(super) usage_snapshot: bool,
@@ -56,6 +59,9 @@ pub struct ManagementPopup {
 impl Default for ManagementPopup {
     fn default() -> Self {
         Self {
+            paint: Default::default(),
+            reader_cache: Default::default(),
+            reader_revision: 0,
             frame: None,
             owner: None,
             usage_snapshot: false,
@@ -75,6 +81,30 @@ pub(super) enum Outcome {
     Confirm { command: Command, detail: String },
 }
 impl ManagementPopup {
+    pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
+        self.paint.get()
+    }
+    pub(super) fn wheel(&mut self, delta: isize) -> bool {
+        if let Some(state) = self.structured_mut()
+            && state.detail.is_none()
+        {
+            let old = state.selected;
+            state.selected = popup::move_selection(old, delta, state.fields.len());
+            return old != state.selected;
+        }
+        let maximum = self.reader_cache.borrow().bounds().maximum;
+        if let Some(view) = self.view_mut() {
+            let old = view.scroll;
+            view.scroll = popup::move_reader(old, delta, maximum);
+            return old != view.scroll;
+        }
+        false
+    }
+    fn reset_reader(&mut self) {
+        self.paint.set(None);
+        self.reader_cache.get_mut().clear();
+        self.reader_revision = self.reader_revision.wrapping_add(1);
+    }
     pub fn is_some(&self) -> bool {
         self.frame.is_some()
     }
@@ -94,6 +124,7 @@ impl ManagementPopup {
         self.frame.as_mut()?.structured.as_mut()
     }
     pub(super) fn open_text(&mut self, view: ManagementView) {
+        self.reset_reader();
         self.frame = Some(ManagementFrame {
             view,
             structured: None,
@@ -107,6 +138,7 @@ impl ManagementPopup {
         omitted: bool,
         work_status: bool,
     ) {
+        self.reset_reader();
         if work_status {
             self.mode = ManagementMode::Status;
         } else if self.mode == ManagementMode::Status {
@@ -140,6 +172,9 @@ impl ManagementPopup {
             && state.request_id == request_id
             && state.pending_pointer.as_deref() == Some(&pointer)
         {
+            self.paint.set(None);
+            self.reader_cache.get_mut().clear();
+            self.reader_revision = self.reader_revision.wrapping_add(1);
             state.detail = Some(ManagementPage {
                 pointer,
                 text,
@@ -167,6 +202,7 @@ impl ManagementPopup {
         });
     }
     pub(super) fn close(&mut self) {
+        self.reset_reader();
         self.epoch = self.epoch.wrapping_add(1);
         self.frame = None;
         self.owner = None;
@@ -609,12 +645,19 @@ impl ManagementPopup {
                     let context = format!("参照 {}", page.pointer);
                     let body =
                         popup::panel(frame, area, &title, &context, MANAGEMENT_DETAIL_FOOTER);
-                    let lines = crate::presentation::sanitize_plain(&page.text, 0)
-                        .0
-                        .lines()
-                        .map(|line| Line::from(line.to_owned()))
-                        .collect::<Vec<_>>();
-                    reader_scroll = Some(popup::reader(frame, body, &lines, view.scroll));
+                    reader_scroll = Some(self.reader_cache.borrow_mut().render(
+                        frame,
+                        body,
+                        self.reader_revision,
+                        view.scroll,
+                        || {
+                            crate::presentation::sanitize_plain(&page.text, 0)
+                                .0
+                                .lines()
+                                .map(|line| Line::from(line.to_owned()))
+                                .collect::<Vec<_>>()
+                        },
+                    ));
                 } else {
                     let context = format!(
                         "{} / {}項目{} · {}",
@@ -634,7 +677,14 @@ impl ManagementPopup {
                             _ => status.to_owned(),
                         }
                     );
-                    let body = popup::panel(frame, area, &view.title, &context, hints);
+                    let body = popup::panel_recorded(
+                        frame,
+                        area,
+                        &view.title,
+                        &context,
+                        hints,
+                        &self.paint,
+                    );
                     let body = self.draw_preview(frame, body);
                     let mut items = Vec::new();
                     let mut selected_row = 0;
@@ -681,14 +731,22 @@ impl ManagementPopup {
                     ManagementMode::Index => format!("対象 {} · {status}", self.index_label()),
                     _ => status.to_owned(),
                 };
-                let body = popup::panel(frame, area, &view.title, &context, hints);
+                let body =
+                    popup::panel_recorded(frame, area, &view.title, &context, hints, &self.paint);
                 let body = self.draw_preview(frame, body);
-                let lines = crate::presentation::sanitize_plain(&view.text, 0)
-                    .0
-                    .lines()
-                    .map(|line| Line::from(line.to_owned()))
-                    .collect::<Vec<_>>();
-                reader_scroll = Some(popup::reader(frame, body, &lines, view.scroll));
+                reader_scroll = Some(self.reader_cache.borrow_mut().render(
+                    frame,
+                    body,
+                    self.reader_revision,
+                    view.scroll,
+                    || {
+                        crate::presentation::sanitize_plain(&view.text, 0)
+                            .0
+                            .lines()
+                            .map(|line| Line::from(line.to_owned()))
+                            .collect::<Vec<_>>()
+                    },
+                ));
             }
             if let Some(scroll) = reader_scroll {
                 self.view_mut().unwrap().scroll = scroll;

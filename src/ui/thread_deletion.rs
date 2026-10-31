@@ -147,7 +147,7 @@ impl UiState {
         };
         let action = self.deletion_action(&dialog, false);
         self.confirmation_scroll = 0;
-        self.confirmation = Some(Confirmation::ThreadDeletion(dialog));
+        self.set_confirmation(Confirmation::ThreadDeletion(dialog));
         self.dirty = true;
         vec![action]
     }
@@ -206,7 +206,7 @@ impl UiState {
             self.confirmation_scroll = 0;
             self.deletion_action(&dialog, execute)
         });
-        self.confirmation = Some(Confirmation::ThreadDeletion(dialog));
+        self.set_confirmation(Confirmation::ThreadDeletion(dialog));
         self.dirty = true;
         action.into_iter().collect()
     }

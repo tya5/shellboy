@@ -56,6 +56,11 @@ impl UiState {
         self.history_mouse_active()
     }
     pub fn event(&mut self, event: Event) -> Vec<UiAction> {
+        if matches!(&event, Event::Paste(_))
+            || matches!(&event, Event::Key(key) if key.kind != KeyEventKind::Release)
+        {
+            self.invalidate_popup_paint();
+        }
         // A redraw gesture has no owner-specific input or status side effects.
         if let Event::Key(key) = &event
             && key.kind != KeyEventKind::Release
@@ -233,26 +238,20 @@ impl UiState {
                 let viewport = Rect::new(0, 0, width, height);
                 if self.viewport != viewport {
                     self.thread_browser.invalidate_paint();
+                    self.invalidate_popup_paint();
                 }
                 self.dirty |= self.viewport != viewport;
                 self.viewport = viewport;
                 vec![]
             }
-            Event::Mouse(mouse) if self.top_overlay() == Some(Overlay::Threads) => {
-                if self.thread_browser.paint_bounds().is_some_and(|bounds| {
-                    bounds
-                        .body
-                        .contains(ratatui::layout::Position::new(mouse.column, mouse.row))
-                }) {
-                    let delta = match mouse.kind {
-                        MouseEventKind::ScrollUp => Some(-3),
-                        MouseEventKind::ScrollDown => Some(3),
-                        _ => None,
-                    };
-                    if let Some(delta) = delta {
-                        self.dirty |= self.thread_browser.wheel(delta);
-                    }
-                }
+            Event::Mouse(mouse)
+                if self.top_overlay().is_some()
+                    && matches!(
+                        mouse.kind,
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                    ) =>
+            {
+                self.popup_wheel(mouse);
                 vec![]
             }
             Event::Mouse(mouse)

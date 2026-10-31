@@ -4,6 +4,8 @@ use crate::protocol::ThreadSetArgs;
 
 const FOOTER: &str = "Esc 戻る · Enter 変更\n↑↓ 選択 · Ctrl+R 再取得 · Ctrl+Y コピー";
 pub(super) struct ModelPicker {
+    paint: std::cell::Cell<Option<popup::PaintBounds>>,
+    filtered_indices: Vec<usize>,
     request: u64,
     connection: String,
     current: Option<String>,
@@ -52,6 +54,7 @@ impl ModelPicker {
             KeyCode::Backspace => {
                 let boundary = prev_grapheme(&self.query, self.query.len());
                 self.query.truncate(boundary);
+                self.rebuild_filter();
                 self.selected = 0;
             }
             KeyCode::Char(c)
@@ -76,10 +79,12 @@ impl ModelPicker {
         if request != self.request {
             return;
         }
+        self.paint.set(None);
         self.loading = false;
         match result {
             Ok(models) => {
                 self.models = models;
+                self.rebuild_filter();
                 self.selected = self
                     .current
                     .as_ref()
@@ -90,18 +95,38 @@ impl ModelPicker {
             Err(error) => self.error = Some(error),
         }
     }
-    fn filtered(&self) -> Vec<&String> {
+    fn rebuild_filter(&mut self) {
         let query = self.query.to_lowercase();
-        self.models
+        self.filtered_indices = self
+            .models
             .iter()
-            .filter(|model| model.to_lowercase().contains(&query))
+            .enumerate()
+            .filter_map(|(index, model)| model.to_lowercase().contains(&query).then_some(index))
+            .collect();
+    }
+    fn filtered(&self) -> Vec<&String> {
+        self.filtered_indices
+            .iter()
+            .filter_map(|index| self.models.get(*index))
             .collect()
+    }
+    pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
+        self.paint.get()
+    }
+    pub(super) fn wheel(&mut self, delta: isize) -> bool {
+        if self.loading || self.error.is_some() {
+            return false;
+        }
+        let old = self.selected;
+        self.selected = popup::move_selection(old, delta, self.filtered_indices.len());
+        old != self.selected
     }
     pub(super) fn paste(&mut self, text: &str) {
         let available = 256usize.saturating_sub(self.query.chars().count());
         self.query
             .extend(text.chars().filter(|c| !c.is_control()).take(available));
         self.selected = 0;
+        self.rebuild_filter();
     }
     pub(super) fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
         let filtered = self.filtered();
@@ -116,7 +141,7 @@ impl ModelPicker {
             },
             filtered.len()
         );
-        let body = popup::panel(frame, area, "モデル", &context, FOOTER);
+        let body = popup::panel_recorded(frame, area, "モデル", &context, FOOTER, &self.paint);
         if self.loading {
             frame.render_widget(
                 Paragraph::new("モデル一覧を取得中…").style(Style::default().fg(theme::ACCENT)),
@@ -174,6 +199,8 @@ impl UiState {
         };
         self.next_model_request = self.next_model_request.wrapping_add(1);
         self.models = Some(ModelPicker {
+            paint: Default::default(),
+            filtered_indices: Vec::new(),
             request: self.next_model_request,
             current: (self.view().connection.as_ref() == Some(&connection))
                 .then(|| self.view().model.clone())
@@ -225,5 +252,45 @@ impl UiState {
             view.model = Some(model);
             vec![]
         }
+    }
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+    #[test]
+    fn prepared_model_filter_and_wheel_never_select_or_reload_a_model() {
+        let mut picker = ModelPicker {
+            paint: Default::default(),
+            filtered_indices: vec![],
+            request: 1,
+            connection: "mock".into(),
+            current: None,
+            models: vec![],
+            query: String::new(),
+            selected: 0,
+            loading: true,
+            error: None,
+        };
+        picker.accept(1, Ok((0..30).map(|n| format!("model-{n:02}")).collect()));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| picker.draw(frame, frame.area()))
+            .unwrap();
+        assert!(picker.paint_bounds().is_some());
+        assert!(picker.wheel(3));
+        assert_eq!(picker.filtered()[picker.selected], "model-03");
+        assert!(picker.wheel(-100));
+        assert!(!picker.wheel(-3));
+        assert_eq!(picker.selected, 0);
+        picker.paste("model-2");
+        assert_eq!(picker.filtered_indices.len(), 10);
+        assert!(picker.wheel(3));
+        assert_eq!(picker.filtered()[picker.selected], "model-23");
+        picker.accept(1, Ok(vec!["other".into()]));
+        assert!(picker.filtered_indices.is_empty());
+        assert!(picker.paint_bounds().is_none());
+        assert!(!picker.wheel(3));
     }
 }

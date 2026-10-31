@@ -40,6 +40,7 @@ pub use management::ManagementPopup;
 mod operations;
 mod overlay;
 mod popup;
+mod popup_motion;
 mod presentation;
 #[cfg(test)]
 mod program_status_tests;
@@ -1477,8 +1478,14 @@ impl Confirmation {
             CONFIRMATION_FOOTER
         }
     }
-    fn layout(&self, area: Rect) -> (String, u16) {
-        let text = match self {
+    fn lines(&self) -> Vec<Line<'static>> {
+        self.text()
+            .lines()
+            .map(|line| Line::from(line.to_owned()))
+            .collect()
+    }
+    fn text(&self) -> String {
+        match self {
                 Confirmation::Watch(target)=>format!("表示中の保存済み対象を{}しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",if target.kind==watch::WatchActionKind::Stop {"停止"}else{"再試行"},target.thread_id,target.run_id),
                 Confirmation::MessageQueue {detail,..}=>detail.clone(),
                 Confirmation::ThreadDeletion(dialog)=>dialog.text(),
@@ -1486,7 +1493,10 @@ impl Confirmation {
                 Confirmation::Index{command,detail}=>format!("索引処理の実行確認 · {}\n{detail}",match command { Command::IndexBackfill(_)=>"backfill", Command::IndexRetry(_)=>"retry", Command::IndexRebuild(_)=>"rebuild", _=>"索引操作" }),
                 Confirmation::Operation{detail,..}=>detail.clone(),
                 Confirmation::ForceQuit=>"強制終了しますか？\n保存/回収が未完了の可能性があります。プロセスを終了し、次回起動で復旧します。".into(),
-            };
+            }
+    }
+    fn layout(&self, area: Rect) -> (String, u16) {
+        let text = self.text();
         let width = popup::reader_width(popup::body_area(
             area,
             CONFIRMATION_CONTEXT,
@@ -1511,6 +1521,11 @@ impl Confirmation {
     }
 }
 pub struct UiState {
+    popup_epoch: u64,
+    popup_paint: Option<(overlay::Overlay, u64, popup::PaintBounds)>,
+    aux_popup_paint: std::cell::Cell<Option<popup::PaintBounds>>,
+    help_cache: popup::ReaderCache,
+    confirmation_cache: popup::ReaderCache,
     palette: theme::Palette,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     bell: bell::Bell,
@@ -1611,6 +1626,11 @@ impl UiState {
         let active = view.draft.draft_id.clone();
         let initialized = cwd.is_absolute();
         Self {
+            popup_epoch: 0,
+            popup_paint: None,
+            aux_popup_paint: Default::default(),
+            help_cache: Default::default(),
+            confirmation_cache: Default::default(),
             palette,
             diagnostics: None,
             bell: bell::Bell::default(),
@@ -3171,7 +3191,7 @@ impl UiState {
                         pending.message = Some("旧作業停止の確認が必要です".into());
                     }
                     if active {
-                        self.confirmation = Some(Confirmation::EditStop {
+                        self.set_confirmation(Confirmation::EditStop {
                             draft_id,
                             revision,
                             run_id,
@@ -3193,7 +3213,7 @@ impl UiState {
                     } else {
                         self.management.index_label()
                     };
-                    self.confirmation = Some(Confirmation::Index {
+                    self.set_confirmation(Confirmation::Index {
                         command,
                         detail: format!(
                             "{label}\n{text}\n外部embedding APIの費用が発生します。Yで実行 / Nで取消"
@@ -3836,7 +3856,7 @@ impl UiState {
         if let Some(edit) = &self.view().draft.edit
             && let Some(run_id) = &edit.run_id
         {
-            self.confirmation = Some(Confirmation::EditStop {
+            self.set_confirmation(Confirmation::EditStop {
                 draft_id: self.view().draft.draft_id.clone(),
                 revision: self.view().draft.revision,
                 run_id: run_id.clone(),
@@ -4717,7 +4737,7 @@ impl UiState {
                 ];
             }
             Command::ThreadDelete(args) => {
-                self.confirmation = Some(Confirmation::Operation {
+                self.set_confirmation(Confirmation::Operation {
                     command: command.clone(),
                     detail: format!(
                         "会話 {} を削除します。子孫を含む: {}。現在の実行状態を再確認してから削除します",
@@ -4727,7 +4747,7 @@ impl UiState {
                 return vec![];
             }
             Command::StorageCollect(args) => {
-                self.confirmation = Some(Confirmation::Operation {
+                self.set_confirmation(Confirmation::Operation {
                     command: command.clone(),
                     detail: format!(
                         "保存データの回収を要求します。category={:?}。保護されたデータを含む回収結果を確認してください",
@@ -4772,17 +4792,29 @@ impl UiState {
                 vec![]
             }
             management::Outcome::Confirm { command, detail } => {
-                self.confirmation = Some(Confirmation::Index { command, detail });
+                self.set_confirmation(Confirmation::Index { command, detail });
                 vec![]
             }
         }
+    }
+    fn set_confirmation(&mut self, confirmation: Confirmation) {
+        self.confirmation = Some(confirmation);
+        self.confirmation_scroll = 0;
+        self.confirmation_cache.clear();
+        self.popup_paint = None;
+        self.aux_popup_paint.set(None);
     }
     fn confirmation_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         if matches!(self.confirmation, Some(Confirmation::ThreadDeletion(_))) {
             return self.thread_deletion_key(key);
         }
         let page = self.confirmation.as_ref().map_or(1, |confirmation| {
-            confirmation.page(popup::viewport(self.viewport))
+            let visible = self.confirmation_cache.bounds().visible;
+            if visible > 0 {
+                visible.saturating_sub(1).max(1)
+            } else {
+                confirmation.page(popup::viewport(self.viewport))
+            }
         });
         if let Some(scroll) = popup::reader_key(key.code, self.confirmation_scroll, page) {
             self.confirmation_scroll = scroll;
@@ -4793,6 +4825,9 @@ impl UiState {
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N')
         ) {
             self.confirmation_scroll = 0;
+            self.confirmation_cache.clear();
+            self.popup_paint = None;
+            self.aux_popup_paint.set(None);
             self.confirmation = None;
             return vec![];
         }
@@ -4800,6 +4835,9 @@ impl UiState {
             return vec![];
         }
         self.confirmation_scroll = 0;
+        self.confirmation_cache.clear();
+        self.popup_paint = None;
+        self.aux_popup_paint.set(None);
         match self.confirmation.take() {
             Some(Confirmation::Watch(target)) => {
                 if self.thread_browser.validates_watch_target(&target) {
@@ -4854,7 +4892,7 @@ impl UiState {
                     .progress()
                     .is_some_and(|(_, _, available)| *available) =>
             {
-                self.confirmation = Some(Confirmation::ForceQuit);
+                self.set_confirmation(Confirmation::ForceQuit);
                 vec![]
             }
             _ => vec![],
@@ -4897,13 +4935,14 @@ impl UiState {
             } else {
                 "終了処理を開始しています。保存・停止を待っています".into()
             };
-            let body = popup::compact(
+            let body = popup::compact_recorded(
                 frame,
                 area,
                 "終了処理",
                 "保存と実行停止の状態",
                 "W / Enter 待機継続 · F 強制終了を選択",
                 12,
+                &self.aux_popup_paint,
             );
             let lines = text
                 .lines()
@@ -4912,20 +4951,32 @@ impl UiState {
             popup::reader(frame, body, &lines, 0);
         }
         if let Some(confirmation) = &self.confirmation {
-            let (text, height) = confirmation.layout(area);
-            let body = popup::compact(
+            let width = popup::reader_width(popup::body_area(
+                area,
+                CONFIRMATION_CONTEXT,
+                confirmation.footer(),
+                None,
+            ))
+            .max(1);
+            let rows = self
+                .confirmation_cache
+                .prepare(0, width, || confirmation.lines());
+            let overhead = 5 + confirmation.footer().lines().count().clamp(1, 2);
+            let height = rows.saturating_add(overhead).clamp(8, u16::MAX as usize) as u16;
+            let body = popup::compact_recorded(
                 frame,
                 area,
                 "実行の確認",
                 CONFIRMATION_CONTEXT,
                 confirmation.footer(),
                 height,
+                &self.aux_popup_paint,
             );
-            let lines = text
-                .lines()
-                .map(|line| Line::from(line.to_owned()))
-                .collect::<Vec<_>>();
-            self.confirmation_scroll = popup::reader(frame, body, &lines, self.confirmation_scroll);
+            self.confirmation_scroll =
+                self.confirmation_cache
+                    .render(frame, body, 0, self.confirmation_scroll, || {
+                        confirmation.lines()
+                    });
         }
         if matches!(
             self.top_overlay(),
@@ -4961,8 +5012,7 @@ impl UiState {
                 if target.kind == watch::WatchActionKind::Output {
                     vec![UiAction::WatchAction(target)]
                 } else {
-                    self.confirmation = Some(Confirmation::Watch(target));
-                    self.confirmation_scroll = 0;
+                    self.set_confirmation(Confirmation::Watch(target));
                     vec![]
                 }
             }
@@ -5500,6 +5550,8 @@ fn visible_render_nodes(
 
 pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     let area = frame.area();
+    state.popup_paint = None;
+    state.aux_popup_paint.set(None);
     state.viewport = area;
     if area.width < 8 || area.height < 5 {
         frame.render_widget(Paragraph::new("Shellboy · enlarge terminal"), area);
@@ -5664,15 +5716,22 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             .draw(frame, popup_area, active, notice_visible);
     }
     if state.help_visible {
-        let body = popup::panel(
+        let body = popup::panel_recorded(
             frame,
             popup_area,
             state.help_page.title,
             state.help_page.context,
             HELP_FOOTER,
+            &state.aux_popup_paint,
         );
-        let lines = state.help_page.lines(popup::reader_width(body));
-        state.help_scroll = popup::reader(frame, body, &lines, state.help_scroll);
+        state.help_scroll = state
+            .help_cache
+            .render(frame, body, 0, state.help_scroll, || {
+                state
+                    .help_page
+                    .lines(popup::reader_width(body))
+                    .into_owned()
+            });
     }
     let overlay_links = state.draw_overlays(frame, popup_area);
     state.visible_links = overlay_links;
@@ -5709,6 +5768,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             cell.underline_color = ratatui::style::Color::Reset;
         }
     }
+    state.capture_popup_paint();
     state.dirty = false;
 }
 pub const HELP: &str = "操作するときはEscで会話へ戻る · / でコマンド候補を表示";

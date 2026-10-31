@@ -12,7 +12,7 @@ use ratatui::{
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
-pub(super) use reader::ReaderCache;
+pub(super) use reader::{ReaderCache, reader_cached};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct PaintBounds {
