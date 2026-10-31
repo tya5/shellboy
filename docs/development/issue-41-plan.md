@@ -324,3 +324,9 @@ no elapsed-performance assertions in CI; fixture failures remain failures.
 Native Windows measurement support must be implemented/observed or explicitly
 unavailable, never inferred from a Unix PTY. Publication/dispatch authorization
 remains distinct from local preparation. No new local600s P2 window is started.
+
+D2-only2e6973d now passes exact-source local standard1835/0/32 against latest
+mainb581283; reviewed wait watchdogs are included and no E/F/G source/migration
+is admitted. Retain the initial native diagnostic failure and no causal claim.
+Do not admit E to main before D2's independent native main gate. Long CI
+measurement implementation/dispatch remains open, not hidden behind old samples.

@@ -1430,3 +1430,12 @@ unchanged. Space selection retains its prior scope. No queue/schema/worker,
 indexing admission, history-search output shape or installed binary is changed.
 Focused mock and wire tests pass; final standard/rebased and native CI are
 separate gates. Existing seven-day observation remains a reviewer rollout task.
+
+### D2-only latest mainb581283 qualification
+
+2e6973d retains latest #71/#73 corrections and reviewed slow-runner wait
+watchdogs, with no E/F/G or migrations15/16. The new exact-source macOS standard
+exits0:1835/0/32 (lib915/integration910/termination7/crash3), layout93/Python9/
+fmt/strict all-target Clippy. Both native parent-shell cleanup variants pass.
+This does not explain the earlier intermittent missing-signal diagnostic.
+Local main contains D2 only; push and main three-OS CI remain unperformed.

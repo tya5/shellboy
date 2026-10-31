@@ -3595,3 +3595,15 @@ mock summaries. Their raw/refusal/provenance/tool-once assertions remain. The
 existing automatic overflow success cases and new rejection case all pass.
 Exact-source three-OS CI is recorded separately in issue #73. Real-provider
 quality and billing remain unverified.
+
+### D2-only requalification after current-main #71/#73 corrections
+
+Source2e6973d includes mainb581283 plus reviewed D2 and watchdog-only679774b
+(asbd0ff5b). Same native environment/standard command as above; exit0,
+layout93/Python9/fmt/strict all-target Clippy pass. Rust915/0/13 library,
+910/0/17 integration,7/0/1 termination,3/0/1 crash:1835/0/32.
+Private log `.local/issue-41-d2-latest-main-standard.log` in the development
+root. The previously failing parent-shell PTY test passes both bash and zsh;
+retain the initial failure as unexplained instead of claiming causal repair.
+No E/F/G source, migration15/16, paid API, installed update or push is included.
+Native main three-OS CI and CI long measurements remain separate unexecuted gates.
