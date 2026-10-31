@@ -2528,3 +2528,17 @@ fell111329272 to107014568 bytes. A post-snapshot Cargo example panic retained
 stack locations at source lines2 and3. Both temporary targets/probe were deleted.
 Elapsed440.95/427.87 seconds are observations, not gates. Details and provenance
 are recorded on issue105; latest-main checks/3-OS CI are separate qualification.
+## #72: Optional External Error Catalogue (2026-11-01)
+
+Use a Python-standard-library script and an independently replaceable derived
+SQLite file, not Rust Core, an owner query/worker, automatic guidance or UI/G.
+The current conversation schema already provides exact shell/call/result/Turn
+references and indexed output prefixes through a read-only SQLite connection.
+Requiring explicit data-dir/build gives non-users zero startup/owner cost.
+Bound the source set and prefix reads, sanitize before persistence, and label
+recovery pairs as temporal associations rather than causal fixes. Prefer a
+bounded rescan refresh over a rowid watermark: completions, GC and deletion can
+change existing rows. No schema/migration change, background subscription, LLM
+or new dependency is justified. Revisit a generic Core reader only if an external
+current-schema reader proves insufficient, after documenting need on issue72
+and obtaining the user's decision.

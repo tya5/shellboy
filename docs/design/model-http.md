@@ -283,7 +283,12 @@ limits the entire arguments string, just as for command text. Display strips
 plain-text controls and falls back to
 the command for absent/empty/whitespace-only descriptions. The description is not
 an authorization or a verified explanation of the command. shell.describe_calls
-is true by default; false omits the parameter from generation tool definitions
-and uses command labels. Existing history/DB formats, lifecycle and workers stay
+is true by default; generation schemas require both command and description
+while leaving the description text and empty-string allowance unchanged. False
+omits the property and its required entry, and uses command labels. Missing/empty
+description in received model output remains executable and falls back to command
+labels; raw arguments are still saved/replayed verbatim. Adding the required
+entry costs 14 serialized UTF-8 bytes, not a measured token estimate.
+Existing history/DB formats, lifecycle and workers stay
 unchanged. Incomplete opaque audit input remains subject to existing transport
 limits; it is not accepted as an executable description.

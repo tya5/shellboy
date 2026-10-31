@@ -390,3 +390,157 @@ async fn stale_restore_selection_and_turn_generation_never_replace_the_current_p
     assert_eq!(final_payloads, original_payloads);
     fixture.close().await;
 }
+
+async fn large_context_trim_marker(fixture: &Fixture) -> (String, Vec<String>) {
+    let ids = (0..1077)
+        .map(|i| format!("00000000-0000-4000-8000-{i:012}"))
+        .collect::<Vec<_>>();
+    let seeded = ids.clone();
+    fixture.db.call(move |db| {
+        let tx=db.transaction()?;
+        for (i,id) in seeded.iter().enumerate() {
+            history::append_node(&tx,"t",id,None,"message",&json!({"role":"user","content":format!("original synthetic {i}: {}","x".repeat(256))}),"now")?;
+        }
+        tx.commit()?;Ok(())
+    }).await.unwrap();
+    let result = fixture
+        .compactor
+        .trim_activated("t", CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result.omitted_nodes, 1076);
+    (result.marker_node_id.unwrap(), ids)
+}
+async fn saved_context_trim_marker(fixture: &Fixture, marker: &str) -> (String, String, i64) {
+    let marker = marker.to_owned();
+    fixture
+        .db
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT payload_json,body_hash,payload_revision FROM node WHERE id=?1",
+                [marker],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+#[tokio::test]
+async fn context_trim_large_marker_range_summarizes_short_notice_and_preserves_originals() {
+    crate::test_watchdog::watchdog("large context trim marker summary", async {
+        let (fixture, mut requests, _release, server) = configured_fixture(1, false).await;
+        let (marker, ids) = large_context_trim_marker(&fixture).await;
+        let original = saved_context_trim_marker(&fixture, &marker).await;
+        assert!(original.0.chars().count() > 80_000);
+        let payload: Value = serde_json::from_str(&original.0).unwrap();
+        assert_eq!(payload["context_trim"]["reason"], "failure");
+        assert_eq!(
+            payload["context_trim"]["original_order"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1076
+        );
+        let input = fixture
+            .db
+            .call(|db| {
+                Ok(crate::control::replay::ReplayCache::new(1_000_000)
+                    .load(db, "t")?
+                    .materialize())
+            })
+            .await
+            .unwrap();
+        assert_eq!(input[0], payload["item"]);
+        assert!(!serde_json::to_string(&input).unwrap().contains(&ids[537]));
+        let result = fixture
+            .compactor
+            .edit(
+                "t",
+                &summary_args(&marker, ids.last().unwrap()),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.compact.source_nodes, 2);
+        assert_eq!(
+            result.compact.original_node_ids,
+            vec![marker.clone(), ids.last().unwrap().clone()]
+        );
+        assert_eq!(saved_context_trim_marker(&fixture, &marker).await, original);
+        let request = requests.recv().await.unwrap();
+        let text = request["input"][1]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Shellboy context notice"));
+        assert!(text.chars().count() < 4096);
+        assert!(
+            !text.contains("original_order")
+                && !text.contains("source_node_ids")
+                && !text.contains(&ids[537])
+        );
+        assert_eq!(
+            crate::test_watchdog::watchdog("one local summary request", server)
+                .await
+                .unwrap()
+                .unwrap(),
+            1
+        );
+        let original_id = ids[537].clone();
+        let body = crate::history::History::new(fixture.db.clone())
+            .get(crate::protocol::HistoryGetArgs {
+                final_answer_only: false,
+                node_id: original_id,
+                limit_bytes: 65536,
+                cursor: None,
+                encoding: "UTF-8".into(),
+            })
+            .await
+            .unwrap();
+        assert!(body.text.contains("original synthetic 537"));
+        assert!(body.tombstone_reason.is_none());
+        eprintln!(
+            "context_trim summary fixture saved={} summary_input={}",
+            original.0.chars().count(),
+            text.chars().count()
+        );
+        fixture.close().await;
+    })
+    .await
+    .unwrap();
+}
+#[tokio::test]
+async fn context_trim_summary_projection_does_not_change_exact_restore_or_marker_payload() {
+    crate::test_watchdog::watchdog("context trim exact restore after render", async {
+        let fixture = Fixture::new().await;
+        let (marker, ids) = large_context_trim_marker(&fixture).await;
+        let original = saved_context_trim_marker(&fixture, &marker).await;
+        let snapshot = fixture.compactor.snapshot("t", false).await.unwrap();
+        assert!(
+            render(&snapshot.groups[0].sources[0], snapshot.epoch)
+                .chars()
+                .count()
+                < 4096
+        );
+        assert!(segments(&snapshot.groups, snapshot.epoch).is_ok());
+        assert_eq!(saved_context_trim_marker(&fixture, &marker).await, original);
+        fixture
+            .compactor
+            .edit(
+                "t",
+                &ContextEditArgs {
+                    thread_id: Some("t".into()),
+                    action: ContextEditAction::Restore,
+                    from_node_id: Some(marker.clone()),
+                    to_node_id: None,
+                    max_chars: None,
+                    max_percent: None,
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fixture.path().await, ids);
+        assert_eq!(saved_context_trim_marker(&fixture, &marker).await, original);
+        fixture.close().await;
+    })
+    .await
+    .unwrap();
+}

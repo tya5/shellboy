@@ -318,3 +318,10 @@ The existing Run, recovery event, receipt and Turn facts remain authoritative;
 root recovery retains the existing event without parent delivery so resume does
 not erase an unobserved transition. Schema16 adds lookup indexes, not tables.
 No new worker, queue or model-facing tool is introduced.
+
+## External Shell Error Catalogue (#72)
+
+Adopt [the external catalogue](error-catalog.md) for explicitly built, sanitized,
+rebuildable failure statistics and observed recovery associations. This is an
+optional script, not Rust Core, UI, an owner worker, automatic guidance or LLM
+processing. Conversation data is read-only; derived data has independent bounds.

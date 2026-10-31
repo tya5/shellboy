@@ -3381,3 +3381,28 @@ async fn description_raw_arguments_survive_adoption_and_next_model_request_byte_
         server.abort();
     }).await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn required_description_schema_keeps_missing_and_empty_model_output_executable() {
+    crate::test_watchdog::watchdog("required description output fallback", async {
+        let root=tempfile::tempdir().unwrap();let(url,mut receive,server)=proxy().await;
+        let owner=owner(root.path(),&url).await;let control=Control::new(&owner,root.path().into());
+        let target=thread(&control).await;
+        for (id,description) in [("absent",None),("empty",Some(""))] {
+            send(&control,&target,id).await;
+            let first=incoming(&control,&mut receive).await;
+            assert_eq!(first.body["tools"][0]["parameters"]["required"],json!(["command","description"]));
+            let mut arguments=json!({"command":"echo REQUIRED_DESCRIPTION_FALLBACK"});
+            if let Some(description)=description {arguments["description"]=json!(description);}
+            first.reply.send((200,json!({"id":id,"status":"completed","output":[{"type":"function_call","call_id":id,"name":"shell","arguments":arguments.to_string()}]}))).unwrap();
+            let next=incoming(&control,&mut receive).await;
+            assert!(next.body["input"].as_array().unwrap().iter().any(|item|item["type"]=="function_call_output" && item["call_id"]==id && item["output"].as_str().is_some_and(|text|text.contains("REQUIRED_DESCRIPTION_FALLBACK"))));
+            next.reply.send((200,answer("done"))).unwrap();settled(&control,&target).await;
+        }
+        control.store.database.call(|db| {
+            assert_eq!(db.query_row("SELECT count(*) FROM shell_execution WHERE state='exited' AND exit_code=0",[],|r|r.get::<_,i64>(0))?,2);
+            Ok(())
+        }).await.unwrap();
+        control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
+    }).await.unwrap();
+}

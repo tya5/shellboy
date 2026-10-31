@@ -313,3 +313,37 @@ shell/child scenes across dark/light/NO_COLOR/vt100, including exact original
 access, duplicate short names, reactive rename and deletion. It never uses user
 data, real providers or the host clipboard. The only timeout is the shared 60s
 watchdog; observations are not latency acceptance gates.
+
+## Optional External Shell Error Catalogue (#72)
+
+Python3.10+ with SQLite3.43+ (JSON and current-schema octet_length support) can
+run this standalone script; Rust Core,
+owner startup, UI and conversation schema are unchanged. Always supply an explicit
+data directory. No provider credentials, owner process or network is needed.
+
+```bash
+python3 scripts/shellboy-errors.py --data-dir DATA build --repo-root REPO
+python3 scripts/shellboy-errors.py --data-dir DATA build --incremental --repo-root REPO
+python3 scripts/shellboy-errors.py --data-dir DATA top --since 2026-10-31T00:00:00Z
+python3 scripts/shellboy-errors.py --data-dir DATA similar --execution EXECUTION_ID
+```
+
+The derived file is `DATA/derived/errors.sqlite3`; deleting it and explicitly
+building again recreates it. The current schema17 reader fails closed on unknown
+schemas or more than10,000 source executions (no silent partial statistics).
+Incremental refresh still scans the bounded current set to catch in-place terminal
+changes and deletion, compares sanitized facts, and skips writing an unchanged
+snapshot. A changed snapshot is replaced atomically, not a per-row read delta.
+Do not use its durations as a claim of faster append-only indexing.
+
+Outputs are historical associations, never recommendations. Read the source IDs
+and verify actual conditions before using a successful command. Sanitization is
+heuristic, not a guarantee of detecting arbitrary secrets; keep derived data
+private and inspect before sharing. The [design](../design/error-catalog.md)
+records text/identity/step limits and deletion/privacy semantics.
+
+Tests use temporary synthetic current-schema databases only:
+`python3 -m unittest discover -s scripts/tests -p test_error_catalog.py`.
+`python3 scripts/measure-error-catalog.py` builds10,000 synthetic executions,
+records one full/changed-fact incremental duration under the60s watchdog and
+removes all generated data. It never locates or reads a real user's data-dir.

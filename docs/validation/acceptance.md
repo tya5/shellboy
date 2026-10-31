@@ -6840,3 +6840,74 @@ confirmed. The older805efc9/3a933824 pair is historical context, not this result
 Main advanced to #88 during measurement; the pair stayed frozen. Subsequent
 rebase/latest-main standard checks and Windows/Linux CI are separate and not yet
 qualified by this record. No extra comparison, P1 run or cold retry was performed.
+### #72 External Shell Error Catalogue: Synthetic Python Qualification
+
+macOS/aarch64, Python3.12.7/SQLite3.51.0:12 new catalogue tests passed; complete
+`scripts/tests` discovery passed83 tests in7.192s. Fixtures initialize the current
+conversation schema17 inside temporary synthetic data directories only. Assertions
+cover deterministic path/number/time/hex grouping, exact group/call/result-node
+references, same Thread/Turn/step/overlap restrictions, counts/paired fractions,
+rare recovery examples, secret canaries (derived bytes and CLI JSON), bounded cut
+input/encoding loss, source SHA256 unchanged/read-only writes rejected, explicit
+rebuild equivalence, in-place completion/GC/deletion refresh, cap/schema/options
+failure, atomic replacement cleanup and symlink/hardlink rejection. Output prefix
+EXPLAIN uses indexed output_stream seeks. No raw stdout was copied.
+
+`python3 scripts/measure-error-catalog.py` created10,000 synthetic executions,
+5,000 failures, then changed one saved exit code before an incremental refresh.
+Observed full1.323557s/refresh1.398745s; refresh identified2 changed facts and9998
+unchanged facts, with5001 failures afterward. These are bounded-rescan/atomic
+replacement observations, not append-only delta reads or performance gates.
+Evidence: `/tmp/issue-72-scale-final.json`, `/tmp/issue-72-python-first.log`;
+execution2472dac9-c44c-4314-a783-fe8bb2f71361 exit0/cleanup confirmed. The scale
+subprocess has only the60s watchdog; its temporary fixture was removed.
+
+Earlier development observations were1.222/1.290s at an earlier source. One
+expanded unit case initially failed because its fixture used literal backslash-n
+instead of a newline; the fixture was corrected and all12 cases reran successfully.
+Redaction remains heuristic (arbitrary-secret detection is not established),
+lexical recovery association is not causation, and data remains untrusted.
+No user DB, model/API, provider credential or real command replay was used.
+Full standard checks/Windows/Linux and reviewer acceptance remain pending.
+
+### #72 Native Windows Failure And Explicit SQLite Lifetime Fix
+
+Initial batch30 native CI41244820590 passed Linux/macOS but failed Windows job
+124665975622 with20 Python errors: WinError32 during staging-file replacement,
+unlink and temporary-directory cleanup. Evidence:
+`/tmp/shellboy-batch30-ci-failed.log`. This is a task-related resource-lifetime
+regression, not an unrelated timeout eligible for a blind rerun. Python's SQLite
+connection context commits/rolls back but does not close its connection; the
+writer still held the staging database open when publishing it.
+
+The author fix closes statement cursors, finishes commit/rollback and explicitly
+closes the writer connection before replace/unlink. Source/catalog query cursors,
+configuration-failure connections, fixture setup/inserts/test queries and the
+scale fixture are explicitly scoped too. Cleanup failures are chained to the
+original publication exception rather than masking it; the previous snapshot
+remains intact on write/replace faults. No retry, sleep, GC, ignored error or
+weakened assertion is introduced.
+
+Three added regression cases retain strong references to every tracked SQLite
+connection/cursor, assert explicit closure before replacement/unlink, exercise
+read/refresh/rebuild, inject write/replace faults and check exact original error
+identity/atomic snapshot retention, and expose cleanup-error chaining. The15
+catalogue cases pass on macOS after the fix. New native Windows qualification
+and the exact-source standard check remain pending; neither prior macOS success
+nor retained-handle simulation establishes a Windows pass.
+
+After the lifetime changes, complete Python discovery passed86 cases in7.549s
+(macOS/Python3.12.7/SQLite3.51.0). The same synthetic10k fixture passed full and
+changed-fact refresh:1.365133s/1.462936s,2 changed/9998 unchanged facts, no timing
+gate. Evidence: `/tmp/issue-72-windows-lifetime-python.log` and
+`/tmp/issue-72-windows-lifetime-scale.json`; execution
+fa8d6e3e-90f7-4dbc-8537-4f6179101955 exited0 with process-group cleanup confirmed.
+These local assertions do not replace a new native Windows run.
+
+## #97 required description follow-up: pending qualification
+
+Source-only schema change and regression fixtures cover enabled/opt-out required
+sets, absent/empty execution and command label fallback. The required-entry-only
+serialized request delta is14 UTF-8 bytes; token/model compliance is not inferred.
+Two synthetic real shell calls must persist exited/exit0 facts; no provider or
+user database is used. Rust/standard results remain pending shared allocation.
