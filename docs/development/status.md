@@ -1919,3 +1919,7 @@ hydration. F overlap was acknowledged by the user; worker4 receives the final
 line mapping with a review-required branch. No Core/protocol/schema change,
 installed binary, user data or clipboard operation is involved. Final local
 standard/native gates remain separate; CI and main integration belong to worker4.
+The corrected real PTY regression passes: older command witness before and after
+saved model completion/separate CLI refresh, follow stays false, normal exit0.
+A final unchanged-production5fc5cc0 comparison with that same fixture fails,
+confirming the latest-main reproduction rather than assuming the user hypothesis.

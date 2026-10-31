@@ -4827,3 +4827,14 @@ Shutdown drains the PTY concurrently with child.wait using async readiness, so
 PTY backpressure is not mistaken for an owner shutdown defect. The preliminary
 full gate passed all other integration cases (934/1/17) but exercised the older,
 non-draining harness; a final full gate must use the corrected fixture.
+
+A controlled final comparison reran the same corrected synthetic fixtures with
+only the three production UI files restored temporarily to starting main5fc5cc0.
+The baseline fails six regressions (including actual PTY older-history progress),
+4 other filtered cases pass; no time bound was changed. The script restores the
+fixed files from dd55c23 on exit and verifies a clean tree. With the fixed UI,
+the real PTY case passes in the recorded run: it shows an older CMD069 witness,
+completes the held request, observes REFRESHED_PAUSED through the separate CLI,
+keeps older history visible and follow=false, drains shutdown and exits0. That
+5.14s observation is not a latency assertion. Only the shared60s watchdog guards
+permanent stalls. No diagnostic-policy relaxation or new timer was introduced.
