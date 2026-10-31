@@ -79,13 +79,22 @@ impl PhaseClock {
         if let Some(previous) = previous
             && previous.key == key
             && previous.anchor == anchor
+            && !(phase == ActivityPhase::Receiving
+                && previous.base.is_none()
+                && view.receive.as_ref().is_some_and(|r| r.received))
         {
             return Some(previous);
         }
         let observed = anchor.is_none();
         let (at, base) = if phase == ActivityPhase::Receiving {
             let first = view.receive.as_ref().map_or(at, |r| r.first_at);
-            (first, Some(Duration::ZERO))
+            (
+                first,
+                view.receive
+                    .as_ref()
+                    .filter(|r| r.received)
+                    .map(|_| Duration::ZERO),
+            )
         } else if let Some(saved) = &anchor {
             let base = chrono::DateTime::parse_from_rfc3339(saved)
                 .ok()
@@ -228,5 +237,25 @@ mod tests {
                 .is_none()
         );
         assert_eq!(FooterText::Observed.key(), "ui.activity.age.observed");
+    }
+    #[test]
+    fn observation_loss_does_not_invent_a_new_first_byte_or_count_the_unknown_gap() {
+        let at = Instant::now();
+        let mut view = ActivityView::default();
+        let s = snapshot("a", 120);
+        view.accept_at(1, s.clone(), at);
+        view.receive_at("a", at + Duration::from_secs(1));
+        view.unavailable_at(2, at + Duration::from_secs(3));
+        view.accept_at(3, s, at + Duration::from_secs(4));
+        assert_eq!(view.phase(), ActivityPhase::Receiving);
+        assert_eq!(
+            view.phase_time_note(at + Duration::from_secs(5)).as_deref(),
+            Some(FooterText::UnknownAge.text())
+        );
+        view.receive_at("a", at + Duration::from_secs(6));
+        assert_eq!(
+            view.phase_time_note(at + Duration::from_secs(7)).as_deref(),
+            Some("観測 1s")
+        );
     }
 }

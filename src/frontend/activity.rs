@@ -205,10 +205,10 @@ pub(super) fn read_tx_with_waits(
             raw.recovery_counts = Some(counts);
         }
         let tool_started_at: Option<String> = db.query_row(
-            "SELECT MIN(created_at) FROM tool_group WHERE turn_id=?1 AND state='running'",
+            "SELECT substr(created_at,1,128) FROM tool_group WHERE turn_id=?1 AND state='running' ORDER BY rowid LIMIT 1",
             [turn_id],
             |r| r.get(0),
-        )?;
+        ).optional()?;
         let tools=db.query_row("SELECT COUNT(*) FROM shell_execution WHERE turn_id=?1 AND json_extract(shell_json,'$.spawned')=1",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
         let cancelled=db.query_row("SELECT COUNT(*) FROM tool_result tr JOIN tool_group g ON g.id=tr.group_id WHERE g.turn_id=?1 AND tr.status='cancelled'",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
         raw.tool_running = tool_started_at.is_some();
