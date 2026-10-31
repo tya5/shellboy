@@ -1815,3 +1815,18 @@ exposed yet; this is not a usable-F or admission claim. Focused ui::watch tests 
 is the isolated state primitive, not the full standard or a usable Watch screen.
 E branch/main/public measurement refs remain unchanged. The primitive must later
 absorb relevant archived corrections and the F ledger gates before publication.
+
+
+## F saved-summary primitive local draft
+
+The F-only preparation branch now shares saved Run/Turn activity decoding and
+optional summary identities with future readonly lineage/Watch consumers. Public
+ThreadSummary output and the exact-ID query boundary are retained. Native macOS
+focused `cargo test --locked --lib control::db::thread_summary::` passes 3/0/0
+(994 filtered out), including saved identity assertions and bounded query-plan
+coverage; formatting passes. This is not a full standard check or a working
+Watch screen. Two dead-code warnings identify helpers/identity fields whose F
+consumers are not wired yet; resolve them through actual consumers before the
+strict Clippy/admission gate, without suppressing unfinished work. No schema,
+new public operation, publication or user-data change is included. E admission
+remains separately approval-gated; #83–#87 remain outside #41.

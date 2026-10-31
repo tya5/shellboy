@@ -643,3 +643,14 @@ browser read and move the shared deadline forward before the pending selected
 read can take that same browser ticket. Keep admission priority in the existing
 outer loop, with no new queue/worker or additional timer. A browser-only change
 still uses its normal bounded standalone read.
+
+### F shared saved-summary primitive
+
+F extracts native Run/Turn activity decoding and saved summary identities into
+control::db::thread_summary because CLI summaries and readonly display consumers
+must classify the same stored facts. The lightweight Run/Turn join is reused by
+descendant queries without per-descendant attempts/tools/body projections.
+Optional stored identities/timestamps remain unknown when absent. This is a
+bounded read model on the caller's existing transaction, not a persistent table,
+new command, worker, queue or lifecycle authority. Frontend retains membership,
+watch/unread/session and presentation ownership. No G inspector model is added.
