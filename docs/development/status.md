@@ -2001,3 +2001,7 @@ header/body gates, a synthetic saved running-group overlap marker (not an OS she
 execution claim), external CLI retry, success and typed usage-limit recovery.
 P1 comparison and final standard/rebase checks remain independent pending gates;
 worker4 owns review-required CI/integration. #87 key hints remain worker3-owned.
+Final serialized validation on source6303d91/mainafe4c08 passes1,972/0/33,
+Python41/layout94/fmt/strict Clippy/policy. Rebuilt native PTYs pass all8/64 again
+with resolved historical panels retained. Quiet P1 passes all three matched pairs;
+loaded-host failures remain recorded. CI/main admission belongs to worker4.

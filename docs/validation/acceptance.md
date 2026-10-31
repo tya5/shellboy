@@ -5224,7 +5224,7 @@ closed gate is claimed merely from a future rerun.
 
 After explicit slot release from workers1/3 (both holding all new Rust work),
 the already-built baselineafe4c08 and final receiver-fix candidate executables
-were observed without rebuilding,11:27:44-11:27:59UTC. Three interleaved P1 pairs
+were observed without rebuilding,11:27:45-11:27:59UTC. Three interleaved P1 pairs
 p95us:4490->4447,4398->4465,4418->4435. All candidate values satisfy8ms and
 +2ms relative goals in this controlled interval; cache counts131/258/16510 and
 focus-reuse assertions remain identical. The earlier over-budget loaded-host
@@ -5245,3 +5245,16 @@ artifact-selection/paired-build scripts,4275 characters (the fourth matching
 entry is the measurement query itself and is excluded). A source-witnessed
 paired-artifact helper could remove repeated boilerplate; this task does not
 expand #85 into that new helper implementation.
+
+After the user-reported normal owner restart, the clean worktree/branch and
+completed observations were verified rather than replaying completed operations.
+The final serialized sequence on source6303d91/mainafe4c08 completed exit0:
+CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=2 sh scripts/check.sh gives1,972 passed /
+0 failed /33 ignored, layout94, Python41, fmt, strict Clippy and watchdog policy.
+The debug product was then rebuilt and the actual temporary-owner PTY matrix
+repeated successfully:8 conditions/64 screens,4 loopback requests each, including
+external retry, historical resolved panel and quota guidance. No stopped build is
+claimed as success. The heavy slot was released directly to worker1 afterwards.
+Subsequent changes in this qualification commit are record-only; Rust and fixture
+source blobs remain identical to the fully checked source. CI is not dispatched
+by this worker, and the branch is handed to worker4 as review required.
