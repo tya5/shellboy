@@ -19,6 +19,9 @@ fn classify_retry(
     facts: &ResponseFacts,
     retry_partial: bool,
 ) -> RetryPolicy {
+    if error.usage_limit.is_some() {
+        return RetryPolicy::Ineligible;
+    }
     if facts.terminal_received && !error.is_context_limit() {
         return RetryPolicy::Ineligible;
     }

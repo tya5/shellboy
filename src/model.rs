@@ -3,6 +3,7 @@
 pub mod dialect;
 pub mod http;
 mod reconcile;
+pub mod usage_limit;
 
 use crate::protocol::ShellToolArgs;
 use serde::{Deserialize, Serialize};
@@ -67,6 +68,8 @@ pub struct ModelError {
     pub status: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_observation: Option<Box<http::HttpObservation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_limit: Option<Box<usage_limit::UsageLimit>>,
 }
 impl ModelError {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
@@ -76,6 +79,7 @@ impl ModelError {
             provider_code: None,
             status: None,
             http_observation: None,
+            usage_limit: None,
         }
     }
     pub fn is_context_limit(&self) -> bool {
@@ -123,6 +127,7 @@ impl ModelError {
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
             http_observation: None,
+            usage_limit: usage_limit::UsageLimit::parse(value, chrono::Utc::now()).map(Box::new),
         }
     }
 }

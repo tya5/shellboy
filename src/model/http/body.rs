@@ -124,12 +124,19 @@ pub(super) async fn http_error(response: Response, context: &mut RequestContext<
             provider_code: None,
             status: Some(status),
             http_observation: None,
+            usage_limit: std::str::from_utf8(&body)
+                .ok()
+                .and_then(|text| {
+                    crate::model::usage_limit::UsageLimit::text(text, chrono::Utc::now())
+                })
+                .map(Box::new),
         },
     };
     if error.message.is_empty() {
         error.message = "Proxy returned an empty HTTP error body".into();
     }
     if truncated {
+        error.usage_limit = None;
         error.message.push_str(" [HTTP error body truncated]");
     }
     redact(error, context.secrets)

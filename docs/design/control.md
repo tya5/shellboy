@@ -447,3 +447,14 @@ present, but establish native shutdown through durable Run/shell/tool outcomes,
 exit status and native process disappearance. For ordered repeated OS signals,
 listener endpoint removal acknowledges that the frontend began shutdown without
 depending on diagnostic admission, including while the database writer is held.
+
+## Known reset facts (#76)
+
+An explicit future usage-limit fact is ineligible for automatic resend before
+partial-output/overflow retry decisions. Preserve existing saved-failure and
+recovery adoption boundaries. The recovery reason retains the UTC reset and
+optional window, with choices to wait or select another connection/model.
+Unknown 429 follows #50 unchanged. The configured shared HTTP clients each own
+one in-memory reset slot; details and exclusions are in [model HTTP](model-http.md).
+No automatic connection switch or resume, durable cooldown state, queue or
+worker is introduced. The short TUI status rendering belongs to #85.
