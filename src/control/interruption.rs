@@ -38,7 +38,7 @@ AND (EXISTS (
                 AND EXISTS (
                     SELECT 1
                     FROM json_each(m.value, '$.conditions') c
-                    WHERE json_extract(c.value, '$.run_id') IN (
+                    WHERE EXISTS(SELECT 1 FROM json_each(c.value,'$.thread_ids') ids WHERE ids.value=t.id) OR json_extract(c.value, '$.run_id') IN (
                         SELECT id
                         FROM run
                         WHERE thread_id = t.id)
@@ -182,6 +182,7 @@ const WAIT_SNAPSHOT: &str = r"SELECT json_object('operation_id', json_extract(m.
         'execution_id', json_extract(m.value, '$.caller.execution_id')),
     'conditions', json_extract(m.value, '$.conditions'),
     'timeout_ms', json_extract(m.value, '$.timeout_ms'),
+    'after_cursor', json_extract(m.value, '$.after_cursor'),
     'accepted_at', json_extract(m.value, '$.accepted_at'),
     'observation_state', 'interrupted')
 FROM app_meta m
@@ -191,7 +192,7 @@ AND (json_extract(m.value, '$.caller.thread_id') = ?1
         AND EXISTS (
             SELECT 1
             FROM json_each(m.value, '$.conditions') c
-            WHERE json_extract(c.value, '$.run_id') IN (
+            WHERE EXISTS(SELECT 1 FROM json_each(c.value,'$.thread_ids') ids WHERE ids.value=?1) OR json_extract(c.value, '$.run_id') IN (
                 SELECT id
                 FROM run
                 WHERE thread_id = ?1)

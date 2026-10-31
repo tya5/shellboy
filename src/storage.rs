@@ -30,6 +30,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (13, "0013_message_path_admission"),
     (14, "0014_turn_interrupt"),
     (15, "0015_readback_indexes"),
+    (16, "0016_thread_observation"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -591,20 +592,44 @@ mod schema_validation_tests {
 mod readback_migration_tests {
     #[tokio::test]
     async fn schema14_index_upgrade_keeps_source_rows_and_malformed_optional_receipts() {
-        tokio::time::timeout(std::time::Duration::from_secs(60),async {
+        crate::test_watchdog::watchdog("schema14 derived index upgrade",async {
             let root=tempfile::tempdir().unwrap();let path=root.path().join("db");
             {
                 let c=rusqlite::Connection::open(&path).unwrap();c.execute_batch(super::CURRENT_SCHEMA).unwrap();
-                c.execute_batch("DROP INDEX shell_started_readback;DROP INDEX shell_owner_started_readback;DROP INDEX compact_operation_thread;DROP INDEX automatic_compaction_turn;DELETE FROM schema_migration WHERE version=15;PRAGMA user_version=14;PRAGMA ignore_check_constraints=ON;INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','2026-10-31T00:00:00Z');PRAGMA ignore_check_constraints=OFF;").unwrap();
+                c.execute_batch("DROP INDEX wait_run_state;DROP INDEX wait_recovery_thread;DROP INDEX thread_answer_latest;DROP INDEX receipt_thread_order;DELETE FROM schema_migration WHERE version=16;DROP INDEX shell_started_readback;DROP INDEX shell_owner_started_readback;DROP INDEX compact_operation_thread;DROP INDEX automatic_compaction_turn;DELETE FROM schema_migration WHERE version=15;PRAGMA user_version=14;PRAGMA ignore_check_constraints=ON;INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','2026-10-31T00:00:00Z');PRAGMA ignore_check_constraints=OFF;").unwrap();
                 c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('keep','/','','p','m','2026-10-31T00:00:00Z')",[]).unwrap();
             }
             let failure=match super::DbWorker::open(&path).await {Err(error)=>error,Ok(worker)=>{worker.shutdown().await.unwrap();panic!("existing CHECK corruption must still reject owner startup")}};
             assert!(failure.to_string().contains("quick_check"),"{failure}");
             let c=rusqlite::Connection::open(&path).unwrap();
-            assert_eq!(c.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),15);
+            assert_eq!(c.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),super::SCHEMA_VERSION);
             assert_eq!(c.query_row("SELECT result_ref_json FROM operation_receipt WHERE operation_id='corrupt'",[],|r|r.get::<_,String>(0)).unwrap(),"malformed");
             assert_eq!(c.query_row("SELECT count(*) FROM thread WHERE id='keep'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
-            assert_eq!(c.query_row("SELECT count(*) FROM schema_migration",[],|r|r.get::<_,i64>(0)).unwrap(),15);
+            assert_eq!(c.query_row("SELECT count(*) FROM schema_migration",[],|r|r.get::<_,i64>(0)).unwrap(),super::SCHEMA_VERSION);
         }).await.expect("derived index upgrade watchdog");
+    }
+}
+
+#[cfg(test)]
+mod thread_observation_migration_tests {
+    #[tokio::test]
+    async fn schema15_observation_indexes_preserve_saved_source_identity_and_reopen() {
+        crate::test_watchdog::watchdog("schema15 Thread observation upgrade",async {
+            let root=tempfile::tempdir().unwrap();let path=root.path().join("db");
+            {
+                let db=rusqlite::Connection::open(&path).unwrap();db.execute_batch(super::CURRENT_SCHEMA).unwrap();
+                db.execute_batch(r#"DROP INDEX wait_run_state;DROP INDEX wait_recovery_thread;DROP INDEX thread_answer_latest;DROP INDEX receipt_thread_order;DELETE FROM schema_migration WHERE version=16;PRAGMA user_version=15;INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','now');INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2000','2001');INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('e','child_recovery_wait','{}','t','{"thread_id":"t","run_id":"r","turn_id":"u"}','2000');"#).unwrap();
+            }
+            for _ in 0..2 {
+                let worker=super::DbWorker::open(&path).await.unwrap();
+                worker.call(|db| {
+                    assert_eq!(db.query_row("SELECT rowid FROM run WHERE id='r'",[],|r|r.get::<_,i64>(0))?,1);
+                    assert_eq!(db.query_row("SELECT rowid FROM event WHERE id='e'",[],|r|r.get::<_,i64>(0))?,1);
+                    assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,16);
+                    assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('wait_run_state','wait_recovery_thread','thread_answer_latest','receipt_thread_order')",[],|r|r.get::<_,i64>(0))?,4);
+                    Ok(())
+                }).await.unwrap();worker.shutdown().await.unwrap();
+            }
+        }).await.unwrap();
     }
 }

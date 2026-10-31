@@ -3411,6 +3411,8 @@ impl UiState {
                         || !view.pending.is_empty())
             })
             .map(|(key, view)| ThreadSummary {
+                last_answer: None,
+                last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,
@@ -6753,6 +6755,8 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
+            last_answer: None,
+            last_input: None,
             last_compaction: None,
             thread_id: "t".into(),
             title: "paired header".into(),

@@ -80,7 +80,7 @@ impl History {
                     "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(ThreadDetails { last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
+                        Ok(ThreadDetails { last_answer: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
                             context_usage: None,
                             context: None,
                             thread_id: id.clone(),

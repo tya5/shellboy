@@ -886,6 +886,7 @@ impl Form {
                             conditions.push(form.condition()?);
                         }
                         Command::Wait(WaitArgs {
+                            after: None,
                             conditions,
                             timeout_ms: form.number("timeout")?,
                         })

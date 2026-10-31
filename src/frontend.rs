@@ -3728,6 +3728,8 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
+                last_answer: None,
+                last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,
@@ -3740,6 +3742,8 @@ mod stream_tests {
                 excerpt: String::new(),
             },
             ThreadSummary {
+                last_answer: None,
+                last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
                 revisit: None,

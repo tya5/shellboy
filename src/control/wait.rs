@@ -90,6 +90,7 @@ struct Observation {
     recovery: bool,
     unavailable: bool,
     interrupted: bool,
+    cursor: Option<String>,
 }
 
 pub(super) async fn observe(
@@ -153,11 +154,16 @@ async fn observe_inner(
     if args.conditions.is_empty() {
         return Err(invalid("wait requires at least one condition"));
     }
+    crate::thread_observation::validate(&args.conditions, args.after.as_deref())?;
+    let mut thread_after = args.after.clone();
     let duration = Duration::from_millis(args.timeout_ms);
     let started = tokio::time::Instant::now();
     if let Some(caller) = &caller {
         for condition in &args.conditions {
             let own = match condition {
+                WaitCondition::ThreadSettled { thread_ids, .. } => {
+                    thread_ids.contains(&caller.thread_id)
+                }
                 WaitCondition::TurnCompleted { turn_id } => turn_id == &caller.turn_id,
                 WaitCondition::RunEnded { run_id } => run_id == &caller.run_id,
                 WaitCondition::ShellEnded { execution_id }
@@ -188,7 +194,8 @@ async fn observe_inner(
         let notified = control.changed.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
-        let query = args.clone();
+        let mut query = args.clone();
+        query.after = thread_after.clone();
         let origin = caller.clone();
         let durable_id = operation_id.clone();
         #[cfg(test)]
@@ -202,10 +209,10 @@ async fn observe_inner(
             .call(move |db| {
                 let tx=db.transaction()?;
                 let observation=inspect(&tx,&query,origin.as_ref(),initial);
-                let edges=ownership_edges(&tx);
+                let edges=if origin.is_some() && initial {ownership_edges(&tx)} else {Ok(Vec::new())};
                 if initial&&observation.as_ref().is_ok_and(|observation|outcome(&query,observation,None).is_ok_and(|value|value.is_none()))&&edges.is_ok(){
                     let caller=origin.as_ref().map(|origin|json!({"thread_id":origin.thread_id,"run_id":origin.run_id,"turn_id":origin.turn_id,"execution_id":origin.execution_id}));
-                    let body=json!({"operation_id":durable_id,"caller":caller,"conditions":query.conditions,"timeout_ms":query.timeout_ms,"accepted_at":chrono::Utc::now().to_rfc3339()}).to_string();
+                    let body=json!({"operation_id":durable_id,"caller":caller,"conditions":query.conditions,"timeout_ms":query.timeout_ms,"after_cursor":observation.as_ref().ok().and_then(|o|o.cursor.as_ref()),"accepted_at":chrono::Utc::now().to_rfc3339()}).to_string();
                     if body.len().saturating_add(WAIT_BINDING_BYTES)>MAX_FRAME_BYTES{return Ok((Err(ApiError::new(ErrorCode::InputLimit,"Wait observation metadata exceeds the public frame bound")),edges));}
                     tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",rusqlite::params![WaitKeys::new(&durable_id).pending(),body])?;
                 }
@@ -215,6 +222,9 @@ async fn observe_inner(
             .await
             .map_err(crate::app::storage_error)?;
         let observation = observation?;
+        if observation.cursor.is_some() {
+            thread_after = observation.cursor.clone();
+        }
         if let Some(result) = outcome(&args, &observation, None)? {
             return Ok(result);
         }
@@ -317,12 +327,14 @@ fn outcome(
     let Some(status) = status else {
         return Ok(None);
     };
-    let cursor = observation.matched.iter().find_map(|condition| {
-        if let WaitCondition::ShellOutput { cursor, .. } = condition {
-            Some(cursor.clone())
-        } else {
-            None
-        }
+    let cursor = observation.cursor.clone().or_else(|| {
+        observation.matched.iter().find_map(|condition| {
+            if let WaitCondition::ShellOutput { cursor, .. } = condition {
+                Some(cursor.clone())
+            } else {
+                None
+            }
+        })
     });
     let reason = match status {
         WaitStatus::Timeout => Some(format!(
@@ -385,10 +397,29 @@ fn inspect(
         recovery: false,
         unavailable: false,
         interrupted: false,
+        cursor: None,
     };
+    let thread_report =
+        crate::thread_observation::observe(db, &args.conditions, args.after.as_deref(), initial)?;
     let mut snapshots = Vec::new();
     for condition in &args.conditions {
         match condition {
+            WaitCondition::ThreadSettled { thread_ids, states } => {
+                let report = thread_report.as_ref().expect("Thread condition projection");
+                let changes: Vec<_> = report
+                    .changes
+                    .iter()
+                    .filter(|change| {
+                        thread_ids.iter().any(|id| change["thread_id"] == *id)
+                            && states.iter().any(|state| change["state"] == *state)
+                    })
+                    .cloned()
+                    .collect();
+                if !changes.is_empty() {
+                    observation.matched.push(condition.clone());
+                }
+                snapshots.push(json!({"type":"thread_settled","thread_ids":thread_ids,"states":states,"changes":changes}));
+            }
             WaitCondition::TurnCompleted { turn_id } => {
                 let row=db.query_row("SELECT u.state,u.run_id,u.answer_node_id,t.deleted_at FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[turn_id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?))).optional().map_err(sql_error)?;
                 if let Some((state, run, answer, deleted)) = row {
@@ -449,6 +480,14 @@ fn inspect(
         observation.interrupted=db.query_row("SELECT EXISTS(SELECT 1 FROM receipt WHERE target_thread_id=?1 AND state='accepted')",[&caller.thread_id],|row|row.get(0)).map_err(sql_error)?;
     }
     observation.snapshot = json!({"conditions":snapshots});
+    if let Some(report) = thread_report {
+        observation.snapshot["changes"] = json!(report.changes);
+        observation.snapshot["more"] = json!(report.more);
+        observation.unavailable |= report.unavailable;
+        observation.snapshot["thread_unavailable"] = json!(report.unavailable);
+        observation.cursor = Some(report.cursor);
+        observation.targets.extend(report.targets);
+    }
     Ok(observation)
 }
 fn missing(observation: &mut Observation, initial: bool, kind: &str, id: &str) -> Result<()> {
@@ -468,24 +507,26 @@ fn terminal(state: &str) -> bool {
 fn ownership_edges(db: &Connection) -> Result<Vec<(String, String)>> {
     let mut edges = Vec::new();
     let mut statement = db
-        .prepare("SELECT id,owner_run_id FROM run WHERE state IN ('live','stopping')")
+        .prepare("SELECT id,owner_run_id,thread_id FROM run INDEXED BY one_live_run WHERE state IN ('live','stopping')")
         .map_err(sql_error)?;
     let mut rows = statement.query([]).map_err(sql_error)?;
     while let Some(row) = rows.next().map_err(sql_error)? {
         let id: String = row.get(0).map_err(sql_error)?;
         let owner: Option<String> = row.get(1).map_err(sql_error)?;
+        let thread: String = row.get(2).map_err(sql_error)?;
+        edges.push((format!("thread:{thread}"), format!("run:{id}")));
         if let Some(owner) = owner {
             edges.push((format!("run:{owner}"), format!("run:{id}")));
         }
     }
-    let mut statement=db.prepare("SELECT id,run_id FROM turn WHERE state IN ('preparing','running','waiting','recovery_wait')").map_err(sql_error)?;
+    let mut statement=db.prepare("SELECT id,run_id FROM turn INDEXED BY one_open_turn WHERE state IN ('preparing','running','waiting','recovery_wait')").map_err(sql_error)?;
     let mut rows = statement.query([]).map_err(sql_error)?;
     while let Some(row) = rows.next().map_err(sql_error)? {
         let id: String = row.get(0).map_err(sql_error)?;
         let run: String = row.get(1).map_err(sql_error)?;
         edges.push((format!("run:{run}"), format!("turn:{id}")));
     }
-    let mut statement=db.prepare("SELECT id,owner_run_id,turn_id FROM shell_execution WHERE state IN ('starting','running','stopping')").map_err(sql_error)?;
+    let mut statement=db.prepare("SELECT id,owner_run_id,turn_id FROM shell_execution INDEXED BY shell_active_owner WHERE state IN ('starting','running','stopping')").map_err(sql_error)?;
     let mut rows = statement.query([]).map_err(sql_error)?;
     while let Some(row) = rows.next().map_err(sql_error)? {
         let id: String = row.get(0).map_err(sql_error)?;
@@ -573,6 +614,7 @@ mod tests {
     }
     fn args(condition: WaitCondition, timeout_ms: u64) -> WaitArgs {
         WaitArgs {
+            after: None,
             conditions: vec![condition],
             timeout_ms,
         }
@@ -921,6 +963,7 @@ mod tests {
             control.clone(),
             "any".into(),
             WaitArgs {
+                after: None,
                 conditions: vec![
                     WaitCondition::TurnCompleted {
                         turn_id: "tb".into(),
@@ -1490,6 +1533,7 @@ mod tests {
             .await
             .unwrap();
         let query = WaitArgs {
+            after: None,
             conditions: vec![
                 WaitCondition::ShellEnded {
                     execution_id: "sa".into(),
@@ -1558,3 +1602,6 @@ mod tests {
         owner.shutdown().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod thread_tests;

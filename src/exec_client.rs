@@ -325,6 +325,7 @@ impl Session {
                 .request(
                     "wait",
                     Command::Wait(WaitArgs {
+                        after: None,
                         conditions: vec![WaitCondition::TurnCompleted {
                             turn_id: turn.clone(),
                         }],

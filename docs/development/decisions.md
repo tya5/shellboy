@@ -2010,3 +2010,24 @@ registration gate, saved-fact/notification observation, and durable/native
 shutdown gates. Listener teardown is the repeated-signal acknowledgment, not
 its best-effort diagnostic line. This does not claim every native lifecycle
 race is impossible or attribute the missing handle to lifeline termination.
+
+## 2026-10-31: bounded saved Thread observations (#74)
+
+Use indexed terminal Run rows plus existing child_recovery_wait facts, rather
+than a new subscription service or clock-only cursor. Root recovery also saves
+that existing fact without a delivery because resume clears the current reason;
+otherwise an unobserved recovery/resume cannot be reconstructed. This is one
+small additional root-recovery write, not a new lifecycle or event type.
+Query-scoped per-stream row positions/ID anchors avoid wall-clock reordering;
+round-robin consumption preserves prefixes/fairness under the64-change cap.
+Source rows are retained while Threads exist; removal/replacement rejects anchors.
+
+Latest answer uses the own final Turn pointer, not arbitrary assistant tool steps
+or fork-only ancestors. Latest input uses received receipt order, including held/
+cancelled, with existing safe sender facts. This is the smaller first version;
+no new UI watcher, idle-without-Run condition or fork-answer expansion is added.
+Revisit these cuts only with a concrete consumer. Four derived indexes/schema16
+support bounded seeks. Body excerpts are bounded in fragments/returned characters,
+not a claim of zero source-JSON parsing cost. No table/worker/queue/dependency is
+added. #80 and #83 were integrated before shared files were edited; UI changes
+are optional DTO initialization only, not rendering/row/composer behavior.

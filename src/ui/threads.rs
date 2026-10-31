@@ -1290,6 +1290,8 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
+            last_answer: None,
+            last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
             revisit: None,
@@ -1947,6 +1949,8 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
+            last_answer: None,
+            last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
             revisit: None,
