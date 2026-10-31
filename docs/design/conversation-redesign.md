@@ -231,6 +231,53 @@ captured; the read result and downstream mutable work remain separate.
 | Native memory, remote model catalog, standalone docs/config/RAG/exec results | These have explicit on-demand/external-source scope and observed/completion time plus refresh/repeat action. Do not start hidden OS/API/file polling or automatically repeat costly/mutating clients. This exception does not apply to saved owner lifecycle fields. |
 | Deletion/index cost confirmations | Retain chosen target/source/time and existing stronger execution guards; changed facts cannot silently authorize a stale destructive/cost preview. |
 
+#### Remaining saved pages: captured evidence and current facts
+
+History list/get/relations/search, shell output pages and completed waits retain
+their obtained bytes, result time, original filters, IDs, hashes, encoding and
+cursor. A live update must never replace those bytes, advance that cursor or
+silently rerun a search embedding/wait. Extend the existing inspection scope
+with a separately labeled current saved-source observation. Keep the retained
+result through its existing bounded Arc/detail retention; do not copy it into
+the UI target or add a second body cache. Explicit repeat/reload produces a new
+result identity. Current facts have their own read sequence/time and error state.
+
+History's private observation belongs beside canonical history semantics:
+current selected-path membership, body revision/availability, tombstone reason
+and captured Thread liveness/selection revision are domain facts. Read only
+the returned page's exact IDs (at most200), using node/path primary-key lookups;
+no payload/raw-output bytes enter this metadata read. Bound scalar copies before
+String materialization (IDs512 bytes, kind64, hash128, reasons/timestamps512)
+and the aggregate metadata channel to256KiB. A limit or missing row is explicit
+unknown/unavailable, never an empty body or evidence of deletion by itself.
+When GC removes a payload or a rewind changes the selected path, the original
+result remains inspectable while these current facts change. Bind selection to
+the result's captured Thread, not whichever Thread happens to be visible later.
+Shell pages likewise retain their original retention generation/sequence and
+observe current execution/retention facts without another raw-output read.
+
+Saved lists retain the chosen page/window and selected row identity. Reuse F's
+Thread row reader for generic F8 ThreadList instead of creating a second summary
+projection. Shell/compact rows and activity status use their native domain
+identities and filter meanings; do not infer a common lifecycle. Within the
+captured window, update mutable row facts and label rows which no longer match.
+New results outside the retained watermark cause an explicit newer-results
+indication; they do not advance a user's cursor. A changed selected-path revision
+marks a history cursor noncurrent while preserving the obtained page. Explicit
+refresh restarts from the captured filters without a cursor. The initial
+canonical status scan is not a permanent periodic read: factor bounded native
+candidate/point reads in its domain before G9 admission and record exact query,
+source-copy and incomplete-result budgets. No full-owner scan or repeated
+Control request is justified merely by moving it onto a readonly connection.
+
+These targets use the same visible-scope dirty admission, shared snapshot,
+generation/sequence fences and cancellation as the initial twelve groups.
+Committed relevant Thread changes and existing GC availability hints invalidate
+current facts; hiding all consumers admits zero work. Do not add a generic
+observation engine, persisted watch table, public Core command, worker or queue.
+Qualify retained-original preservation and actual CLI mutation/replay/rollback
+behavior for each route; a grouped enum/test is not proof for omitted commands.
+
 Inspection visibility has a UI-local monotonic revision, separate from saved
 read sequence and request generation. One scalar hide revision reuses the
 existing priority control mailbox, so hiding a popup retires observation even
