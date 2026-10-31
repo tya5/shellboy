@@ -17,6 +17,6 @@ def reject_gui_clipboard_input(commands, keys, draft):
         if command.split(maxsplit=1)[0:1] in [['/copy'], ['/image'], ['/paste-image']]:
             raise ValueError('Clipboard checks require a pipe-drained PTY, not GUI capture')
     for text in [*keys, draft]:
-        literal = re.sub(r'\x1b(?:\[[0-9;?]*[A-Za-z~]|O[A-Za-z])', '', text)
-        if any(key in literal for key in ('c', 'C', '\x19', '\x03')) or '/image' in literal or '/paste-image' in literal:
+        literal = re.sub(r'\x1b(?:\[[0-9;?]*[A-DHF~]|O[A-DHFP-S])', '', text)
+        if '\x1b' in literal or any(key in literal for key in ('c', 'C', '\x19', '\x03')) or '/image' in literal or '/paste-image' in literal:
             raise ValueError('Potential clipboard shortcut in GUI capture; use the PTY driver')
