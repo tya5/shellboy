@@ -39,7 +39,7 @@ WITH wait_keys AS MATERIALIZED (
         CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.command')='text' THEN substr(json_extract(s.shell_json,'$.command'),1,512) END END AS label,
         s.state,s.started_at,
         (SELECT received_at FROM output_chunk o WHERE o.execution_id=s.id ORDER BY o.sequence DESC LIMIT 1) AS output_at,
-        CASE WHEN json_valid(s.shell_json) AND json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END AS description
+        CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END AS description
  FROM shell_members member CROSS JOIN shell_execution s ON s.id=member.id
 ), children AS MATERIALIZED (
  SELECT 'child' AS kind,r.id AS id,r.thread_id AS related,NULL AS execution,
@@ -310,6 +310,18 @@ mod tests {
         db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",rusqlite::params![format!("wait.pending.{operation}"),json!({"operation_id":operation,"caller":{"run_id":run,"execution_id":execution},"accepted_at":"2020-01-01T00:00:02Z"}).to_string()]).unwrap();
     }
 
+    #[test]
+    fn common_description_metadata_preserves_real_command_label_for_details_and_optout() {
+        let db = fixture();
+        db.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.description',?1) WHERE id='s-old'", ["  Inspect\nfiles\u{7}  "]).unwrap();
+        let snapshot = prepare(read_tx(&db, "r", Some(&[])).unwrap());
+        let first = &snapshot.rows[0];
+        assert_eq!(first.description.as_deref(), Some("Inspect files"));
+        assert!(first.label.contains("printf saved"));
+        assert!(
+            matches!(&first.target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-old")
+        );
+    }
     #[test]
     fn saved_ownership_oldest_rows_counts_and_timing_survive_later_changes() {
         let db = fixture();

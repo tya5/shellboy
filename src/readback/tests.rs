@@ -444,3 +444,29 @@ async fn readonly_commands_complete_while_writer_is_held_without_provider_or_rec
   assert_eq!(std::fs::read_to_string(log).unwrap().lines().count(),0);database.shutdown().await.unwrap();server.abort();let _=server.await;
  }).await.expect("readonly lane fixture watchdog");
 }
+
+#[test]
+fn shell_list_common_description_is_bounded_sanitized_and_does_not_replace_command() {
+    watchdog(|| {
+        let c = db();
+        shell_row(
+            &c,
+            "described",
+            "t",
+            "2026-10-31T00:00:00Z",
+            "printf REAL_COMMAND",
+            0,
+        );
+        c.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.description',?1) WHERE id='described'", ["  Inspect\nfiles\u{7}  "]).unwrap();
+        let result = shells(&c, &args()).unwrap();
+        assert_eq!(result["items"][0]["description"], "Inspect files");
+        assert_eq!(result["items"][0]["command_excerpt"], "printf REAL_COMMAND");
+        c.execute(
+            "UPDATE shell_execution SET shell_json=json_set(shell_json,'$.description','   ')",
+            [],
+        )
+        .unwrap();
+        let result = shells(&c, &args()).unwrap();
+        assert!(result["items"][0].get("description").is_none());
+    });
+}
