@@ -250,7 +250,8 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/detach ATTACHMENT_ID` | Exclude from draft or saved send selection |
 | `/reload-attachments` | Explicitly reread saved Thread attachments, without API submission |
 | `/image`, `/paste-image` | Add clipboard image to draft |
-| `/copy [NODE_ID] [BLOCK_INDEX]` | Copy source body or zero-based complete code block |
+| `/copy [NODE_ID] [BLOCK_INDEX]` | With no arguments, copy the sole code block or choose a numbered block; explicit indices are zero-based |
+| `/copy all` | Copy the focused/read-position item's whole canonical body |
 | `/reasoning [NODE_ID]` | Expand/collapse returned reasoning text |
 | `/select` | Toggle selection/copy mode |
 | `/paste ID show\|edit\|remove` | Paste-block actions |
@@ -434,7 +435,9 @@ In F8 `待機 · 条件を観測`, choose a condition kind and target ID. F9 add
 
 F2 or `/select` freezes history rendering and releases mouse capture. Use terminal-native range selection/copy; F2 or Esc returns. OS/terminal copy shortcuts may intercept Ctrl+C, but if Shellboy receives it, it interrupts. Ctrl+Q begins shutdown even in selection mode.
 
-`/copy` fetches DB source rather than a display placeholder. Whole-body copies over 64KiB fail with instructions to page via `history get`. Code-block indices/indentation use the same parser as Markdown display. An EOF-ended block is eligible if the entire source has been fetched. With an intermediate page, an unfinished trailing block is not copied; fetch more source first. See [configuration](configuration.md) for OS clipboard/OSC52 selection and remote-terminal limitations.
+`/copy` fetches DB source rather than a display placeholder. With no arguments it targets the focused item, then the reading position, then the latest displayed answer. A sole code block is copied directly; multiple blocks open numbered choices; no code copies the body. `/copy all` explicitly copies the whole body. With item focus, B opens the same numbered choices: press a digit 1-9 or select with Up/Down and Enter/C. Captions and choices use one-based numbers; explicit `/copy NODE_ID BLOCK_INDEX` retains zero-based indices. C on a focused item still copies its whole body.
+
+Preparation inspects at most 1MiB, 64 canonical pages and 128 code blocks on existing workers. Every clipboard payload, including a single block or whole body, remains bounded to 64KiB. Incomplete/unavailable/over-limit source fails without copying a prefix; O and N or `history get` expose pages. A chosen source is reread and digest-checked before copying. Code indentation and order use the same parser as Markdown display, including EOF-ended code only when the entire source is fetched. Feedback reports a block number and Unicode character count. OSC52 reports only that a request was sent, not confirmed OS clipboard completion. See [configuration](configuration.md) for remote-terminal limitations.
 
 ## AGENTS.md and Agent Guide
 

@@ -5,8 +5,8 @@ mod program_status;
 use admission::{spawn_read, spawn_work};
 mod browser;
 mod browser_read;
-mod draft_images;
 mod copying;
+mod draft_images;
 mod draft_saver;
 mod header;
 mod history_reader;
@@ -376,7 +376,7 @@ enum BackgroundResult {
     },
     Copied {
         scope: CopyScope,
-        result: Result<CopyOutcome, ApiError>,
+        result: Result<(CopyOutcome, usize), ApiError>,
     },
     Command {
         work_status: bool,
@@ -1118,9 +1118,15 @@ async fn run_with_delivery(
                         action => break action,
                     }
                 };
+                let (action, expected_copy_hash) = match action {
+                    UiAction::CopySelected { node_id, code_block, source_hash } =>
+                        (UiAction::Copy { node_id, code_block }, Some(source_hash)),
+                    other => (other, None),
+                };
                 let has_submission = submission.is_some();
                 #[cfg(test)] stream_metrics::FRONTEND_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 match action {
+                    UiAction::CopySelected { .. } => unreachable!("copy selection normalized before dispatch"),
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
                     }
@@ -2414,7 +2420,7 @@ async fn run_with_delivery(
                                 let pixels = clipboard.capture(timeout, cancel.clone()).await?;
                                 attachments.save_clipboard_pixels(pixels, cancel).await
                             }
-                            .await;
+                            .await.map_err(image_acquisition_error);
                             command_outcome(&outcomes, submission, &result).await;
                             {
                                 let _ = sender
@@ -2440,14 +2446,17 @@ async fn run_with_delivery(
                         )
                         .await;
                     }
-                    UiAction::LoadCopyChoices { node_id, request_id } => {
+                    UiAction::LoadCopyChoices { node_id, request_id, cancel } => {
                         let control = control.clone();
                         let sender = updates.worker();
                         let read_node = node_id.clone();
+                        if cancel.is_cancelled() { continue; }
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                            let result = checked_storage(&control, copying::choices(&control, read_node.clone()).await).await
-                                .map_err(|error| error.to_string());
-                            update(&sender, UiUpdate::CopyChoices { node_id: read_node, request_id, result }).await;
+                            tokio::select! { biased; _=cancel.cancelled()=>{}, _=async {
+                                let result = checked_storage(&control, copying::choices(&control, read_node.clone()).await).await
+                                    .map_err(|error| error.to_string());
+                                update(&sender, UiUpdate::CopyChoices { node_id: read_node, request_id, result }).await;
+                            } => {} }
                         }) {
                             update(&updates, UiUpdate::CopyChoices { node_id, request_id,
                                 result: Err("原文読込キューが満杯です。Esc後に再操作してください".into()) }).await;
@@ -2631,6 +2640,7 @@ async fn run_with_delivery(
                         let sender = background_tx.clone();
                         let cancel = cancel.child_token();
                         spawn_work(&mut workers, permit, async move {
+                            let characters = text.chars().count();
                             let result = clipboard
                                 .copy(
                                     text,
@@ -2639,7 +2649,7 @@ async fn run_with_delivery(
                                     control.store.config.io.file_prepare_timeout_ms,
                                     cancel,
                                 )
-                                .await;
+                                .await.map(|outcome| (outcome, characters));
                             let _ = sender
                                 .send(BackgroundResult::Copied { scope, result })
                                 .await;
@@ -2649,8 +2659,8 @@ async fn run_with_delivery(
                         node_id,
                         code_block,
                     } => {
-                        let scope = if code_block.is_some() {
-                            CopyScope::CodeBlock
+                        let scope = if let Some(index) = code_block {
+                            CopyScope::CodeBlock { index }
                         } else {
                             CopyScope::Body
                         };
@@ -2681,7 +2691,8 @@ async fn run_with_delivery(
                         let cancel = cancel.child_token();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
-                                let text = copy_source(&control, node_id, code_block).await?;
+                                let text = checked_storage(&control, copying::text(&control, node_id, code_block, expected_copy_hash).await).await?;
+                                let characters = text.chars().count();
                                 clipboard
                                     .copy(
                                         text,
@@ -2690,7 +2701,7 @@ async fn run_with_delivery(
                                         control.store.config.io.file_prepare_timeout_ms,
                                         cancel,
                                     )
-                                    .await
+                                    .await.map(|outcome| (outcome, characters))
                             }
                             .await;
                             command_outcome(&outcomes, submission, &result).await;
@@ -3006,18 +3017,18 @@ async fn run_with_delivery(
                 },
                 Some(BackgroundResult::Copied {
                     scope,
-                    result: Ok(CopyOutcome::OsCopied),
-                }) => status(&updates, None, format!("{}をコピーしました", scope.label())).await,
+                    result: Ok((CopyOutcome::OsCopied, characters)),
+                }) => status(&updates, None, format!("{}をコピーしました（{characters}文字）", scope.label())).await,
                 Some(BackgroundResult::Copied {
                     scope,
-                    result: Ok(CopyOutcome::TerminalRequest(bytes)),
+                    result: Ok((CopyOutcome::TerminalRequest(bytes), characters)),
                 }) => {
                     update(&updates, UiUpdate::TerminalRequest { bytes }).await;
                     status(
                         &updates,
                         None,
                         format!(
-                            "OSC52: {}のコピー要求を端末へ送りました（完了未確認）",
+                            "OSC52: {}のコピー要求を端末へ送りました（{characters}文字・完了未確認）",
                             scope.label()
                         ),
                     )
@@ -3771,8 +3782,22 @@ impl RawNode {
         }
     }
 }
-pub async fn copy_source(control: &Control, node_id: String, code_block: Option<usize>) -> Result<String, ApiError> {
-    checked_storage(control, copying::text(control, node_id, code_block).await).await
+fn image_acquisition_error(mut error: ApiError) -> ApiError {
+    error
+        .message
+        .push_str("。画像ファイルがあれば /attach パス で下書きに添付できます");
+    error
+}
+pub async fn copy_source(
+    control: &Control,
+    node_id: String,
+    code_block: Option<usize>,
+) -> Result<String, ApiError> {
+    checked_storage(
+        control,
+        copying::text(control, node_id, code_block, None).await,
+    )
+    .await
 }
 pub fn fenced_code_block(text: &str, index: usize) -> Option<String> {
     source_code_block(text, index, true)

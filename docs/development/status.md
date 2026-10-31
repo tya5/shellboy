@@ -2748,3 +2748,16 @@ and activity facts remain with #85. Validation and remaining scope are recorded
 in acceptance; this is not completion of #87's canonical code-copy chooser,
 numbered block targets, bare /copy preference, complete-block retrieval, copy
 counts or image-failure alternatives. Core/schema/protocol remain unchanged.
+
+### #87 Remaining Canonical Copy And Image Guidance (In Progress)
+
+The existing Details overlay now hosts a bounded, cancellation-owned code chooser.
+Bare `/copy` prefers a sole complete canonical code block; B/digits select multiple
+blocks without entering a node ID, and `/copy all` preserves whole-body access.
+Complete assistant code surfaces show numbered captions, copy feedback includes
+Unicode counts, and clipboard image failures retain facts and suggest `/attach`.
+Canonical page/source/clipboard limits are explicit; source digests reject changed
+numbered targets. New parser, ownership, source-limit and real-DB tests are written.
+These additional changes have passed formatting/static layout only, not compilation,
+standard checks or real PTY qualification yet. Earlier stage-1 validation does not
+qualify these additional paths. Rust qualification is queued after #91 and W2 work.

@@ -18,7 +18,8 @@ pub mod activity;
 mod bell;
 mod chrome;
 mod code_copy;
-pub use code_copy::CopyBlock;
+pub(crate) use code_copy::caption as code_copy_caption;
+pub use code_copy::{CopyBlock, CopyOffer};
 mod composer;
 mod details;
 pub mod live_work;
@@ -438,18 +439,20 @@ pub enum CopyScope {
     ManagementPage { has_more: bool },
     Value,
     Body,
-    CodeBlock,
+    CodeBlock { index: usize },
 }
 impl CopyScope {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::OriginalPage { has_more: true } => "原文の現在ページ（続きあり）",
-            Self::OriginalPage { has_more: false } => "原文の現在ページ（このページのみ）",
-            Self::ManagementPage { has_more: true } => "管理詳細の現在ページ（続きあり）",
-            Self::ManagementPage { has_more: false } => "管理詳細の現在ページ（このページのみ）",
-            Self::Value => "項目の完全な値",
-            Self::Body => "本文全体",
-            Self::CodeBlock => "コードブロック全体",
+            Self::OriginalPage { has_more: true } => "原文の現在ページ（続きあり）".into(),
+            Self::OriginalPage { has_more: false } => "原文の現在ページ（このページのみ）".into(),
+            Self::ManagementPage { has_more: true } => "管理詳細の現在ページ（続きあり）".into(),
+            Self::ManagementPage { has_more: false } => {
+                "管理詳細の現在ページ（このページのみ）".into()
+            }
+            Self::Value => "項目の完全な値".into(),
+            Self::Body => "本文全体".into(),
+            Self::CodeBlock { index } => format!("コードの塊 {}", index.saturating_add(1)),
         }
     }
 }
@@ -550,6 +553,7 @@ pub enum UiAction {
     LoadCopyChoices {
         node_id: String,
         request_id: u64,
+        cancel: tokio_util::sync::CancellationToken,
     },
     LoadOriginal {
         node_id: String,
@@ -714,6 +718,11 @@ pub enum UiAction {
     Copy {
         node_id: String,
         code_block: Option<usize>,
+    },
+    CopySelected {
+        node_id: String,
+        code_block: Option<usize>,
+        source_hash: String,
     },
     PasteImage {
         draft_id: String,
@@ -882,7 +891,7 @@ pub enum UiUpdate {
     CopyChoices {
         node_id: String,
         request_id: u64,
-        result: Result<Vec<CopyBlock>, String>,
+        result: Result<CopyOffer, String>,
     },
     OriginalPage {
         request_id: u64,
@@ -2544,12 +2553,20 @@ impl UiState {
                     details.accept_links(request_id, result);
                 }
             }
-            UiUpdate::CopyChoices { node_id, request_id, result } => {
+            UiUpdate::CopyChoices {
+                node_id,
+                request_id,
+                result,
+            } => {
                 if let Some(mut details) = self.details.take() {
-                    let action = details.copy_choices.as_mut().and_then(|choices|
-                        choices.accept(self.view(), request_id, &node_id, result));
-                    if let Some(action) = action { self.deferred_actions.push(action); }
-                    else { self.details = Some(details); }
+                    let action = details.copy_choices.as_mut().and_then(|choices| {
+                        choices.accept(self.view(), request_id, &node_id, result)
+                    });
+                    if let Some(action) = action {
+                        self.deferred_actions.push(action);
+                    } else {
+                        self.details = Some(details);
+                    }
                 }
             }
             UiUpdate::OriginalPage {
@@ -4344,12 +4361,27 @@ impl UiState {
                 let parts = argument.split_whitespace().collect::<Vec<_>>();
                 match parts.as_slice() {
                     [] => self.choose_code(true),
-                    ["all"] => self.copy_target().map(|node_id| vec![UiAction::Copy { node_id, code_block: None }])
+                    ["all"] => self
+                        .copy_target()
+                        .map(|node_id| {
+                            vec![UiAction::Copy {
+                                node_id,
+                                code_block: None,
+                            }]
+                        })
                         .unwrap_or_else(|| self.command_error("コピー対象の回答がありません")),
-                    [node] => vec![UiAction::Copy { node_id: (*node).into(), code_block: None }],
+                    [node] => vec![UiAction::Copy {
+                        node_id: (*node).into(),
+                        code_block: None,
+                    }],
                     [node, index] => match index.parse::<usize>() {
-                        Ok(index) => vec![UiAction::Copy { node_id: (*node).into(), code_block: Some(index) }],
-                        Err(_) => self.command_error("コード番号は0以上の整数です。/copy [all | node-id [番号]]"),
+                        Ok(index) => vec![UiAction::Copy {
+                            node_id: (*node).into(),
+                            code_block: Some(index),
+                        }],
+                        Err(_) => self.command_error(
+                            "コード番号は0以上の整数です。/copy [all | node-id [番号]]",
+                        ),
                     },
                     _ => self.command_error("/copy [all | node-id [番号]]"),
                 }

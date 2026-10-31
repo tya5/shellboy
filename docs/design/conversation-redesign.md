@@ -1124,3 +1124,16 @@ Bare /copy auto-selects a sole block or the whole body when no block exists;
 b/B always opens numbered choices. Enter/c or digits 1-9 select a block, 0 copies
 the whole body, Esc closes. /copy all selects the whole body explicitly. Source
 reads and Markdown parsing are never done by UI drawing or key handlers.
+Code offers carry a digest of the complete canonical source. A chosen block is
+reread and checked against that digest before clipboard work, so a changed body
+cannot silently change the numbered target. Closing the chooser cancels pending
+preparation even before admission; no additional read pool is introduced. Copy
+feedback reports the exact Unicode scalar count handed to the adapter and a
+one-based block number. Image acquisition/preparation errors retain the original
+code/details and suggest an existing image file via /attach, without probing on
+ordinary paste or claiming that every environment supports clipboard images.
+Complete assistant Markdown projections add numbered copy captions beside code
+surfaces, using the same one-based parser order as the canonical chooser. These
+captions are rendered decoration only; partial/evicted projections do not claim
+global block numbers. The b shortcut opens that answer's numbered chooser, then
+one digit copies the selected full block without typing a node identity.
