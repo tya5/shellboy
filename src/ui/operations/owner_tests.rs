@@ -340,6 +340,17 @@ fn readback_periods_memory_and_resumable_settlement_use_current_typed_args() {
     set(&mut memory, "thread", "");
     assert!(matches!(memory.command(&c.cwd).unwrap(), Command::Status(args) if args.memory));
     let mut wait = Form::new(OpKind::Wait, &c);
+    wait.selected = wait
+        .fields
+        .iter()
+        .position(|field| field.name == "settled_states")
+        .unwrap();
+    let metadata = wait.selected_metadata().unwrap();
+    assert_eq!(metadata.default_origin, DefaultOrigin::Literal);
+    assert_eq!(
+        metadata.tui_default,
+        Some(crate::operations::DEFAULT_SETTLEMENT_STATES)
+    );
     set(&mut wait, "condition", "thread_settled");
     set(&mut wait, "target", "thread-a thread-b");
     set(&mut wait, "settled_states", "completed recovery_wait");

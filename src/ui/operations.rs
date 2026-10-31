@@ -1126,7 +1126,7 @@ impl Form {
                     f(
                         "settled_states",
                         "会話の観測状態（空白区切り）",
-                        "completed recovery_wait failed stopped".into(),
+                        crate::operations::DEFAULT_SETTLEMENT_STATES.into(),
                         Text,
                     ),
                     f(

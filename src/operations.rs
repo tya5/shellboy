@@ -208,6 +208,7 @@ pub(crate) enum FieldId {
     Now,
     Text,
     Conditions,
+    SettlementStates,
     Timeout,
     ExcerptChars,
     LimitBytes,
@@ -346,7 +347,16 @@ pub(crate) const RAG_DB_ARGUMENT: GlobalArgument = GlobalArgument {
     meaning: "明示パス、未指定は解決済みDATA_DIR/rag.dbです。所有者の会話DBとは別です。",
 };
 
+pub(crate) const DEFAULT_SETTLEMENT_STATES: &str = "completed recovery_wait failed stopped";
 pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
+    FieldSpec {
+        id: FieldId::SettlementStates,
+        default_origin: DefaultOrigin::Literal,
+        label: "会話の観測状態",
+        help: "thread_settledのstatesを空白で区切ります。フォーム初期値はcompleted recovery_wait failed stoppedです。CLIではconditions-jsonのstates配列で明示します。",
+        kind: FieldType::TextList,
+        discovery: Discovery::None,
+    },
     FieldSpec {
         id: FieldId::Until,
         default_origin: DefaultOrigin::None,
@@ -607,7 +617,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::Conditions,
         default_origin: DefaultOrigin::None,
         label: "観測条件",
-        help: "turn_completed/run_ended/shell_ended/shell_outputのいずれかが成立するまで観測します。出力条件はcursorも必要です。",
+        help: "turn_completedはTurn ID、run_endedはRun ID、shell_endedとshell_outputは実行ID、thread_settledはThread IDの一覧で観測します。種類を変えたら対応するIDを明示します。出力条件はshellのcursor、再開は前回waitのafterを別々に指定します。",
         kind: FieldType::Conditions,
         discovery: Discovery::Status,
     },
@@ -1210,7 +1220,13 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::After, FieldId::Conditions, FieldId::Timeout],
+        fields: &[
+            FieldId::SettlementStates,
+            FieldId::Cursor,
+            FieldId::After,
+            FieldId::Conditions,
+            FieldId::Timeout,
+        ],
     },
     OperationSpec {
         id: OperationId::HistoryList,
@@ -3794,7 +3810,9 @@ impl OperationSpec {
             .iter()
             .filter(|arg| arg.field == id && (arg.takes_value || field.kind == FieldType::Boolean))
             .find_map(|arg| arg.default);
-        let tui_default = if id == FieldId::CompactAction {
+        let tui_default = if self.id == OperationId::Wait && id == FieldId::SettlementStates {
+            Some(DEFAULT_SETTLEMENT_STATES)
+        } else if id == FieldId::CompactAction {
             Some("deferred")
         } else if id == FieldId::Limit
             && matches!(self.id, OperationId::ThreadList | OperationId::HistoryList)

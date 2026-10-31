@@ -52,7 +52,6 @@ impl Form {
             "operation" => FieldId::Operation,
             "execution" => FieldId::Execution,
             "query" => FieldId::Query,
-            "cursor" if self.operation == OpKind::Wait => FieldId::Conditions,
             "cursor" => FieldId::Cursor,
             "limit"
                 if matches!(
@@ -83,7 +82,8 @@ impl Form {
             "sender_label" => FieldId::SenderLabel,
             "now" => FieldId::Now,
             "text" => FieldId::Text,
-            "condition" | "target" | "settled_states" => FieldId::Conditions,
+            "condition" | "target" => FieldId::Conditions,
+            "settled_states" => FieldId::SettlementStates,
             "timeout" => FieldId::Timeout,
             "excerpt_chars" => FieldId::ExcerptChars,
             "final_answer_only" => FieldId::FinalAnswerOnly,
