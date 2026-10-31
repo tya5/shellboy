@@ -374,6 +374,15 @@ exact-node excerpt queries use the caller's snapshot. This private domain model
 shares semantics with canonical callers; no table, worker, queue or public API.
 Last-compaction projection and overall Thread/header SQL bounds remain separate
 G9 obligations rather than being hidden by these two bounded message facts.
+For last-compaction, split the existing readback reader into saved row capture
+and pure preparation. Reuse its receipt/automatic/replacement queries and spill
+coverage semantics; metadata collection stays in the caller's readonly snapshot,
+while JSON metric decoding, event merging, ordering and public result formatting
+run afterward. Canonical CLI list remains a wrapper over those same two phases.
+Derive spill-count admission in the existing SQL projection with the same
+nonnegative-integer semantics, not an additional per-row query or a second
+business-state decoder. Candidate caps alone do not prove bounded source copies
+or total query work: G9 must still qualify/limit those queries before admission.
 
 The next extraction covers saved Run/Turn metadata. Their initial explicit reads
 must retain canonical saved usage totals in the same readonly transaction; normal
