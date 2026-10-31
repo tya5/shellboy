@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use shellboy::storage::{DbWorker, StorageError};
 
-const DROP_HOT_INDEXES: &str = "DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
+const DROP_HOT_INDEXES: &str = "DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
 
 fn schema(db: &Connection) -> rusqlite::Result<Vec<(String, String, String)>> {
     db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name")?
@@ -105,7 +105,12 @@ async fn hot_query_plans_use_expected_access_paths() {
             ("SELECT id FROM shell_execution WHERE state IN ('exited','failed','stopped') AND COALESCE(ended_at,started_at)>'now' ORDER BY COALESCE(ended_at,started_at),rowid LIMIT 128", "shell_terminal_time"),
         ] {
             let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?.query_map([], |r| r.get::<_, String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(plan.iter().any(|line| line.contains(expected)), "expected {expected}: {plan:?}");
+            if expected=="one_live_run" {
+                // Either named index still seeks the exact Thread/state prefix.
+                assert!(plan.iter().any(|line| (line.contains("one_live_run") || line.contains("wait_run_state")) && line.contains("SEARCH run") && line.contains("thread_id=?")),"{plan:?}");
+            } else {
+                assert!(plan.iter().any(|line| line.contains(expected)), "expected {expected}: {plan:?}");
+            }
         }
         Ok(())
     }).await.unwrap();

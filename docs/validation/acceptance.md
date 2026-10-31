@@ -4350,3 +4350,13 @@ indexes too. Runtime migration stays strict, with no IF NOT EXISTS workaround.
 That touched fixture's10s guard moves to the shared60s watchdog, removing one
 more stale allowance (two removed in this task). Revalidation follows normally;
 these deterministic integration findings are not called unrelated CI flakes.
+
+The next full gate passed lib tests but exposed the same old-schema fixture
+omission in ten integration cases (index reset, message recovery, readonly RAG
+schema rejection and storage/hot-query upgrades) plus one Run plan name check:
+913 passed/11 failed/17 ignored in integration. All downgrade scripts that drop
+the prior readback indexes now also drop the four new derived indexes, keeping
+ledger/schema consistent before migration. The hot Run plan accepts only the
+old one_live_run or new wait_run_state named index, with an explicit Thread
+SEARCH predicate; unrelated plan checks remain unchanged. Production migration
+stays strict and source-preservation/rollback/reopen assertions are retained.
