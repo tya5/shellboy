@@ -4878,3 +4878,46 @@ results, final SHA, record-line audit and integration status are tracked in #5;
 this structural evidence alone is not an unrun native-OS test result. serve,
 shutdown RPC, shared signal observation and real headless child-process tests
 remain later stages. User data, installed owner/binary and releases are untouched.
+## Input band structure and clipboard fixture safety (#91, in progress)
+
+The implementation separates mark/body/optional right metadata, preserves source
+anchors and canonical copy/original text, and applies band backgrounds to all
+spans without changing foreground, emphasis or link identity. Unit coverage uses
+all source classes, palette/plain modes, narrow metadata omission and wrapping;
+frontend copy coverage uses injected FixtureClipboard and temporary stores.
+
+An initial PTY run omitted ui.copy_backend and the Auto backend wrote synthetic
+text to the host OS clipboard. Work stopped and the user authorized continuation
+with explicit temporary OSC52 config. The prior clipboard value was not saved
+or restored. This was a test-side side effect, not a passing copy validation.
+
+A grep audit of scripts/, tests/ and examples/ found omitted copy settings in
+synthetic config generators and omitted --config on several fixture CLI calls.
+Those paths now explicitly use OSC52 and the fixture config. Shared PTY startup
+rejects missing/Auto/OS copy settings before opening a terminal, strips agent
+SHELLBOY context and overrides HOME/XDG directories inside the scratch fixture.
+All fixtures retain explicit disposable --data-dir. Copy/image integration tests
+inject FixtureClipboard rather than calling the native adapter. No direct
+arboard/pbcopy/pbpaste/get/set-clipboard call was found in the audited tests,
+examples or scripts. Default-configuration parsing tests intentionally still
+verify the product defaults without performing clipboard I/O.
+
+OSC52 itself is not an OS-clipboard sandbox when rendered by a GUI terminal.
+The GUI capture helper therefore rejects explicit copy/image commands and
+potential copy shortcut input; clipboard verification uses pipe-drained Unix
+PTY output only. This conservative helper can reject ordinary text containing
+c/C; use the PTY driver for such input. No GUI capture is run for this task.
+These test guards are not a security boundary for arbitrary supplied programs.
+
+Python fixture guard tests pass (20 total tests). The prior local check passed
+1,894 Rust tests with 33 ignored before the safety changes/rebase; it is not final
+source evidence. Early safe PTY attempts exposed ambiguous adjacent Esc handling
+and a predicate that matched the word 名乗り in the synthetic body; cleanup now
+preserves the primary assertion, waits for the full main scene, and clears item
+focus before /quit. Failed watchdog attempts are not accepted sessions.
+
+Final-source standard checks and the three candidate PTY observations follow
+below when complete. Physical glyph rendering/fonts, actual IME/OS clipboard and
+Windows ConPTY remain unverified. The user delegates CI and main integration to
+worker4; no workflow_dispatch is run by this worker. Do not merge before mark
+selection and approval.

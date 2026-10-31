@@ -77,13 +77,13 @@ def main():
             if 'SYNTHETIC_SENDER' in text:
                 if any(item.get('type') == 'function_call_output' for item in body.get('input', [])):
                     return self.send(200, response('synthetic sender completed'))
-                command = ' '.join(shlex.quote(str(item)) for item in [old, '--data-dir', data, 'message', 'send', '--thread', state['recovery_thread'], '--text', 'SYNTHETIC_PENDING_FROM_030'])
+                command = ' '.join(shlex.quote(str(item)) for item in [old, '--config', config, '--data-dir', data, 'message', 'send', '--thread', state['recovery_thread'], '--text', 'SYNTHETIC_PENDING_FROM_030'])
                 return self.send(200, {'id': 'synthetic-tool', 'status': 'completed', 'output': [{'type': 'function_call', 'call_id': 'queue-pending', 'name': 'shell', 'arguments': json.dumps({'command': command})}]})
             return self.send(200, response('SYNTHETIC_ANSWER retained conversation text'))
 
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    config.write_text(f'default_connection="fixture"\ndefault_model="fixture-model"\n[connections.fixture]\nbase_url="http://127.0.0.1:{server.server_port}/v1"\nresponse_max_retries=0\n[embedding]\nconnection="fixture"\nmodel="fixture-embedding"\n', encoding='utf-8')
+    config.write_text(f'default_connection="fixture"\ndefault_model="fixture-model"\n[connections.fixture]\nbase_url="http://127.0.0.1:{server.server_port}/v1"\nresponse_max_retries=0\n[embedding]\nconnection="fixture"\nmodel="fixture-embedding"\n[ui]\ncopy_backend="osc52"\n', encoding='utf-8')
 
     class Owner:
         def __init__(self, binary, store):
@@ -226,7 +226,7 @@ def main():
         assert 'SYNTHETIC_RAG_CONTENT' in json.dumps(cli(new, upgraded, 'rag', 'search', '--scope', 'source:synthetic-documents', '--query', 'SYNTHETIC_RAG_CONTENT'))
         schema = root / 'result.schema.json'
         schema.write_text('{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}', encoding='utf-8')
-        execution = subprocess.run([str(new), '--data-dir', str(upgraded), 'exec', '--schema', str(schema), '--thread', seed, 'UPGRADE_EXEC'], cwd=work, env=env, capture_output=True, text=True, timeout=90)
+        execution = subprocess.run([str(new), '--config', str(config), '--data-dir', str(upgraded), 'exec', '--schema', str(schema), '--thread', seed, 'UPGRADE_EXEC'], cwd=work, env=env, capture_output=True, text=True, timeout=90)
         assert execution.returncode == 0, (execution.stdout, execution.stderr)
         assert json.loads(execution.stdout) == {'value': 'upgraded mock exec'}
         execution_facts = json.loads(execution.stderr)

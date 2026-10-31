@@ -1926,3 +1926,11 @@ and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
 key actions and loopback-only configuration. Native captures and replay are used
 immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
 This is developer tooling only; product Rust, schema and workflows are unchanged.
+## Input band structure and external mark review (#91)
+
+Input rows separate the source mark, canonical body, and optional muted metadata.
+Sender labels use existing bounded receipt facts and display identity; wrapping
+and source/copy operations do not absorb decoration. Every span receives only
+the band background override. The external mark remains provisional (⤷ / ⇥ / ⤳).
+Native validation and the clipboard-fixture incident are recorded in acceptance.
+Main integration is blocked pending user choice; CI/integration belongs to worker4.

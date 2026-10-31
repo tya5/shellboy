@@ -178,7 +178,7 @@ def main():
                         with sqlite3.connect(f"file:{root / 'data/shellboy.db'}?mode=ro", uri=True) as db:
                             execution = db.execute("SELECT id FROM shell_execution WHERE state='running' AND json_extract(shell_json,'$.command') LIKE 'read fixture_line%' LIMIT 1").fetchone()[0]
                         # Use the fixture owner only; complete the real background read.
-                        result = subprocess.run([str(binary), "--data-dir", str(root / "data"),
+                        result = subprocess.run([str(binary), "--config", str(root / "config.toml"), "--data-dir", str(root / "data"),
                                                  "shell", "write", "--execution", execution,
                                                  "--text", "complete\n"], capture_output=True,
                                                 text=True, timeout=capture.WATCHDOG_SECONDS, check=True)
