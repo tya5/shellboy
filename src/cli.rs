@@ -127,6 +127,17 @@ pub enum UsageCommand {
 }
 #[derive(Debug, Clone, Args)]
 pub struct UsageOptions {
+    /// Return bounded saved-attempt groups instead of ungrouped totals.
+    #[arg(long, value_parser = ["hour", "day", "thread"])]
+    pub group_by: Option<String>,
+    /// Bucket timezone: local (owner default), UTC, or a fixed +HH:MM/-HH:MM.
+    #[arg(long, requires = "group_by")]
+    pub timezone: Option<String>,
+    /// Groups per response (1..=168; default 168).
+    #[arg(long, requires = "group_by")]
+    pub limit: Option<u32>,
+    #[arg(long, requires = "group_by")]
+    pub cursor: Option<String>,
     #[arg(long)]
     pub since: Option<String>,
     #[arg(long)]
@@ -757,6 +768,10 @@ impl Cli {
             CliCommand::Usage {
                 command: UsageCommand::Get(a),
             } => C::UsageGet(wire::UsageGetArgs {
+                group_by: a.group_by,
+                timezone: a.timezone,
+                limit: a.limit,
+                cursor: a.cursor,
                 since: a.since,
                 until: a.until,
                 thread_id: a.thread_id,

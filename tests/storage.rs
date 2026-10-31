@@ -1180,3 +1180,25 @@ async fn schema_thirteen_records_positive_admission_evidence_and_keeps_uncertain
         writer.shutdown().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn usage_breakdown_schema18_upgrade_preserves_saved_rows_and_reopens() {
+    let root=tempfile::tempdir().unwrap();let path=root.path().join("usage.db");
+    let db=DbWorker::open(path.clone()).await.unwrap();
+    db.call(|db|{
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
+        INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
+        INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
+        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','{\"input_tokens\":42}','2026-10-31T09:00:00+09:00');
+        DROP INDEX attempt_started_readback; DELETE FROM schema_migration WHERE version=18; PRAGMA user_version=17;")?;Ok(())
+    }).await.unwrap();db.shutdown().await.unwrap();
+    let db=DbWorker::open(path.clone()).await.unwrap();
+    db.call(|db|{
+        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,18);
+        assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='attempt_started_readback'",[],|r|r.get::<_,i64>(0))?,1);
+        assert_eq!(db.query_row("SELECT usage_json FROM model_attempt WHERE id='a'",[],|r|r.get::<_,String>(0))?,"{\"input_tokens\":42}");
+        assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,1);
+        assert_eq!(db.query_row("PRAGMA quick_check",[],|r|r.get::<_,String>(0))?,"ok");Ok(())
+    }).await.unwrap();db.shutdown().await.unwrap();
+    DbWorker::open(path).await.unwrap().shutdown().await.unwrap();
+}

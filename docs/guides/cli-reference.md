@@ -106,7 +106,7 @@ that a particular provider/model implements every feature.
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME]` | Saved model usage and separate Run/model/shell durations, optionally time-filtered. At most one scope ID. Default is the authenticated caller's Thread; external callers supply an ID. Children apply only to Thread scope. No provider call or receipt. |
+| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME] [--group-by hour\|day\|thread] [--timezone ZONE] [--limit N] [--cursor CURSOR]` | Saved usage totals or bounded grouped request-size/cache statistics. At most one scope ID. Ungrouped default is the caller's Thread; grouped default spans non-deleted Threads. Children require Thread scope. Group-only flags and partial/cursor semantics are described under bounded usage breakdowns. No provider call or receipt. |
 
 `thread get`, `run get` and `turn get` also include `usage_totals`. Counts use saved
 completed/failed/incomplete model attempts, not proof of client transmission.
@@ -712,3 +712,41 @@ Read the saved error before retrying; generation/embedding requests have normal
 costs. TUI drafts, submitted-draft restore, Turn interruption and TUI slash-only
 operations have no headless UI. Existing CLI compact operations remain available.
 A TUI cannot be attached later, and owner replacement does not transfer live work.
+
+### Bounded usage breakdowns (#101)
+
+```sh
+shellboy usage get --group-by thread --since 2026-10-31T06:00:00Z --until 2026-10-31T12:00:00Z
+shellboy usage get --group-by hour --timezone +09:00 --since 2026-10-31T00:00:00Z --until 2026-11-01T00:00:00Z
+shellboy usage get --group-by day --timezone UTC --limit 24
+```
+
+Grouped reads without an explicit scope cover non-deleted conversations, so the
+first example can identify conversations with mean input above 300,000 tokens.
+An explicit `--thread`, `--run`, or `--turn` narrows that selection; children
+require an explicit Thread. Ungrouped `usage get` keeps its existing behavior.
+
+Each item has a group `key`, saved per-state `model_attempts` sums with known/
+unknown/overflow fields, `input_per_request` (mean/max/nearest-rank p50/p95,
+known/unknown counts, `max_attempt` with attempt/Turn/Run/Thread references), and
+`cache` (paired cached/input ratio and coverage counts). Inspect a max request
+with `turn get --turn TURN_ID`, then use history list/get for that Turn's saved
+nodes; an attempt ID is not a history node ID. Input statistics use terminal
+completed/failed/incomplete attempts. Missing usage is not zero; a zero cache
+ratio denominator is null. Provider inconsistencies are not clamped or repaired.
+
+The default period is the last 24 hours; the maximum is 31 days. Time buckets use
+owner `local` time by default, or `UTC`/an explicit fixed offset (`+HH:MM` or
+`-HH:MM`; use `--timezone=-05:00` for a leading minus). IANA zone names are not
+accepted. Repeated local DST hours have distinct offset-bearing keys.
+
+At most 10,000 candidate attempts plus one lookahead are read per scan window,
+before scope/deletion filtering; at most 168 groups are returned (`--limit` lowers
+that). Repeat the same command with `--cursor NEXT_CURSOR` while `more` is true,
+even when a filtered page is empty. A cursor pages the current window's groups,
+then continues remaining candidates. `scan_truncated` means statistics cover
+only the current candidate window; a group can recur in another window. Do not
+average page percentiles or cache ratios into whole-period estimates. Cursors
+bind filters/limit/owner instance and exclude later inserts, but separate calls
+are not one persistent snapshot. `elapsed_ms` is an observation, not a pass/fail
+threshold. Summary/embedding usage and monetary cost are not inferred.

@@ -6949,3 +6949,14 @@ sets, absent/empty execution and command label fallback. The required-entry-only
 serialized request delta is14 UTF-8 bytes; token/model compliance is not inferred.
 Two synthetic real shell calls must persist exited/exit0 facts; no provider or
 user database is used. Rust/standard results remain pending shared allocation.
+
+## Grouped saved usage (#101): pending qualification
+
+Source/static work on basee83047f only: 20 known inputs10..200 require sum2100,
+mean105, max200, p50100, p95190 and cache ratio0.5; fixed fixtures separately
+exercise nullable/invalid scalars, states/scopes, offsets/subseconds, insertion
+watermarks,168 groups and10,000 candidate limits. Query-only/no-write and held
+writer dispatch, schema17->18 row preservation/reopen and indexed EXPLAIN are
+separate assertions. Runtime/standard results are not yet available. Durations
+are observations only. No API/provider/user-data/installed-binary changes or
+TUI changes are included; no new table/worker/queue is introduced.

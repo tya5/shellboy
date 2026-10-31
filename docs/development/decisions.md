@@ -2560,3 +2560,18 @@ change existing rows. No schema/migration change, background subscription, LLM
 or new dependency is justified. Revisit a generic Core reader only if an external
 current-schema reader proves insufficient, after documenting need on issue72
 and obtaining the user's decision.
+
+## #101 bounded grouped usage decisions (2026-10-31)
+
+Adopt the issue's group-by-thread alternative to repeated Thread flags. Bound
+periods to31days, scan windows to10,000+1 and response groups to168. Apply scope
+filters after the candidate cap so selective scopes cannot cause an unbounded
+scan. Cursor pages can therefore be empty or repeat groups across distinct scan
+windows; mark page-local coverage and do not imply whole-period percentiles.
+These choices prioritize countable DB/memory work; revisit pagination only with
+an approved contract, not persistent aggregates. A single schema18 normalized
+start index enables the otherwise missing global period seek. The index is
+Core-review-required; no schema/table/worker expansion beyond it is proposed.
+Use local/UTC/fixed offsets without a new timezone crate; IANA-name support is
+outside this implementation and can be reconsidered with a separate dependency
+review. Max attempt references include Turn/Run/Thread so history is reachable.

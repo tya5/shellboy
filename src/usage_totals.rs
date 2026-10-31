@@ -1,4 +1,5 @@
 //! Read-only totals of saved usage, shared by owner projections and scale probes.
+pub(crate) mod breakdown;
 use crate::{
     protocol::{ApiError, ErrorCode, MAX_LIST_LIMIT},
     usage,

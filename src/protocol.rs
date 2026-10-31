@@ -383,7 +383,7 @@ macro_rules! args {
     };
 }
 args!(ThreadTarget { #[serde(default)] thread_id: Option<String> });
-args!(#[derive(Default)] UsageGetArgs { #[serde(default)] since: Option<String>, #[serde(default)] until: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] turn_id: Option<String>, #[serde(default)] include_children: bool });
+args!(#[derive(Default)] UsageGetArgs { #[serde(default)] since: Option<String>, #[serde(default)] until: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] turn_id: Option<String>, #[serde(default)] include_children: bool, #[serde(default)] group_by: Option<String>, #[serde(default)] timezone: Option<String>, #[serde(default)] limit: Option<u32>, #[serde(default)] cursor: Option<String> });
 fn readback_default_limit() -> u32 {
     50
 }

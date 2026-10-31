@@ -424,3 +424,17 @@ edit on its exact live Run/active Turn. Fields identify kind, primary operation,
 action, accepted_at and operation_count; no completion time or OS state is
 inferred. Empty/terminal/ordinary background runs omit it. Same saved projection
 feeds the TUI, without a new Run/Turn state or protocol-version change (#102).
+
+## Grouped saved usage (#101)
+
+`usage.get` optionally accepts `group_by` (`hour`, `day`, `thread`), `timezone`
+(`local`, `UTC`, fixed signed HH:MM), `limit` (1..168), and `cursor`.
+Timezone/limit/cursor require grouping; existing scope exclusivity still applies.
+Grouped unscoped reads span non-deleted Threads, not an implicitly selected Thread.
+The default last24h/max31day saved-start period, 10,000+1 candidate scan bound,
+group/scan cursor, page-local statistics, unknown coverage and max-attempt
+references are defined in [usage aggregates](usage-aggregates.md#bounded-grouped-cli-readback-101).
+The response exposes `items`, `more`, `next_cursor`, `requested_period`,
+`scanned_candidates`, `matched_attempts`, `scan_truncated`, `scope_complete`,
+`statistics_scope`, coverage and observed `elapsed_ms`. No receipt or new lifecycle
+state is created. Existing ungrouped response shape is unchanged.

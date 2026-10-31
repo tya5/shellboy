@@ -468,3 +468,25 @@ or a claim of safety; never put credentials in it. The command still executes
 unchanged. Blank labels fall back to commands; overlong labels are bounded and
 normalization is recorded. `[shell] describe_calls = false` removes the parameter
 from generation tool definitions and keeps command-based rows.
+
+### Compare saved request sizes
+
+Use bounded saved usage, not direct access to the owner's database:
+
+```sh
+shellboy usage get --group-by thread --since 2026-10-31T06:00:00Z --until 2026-10-31T12:00:00Z
+```
+
+Inspect `items[].input_per_request.mean`, `max`, `p50`, and `p95` to find
+conversations above, for example, 300,000 input tokens. `cache.ratio` uses only
+attempts with both input/cache counts reported; inspect its paired/unknown counts.
+The max request includes attempt/Thread/Run/Turn IDs; use Turn get and history
+list/get to inspect saved sources, not an attempt ID as a node ID. Hour/day groups
+accept `--timezone UTC` or `--timezone +09:00`; default is the owner's local time.
+
+Follow `more`/`next_cursor` with the same flags, including on an empty filtered
+page. Each page is capped at 10,000 candidates and 168 groups, over a maximum
+31-day interval (last24h by default). `scan_truncated` discloses partial-window
+statistics; do not combine percentiles across pages or mistake them for complete
+period usage. Unknown is not zero, and these measurements are not a bill or a
+reason to automatically compact unfinished work.

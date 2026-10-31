@@ -3308,3 +3308,13 @@ alongside command. Opt-out removes both property and required entry. Inbound
 missing/empty descriptions remain executable and display command fallback; raw
 arguments are unchanged. Schema/label tests and a synthetic two-call real shell
 execution/replay fixture are authored. Shared-slot Rust checks are pending.
+
+## Bounded grouped usage (#101)
+
+Source implementation adds grouped usage get over saved model attempts only,
+with exact known-input statistics and paired cache ratios. Existing readonly
+presentation-pool routing is reused; no new table/worker/queue/producer hook.
+Schema18 adds one justified derived period-seek index. Synthetic exact numbers,
+unknowns/states/scopes, row/group caps, cursor scope/watermark, EXPLAIN, upgrade
+preservation, CLI and writer-held dispatch coverage are authored. Rust remains
+unrun pending the shared-slot grant; no performance or native-OS claim yet.

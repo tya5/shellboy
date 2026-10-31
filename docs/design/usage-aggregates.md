@@ -72,3 +72,41 @@ Only monotonic DB aggregation durations >=100ms enter the existing diagnostic
 writer as usage_totals_slow with typed trigger/scope/elapsed fields and no content
 or IDs. Faster reads emit no aggregation diagnostic. Trigger context follows the
 existing request task into the DB job; it is not a protocol option or setting.
+
+## Bounded grouped CLI readback (#101)
+
+`usage get --group-by hour|day|thread` uses the existing finite presentation pool
+and read-only WAL snapshot, not the write DB worker. Ungrouped totals are unchanged.
+Without an explicit scope, grouped reads cover non-deleted Threads. Thread groups
+provide the multi-conversation alternative; one explicit Thread/Run/Turn filter
+and bounded existing descendant selection remain available.
+
+The saved-start interval is half-open, defaults to the last 24 hours, and cannot
+exceed 31 days. Unknown starts are excluded. Each scan page reads at most 10,000
+indexed time-ordered candidates plus one lookahead, before scope/deletion filters;
+JSON projection and retained samples are bounded by that page. One derived
+normalized attempt-start index (schema18) is necessary because attempts_by_turn
+cannot seek a cross-conversation period. It contains no usage bytes; startup
+migration owns creation and SQLite owns its lifetime. No table, worker, queue,
+producer hook or persistent aggregate is added.
+
+Responses contain at most 168 groups (default168, `--limit` can lower it).
+A cursor first pages groups in the same candidate window, then continues the
+next candidate window. `scan_truncated` explicitly marks incomplete coverage;
+statistics are exact for the displayed scan window, not whole-period estimates.
+The same group can occur in multiple scan windows. Do not average percentiles or
+ratios across pages. Cursors bind filters, limits, owner instance and an insertion
+watermark; they do not promise an immutable snapshot across separate requests.
+
+Time buckets use owner local time by default (`local`), or `UTC`/a fixed
+`+HH:MM`/`-HH:MM` offset via `--timezone`. Local hours retain their offset so DST
+repeated hours remain distinct; local days use calendar date. Arbitrary IANA zone
+names are not accepted. No timezone dependency is added.
+
+Each group preserves per-state numeric sums/unknown/overflow fields. Input
+statistics use known input tokens on completed/failed/incomplete attempts only:
+mean, max, nearest-rank p50/p95, known/unknown counts and the max attempt identity
+with its Thread/Run/Turn references. Cache ratio is sum(cached)/sum(input) over
+terminal attempts with both fields known; zero denominator is null, inconsistent
+provider measurements are not clamped. Paired/unknown counts expose coverage.
+No money, unrecorded summary/embedding usage or inferred tokens are added.
