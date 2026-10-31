@@ -142,20 +142,69 @@ def apply(rules, root):
                 cleanup_warnings=warnings)
 
 
+def parse_blocks(text, marker='@@'):
+    """Parse exact LF/CRLF delimiter lines, keeping payload line endings intact."""
+    if not marker or len(marker) > 32 or any(char.isspace() for char in marker):
+        raise ValueError('Marker must be 1-32 non-whitespace characters')
+    header, separator, end = marker + ' replace: ', marker + ' with', marker + ' end'
+    rules, current, part = [], None, None
+    pieces = text.split('\n')
+    for index, piece in enumerate(pieces):
+        has_newline = index < len(pieces) - 1
+        line = piece + ('\n' if has_newline else '')
+        token = piece[:-1] if has_newline and piece.endswith('\r') else piece
+        if token.startswith(header):
+            if current is not None or not token[len(header):]:
+                raise ValueError('Nested block or missing file path')
+            current = dict(file=token[len(header):], before=[], after=[])
+            part = 'before'
+        elif token == separator:
+            if current is None or part != 'before':
+                raise ValueError('Unexpected with delimiter')
+            part = 'after'
+        elif token == end:
+            if current is None or part != 'after':
+                raise ValueError('Unexpected end delimiter; missing with')
+            rules.append(dict(file=current['file'], before=''.join(current['before']),
+                              after=''.join(current['after'])))
+            if len(rules) > 256:
+                raise ValueError('At most 256 replacement blocks')
+            current, part = None, None
+        elif current is not None:
+            current[part].append(line)
+        elif token:
+            raise ValueError('Expected a replace delimiter, not text outside a block')
+    if current is not None:
+        raise ValueError('Unclosed block: missing with/end delimiter')
+    if not rules:
+        raise ValueError('No replacement blocks')
+    return rules
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        'stdin: [{"file":"existing.txt","before":"old","after":"new"}]. '
+        'Usual stdin with --blocks: @@ replace: existing.txt NEWLINE old lines NEWLINE '
+        '@@ with NEWLINE new lines NEWLINE @@ end. Delimiters match entire lines. '
+        'Payload lines, including newlines/$/quotes/backslashes, are literal; use a quoted heredoc. '
+        'Use --marker %% if payload contains an exact delimiter line. '
+        'For partial-line changes use JSON: [{"file":"existing.txt","before":"old","after":"new"}]. '
         'All rules preflight before writes; rules on one file are sequential. '
         'No new files, symlinks, hardlinks, binaries or out-of-root paths. '
         'Atomic per-file with rollback, not a crash-safe multi-file transaction. '
         'Exit 0 success, 1 nonunique needle, 2 input/I/O, 3 manual recovery.'))
     parser.add_argument('--root', type=Path, default=Path('.'), help='Allowed source root (default: cwd)')
+    parser.add_argument('--blocks', action='store_true', help='Read literal whole-line replacement blocks, not JSON')
+    parser.add_argument('--marker', default='@@', help='Block delimiter prefix (default: @@; requires --blocks)')
     args = parser.parse_args()
     try:
+        if not args.blocks and args.marker != '@@':
+            raise ValueError('--marker requires --blocks')
         raw = sys.stdin.buffer.read(REQUEST_LIMIT + 1)
         if len(raw) > REQUEST_LIMIT:
             raise ValueError('Request exceeds 4 MiB')
-        result = apply(json.loads(raw.decode('utf-8')), args.root)
+        text = raw.decode('utf-8')
+        rules = parse_blocks(text, args.marker) if args.blocks else json.loads(text)
+        result = apply(rules, args.root)
         code = 0
     except RecoveryError as error:
         result, code = dict(ok=False, error=str(error), recovery_dirs=error.directories), 3

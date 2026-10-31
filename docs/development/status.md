@@ -1957,3 +1957,8 @@ batch. Same-file rules are sequential; explicit roots, UTF-8/newline preservatio
 atomic renames, guarded rollback and reported recovery originals bound failures.
 The helper is already used to edit its own implementation/tests. Developer
 scripts only; Core/storage/protocol/clipboard and installed binaries are untouched.
+
+#94.3's JSON-only submission is superseded by the user's literal-block revision.
+Use --blocks/--marker for normal whole-line changes and JSON for substrings;
+both feed the same all-or-nothing match preflight. Quoted-heredoc and delimiter
+failure checks are included. The superseded b2c5b186 must not be integrated.
