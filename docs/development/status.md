@@ -1555,3 +1555,31 @@ Correct that sentence and align both User Guides with reactive saved updates,
 selection retention and explicit resync. Guides are embedded, so the final review
 candidate receives another full standard check after this documentation change.
 No Rust UI behavior changes, F/G implementation, push or release is introduced.
+
+
+### E CI comparison reported; main admission remains open
+
+[Full source-qualified values and ordinary CI failures](https://github.com/tya5/shellboy/issues/41#issuecomment-6538392801)
+are reported for run41160746679: dispatch-time main912b2e2 versus candidateCBC.
+All12Unix before/after pairs have valid600s P2 /60s P5/P5-list windows and source /
+harness /binary witnesses. Ordinary macOS succeeds; Linux1890/2/31 and
+Windows1769/1/24 fail. The overall run remains red; native job success is only
+fixture validity, not acceptance of every performance target.
+
+All24windows have0UI read-task admissions,0UI writer jobs and0readonly opens;
+all16P5windows have0draws. P2 has600draws/600s, but macOS80 has maximum2draws per
+1s bin in both versions (main6 such bins, E35). Linux P5 attains about50commits/s;
+macOS observes16.62–17.77, below the40commit condition, with multiple retained
+lines per saved chunk. Do not replace committed batches with line counts or
+quietly reinterpret strict redraw/CPU targets. Linux P5 CPU rises0.0720–0.7816pp
+in this single comparison; no causal regression or no-worse guarantee is inferred.
+AttachmentService::collect_managed is recorded as an unclassified maintenance
+caller20times/P2 and2times/P5 in both subjects; all DB work is not zero.
+
+Separate E-only local cut68304cc includes latest mainc950b44 and both CI follow-up
+repairs. Its complete native macOS standard passes1891/0/32, Python11/layout93 /
+fmt/strict Clippy. It has not been pushed or qualified by new Linux/Windows CI.
+Its performance is not relabelled with CBC's measurements. Remote measurement
+branch staysCBC; no main push, release, install or default-data change occurred.
+P3, Mac40Hz qualification, strict clock-bin interpretation and F/G remain open.
+Claude's later main-admission approval is required; #41 is not complete.

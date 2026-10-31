@@ -390,3 +390,14 @@ migration. F's previously proposed15/16 parent/view-lookup numbers now conflict:
 recheck at F admission (currently next free16/17), update its isolated migration
 files/ledger and retain the pre-upgrade backup warning. Neither old F migration
 is imported here. #71 admission and #54 tick conditions remain unchanged.
+
+
+### E CI observation gate after the initial run
+
+The source-qualified [result report](https://github.com/tya5/shellboy/issues/41#issuecomment-6538392801)
+keeps E9/E10 open: CBC ordinary Linux/Windows red; P5 Linux50Hz/0draws/0UIreads,
+Mac below40commits/s; Mac80 P2 max2draws/1s-bin despite600/600s totals. P3 remains
+unmeasured. Local E-only68304cc repairs the deadline priority and test guards,
+includes latestmainc950 and qualifies1891/0/32 plusPython11; no follow-up push or
+new three-OS CI is claimed. Keep this fixed cut separate from published CBC and
+from its historical main912 comparison. Do not merge F/G or close #41 on this data.

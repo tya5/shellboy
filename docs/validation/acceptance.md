@@ -3840,3 +3840,29 @@ Standard-library tests check PNG hash, dimensions, palette, chunk CRCs,
 decompression, placement and textual alternatives without image-library/network
 requirements. Exact-source standard/native CI and text-file line-count audits
 are recorded in #78. No runtime, user configuration, DB or installed binary change.
+
+
+### E formal CI / locally corrected E cut (2026-10-31)
+
+[Issue41 comparison report](https://github.com/tya5/shellboy/issues/41#issuecomment-6538392801)
+contains the full12-pair table for run41160746679, source main912b2e2→CBC. All
+required source/build/window/cleanup witnesses pass; ordinary checks fail on
+Linux(two cases) and Windows(one), macOS1891/0/32 passes. Windows native
+measurements are explicitly unavailable. No unchanged-CBC failed-job rerun is
+used to hide the initial failures.
+
+P2 both sources:600draws/600s,0UItasks/writerUIjobs/ROopens. Maximum1s-bin draws
+are1 except macOS80 both2; the latter has6/35 bins with2, minimum draw intervals
+0.826665/0.820072s. P5/P5-list both sources:0draws/UItasks/writerUIjobs/ROopens.
+Linux produces49.90–50.00commits/s; Mac16.62–17.77 does not qualify the40load.
+Mac140 P5-list retained stream totals (including setup/cleanup) show3171lines /
+1208chunks(main),3167/1240(E), so lines and commits are not interchangeable.
+CPU values/deltas, unknown attachment-GC callers and measurement-scope limits are
+preserved in the linked report/artifacts. No full-P2/P5 acceptance is inferred
+from nominal job success or average1Hz alone.
+
+The final E-only local cut68304cc merges current mainc950b44 and passes the full
+standard:1891/0/32 (lib965/13ignored, integration916/17, termination7/1, crash3/1),
+layout93, Python11, fmt and strict all-target Clippy. The16-change shared-snapshot
+case and stronger post-drain raw-save assertion pass. This source is not pushed
+or run in new native CI. P3 and laterF/G are not established by these results.
