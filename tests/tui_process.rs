@@ -139,18 +139,43 @@ async fn read_until_text(terminal: &mut File, output: &mut Vec<u8>, label: &str)
 // in that same fresh frame rather than joining unrelated historical diffs.
 async fn read_repaint_text(terminal: &mut File, output: &mut Vec<u8>, labels: &[&str]) {
     eprintln!("PTY awaiting fresh repaint: {labels:?}");
-    terminal.write_all(&[0x0c]).unwrap();
-    collect_matching(
-        terminal,
-        output,
-        "fresh repaint containing expected labels",
-        |bytes| {
-            let shown = emitted_text(bytes);
-            bytes.windows(4).any(|b| b == b"\x1b[2J")
-                && labels.iter().all(|label| shown.contains(label))
-        },
-    )
-    .await;
+    let mut frame = Vec::new();
+    crate::test_watchdog::watchdog("fresh repaint containing expected labels", async {
+        terminal.write_all(&[0x0c]).unwrap();
+        loop {
+            let mut received = false;
+            for _ in 0..16 {
+                let mut bytes = [0; 8192];
+                match terminal.read(&mut bytes) {
+                    Ok(n) if n > 0 => {
+                        output.extend_from_slice(&bytes[..n]);
+                        frame.extend_from_slice(&bytes[..n]);
+                        received = true;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Ok(_) => break,
+                    Err(e) => panic!("PTY repaint read: {e}"),
+                }
+            }
+            assert!(output.len() < 4 * 1024 * 1024, "terminal output flood");
+            // A worker reply can change the screen after the first Ctrl+L.
+            // Request another repaint only after observed output, not after a
+            // presumed settling interval. Never join labels across clear frames.
+            if let Some(clear) = frame.windows(4).rposition(|v| v == b"\x1b[2J") {
+                frame.drain(..clear);
+                let shown = emitted_text(&frame);
+                if labels.iter().all(|label| shown.contains(label)) {
+                    return;
+                }
+            }
+            if received {
+                terminal.write_all(&[0x0c]).unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("PTY fresh-frame facts watchdog");
 }
 
 fn color_updates(bytes: &[u8]) -> Vec<&[u8]> {

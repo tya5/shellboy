@@ -3893,3 +3893,17 @@ pre-existing arrow requirement, so the assertions inspect the full required
 facts rather than race a partial PTY read. No350ms wait or relaxed assertion was
 restored, and production rendering is unchanged. Final combined-source native
 qualification is repeated after this fixture correction.
+
+
+### Output-driven repaint refresh
+
+On candidate b387323, run41161117185 passed all three OSes; run41161114836
+failed Linux's native PTY while waiting for the post-retry unpaused management
+frame. The first requested repaint can precede the asynchronous status reply;
+later cursor-diff bytes need not repeat an unchanged label. The observer now
+requests a further repaint after actual received output, retains only the latest
+clear-frame bytes, and requires all expected labels within that frame. It does
+not reinstate120ms settling windows or join labels across unrelated frames. The
+same60s guard protects liveness. This fixture failure is retained, not relabelled
+as an unrelated Windows flake. Main's independent noncontrolling-EOF diagnostic
+follow-up ad6c54b is preserved during rebase; it is not a #77 production change.
