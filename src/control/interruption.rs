@@ -94,15 +94,15 @@ AND (u.state IN ('preparing', 'running', 'waiting', 'recovery_wait')
             ORDER BY z.created_at DESC, z.rowid DESC LIMIT 1)))
 ORDER BY u.created_at, u.id";
 
-const SHELL_SNAPSHOT: &str = r"SELECT json_object('execution_id', s.id,
+const SHELL_SNAPSHOT: &str = r"SELECT json_patch(json_object('execution_id', s.id,
     'run_id', s.owner_run_id,
     'turn_id', s.turn_id,
     'previous_state', s.state,
-    'startup_state', 'stopped',
+    'startup_state', ?2,
     'output_complete', json('false'),
     'saved_sequence', s.saved_sequence,
     'retention_generation', s.retention_generation,
-    'result_uncertain', json('true'))
+    'result_uncertain', json('true')), json(?3))
 FROM shell_execution s
 JOIN run r ON r.id = s.owner_run_id
 WHERE r.thread_id = ?1
@@ -339,8 +339,20 @@ fn snapshot_section(
     section: &str,
     reason: &str,
 ) -> Result<Value, StorageError> {
+    snapshot_section_with_params(tx, sql, [thread], thread, at, section, reason)
+}
+
+fn snapshot_section_with_params(
+    tx: &rusqlite::Transaction<'_>,
+    sql: &str,
+    params: impl rusqlite::Params,
+    thread: &str,
+    at: &str,
+    section: &str,
+    reason: &str,
+) -> Result<Value, StorageError> {
     let mut statement = tx.prepare(sql)?;
-    let mut query = statement.query([thread])?;
+    let mut query = statement.query(params)?;
     let mut writer = SectionWriter::new(tx, thread, at, section, reason);
     while let Some(row) = query.next()? {
         writer.push(row.get(0)?)?;
@@ -425,15 +437,24 @@ fn capture_context(
         let captured = (|| -> Result<(), StorageError> {
             let runs = snapshot_section(tx, RUN_SNAPSHOT, &thread, at, "runs", reason)?;
             let turns = snapshot_section(tx, TURN_SNAPSHOT, &thread, at, "turns", reason)?;
-            let shell_sql = if cfg!(unix) && reason == "previous_instance_interrupted" {
-                SHELL_SNAPSHOT.replace(
-                    "'startup_state', 'stopped'",
-                    "'startup_state', 'failed', 'os_state', 'unverified'",
-                )
-            } else {
-                SHELL_SNAPSHOT.to_owned()
-            };
-            let shells = snapshot_section(tx, &shell_sql, &thread, at, "shells", reason)?;
+            let unverified = cfg!(unix) && reason == "previous_instance_interrupted";
+            let shells = snapshot_section_with_params(
+                tx,
+                SHELL_SNAPSHOT,
+                rusqlite::params![
+                    &thread,
+                    if unverified { "failed" } else { "stopped" },
+                    if unverified {
+                        r#"{"os_state":"unverified"}"#
+                    } else {
+                        "{}"
+                    },
+                ],
+                &thread,
+                at,
+                "shells",
+                reason,
+            )?;
             let tool_calls =
                 snapshot_section(tx, TOOL_CALL_SNAPSHOT, &thread, at, "tool_calls", reason)?;
             let revisits = snapshot_section(tx, REVISIT_SNAPSHOT, &thread, at, "revisits", reason)?;

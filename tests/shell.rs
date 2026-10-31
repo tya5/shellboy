@@ -101,6 +101,20 @@ fn input_encoding_is_strict_complete_and_byte_limited() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn natural_exit_releases_guardian_and_finishes_output_drain_without_stderr_eof_cycle() {
+    let mut config = Config::default();
+    config.io.drain_timeout_ms = crate::test_watchdog::WATCHDOG.as_millis() as u64;
+    let (chunks, done) =
+        collect(spawn(&config, args("printf stdout-tail; printf stderr-tail >&2")).await).await;
+    assert_eq!(joined(&chunks, OutputStream::Stdout), b"stdout-tail");
+    assert_eq!(joined(&chunks, OutputStream::Stderr), b"stderr-tail");
+    assert_eq!(done.state, ShellState::Exited);
+    assert_eq!(done.exit_code, Some(0));
+    assert!(done.output_complete && done.group_cleanup_confirmed);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn bash_preserves_command_exit_status_multistream_and_raw_non_utf8() {
     let execution = spawn(
         &config(),
