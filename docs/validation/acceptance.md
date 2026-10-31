@@ -1,5 +1,20 @@
 # Validation record
 
+## G profile-integrated standard6c8eeca and latest-main qualification
+
+Native macOS shared-target `RUST_TEST_THREADS=2 sh scripts/check.sh` v30 exits0:
+Python71, layout95/watchdog, formatting, strict all-target Clippy and2326 Rust
+passes/0 failures/35 ignored (library1350/15, integration957/17,
+termination12/1, crash7/2; main/three examples0). This qualifies source6c8eeca
+including #105 line-table dev profile, not just the earlier production profile.
+Evidence: private issue-41-g-final-main-e830-standard-v30.log. Subsequentdeeb2b0
+only reconciles the ledger. G-only65-commit gitleaks8.30.1 scan reports0 leaks.
+
+New main1ac2277/#106 changed control driver retirement and stop ownership;
+merge8f0ad72 is conflict-free. Its separate announced sequential standard v31
+is running; no success is inferred yet. Exact-source3OS, G publication/reviewer
+approval and main admission remain unperformed.
+
 ## G production5ba1cdd and external IPC7984c0c qualification
 
 Native macOS/Rust1.99.1, root shared CARGO_TARGET_DIR, job1/incremental off and
@@ -57,8 +72,9 @@ uses the preserved draft and empty-history body; actual wheel movement/counter
 assertions are unchanged. No product behavior was modified for this harness.
 Existing cb1d480 visual/effect/Enter form matrix and a8bbcf0 P6 evidence remain
 separately source-qualified; current original reader/cache/dispatch code is
-unchanged. Latest main7071932 adds #105 build debug profile only; its final
-integrated standard and exact-source3OS/main review are still pending.
+unchanged. Merge7071932 adds #105 build debug profile only; integrated standard6c8eeca
+now passes as recorded above. Later #106 source8f0ad72 and exact-source3OS/main
+review remain separately pending.
 
 
 ## G native P6 checkpointa8bbcf0: count gates pass

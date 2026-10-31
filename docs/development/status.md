@@ -20,15 +20,19 @@ No real provider/clipboard/user-data use. P6a8bbcf0 remains the source-qualified
 original-reader/cache count checkpoint; relevant original-reader/wheel code is
 unchanged. No new timing or variance gate is introduced.
 
-Latest main e83047f (#105 line-table dev debug) merges at7071932 without Rust
-source changes/conflicts. Final integrated standard is pending; do not attribute
-the previous standard to the new profile. G review/publication, exact-source3OS
-and main admission remain open. Offloaded #107–#109 are not G completion gates.
+The final profile-integrated standard on6c8eeca exits0:2326/0/35, Python71,
+layout95/watchdog/fmt/strict all-target Clippy (v30). The G-only65-commit
+gitleaks scan throughdeeb2b0 finds0 leaks. Reconciled G1–G11 and per-route
+evidence in the current plan; older open paragraphs remain historical.
+Latest main1ac2277 (#106 driver retirement/accepted stop) merges cleanly
+at8f0ad72. Its announced sequential standard v31 is running; the previous run
+is terminal. Do not transfer earlier success to the new control source.
+G review/publication, exact-source3OS and main admission remain open. Offloaded #107–#109 are not G completion gates.
 The actual adapter/type handoff is #107 comment6549946520, linked from108/109;
 it explicitly distinguishes missing batch APIs and test-only helpers.
 
 
-## #41 offload ownership and current unqualified source
+## Historical pre-v27 offload checkpoint (superseded by qualification above)
 
 The2026-11-01 user explicitly authorizes independent issues outside #41, with
 non-overlapping files/functions, countable completion and G ordering. #107 owns
@@ -50,7 +54,7 @@ standard or P6 success is inferred from earlier checkpoints. Next: format and
 run one announced shared-target pipeline on the combined stable source.
 
 
-## G native P6 count checkpointa8bbcf0
+## Historical G native P6 count checkpointa8bbcf0
 
 Four native Unix PTY cases pass at80/140 columns for keyboard/wheel:600 events
 per10s,65536 original bytes,219–241 draws, zero warm-reader rebuilds; peak1493
@@ -58,9 +62,9 @@ rows/446375 bytes stays within cache bounds. Keyboard UI+draw p95 observations
 are8.599/8.777ms versus original36.836/39.427ms; wheel6.132/12.485ms has no
 supported original baseline. Durations do not gate acceptance. Private source,
 raw terminal/results and hashes remain local; instrumentation restores exactly.
-Shared target/debug/shellboy currently holds that private measurement executable,
-so rebuild ordinary source before normal development use. Installed binary is
-untouched. See acceptance for exact source/hash/counts and preflight failure.
+At this checkpoint the shared target/debug/shellboy held private instrumentation.
+The later v29 popup smoke uses a rebuilt ordinary binary (hash in acceptance).
+Installed binary is untouched. See acceptance for exact source/hash/counts and preflight failure.
 
 P6 is a qualified checkpoint, not all G: remaining saved routes, header/SQL bounds,
 shared-consumer P3, all-popup native wheel and review/three-OS/main gates remain.

@@ -761,8 +761,10 @@ IPC mutations; F8 suite14/0 and strict Clippy pass. Header/query/source proofs,
 retained originals/pending cursor races and production shared P3 collector pass.
 Native popup wheel v29 passes four dispatch classes at80/140 with draft retained
 and0 synthetic nodes; binary hash is fixed. No schema18 change is needed for
-an invented own-card flat-VM gate. Main e83047f profile change merges7071932;
-final merged standard, review/publication/exact-SHA3OS/main admission stay open.
+an invented own-card flat-VM gate. Main e83047f profile change merges7071932; standard6c8eeca now also passes
+2326/0/35 with Python71/layout95/watchdog/fmt/strict all-target Clippy.
+Latest main1ac2277/#106 merges8f0ad72; that new control source is being checked
+in a separate announced standard. Review/publication/exact-SHA3OS/main stay open.
 Full source-qualified counts/limits and native exclusions are in acceptance.
 
 
