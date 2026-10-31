@@ -230,3 +230,14 @@ logged. Input is capped at 4MiB/256 rules and aggregate source/result text32MiB.
 The helper is standard-library-only and does not build Rust or access Shellboy
 settings, data, clipboard or credentials. Use it only on owned source changes;
 no inputs/default paths are inferred from user configuration.
+
+### DB-gated preview lifetime fixture
+
+After building `--bin shellboy --example preview_gate`, run
+`python3 scripts/check-preview-lifetime.py --binary target/debug/shellboy --fixture target/debug/examples/preview_gate --out NEW_OUTPUT_DIRECTORY`.
+The driver creates only marked temporary roots, uses an injected non-clipboard
+adapter and no provider, and releases the real DB worker via one loopback
+connection after open/close/reopen. It verifies fixed observation text and no new
+UI preview requests across unrelated title changes. The example rejects existing
+data, unmarked roots, non-loopback configuration and credential headers. Both
+fixture and driver are opt-in development tools; no product debug command exists.

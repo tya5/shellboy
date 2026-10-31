@@ -2632,3 +2632,10 @@ and actual DB-worker-gate tests are prepared. A marked disposable real-TUI
 example gates its DB worker for open/close/reopen verification without a paid
 provider or clipboard access. This is uncompiled until the serialized Rust slot
 is released and is not yet a validated submission. Review remains required.
+
+#99 qualification supersedes the earlier in-progress note: the latest-main
+focused DB/virtual-clock/no-raw tests, standard check and rebuilt marked fixture
+pass. Eight native conditions confirm open/close/reopen with the actual DB worker
+held, then three unrelated Changed events without new UI preview requests or a
+moving observation notice. The implementation remains review-required; source
+and verification details are recorded in the issue comment, not as design history.

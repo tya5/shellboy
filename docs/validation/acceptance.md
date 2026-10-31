@@ -5689,3 +5689,16 @@ DB-gate unit tests, rather than elapsed wall time, establish pending-read behavi
 No paid provider or OS clipboard was involved. A next rebuilt fixture run and
 review-required handoff remain pending. No all-OS/native or latency guarantee is
 claimed from these local observations.
+
+The later serialized run on the rebased main passed focused3/0 and standard
+Rust2059 passed/0 failed/35 ignored, Python66, layout/watchdog,fmt,Clippy and
+bin/preview_gate build. Rebuilt native eight-condition results and the versioned
+driver pass with exactly two admitted UI preview requests (one retired, one
+reopened), fixed observation notices and three unrelated title changes per case.
+This is a UI-request count, not a SQLite statement count; the valid-source test
+with output_chunk absent separately proves metadata enrichment does not read raw.
+Latest logs: /tmp/issue-99-focused-latest.log,/tmp/issue-99-standard-latest.log,
+/tmp/issue-99-build-latest.log,/tmp/issue-99-native-latest/ and
+/tmp/issue-99-native-versioned/. Earlier null-counter and lint-failure records
+remain historical. Final submission/review and all-OS CI are not established by
+these local results. The issue comment contains the detailed reproducible report.
