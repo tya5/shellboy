@@ -127,7 +127,8 @@ fn unknown_target() -> PreparedTarget {
 pub(crate) fn prepare_retained_facts(
     scope: &RetainedScope, result_identity: &str, facts: Option<&[CurrentTargetFacts]>,
 ) -> Option<Vec<PreparedTarget>> {
-    if scope.result_identity.as_ref()!=result_identity { return None; }
+    if scope.result_identity.as_ref()!=result_identity || scope.targets.len()>MAX_TARGETS
+        || scope.metadata_bytes>MAX_METADATA_BYTES { return None; }
     let mut prepared=vec![unknown_target();scope.targets.len()];
     let Some(facts)=facts else { return Some(prepared); };
     if facts.len()>MAX_TARGETS { return Some(prepared); }
