@@ -5953,7 +5953,7 @@ Control::new; no production scheduling/order/timeout change. Full evidence in#10
 
 The owned macOS chain `41eadd51-1a25-441b-881d-210b2ceabb24` qualified source
 `6b8c0c818628bd8724eee5c0b8c06d6b2ef03bec` on base
-`bc9582d531240b4b1715b398c37d50a0e6d25500`: targeted footer test,
+`1ee0d8405323c4ce50c542e4dc8090422faaf2b7`: targeted footer test,
 `sh scripts/check.sh`, and `cargo build --locked --bin shellboy` all passed
 with `CARGO_BUILD_JOBS=2` and `RUST_TEST_THREADS=2`. It exited 0 and released
 at 2026-10-31T17:06:27Z, with process-group cleanup confirmed. This supersedes
@@ -5965,3 +5965,10 @@ Only formatting and `git diff --check` have run for that correction; the new
 regression and standard check await the next allocated gate. The preceding
 full/bin result does not qualify this changed source. No additional Rust/bin,
 PTY, quiet chain, installed binary change, provider call or user DB mutation ran.
+
+Ancestry clarification: `bc9582d` was the observed fetched `origin/main`, not the
+checked source's ancestor. The checked source descends from `1ee0d84`. A final
+rebase attempt encountered conflicts in `docs/design/control.md` and
+`tests/runtime_features.rs` while replaying the initial feature commit; it was
+aborted without retaining partial integration. Latest-main integration and its
+native CI remain separate, with the integrator. No whole-stack equivalence claim.
