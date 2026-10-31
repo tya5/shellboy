@@ -3731,3 +3731,13 @@ an earlier row retains the selected screen anchor, changes the count, and makes
 the new row selectable by Up. Every fixture exits0; no paid/default-store or
 clipboard action occurs. This supersedes the pre-#75 native scope for these
 specific behaviors, not physical Windows UX or full performance acceptance.
+
+
+The measurement-review branch63a7f17 standard run passed lib965 and Python20,
+but integration had915 successes/1 failure: the paired-browser fixture saw
+browser sequence77 and current-view78. Its initial gate accepted a metadata-only
+patch before the selected-row excerpt observation, leaving legitimate initial
+work in flight when the foreign CLI mutation began. Wait for the actual selected
+excerpt result instead; retain the exact one-observation/shared-sequence/no-reload
+assertions. No product cadence, timeout or sequence fence is relaxed. New focused
+and complete qualification is pending; the original failure log is retained.

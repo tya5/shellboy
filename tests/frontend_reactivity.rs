@@ -33,6 +33,7 @@ struct Fixture {
     view_sequences: Vec<u64>,
     browser_sequences: Vec<u64>,
     browser_pages: usize,
+    browser_selected_ready: bool,
 }
 impl Fixture {
     async fn new(url: &str) -> Self {
@@ -93,6 +94,7 @@ impl Fixture {
             view_sequences: Vec::new(),
             browser_sequences: Vec::new(),
             browser_pages: 0,
+            browser_selected_ready: false,
         };
         fixture
             .until("initial selected header", |ui, screen| {
@@ -108,7 +110,13 @@ impl Fixture {
                     self.view_sequences.push(*read_revision);
                 }
             }
-            UiUpdate::BrowserPatch { patch } => self.browser_sequences.push(patch.read_sequence),
+            UiUpdate::BrowserPatch { patch } => {
+                self.browser_sequences.push(patch.read_sequence);
+                self.browser_selected_ready |= patch
+                    .excerpt
+                    .as_ref()
+                    .is_some_and(|(id, value)| id == "reactive" && value.is_ok());
+            }
             UiUpdate::Threads { .. } => self.browser_pages += 1,
             _ => {}
         }
@@ -862,8 +870,8 @@ async fn selected_header_and_open_browser_share_one_changed_snapshot_without_rel
         })
         .await;
     fixture
-        .observed_until("initial browser patch", |fixture, _| {
-            !fixture.browser_sequences.is_empty()
+        .observed_until("initial selected browser snapshot", |fixture, _| {
+            fixture.browser_selected_ready
         })
         .await;
     let generation = fixture.ui.list_generation();
