@@ -28,14 +28,17 @@ impl Kind {
         Self::Message,
         Self::Attempt,
     ];
-    pub(crate) fn name(self) -> &'static str {
+    fn canonical(self) -> super::WorkKind {
         match self {
-            Self::Run => "run",
-            Self::Turn => "turn",
-            Self::Shell => "shell",
-            Self::Message => "message",
-            Self::Attempt => "attempt",
+            Self::Run => super::WorkKind::Run,
+            Self::Turn => super::WorkKind::Turn,
+            Self::Shell => super::WorkKind::Shell,
+            Self::Message => super::WorkKind::Message,
+            Self::Attempt => super::WorkKind::Attempt,
         }
+    }
+    pub(crate) fn name(self) -> &'static str {
+        self.canonical().as_str()
     }
     pub(crate) fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| kind.name() == s)
@@ -335,6 +338,43 @@ pub(crate) fn read_membership_tx(
     }
     assert!(result.prefix_rows <= MEMBERSHIP_CANDIDATES);
     Ok(result)
+}
+/// Canonical native-state exclusions, without re-evaluating/moving a page cursor.
+/// None is explicit uncertainty, not a filter mismatch or deleted row.
+pub(crate) fn matches_filters(
+    kind: Kind,
+    fields: &Value,
+    args: &crate::protocol::StatusArgs,
+) -> Option<bool> {
+    let state = fields.get("state")?.as_str()?;
+    if !args.state.is_empty() {
+        if !args.state.iter().any(|wanted| wanted == state) {
+            return Some(false);
+        }
+    } else if !args.all && kind.canonical().terminal(state) {
+        return Some(false);
+    }
+    for (filter, name) in [(&args.thread_id, "thread_id"), (&args.run_id, "run_id")] {
+        if let Some(expected) = filter {
+            if fields.get(name)?.as_str()? != expected {
+                return Some(false);
+            }
+        }
+    }
+    if let Some(since) = args.since.as_deref() {
+        let since = super::stamp(since).ok()?;
+        let mut activity = None;
+        for name in ["created_at", "started_at", "ended_at", "updated_at"] {
+            if let Some(text) = fields.get(name).and_then(Value::as_str) {
+                let at = super::stamp(text).ok()?;
+                activity = Some(activity.map_or(at, |previous| std::cmp::max(previous, at)));
+            }
+        }
+        if activity? < since {
+            return Some(false);
+        }
+    }
+    Some(true)
 }
 /// Pure metadata patch. Caller retains filters/page/cursor and adoption fences.
 pub(crate) fn prepare(raw: Raw) -> Value {
