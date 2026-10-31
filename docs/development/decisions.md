@@ -2240,3 +2240,19 @@ can cover the tail and hide the fixture mistake. Establish paused navigation and
 its anchor before dispatch, matching actual backward navigation. Keep the exact
 old guards and body/metadata assertions. A pure two-order regression checks both
 states without time; no UI product policy changes for this third case.
+
+## #95 return: periodic work is not another Changed event (2026-10-31)
+
+Use the existing selected-refresh in-flight set to suppress redundant periodic
+poll requests while a snapshot is already being read/projected. Do not clear
+real dirty work, suppress a real Changed event, deduplicate delivered facts to
+hide extra reads, or invent a new epoch. Idle activity can stop polling without
+a tick echo left behind; live activity resumes the existing cadence after the
+read completes. Real Changed during a read retains epoch invalidation and its
+next read. Keep the strict E observation/sequence/reload contract unchanged.
+
+An old-rule red fixed-order test and new-rule green test establish this source
+class; three local original integration runs are separate regression evidence,
+not historical Windows scheduling proof. The old product's three green split
+runs do not cancel its failed ordinary Windows run. This source change requires
+Core review and fresh exact-source native CI by the integration worker.

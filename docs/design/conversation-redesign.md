@@ -757,3 +757,15 @@ IDs with the selected snapshot. Otherwise the view can lose the browser ticket
 before either deadline tie rule applies. Browser-only/foreign work retains the
 same cadence and existing notification wakeups. No epoch, worker, queue, timer
 or persistent state is added. The strict paired-sequence test remains unchanged.
+
+### Periodic polls cannot redirty an in-flight selected observation (#95 return)
+
+The existing progress tick requests another snapshot only when no snapshot for
+that selected Thread is already in flight. A Changed event can temporarily mark
+an idle selection as pollable until its activity facts return; periodic ticks
+while that read is pending are not independent saved changes and must not queue
+a second observation after its idle result. Real Changed events still advance
+the existing epoch and dirty the Thread even during a read; stale activity cannot
+clear that new work. Keep the same 500ms cadence, missed-tick behavior, paired
+browser ticket and all one-observation/same-sequence/no-reload assertions. This
+uses only the existing refreshing set, with no timer/state/worker/queue addition.
