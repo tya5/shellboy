@@ -432,7 +432,7 @@ impl Compactor {
         range: Range<usize>,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_with_policy(snapshot, range, cancel, None)
+        self.summarize_with_policy(snapshot, range, cancel, self.config.compaction.clone())
             .await
     }
     async fn summarize_with_policy(
@@ -440,7 +440,7 @@ impl Compactor {
         snapshot: Snapshot,
         range: Range<usize>,
         cancel: CancellationToken,
-        policy: Option<crate::config::Compaction>,
+        policy: crate::config::Compaction,
     ) -> Result<CompactResult, ApiError> {
         range::validate(
             &snapshot,
@@ -449,21 +449,23 @@ impl Compactor {
         )?;
         let count = range.end;
         let groups = &snapshot.groups[range.clone()];
-        let source_characters = if policy.is_some() {
+        let source_characters = {
             groups
                 .iter()
                 .flat_map(|g| &g.sources)
                 .map(|s| edit::projection_characters(&s.payload, snapshot.epoch))
                 .fold(0u64, u64::saturating_add)
-        } else {
-            0
         };
-        let mut budget = policy.as_ref().map(|p| SummaryBudget {
+        let mut budget = SummaryBudget {
             source_characters,
             summary_characters: 0,
-            limit: p.summary_limit(source_characters),
+            limit: policy.summary_limit(source_characters),
             requests: 0,
-        });
+            map_requests: 0,
+            reduce_requests: 0,
+            map_limit: policy.summary_map_max_requests,
+            reduce_limit: policy.summary_reduce_max_requests,
+        };
         self.config
             .connections
             .get(&snapshot.profile)
@@ -478,6 +480,34 @@ impl Compactor {
             .get(&snapshot.profile)
             .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
         let mut segments = segments(groups, snapshot.epoch)?;
+        let mut uncached = 0usize;
+        for (start, end, _) in &segments {
+            let sources: Vec<Source> = groups[*start..*end]
+                .iter()
+                .flat_map(|g| g.sources.clone())
+                .collect();
+            let lookup = CompactionKeys::summary_part(&summary_key(&snapshot, &sources));
+            let cached = self
+                .database
+                .call(move |db| CachedPart::load(db, &lookup))
+                .await
+                .map_err(storage_error)?;
+            if cached.filter(CachedPart::reusable).is_none() {
+                uncached += 1;
+            }
+        }
+        if uncached > budget.map_limit {
+            let mut error = budget
+                .error("Summary map preflight exceeds the request limit; original path retained");
+            let facts = error.details.as_mut().unwrap().as_object_mut().unwrap();
+            facts.insert("map_segments".into(), json!(segments.len()));
+            facts.insert("uncached_map_segments".into(), json!(uncached));
+            facts.insert(
+                "cached_map_segments".into(),
+                json!(segments.len() - uncached),
+            );
+            return Err(error.hint("Narrow the range or raise compaction.summary_map_max_requests; no model request was sent"));
+        }
         segments.reverse();
         let mut parts = Vec::new();
         let mut created = 0;
@@ -490,16 +520,7 @@ impl Compactor {
                 .iter()
                 .flat_map(|g| g.sources.clone())
                 .collect();
-            let prompt = budget
-                .as_ref()
-                .map(|b| b.prompt("map; preserve chronological state changes and source node IDs"))
-                .unwrap_or_else(|| SUMMARY_PROMPT.to_owned());
-            let source_key = summary_key(&snapshot, &sources);
-            let cache_key = if budget.is_some() {
-                key(&("bounded-summary-v1", source_key, &prompt))
-            } else {
-                source_key
-            };
+            let cache_key = summary_key(&snapshot, &sources);
             let lookup = CompactionKeys::summary_part(&cache_key);
             let cached = self
                 .database
@@ -507,11 +528,9 @@ impl Compactor {
                 .await
                 .map_err(storage_error)?;
             if let Some(part) = cached.filter(CachedPart::reusable) {
-                if let Some(budget) = &mut budget {
-                    budget.summary_characters = budget
-                        .summary_characters
-                        .saturating_add(part.text.chars().count() as u64);
-                }
+                budget.summary_characters = budget
+                    .summary_characters
+                    .saturating_add(part.text.chars().count() as u64);
                 parts.push(part);
                 reused += 1;
                 continue;
@@ -524,15 +543,13 @@ impl Compactor {
             let request = model::response_request(
                 &snapshot.model,
                 vec![
-                    json!({"role":"developer","content":[{"type":"input_text","text":prompt}]}),
+                    json!({"role":"developer","content":[{"type":"input_text","text":SUMMARY_PROMPT}]}),
                     json!({"role":"user","content":[{"type":"input_text","text":text}]}),
                 ],
                 snapshot.effort.as_deref(),
                 false,
             );
-            if let Some(budget) = &mut budget {
-                budget.request()?;
-            }
+            budget.request_map()?;
             let response = match client
                 .response_for_thread(&snapshot.thread, request, cancel.clone(), None)
                 .await
@@ -571,11 +588,9 @@ impl Compactor {
                 )
                 .details(json!({"summary_part_key":part.cache_key})));
             }
-            if let Some(budget) = &mut budget {
-                budget.summary_characters = budget
-                    .summary_characters
-                    .saturating_add(part.text.chars().count() as u64);
-            }
+            budget.summary_characters = budget
+                .summary_characters
+                .saturating_add(part.text.chars().count() as u64);
             parts.push(part);
             created += 1;
         }
@@ -584,28 +599,11 @@ impl Compactor {
         }
         let sources: Vec<Source> = groups.iter().flat_map(|g| g.sources.clone()).collect();
         let originals: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
-        let body = if let Some(budget) = &mut budget {
-            self.reduce_summary(&snapshot, &parts, budget, &cancel)
-                .await?
-        } else {
-            parts
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    format!(
-                        "### Part {}\n{}\n\nShellboy source nodes: {}",
-                        i + 1,
-                        p.text,
-                        p.sources.join(", ")
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        };
+        let body = self
+            .reduce_summary(&snapshot, &parts, &mut budget, &cancel)
+            .await?;
         let payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":body}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_part_keys":parts.iter().filter_map(|p|p.cache_key.as_deref()).collect::<Vec<_>>()});
-        if let Some(budget) = &budget
-            && edit::projection_characters(&payload, snapshot.epoch) >= budget.source_characters
-        {
+        if edit::projection_characters(&payload, snapshot.epoch) >= budget.source_characters {
             return Err(budget.error(
                 "Summary does not shrink its original source projection; original path retained",
             ));
@@ -617,10 +615,10 @@ impl Compactor {
             start: range.start,
             count,
             result: CompactResult {
-                source_characters: budget.as_ref().map(|b| b.source_characters),
-                summary_characters: budget.as_ref().map(|b| b.summary_characters),
-                summary_limit: budget.as_ref().map(|b| b.limit),
-                model_requests: budget.as_ref().map(|b| b.requests),
+                source_characters: Some(budget.source_characters),
+                summary_characters: Some(budget.summary_characters),
+                summary_limit: Some(budget.limit),
+                model_requests: Some(budget.requests),
                 source_nodes: originals.len(),
                 created_parts: created,
                 reused_parts: reused,
@@ -1397,7 +1395,7 @@ mod tests {
                     id,
                     None,
                     "message",
-                    &json!({"role":"user","content":id}),
+                    &json!({"role":"user","content":id.repeat(100)}),
                     "now",
                 )?;
             }
@@ -1759,7 +1757,7 @@ mod tests {
                     id,
                     None,
                     "message",
-                    &json!({"role":"user","content":id}),
+                    &json!({"role":"user","content":id.repeat(100)}),
                     "now",
                 )?;
             }
@@ -1996,7 +1994,7 @@ mod tests {
                 "original",
                 None,
                 "message",
-                &json!({"role":"user","content":"source"}),
+                &json!({"role":"user","content":"source".repeat(100)}),
                 "now",
             )?;
             tx.commit()?;
@@ -2072,7 +2070,7 @@ mod tests {
                     "original",
                     None,
                     "message",
-                    &json!({"role":"user","content":"source"}),
+                    &json!({"role":"user","content":"source".repeat(100)}),
                     "now",
                 )?;
                 tx.commit()?;

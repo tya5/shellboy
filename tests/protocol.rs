@@ -904,3 +904,39 @@ fn summary_limits_are_checked_at_the_owner_boundary() {
     a.action = ContextEditAction::Omit;
     assert!(a.validate().is_err());
 }
+
+#[test]
+fn index_status_additive_policy_defaults_do_not_change_config_defaults() {
+    let base = json!({
+        "pending":0,"running":0,"done":0,"failed":0,"paused":false,
+        "paused_at":null,"pause_id":null,"spaces":[],"spaces_total":0,
+        "spaces_truncated":false,"probes":[]
+    });
+    let absent: IndexStatus = serde_json::from_value(base.clone()).unwrap();
+    assert!(!absent.auto_history);
+    assert_eq!(absent.held_auto_history, 0);
+    assert!(shellboy::config::Config::default().indexing.auto_history);
+    for enabled in [false, true] {
+        let mut value = base.clone();
+        value["auto_history"] = json!(enabled);
+        value["held_auto_history"] = json!(3);
+        let parsed: IndexStatus = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.auto_history, enabled);
+        assert_eq!(parsed.held_auto_history, 3);
+        let wire = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(wire["auto_history"], enabled);
+        assert_eq!(wire["held_auto_history"], 3);
+    }
+    for (key, invalid) in [
+        ("auto_history", json!("off")),
+        ("auto_history", Value::Null),
+        ("held_auto_history", json!(-1)),
+    ] {
+        let mut value = base.clone();
+        value[key] = invalid;
+        assert!(serde_json::from_value::<IndexStatus>(value).is_err());
+    }
+    let mut missing_pending = base;
+    missing_pending.as_object_mut().unwrap().remove("pending");
+    assert!(serde_json::from_value::<IndexStatus>(missing_pending).is_err());
+}

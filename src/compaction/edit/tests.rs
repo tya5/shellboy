@@ -604,7 +604,7 @@ async fn marker_explicitly_reports_current_turn_work_after_the_retained_request(
     assert!(!text.contains("history search"));
     assert!(!text.contains("--mode hybrid") && !text.contains("--mode semantic"));
     assert!(text.contains("Original data is retained and can stay omitted"));
-    assert!(text.contains("--max-chars 20000 --max-percent 5"));
+    assert!(!text.contains("--max-chars") && !text.contains("--max-percent"));
     assert!(text.contains(
         "restoring or summarizing omitted history can enlarge context and reproduce the failure"
     ));

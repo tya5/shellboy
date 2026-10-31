@@ -545,13 +545,7 @@ async fn overflow_without_maximum_target_summarizes_without_unchanged_resend() {
         json!([]),
         "no unchanged conversation resend before the final stage"
     );
-    summary
-        .reply
-        .send((
-            200,
-            answer("retained task; original source remains accessible"),
-        ))
-        .unwrap();
+    summary.reply.send((200, answer("OK"))).unwrap();
     let retry = incoming(&control, &mut receive).await;
     assert_eq!(retry.body["tools"].as_array().unwrap().len(), 1);
     retry.reply.send((400, overflow)).unwrap();
@@ -710,13 +704,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     retry_one.reply.send((400, overflow.clone())).unwrap();
     let summary = next(&mut receive, &control, "second overflow: summary request").await;
     assert_eq!(summary.body["tools"], json!([]));
-    summary
-        .reply
-        .send((
-            200,
-            answer("Earlier groups completed; exact references remain."),
-        ))
-        .unwrap();
+    summary.reply.send((200, answer("OK"))).unwrap();
     let retry_two = next(
         &mut receive,
         &control,
@@ -2709,4 +2697,46 @@ async fn failed_response_usage_is_saved_without_provider_appendices_or_audit_los
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_resend() {
+    timeout(Duration::from_secs(60),async {
+        let root=tempfile::tempdir().unwrap();let (url,mut receive,server)=proxy().await;
+        let config=root.path().join("config.toml");
+        std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=8\n[compaction]\nsummary_max_chars=2000\nsummary_map_max_requests=1\nsummary_reduce_max_requests=1\n")).unwrap();
+        let owner=DataOwner::start(Some(config),Some(root.path().join("data")),root.path().into()).await.unwrap();
+        let control=Control::new(&owner,root.path().into());let thread=thread(&control).await;
+        send(&control,&thread,"protected task").await;
+        receive.recv().await.unwrap().reply.send((200,json!({"id":"tool","status":"completed","output":[{"type":"function_call","call_id":"only-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]}))).unwrap();
+        let pending=receive.recv().await.unwrap();let target=thread.clone();
+        control.store.database.call(move|db| {
+            let tx=db.transaction()?;
+            let request:String=tx.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 ORDER BY created_at LIMIT 1",[&target],|r|r.get(0))?;
+            let selected=tx.prepare("SELECT n.id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND (n.id=?2 OR json_extract(n.payload_json,'$.group_id') IS NOT NULL) ORDER BY p.ordinal")?.query_map(rusqlite::params![target,request],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            let revision:i64=tx.query_row("SELECT selection_revision FROM thread WHERE id=?1",[&target],|r|r.get(0))?;
+            shellboy::history::select_path(&tx,&target,revision as u64,&selected,"2026-10-31T00:00:00Z")?;tx.commit()?;Ok(())
+        }).await.unwrap();
+        pending.reply.send((400,json!({"error":{"code":"context_length_exceeded","message":"fixture pressure"}}))).unwrap();
+        let log=root.path().join("summary-requests.jsonl");std::fs::write(&log,"").unwrap();
+        for _ in 0..2 {
+            let request=receive.recv().await.unwrap();assert_eq!(request.body["tools"],json!([]));
+            use std::io::Write;
+            writeln!(std::fs::OpenOptions::new().append(true).open(&log).unwrap(),"{}",request.body).unwrap();
+            request.reply.send((200,answer(&"x".repeat(2001)))).unwrap();
+        }
+        loop {
+            let ready=control.store.database.call(|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE state='recovery_wait')",[],|r|r.get::<_,bool>(0))?)).await.unwrap();
+            if ready {break;}tokio::task::yield_now().await;
+        }
+        control.store.database.call(|db| {
+            assert_eq!(db.query_row("SELECT count(*) FROM node WHERE kind='summary'",[],|r|r.get::<_,i64>(0))?,0);
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,2);
+            let raw:String=db.query_row("SELECT error_json FROM model_attempt WHERE state='incomplete'",[],|r|r.get(0))?;
+            let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["automatic_trim_attempt"]["error"]["details"];
+            assert_eq!(facts["map_requests"],1);assert_eq!(facts["reduce_requests"],1);assert_eq!(facts["summary_limit"],2000);Ok(())
+        }).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),2);
+        control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
+    }).await.expect("automatic summary recovery fixture watchdog");
 }

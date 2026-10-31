@@ -514,8 +514,18 @@ RAG reports disabled coverage in its existing degraded/scope_status/warnings.
 corresponding `[compaction]` setting; omitted overrides preserve the configuration.
 Defaults are the smaller of 20,000 characters and 5% of original projected input,
 floored at 2,000. Explicit summaries consolidate parts into one bounded text,
-with at most 64 model requests and four reduce rounds, or fail without adoption.
+with independent map/reduce budgets (default 128/16) and four reduce rounds,
+or fail without adoption. A map budget overrun known from uncached segment count
+is rejected before any model request. Changing a size override reuses map cache.
+The same limits apply to automatic stage 2; failure follows normal recovery wait.
 The downstream `result.compact` adds `source_characters`, `summary_characters`,
 `summary_limit` and `model_requests`; size/budget failure details expose the same
 facts. Read [configuration](configuration.md#explicit-summary-size-limits) for
 single-limit settings, retry caching, and omitted-history caveats.
+
+
+`index status` reports `held_auto_history` separately from `pending`: automatic
+pending source authorizations/bootstrap/segment jobs held while auto_history is
+false. Explicit pending work, running/failed/done and space selection retain
+their existing meaning. Re-enable or explicitly reauthorize to release applicable
+held entries. No saved job state is changed by this status projection.

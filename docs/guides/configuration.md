@@ -466,6 +466,8 @@ These prompts are not a guarantee of factual correctness; inspect sources when n
 [compaction]
 summary_max_chars = 20000
 summary_max_percent = 5
+summary_map_max_requests = 128
+summary_reduce_max_requests = 16
 ```
 
 Without this section, both limits above apply. In a present section, specify
@@ -482,14 +484,23 @@ limits keep their configured values. Run `config check` to validate the section
 and inspect its resolved values in `result.compaction`, then restart the owner
 to apply changed settings. Checking still uses only the model catalog, not a chat.
 
-Each invocation allows at most 64 model requests across map, context-limit splits
-and reduce, and at most four reduce rounds. Over-limit summaries are reduced more
+Map and reduce have independent request budgets: `summary_map_max_requests`
+(default 128) and `summary_reduce_max_requests` (default 16), each in 1..4096.
+Before sending any model request, count the known uncached map segments. If they
+exceed the map budget, refuse with total/uncached/cached segment counts and a hint
+to narrow the range or raise the map budget. Valid cached segments consume no
+map requests, and changing an output-size limit does not change map cache keys.
+Unexpected provider context-limit splits consume the remaining map attempt budget.
+Reduce still has at most four rounds and its own request budget. A section with
+only request-budget settings uses the default 20,000-character/5% size limits. Over-limit summaries are reduced more
 strongly, never truncated to fit. On failure, no replacement is adopted; inspect
 `source_characters`, `summary_characters`, `summary_limit` and `model_requests`
 in the error details. Successful downstream results expose these under `compact`
 in addition to before/after context sizes. Cached successful parts can be reused
 on explicit retry, so model_requests counts requests actually made this time.
-Automatic failure compaction and argument-free `compact` are unchanged.
+Automatic failure stage 2 and argument-free `compact` use the same bounded
+summarizer. An over-limit automatic summary is not adopted; existing #50 recovery
+handling enters recovery wait. The prior spill stage may already be saved.
 
 Omitted history can stay omitted. Use bounded keyword RAG/`history get` first;
 when embeddings are configured, `history search` can help with differently worded

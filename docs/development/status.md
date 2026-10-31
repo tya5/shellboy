@@ -1,5 +1,13 @@
 # Development status
 
+## #73 review fixes / D-017
+
+Map cache identity is independent of output limits and retains the pre-#73 key.
+Independent configured map/reduce budgets default to 128/16, with uncached-map
+preflight before HTTP. All summary paths, including automatic stage 2, share
+reduce/size rejection and existing recovery behavior. Omission commands honor
+user settings. Local checks pass; exact-source native CI is tracked in issue #73.
+
 ## #73 bounded explicit summaries
 
 Range summaries now consolidate chronological parts into one bounded text,
@@ -1411,3 +1419,14 @@ failed an existing parent-shell PTY diagnostic assertion after durable cleanup;
 the same-source focused rerun and full standard rerun pass. No causal fix or
 intermittent-failure diagnosis is claimed. Main three-OS CI and current-source
 long measurements remain unverified; no push or installation was performed.
+
+## Index-status review follow-up (#71)
+
+IndexStatus defaults its additive policy fields on decode only (auto_history
+false, held_auto_history zero); actual owner configuration remains default true.
+Status separates automatic pending authorizations/bootstrap/jobs held by the off
+policy into held_auto_history, leaving explicit pending and running/failed/done
+unchanged. Space selection retains its prior scope. No queue/schema/worker,
+indexing admission, history-search output shape or installed binary is changed.
+Focused mock and wire tests pass; final standard/rebased and native CI are
+separate gates. Existing seven-day observation remains a reviewer rollout task.

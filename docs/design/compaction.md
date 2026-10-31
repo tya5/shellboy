@@ -213,7 +213,7 @@ most 64,000 characters, then consolidate again until one final summary remains.
 Prompts deduplicate goals/constraints, keep only the latest confirmed state,
 retain decisions/reasons, unresolved work, uncertainty and source node IDs.
 Original payloads, replacement sources, cancellation and transactional CAS
-adoption remain unchanged. Automatic overflow compaction is outside this change.
+adoption remain unchanged. Per D-017, automatic stage 2 shares these bounds.
 
 `[compaction] summary_max_chars` and `summary_max_percent` select the smaller
 limit, floored at 2,000 Unicode characters. An absent section defaults to 20,000
@@ -226,13 +226,31 @@ metadata. Reject a summary exceeding its limit or failing to shrink its original
 source projection; omitted information can still enlarge the currently selected
 marker and must be reported as such. Never truncate a model answer to pass.
 
-Use at most 64 model requests per invocation (map, context splits, reduce and
-stronger retries combined), and at most four reduce rounds. Successful parts and
-reduce responses use existing summary.part metadata with bounded-policy-specific
-keys, model/profile/effort/epoch/input/limit identity and raw-response validation.
+Use independent configured map/reduce request limits (default 128/16) and at
+most four reduce rounds. Preflight uncached map segments before HTTP; cached maps
+do not consume map budget. Map prompt/key identity remains pre-#73 and independent
+of size policy; reduce keys include the output policy, model/profile/effort/epoch
+and input identity. Existing summary.part metadata and raw validation are reused.
 No new table, worker, queue, timer or automatic transport retry is added. Refusal
 or empty responses remain auditable and cannot be adopted. If budgets/limits
 fail, preserve the selected path and return source/summary/limit/request facts.
 Successful results expose those facts too. Omission notices recommend leaving
 history omitted and bounded history search/get first; a capped summary explicitly
 reintroduces key facts rather than undoing the side effects of earlier work.
+
+
+### D-017 review correction: all summary paths share bounds
+
+This supersedes #73's initial shared 64-call budget and automatic-path exception.
+All summaries, including #50 stage 2 and argument-free compact, use the same
+reduce and size rejection before adoption. Preserve the pre-#73 SUMMARY_PROMPT,
+summary_key and raw-validated map cache identity; output limits affect only reduce
+prompts/cache keys. Map/reduce request ceilings are independent, default 128/16,
+configurable via summary_map_max_requests/summary_reduce_max_requests (1..4096).
+Before HTTP, count all known uncached segments and reject an excessive map plan
+with total/cached/uncached counts, limit and narrowing/configuration guidance.
+Cached maps do not consume budget. Context-limit split attempts remain charged
+to the map budget because their necessity is learned only from the provider.
+The four-round reduce bound remains. Existing #50 rejection handling, cancellation,
+provenance and atomic adoption remain unchanged; an earlier spill may be saved.
+Omission notices do not hardcode size flags: ordinary summary uses user settings.

@@ -152,12 +152,12 @@ impl IndexService {
     pub async fn status(&self, args: IndexArgs) -> Result<IndexStatus, ApiError> {
         let keys = self.identity_keys();
         let family = self.endpoint_family_key.clone();
+        let auto_history = self.config.indexing.auto_history;
         let mut status = self
             .database
-            .call(move |db| read_status(db, args, keys, family))
+            .call(move |db| read_status(db, args, keys, family, auto_history))
             .await
             .map_err(db_error)?;
-        status.auto_history = self.config.indexing.auto_history;
         if let Some(reason) = self.storage_stop_reason() {
             status.paused = true;
             status.reason = Some(match status.reason.take() {
@@ -396,13 +396,15 @@ fn read_status(
     args: IndexArgs,
     keys: Vec<String>,
     family: Option<String>,
+    auto_history: bool,
 ) -> Result<IndexStatus, StorageError> {
     let embedding_job_sql = "SELECT source_node_id,error_json FROM embedding_job WHERE space_id=?1 AND state='failed' ORDER BY id LIMIT 1";
     let explicit = args.space_id.is_some();
     let selected = args.space_id.or(meta(db, IndexKeys::ACTIVE_SPACE)?);
     let mut status = IndexStatus {
         space_id: selected.clone(),
-        auto_history: true,
+        auto_history,
+        held_auto_history: 0,
         pending: 0,
         running: 0,
         done: 0,
@@ -453,6 +455,7 @@ fn read_status(
             })? {
                 let admission: AutoAdmission = decode_json(&value?)?;
                 match admission.state.as_str() {
+                    "pending" if !auto_history => status.held_auto_history += 1,
                     "pending" => status.pending += 1,
                     "running" => status.running += 1,
                     "failed" => status.failed += 1,
@@ -471,6 +474,11 @@ fn read_status(
                 let work: Work = decode_json(&value?)?;
                 if group_current(db, IndexKeys::new(key), &work.group)? {
                     match work.state.as_str() {
+                        "pending"
+                            if !auto_history && work.authorization.starts_with("new-finalized") =>
+                        {
+                            status.held_auto_history += 1
+                        }
                         "pending" => status.pending += 1,
                         "running" => status.running += 1,
                         "failed" => status.failed += 1,
@@ -486,13 +494,19 @@ fn read_status(
         }
     }
     for space in spaces {
-        let mut statement = db
-            .prepare("SELECT state,COUNT(*) FROM embedding_job WHERE space_id=?1 GROUP BY state")?;
-        for row in statement.query_map([&space], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        let mut statement = db.prepare(
+            "SELECT state,CASE WHEN NOT ?2 AND state='pending' THEN COALESCE(json_extract(authorized_watermark,'$.authorization'),'') LIKE 'new-finalized%' ELSE 0 END AS held,COUNT(*) FROM embedding_job WHERE space_id=?1 GROUP BY state,held",
+        )?;
+        for row in statement.query_map(params![&space, auto_history], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, bool>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })? {
-            let (state, count) = row?;
+            let (state, held, count) = row?;
             match state.as_str() {
+                "pending" if held => status.held_auto_history += count as u64,
                 "pending" => status.pending += count as u64,
                 "running" => status.running += count as u64,
                 "done" => status.done += count as u64,

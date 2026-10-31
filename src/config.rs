@@ -724,18 +724,49 @@ pub fn resolve_cli_data_dir(
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "CompactionFields")]
 pub struct Compaction {
-    #[serde(default)]
     pub summary_max_chars: Option<u64>,
-    #[serde(default)]
     pub summary_max_percent: Option<f64>,
+    pub summary_map_max_requests: usize,
+    pub summary_reduce_max_requests: usize,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct CompactionFields {
+    summary_max_chars: Option<u64>,
+    summary_max_percent: Option<f64>,
+    summary_map_max_requests: Option<usize>,
+    summary_reduce_max_requests: Option<usize>,
+}
+impl From<CompactionFields> for Compaction {
+    fn from(f: CompactionFields) -> Self {
+        let request_only = f.summary_max_chars.is_none()
+            && f.summary_max_percent.is_none()
+            && (f.summary_map_max_requests.is_some() || f.summary_reduce_max_requests.is_some());
+        Self {
+            summary_max_chars: if request_only {
+                Some(20_000)
+            } else {
+                f.summary_max_chars
+            },
+            summary_max_percent: if request_only {
+                Some(5.0)
+            } else {
+                f.summary_max_percent
+            },
+            summary_map_max_requests: f.summary_map_max_requests.unwrap_or(128),
+            summary_reduce_max_requests: f.summary_reduce_max_requests.unwrap_or(16),
+        }
+    }
 }
 impl Default for Compaction {
     fn default() -> Self {
         Self {
             summary_max_chars: Some(20_000),
             summary_max_percent: Some(5.0),
+            summary_map_max_requests: 128,
+            summary_reduce_max_requests: 16,
         }
     }
 }
@@ -746,13 +777,17 @@ impl Compaction {
             && self
                 .summary_max_percent
                 .is_none_or(|p| p.is_finite() && p > 0.0 && p <= 100.0)
+            && (1..=4096).contains(&self.summary_map_max_requests)
+            && (1..=4096).contains(&self.summary_reduce_max_requests)
     }
     pub fn summary_limit(&self, source: u64) -> u64 {
-        let absolute = self.summary_max_chars.unwrap_or(u64::MAX);
-        let relative = self
-            .summary_max_percent
-            .map(|p| (source as f64 * (p / 100.0)).floor() as u64)
-            .unwrap_or(u64::MAX);
-        absolute.min(relative).max(2_000)
+        self.summary_max_chars
+            .unwrap_or(u64::MAX)
+            .min(
+                self.summary_max_percent
+                    .map(|p| (source as f64 * (p / 100.0)).floor() as u64)
+                    .unwrap_or(u64::MAX),
+            )
+            .max(2000)
     }
 }

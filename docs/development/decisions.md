@@ -1911,3 +1911,15 @@ Receipt/business results keep ordered delivery. Pressure tests exercise1,000
 updates per kind with a full raw UI channel and require two latest entries,
 zero critical entries and the newest values after draining. No channel/queue or
 capacity is added. The previously qualified45b8b15 source predates this follow-up.
+
+## #73 review / D-017 (2026-10-31, active)
+
+Supersede the shared 64-request and automatic-path exclusion decisions above.
+Use independent map 128/reduce 16 default request budgets, configurable in 1..4096;
+reject a known excessive uncached map plan before sending any model request.
+Keep legacy map prompt/key identity independent of final-size policy; reduce
+caches remain policy-specific. Apply identical limits to automatic stage 2 and
+argument-free compact, leaving #50 recovery handling unchanged. Size-free omission
+commands honor user configuration. A request-budget-only configuration section
+uses D-015's default size policy; single size keys retain their existing meaning.
+Source: reviewer request, issue #73 review, issue #68 D-017. No new persistence or worker.

@@ -728,3 +728,23 @@ fn explicit_summary_limits_defaults_single_knobs_minimum_and_rejections() {
         );
     }
 }
+
+#[test]
+fn summary_request_budgets_are_independent_configurable_and_positive() {
+    let c =
+        Config::parse("[compaction]\nsummary_map_max_requests=2\nsummary_reduce_max_requests=3")
+            .unwrap()
+            .compaction;
+    assert_eq!(c.summary_map_max_requests, 2);
+    assert_eq!(c.summary_reduce_max_requests, 3);
+    assert_eq!(c.summary_max_chars, Some(20000));
+    assert_eq!(c.summary_max_percent, Some(5.0));
+    let c = Config::default().compaction;
+    assert_eq!(c.summary_map_max_requests, 128);
+    assert_eq!(c.summary_reduce_max_requests, 16);
+    for field in ["summary_map_max_requests", "summary_reduce_max_requests"] {
+        for value in ["0", "-1", "4097", "1.5"] {
+            assert!(Config::parse(&format!("[compaction]\n{field}={value}")).is_err());
+        }
+    }
+}

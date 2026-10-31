@@ -365,4 +365,9 @@ validation rather than parsing reasoning as an answer.
 HistorySearch now returns `{items, auto_history, degraded, scope_status}` instead
 of a bare hit array. Disabled automatic ingestion is an explicit partial-coverage
 warning, not a claim of measured missing counts. Existing IndexHit provenance and
-span semantics remain unchanged. IndexStatus adds the required auto_history bool.
+span semantics remain unchanged. IndexStatus emits the actual auto_history bool. The #71 review explicitly adopts
+serde defaults for its additive auto_history (false when absent) and
+held_auto_history (0 when absent) projection fields. This narrow decoding rule
+does not change the configuration default (true), permit unknown request fields,
+or add Core data/schema compatibility paths. held_auto_history counts pending
+automatic entries excluded from pending while auto_history is false.

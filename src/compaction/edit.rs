@@ -132,7 +132,7 @@ impl Compactor {
                     self.spill_snapshot(snapshot, vec![selected], cancel)
                         .await?
                 } else {
-                    self.summarize_with_policy(snapshot, selected, cancel, Some(limits))
+                    self.summarize_with_policy(snapshot, selected, cancel, limits)
                         .await?
                 };
                 let after = history_characters(&self.snapshot(thread, false).await?);
@@ -251,7 +251,7 @@ impl Compactor {
             snapshot.groups.splice(index..index + 1, groups);
             let thread = snapshot.thread.clone();
             let compact = self
-                .summarize_with_policy(snapshot, index..index + count, cancel, Some(limits))
+                .summarize_with_policy(snapshot, index..index + count, cancel, limits)
                 .await?;
             let after = history_characters(&self.snapshot(&thread, false).await?);
             return Ok(ContextEditResult {
