@@ -254,30 +254,29 @@ pub(super) async fn finish_bridge(
     mut bridge: tokio::task::JoinHandle<Result<(), crate::protocol::ApiError>>,
     incoming: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>,
 ) {
-    let _watchdog_seconds = if cfg!(windows) { 30 } else { 15 };
+    let watchdog_seconds = if cfg!(windows) { 30 } else { 15 };
     let mut last_progress = None;
-    let completed =
-        crate::test_watchdog::watchdog("src/frontend/control_tests.rs: finish_bridge", async {
-            let mut tick = tokio::time::interval(std::time::Duration::from_millis(5));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                while let Ok(update) = incoming.try_recv() {
-                    if let crate::ui::UiUpdate::ShutdownProgress {
-                        elapsed_ms,
-                        detail,
-                        force_available,
-                    } = update
-                    {
-                        last_progress = Some((elapsed_ms, detail, force_available));
-                    }
-                }
-                tokio::select! {
-                    result = &mut bridge => return result,
-                    _ = tick.tick() => {},
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(watchdog_seconds), async {
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(5));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            while let Ok(update) = incoming.try_recv() {
+                if let crate::ui::UiUpdate::ShutdownProgress {
+                    elapsed_ms,
+                    detail,
+                    force_available,
+                } = update
+                {
+                    last_progress = Some((elapsed_ms, detail, force_available));
                 }
             }
-        })
-        .await;
+            tokio::select! {
+                result = &mut bridge => return result,
+                _ = tick.tick() => {},
+            }
+        }
+    })
+    .await;
     let joined = completed.unwrap_or_else(|_| {
         panic!("frontend cleanup watchdog expired; last progress: {last_progress:?}")
     });
@@ -313,7 +312,7 @@ async fn cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting() 
             })))
             .unwrap();
     }
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting", async {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             drain(&incoming);
             let count: i64 = control
@@ -341,7 +340,7 @@ async fn cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting() 
             thread_id: "thread".into(),
         })
         .unwrap();
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting", async {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             drain(&incoming);
             let state: String = control
@@ -491,7 +490,7 @@ async fn reserved_shutdown_choices_keep_the_existing_grace_wait_and_force_bounda
         .await
     });
     async fn progress(incoming: &std::sync::mpsc::Receiver<UiUpdate>, wanted: bool) {
-        crate::test_watchdog::watchdog("src/frontend/control_tests.rs: progress",async{
+        tokio::time::timeout(std::time::Duration::from_secs(2),async{
             loop {
                 while let Ok(update)=incoming.try_recv(){if matches!(update,UiUpdate::ShutdownProgress{force_available,..} if force_available==wanted){return;}}
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -506,7 +505,7 @@ async fn reserved_shutdown_choices_keep_the_existing_grace_wait_and_force_bounda
     assert!(!shutdown.is_finished());
     progress(&incoming, true).await;
     sender.try_send(UiAction::ForceQuit).unwrap();
-    let error = crate::test_watchdog::watchdog("src/frontend/control_tests.rs: progress", shutdown)
+    let error = tokio::time::timeout(std::time::Duration::from_secs(2), shutdown)
         .await
         .unwrap()
         .unwrap()
@@ -541,7 +540,7 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
             })))
             .unwrap();
     }
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt", async {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             drain(&incoming);
             let count: i64 = control
@@ -618,7 +617,7 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
             thread_id: "thread".into(),
         })
         .unwrap();
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt", async {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             drain(&incoming);
             let state: String = control
@@ -712,7 +711,7 @@ async fn slash_queue_rejection_and_domain_error_recover_input_but_success_releas
         };
         let revision = submission.revision;
         sender.try_send(actions[0].clone()).unwrap();
-        let outcome = crate::test_watchdog::watchdog("src/frontend/control_tests.rs: slash_queue_rejection_and_domain_error_recover_input_but_success_releases_it", async {
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     if let UiUpdate::CommandOutcome { submission, result } = update {
@@ -741,7 +740,7 @@ async fn slash_queue_rejection_and_domain_error_recover_input_but_success_releas
         if command == "/compact" {
             drop(saturation.take());
         }
-        crate::test_watchdog::watchdog("src/frontend/control_tests.rs: slash_queue_rejection_and_domain_error_recover_input_but_success_releases_it", async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while slots.available_permits() == 0 {
                 drain(&incoming);
                 tokio::task::yield_now().await;
@@ -794,7 +793,7 @@ async fn send_preparation_failure_keeps_newer_input_and_the_original_snapshot() 
     ui.insert(" latest", false);
     let newer = ui.view().draft.clone();
     sender.try_send(actions[0].clone()).unwrap();
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: send_preparation_failure_keeps_newer_input_and_the_original_snapshot", async {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 let failed = matches!(&update, UiUpdate::Receipt { revision: r, status: ReceiptStatus::Failed, .. } if *r == revision);
@@ -978,7 +977,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     for action in ui.select_thread("thread".into()) {
         sender.try_send(action).unwrap();
     }
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body", async {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 ui.apply(update);
@@ -1006,7 +1005,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
             selection_revision: ui.view().selection_revision,
         })
         .unwrap();
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body", async {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 ui.apply(update);
@@ -1071,7 +1070,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
         ))
         .await;
     assert!(response.ok, "{response:?}");
-    crate::test_watchdog::watchdog("src/frontend/control_tests.rs: changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body", async {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 ui.apply(update);
@@ -1245,7 +1244,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
             })
             .unwrap();
         sender.try_send(latest).unwrap();
-        crate::test_watchdog::watchdog("src/frontend/control_tests.rs: context", async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while slots.available_permits() != 0 {
                 tokio::task::yield_now().await;
             }
@@ -1256,7 +1255,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
         gate.await.unwrap();
         let mut notices = Vec::new();
         let mut reports = Vec::new();
-        crate::test_watchdog::watchdog("src/frontend/control_tests.rs: context", async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     match &update {
@@ -1391,7 +1390,7 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
                 })
                 .unwrap();
             let (mut terminal, mut result) = (Vec::new(), None);
-            crate::test_watchdog::watchdog("src/frontend/control_tests.rs: copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_from_terminal_request", async {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 while result.is_none() {
                     while let Ok(update) = incoming.try_recv() {
                         match update {
@@ -1598,7 +1597,7 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
     })
     .unwrap();
     async fn number(incoming: &std::sync::mpsc::Receiver<UiUpdate>, expected: &str) -> u64 {
-        crate::test_watchdog::watchdog("src/frontend/control_tests.rs: number", async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     if let UiUpdate::ScopedManagement { context, update } = update

@@ -1,24 +1,80 @@
 [
   {
-    "file": "src/control/driver/shell_output/performance_tests.rs",
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "2bc3c79fdb5c783d4cc5332383acab30e4d8a0bf253fcf3eb70b868057fc7abb",
+    "function": "cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "46e767354992ab8de8ef3d07e20b92a1547abfd996b130cc8e993c9437d4d6f3",
+    "function": "forced_shutdown_can_interrupt_pre_capture_admission_drain",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing forced_shutdown_can_interrupt_pre_capture_admission_drain test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "5b158e808bb0c3ad4a4ceb4ac6d9eb615a79a8fc32b8cf1cdd1d58a6c1047227",
+    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "822f11b15255b3d7987c4acf9c62fa899e759e0b38e1f2d89c6937c55b2f46e2",
+    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "873f7afd00a40bc19d64d25a52d12f20fcf42d3f1e4fe7282f984bdff3c5edcb",
+    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "a7995772cc41346bba6674cb35c9f3c66301776ee33ba73524c90a779337feef",
+    "function": "forced_shutdown_can_interrupt_pre_capture_admission_drain",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing forced_shutdown_can_interrupt_pre_capture_admission_drain test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "c90912e6fe6463da31a27d3258fee84d4b84f8f8f4a47c22e982416178fa33d8",
+    "function": "cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "d7f135f229efe1b72523a2bc4fef3b463b54a9a7ad7daf68917efcbf4977c189",
+    "function": "authenticated_model_catalog_uses_origin_thread_unless_connection_overrides_it",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing authenticated_model_catalog_uses_origin_thread_unless_connection_overrides_it test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "46c6ae47c4a74dc31b5e7c208f5e472db63cef8a8ff779bee8e77f94a914aa50",
+    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control/driver/shell_output.rs",
     "rule": "elapsed-comparison",
-    "fingerprint": "bd13f79cbfc6c4df50fb13cbc63aec52970cac313684e12228717761b994cd22",
-    "function": "performance_ten_shells_ten_lifecycle_waits",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
-  },
-  {
-    "file": "src/control/driver/shell_output.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "4b5583747f8c821ec00b9ad132c07df7984dec95de51c36878871b68fce76b12",
-    "function": "batches_carry_original_chunks_without_crossing_the_byte_bound",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing batches_carry_original_chunks_without_crossing_the_byte_bound test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control/driver/shell_output.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "2be412c16031bd6b9dd85cfe1a1be466cc8324d93e50281283688de415ca7d3e",
+    "fingerprint": "8fc8615e2fb218cdd494fbc40f70a5a1e092a8694b219cf050056e65de65414a",
     "function": "sparse_live_output_flushes_at_the_configured_time_bound",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing sparse_live_output_flushes_at_the_configured_time_bound test occurrence only; migrate on #41 integration, no file-wide exemption."
@@ -34,18 +90,42 @@
   {
     "file": "src/control/driver/shell_output.rs",
     "rule": "raw-timeout",
-    "fingerprint": "b43629177a5ca13e24f3e994af00b2e28bd2fbc9a2f8711bbe8502cb0735ed3f",
+    "fingerprint": "2be412c16031bd6b9dd85cfe1a1be466cc8324d93e50281283688de415ca7d3e",
     "function": "sparse_live_output_flushes_at_the_configured_time_bound",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing sparse_live_output_flushes_at_the_configured_time_bound test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/control/driver/shell_output.rs",
-    "rule": "elapsed-comparison",
-    "fingerprint": "8fc8615e2fb218cdd494fbc40f70a5a1e092a8694b219cf050056e65de65414a",
+    "rule": "raw-timeout",
+    "fingerprint": "4b5583747f8c821ec00b9ad132c07df7984dec95de51c36878871b68fce76b12",
+    "function": "batches_carry_original_chunks_without_crossing_the_byte_bound",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing batches_carry_original_chunks_without_crossing_the_byte_bound test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control/driver/shell_output.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "b43629177a5ca13e24f3e994af00b2e28bd2fbc9a2f8711bbe8502cb0735ed3f",
     "function": "sparse_live_output_flushes_at_the_configured_time_bound",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing sparse_live_output_flushes_at_the_configured_time_bound test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control/driver/shell_output/performance_tests.rs",
+    "rule": "elapsed-comparison",
+    "fingerprint": "bd13f79cbfc6c4df50fb13cbc63aec52970cac313684e12228717761b994cd22",
+    "function": "performance_ten_shells_ten_lifecycle_waits",
+    "count": 1,
+    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
+  },
+  {
+    "file": "src/control/live.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "1a1964702f95cfb35a4adaf33623ea4e40406b93c3353d8e4cc142db0a03027b",
+    "function": "quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call",
+    "count": 2,
+    "reason": "Deferred #41/shared-read: existing quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/control/live.rs",
@@ -64,20 +144,20 @@
     "reason": "Deferred #41/shared-read: existing quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
-    "file": "src/control/live.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "1a1964702f95cfb35a4adaf33623ea4e40406b93c3353d8e4cc142db0a03027b",
-    "function": "quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call",
-    "count": 2,
-    "reason": "Deferred #41/shared-read: existing quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
     "file": "src/control/wait.rs",
     "rule": "raw-timeout",
     "fingerprint": "261912d895b35cafa93f3347cf4c22dbf596c2d7bcbdcd150c1f79241bc508aa",
     "function": "registered",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing registered test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control/wait.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "2b504c75c05006e53e88a242ce6df7fe3db431cf46ac8c12b2fc87b01bff7506",
+    "function": "pending_count",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing pending_count test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/control/wait.rs",
@@ -90,10 +170,26 @@
   {
     "file": "src/control/wait.rs",
     "rule": "raw-timeout",
-    "fingerprint": "2b504c75c05006e53e88a242ce6df7fe3db431cf46ac8c12b2fc87b01bff7506",
-    "function": "pending_count",
+    "fingerprint": "5ca08f9a325fc52729c7f13a6faef39babac8bf734058a91939c818ce13e2be0",
+    "function": "output_condition_in_any_wait_observes_committed_bytes_without_lifecycle_change",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing pending_count test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing output_condition_in_any_wait_observes_committed_bytes_without_lifecycle_change test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control/wait.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "61ea4deca8c74a4976993eacdbbbc6a8418f876a48b6e034b12df2a124d1d0f7",
+    "function": "output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control/wait.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "8e79c74cdd439d3a83a58a30d9751093f20bf37ae2260cfc981c021e046debb2",
+    "function": "output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/control/wait.rs",
@@ -112,108 +208,164 @@
     "reason": "Deferred #41/shared-read: existing last_foreground_wait_restores_running_but_human_and_background_observers_do_not_change_it test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
-    "file": "src/control/wait.rs",
+    "file": "src/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "8e79c74cdd439d3a83a58a30d9751093f20bf37ae2260cfc981c021e046debb2",
-    "function": "output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do",
+    "fingerprint": "4016e16e8010b22a0ad923808b22e236dc47c18b210f339697e92297ee56dc6e",
+    "function": "run_with_delivery",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
-    "file": "src/control/wait.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "61ea4deca8c74a4976993eacdbbbc6a8418f876a48b6e034b12df2a124d1d0f7",
-    "function": "output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control/wait.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "5ca08f9a325fc52729c7f13a6faef39babac8bf734058a91939c818ce13e2be0",
-    "function": "output_condition_in_any_wait_observes_committed_bytes_without_lifecycle_change",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing output_condition_in_any_wait_observes_committed_bytes_without_lifecycle_change test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "5b158e808bb0c3ad4a4ceb4ac6d9eb615a79a8fc32b8cf1cdd1d58a6c1047227",
-    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "873f7afd00a40bc19d64d25a52d12f20fcf42d3f1e4fe7282f984bdff3c5edcb",
-    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "822f11b15255b3d7987c4acf9c62fa899e759e0b38e1f2d89c6937c55b2f46e2",
-    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "a7995772cc41346bba6674cb35c9f3c66301776ee33ba73524c90a779337feef",
-    "function": "forced_shutdown_can_interrupt_pre_capture_admission_drain",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing forced_shutdown_can_interrupt_pre_capture_admission_drain test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "46e767354992ab8de8ef3d07e20b92a1547abfd996b130cc8e993c9437d4d6f3",
-    "function": "forced_shutdown_can_interrupt_pre_capture_admission_drain",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing forced_shutdown_can_interrupt_pre_capture_admission_drain test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "d7f135f229efe1b72523a2bc4fef3b463b54a9a7ad7daf68917efcbf4977c189",
-    "function": "authenticated_model_catalog_uses_origin_thread_unless_connection_overrides_it",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing authenticated_model_catalog_uses_origin_thread_unless_connection_overrides_it test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "2bc3c79fdb5c783d4cc5332383acab30e4d8a0bf253fcf3eb70b868057fc7abb",
-    "function": "cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "c90912e6fe6463da31a27d3258fee84d4b84f8f8f4a47c22e982416178fa33d8",
-    "function": "cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing cancelled_failure_observer_still_stops_a_shell_after_the_map_unlocks test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control.rs",
+    "file": "src/frontend.rs",
     "rule": "wall-deadline",
-    "fingerprint": "46c6ae47c4a74dc31b5e7c208f5e472db63cef8a8ff779bee8e77f94a914aa50",
-    "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "fingerprint": "082dd291e84fb60e4063d7d3795710f4eefc00b6a6fdb042de8c0603d4ae8492",
+    "function": "run_with_delivery",
+    "count": 2,
+    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
-    "file": "src/frontend/control_tests/thread_settings.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "8a3549fc5a5bac7945edd59f4d684c6647cab0ba609dca11fec9bd58f0eb3cc1",
-    "function": "external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery",
+    "file": "src/frontend.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "d0699bcc513b80193ac39e9db2bec83da31929527e73685ed38049f9d4558114",
+    "function": "run_with_delivery",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "099a31fa19e946b8c0dbb9438377922f87469d12b9b4e37840d3d0440fa7a100",
+    "function": "cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "180128c70ddef207bc3adf35e7cca47e962a349a1b7a05733da7dd86a69d9182",
+    "function": "copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_from_terminal_request",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_from_terminal_request occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "1d2f9368b01b1fb9fc2b249d6022464e6c0a7f1e04b49793155c1fdded0e9af3",
+    "function": "changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "1f24049281f515b74d3af5666cbb49585177f778217b6c704cf8d4e80bfe77c6",
+    "function": "progress",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing progress occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "304add9787821e3fbe54047aa40f56f414ea929692bee6442ba355b7295d4e7a",
+    "function": "cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "3513aabe77c8b765db45dee2a5dc08e9a2a529a3e50485f6bbbc56a8cd936ca8",
+    "function": "changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "718df3829d440ee4d2e17761b993cebd58f9b469d39e762598094756873ccffa",
+    "function": "cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "813d84359b47c5ee69c67baf8b701316b951320ac91a52ea3835985bf11e6fd4",
+    "function": "number",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing number occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "8e4199d50d837b8ce9217f3afabd696209ab49c455a9133504e441b87781213c",
+    "function": "slash_queue_rejection_and_domain_error_recover_input_but_success_releases_it",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing slash_queue_rejection_and_domain_error_recover_input_but_success_releases_it occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "ac5725155a953c995f36ef9ead0ffdd0a75e94e30c528cb842866a9732fae9a1",
+    "function": "progress",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing progress occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "b41ecbdf71642765cedf71bb39cb66af5517ec2fa72cb1c0e2a48f86433bdf0a",
+    "function": "context",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing context occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "c8165c4088bb24ecd90aa39fb83b8db1aa7bf22b592a532e631f25c16d0dd8fb",
+    "function": "cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "ca7f029def659872ca028bfa8413516401a147502b54a77620d3e7e641f1ad00",
+    "function": "finish_bridge",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing finish_bridge occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "cd07b93f816e7a813620859d0add850766912524a7154b308fed1a2ab054abcd",
+    "function": "slash_queue_rejection_and_domain_error_recover_input_but_success_releases_it",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing slash_queue_rejection_and_domain_error_recover_input_but_success_releases_it occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "ce9d5c73c56007e8998180530357b3b180dbffc6053433a42d95461d40f62081",
+    "function": "send_preparation_failure_keeps_newer_input_and_the_original_snapshot",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing send_preparation_failure_keeps_newer_input_and_the_original_snapshot occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "da313d14e7040d61b7c3d25be70e89f9c7deba9020fe70e9a49373064de95f34",
+    "function": "changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body occurrence only, migrate on #41 integration."
+  },
+  {
+    "file": "src/frontend/control_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "f1e410302e9a7446f7ca1514600355c6c3ca09ca38215bd8336444dbab83ddfd",
+    "function": "context",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing context occurrence only, migrate on #41 integration."
   },
   {
     "file": "src/frontend/control_tests/thread_settings.rs",
@@ -222,6 +374,14 @@
     "function": "unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/control_tests/thread_settings.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "8a3549fc5a5bac7945edd59f4d684c6647cab0ba609dca11fec9bd58f0eb3cc1",
+    "function": "external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/control_tests/thread_settings.rs",
@@ -266,23 +426,31 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
+    "fingerprint": "0116e4e0b601d967fad56a2e8d2c85eb58088b69f2cdda129311787a308fc7f8",
+    "function": "shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "128c43e4f22e99e7265bd3a6471f7d08288d3786a0e763fdb1397e92e7c32906",
+    "function": "full_outbox_retry_never_overtakes_older_critical_results",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing full_outbox_retry_never_overtakes_older_critical_results test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "184ad8bc37f774b2e21a51a8967e174ede5e53b01708e4898193f093d6397ef6",
+    "function": "accepted_force_at_full_reserve_never_waits_for_ui_or_second_force",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing accepted_force_at_full_reserve_never_waits_for_ui_or_second_force test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
     "fingerprint": "21bd53bc0adedae778ad9646f7ec6727d14f60fa7b3b928c2a87c3c68f2f9d11",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "c82139c30fee17666285194f1de07342702e921627fdd48e722d33ac82718d58",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "ee8dc4f3fe788e9a78ee1cb9a16f0cdfe6660b8a8ac2cb32af0529f00a6d5268",
     "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
@@ -298,10 +466,26 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "7ccee6966f4eb2a46ef1cf5a3afc05f4edac026dd5275dec004bb15c8c47d0a8",
-    "function": "completed_owned_shutdown_honors_one_force_while_terminal_marker_is_retained",
+    "fingerprint": "576667b366f95242b66e53edad2bb16dfe742048118bb050543eadf2b63506fa",
+    "function": "worker_enqueue_wakes_an_idle_select_with_flush_initially_disabled",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing completed_owned_shutdown_honors_one_force_while_terminal_marker_is_retained test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing worker_enqueue_wakes_an_idle_select_with_flush_initially_disabled test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "62849a8d74221b890392275fd723911907138e59166d4b3e76a100e105341ff3",
+    "function": "final_ui_drain_honors_force_without_starting_another_grace",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing final_ui_drain_honors_force_without_starting_another_grace test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "6976c5703b03b3f6b5c5441848ead9cf427dd563edcbfba5f544445bde59ba36",
+    "function": "worker_completion_cannot_be_followed_by_older_preparing_status",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing worker_completion_cannot_be_followed_by_older_preparing_status test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
@@ -322,34 +506,26 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "6976c5703b03b3f6b5c5441848ead9cf427dd563edcbfba5f544445bde59ba36",
-    "function": "worker_completion_cannot_be_followed_by_older_preparing_status",
+    "fingerprint": "7ccee6966f4eb2a46ef1cf5a3afc05f4edac026dd5275dec004bb15c8c47d0a8",
+    "function": "completed_owned_shutdown_honors_one_force_while_terminal_marker_is_retained",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing worker_completion_cannot_be_followed_by_older_preparing_status test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing completed_owned_shutdown_honors_one_force_while_terminal_marker_is_retained test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "fc05aef078584debd11c2272318823a7a1613d64fa7738fdc2c2e1a5785eb823",
-    "function": "worker_completion_cannot_be_followed_by_older_preparing_status",
+    "fingerprint": "bfdfe0ab5ba85073bc5b2a2796541569641c47b2e3f9747b5fec32d43629ee70",
+    "function": "shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing worker_completion_cannot_be_followed_by_older_preparing_status test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "128c43e4f22e99e7265bd3a6471f7d08288d3786a0e763fdb1397e92e7c32906",
-    "function": "full_outbox_retry_never_overtakes_older_critical_results",
+    "fingerprint": "c82139c30fee17666285194f1de07342702e921627fdd48e722d33ac82718d58",
+    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing full_outbox_retry_never_overtakes_older_critical_results test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "62849a8d74221b890392275fd723911907138e59166d4b3e76a100e105341ff3",
-    "function": "final_ui_drain_honors_force_without_starting_another_grace",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing final_ui_drain_honors_force_without_starting_another_grace test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
@@ -362,18 +538,10 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "184ad8bc37f774b2e21a51a8967e174ede5e53b01708e4898193f093d6397ef6",
-    "function": "accepted_force_at_full_reserve_never_waits_for_ui_or_second_force",
+    "fingerprint": "ee8dc4f3fe788e9a78ee1cb9a16f0cdfe6660b8a8ac2cb32af0529f00a6d5268",
+    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing accepted_force_at_full_reserve_never_waits_for_ui_or_second_force test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "576667b366f95242b66e53edad2bb16dfe742048118bb050543eadf2b63506fa",
-    "function": "worker_enqueue_wakes_an_idle_select_with_flush_initially_disabled",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing worker_enqueue_wakes_an_idle_select_with_flush_initially_disabled test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
@@ -386,42 +554,18 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "0116e4e0b601d967fad56a2e8d2c85eb58088b69f2cdda129311787a308fc7f8",
-    "function": "shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure",
+    "fingerprint": "fc05aef078584debd11c2272318823a7a1613d64fa7738fdc2c2e1a5785eb823",
+    "function": "worker_completion_cannot_be_followed_by_older_preparing_status",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing worker_completion_cannot_be_followed_by_older_preparing_status test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
-    "file": "src/frontend/update_delivery.rs",
+    "file": "src/index/mod.rs",
     "rule": "raw-timeout",
-    "fingerprint": "bfdfe0ab5ba85073bc5b2a2796541569641c47b2e3f9747b5fec32d43629ee70",
-    "function": "shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure",
+    "fingerprint": "ad82f2bd358d5b9e5e4992d8d915d2b4272e764b3180edf88ff14591fc8e2983",
+    "function": "wait_idle_retains_detached_blocking_parser_permit_until_actual_completion",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing shutdown_progress_wakes_delivery_and_enables_one_force_after_ui_backpressure test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "4016e16e8010b22a0ad923808b22e236dc47c18b210f339697e92297ee56dc6e",
-    "function": "run_with_delivery",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "082dd291e84fb60e4063d7d3795710f4eefc00b6a6fdb042de8c0603d4ae8492",
-    "function": "run_with_delivery",
-    "count": 2,
-    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "d0699bcc513b80193ac39e9db2bec83da31929527e73685ed38049f9d4558114",
-    "function": "run_with_delivery",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing wait_idle_retains_detached_blocking_parser_permit_until_actual_completion test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/index/mod.rs",
@@ -432,12 +576,12 @@
     "reason": "Deferred #41/shared-read: existing wait_idle_retains_detached_blocking_parser_permit_until_actual_completion test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
-    "file": "src/index/mod.rs",
+    "file": "src/index/search/performance_tests.rs",
     "rule": "raw-timeout",
-    "fingerprint": "ad82f2bd358d5b9e5e4992d8d915d2b4272e764b3180edf88ff14591fc8e2983",
-    "function": "wait_idle_retains_detached_blocking_parser_permit_until_actual_completion",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing wait_idle_retains_detached_blocking_parser_permit_until_actual_completion test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "fingerprint": "2a89c178a1ee5a684734eb35c7eb61c6103916546abe6c628352bc96780b2a84",
+    "function": "performance_semantic_ranking_writer_contention",
+    "count": 2,
+    "reason": "Deferred #41/shared-read: existing performance_semantic_ranking_writer_contention test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/index/search/performance_tests.rs",
@@ -456,17 +600,9 @@
     "reason": "Deferred #41/shared-read: existing performance_semantic_ranking_writer_contention test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
-    "file": "src/index/search/performance_tests.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "2a89c178a1ee5a684734eb35c7eb61c6103916546abe6c628352bc96780b2a84",
-    "function": "performance_semantic_ranking_writer_contention",
-    "count": 2,
-    "reason": "Deferred #41/shared-read: existing performance_semantic_ranking_writer_contention test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
     "file": "src/ui/performance_stream.rs",
     "rule": "wall-deadline",
-    "fingerprint": "cbf83badf0851e75ff37a1b7ad4a91e880b894c66e1ee8850eaacf104e3f1a1e",
+    "fingerprint": "287020d6c3c8322d859060dae95538c34b85e79c3b7de91543467eeb2b92ea42",
     "function": "stream_input_layout_and_db_fairness",
     "count": 1,
     "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
@@ -482,7 +618,7 @@
   {
     "file": "src/ui/performance_stream.rs",
     "rule": "wall-deadline",
-    "fingerprint": "fe15f12f6688cf4a5584469f49ac752d377c56162a5bd97ac8e47c044c93a5b0",
+    "fingerprint": "cbf83badf0851e75ff37a1b7ad4a91e880b894c66e1ee8850eaacf104e3f1a1e",
     "function": "stream_input_layout_and_db_fairness",
     "count": 1,
     "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
@@ -490,7 +626,7 @@
   {
     "file": "src/ui/performance_stream.rs",
     "rule": "wall-deadline",
-    "fingerprint": "287020d6c3c8322d859060dae95538c34b85e79c3b7de91543467eeb2b92ea42",
+    "fingerprint": "fe15f12f6688cf4a5584469f49ac752d377c56162a5bd97ac8e47c044c93a5b0",
     "function": "stream_input_layout_and_db_fairness",
     "count": 1,
     "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
@@ -506,7 +642,7 @@
   {
     "file": "src/ui/threads.rs",
     "rule": "wall-deadline",
-    "fingerprint": "c23f0c67d7d6e6ac54c481466743ccead25f14c90a08b4b5c44569b8eb789c72",
+    "fingerprint": "24a7ca1401f08d7cbc13024aa9ab26668d740e7841c3802b7495de45ad8b3301",
     "function": "deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads test occurrence only; migrate on #41 integration, no file-wide exemption."
@@ -514,10 +650,18 @@
   {
     "file": "src/ui/threads.rs",
     "rule": "wall-deadline",
-    "fingerprint": "24a7ca1401f08d7cbc13024aa9ab26668d740e7841c3802b7495de45ad8b3301",
+    "fingerprint": "c23f0c67d7d6e6ac54c481466743ccead25f14c90a08b4b5c44569b8eb789c72",
     "function": "deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/attachments.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "2757169064da75923fe6cda13fc53ebfc0b551bad13be8294561c1019ed231a5",
+    "function": "timeout_keeps_real_blocking_worker_occupied_until_exit",
+    "count": 1,
+    "reason": "Product deadline input on a controlled Tokio clock after the real blocking worker signals entry; advance/resume explicitly, no wall-time success criterion."
   },
   {
     "file": "tests/attachments.rs",
@@ -528,12 +672,44 @@
     "reason": "Product deadline input on a controlled Tokio clock after the real blocking worker signals entry; advance/resume explicitly, no wall-time success criterion."
   },
   {
-    "file": "tests/attachments.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "2757169064da75923fe6cda13fc53ebfc0b551bad13be8294561c1019ed231a5",
-    "function": "timeout_keeps_real_blocking_worker_occupied_until_exit",
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "0431ec4a1b85c61e0b8a02fa8a1040b6752549386def9032a8782c820ffdcbf0",
+    "function": "queued_database_query_does_not_delay_quit_grace_notification",
     "count": 1,
-    "reason": "Product deadline input on a controlled Tokio clock after the real blocking worker signals entry; advance/resume explicitly, no wall-time success criterion."
+    "reason": "Deferred #41/shared-read: existing queued_database_query_does_not_delay_quit_grace_notification test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "1648adcd9535be99823682d022adae4628368ab4fbeb406d52ea27148b6b6b11",
+    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "220d65049d46357cd05a4982827dd0137b2392f0dd0c04d9ad7bbb59724be590",
+    "function": "mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitted_watermark",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitted_watermark test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "235650b64cd872388939b7b8239027c41f5405c845f186cb3d64514e4e8cac88",
+    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing structured_history_pages_details_url_copy_and_wait_cancel_keep_originals test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "3d70e4e0df6366ec0d94c859c74b7c7ba496631a537af39b3a029c87b9b54f26",
+    "function": "direct_database_read_failure_also_stops_new_execution",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing direct_database_read_failure_also_stops_new_execution test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/frontend.rs",
@@ -546,10 +722,42 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
+    "fingerprint": "4ce645a61ac7997239c709fe4ead298d7e3b0cb45ff56b4fc5cb1f67f9f2711b",
+    "function": "persisted_output_identity_is_delivered_before_each_history_window",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "541367e5e43d654dfc652c402d0428404ca9c98b43097cd9f77bfb0500c72d8e",
+    "function": "quit_accepted_before_frontend_binding_still_drains_queued_send_and_latest_draft",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing quit_accepted_before_frontend_binding_still_drains_queued_send_and_latest_draft test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
     "fingerprint": "5709a9a1f0c9b87349d31b5e1167ad12ed1e9f13b26590354ff20c8ee5b82af4",
     "function": "frontend_first_send_is_saved_and_later_draft_survives_shutdown",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing frontend_first_send_is_saved_and_later_draft_survives_shutdown test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "61d7ca4414f2d18b79c1231683636e72ef81badcd3c91b1ad725a2cdd168f9ec",
+    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "69d90c596f6bdd4d11ae3ba7184e5e9cda7e9e74240d1f3c80a6b39c1ed259f0",
+    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing structured_history_pages_details_url_copy_and_wait_cancel_keep_originals test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/frontend.rs",
@@ -562,10 +770,50 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
+    "fingerprint": "7bfeb90cc3180bbbdace2fc79e75037a2af79b4d8605e75beeb686c427594eb5",
+    "function": "persisted_output_identity_is_delivered_before_each_history_window",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "7f88ca4b7853a553d4355c2800ed24fa43d62b7cc2d17dfb63d16335d85e3af7",
+    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "99cc906df920b0581427487c16ba3bb6963843e9ae59473785a8f6f4d9df01e9",
+    "function": "persisted_output_identity_is_delivered_before_each_history_window",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "bb904d2a2975411eabe436ed3244b1f54ef71046785799fc1ebf8e1124cbe8bf",
+    "function": "queued_database_query_does_not_delay_quit_grace_notification",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing queued_database_query_does_not_delay_quit_grace_notification test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
     "fingerprint": "df03c2fc3ec22d6d377e223443c71062cdf33d754d85e69e97e7b2c2ab1917a5",
     "function": "clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_body",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_body test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "e19d48d8cadbd98ebafad8765d175fc2431c2e42a9e25e068bc0914960b33d26",
+    "function": "stale_history_navigation_recovers_after_path_change",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing stale_history_navigation_recovers_after_path_change test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/frontend.rs",
@@ -582,126 +830,6 @@
     "function": "edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "0431ec4a1b85c61e0b8a02fa8a1040b6752549386def9032a8782c820ffdcbf0",
-    "function": "queued_database_query_does_not_delay_quit_grace_notification",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing queued_database_query_does_not_delay_quit_grace_notification test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "bb904d2a2975411eabe436ed3244b1f54ef71046785799fc1ebf8e1124cbe8bf",
-    "function": "queued_database_query_does_not_delay_quit_grace_notification",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing queued_database_query_does_not_delay_quit_grace_notification test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "1648adcd9535be99823682d022adae4628368ab4fbeb406d52ea27148b6b6b11",
-    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "7f88ca4b7853a553d4355c2800ed24fa43d62b7cc2d17dfb63d16335d85e3af7",
-    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "61d7ca4414f2d18b79c1231683636e72ef81badcd3c91b1ad725a2cdd168f9ec",
-    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "3d70e4e0df6366ec0d94c859c74b7c7ba496631a537af39b3a029c87b9b54f26",
-    "function": "direct_database_read_failure_also_stops_new_execution",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing direct_database_read_failure_also_stops_new_execution test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "235650b64cd872388939b7b8239027c41f5405c845f186cb3d64514e4e8cac88",
-    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing structured_history_pages_details_url_copy_and_wait_cancel_keep_originals test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "69d90c596f6bdd4d11ae3ba7184e5e9cda7e9e74240d1f3c80a6b39c1ed259f0",
-    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing structured_history_pages_details_url_copy_and_wait_cancel_keep_originals test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "e19d48d8cadbd98ebafad8765d175fc2431c2e42a9e25e068bc0914960b33d26",
-    "function": "stale_history_navigation_recovers_after_path_change",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing stale_history_navigation_recovers_after_path_change test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "4ce645a61ac7997239c709fe4ead298d7e3b0cb45ff56b4fc5cb1f67f9f2711b",
-    "function": "persisted_output_identity_is_delivered_before_each_history_window",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "7bfeb90cc3180bbbdace2fc79e75037a2af79b4d8605e75beeb686c427594eb5",
-    "function": "persisted_output_identity_is_delivered_before_each_history_window",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "99cc906df920b0581427487c16ba3bb6963843e9ae59473785a8f6f4d9df01e9",
-    "function": "persisted_output_identity_is_delivered_before_each_history_window",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "541367e5e43d654dfc652c402d0428404ca9c98b43097cd9f77bfb0500c72d8e",
-    "function": "quit_accepted_before_frontend_binding_still_drains_queued_send_and_latest_draft",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing quit_accepted_before_frontend_binding_still_drains_queued_send_and_latest_draft test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "220d65049d46357cd05a4982827dd0137b2392f0dd0c04d9ad7bbb59724be590",
-    "function": "mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitted_watermark",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitted_watermark test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend_reactivity.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "f9d3363b6abcee0546f17f1d04d279450b76714dde2e833efb13a1d224488bb3",
-    "function": "cli_only",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing cli_only test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/frontend_reactivity.rs",
@@ -729,6 +857,14 @@
   },
   {
     "file": "tests/frontend_reactivity.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "f9d3363b6abcee0546f17f1d04d279450b76714dde2e833efb13a1d224488bb3",
+    "function": "cli_only",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing cli_only test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/frontend_reactivity.rs",
     "rule": "wall-deadline",
     "fingerprint": "4c9068d6d4fae52a2e4734774812714306334f6caec33dbc3c6fcc0caac7840d",
     "function": "until",
@@ -746,10 +882,10 @@
   {
     "file": "tests/index.rs",
     "rule": "raw-timeout",
-    "fingerprint": "dda3700d86b28132f537cf72b8bb9c18901ddd92386dbe1d241b619defcbff47",
-    "function": "paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_space_retry",
+    "fingerprint": "163ddf2438b520bd88ae7e30539cf807de499e38b2c355de97ed1e4b3ded743a",
+    "function": "query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_space_retry test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/index.rs",
@@ -762,50 +898,10 @@
   {
     "file": "tests/index.rs",
     "rule": "raw-timeout",
-    "fingerprint": "6d72cab3b2eb64b2ba4f671c89b969853260cb6149ed31d5cc51cdd9e853d1e1",
-    "function": "expire_embedding",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing expire_embedding test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "cb3b831c390b1c8e5e13a60c9b49a11f58415a8585129450903db27451d7f651",
-    "function": "query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "163ddf2438b520bd88ae7e30539cf807de499e38b2c355de97ed1e4b3ded743a",
-    "function": "query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "85ee4396de641ebec8dda5190d5a52cd653a915063124d5dee0209b784aa884b",
-    "function": "old_integer_reset_migrates_before_real_workers_and_exhausted_failures_trip_breaker",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing old_integer_reset_migrates_before_real_workers_and_exhausted_failures_trip_breaker test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
     "fingerprint": "45bc951fd397866bdb6b01071f326a9c73600d134d7c04217677a771ca6dbccc",
     "function": "malformed_current_counter_preserves_provider_failure_and_pauses_real_worker",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing malformed_current_counter_preserves_provider_failure_and_pauses_real_worker test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "fd8d842ae4817aad9014531f2caa25d3f7da3eb43f5021d6c0909926ad39cbf9",
-    "function": "automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/index.rs",
@@ -822,6 +918,46 @@
     "function": "auto_history_status_separates_held_admissions_bootstrap_and_jobs",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing auto_history_status_separates_held_admissions_bootstrap_and_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/index.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "6d72cab3b2eb64b2ba4f671c89b969853260cb6149ed31d5cc51cdd9e853d1e1",
+    "function": "expire_embedding",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing expire_embedding test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/index.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "85ee4396de641ebec8dda5190d5a52cd653a915063124d5dee0209b784aa884b",
+    "function": "old_integer_reset_migrates_before_real_workers_and_exhausted_failures_trip_breaker",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing old_integer_reset_migrates_before_real_workers_and_exhausted_failures_trip_breaker test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/index.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "cb3b831c390b1c8e5e13a60c9b49a11f58415a8585129450903db27451d7f651",
+    "function": "query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing query_embedding_caller_disconnect_releases_stalled_http_and_allows_next_query test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/index.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "dda3700d86b28132f537cf72b8bb9c18901ddd92386dbe1d241b619defcbff47",
+    "function": "paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_space_retry",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_space_retry test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/index.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "fd8d842ae4817aad9014531f2caa25d3f7da3eb43f5021d6c0909926ad39cbf9",
+    "function": "automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/message_recovery.rs",
@@ -842,39 +978,7 @@
   {
     "file": "tests/storage.rs",
     "rule": "raw-timeout",
-    "fingerprint": "f9970b3c79d1cf0f0cb6622ee2d1c1da040db1eb4800a5ff44b95a04c84bf8f6",
-    "function": "bounded_admission_and_shared_shutdown_drain_accepted_jobs",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing bounded_admission_and_shared_shutdown_drain_accepted_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/storage.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "2af276d19e85279780e3b487ab570db1ef29c12f543de20a7e0660ef2e05e771",
-    "function": "bounded_admission_and_shared_shutdown_drain_accepted_jobs",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing bounded_admission_and_shared_shutdown_drain_accepted_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/storage.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "9d6423565a9ef101022f8d40b5647654f8e3a05fbfe4e188ece23b3cf4a90e5b",
-    "function": "cancelling_shutdown_observer_still_closes_and_joins_writer",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing cancelling_shutdown_observer_still_closes_and_joins_writer test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/storage.rs",
-    "rule": "raw-timeout",
     "fingerprint": "086e7d4ea88f87da76a419a20d5d11480b174aa07f288c8a4269d12e5a3e51ee",
-    "function": "cancelling_shutdown_observer_still_closes_and_joins_writer",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing cancelling_shutdown_observer_still_closes_and_joins_writer test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/storage.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "915eff6be6c34e14fb116e83acf3c7b588aa375f8da5f0ebe2cafbcdb93a4631",
     "function": "cancelling_shutdown_observer_still_closes_and_joins_writer",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing cancelling_shutdown_observer_still_closes_and_joins_writer test occurrence only; migrate on #41 integration, no file-wide exemption."
@@ -890,10 +994,50 @@
   {
     "file": "tests/storage.rs",
     "rule": "raw-timeout",
+    "fingerprint": "2af276d19e85279780e3b487ab570db1ef29c12f543de20a7e0660ef2e05e771",
+    "function": "bounded_admission_and_shared_shutdown_drain_accepted_jobs",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing bounded_admission_and_shared_shutdown_drain_accepted_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/storage.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "915eff6be6c34e14fb116e83acf3c7b588aa375f8da5f0ebe2cafbcdb93a4631",
+    "function": "cancelling_shutdown_observer_still_closes_and_joins_writer",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing cancelling_shutdown_observer_still_closes_and_joins_writer test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/storage.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "9d6423565a9ef101022f8d40b5647654f8e3a05fbfe4e188ece23b3cf4a90e5b",
+    "function": "cancelling_shutdown_observer_still_closes_and_joins_writer",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing cancelling_shutdown_observer_still_closes_and_joins_writer test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/storage.rs",
+    "rule": "raw-timeout",
     "fingerprint": "f11e912dd284a56abb99369220e30e7bed65ae49692a8a5e70fe48a0d4456c0d",
     "function": "owner_guard_outlives_all_callers_until_actual_writer_close",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing owner_guard_outlives_all_callers_until_actual_writer_close test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/storage.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "f9970b3c79d1cf0f0cb6622ee2d1c1da040db1eb4800a5ff44b95a04c84bf8f6",
+    "function": "bounded_admission_and_shared_shutdown_drain_accepted_jobs",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing bounded_admission_and_shared_shutdown_drain_accepted_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/support/watchdog.rs",
+    "rule": "elapsed-comparison",
+    "fingerprint": "31a3713c94c8d6e61c96c0b3c2501293edf1ef8b7576e82232986cde2000dbe6",
+    "function": "expired",
+    "count": 1,
+    "reason": "Single shared deadlock-watchdog implementation; all async, sync and blocking guards use the one WATCHDOG constant."
   },
   {
     "file": "tests/support/watchdog.rs",
@@ -910,30 +1054,6 @@
     "function": "blocking_recv",
     "count": 1,
     "reason": "Single shared deadlock-watchdog implementation; all async, sync and blocking guards use the one WATCHDOG constant."
-  },
-  {
-    "file": "tests/support/watchdog.rs",
-    "rule": "elapsed-comparison",
-    "fingerprint": "31a3713c94c8d6e61c96c0b3c2501293edf1ef8b7576e82232986cde2000dbe6",
-    "function": "expired",
-    "count": 1,
-    "reason": "Single shared deadlock-watchdog implementation; all async, sync and blocking guards use the one WATCHDOG constant."
-  },
-  {
-    "file": "tests/tui_recovery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "5abd3a365f816108cc375fcfdf564f685a6427a03acdab633f2322fb475e2bef",
-    "function": "request_with_ui",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing request_with_ui test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/tui_recovery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "5bdeb67142d76917c1afab27cffb2f2bbc33ba021bcf176f84b51f37052cf747",
-    "function": "phase",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing phase test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/tui_recovery.rs",
@@ -954,6 +1074,30 @@
   {
     "file": "tests/tui_recovery.rs",
     "rule": "raw-timeout",
+    "fingerprint": "5abd3a365f816108cc375fcfdf564f685a6427a03acdab633f2322fb475e2bef",
+    "function": "request_with_ui",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing request_with_ui test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/tui_recovery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "5bdeb67142d76917c1afab27cffb2f2bbc33ba021bcf176f84b51f37052cf747",
+    "function": "phase",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing phase test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/tui_recovery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "673b803fcd110b32d6b6743883f98176a72894d32af06e621e441c6d4b1da91e",
+    "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
+    "count": 1,
+    "reason": "Deferred #41/shared-read: existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "tests/tui_recovery.rs",
+    "rule": "raw-timeout",
     "fingerprint": "82590c893d76aef62e33fea1e20796bb3e05e3ba08cd72c787c3afdf216025f0",
     "function": "recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_reasons",
     "count": 1,
@@ -963,14 +1107,6 @@
     "file": "tests/tui_recovery.rs",
     "rule": "raw-timeout",
     "fingerprint": "835622aa5ce1a29f51772ba2c1d4f651e7c4d06694873496e2fc67527330d6ad",
-    "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/tui_recovery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "673b803fcd110b32d6b6743883f98176a72894d32af06e621e441c6d4b1da91e",
     "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
