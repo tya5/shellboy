@@ -32,8 +32,19 @@ pub(super) async fn read_sequenced<T: Send + 'static>(
     stop: CancellationToken,
     collect: impl FnOnce(&Connection, u64) -> Result<T, StorageError> + Send + 'static,
 ) -> Result<(T, u64), ApiError> {
+    read_sequenced_guarded(path, stop, || true, collect).await
+}
+
+/// A shared visible plan may close while waiting for the finite worker pool.
+/// Check its captured ownership before admission and immediately before SQLite.
+pub(super) async fn read_sequenced_guarded<T: Send + 'static>(
+    path: PathBuf,
+    stop: CancellationToken,
+    active: impl Fn() -> bool + Send + 'static,
+    collect: impl FnOnce(&Connection, u64) -> Result<T, StorageError> + Send + 'static,
+) -> Result<(T, u64), ApiError> {
     let sequence = super::message_queue::read_revision();
-    read(path, stop, move |db| {
+    read_guarded(path, stop, active, move |db| {
         collect(db, sequence).map(|raw| (raw, sequence))
     })
     .await
@@ -44,12 +55,21 @@ pub(super) async fn read<T: Send + 'static>(
     stop: CancellationToken,
     collect: impl FnOnce(&Connection) -> Result<T, StorageError> + Send + 'static,
 ) -> Result<T, ApiError> {
-    if stop.is_cancelled() {
+    read_guarded(path, stop, || true, collect).await
+}
+
+async fn read_guarded<T: Send + 'static>(
+    path: PathBuf,
+    stop: CancellationToken,
+    active: impl Fn() -> bool + Send + 'static,
+    collect: impl FnOnce(&Connection) -> Result<T, StorageError> + Send + 'static,
+) -> Result<T, ApiError> {
+    if stop.is_cancelled() || !active() {
         return Err(closed());
     }
     super::presentation_work(move || {
         let result = (|| {
-            if stop.is_cancelled() {
+            if stop.is_cancelled() || !active() {
                 return Err(closed().into());
             }
             let mut db = Connection::open_with_flags(
@@ -267,5 +287,35 @@ mod tests {
         assert_eq!(error.code, ErrorCode::InvalidState);
         assert!(!error.is_storage_failure());
         writer.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn invalidated_plan_never_opens_a_missing_database() {
+        crate::test_watchdog::watchdog("closed snapshot before SQLite open", async {
+            use std::sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            };
+            let root = tempfile::tempdir().unwrap();
+            for close_at in [0, 1] {
+                let calls = Arc::new(AtomicUsize::new(0));
+                let observed = calls.clone();
+                let result: Result<((), u64), ApiError> = read_sequenced_guarded(
+                    root.path().join("must-not-be-opened.sqlite"),
+                    CancellationToken::new(),
+                    move || observed.fetch_add(1, Ordering::SeqCst) < close_at,
+                    |_, _| panic!("closed plan must not query SQLite"),
+                )
+                .await;
+                let error = result.unwrap_err();
+                assert_eq!(error.code, ErrorCode::InvalidState);
+                assert!(
+                    !error.is_storage_failure(),
+                    "a closed plan must not attempt the missing DB"
+                );
+                assert_eq!(calls.load(Ordering::SeqCst), close_at + 1);
+            }
+        })
+        .await
+        .unwrap();
     }
 }

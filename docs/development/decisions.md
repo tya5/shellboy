@@ -2169,3 +2169,17 @@ follow that numbering; there is no compatibility alias for the unpublished
 local candidate. Recheck the next free version before F admission. E remains
 independent and uses main schema16. Back up the complete stopped data directory
 before opening any release containing the F upgrade.
+
+
+## Shared visible-read cancellation remains in Frontend
+
+A captured plan has at most the existing browser and descendant-count consumers.
+Use their existing cancellation tokens directly, without spawning a listener:
+wait for both to close when both exist, and for the single token otherwise.
+Closing one must preserve work for the other. The existing readonly snapshot
+helper accepts a captured ownership predicate checked before admission and
+immediately before SQLite open on the finite presentation worker. An already
+executing read may finish and still passes its existing stale-result fences.
+This closes the queued-read gap without Core state, a new event/table/worker,
+separate cancellation queue, or an unbounded family of subscriptions. Revisit
+only if another actual bounded consumer joins this same snapshot.

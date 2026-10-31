@@ -22,6 +22,16 @@ impl Tickets {
                 .as_ref()
                 .is_some_and(|ticket| !ticket.stop.is_cancelled())
     }
+    async fn closed(&self) {
+        match (&self.browser, &self.descendants) {
+            (None, None) => {}
+            (Some(browser), None) => browser.stop.cancelled().await,
+            (None, Some(descendants)) => descendants.stop.cancelled().await,
+            (Some(browser), Some(descendants)) => {
+                tokio::join!(browser.stop.cancelled(), descendants.stop.cancelled());
+            }
+        }
+    }
 }
 pub(super) struct RawBatch {
     browser: Option<Result<browser::RawObservation, ApiError>>,
@@ -241,12 +251,15 @@ pub(super) async fn read(
 ) -> Result<(Prepared, u64), ApiError> {
     let _permit = tokio::select! { biased;
         _=stop.cancelled()=>return Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
+        _=tickets.closed()=>return Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
         permit=progress_slots.acquire_owned()=>permit.map_err(|_|ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read admission closed"))?,
     };
     let collect = tickets.clone();
-    let result = super::snapshot::read_sequenced(
+    let active = tickets.clone();
+    let result = super::snapshot::read_sequenced_guarded(
         control.store.database.path().to_path_buf(),
         stop,
+        move || active.active(),
         move |db, _sequence| {
             if !collect.active() {
                 return Err(ApiError::new(
@@ -264,4 +277,90 @@ pub(super) async fn read(
     let project = tickets.clone();
     let prepared = presentation_work(move || prepare(raw, sequence, &project)).await?;
     Ok((prepared, sequence))
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    use tokio::sync::Semaphore;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn closed_visible_consumers_do_not_wait_for_read_admission() {
+        crate::test_watchdog::watchdog("closed visible read admission", async {
+            let root=tempfile::tempdir().unwrap();
+            let owner=crate::app::DataOwner::start(None,Some(root.path().join("data")),root.path().into()).await.unwrap();
+            let control=Control::new(&owner,root.path().into());
+            let slots=std::sync::Arc::new(Semaphore::new(0));
+            let stop=CancellationToken::new();
+            let empty=Tickets::default();
+            let empty_ready={
+                let mut pending=std::pin::pin!(read(&control,&empty,slots.clone(),stop.clone()));
+                matches!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())),Poll::Ready(Err(error)) if error.code==crate::protocol::ErrorCode::InvalidState)
+            };
+            let mut browser=browser::Browser::default();
+            browser.observe(1,"".into(),Some("t".into()),true).unwrap();
+            let mut descendants=lineage_observer::Observer::default();
+            descendants.observe(1,vec!["t".into()]).unwrap();
+            let tickets=Tickets { browser:Some(browser.take(tokio::time::Instant::now()).unwrap()), descendants:Some(descendants.take(tokio::time::Instant::now()).unwrap()) };
+            let (single_stays_pending,all_closed_ready)={
+                let mut pending=std::pin::pin!(read(&control,&tickets,slots.clone(),stop));
+                assert!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+                tickets.browser.as_ref().unwrap().stop.cancel();
+                let single=pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending();
+                tickets.descendants.as_ref().unwrap().stop.cancel();
+                let closed=matches!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())),Poll::Ready(Err(error)) if error.code==crate::protocol::ErrorCode::InvalidState);
+                (single,closed)
+            };
+            assert_eq!(slots.available_permits(),0);
+            drop(control);owner.shutdown().await.unwrap();
+            assert!(empty_ready,"an empty visible plan must not wait for the shared read slot");
+            assert!(single_stays_pending,"a remaining visible consumer still owns the shared read");
+            assert!(all_closed_ready,"closing all consumers must retire a slot waiter immediately");
+        }).await.unwrap();
+    }
+    #[test]
+    fn closed_watch_does_not_discard_a_visible_descendant_count() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('root','parent','/','','p','m','now'); INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','root','child','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','child','live','now');").unwrap();
+        let mut browser = browser::Browser::default();
+        browser
+            .observe_view(
+                1,
+                "".into(),
+                Some("child".into()),
+                true,
+                crate::ui::watch::BrowserMode::Watch,
+                Some("root".into()),
+                vec!["child".into()],
+                vec!["root".into()],
+            )
+            .unwrap();
+        let mut descendants = lineage_observer::Observer::default();
+        descendants.observe(1, vec!["root".into()]).unwrap();
+        let tickets = Tickets {
+            browser: Some(browser.take(tokio::time::Instant::now()).unwrap()),
+            descendants: Some(descendants.take(tokio::time::Instant::now()).unwrap()),
+        };
+        tickets.browser.as_ref().unwrap().stop.cancel();
+        let statements = super::super::sql_trace::Statements::new(&db);
+        let raw = read_tx(&db, &tickets).unwrap();
+        assert!(raw.browser.is_none());
+        assert_eq!(
+            statements.count(),
+            1,
+            "only the still-visible root count may query SQLite"
+        );
+        let prepared = prepare(raw, 7, &tickets);
+        assert!(prepared.browser.is_none());
+        let counts = prepared.descendants.unwrap().unwrap();
+        assert_eq!(counts.queried_roots, 1);
+        assert_eq!(counts.snapshots[0].threads, ["child"]);
+        assert_eq!(counts.snapshots[0].active, 1);
+    }
 }

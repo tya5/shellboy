@@ -2233,3 +2233,23 @@ This proves the retained paste/composer interaction, not full Watch visual
 acceptance or physical Windows UX. Combined F standard2016/0/35 and P4 values
 are recorded above; F native/P2/P3/P5/memory gaps remain open. F publication/CI
 is authorized after E admission; F main admission is separately gated on review.
+
+
+## F cancellation qualification follow-up
+
+Published F67cc688 ordinary CI41182628647 is green: Linux2017/0/34,
+macOS2016/0/35, Windows1885/0/26; exact artifact source SHA and actual scoped
+Watch/paired-snapshot test successes were checked. Native macOS Watch PTY
+passes8 conditions/56 captures on that code. F remains outside main pending
+completion of the retained qualification rows and reviewer approval.
+
+F4 review of shared-slot cancellation found an empty/fully closed plan could
+stay queued and later open SQLite before discarding results. The new regression
+fails on the published source (no speed timeout): an empty visible plan waits
+for a zero-capacity read semaphore. The follow-up retires that waiter only when
+all consumers close, and checks ownership again at the worker's pre-open
+boundary. Core and lifecycle mutations are unchanged; no new task/queue/worker.
+Focused Frontend tests with the fix pass249/0/3, including both new cancellation
+checks. An additional partial-consumer SQL fixture preserves the visible child
+count after Watch closes. Combined standard/CI qualification of this final
+source remains pending; the earlier published CI is not relabelled.

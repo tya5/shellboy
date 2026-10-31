@@ -805,3 +805,17 @@ helpers. Explicit UI canonical pages retain the shared ThreadList behavior.
 No new operation or schema is added by E beyond the inherited main schema16.
 The #83 presentation::rows legend and #84 composer remain byte-identical to the
 merged main; preserve #71 auto_history and #54 conditional status ticks.
+
+
+### F closed-consumer read admission
+
+The visible-read plan waits only while at least one captured List/Watch or
+descendant-count consumer remains live. Closing one consumer does not cancel a
+shared read still needed by another; closing all consumers retires a shared-slot
+waiter without acquiring that slot. The existing readonly snapshot helper also
+checks the captured plan immediately before opening SQLite on the presentation
+worker, so a plan invalidated while queued does not open a database and then
+discard its result. Existing per-consumer checks still omit cancelled parts of
+a partially live snapshot. No new task, worker, queue, Core state or operation
+is introduced. Cancellation is cooperative at admission/worker boundaries; a
+snapshot already executing may finish, and stale-result guards still apply.
