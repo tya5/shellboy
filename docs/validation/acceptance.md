@@ -3507,3 +3507,24 @@ Record audit against the new base `a5a08b1`: status 1289 -> 1298
 The complete previous status body and byte-for-byte acceptance prefix remain;
 no historical evidence or role heading is replaced. Exact-source native CI is
 recorded in issue #73 separately from these local checks.
+
+## #41 D2-only main7393ccb integration qualification (2026-10-31)
+
+Candidate37e0929 contains D2 through4ce6913 only, merged onto main7393ccb.
+No E/F/G modules or schema15/16 migration is admitted. macOS arm64, Rust1.99.1,
+`CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=2 sh scripts/check.sh`:
+first run passes library911/0/13 and integration906/0/17, then fails termination
+6/1/1: `actual_parent_shell_pty_close_kills_term_ignoring_owned_groups_without_force`
+finds no shutdown scope=signal diagnostic (all preceding saved-cleanup assertions
+passed; bash/zsh retired after about2.02s). That run is not a successful standard.
+
+At identical source the focused native PTY rerun passes1/0, then a full standard
+rerun exits0: library911/0/13, integration906/0/17, termination7/0/1, crash3/0/1,
+combined1827/0/32, layout93/Python9/fmt/strict all-target Clippy. Private logs are
+`.local/issue-41-d2-admission-standard.log`, `issue-41-d2-termination-recheck.log`
+and `issue-41-d2-admission-standard-recheck.log` in the development root. The
+intermittent diagnostic cause is unproven; rerun success is not a causal repair.
+Historical D1/D2 P2/P5 figures retain their original source scope and do not
+qualify latest-main CPU behavior or another OS. Main CI/Windows terminal/new
+long measurements are unexecuted. #71's actual auto_history-off integration
+tests are retained and included in the passing standard.

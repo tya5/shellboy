@@ -1400,3 +1400,14 @@ to change its default later, not whether to remove embedding configuration.
 Native mock tests and full standard check pass; actual usefulness still needs
 the post-rollout week. Active-index-only deletion has no existing CLI; the guide
 states inactive-space GC limits rather than recommending unsafe DB deletion.
+
+## #41 D2-only latest-main integration (local, 2026-10-31)
+
+37e0929 integrates reviewed D2 through4ce6913 with main7393ccb. E/F/G source
+and migrations15/16 are absent; conversation schema remains14. #71 index policy
+and #73 bounded summaries remain intact. Exact-source standard recheck passes
+1827/0/32, layout93/Python9/fmt/strict all-target Clippy. The first standard
+failed an existing parent-shell PTY diagnostic assertion after durable cleanup;
+the same-source focused rerun and full standard rerun pass. No causal fix or
+intermittent-failure diagnosis is claimed. Main three-OS CI and current-source
+long measurements remain unverified; no push or installation was performed.

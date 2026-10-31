@@ -305,3 +305,22 @@ choose a later readable input (covered by its original tests/CLI-parity policy).
 Changing that to limited/unknown evidence is a possible E policy refinement,
 not a silent correction bundled into D2. Decide and document it before the
 set-oriented title reader changes those cases.
+
+## D2 isolated admission after review6535884761
+
+37e0929 is a latest-main7393ccb candidate containing only reviewed D2 ancestry
+through4ce6913. Its exact-source full standard recheck passes1827/0/32; retain
+the initial native PTY diagnostic failure and unproven intermittent cause in
+acceptance. The D2 cutoff contains no E/F/G source or schema15/16. Do not merge
+`issue-41/shared-read` into main. E remains the next separately admitted unit
+after D2's native main gate; F and G follow their own complete ledgers.
+
+Review6536376198 adopts manual-CI measurement for long P2/P5 windows. Existing
+`measure` currently measures test timings on Windows only; it does not yet
+measure TUI CPU/draw/DB work. Extend that measurement path with exact-source
+baseline/candidate, OS/terminal capability, synthetic fixture and counter/harness
+witnesses, and upload structured results/logs. Measurements record values, with
+no elapsed-performance assertions in CI; fixture failures remain failures.
+Native Windows measurement support must be implemented/observed or explicitly
+unavailable, never inferred from a Unix PTY. Publication/dispatch authorization
+remains distinct from local preparation. No new local600s P2 window is started.
