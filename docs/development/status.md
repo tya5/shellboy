@@ -2592,3 +2592,10 @@ that frontend unchanged; do not replay the E browser state over F. A separate
 candidate adds only the still-missing approved HTTP header classification/tests
 and backward-navigation fixture/regression. #100 remains a separate review.
 Source-retention proof, fresh local checks and exact SHA are reported in #95.
+## Terminal-owned URL and file opening (#103)
+
+The TUI guide and both User Guides explain terminal link gestures, default
+WezTerm file URLs and optional bare-path rules. The Agent Guide asks for absolute
+file URLs only when asking a user to open a file/folder. No path detector,
+existence check, launcher or product setting is added; source/bundle validation
+limits and the user's terminal observation are separated in acceptance.
