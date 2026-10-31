@@ -286,3 +286,22 @@ and Windows uses current-process working set/private usage. No cache caps change
 
 F8 presentation is deferred to overlapping #41. This first version does not
 investigate leaks, optimize request-copy peaks or collect per-allocation data.
+
+## Headless owner startup (#5 stage 2)
+
+`serve --data-dir DIR [--config FILE]` starts the shared owner session without
+terminal setup or a UI frontend. An explicit nonempty data directory is required;
+`--operation-id` is not an owner-startup option. Default config lookup is unchanged.
+The owner lock rejects an already-owned directory instead of attaching to it.
+One flushed stdout JSON line with event/state `ready`, absolute `data_dir`,
+`instance_id` and `protocol_version` follows IPC binding and dispatcher startup.
+Startup errors are JSON on stderr, with no stdout result. stdin is not read and
+EOF does not request shutdown. No daemonization, fork, setsid or breakaway is added.
+Shutdown RPC, Unix signal handling and the normal final line are stage 3 work.
+
+Startup never calls the CLI endpoint/origin lookup: the required explicit path
+wins over inherited SHELLBOY_DATA_DIR, and inherited socket/instance/origin values
+are not owner identity. Existing driver environment assembly issues child-owner
+identity for each shell. API-key and proxy environment variables remain intact;
+no runtime global environment mutation is needed. This stage adds no table,
+worker, queue or UI adapter. Core review is required before integration.
