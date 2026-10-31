@@ -600,6 +600,13 @@ impl Details {
     pub(super) fn mark_stale(&mut self, reason: &str) {
         self.sources_stale = Some(safe(reason));
     }
+    pub(super) fn refresh_wait(&self, now: Instant) -> Option<Duration> {
+        (self.sources_dirty && !self.links_pending).then(|| {
+            self.last_sources_request.map_or(Duration::ZERO, |last| {
+                Duration::from_millis(500).saturating_sub(now.saturating_duration_since(last))
+            })
+        })
+    }
     pub(super) fn refresh_request(
         &mut self,
         thread_id: String,

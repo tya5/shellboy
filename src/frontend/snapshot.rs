@@ -82,7 +82,7 @@ fn closed() -> ApiError {
 mod tests {
     use super::*;
     use crate::storage::DbWorker;
-    use tokio::{sync::oneshot, time::timeout};
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn display_snapshot_and_browser_facts_do_not_wait_for_writer_queue() {
@@ -102,12 +102,12 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        timeout(Duration::from_secs(60), ready)
+        crate::test_watchdog::watchdog("E readonly observation", ready)
             .await
             .unwrap()
             .unwrap();
-        let result = timeout(
-            Duration::from_secs(60),
+        let result = crate::test_watchdog::watchdog(
+            "E readonly observation",
             read(path, CancellationToken::new(), |db| {
                 assert_eq!(
                     db.pragma_query_value(None, "query_only", |row| row.get::<_, i64>(0))?,
@@ -165,7 +165,7 @@ mod tests {
                 Ok((first, second))
             },
         ));
-        timeout(Duration::from_secs(60), ready)
+        crate::test_watchdog::watchdog("E readonly observation", ready)
             .await
             .unwrap()
             .unwrap();
@@ -199,11 +199,12 @@ mod tests {
             .await;
         drop(release);
         let newer_page_sequence = changed.unwrap();
-        let (observed, older_sequence) = timeout(Duration::from_secs(60), reader)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let (observed, older_sequence) =
+            crate::test_watchdog::watchdog("E readonly observation", reader)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
         assert_eq!(observed, ("before".into(), "before".into()));
         assert!(
             older_sequence < newer_page_sequence,

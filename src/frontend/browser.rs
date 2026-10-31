@@ -407,7 +407,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(60), ready)
+        crate::test_watchdog::watchdog("E readonly observation", ready)
             .await
             .unwrap()
             .unwrap();
@@ -417,7 +417,7 @@ mod tests {
             .observe(1, "".into(), Some("browser-root".into()), true)
             .unwrap();
         let ticket = browser.take(tokio::time::Instant::now()).unwrap();
-        let observed = tokio::time::timeout(Duration::from_secs(60), async {
+        let observed = crate::test_watchdog::watchdog("E readonly observation", async {
             let (page, _, page_sequence) = page(
                 &control,
                 ThreadListArgs::default(),

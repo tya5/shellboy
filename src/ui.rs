@@ -1795,6 +1795,18 @@ impl UiState {
             .expect("active view exists")
             .history_layout(&self.active, &mut self.layout_cache, budget, width, height)
     }
+    /// Next pending visible UI action's coalescing delay; none means no timer.
+    /// This never reads storage and is shared by native and headless UI loops.
+    pub fn deferred_action_wait(&self, now: Instant) -> Option<Duration> {
+        match self.top_overlay() {
+            Some(overlay::Overlay::Details) => self
+                .details
+                .as_ref()
+                .and_then(|details| details.refresh_wait(now)),
+            Some(overlay::Overlay::Threads) => self.thread_browser.filter_wait(now),
+            _ => None,
+        }
+    }
     pub fn take_deferred_actions(&mut self) -> Vec<UiAction> {
         self.take_deferred_actions_at(Instant::now())
     }
@@ -5622,6 +5634,9 @@ fn run_session(
             let wait = state
                 .thread_browser
                 .filter_wait(Instant::now())
+                .map_or(wait, |remaining| wait.min(remaining));
+            let wait = state
+                .deferred_action_wait(Instant::now())
                 .map_or(wait, |remaining| wait.min(remaining));
             if event::poll(wait)? {
                 let actions_to_send = state.event(event::read()?);

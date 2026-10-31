@@ -36,3 +36,7 @@ pub mod ui;
 mod usage;
 
 pub mod usage_totals;
+
+#[cfg(test)]
+#[path = "../tests/support/watchdog.rs"]
+pub(crate) mod test_watchdog;

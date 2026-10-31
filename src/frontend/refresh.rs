@@ -497,7 +497,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(60), ready)
+        crate::test_watchdog::watchdog("E readonly observation", ready)
             .await
             .unwrap()
             .unwrap();
@@ -510,8 +510,8 @@ mod tests {
         let (sender, mut results) = mpsc::channel(8);
         let slots = Arc::new(Semaphore::new(1));
         let permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
-        let observed = tokio::time::timeout(
-            Duration::from_secs(60),
+        let observed = crate::test_watchdog::watchdog(
+            "E readonly observation",
             run(
                 Query {
                     thread: "t".into(),
