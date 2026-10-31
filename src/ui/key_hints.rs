@@ -59,7 +59,7 @@ impl Action {
             Self::Copy => ("c", "コピー"),
             Self::Back => ("Esc", "戻る"),
             Self::SelectionBack => ("F2/Esc", "戻る"),
-            Self::LongCopy => ("Esc → Tab → c", "長い回答のコピー"),
+            Self::LongCopy => ("会話の履歴で c", "長い回答のコピー"),
             Self::Move => ("↑↓", "選択"),
             Self::NextPage => ("n", "次page"),
             Self::FirstPage => ("p", "先頭再取得"),
@@ -363,5 +363,18 @@ mod readonly_tests {
                 assert_eq!(readonly_key(key), key);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn selection_tip_does_not_toggle_an_existing_history_focus_back_to_composer() {
+        let cache = Cache::default();
+        let text = cache.text(Context::Selection, 100, &Config::default());
+        assert!(text.contains("F2/Esc 戻る"));
+        assert!(text.contains("会話の履歴で c"));
+        assert!(!text.contains("Tab"));
     }
 }
