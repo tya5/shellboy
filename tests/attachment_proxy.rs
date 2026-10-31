@@ -16,7 +16,7 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
 }
 async fn completed(control: &Control, thread: &str) {
     let thread = thread.to_owned();
-    tokio::time::timeout(Duration::from_secs(180),async {
+    crate::test_watchdog::watchdog("tests/attachment_proxy.rs: completed",async {
         loop {
             let target=thread.clone();
             let state=control.store.database.call(move|db| {

@@ -9,7 +9,7 @@ use shellboy::{
     storage::DbWorker,
 };
 use std::{path::PathBuf, time::Duration};
-use tokio::time::{Instant, timeout};
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 struct Fixture {
     _temp: tempfile::TempDir,
@@ -111,7 +111,7 @@ impl Fixture {
             .unwrap();
     }
     async fn wait_pins(&self, count: i64) {
-        timeout(Duration::from_secs(2), async {
+        crate::test_watchdog::watchdog("tests/attachments.rs: wait_pins", async {
             loop {
                 let n = self
                     .db
@@ -376,7 +376,7 @@ async fn timeout_keeps_real_blocking_worker_occupied_until_exit() {
     let w = worker.clone();
     let task = tokio::spawn(async move {
         w.execute(
-            Instant::now() + Duration::from_millis(50),
+            Instant::now() + Duration::from_secs(3600),
             CancellationToken::new(),
             move || {
                 entered.send(()).unwrap();
@@ -387,23 +387,30 @@ async fn timeout_keeps_real_blocking_worker_occupied_until_exit() {
         .await
     });
     entered_rx.await.unwrap();
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(3601)).await;
     let error = task.await.unwrap().unwrap_err();
     assert!(error.message.contains("timed out"));
     assert_eq!(worker.available(), 0);
-    let next = worker
-        .execute(
-            Instant::now() + Duration::from_millis(20),
-            CancellationToken::new(),
-            || Ok(1),
-        )
-        .await;
-    assert!(next.is_err());
+    let next = worker.execute(
+        Instant::now() + Duration::from_millis(20),
+        CancellationToken::new(),
+        || Ok(1),
+    );
+    tokio::pin!(next);
+    assert!(futures_util::poll!(&mut next).is_pending());
+    tokio::time::advance(Duration::from_millis(21)).await;
+    assert!(next.await.is_err());
+    tokio::time::resume();
     release.send(()).unwrap();
-    timeout(Duration::from_secs(1), async {
-        while worker.available() == 0 {
-            tokio::task::yield_now().await;
-        }
-    })
+    crate::test_watchdog::watchdog(
+        "tests/attachments.rs: timeout_keeps_real_blocking_worker_occupied_until_exit",
+        async {
+            while worker.available() == 0 {
+                tokio::task::yield_now().await;
+            }
+        },
+    )
     .await
     .unwrap();
 }

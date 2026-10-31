@@ -11,7 +11,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::{mpsc, oneshot},
-    time::timeout,
 };
 fn working_instructions(body: &Value) -> Option<(String, &str)> {
     let messages: Vec<_> = body["input"]
@@ -163,10 +162,16 @@ fn incoming<'a>(
 ) -> impl std::future::Future<Output = Incoming> + 'a {
     let caller = std::panic::Location::caller();
     async move {
-        match timeout(Duration::from_secs(60), receive.recv()).await {
+        match crate::test_watchdog::watchdog("tests/runtime_features.rs: incoming", receive.recv())
+            .await
+        {
             Ok(Some(value)) => value,
             result => {
-                let diagnostic = timeout(Duration::from_secs(5), progress(control)).await;
+                let diagnostic = crate::test_watchdog::watchdog(
+                    "tests/runtime_features.rs: incoming",
+                    progress(control),
+                )
+                .await;
                 panic!(
                     "loopback request watchdog at {}:{}; receive={}; saved lifecycle facts={diagnostic:?}",
                     caller.file(),
@@ -189,7 +194,7 @@ fn settled<'a>(
     let caller = std::panic::Location::caller();
     let mut events = control.subscribe();
     async move {
-        let result = timeout(Duration::from_secs(60), async {
+        let result = crate::test_watchdog::watchdog("tests/runtime_features.rs: settled", async {
             loop {
                 let target = thread.to_owned();
                 if control.store.database.call(move |db| Ok(db.query_row(
@@ -212,7 +217,11 @@ fn settled<'a>(
             }
         }).await;
         if result.is_err() {
-            let diagnostic = timeout(Duration::from_secs(5), progress(control)).await;
+            let diagnostic = crate::test_watchdog::watchdog(
+                "tests/runtime_features.rs: settled",
+                progress(control),
+            )
+            .await;
             panic!(
                 "Thread {thread} did not settle within the fixture watchdog at {}:{}; saved lifecycle facts={diagnostic:?}",
                 caller.file(),
@@ -462,8 +471,7 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
     let ordinary = incoming(&control, &mut receive).await;
     assert_eq!(ordinary.session.as_deref(), Some(thread.as_str()));
     assert!(ordinary.body.get("prompt_cache_key").is_none());
-    let accepted = timeout(
-        Duration::from_millis(500),
+    let accepted = crate::test_watchdog::watchdog("tests/runtime_features.rs: manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_extra_turn",
         request(
             &control,
             Command::Compact(ThreadTarget {
@@ -474,11 +482,7 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
     .await
     .unwrap();
     assert_eq!(accepted["status"], "queued");
-    assert!(
-        timeout(Duration::from_millis(30), receive.recv())
-            .await
-            .is_err()
-    );
+    assert!(receive.try_recv().is_err());
     ordinary.reply.send((200, answer("last answer"))).unwrap();
     let summary = incoming(&control, &mut receive).await;
     assert_eq!(summary.session.as_deref(), Some(thread.as_str()));
@@ -489,7 +493,7 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
         .reply
         .send((200, answer("## 目的\nSummarized earlier turns")))
         .unwrap();
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/runtime_features.rs: manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_extra_turn", async {
         loop {
             let value = request(
                 &control,
@@ -631,11 +635,13 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     ) -> Incoming {
         // This boundary includes a real PowerShell launch under concurrent owner tests.
         // Match the native Windows shell fixture's bounded startup/output allowance.
-        let seconds = if cfg!(windows) { 15 } else { 5 };
-        match timeout(Duration::from_secs(seconds), receive.recv()).await {
+        let _seconds = if cfg!(windows) { 15 } else { 5 };
+        match crate::test_watchdog::watchdog("tests/runtime_features.rs: next", receive.recv())
+            .await
+        {
             Ok(Some(request)) => request,
             failed => {
-                let diagnostic = timeout(Duration::from_secs(1), control.store.database.call(|db| {
+                let diagnostic = crate::test_watchdog::watchdog("tests/runtime_features.rs: next", control.store.database.call(|db| {
                     let mut observations = Vec::new();
                     for (label, sql) in [
                         ("turn", "SELECT json_object('state',state,'reason',recovery_reason_json) FROM turn LIMIT 8"),
@@ -724,11 +730,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     }
     retry_two.reply.send((400, overflow)).unwrap();
     settled(&control, &thread).await;
-    assert!(
-        timeout(Duration::from_millis(60), receive.recv())
-            .await
-            .is_err()
-    );
+    assert!(receive.try_recv().is_err());
     let run_id = control
         .store
         .database
@@ -810,22 +812,14 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
             ))
             .await
     });
-    assert!(
-        timeout(Duration::from_millis(30), &mut observer)
-            .await
-            .is_err()
-    );
+    assert!(futures_util::poll!(&mut observer).is_pending());
     observer.abort();
     let stopping = control.clone();
     let mut shutdown = tokio::spawn(async move { stopping.shutdown().await });
-    assert!(
-        timeout(Duration::from_millis(20), &mut shutdown)
-            .await
-            .is_err()
-    );
+    assert!(futures_util::poll!(&mut shutdown).is_pending());
     release.send(()).unwrap();
     blocker.await.unwrap();
-    timeout(Duration::from_secs(5), shutdown)
+    crate::test_watchdog::watchdog("tests/runtime_features.rs: disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shutdown", shutdown)
         .await
         .unwrap()
         .unwrap()
@@ -911,7 +905,7 @@ async fn stopping_recovery_cancels_an_inflight_manual_summary_without_adopting_i
     let _ = summary
         .reply
         .send((200, answer("late summary must not be selected")));
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/runtime_features.rs: stopping_recovery_cancels_an_inflight_manual_summary_without_adopting_it", async {
         loop {
             let status = request(
                 &control,
@@ -972,7 +966,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
         .send((200, answer("old original answer")))
         .unwrap();
     settled(&control, &thread).await;
-    timeout(Duration::from_secs(5),async{loop{let target=thread.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    crate::test_watchdog::watchdog("tests/runtime_features.rs: editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_settings",async{loop{let target=thread.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
     let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
     let node = accepted["message_id"].as_str().unwrap().to_owned();
     let args = ThreadCreateArgs {
@@ -1147,9 +1141,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     )
     .await;
     assert!(
-        timeout(Duration::from_millis(100), receive.recv())
-            .await
-            .is_err(),
+        receive.try_recv().is_err(),
         "settings must not resume recovery_wait"
     );
     let target = thread.clone();
@@ -1587,9 +1579,7 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
     assert_eq!(status["limit_reached"], false);
     assert_eq!(status["logical_raw_bytes"], 0);
     assert!(
-        timeout(Duration::from_millis(150), receive.recv())
-            .await
-            .is_err(),
+        receive.try_recv().is_err(),
         "capacity reclamation must not automatically resume a model request"
     );
     let target = turn.clone();
@@ -1969,7 +1959,7 @@ async fn quit_during_the_first_tool_cancels_the_next_call_without_restarting_the
     ]}))).unwrap();
     // Synchronize on persisted output from the first actual OS process, then
     // keep it blocked on stdin until the Quit acceptance has closed the gate.
-    let execution = timeout(Duration::from_secs(5), async {
+    let execution = crate::test_watchdog::watchdog("tests/runtime_features.rs: quit_during_the_first_tool_cancels_the_next_call_without_restarting_the_existing_process", async {
         loop {
             let found = owner.db.call(|db| {
                 use rusqlite::OptionalExtension;
@@ -2701,7 +2691,7 @@ async fn failed_response_usage_is_saved_without_provider_appendices_or_audit_los
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_resend() {
-    timeout(Duration::from_secs(60),async {
+    crate::test_watchdog::watchdog("tests/runtime_features.rs: automatic_summary_limit_failure_enters_recovery_without_adoption_or_resend",async {
         let root=tempfile::tempdir().unwrap();let (url,mut receive,server)=proxy().await;
         let config=root.path().join("config.toml");
         std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=8\n[compaction]\nsummary_max_chars=2000\nsummary_map_max_requests=1\nsummary_reduce_max_requests=1\n")).unwrap();

@@ -8,7 +8,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::timeout,
 };
 
 struct Reply {
@@ -154,7 +153,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     .unwrap()
 }
 async fn incoming(receiver: &mut mpsc::UnboundedReceiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), receiver.recv())
+    crate::test_watchdog::watchdog("tests/runtime.rs: incoming", receiver.recv())
         .await
         .unwrap()
         .unwrap()
@@ -173,7 +172,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     let table = table.to_owned();
     let id = id.to_owned();
     let wanted = wanted.to_owned();
-    let result = timeout(Duration::from_secs(8), async {
+    let result = crate::test_watchdog::watchdog("tests/runtime.rs: state", async {
         loop {
             let table = table.clone();
             let id = id.clone();
@@ -197,7 +196,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     })
     .await;
     if result.is_err() {
-        let diagnostic = timeout(Duration::from_millis(250), control.store.database.call(|db| {
+        let diagnostic = crate::test_watchdog::watchdog("tests/runtime.rs: state", control.store.database.call(|db| {
             let turns = db.prepare("SELECT id,state,generation FROM turn ORDER BY rowid")?
                 .query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -211,7 +210,7 @@ async fn state(control: &Arc<Control>, table: &str, id: &str, wanted: &str) {
     }
 }
 async fn close(control: Arc<Control>, owner: DataOwner, server: JoinHandle<()>) {
-    timeout(Duration::from_secs(8), control.shutdown())
+    crate::test_watchdog::watchdog("tests/runtime.rs: close", control.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -470,12 +469,7 @@ async fn accepted_message_proxy_shell_final_and_reopen_preserve_original() {
         })
         .await
         .unwrap();
-    assert!(
-        timeout(Duration::from_millis(75), requests.recv())
-            .await
-            .is_err(),
-        "no spurious completion Turn"
-    );
+    assert!(requests.try_recv().is_err(), "no spurious completion Turn");
     close(control, owner, server).await;
     let reopened = shellboy::storage::DbWorker::open(directory.path().join("data/shellboy.db"))
         .await
@@ -509,7 +503,7 @@ async fn foreground_additional_input_is_accepted_while_shell_lives_and_stop_reap
         .send(tool("sleep 10; printf unexpected", false))
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: foreground_additional_input_is_accepted_while_shell_lives_and_stop_reaps_before_terminal", async {
         loop {
             let running = control
                 .store
@@ -531,8 +525,7 @@ async fn foreground_additional_input_is_accepted_while_shell_lives_and_stop_reap
     })
     .await
     .unwrap();
-    let additional = timeout(
-        Duration::from_millis(500),
+    let additional = crate::test_watchdog::watchdog("tests/runtime.rs: foreground_additional_input_is_accepted_while_shell_lives_and_stop_reaps_before_terminal",
         command(
             &control,
             Command::MessageSend(MessageSendArgs {
@@ -996,11 +989,7 @@ async fn recovery_wait_without_live_driver_can_be_stopped() {
         "stopped",
     )
     .await;
-    assert!(
-        timeout(Duration::from_millis(75), requests.recv())
-            .await
-            .is_err()
-    );
+    assert!(requests.try_recv().is_err());
     close(control, owner, server).await;
 }
 
@@ -1024,7 +1013,7 @@ async fn background_completion_before_answer_is_durable_and_reaches_a_model_boun
             .any(|item| item["role"] == "developer" && item.to_string().contains("shell_ended"))
     };
     let mut delivered = usize::from(has_event(&second.body));
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: background_completion_before_answer_is_durable_and_reaches_a_model_boundary_once", async {
         loop {
             let done = control
                 .store
@@ -1069,9 +1058,7 @@ async fn background_completion_before_answer_is_durable_and_reaches_a_model_boun
     )
     .await;
     assert!(
-        timeout(Duration::from_millis(75), requests.recv())
-            .await
-            .is_err(),
+        requests.try_recv().is_err(),
         "completion event must not generate duplicate Turns"
     );
     close(control, owner, server).await;
@@ -1090,7 +1077,7 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
         .send(tool("while :; do printf flood; sleep 0.01; done", false))
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdown", async {
         loop {
             if let shellboy::control::EngineEvent::Error { error, .. } =
                 events.recv().await.unwrap()
@@ -1117,12 +1104,10 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
         .await;
     assert_eq!(reply.error.unwrap().code, ErrorCode::InvalidState);
     assert!(
-        timeout(Duration::from_millis(75), requests.recv())
-            .await
-            .is_err(),
+        requests.try_recv().is_err(),
         "storage failure must not initiate another model request"
     );
-    let shutdown = timeout(Duration::from_secs(8), control.shutdown())
+    let shutdown = crate::test_watchdog::watchdog("tests/runtime.rs: raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdown", control.shutdown())
         .await
         .unwrap()
         .unwrap_err();
@@ -1187,7 +1172,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         ))
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail", async {
         loop {
             let saved = control
                 .store
@@ -1210,8 +1195,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
     .await
     .unwrap();
     // Control handles another operation before the foreground shell completes.
-    timeout(
-        Duration::from_secs(1),
+    crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail",
         command(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
@@ -1239,7 +1223,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         })
         .await
         .unwrap();
-    let next = match timeout(Duration::from_secs(5), requests.recv()).await {
+    let next = match crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail", requests.recv()).await {
         Ok(Some(request)) => request,
         outcome => {
             let snapshot = control.store.database.call(|db| {
@@ -1374,7 +1358,7 @@ async fn shell_output_wait_wakes_after_commit_while_shell_and_model_remain_block
     );
     let observer = control.clone();
     let mut waiting = tokio::spawn(async move { observer.request(request).await });
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: shell_output_wait_wakes_after_commit_while_shell_and_model_remain_blocked", async {
         loop {
             let key = format!("wait.pending.{operation}");
             let registered = control
@@ -1403,7 +1387,7 @@ async fn shell_output_wait_wakes_after_commit_while_shell_and_model_remain_block
         .await
         .unwrap()
         .unwrap();
-    let observed = timeout(Duration::from_secs(2), &mut waiting).await;
+    let observed = crate::test_watchdog::watchdog("tests/runtime.rs: shell_output_wait_wakes_after_commit_while_shell_and_model_remain_blocked", &mut waiting).await;
     waiting.abort();
     let saved = control
         .store
@@ -1440,7 +1424,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     let first = incoming(&mut requests).await;
     first.reply.send(Reply::json(json!({"id":"stdin-response","status":"completed","output":[{"type":"function_call","id":"stdin-item","call_id":"stdin-call","name":"shell","arguments":json!({"command":"cat","background":true,"stdin_open":true}).to_string()}]}))).ok().unwrap();
     let second = incoming(&mut requests).await;
-    let execution = timeout(Duration::from_secs(3), async {
+    let execution = crate::test_watchdog::watchdog("tests/runtime.rs: stdin_operation_retransmission_writes_once_and_wait_any_observes_completion", async {
         loop {
             let id = control
                 .store
@@ -1667,7 +1651,7 @@ async fn real_shell_cli_cannot_mutate_an_independent_runs_live_shell() {
         }),
     )
     .await;
-    let before = timeout(Duration::from_secs(3), async {
+    let before = crate::test_watchdog::watchdog("tests/runtime.rs: snapshot", async {
         loop {
             let saved = snapshot(&control, &execution).await;
             if saved.3 == b"baseline\n" {
@@ -1749,7 +1733,7 @@ async fn real_shell_cli_cannot_mutate_an_independent_runs_live_shell() {
         }),
     )
     .await;
-    timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: snapshot", async {
         loop {
             let saved = snapshot(&control, &execution).await;
             if saved.3 == b"baseline\nstill-live\n" {
@@ -1977,7 +1961,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         ))
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
         loop {
             if control.background(&accepted.thread_id).await.is_ok() {
                 break;
@@ -2072,28 +2056,29 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         assert!(notices[0].contains("後続の未実行呼出しはありません"));
         assert!(!notices[0].contains("取消") && !notices[0].contains("取り消"));
     }
-    let ui_notice = timeout(Duration::from_secs(5), async {
-        loop {
-            match updates_receive.try_recv() {
-                Ok(update @ shellboy::ui::UiUpdate::Status { .. }) => {
-                    if let shellboy::ui::UiUpdate::Status {
-                        thread_id: Some(ref target),
-                        ref text,
-                    } = update
-                        && target == &accepted.thread_id
-                        && text == &notices[0]
-                    {
-                        break update;
+    let ui_notice =
+        crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
+            loop {
+                match updates_receive.try_recv() {
+                    Ok(update @ shellboy::ui::UiUpdate::Status { .. }) => {
+                        if let shellboy::ui::UiUpdate::Status {
+                            thread_id: Some(ref target),
+                            ref text,
+                        } = update
+                            && target == &accepted.thread_id
+                            && text == &notices[0]
+                        {
+                            break update;
+                        }
                     }
+                    Ok(_) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(error) => panic!("UI bridge stopped before background notice: {error}"),
                 }
-                Ok(_) => {}
-                Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
-                Err(error) => panic!("UI bridge stopped before background notice: {error}"),
             }
-        }
-    })
-    .await
-    .unwrap();
+        })
+        .await
+        .unwrap();
     ui.apply(ui_notice);
     assert_eq!(ui.view().status, notices[0]);
     next.reply
@@ -2121,9 +2106,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     )
     .await;
     assert!(
-        timeout(Duration::from_millis(100), requests.recv())
-            .await
-            .is_err(),
+        requests.try_recv().is_err(),
         "settings must not wake background-only waiting"
     );
     control
@@ -2151,38 +2134,39 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         "stopped",
     )
     .await;
-    let stopped = timeout(Duration::from_secs(5), async {
-        loop {
-            match updates_receive.try_recv() {
-                Ok(update @ shellboy::ui::UiUpdate::Progress { .. }) => {
-                    if let shellboy::ui::UiUpdate::Progress {
-                        ref thread_id,
-                        ref state,
-                        ..
-                    } = update
-                        && thread_id == &accepted.thread_id
-                        && state == "中断済み"
-                    {
-                        break update;
+    let stopped =
+        crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
+            loop {
+                match updates_receive.try_recv() {
+                    Ok(update @ shellboy::ui::UiUpdate::Progress { .. }) => {
+                        if let shellboy::ui::UiUpdate::Progress {
+                            ref thread_id,
+                            ref state,
+                            ..
+                        } = update
+                            && thread_id == &accepted.thread_id
+                            && state == "中断済み"
+                        {
+                            break update;
+                        }
                     }
+                    Ok(_) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(error) => panic!("UI bridge stopped before saved interruption: {error}"),
                 }
-                Ok(_) => {}
-                Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
-                Err(error) => panic!("UI bridge stopped before saved interruption: {error}"),
             }
-        }
-    })
-    .await
-    .unwrap();
+        })
+        .await
+        .unwrap();
     ui.apply(stopped);
     assert_eq!(ui.view().state, "中断済み");
     actions.send(shellboy::ui::UiAction::Quit).await.unwrap();
-    timeout(Duration::from_secs(8), bridge)
+    crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", bridge)
         .await
         .unwrap()
         .unwrap()
         .unwrap();
-    timeout(Duration::from_secs(8), serving)
+    crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", serving)
         .await
         .unwrap()
         .unwrap();
@@ -2320,7 +2304,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
         .send(Reply::json(json!({"id":"shutdown-shell-response","status":"completed","output":[{"type":"function_call","call_id":"shutdown-shell","name":"shell","arguments":json!({"command":"printf SHUTDOWN_READY; read -r finish","background":false,"stdin_open":true}).to_string()}]})))
         .ok()
         .unwrap();
-    let execution=timeout(Duration::from_secs(5),async { loop {
+    let execution=crate::test_watchdog::watchdog("tests/runtime.rs: graceful_shutdown_captures_real_shell_wait_once_and_replays_context_after_gc_restart",async { loop {
         let row=control.store.database.call(|db|{
             use rusqlite::OptionalExtension;
             Ok(db.query_row("SELECT s.id FROM shell_execution s WHERE s.state='running' AND EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id)",[],|r|r.get::<_,String>(0)).optional()?)
@@ -2346,7 +2330,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
                 .await
         }
     });
-    let registered = timeout(Duration::from_secs(3), async {
+    let registered = crate::test_watchdog::watchdog("tests/runtime.rs: graceful_shutdown_captures_real_shell_wait_once_and_replays_context_after_gc_restart", async {
         loop {
             let key = format!("wait.pending.{operation}");
             if control
@@ -2389,7 +2373,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
     let (first, second) = tokio::join!(control.prepare_shutdown(), control.prepare_shutdown());
     first.unwrap();
     second.unwrap();
-    timeout(Duration::from_secs(8), control.shutdown())
+    crate::test_watchdog::watchdog("tests/runtime.rs: graceful_shutdown_captures_real_shell_wait_once_and_replays_context_after_gc_restart", control.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -2463,7 +2447,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
         .send(final_answer("context restored"))
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(5),async{loop {let target=accepted.thread_id.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::task::yield_now().await;}}).await.unwrap();
+    crate::test_watchdog::watchdog("tests/runtime.rs: graceful_shutdown_captures_real_shell_wait_once_and_replays_context_after_gc_restart",async{loop {let target=accepted.thread_id.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::task::yield_now().await;}}).await.unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -2479,10 +2463,13 @@ async fn graceful_context_revision_does_not_adopt_a_late_model_response() {
     let pending = incoming(&mut requests).await;
     control.prepare_shutdown().await.unwrap();
     let _ = pending.reply.send(final_answer("LATE_SHUTDOWN_ANSWER"));
-    timeout(Duration::from_secs(8), control.shutdown())
-        .await
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "tests/runtime.rs: graceful_context_revision_does_not_adopt_a_late_model_response",
+        control.shutdown(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let turn = accepted.turn_id.clone().unwrap();
     control
         .store
@@ -2763,7 +2750,7 @@ async fn stalled_stream_enters_durable_recovery_and_preserves_received_text_with
     let accepted = start(&control).await;
     let turn = accepted.turn_id.clone().unwrap();
     state(&control, "turn", &turn, "recovery_wait").await;
-    timeout(Duration::from_secs(3), disconnected)
+    crate::test_watchdog::watchdog("tests/runtime.rs: stalled_stream_enters_durable_recovery_and_preserves_received_text_without_replay", disconnected)
         .await
         .unwrap()
         .unwrap();

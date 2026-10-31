@@ -6,16 +6,16 @@ use shellboy::{
     control::{Control, EngineEvent},
     protocol::*,
 };
-use std::{sync::Arc, time::Duration};
-use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc, time::timeout};
+use std::sync::Arc;
+use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 // Fixture bounds cover scheduling, persisted transitions and cleanup, not HTTP deadlines.
-const WATCHDOG: Duration = Duration::from_secs(60);
+use crate::test_watchdog::WATCHDOG;
 
 async fn request(control: &Arc<Control>, command: Command) -> Value {
-    let response = timeout(
-        WATCHDOG,
+    let response = crate::test_watchdog::watchdog(
+        "tests/response_upload_recovery.rs: request",
         control.request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             command,
@@ -137,7 +137,12 @@ async fn upload_recovery(auto_trim: bool) {
     .unwrap();
     let turn = accepted.turn_id.unwrap();
     for ordinal in 1..=3 {
-        match timeout(WATCHDOG, received.recv()).await {
+        match crate::test_watchdog::watchdog(
+            "tests/response_upload_recovery.rs: upload_recovery",
+            received.recv(),
+        )
+        .await
+        {
             Ok(Some(())) => {}
             result => panic!(
                 "request prefix {ordinal}/3 was not actually read (auto_trim={auto_trim}, result={result:?}); saved upload facts: {}",
@@ -147,23 +152,30 @@ async fn upload_recovery(auto_trim: bool) {
     }
     let mut events = control.subscribe();
     let observed_turn = turn.clone();
-    let recovery = timeout(WATCHDOG, async {
-        loop {
-            let turn = observed_turn.clone();
-            let state: String = control
-                .store
-                .database
-                .call(move |db| {
-                    Ok(db.query_row("SELECT state FROM turn WHERE id=?1", [turn], |r| r.get(0))?)
-                })
-                .await
-                .unwrap();
-            if state == "recovery_wait" {
-                break;
+    let recovery = crate::test_watchdog::watchdog(
+        "tests/response_upload_recovery.rs: upload_recovery",
+        async {
+            loop {
+                let turn = observed_turn.clone();
+                let state: String = control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(
+                            db.query_row("SELECT state FROM turn WHERE id=?1", [turn], |r| {
+                                r.get(0)
+                            })?,
+                        )
+                    })
+                    .await
+                    .unwrap();
+                if state == "recovery_wait" {
+                    break;
+                }
+                changed(&mut events, &thread).await;
             }
-            changed(&mut events, &thread).await;
-        }
-    })
+        },
+    )
     .await;
     assert!(
         recovery.is_ok(),
@@ -208,18 +220,30 @@ async fn upload_recovery(auto_trim: bool) {
         }
         Ok(())
     }).await.unwrap();
-    timeout(WATCHDOG, control.shutdown())
+    crate::test_watchdog::watchdog(
+        "tests/response_upload_recovery.rs: upload_recovery",
+        control.shutdown(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    crate::test_watchdog::watchdog(
+        "tests/response_upload_recovery.rs: upload_recovery",
+        owner.shutdown(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    stop.cancel();
+    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: upload_recovery", server)
         .await
         .unwrap()
         .unwrap();
-    timeout(WATCHDOG, owner.shutdown()).await.unwrap().unwrap();
-    stop.cancel();
-    timeout(WATCHDOG, server).await.unwrap().unwrap();
 }
 
 async fn upload_facts(control: &Control, turn: &str) -> Value {
     let turn = turn.to_owned();
-    match timeout(WATCHDOG, control.store.database.call(move |db| {
+    match crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: upload_facts", control.store.database.call(move |db| {
         let (state, reason): (String, Option<String>) = db.query_row(
             "SELECT state,recovery_reason_json FROM turn WHERE id=?1", [&turn],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -285,7 +309,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     .unwrap();
     let turn = accepted.turn_id.unwrap();
     let mut events = control.subscribe();
-    let observed = timeout(WATCHDOG, async {
+    let observed = crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", async {
         loop {
             let turn = turn.clone();
             let (failed, state): (i64, String) = control
@@ -316,7 +340,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     .await;
     if observed.is_err() {
         let target = turn.clone();
-        let progress = timeout(WATCHDOG, control.store.database.call(move |db| {
+        let progress = crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", control.store.database.call(move |db| {
         let state: String = db.query_row("SELECT state FROM turn WHERE id=?1", [&target], |r| r.get(0))?;
         let attempts = db.prepare("SELECT json_object('state',state,'kind',json_extract(error_json,'$.error.kind'),'phase',json_extract(error_json,'$.error.http_observation.phase'),'source_bytes',json_extract(error_json,'$.error.http_observation.body_source_bytes_consumed'),'duration_ms',round((julianday(ended_at)-julianday(started_at))*86400000)) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid LIMIT 9")?
             .query_map([target], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -329,7 +353,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     }
     let listener = TcpListener::bind(address).await.unwrap();
     let server = tokio::spawn(async move {
-        let (mut stream, _) = timeout(WATCHDOG, listener.accept()).await.unwrap().unwrap();
+        let (mut stream, _) = crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", listener.accept()).await.unwrap().unwrap();
         stream.set_nodelay(true).unwrap();
         let mut bytes = Vec::new();
         loop {
@@ -354,7 +378,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         let body = json!({"id":"proxy-restored","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"connection restored"}]}]}).to_string();
         stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
     });
-    timeout(WATCHDOG, async {
+    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", async {
         loop {
             let target = turn.clone();
             let state: String = control
@@ -410,12 +434,12 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         })
         .await
         .unwrap();
-    timeout(WATCHDOG, server).await.unwrap().unwrap();
-    timeout(WATCHDOG, control.shutdown())
+    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", server).await.unwrap().unwrap();
+    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", control.shutdown())
         .await
         .unwrap()
         .unwrap();
-    timeout(WATCHDOG, owner.shutdown()).await.unwrap().unwrap();
+    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", owner.shutdown()).await.unwrap().unwrap();
 }
 
 // Subscribe before the saved-state read; lag means re-read, not lost completion.

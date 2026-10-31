@@ -27,7 +27,7 @@ async fn spawn(args: ShellToolArgs) -> ShellExecution {
         .unwrap()
 }
 async fn collect(mut execution: ShellExecution) -> (Vec<u8>, Vec<u8>, ShellCompletion) {
-    timeout(Duration::from_secs(15), async {
+    crate::test_watchdog::watchdog("tests/shell_windows.rs: collect", async {
         let mut out = Vec::new();
         let mut err = Vec::new();
         while let Some(ShellEvent::Output(chunk)) = execution.events.recv().await {

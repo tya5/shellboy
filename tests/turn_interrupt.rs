@@ -6,13 +6,12 @@ use shellboy::{
     control::{Control, EngineEvent},
     protocol::*,
 };
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{broadcast, mpsc, oneshot},
     task::JoinHandle,
-    time::timeout,
 };
 
 struct Reply {
@@ -157,7 +156,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     .unwrap()
 }
 async fn incoming(receiver: &mut mpsc::UnboundedReceiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(60), receiver.recv())
+    crate::test_watchdog::watchdog("tests/turn_interrupt.rs: incoming", receiver.recv())
         .await
         .unwrap()
         .unwrap()
@@ -181,7 +180,7 @@ async fn saved_state(control: &Control, table: &str, id: &str, wanted: &str) {
     let table = table.to_owned();
     let id = id.to_owned();
     let mut changes = control.subscribe();
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("tests/turn_interrupt.rs: saved_state", async {
         loop {
             let table = table.clone();
             let id = id.clone();
@@ -207,7 +206,7 @@ async fn saved_state(control: &Control, table: &str, id: &str, wanted: &str) {
     .unwrap();
 }
 async fn close(control: Arc<Control>, owner: DataOwner, server: JoinHandle<()>) {
-    timeout(Duration::from_secs(60), control.shutdown())
+    crate::test_watchdog::watchdog("tests/turn_interrupt.rs: close", control.shutdown())
         .await
         .unwrap()
         .unwrap();
@@ -236,7 +235,7 @@ async fn interrupted_stream_is_saved_without_retry_and_empty_run_completes() {
         })
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("tests/turn_interrupt.rs: interrupted_stream_is_saved_without_retry_and_empty_run_completes", async {
         loop {
             if let shellboy::control::EngineEvent::Stream { text, .. } =
                 events.recv().await.unwrap()
@@ -292,7 +291,7 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
         {"type":"function_call","id":"later","call_id":"later-call","name":"shell","arguments":json!({"command":if cfg!(windows){"[Console]::Out.Write('MUST_NOT_RUN')"}else{"printf MUST_NOT_RUN"}}).to_string()}
     ]}))).ok().unwrap();
     let mut changes = control.subscribe();
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("tests/turn_interrupt.rs: interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_same_run", async {
         loop {
             let count = control
                 .store
@@ -510,7 +509,7 @@ async fn later_stream_interruption_is_not_misclassified_by_an_earlier_completed_
         })
         .ok()
         .unwrap();
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("tests/turn_interrupt.rs: later_stream_interruption_is_not_misclassified_by_an_earlier_completed_tool_group", async {
         loop {
             if let shellboy::control::EngineEvent::Stream { text, .. } =
                 events.recv().await.unwrap()
@@ -592,7 +591,7 @@ async fn background_completion_after_interruption_starts_new_turn_and_completes_
     stream.reply.send(Reply{status:200,kind:"text/event-stream",keep_open:true,
         body:format!("data: {}\n\n",json!({"type":"response.output_text.delta","delta":"interrupted while background work continues"})).into_bytes(),
     }).ok().unwrap();
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("tests/turn_interrupt.rs: background_completion_after_interruption_starts_new_turn_and_completes_same_run", async {
         loop {
             if let shellboy::control::EngineEvent::Stream { text, .. } =
                 events.recv().await.unwrap()
@@ -705,7 +704,7 @@ async fn ordinary_queued_input_keeps_foreground_group_intact_without_extra_model
         ]
     }))).ok().unwrap();
     let mut changes = control.subscribe();
-    let execution=timeout(Duration::from_secs(60),async{loop{
+    let execution=crate::test_watchdog::watchdog("tests/turn_interrupt.rs: ordinary_queued_input_keeps_foreground_group_intact_without_extra_model_requests",async{loop{
         let execution=control.store.database.call(|db|Ok(db.query_row("SELECT id FROM shell_execution WHERE state='running' ORDER BY rowid LIMIT 1",[],|r|r.get::<_,String>(0)).optional()?)).await.unwrap();
         if let Some(execution)=execution{break execution;}changed(&mut changes).await;
     }}).await.unwrap();
