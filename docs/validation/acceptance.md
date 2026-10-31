@@ -5144,9 +5144,9 @@ permits across optional HistoryReader::saved display work. Quit drops the
 background result receiver but did not cancel those reads; stalled presentation
 admission could prevent remaining closing submissions from obtaining a permit.
 A stronger version of the existing real closing fixture holds both presentation
-slots until its end. The old boundary deterministically fails with exactly32
-saved inputs and frontend unfinished, while retaining the original10-second
-watchdog and every40-input/draft/FIFO/force assertion. The corrected boundary
+slots until its end. The old boundary deterministically fails with exactly 32
+saved inputs and frontend unfinished, while retaining the original 10-second
+watchdog and every 40-input/draft/FIFO/force assertion. The corrected boundary
 passes with both display slots still held: only the optional post-commit
 projection observes the existing frontend cancellation token. Durable sends
 are never raced against cancellation. Ordinary send/read admission capacities,
@@ -5159,7 +5159,15 @@ not save foreground-registration or presentation-admission traces, so exact
 past interleavings, or whether other contributors existed, remain unproved.
 They are not declarations that a rerun alone fixed an intermittent failure.
 The targeted foreground test, 16 outbox tests and unchanged real TUI recovery
-test pass locally. New asynchronous guards use the shared60-second watchdog;
+test pass locally. New asynchronous guards use the shared 60-second watchdog;
 legacy targeted guards were not extended, assertions relaxed or tests ignored.
 Full latest-main standard checks, role/delta audit and exact submitted SHA are
 recorded in #96 rather than substituting an older tree's successful result.
+
+Latest-main local qualification on afe4c087 plus #96 succeeds: standard checks
+1,965 passed / 0 failed / 33 ignored, layout94, Python41, watchdog policy, format
+and strict all-target Clippy. The separate document-role test passes; bundled
+docs checks pass33 CLI checks / 13 guides / 3 categories / 147 links, in empty
+cwd with cleared environment, absent config and no owner API. No earlier source
+success replaces the submitted tree's prepush recheck. Build contention was
+observed while other task builds ran; it is not a runtime performance result.
