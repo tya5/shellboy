@@ -25,7 +25,7 @@ pub(crate) struct CaptureTarget<'a> {
     // Only the original request's explicit selection, never a viewer/provenance.
     pub(crate) selecting_thread: Option<&'a str>,
     pub(crate) source_revision: Option<u64>,
-    pub(crate) source_hash: Option<[u8;32]>,
+    pub(crate) source_hash: Option<&'a str>,
     pub(crate) raw: Option<&'a CapturedRawFacts>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +34,7 @@ pub(crate) struct ExactTarget {
     pub(crate) id: Arc<str>,
     pub(crate) selecting_thread: Option<Arc<str>>,
     pub(crate) source_revision: Option<u64>,
-    pub(crate) source_hash: Option<[u8;32]>,
+    pub(crate) source_hash: Option<Arc<str>>,
     pub(crate) raw: Option<CapturedRawFacts>,
 }
 #[derive(Clone, Debug)]
@@ -62,14 +62,15 @@ pub(crate) fn capture_retained_scope(input: CaptureInput<'_>) -> Result<Retained
     let mut unobserved_targets = input.targets.len().saturating_sub(MAX_TARGETS);
     for t in input.targets.iter().take(MAX_TARGETS) {
         let raw_bytes = t.raw.map(|r| r.encoding.len()+r.lifecycle.len()).unwrap_or(0);
-        let bytes = t.id.len()+t.selecting_thread.map(str::len).unwrap_or(0)+raw_bytes+32;
+        let bytes = t.id.len()+t.selecting_thread.map(str::len).unwrap_or(0)+raw_bytes+t.source_hash.map(str::len).unwrap_or(0);
         if !id_ok(t.id) || t.selecting_thread.is_some_and(|s|!id_ok(s))
+            || t.source_hash.is_some_and(|h|h.len()>128)
             || t.raw.is_some_and(|r|r.encoding.len()>128 || r.lifecycle.len()>32)
             || metadata_bytes.checked_add(bytes).is_none_or(|n|n>MAX_METADATA_BYTES)
         { unobserved_targets += 1; continue; }
         metadata_bytes += bytes;
         targets.push(ExactTarget { kind:t.kind,id:Arc::from(t.id),selecting_thread:t.selecting_thread.map(Arc::from),
-            source_revision:t.source_revision,source_hash:t.source_hash,raw:t.raw.cloned() });
+            source_revision:t.source_revision,source_hash:t.source_hash.map(Arc::from),raw:t.raw.cloned() });
     }
     Ok(RetainedScope { result_identity:Arc::from(input.result_identity),route:input.route,
 targets,unobserved_targets,metadata_bytes })
@@ -96,7 +97,7 @@ pub(crate) struct CurrentTargetFacts {
     pub(crate) presence: Presence,
     pub(crate) selection: Selection,
     pub(crate) source_revision: Option<u64>,
-    pub(crate) source_hash: Option<[u8;32]>,
+    pub(crate) source_hash: Option<Arc<str>>,
     pub(crate) body_retained: Option<bool>,
     pub(crate) lifecycle: Option<Arc<str>>,
     pub(crate) raw: Option<CurrentRawFacts>,
@@ -135,7 +136,7 @@ pub(crate) fn prepare_retained_facts(
         let Some(original)=scope.targets.get(f.target_index) else { continue; };
         if seen[f.target_index] { prepared[f.target_index]=unknown_target();continue; }
         seen[f.target_index]=true;
-        let changed_hash=original.source_hash.zip(f.source_hash).map(|(a,b)|a!=b);
+        let changed_hash=original.source_hash.as_ref().zip(f.source_hash.as_ref()).map(|(a,b)|a!=b);
         let changed_revision=original.source_revision.zip(f.source_revision).map(|(a,b)|a!=b);
         let mut p=PreparedTarget { presence:f.presence,
             selection:if original.selecting_thread.is_some(){f.selection}else{Selection::Unknown},
@@ -162,10 +163,10 @@ mod tests {
         capture_retained_scope(CaptureInput { result_identity:"original",route,targets }).unwrap()
     }
     fn target<'a>(id:&'a str,thread:Option<&'a str>)->CaptureTarget<'a> {
-        CaptureTarget { kind:TargetKind::Node,id,selecting_thread:thread,source_revision:Some(1),source_hash:Some([1;32]),raw:None }
+        CaptureTarget { kind:TargetKind::Node,id,selecting_thread:thread,source_revision:Some(1),source_hash:Some("captured opaque hash"),raw:None }
     }
     fn fact(presence:Presence)->CurrentTargetFacts {
-        CurrentTargetFacts { target_index:0,presence,selection:Selection::NotSelected,source_revision:Some(2),source_hash:Some([2;32]),body_retained:Some(false),lifecycle:None,raw:None }
+        CurrentTargetFacts { target_index:0,presence,selection:Selection::NotSelected,source_revision:Some(2),source_hash:Some(Arc::from("current opaque hash")),body_retained:Some(false),lifecycle:None,raw:None }
     }
     #[test]
     fn all_routes_preserve_original_data_while_current_selection_and_sources_change() {
@@ -313,5 +314,41 @@ mod adapter_contract_tests {
         assert_eq!(rows,vec![(0,true,Some("completed".into())),(1,true,Some("running".into())),(2,false,None)]);
         let plan=db.prepare(&format!("EXPLAIN QUERY PLAN {LIFECYCLE_SQL}")).unwrap().query_map([&requests],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap().join("\n");
         assert!(plan.contains("sqlite_autoindex_run_1"),"{plan}");assert!(plan.contains("sqlite_autoindex_turn_1"),"{plan}");
+    }
+}
+
+#[cfg(test)]
+mod comparison_limit_tests {
+    use super::*;
+    fn scope()->RetainedScope {
+        capture_retained_scope(CaptureInput{result_identity:"r",route:RetainedRoute::CompletedWait,
+            targets:&[CaptureTarget{kind:TargetKind::Run,id:"run",selecting_thread:None,source_revision:None,source_hash:None,raw:None}]}).unwrap()
+    }
+    fn current(index:usize,presence:Presence)->CurrentTargetFacts {
+        CurrentTargetFacts{target_index:index,presence,selection:Selection::Unknown,source_revision:None,source_hash:None,body_retained:None,lifecycle:Some(Arc::from("completed")),raw:None}
+    }
+    #[test]
+    fn completed_wait_current_lifecycle_does_not_replace_captured_identity() {
+        let captured=scope();let p=prepare_retained_facts(&captured,"r",Some(&[current(0,Presence::Present)])).unwrap();
+        assert_eq!(p[0].current_lifecycle.as_deref(),Some("completed"));assert_eq!(captured.result_identity.as_ref(),"r");
+    }
+    #[test]
+    fn duplicate_rows_are_unknown_not_last_writer_wins() {
+        let captured=scope();let p=prepare_retained_facts(&captured,"r",Some(&[current(0,Presence::Missing),current(0,Presence::Present)])).unwrap();
+        assert_eq!(p[0].presence,Presence::Unknown);assert_eq!(p[0].current_lifecycle,None);
+    }
+    #[test]
+    fn out_of_scope_target_cannot_fill_missing_witness() {
+        let captured=scope();let p=prepare_retained_facts(&captured,"r",Some(&[current(1,Presence::Present)])).unwrap();
+        assert_eq!(p[0].presence,Presence::Unknown);
+    }
+    #[test]
+    fn expansion_over_200_current_facts_is_unknown_not_false_empty() {
+        let captured=scope();let rows=(0..201).map(|_|current(0,Presence::Missing)).collect::<Vec<_>>();
+        let p=prepare_retained_facts(&captured,"r",Some(&rows)).unwrap();assert_eq!(p[0].presence,Presence::Unknown);
+    }
+    #[test]
+    fn explicit_repeat_must_have_its_own_retained_result_identity() {
+        assert!(prepare_retained_facts(&scope(),"repeat",Some(&[current(0,Presence::Present)])).is_none());
     }
 }
