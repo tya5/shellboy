@@ -7,7 +7,6 @@ use timing::PhaseClock;
 pub use timing::SavedTiming;
 
 mod wait;
-pub(super) use wait::label as context_wait_label;
 pub use crate::activity::ActivityPhase;
 /// Stable footer vocabulary for the later #35 translation layer.
 #[derive(Clone, Copy, Debug)]
@@ -39,6 +38,7 @@ impl FooterText {
     }
 }
 
+pub(super) use wait::label as context_wait_label;
 impl ActivityPhase {
     pub fn is_active(self) -> bool {
         self.motion() != Motion::Still

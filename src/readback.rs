@@ -3,11 +3,11 @@ use crate::protocol::{ApiError, CompactListArgs, ErrorCode, ShellListArgs};
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 mod compact;
+mod run_wait;
 mod shell;
 mod time;
-mod run_wait;
-pub(crate) use run_wait::read as run_wait_reason;
 pub(crate) use compact::list as compactions;
+pub(crate) use run_wait::read as run_wait_reason;
 pub(crate) use shell::list as shells;
 pub(crate) use time::Window;
 fn invalid(message: &str) -> ApiError {

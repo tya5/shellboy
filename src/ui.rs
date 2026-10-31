@@ -6440,6 +6440,7 @@ mod layout_cache_tests {
         let snapshot = ActivitySnapshot {
             timing: Default::default(),
             tool_running: false,
+            waiting_reason: None,
             live_work: None,
             revisit: None,
             context_reduction: None,

@@ -55,6 +55,15 @@ async fn proxy() -> (
     mpsc::Receiver<Incoming>,
     tokio::task::JoinHandle<()>,
 ) {
+    proxy_with_sse(false).await
+}
+async fn proxy_with_sse(
+    sse: bool,
+) -> (
+    String,
+    mpsc::Receiver<Incoming>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (send, receive) = mpsc::channel(8);
@@ -109,8 +118,18 @@ async fn proxy() -> (
                 let Ok((status, body)) = result.await else {
                     return;
                 };
-                let body = body.to_string();
-                let _=stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await;
+                let (content_type, body) = if sse && status == 200 {
+                    (
+                        "text/event-stream",
+                        format!(
+                            "data: {}\n\n",
+                            json!({"type":"response.completed","response":body})
+                        ),
+                    )
+                } else {
+                    ("application/json", body.to_string())
+                };
+                let _=stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await;
             });
         }
     });
@@ -3271,11 +3290,11 @@ async fn headless_native_startup_snapshot_and_database_close_kills_keep_committe
 }
 
 #[cfg(unix)]
-#[tokio::test(flavor="multi_thread",worker_threads=2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background_completion() {
     crate::test_watchdog::watchdog("summary boundary observation",async {
         let root=tempfile::tempdir().unwrap();let (url,mut receive,server)=proxy_with_sse(true).await;
-        let owner=owner(root.path(),&url).await;let control=Control::start(owner.store.clone(),owner.shell.clone());
+        let owner=owner(root.path(),&url).await;let control=Control::new(&owner,root.path().into());
         let thread=thread(&control).await;
         for n in 0..2 {send(&control,&thread,&format!("older-{n} {}","x".repeat(4000))).await;incoming(&control,&mut receive).await.reply.send((200,answer("older answer"))).unwrap();settled(&control,&thread).await;}
         send(&control,&thread,"foreground and background gate").await;
@@ -3319,6 +3338,6 @@ async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background
         assert!(resumed_run.get("waiting_reason").is_none());
         assert!(resumed.body.to_string().contains("shell_ended"),"saved shell completions enter the next request boundary");
         resumed.reply.send((200,answer("resumed after summary"))).unwrap();settled(&control,&thread).await;
-        control.shutdown().await;owner.shutdown().await.unwrap();server.abort();
+        control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
     }).await.unwrap();
 }

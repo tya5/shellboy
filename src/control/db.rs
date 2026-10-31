@@ -2044,7 +2044,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
         });
     Ok(RunDetails {
         usage_totals: None,
-        waiting_reason: crate::readback::run_wait_reason(connection,&row.0,id)?,
+        waiting_reason: crate::readback::run_wait_reason(connection, &row.0, id)?,
         revisit: super::revisit::summary(connection, id)?,
         context: crate::context::for_run(connection, id)?,
         run_id: id.into(),

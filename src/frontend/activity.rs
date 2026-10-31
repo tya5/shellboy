@@ -165,7 +165,8 @@ pub(super) fn read_tx_with_waits(
     };
     let mut raw = RawProjection {
         run: None,
-        waiting_reason: crate::readback::run_wait_reason(db,thread,run_id).map_err(crate::storage::StorageError::from)?,
+        waiting_reason: crate::readback::run_wait_reason(db, thread, run_id)
+            .map_err(crate::storage::StorageError::from)?,
         turn: None,
         attempt: None,
         revisit,
