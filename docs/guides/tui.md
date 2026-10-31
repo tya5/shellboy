@@ -356,7 +356,43 @@ Ordinary shell results separate stdout/stderr blocks only when verified from ret
 
 F6 returns to the item list; Esc closes details without changing draft or original reading anchor. Reclaimed source shows a reason rather than an empty successful body.
 
-Open links using standard terminal controls; modifiers, tmux, and mouse capture follow terminal settings. While TUI mouse capture is active, WezTerm normally bypasses it with Shift+click ([`bypass_mouse_reporting_modifiers`](https://wezterm.org/config/lua/config/bypass_mouse_reporting_modifiers.html) default); a user confirmed this on macOS. Other terminals or customized bindings may differ. If capture interferes, use F2 terminal selection or copy the full URL from F7. Shellboy does not claim to verify browser launch success.
+### Open URLs and file paths with your terminal
+
+Opening a URL or a `file://` file/folder path in displayed text is a **terminal
+feature**, not a Shellboy action. In WezTerm, use Shift+click: Shellboy captures
+mouse events, and Shift normally bypasses application mouse reporting
+([`bypass_mouse_reporting_modifiers`](https://wezterm.org/config/lua/config/bypass_mouse_reporting_modifiers.html)).
+WezTerm's default hyperlink rules recognize `file://` URLs. In iTerm2, use
+Cmd+click; custom bindings and multiplexers such as tmux can change the gesture.
+The terminal and OS decide which application opens the target and how it opens.
+Shellboy does not check whether a path exists or launch a browser, editor or
+file manager.
+
+For bare paths without `file://`, add a suitable terminal rule. For example,
+this minimal WezTerm Lua configuration keeps the default URL rules and adds
+simple ASCII absolute POSIX paths such as `/tmp/report.md`:
+
+```lua
+local wezterm = require 'wezterm'
+local config = wezterm.config_builder()
+config.hyperlink_rules = wezterm.default_hyperlink_rules()
+table.insert(config.hyperlink_rules, {
+  regex = [[(?:^|[\s(])(/[A-Za-z0-9_./-]+)(?:$|[\s)])]],
+  format = 'file://$1',
+})
+return config
+```
+
+Merge the rule into your existing configuration rather than replacing unrelated
+settings. Paths with spaces, non-ASCII names, relative paths or Windows drive
+paths need a complete `file://` URL or a rule adapted to their form. See
+WezTerm's [`hyperlink_rules`](https://wezterm.org/config/lua/config/hyperlink_rules.html)
+for terminal-side customization. These rules do not validate paths.
+
+If mouse capture interferes, use F2 terminal selection to copy displayed text;
+F7 can copy full HTTP(S) URLs, but its link list does not include file paths.
+Terminal settings and OS behavior still apply; Shellboy does not verify opening
+success.
 
 ### Recovery wait
 

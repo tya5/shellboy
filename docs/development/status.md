@@ -2584,3 +2584,11 @@ the passing membership regression with a visual fix. The
 records both outcomes. Exact-source3OS and main push follow; no release/install.
 After F, start G on then-current main without waiting for #87 (6543753689);
 later side reconciles overlap, and G P6 time is observation only.
+
+## Terminal-owned URL and file opening (#103)
+
+The TUI guide and both User Guides explain terminal link gestures, default
+WezTerm file URLs and optional bare-path rules. The Agent Guide asks for absolute
+file URLs only when asking a user to open a file/folder. No path detector,
+existence check, launcher or product setting is added; source/bundle validation
+limits and the user's terminal observation are separated in acceptance.

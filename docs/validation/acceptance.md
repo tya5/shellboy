@@ -5518,3 +5518,24 @@ the old CI lacks the full admission/tick trace needed to prove its exact past
 interleaving or exclude all other contributors. Standard/doc checks and final
 SHA are reported in #95. Native Windows/Linux validation on this new source is
 still an integration gate, not inferred from local success or old split runs.
+
+## #103 terminal-owned link guidance (documentation only)
+
+Source: issue #103 decision comment6543709978 and the user's WezTerm/macOS
+observation in comment6543687265 on main afe4c08. The user opened a displayed
+file URL with Shift+click under the terminal's default rules. This is not an
+agent-run physical-terminal test of the new guide or a universal OS guarantee.
+The short optional ASCII absolute-POSIX-path example follows WezTerm's current
+hyperlink_rules documentation (default_hyperlink_rules and capture format $1);
+it is not a Shellboy path detector and was not installed into a real config.
+
+On native macOS, Python document-role1 and README2 tests pass; both updated User
+Guide links resolve to the new source TUI section. check-docs.py against the
+existing installed executable passes33 CLI checks/13 guides/147 bundled links
+with empty cwd, cleared environment, absent config and no owner/API or state
+creation. This checks that executable's pre-existing catalogue, NOT embedding
+of the edited Markdown. The edited bodies and new bundled link must be qualified
+by the next combined exact-source CI; no Rust build/test ran locally. Neither
+installed-binary bytes nor user configuration/data/OS clipboard were changed.
+The Japanese User Guide matches the English guidance. The optional bare-path
+rule, customized terminal bindings and physical iTerm2 behavior remain untested.
