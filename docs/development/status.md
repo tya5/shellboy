@@ -8,6 +8,14 @@ all checks, and manual dispatch always runs native checks. The reviewer approved
 reuse only; Windows retains the original single job/four test threads. Rejected
 split experiments and #95 failures are retained in acceptance. Native unsplit
 qualification and live main-push reuse remain pending on the reuse-only source.
+## Terminal-free owner startup (#5 stage 2)
+
+serve now requires an explicit data directory and reuses owner_session without
+a terminal or TUI. Readiness is one flushed stdout JSON row after binding IPC
+and starting its dispatcher; startup failures use stderr. EOF is not a stop.
+Process tests cover inherited owner variables, CLI availability, duplicate locks
+and output isolation. Shutdown/signals and parent/process crash checks remain
+stages 3/4; Core review and exact-source integration are tracked in #5.
 
 ## Shared owner bootstrap (#5 stage 1)
 
