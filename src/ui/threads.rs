@@ -554,6 +554,7 @@ impl ThreadBrowser {
             missing_ids,
             limited_titles,
             excerpt,
+            watch_summaries: _,
         } = patch;
         if generation != self.generation
             || self
@@ -2744,6 +2745,7 @@ mod patch_tests {
             missing_ids: missing.iter().map(|id| (*id).into()).collect(),
             limited_titles: vec![],
             excerpt: None,
+            watch_summaries: vec![],
         }
     }
     fn initial(items: Vec<ThreadSummary>) -> ThreadBrowser {

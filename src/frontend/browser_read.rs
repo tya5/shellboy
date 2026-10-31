@@ -5,6 +5,7 @@ use crate::{
     storage::StorageError,
 };
 use rusqlite::Connection;
+#[cfg(test)]
 use std::collections::HashSet;
 
 pub(super) struct RawPatch {
@@ -18,6 +19,7 @@ pub(super) struct PreparedPatch {
     pub missing_ids: Vec<String>,
     pub limited_title_ids: Vec<String>,
     pub selected_excerpt: Option<(String, Result<String, String>)>,
+    pub watch_summaries: Vec<crate::ui::watch::WatchSummary>,
 }
 struct RawExcerpt {
     thread: String,
@@ -40,6 +42,7 @@ SELECT CASE WHEN bytes<=16384 AND used<=16384 THEN (SELECT payload_json FROM nod
        bytes IS NOT NULL AND (bytes>16384 OR used>16384),(SELECT count(*) FROM prefix)>128
 FROM selected LEFT JOIN budgeted ON 1 ORDER BY ordinal DESC";
 
+#[cfg(test)]
 pub(super) fn read_tx(
     db: &Connection,
     ids: &[String],
@@ -73,6 +76,34 @@ pub(super) fn read_tx(
         titles,
         missing_ids,
         selected_excerpt,
+    })
+}
+impl RawPatch {
+    pub(super) fn rows(&self) -> &[thread_summary::RawSummary] {
+        &self.rows
+    }
+    pub(super) fn title_ids(&self) -> std::collections::BTreeSet<String> {
+        self.rows.iter().map(|row| row.thread_id.clone()).collect()
+    }
+}
+pub(super) fn read_shared_tx(
+    db: &Connection,
+    rows: Vec<thread_summary::RawSummary>,
+    missing_ids: Vec<String>,
+    selected: Option<&str>,
+) -> Result<RawPatch, StorageError> {
+    if rows.len() > 128 {
+        return Err(ApiError::new(ErrorCode::InputLimit, "Browser patch exceeds128 rows").into());
+    }
+    let requests = rows
+        .iter()
+        .map(|row| (row.thread_id.clone(), row.stored_title.clone()))
+        .collect::<Vec<_>>();
+    Ok(RawPatch {
+        rows,
+        titles: super::header::read_titles_tx(db, &requests)?,
+        missing_ids,
+        selected_excerpt: selected.map(|id| read_excerpt(db, id)).transpose()?,
     })
 }
 fn read_excerpt(db: &Connection, id: &str) -> Result<RawExcerpt, StorageError> {
@@ -124,8 +155,13 @@ fn prepare_excerpt(raw: RawExcerpt) -> (String, Result<String, String>) {
     };
     (raw.thread, value)
 }
+#[cfg(test)]
 pub(super) fn prepare(raw: RawPatch) -> PreparedPatch {
+    prepare_with_watch(raw, false)
+}
+pub(super) fn prepare_with_watch(raw: RawPatch, include_watch: bool) -> PreparedPatch {
     let (mut titles, limited_title_ids) = raw.titles.prepare();
+    let mut watch_summaries = Vec::new();
     let rows = raw
         .rows
         .into_iter()
@@ -133,7 +169,15 @@ pub(super) fn prepare(raw: RawPatch) -> PreparedPatch {
             let title = titles
                 .remove(&row.thread_id)
                 .expect("saved summary title witness");
-            thread_summary::prepare(row, title, String::new())
+            let identity = (row.identity.run_id.clone(), row.identity.answer_id.clone());
+            let prepared = thread_summary::prepare(row, title, String::new());
+            if include_watch {
+                watch_summaries.push(
+                    crate::ui::watch::WatchSummary::prepare(&prepared)
+                        .with_identity(identity.0, identity.1),
+                );
+            }
+            prepared
         })
         .collect();
     PreparedPatch {
@@ -141,6 +185,7 @@ pub(super) fn prepare(raw: RawPatch) -> PreparedPatch {
         missing_ids: raw.missing_ids,
         limited_title_ids,
         selected_excerpt: raw.selected_excerpt.map(prepare_excerpt),
+        watch_summaries,
     }
 }
 

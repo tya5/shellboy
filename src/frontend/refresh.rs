@@ -186,16 +186,16 @@ pub(super) async fn run(
         };
         let target=thread.clone();
         let waits=control.pending_wait_sources();
-        let browser_scope=browser.as_ref().map(|ticket|(ticket.ids.clone(),ticket.selected.clone(),ticket.stop.clone()));
+        let browser_scope=browser.clone();
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             let receipts=receipt_states_tx(db,&ids)?;
             // Keep typed per-surface errors until the display mapper can distinguish
             // retryable WAL contention from a true storage failure.
             let visible=read_visible_tx(db,&target,tool_scope,waits.as_deref(),sequence);
-            let browser=browser_scope.map(|(ids,selected,stop)|{
-                if stop.is_cancelled() {return Err(StorageError::from(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")));}
-                super::browser_read::read_tx(db,&ids,selected.as_deref())
+            let browser=browser_scope.map(|ticket|{
+                if ticket.stop.is_cancelled() {return Err(StorageError::from(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")));}
+                super::browser::read_tx(db,&ticket,None)
             });
             Ok((receipts,visible,browser))
         }).await;
@@ -540,7 +540,7 @@ mod tests {
         while let Ok(result) = results.try_recv() {
             match result {
                 BackgroundResult::BrowserPatch { result, .. } => {
-                    browser_sequence = Some(result.unwrap().read_sequence)
+                    browser_sequence = Some(result.unwrap().patch.unwrap().read_sequence)
                 }
                 BackgroundResult::Refreshed {
                     receipts, progress, ..

@@ -286,7 +286,7 @@ enum BackgroundResult {
     },
     BrowserPatch {
         ticket: browser::Ticket,
-        result: Result<crate::ui::thread_patch::BrowserPatch, ApiError>,
+        result: Result<browser::Observation, ApiError>,
     },
     ThreadDeletion {
         request_id: u64,
@@ -2762,7 +2762,10 @@ async fn run_with_delivery(
                 Some(BackgroundResult::BrowserPatch {ticket,result})=>{
                     if browser.complete(&ticket) {
                         match result {
-                            Ok(patch)=>update(&updates,UiUpdate::BrowserPatch {patch:Box::new(patch)}).await,
+                            Ok(observation)=>{
+                                if let Some(details)=&observation.details { browser.accept_details(&ticket,&details.details); }
+                                if let Some(patch)=observation.patch { browser.adopt_patch(ticket.generation,patch.read_sequence,&patch.rows,None); update(&updates,UiUpdate::BrowserPatch {patch:Box::new(patch)}).await; }
+                            },
                             Err(error)=>update(&updates,UiUpdate::BrowserPatchFailed {generation:ticket.generation,error:error.to_string()}).await,
                         }
                     }

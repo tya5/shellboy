@@ -708,3 +708,18 @@ Lineage query diagnostics add one fixed numeric/boolean aggregate only when
 the measured read takes at least50ms, through the existing bounded diagnostic
 writer. No titles, query bodies or per-descendant records are logged; no new
 queue or worker is added. This event is observational, not a lifecycle event.
+
+
+### F browser integration boundary
+
+Extend the existing browser observer with explicit List/Watch mode, visible
+detail IDs/parent dependencies and bounded cached lineage. Existing List reads
+stay readonly and retain E's progress admission, sequenced snapshots and the
+same-deadline priority rule. List does not prepare hidden Watch summaries.
+In Watch mode, summary/title/detail witnesses from this transaction are reused
+before releasing it, then projected on the finite presentation worker. A detail
+scope replacement cancels old detail tickets independently of the browser page.
+One observer retains one flight/500ms and its start deadline across hiding or
+replacement. Output hints only compare already-visible shell markers, not poll
+new rows. Runtime Watch exposure waits for actual UI consumption and actions;
+backend primitives alone do not claim a usable screen.

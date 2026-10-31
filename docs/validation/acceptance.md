@@ -4416,3 +4416,32 @@ fields; ordinary non-test builds may identify more. No suppression/full standard
 strict Clippy success is claimed. P2/P4/P5, Watch actions and three-OS native UI
 qualification remain open. E main admission still needs separate approval; no
 main push, installed-binary change, default data, paid API or release.
+
+
+## F browser backend integration over E
+
+The existing List observer now owns explicit mode/detail/parent/saved-lineage
+scopes for future Watch consumers. Exact-ID summary/title/detail batches reuse
+same-transaction evidence; detail cancellation is separate from page scope.
+The output-hint helper tracks only already-visible shell owners. Existing List
+runtime keeps E's readonly canonical page helper, progress admission, sequenced
+shared current-view snapshot and same-deadline priority rule. List skips Watch
+summary/detail projection. No UI-thread I/O or new worker/queue is added.
+
+Native macOS checks: browser/read helpers19/0/0 (1019 filtered); shared refresh
+5/0/0 (1033 filtered); actual frontend_reactivity6/0/0 (933 filtered), including
+16 actual CLI title mutations sharing CurrentView/BrowserPatch sequence with no
+page reload, unloaded create/delete, queue/recovery/Run stop and F6/F7 GC paths.
+The integration result precedes only the test-only virtual-clock cleanup; product
+logic is unchanged by that cleanup. Two imported synthetic deadline tests now
+advance paused Tokio time, with no real-time wait/allowance. Formatter, layout93
+and watchdog policy pass. No new performance/three-OS qualification is claimed.
+
+The current UI still produces only List observations: Watch summaries/details
+are not exposed to users by this commit. The prepared internal detail DTO still
+needs actual Watch UI delivery/sequence adoption through the forthcoming shared
+browser/count broker. Descendant observer/current-view admission, Watch overlay/
+actions, cancellation/contention tests and F performance/visual gates remain
+pending. Dead-code warnings for these unwired components remain unsuppressed;
+this is not full standard/strict Clippy success or F admission. No main push,
+installed-binary/default-data change, release or paid API.

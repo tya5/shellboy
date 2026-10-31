@@ -554,3 +554,10 @@ actual Watch frontend admission/cancellation, shared current/List-or-Watch/count
 P3, retained UI cache accounting and F's native visual/performance gates remain
 pending. The canonical page's SQLite sort work is not claimed to be capped by
 its4096 retained metadata rows. Do not mark F complete from component tests.
+
+
+F4 backend integration now preserves the actual E/List runtime:19 browser/read
+cases and5 shared-refresh cases pass;6 real CLI/reactivity cases retain the
+strict16 paired observations with no reload. List has no Watch summary/detail
+projection. Full F4 is still pending the browser/count broker and actual Watch
+UI consumers; helper tests do not establish combined F P3 or long-window P2/P5.
