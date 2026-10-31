@@ -46,7 +46,7 @@ when updating main; do not import the archived combined F/G development branch.
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | D2 shipped in main per6539106715; cross-increment P2/P3/P5 measurements remain tracked with E/F, not a new D admission or transferred display work |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Admitted to main d0a92bf after exact-SHA ordinary3OS CI41181650657, approval6540583854 and accepted qualified producer3/P3 evidence. |
-| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Local runtime9d3494f; standard1981/0/35. Remaining guides/native/performance/CI gates below; not main-admitted |
+| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Published4b61c0f: native standard2026/0/35, Watch8 conditions, P3 six cases; Exact-source3OS CI41193738579 verified; long measurements running. Separate main review/admission pending. |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
 
 Each increment must be usable independently. A requirement that crosses these
@@ -216,7 +216,7 @@ and rebased candidate. Qualification gaps remain unchecked below.
 - [ ] P2 D/F: silent background shell10min, <=1 redraw/sec,0 DB jobs/tick, CPU no worse.
 - [ ] P3 Each applicable increment: visible Changed jobs and DB-worker time with
   list/watch/descendant consumers enabled, showing combined/coalesced work.
-- [ ] P4 F:256 descendants/depth8 one-query p95<=50ms plus bounded slow-only logging.
+- [x] P4 F: native macOS256 descendants/depth8 one-query p95<=50ms plus bounded slow-only logging; source-qualified evidence and unchanged query/observer blobs below.
 - [ ] P5 D/E/F: hidden output40 batches/sec ->0 visible redraws/0 output-driven DB jobs.
 - [ ] P6 G:64KiB original,60 wheel events/sec ->frames<=max_fps and p95<=8ms/+2ms.
 - [x] P7 B+C:128x16KiB expanded previews counted within cache.body_bytes, including
@@ -641,3 +641,28 @@ artifacts, resolve strict P2 CPU/bin interpretation with review, retain newer
 main/admission fixes such as #95, and obtain separate F main approval. Historical
 "open" paragraphs above retain their own observation dates and are not used to
 claim these later gates never ran. F/G main order and transferred scope remain.
+
+
+## F source-gate partial artifact audit41193738579
+
+Downloaded Linux/macOS artifacts both identify exact4b61c0f and no failures:
+Linux2,027/0/34, macOS2,026/0/35. Seven required actual success lines are
+checked on each: two Watch render regressions, three cancellation checks,
+paired-snapshot and scoped-Watch CLI lifecycle. Windows and long performance
+remain running; do not infer their success from these two artifacts.
+
+P4's native50ms gate is measured at742d523/code-equivalent67cc688: depth8
+p95=4.078ms,256 descendants,one statement. Query and observer source blobs are
+unchanged through4b61c0f: lineage b516b4973c55ee61a08ebe7d7c2bcc5e85078a5a,
+lineage_observer4fa08975a31b0b6800717549bb6dfadf7fb98a48. The completed P4
+checkbox is scoped to this native query/slow-log evidence, not a new timing
+measurement of the whole later UI or other OSes. F main admission remains open.
+
+
+## F source4b61c0f full ordinary CI gate41193738579
+
+All3 OS jobs now succeed. Downloaded artifacts identify4b61c0f, failures0 and
+all7 targeted regression success lines on every OS: Linux2,027/0/34,
+macOS2,026/0/35, Windows1,895/0/26. This closes the candidate ordinary source
+CI gate, not long P2/P5, later-main reconciliation or reviewer main approval.
+G remains after F's separately approved main admission.

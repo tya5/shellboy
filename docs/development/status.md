@@ -2370,3 +2370,23 @@ See the F qualification record for source/binary witnesses and measurements.
 Exact-source3OS CI41193738579 and fresh long P2/P5 comparison41193740385 are
 running. F main is not authorized yet; G and transferred UI issues remain out
 of this candidate. Adopt #95's reviewed guard when its integration reaches main.
+
+
+## F source4b61c0f Linux/macOS artifact audit
+
+Ordinary CI41193738579 Linux/macOS succeeds. Downloaded exact-source logs
+verify2,027/0/34 and2,026/0/35 respectively, including all7 targeted regressions.
+Windows tests and long P2/P5 CI41193740385 remain live. Current F ledger now
+reflects the published source and native evidence rather than its old prototype
+checkpoint. Native P4 query/observer blobs match the measured source; its native
+checkbox is now checked with explicit scope. No F/G main admission occurred.
+
+
+## F source4b61c0f ordinary3OS gate complete
+
+CI41193738579 now succeeds on all3 OSes. Artifacts verify exact-source
+Linux2,027/0/34, macOS2,026/0/35 and Windows1,895/0/26, including all7 targeted
+regression lines per OS. Long P2/P5 remains live; no F main approval/admission.
+Ignored private G preflight records current CLI/catalogue/migration differences
+and backs up both existing archive layers without changing the root index/tree.
+G extraction/admission remains ordered after F.

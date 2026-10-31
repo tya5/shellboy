@@ -244,3 +244,11 @@ remains unavailable. F main still requires reviewer approval after gates; #95's
 approved admission guard is owned by its integration thread and must be retained
 when its main change is incorporated. No main admission, release, installed
 binary, paid request, user-store or clipboard change is implied.
+
+
+Ordinary candidate CI41193738579 completes all3 OSes successfully at4b61c0f.
+Downloaded source_sha, zero failures and all7 target regression lines are
+verified: Linux2,027/0/34, macOS2,026/0/35, Windows1,895/0/26. These include
+both new Watch render, all three cancellation, paired snapshot and actual
+scoped-Watch CLI tests. Long comparison41193740385 remains live; F main still
+requires its separate review and later-main ancestry reconciliation.
