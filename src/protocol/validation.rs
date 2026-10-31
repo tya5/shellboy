@@ -56,6 +56,7 @@ impl ContextEditArgs {
             if !(crate::config::Compaction {
                 summary_max_chars: self.max_chars,
                 summary_max_percent: self.max_percent,
+                ..Default::default()
             })
             .valid()
             {

@@ -9,7 +9,7 @@ impl Config {
         if !self.compaction.valid() {
             return Err(invalid(
                 "compaction",
-                "set a positive summary_max_chars and/or finite summary_max_percent in (0,100]",
+                "set positive summary_max_chars and/or finite summary_max_percent in (0,100], and summary map/reduce request limits in 1..=4096",
             ));
         }
         self.retention.validate_positive()?;

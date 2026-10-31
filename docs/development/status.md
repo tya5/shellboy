@@ -1,5 +1,13 @@
 # Development status
 
+## #73 review fixes / D-017
+
+Map cache identity is independent of output limits and retains the pre-#73 key.
+Independent configured map/reduce budgets default to 128/16, with uncached-map
+preflight before HTTP. All summary paths, including automatic stage 2, share
+reduce/size rejection and existing recovery behavior. Omission commands honor
+user settings. Local checks pass; exact-source native CI is tracked in issue #73.
+
 ## #73 bounded explicit summaries
 
 Range summaries now consolidate chronological parts into one bounded text,

@@ -3494,3 +3494,39 @@ layout93, Python9, fmt and strict all-target Clippy. Rebase and ordinary native
 main CI remain separate gates. Record audit against starting main7393ccb:
 status1298->1310, acceptance3464->3496; both original byte prefixes
 are preserved, with zero deleted lines in either historical record.
+
+## #73 review corrections / D-017
+
+2026-10-31, native macOS 26.3.1 arm64 / Rust 1.99.1. Full standard check
+`sh scripts/check.sh` succeeds: **1,755 passed / 0 failed / 32 ignored**,
+layout 93, Python 9, format and strict Clippy. All summarizers in these tests are
+loopback mocks; no real provider, installed binary, owner or real data is changed.
+
+- Stable pre-#73 map prompt/key/raw validation are reused. Raising output limits
+  after an over-limit attempt reuses its map cache: log remains 5 lines and the
+  next result reports zero model requests. Reduce policy identity remains separate.
+- Map/reduce request defaults are 128/16 and independently configurable (1..4096).
+  Preflight with 3 segments / 1 cached / 2 uncached and map limit 1 refuses with
+  counts and guidance, original path and zero requests/log lines. After another
+  legacy-key cache seed, 2 cached parts plus 1 new map and 1 reduce succeed:
+  log 0->2. Cached maps do not consume map budget. A 65-part range succeeds
+  under defaults with log 0->66 rather than failing after paying 64 requests.
+- A one-map/one-reduce budget stops at log 0->2 independently. Context-limit split
+  attempts consume runtime map budget; unknown provider capacity cannot be
+  predicted by preflight. Four reduce rounds remain a separate convergence bound.
+- Automatic stage 2 uses identical size/reduce limits. A real temporary owner and
+  loopback proxy show a 2,001-character map/reduce response rejected at limit
+  2,000: two summary request-log lines, zero summary nodes, recovery_wait and
+  exactly two conversation attempts (no unchanged resend). No new table/worker.
+- The omission notice drops hardcoded size flags and preserves conditional #71
+  semantic guidance. Config check exposes both request budgets; validation rejects
+  zero/negative/noninteger/excessive values. A request-budget-only section retains
+  D-015 output defaults; specifying a single output limit keeps its old meaning.
+
+New tests use 60-second watchdogs, not elapsed-time pass thresholds. Initial
+checks correctly rejected old tiny-source success fixtures under the newly shared
+nonshrinking rule; those fixtures now use longer synthetic originals or shorter
+mock summaries. Their raw/refusal/provenance/tool-once assertions remain. The
+existing automatic overflow success cases and new rejection case all pass.
+Exact-source three-OS CI is recorded separately in issue #73. Real-provider
+quality and billing remain unverified.

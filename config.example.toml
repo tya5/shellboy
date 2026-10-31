@@ -63,3 +63,5 @@ auto_history = true
 # [compaction]
 # summary_max_chars = 20000
 # summary_max_percent = 5
+# summary_map_max_requests = 128 # 1..4096; cached parts do not consume requests
+# summary_reduce_max_requests = 16 # 1..4096
