@@ -70,9 +70,8 @@ footerは既存の1行・同じpulseと中立的な活動色を使い、保存�
 
 ## Footer fact correction (#85)
 
-The #85/#86/#90 memo is implemented incrementally, with user permission to start
-before F/G admission. Keep the saved shared activity classifier and all Core
-states/protocol unchanged. A single UI composition gives current tools precedence
+Keep the saved shared activity classifier and all Core states/protocol unchanged.
+A single UI composition gives current tools precedence
 over the current attempt while retaining the attempt as a secondary phase.
 Matching transport receive observations (headers/body liveness, not generated
 assistant content) end the response-wait label, including receive-before-snapshot.
@@ -114,8 +113,8 @@ viewer offset captured on the presentation worker; same local date shows HH:MM,
 other dates show YYYY-MM-DD HH:MM. Missing/invalid facts explicitly say unknown.
 Formatting a later explicit redraw may age the date label without any idle timer,
 new read or unsolicited frame. Recovery/live phases do not show an older end time.
-Latest user performance policy supersedes the earlier latency/CPU admission gate:
-record measurements only; accept using virtual-clock/frame/read/job count bounds.
+Latency/CPU are recorded observations only, not acceptance gates. Acceptance uses
+virtual-clock/frame/read/job count bounds.
 
 The historical one-row initial scope above is not the current layout: current
 chrome::footer_lines returns two quiet rows. #85 owns first-row activity facts and

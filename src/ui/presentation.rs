@@ -1371,9 +1371,12 @@ fn tool_metadata(
         parts.push(outcome);
     }
     if let Some(seconds) = elapsed {
-        parts.push(crate::presentation::elapsed_text(seconds.saturating_mul(1000), false));
+        parts.push(crate::presentation::elapsed_text(
+            seconds.saturating_mul(1000),
+            false,
+        ));
     } else if let Some(ms) = tool.elapsed_ms {
-        parts.push(crate::presentation::elapsed_text(ms,true));
+        parts.push(crate::presentation::elapsed_text(ms, true));
     } else if kind == RowKind::Running && tool.started_at.is_some() {
         parts.push("経過未取得".into());
     }
@@ -2369,17 +2372,19 @@ pub(super) fn paint_live_times(
             })
             .map(|span| {
                 let mut parts = span.content.split(" · ").collect::<Vec<_>>();
-                if parts
-                    .last()
-                    .is_some_and(|part| *part == "経過未取得" || (part.ends_with('秒') || part.ends_with('分')))
-                {
+                if parts.last().is_some_and(|part| {
+                    *part == "経過未取得" || (part.ends_with('秒') || part.ends_with('分'))
+                }) {
                     parts.pop();
                 }
                 let mut value = parts.join(" · ");
                 if !value.is_empty() {
                     value.push_str(" · ");
                 }
-                value.push_str(&crate::presentation::elapsed_text(seconds.saturating_mul(1000),false));
+                value.push_str(&crate::presentation::elapsed_text(
+                    seconds.saturating_mul(1000),
+                    false,
+                ));
                 value
             })
             .unwrap_or(fallback);
