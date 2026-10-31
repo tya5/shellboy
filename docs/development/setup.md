@@ -242,25 +242,5 @@ UI preview requests across unrelated title changes. The example rejects existing
 data, unmarked roots, non-loopback configuration and credential headers. Both
 fixture and driver are opt-in development tools; no product debug command exists.
 
-## Pairwise conflict forecast
-
-`python3 scripts/dev/conflict-forecast.py [--repo PATH] [--base origin/main]
-[--json] [REF ...]` predicts textual conflicts, not semantic/API compatibility or
-an integration order. With no refs, it selects non-symbolic origin tracking
-branches not already ancestors of origin/main. It compares base against each
-selected branch, then every distinct branch pair in lexical order. Resolved
-commit IDs are pinned for the report; refs can still move concurrently.
-
-The helper uses Git2.38+ merge-tree --write-tree in a fresh temporary repository
-with read-only access to original objects via alternates. Real files/index/refs/
-objects are not written or fetched. The first side's committed .gitattributes are
-materialized there for each direction, including nested attributes; dirty working
-attributes, info/attributes and global/local merge settings are not imported.
-Builtin union/text/binary drivers are supported, custom driver attributes fail
-closed. Attribute/config changes can affect direction or later sequential
-integration; this is not proof of a clean full batch. Partial/shallow stores fail
-closed. Exit0 means all checked pairs clean,1 conflicts,2 invalid/unsupported
-input or Git failure. Conflicts are never silently excluded for union paths.
-Defaults:64 selected branches maximum and60s per Git-command watchdog. No Rust,
-provider request, Shellboy data/config or clipboard access. Report enough refs
-explicitly to constrain a large backlog. Coordinator still owns review and CI.
+Conflict forecast: `python3 scripts/dev/conflict-forecast.py [REF ...] [--json]` (Git2.40+).
+Textual prediction only; files/index/refs unchanged, loose objects permitted. See `--help`.

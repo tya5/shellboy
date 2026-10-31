@@ -5713,20 +5713,5 @@ native-tested baseline. This supersedes the queued-final-recheck gap in the
 issue comment, not review-required status or all-OS/native testing limits.
 ## Pairwise conflict forecast (#104)
 
-Pre-implementation native macOS/Git2.50.1 probe: union replacement contains both
-branches; only plain.txt conflicts. Redirecting index/worktree environment while
-running -C original did not isolate dirty real attributes. A fresh disposable Git
-repository with alternate original objects and committed attribute files does.
-No original repository object/index/ref writes or external drivers are required.
-Focused Python10 tests pass with temporary repositories, including byte-identical
-original files/index/refs/object fingerprints, linked worktrees, names with space/
-Unicode/tab/newline, base+all pairs, discovery, nested/changed union and errors.
-Custom right-side attributes initially escaped validation; validating all sides
-before pair execution fixed that test. Git behavior on Windows is unqualified;
-invalid-Windows filename test is Unix-only. Timeouts are60s watchdogs, not speed
-acceptance. Python stdlib only; Rust sources/dependencies are unchanged.
-A read-only real example pinned mainfff2076/#85=1eed715/#87=42300a6: main+#85
-clean; main+#87 conflict conversation-redesign.md/ui.rs; #85+#87 conflict design.
-Exit1 is the expected conflict report, not a helper crash. No semantic or whole-
-batch safe-order claim. Full standard check/rebase and coordinator review are
-separate pending gates; #85 and higher-priority resource users retain first slots.
+Simplified --attr-source helper:4 synthetic cases pass on native Git2.50.1.
+Probe/results are in #104; full standard check and other OS Git remain unqualified.
