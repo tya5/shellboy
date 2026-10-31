@@ -5338,3 +5338,19 @@ the old CI lacks the full admission/tick trace needed to prove its exact past
 interleaving or exclude all other contributors. Standard/doc checks and final
 SHA are reported in #95. Native Windows/Linux validation on this new source is
 still an integration gate, not inferred from local success or old split runs.
+
+### Approved #95 rebase on admitted #98 main (2026-10-31)
+
+Rebased pure approved cb75209 plus incremental714b515 onto main9fd7b1c in a
+new non-force branch. The additive conversation-design EOF conflict preserves
+the whole admitted main #98/#91/#93 document as a byte-identical prefix, then
+keeps each #95 section once. No source conflict required manual edits. #100
+investigation, viewport fixes, stale-ID guard and its reproduction fixture are
+not included in this candidate.
+
+The approved source/test delta from f1e2a16 to714b515 and the rebased delta have
+identical stable patch-id be90c77f3e8f219cedf582e507dc1527770f5b84. Applying that
+approved patch to a temporary index initialized from admitted main with 3-way
+merge yields an expected src/tests tree byte-identical to the rebased HEAD.
+Fresh local checks and final SHA are reported in #95. Old8c/33f native/split
+results are historical evidence only, never qualification of this new tree.
