@@ -266,7 +266,7 @@
   {
     "file": "src/frontend/control_tests.rs",
     "rule": "raw-timeout",
-    "fingerprint": "1d2f9368b01b1fb9fc2b249d6022464e6c0a7f1e04b49793155c1fdded0e9af3",
+    "fingerprint": "554ef880c72bfe60f55d9594a3f451a882dfdec326839fb4f73bae9da59bafaf",
     "function": "changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body",
     "count": 1,
     "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body occurrence only, migrate on #41 integration."
@@ -290,7 +290,7 @@
   {
     "file": "src/frontend/control_tests.rs",
     "rule": "raw-timeout",
-    "fingerprint": "3513aabe77c8b765db45dee2a5dc08e9a2a529a3e50485f6bbbc56a8cd936ca8",
+    "fingerprint": "cc9ce622cfc024e89e6579f134ec654f1b1e2c4ba25ce1b107da055cf645e7f6",
     "function": "changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body",
     "count": 1,
     "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body occurrence only, migrate on #41 integration."
