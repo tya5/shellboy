@@ -18,6 +18,23 @@ class MeasurementTests(unittest.TestCase):
             self.assertEqual(M.scenario_plan(subject)[-2:],[('p2-watch',600),('p5-watch',60)])
             self.assertTrue(all(seconds==2 for _,seconds in M.scenario_plan(subject,True)))
 
+    def test_watch_profile_keeps_real_windows_and_never_invents_a_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subject=Path(tmp)
+            self.assertEqual(M.scenario_plan(subject,profile='watch'),[])
+            with self.assertRaisesRegex(ValueError,'no capable subject'):
+                M.pair(subject/'before',subject/'after',subject/'out',80,True,3,'watch')
+            self.assertFalse((subject/'out').exists())
+            (subject/'src/ui').mkdir(parents=True)
+            (subject/'src/ui/watch.rs').write_text('// real subject capability')
+            self.assertEqual(M.scenario_plan(subject,profile='watch'),
+                [('p2-watch',600),('p5-watch',60)])
+            self.assertEqual(M.scenario_plan(subject,True,'watch'),
+                [('p2-watch',2),('p5-watch',2)])
+            self.assertEqual(len(M.scenario_plan(subject)),5)
+            with self.assertRaisesRegex(ValueError,'profile'):
+                M.scenario_plan(subject,profile='invented')
+
     def test_multiple_background_calls_have_distinct_tool_pair_identities(self):
         import json
         calls=M.background_calls('fixed command',3)

@@ -35,3 +35,13 @@ ordinary Windows functional CI success does not replace that observation.
 All data is synthetic, endpoints are loopback mocks, terminal capture is bounded,
 and the fixture verifies owner/shell cleanup. Source patches, logs and invalid
 results are retained for diagnosis; there are no automatic measurement retries.
+
+
+For a Watch clock/render follow-up, `native_tui_profile=watch` keeps only the
+actual600s P2-Watch and60s P5-Watch windows per capable subject. It retains the
+same source/build/binary/ACK/producer witnesses and same-runner before/after
+comparison; it does not shorten formal windows or make a missing Watch baseline
+zero-cost. Default `all` is unchanged. Pair/capability records identify the
+profile. Use exact baseline/candidate refs and review actual draw timestamps,
+bins, CPU and UI read counters; green fixture validation is not a performance
+threshold waiver. Windows still records unavailable, never measurements.

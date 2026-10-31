@@ -460,22 +460,26 @@ def validate_result(result,manifest,seconds):
     return not errors,errors
 
 
-def scenario_plan(subject, smoke=False):
+def scenario_plan(subject, smoke=False, profile="all"):
+    if profile not in ("all", "watch"):
+        raise ValueError("unknown native observation profile")
     cases=[('p2',2 if smoke else 600),('p5',2 if smoke else 60),('p5-list',2 if smoke else 60)]
     if (subject/'src/ui/watch.rs').exists():
         cases.extend([('p2-watch',2 if smoke else 600),('p5-watch',2 if smoke else 60)])
-    return cases
+    return [case for case in cases if profile == "all" or case[0].endswith("-watch")]
 
 
-def pair(baseline,candidate,output,cols,smoke=False,producers=1):
+def pair(baseline,candidate,output,cols,smoke=False,producers=1,profile="all"):
     if not smoke and os.environ.get('GITHUB_ACTIONS')!='true':
         raise ValueError('full windows run only in manual CI; use --smoke for local fixture qualification')
+    if profile == 'watch' and not any((subject/'src/ui/watch.rs').exists() for subject in (baseline,candidate)):
+        raise ValueError('Watch profile has no capable subject')
     results=[];errors=[]
     write_json(output/'watch-capabilities.json',{'before':(baseline/'src/ui/watch.rs').exists(),
         'after':(candidate/'src/ui/watch.rs').exists(),
-        'policy':'Missing Watch mode is unavailable, never a zero-cost baseline. Only common scenarios get paired deltas.'})
+        'profile':profile,'policy':'Missing Watch mode is unavailable, never a zero-cost baseline. Only common scenarios get paired deltas.'})
     for label,subject in [('before',baseline),('after',candidate)]:
-        for kind,seconds in scenario_plan(subject,smoke):
+        for kind,seconds in scenario_plan(subject,smoke,profile):
             try:results.append(scenario(subject,output/label,kind,seconds,cols,smoke,producers))
             except Exception as error:
                 errors.append({'subject':label,'kind':kind,'error':str(error)})
@@ -483,7 +487,7 @@ def pair(baseline,candidate,output,cols,smoke=False,producers=1):
                 write_json(output/'pair-error.json',errors)
                 raise
     write_json(output/'pair.json',{'version':VERSION,'host':platform.platform(),'cols':cols,
-               'smoke_only':smoke,'p5_producer_count':producers,'results':[{'source':r['source']['source']['head'],'kind':r['kind'],'metrics':r['native_metrics']} for r in results],
+               'smoke_only':smoke,'profile':profile,'p5_producer_count':producers,'results':[{'source':r['source']['source']['head'],'kind':r['kind'],'metrics':r['native_metrics']} for r in results],
                'comparison_policy':'same runner, sequential same-profile builds; deltas recorded, never a performance pass/fail'})
 
 
@@ -514,14 +518,14 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     for command in ['prepare','build']:
         p=sub.add_parser(command);p.add_argument('--subject',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p=sub.add_parser('run-pair');p.add_argument('--baseline',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--cols',type=int,choices=[80,140],required=True);p.add_argument('--smoke',action='store_true');p.add_argument('--producers',type=int,choices=range(1,5),default=1)
+    p=sub.add_parser('run-pair');p.add_argument('--baseline',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--cols',type=int,choices=[80,140],required=True);p.add_argument('--smoke',action='store_true');p.add_argument('--producers',type=int,choices=range(1,5),default=1);p.add_argument('--profile',choices=['all','watch'],default='all')
     p=sub.add_parser('unavailable');p.add_argument('--baseline',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p=sub.add_parser('summarize');p.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();args.output=args.output.resolve();args.output.mkdir(parents=True,exist_ok=True)
     try:
         if args.command=='prepare':prepare(args.subject.resolve(),args.output)
         elif args.command=='build':build(args.subject.resolve(),args.output)
-        elif args.command=='run-pair':pair(args.baseline.resolve(),args.candidate.resolve(),args.output,args.cols,args.smoke,args.producers)
+        elif args.command=='run-pair':pair(args.baseline.resolve(),args.candidate.resolve(),args.output,args.cols,args.smoke,args.producers,args.profile)
         elif args.command=='unavailable':write_json(args.output/'unavailable.json',{
             'status':'unavailable','reason':'Native Windows ConPTY fixture is not implemented; Windows P2/P5 gate remains open',
             'before':source_witness(args.baseline),'after':source_witness(args.candidate),
