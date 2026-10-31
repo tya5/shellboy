@@ -201,6 +201,52 @@ filtered/narrow lists, and every popup's wheel/edge/outside/F2 behavior. Record
 actual PTY forms/screens separately from TestBackend. G can contain reviewable
 subcommits but must enter main as a complete usable independent increment.
 
+### G saved inspections: domain ownership and complete coverage
+
+The retained mutable-fact inventory below governs extraction of the archived
+inspector. Its twelve initial target variants are not a complete coverage proof.
+In particular, audit activity status, history/context/availability and the current
+shell/compaction readback lists as well as the original Run/Turn/index targets.
+Record per-field source, committed notification, finite readonly read and failure
+behavior before claiming each route complete. A followed reference is not by
+itself a reason to freeze mutable facts. Edited form inputs intentionally remain
+captured; the read result and downstream mutable work remain separate.
+
+| Result class | Required treatment |
+| --- | --- |
+| Exact saved Thread/Run/Turn/message/operation/Revisit/shell/attachment facts | Relevant committed changes update the visible exact target; preserve source/selection and reject older generation/sequence results. Terminal receipt evidence stays distinct from downstream current work. |
+| Activity status and saved readback/history lists | Audit actual mutable row/context fields and page membership; use bounded saved reads or an explicit source/time-scoped page contract, never a blanket all-F8 snapshot exception. Preserve immutable originals while mutable context/availability changes. |
+| History originals and shell-output pages | Already obtained bytes retain source/hash/page/encoding/read time. Explicit next-page/read cursors do not advance automatically. Mutable lifecycle, current selection and availability need their own current/stale indication. |
+| Usage and context totals | Relevant changes trigger the existing independent3s cadence; lightweight facts remain on500ms shared admission. No periodic heavy reread during quiet work. |
+| Native memory, remote model catalog, standalone docs/config/RAG/exec results | These have explicit on-demand/external-source scope and observed/completion time plus refresh/repeat action. Do not start hidden OS/API/file polling or automatically repeat costly/mutating clients. This exception does not apply to saved owner lifecycle fields. |
+| Deletion/index cost confirmations | Retain chosen target/source/time and existing stronger execution guards; changed facts cannot silently authorize a stale destructive/cost preview. |
+
+Frontend owns visibility, cadence, cancellation, generation/sequence adoption,
+retention and presentation. Reads join the existing finite presentation pool and
+readonly WAL snapshot; no I/O, DB work, queue wait or join enters the UI OS thread.
+A hidden/closed consumer causes no read. Failure keeps identified old facts stale
+or marks unavailable; it never invents idle/zero/completed values.
+
+Private domain helpers are permitted only where they avoid duplicating canonical
+schema/semantics: index saved views know private space/pause/failure keys and must
+not call the heavyweight full-status/provider path; GC observations know category
+ownership and retention eligibility; deletion observations know descendants,
+shared/source references and live-work protections. Keep bounded raw SQL/scalar
+facts and canonical validation beside those domain modules. They do not own UI
+labels, refresh state, caches or a second execution policy. Document numeric
+row/source/channel limits and query-count/index evidence when adopting each
+helper; explain why reuse of an existing lighter helper is insufficient.
+Physical storage observation uses the existing bounded file work separately from
+saved metadata. A preview is information, not deletion permission.
+
+No generic Repository, new Core operation, persistent table, worker, queue or job
+engine is needed. If existing committed notifications miss Index/GC writers, use
+only a justified bounded in-process hint after commit, recording ownership,
+coalescing/loss and shutdown; do not consume a worker's own wake permit. Recheck
+actual indexes and then-current schema before an index-only migration. F is17;
+a possible next slot is not reserved, and pre-upgrade backup/atomic ledger and
+rollback/reopen checks remain required.
+
 ## Cross-surface reactivity and performance admission (comments6520522032/6520544888)
 
 These mandatory additions supersede any blanket rule that reference navigation,

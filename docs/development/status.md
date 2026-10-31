@@ -2625,3 +2625,18 @@ Fullstandard/native forms/3OS are not yet G-qualified. Next: centralize the old
 frontend result-title match, complete popup wheel/cache ownership, then saved
 reactive inspectors and the remaining G1–G12 gates. #100's independent fix must
 be retained. No G push/main/release/install/user-data change.
+
+
+## G1–G4 local standard checkpointf9c2d73
+
+Typed catalogue/forms/results now share the operation identity; top-popup wheel
+ownership, confirmation replacement and bounded lazy wrapped readers are wired.
+Native standard2089/0/35 and Python66/strict Clippy pass. Earlier title-expectation
+failures and their corrected identity/body-preserving integration results are
+recorded in [acceptance](../validation/acceptance.md#g1g4-local-standard-atf9c2d73-not-g-admission).
+This is not G admission or native-terminal/P6 success. Next finish remaining
+layout-cache/native observations and G5's full saved-fact coverage/shared readonly
+reads, with private domain-helper rationale and query/index evidence before code
+adoption. The archive12-target enum is incomplete evidence for status/history/
+readback inventory; no blanket F8 snapshot exception is accepted. Retain #100's
+independent fix. G remains local/unqualified for main; no install/data changes.

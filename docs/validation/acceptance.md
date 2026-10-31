@@ -5553,3 +5553,41 @@ General saved-inspection reactivity, shared readonly admission, Core projection/
 index rationale, actual mutable-target tests, native forms and final gates remain
 open in G1–G12. #100 overlap notice6544035614 is retained; do not overwrite its
 independent F-based fix. No G branch push/main/release/install/user-data change.
+
+
+## G1–G4 local standard atf9c2d73 (not G admission)
+
+Sourcef9c2d7337660447fb1526430479cf9ab3f0f1b75 passes native macOS arm64
+`sh scripts/check.sh`: **2089 passed/0 failed/35 ignored**, Python66,
+layout/watchdog/fmt/strict all-target Clippy. Totals derive from actual harnesses
+(1131 library,939 integration,12 block-replacement,7 frontend-structure passes).
+Log/source audit remains local. The source is split into title/catalogue mapping,
+shared popup wheel/cache, integration caption expectations, nested wait metadata
+and guide commits. No full G or3OS/native-terminal claim is made.
+
+Actual new tests cover painted top-owner bounds/epoch, outside/edge/F2/resize
+no-ops, same-kind reader/confirmation replacement, queue/structured selection
+without execution, immutable original-copy preservation, and one wrap build over
+repeated paints/wheels/confirmation keys until width changes. Confirmation height
+also uses the cached row count. All production confirmation constructors share
+cache/hit-target retirement. Help/details/management readers use lazy source
+preparation; model and operation filters cache their row selection. Original
+source bytes/copy IDs are not replaced by wrapped/truncated cache rows.
+
+Earlier runs are retained: result-title library1123/1/15, first G4 library1130/1/15
+(old unit captions), then unit1131/0/15 plus integration936/3/17 (old result-title
+predicates). Eleven integration caption strings were changed to the canonical
+catalogue labels; no identity/body/cancellation/scope assertions or watchdogs
+were relaxed. Final actual success lines include stale-report ownership and all
+three formerly failing original/overview/wait integration tests. Secret scan
+fff2076..f9c2d73:12commits/no leaks. No new timing/variance measurement was run.
+
+Still open: native form/popup captures and actual P6 counts/observations; any
+remaining non-reader list/form wrapping-cache inventory; all saved-inspection
+read/reactivity/source/notification domains and shared-read P3; necessary index
+proofs/migration; final standard/CI/reviewer main admission. The archive's twelve
+inspection targets must not substitute for the full mutable-field inventory.
+The adopted design records status/history/readback coverage and narrowly justified
+on-demand/external snapshots plus why private domain helpers may belong in Core.
+#100's separate F-based correction remains to be retained on reconciliation.
+No G push/main/release/install/user-data change occurred.
