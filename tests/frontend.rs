@@ -289,13 +289,13 @@ async fn work_overview_follows_the_saved_execution_to_get_and_raw_output() {
     for (mode, title, key, value) in [
         (
             ManagementFollow::Inspect,
-            "コマンドの詳細",
+            "shell · 詳細",
             "/execution_id",
             "saved-execution",
         ),
         (
             ManagementFollow::Read,
-            "コマンド出力の読取り",
+            "shell · 保存出力",
             "/text",
             "SAVED_OUTPUT_ONLY",
         ),
@@ -313,7 +313,7 @@ async fn work_overview_follows_the_saved_execution_to_get_and_raw_output() {
                 title,
                 fields,
                 omitted,
-            } if title == "作業状態" => {
+            } if title == "作業 · 状態一覧" => {
                 assert!(work_status);
                 assert!(fields[0].value.contains("調査"));
                 Some((
@@ -347,7 +347,7 @@ async fn work_overview_follows_the_saved_execution_to_get_and_raw_output() {
             thread_id: None,
             text: failure,
         });
-        assert_eq!(ui.management.as_ref().unwrap().title, "作業状態");
+        assert_eq!(ui.management.as_ref().unwrap().title, "作業 · 状態一覧");
         assert!(
             !ui.event(crossterm::event::Event::Key(
                 crossterm::event::KeyEvent::new(
@@ -862,7 +862,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     .await
     .unwrap();
     next_update(&mut incoming, |u| {
-        matches!(u,UiUpdate::StructuredManagement{ref title,..}if title.contains("添付の追加"))
+        matches!(u,UiUpdate::StructuredManagement{ref title,..}if title.contains("添付 · 追加"))
             .then_some(())
     })
     .await;
@@ -1108,7 +1108,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     .await
     .unwrap();
     let shown = next_update(&mut incoming, |u| match u {
-        UiUpdate::StructuredManagement { title, fields, .. } if title.contains("保存容量") => {
+        UiUpdate::StructuredManagement { title, fields, .. } if title.contains("保存 · 状態") => {
             Some(fields)
         }
         _ => None,
@@ -1125,7 +1125,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     .await
     .unwrap();
     let managed = next_update(&mut incoming, |u| match u {
-        UiUpdate::StructuredManagement { title, fields, .. } if title.contains("索引の状態") => {
+        UiUpdate::StructuredManagement { title, fields, .. } if title.contains("索引 · 状態") => {
             Some(fields)
         }
         _ => None,
@@ -1150,7 +1150,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     .await
     .unwrap();
     next_update(&mut incoming, |u| match u {
-        UiUpdate::StructuredManagement { title, fields, .. } if title.contains("会話の詳細") =>
+        UiUpdate::StructuredManagement { title, fields, .. } if title.contains("会話 · 詳細") =>
         {
             assert_eq!(field(&fields, "/model"), "fixture-model");
             Some(())
@@ -1938,7 +1938,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await
     .unwrap();
     let empty = next_update(&mut incoming, |update| match update {
-        UiUpdate::StructuredManagement { title, fields, .. } if title == "履歴の検索" => {
+        UiUpdate::StructuredManagement { title, fields, .. } if title == "履歴 · 検索" => {
             Some(fields)
         }
         _ => None,
@@ -1959,7 +1959,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await
     .unwrap();
     let raw = next_update(&mut incoming, |update| match update {
-        UiUpdate::StructuredManagement { title, fields, .. } if title == "コマンド出力の読取り" => {
+        UiUpdate::StructuredManagement { title, fields, .. } if title == "shell · 保存出力" => {
             Some(fields)
         }
         _ => None,
@@ -2093,7 +2093,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .unwrap();
     send.send(UiAction::CancelWait).await.unwrap();
     let outcome = next_update(&mut incoming, |update| match update {
-        UiUpdate::StructuredManagement { title, fields, .. } if title == "条件の成立を待機" => {
+        UiUpdate::StructuredManagement { title, fields, .. } if title == "待機 · 条件を観測" => {
             Some(fields)
         }
         _ => None,
