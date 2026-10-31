@@ -612,4 +612,47 @@ mod tests {
             "rendering must not rewrite saved source"
         );
     }
+    #[test]
+    fn descendant_count_stays_visible_when_other_footer_facts_fill_the_row() {
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
+        ui.select_thread("t".into());
+        ui.view_mut().loading = false;
+        ui.view_mut().tool_calls = 9999;
+        ui.apply(UiUpdate::Activity {
+            thread_id: "t".into(),
+            generation: ui.view().generation,
+            epoch: 1,
+            observed_at: std::time::Instant::now(),
+            snapshot: ActivitySnapshot {
+                phase: ActivityPhase::Running,
+                turn_in_progress: true,
+                revisit: Some("saved revisit metadata ".repeat(20)),
+                ..Default::default()
+            },
+        });
+        let Some(super::super::UiAction::ObserveDescendants { generation, .. }) =
+            ui.descendants.observe(vec!["t".into()])
+        else {
+            panic!("count scope")
+        };
+        ui.apply(UiUpdate::Descendants {
+            generation,
+            read_sequence: 1,
+            counts: vec![super::super::watch::DescendantCount {
+                root: "t".into(),
+                available: true,
+                active: 2,
+                recovery: 1,
+                truncated: false,
+                cycle: false,
+            }],
+            error: None,
+        });
+        let shown = frame_text(&mut ui, 80, 24);
+        let footer = shown.lines().nth(22).unwrap();
+        assert!(
+            footer.contains("子孫") && footer.contains("稼働2") && footer.contains("復旧1"),
+            "{footer}"
+        );
+    }
 }

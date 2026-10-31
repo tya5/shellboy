@@ -11,6 +11,7 @@ mod header;
 mod history_reader;
 mod input_history;
 mod lineage;
+mod lineage_observer;
 mod live_output;
 mod live_work;
 mod message_metadata;
@@ -20,6 +21,8 @@ mod received;
 mod snapshot;
 mod thread_deletion;
 mod update_delivery;
+mod view_read;
+mod watch_action;
 use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
 use update_delivery::{BufferedUpdates, UpdateTarget};
 mod management;
@@ -279,14 +282,24 @@ fn trace_send(
         },
     );
 }
+enum ThreadPageResult {
+    List(Page<ThreadSummary>, Vec<ThreadDisplayTime>, u64),
+    Watch(watch_page::PreparedPage),
+}
 enum BackgroundResult {
     ProgramStatus {
         epoch: u64,
         result: Result<program_status::Projected, ApiError>,
     },
-    BrowserPatch {
-        ticket: browser::Ticket,
-        result: Result<browser::Observation, ApiError>,
+    ViewFacts {
+        tickets: view_read::Tickets,
+        result: Result<(view_read::Prepared, u64), ApiError>,
+    },
+    ThreadPage {
+        generation: u64,
+        requested_cursor: Option<String>,
+        stop: CancellationToken,
+        result: Result<ThreadPageResult, ApiError>,
     },
     ThreadDeletion {
         request_id: u64,
@@ -760,6 +773,7 @@ async fn run_with_delivery(
     let progress_slots = Arc::new(Semaphore::new(1));
     let mut dirty_threads: HashSet<String> = HashSet::new();
     let mut browser = browser::Browser::default();
+    let mut descendants = lineage_observer::Observer::default();
     let mut view_read_next: Option<tokio::time::Instant> = None;
     let mut refreshing: HashSet<String> = HashSet::new();
     let mut draft_saver = draft_saver::DraftSaver::new(control.clone(), background_tx.clone());
@@ -843,12 +857,15 @@ async fn run_with_delivery(
             refreshing.insert(thread.clone());
             selection.refresh_started(&thread, tokio::time::Instant::now());
             let tool_scope = visible.then(|| selection.tool_scope.clone()).flatten();
-            let browser_ticket = if visible {
+            let view_tickets = if visible {
                 let at = tokio::time::Instant::now();
                 view_read_next = Some(at + Duration::from_millis(500));
-                browser.take(at)
+                view_read::Tickets {
+                    browser: browser.take(at),
+                    descendants: descendants.take(at),
+                }
             } else {
-                None
+                view_read::Tickets::default()
             };
             #[cfg(test)]
             stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -861,7 +878,7 @@ async fn run_with_delivery(
                     epoch: selection.progress_epoch,
                     render_width,
                     tool_scope,
-                    browser: browser_ticket,
+                    views: view_tickets,
                 },
                 control.clone(),
                 updates.worker(),
@@ -927,8 +944,12 @@ async fn run_with_delivery(
             })
             .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         let live_deadline = live_output.deadline();
+        let watch_output_deadline = browser.output_deadline();
         let browser_deadline = browser
             .deadline()
+            .into_iter()
+            .chain(descendants.deadline())
+            .min()
             .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         tokio::select! {
             _=tokio::time::sleep_until(browser_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
@@ -939,25 +960,32 @@ async fn run_with_delivery(
                 if refresh_deadline.is_some_and(|due|tokio::time::Instant::now()>=due) {
                     continue;
                 }
-                if let Ok(permit)=read_slots.clone().try_acquire_owned()
-                    && let Some(ticket)=browser.take(tokio::time::Instant::now()) {
-                    view_read_next=Some(tokio::time::Instant::now()+Duration::from_millis(500));
-                    let control=control.clone();let results=background_tx.clone();
-                    let progress_slots=progress_slots.clone();
-                    read_workers.spawn(async move {
-                        let _permit=permit;
-                        let result=tokio::select! {biased;_=ticket.stop.cancelled()=>Err(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")),value=browser::read(&control,&ticket,progress_slots)=>value};
-                        let _=results.send(BackgroundResult::BrowserPatch {ticket,result}).await;
-                    });
+                if let Ok(permit)=read_slots.clone().try_acquire_owned() {
+                    let at=tokio::time::Instant::now();
+                    let tickets=view_read::Tickets {browser:browser.take(at),descendants:descendants.take(at)};
+                    if !tickets.is_empty() {
+                        view_read_next=Some(at+Duration::from_millis(500));
+                        let control=control.clone();let results=background_tx.clone();
+                        let progress_slots=progress_slots.clone();let stop=read_cancel.clone();
+                        read_workers.spawn(async move {
+                            let _permit=permit;
+                            let result=view_read::read(&control,&tickets,progress_slots,stop).await;
+                            let _=results.send(BackgroundResult::ViewFacts {tickets,result}).await;
+                        });
+                    }
                 }
             },
             _=output_signal.as_mut()=>{
                 output_signal.set(observed_control.shell_output_notification().notified());
                 output_signal.as_mut().enable();
+                browser.output_notified();
                 if let Some(ids)=live_output.executions() {
                     let markers=control.committed_output_markers(&ids).await?;
                     if let Some(value)=live_output.markers(markers) {update(&updates,value).await;}
                 }
+            },
+            _=tokio::time::sleep_until(watch_output_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))), if watch_output_deadline.is_some()=>{
+                if let Some(ids)=browser.take_output_ids(tokio::time::Instant::now()) {let markers=control.committed_watch_output_markers(&ids).await?;browser.output_markers(markers);}
             },
             _=tokio::time::sleep_until(live_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if live_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
@@ -1813,38 +1841,46 @@ async fn run_with_delivery(
                             }
                         }
                     }
-                    UiAction::ObserveBrowser {generation,filter,selected,visible}=>{
-                        if let Err(error)=browser.observe(generation,filter,selected,visible) {
-                            update(&updates,UiUpdate::BrowserPatchFailed {generation,error:error.to_string()}).await;
-                        }
+                    UiAction::ObserveBrowser {generation,filter,selected,visible,mode,descendant_root,detail_ids,detail_parent_ids}=>{
+                        if let Err(error)=browser.observe_view(generation,filter,selected,visible,mode,descendant_root,detail_ids,detail_parent_ids) {update(&updates,UiUpdate::BrowserPatchFailed {generation,error:error.to_string()}).await;}
                     },
-                    UiAction::LoadThreads {cursor,filter,generation}=>{
-                        let page_stop=match browser.begin_page(generation,filter.clone()) {
-                            Ok(Some(stop))=>stop,
-                            Ok(None)=>continue,
-                            Err(error)=>{
-                                update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await;
-                                continue;
-                            }
+                    UiAction::ObserveDescendants {generation,roots}=>{
+                        if let Err(error)=descendants.observe(generation,roots) {update(&updates,UiUpdate::Descendants {generation,read_sequence:message_queue::read_revision(),counts:Vec::new(),error:Some(error.to_string())}).await;}
+                    },
+                    UiAction::LoadThreads {cursor,filter,generation,mode,descendant_root,seen_completions,seen_history_limited}=>{
+                        let page_stop=match browser.begin_page_view(generation,filter.clone(),mode,descendant_root.clone()) {
+                            Ok(Some(stop))=>stop,Ok(None)=>continue,
+                            Err(error)=>{update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await;continue;}
                         };
-                        let control=control.clone();let sender=updates.worker();
-                        let progress_slots=progress_slots.clone();
+                        let control=control.clone();let results=background_tx.clone();let progress_slots=progress_slots.clone();let diagnostics=owner.diagnostics.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
                             let requested_cursor=cursor.clone();
-                            let args=ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter)};
-                            let result=tokio::select! {biased;
-                                _=page_stop.cancelled()=>return,
-                                result=browser::page(&control,args,page_stop.clone(),progress_slots)=>result,
+                            let result=tokio::select! { biased;_=page_stop.cancelled()=>return,
+                                value=async {
+                                    if mode==BrowserMode::Watch {
+                                        watch_page::read(&control,watch_page::Request {filter,cursor,descendant_root,seen_completions,seen_history_limited,limit:DEFAULT_LIST_LIMIT as usize},page_stop.clone(),progress_slots,diagnostics).await.map(ThreadPageResult::Watch)
+                                    } else {
+                                        browser::page(&control,ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter)},page_stop.clone(),progress_slots).await.map(|(page,times,sequence)|ThreadPageResult::List(page,times,sequence))
+                                    }
+                                }=>value,
                             };
-                            if page_stop.is_cancelled() {return;}
-                            match result {
-                                Ok((page,display_times,read_sequence))=>update(&sender,UiUpdate::Threads {generation,read_sequence,requested_cursor,threads:page.items,display_times,next_cursor:page.next_cursor}).await,
-                                Err(error)=>update(&sender,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await,
-                            }
-                        }) {
-                            update(&updates,UiUpdate::ThreadListFailed {generation,error:"スレッド読込キューが満杯です。Ctrl+Rで再取得してください".into()}).await;
-                        }
-                    }
+                            let _=results.send(BackgroundResult::ThreadPage {generation,requested_cursor,stop:page_stop,result}).await;
+                        }) {update(&updates,UiUpdate::ThreadListFailed {generation,error:"会話一覧の読込キューが満杯です。Ctrl+Rで再取得してください".into()}).await;}
+                    },
+                    UiAction::WatchAction(target)=>{
+                        let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,selection.active_thread.clone(),"Watchの操作キューが満杯です。再操作してください").await;continue;};
+                        let output=target.kind==watch::WatchActionKind::Output;
+                        let title=match target.kind {watch::WatchActionKind::Stop=>"Watch · 停止",watch::WatchActionKind::Retry=>"Watch · 再試行",watch::WatchActionKind::Output=>"Watch · 保存出力"}.to_owned();
+                        let generation=if output {management.next_generation()}else{0};
+                        let selected=selection.active_thread.clone();let control=control.clone();let results=background_tx.clone();let outcomes=updates.worker();
+                        spawn_work(&mut workers,permit,async move {
+                            let response=watch_action::execute(&control,target).await;
+                            if output {
+                                let result=prepare_management(response,control.store.config.cache.body_bytes).await;
+                                let _=results.send(BackgroundResult::Command {work_status:false,context:None,generation,title,result}).await;
+                            } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,error).await,}}
+                        });
+                    },
                     UiAction::ProgramStatusSeen { thread_id, run_id } => {
                         if status_enabled && status_session.seen.get(&thread_id) != Some(&run_id) {
                             status_session.seen.insert(thread_id, run_id);
@@ -2759,14 +2795,21 @@ async fn run_with_delivery(
                         Err(error) => status(&updates, Some(thread_id), error).await,
                     }
                 }
-                Some(BackgroundResult::BrowserPatch {ticket,result})=>{
-                    if browser.complete(&ticket) {
+                Some(BackgroundResult::ViewFacts {tickets,result})=>{
+                    view_read::complete(&owner.diagnostics,&mut browser,&mut descendants,&updates,tickets,result).await;
+                },
+                Some(BackgroundResult::ThreadPage {generation,requested_cursor,stop,result})=>{
+                    if !stop.is_cancelled()&&browser.generation()==Some(generation) {
                         match result {
-                            Ok(observation)=>{
-                                if let Some(details)=&observation.details { browser.accept_details(&ticket,&details.details); }
-                                if let Some(patch)=observation.patch { browser.adopt_patch(ticket.generation,patch.read_sequence,&patch.rows,None); update(&updates,UiUpdate::BrowserPatch {patch:Box::new(patch)}).await; }
+                            Ok(ThreadPageResult::List(page,display_times,read_sequence))=>{
+                                browser.adopt_page(generation,read_sequence,&page.items,None);
+                                update(&updates,UiUpdate::Threads {generation,read_sequence,requested_cursor,threads:page.items,display_times,next_cursor:page.next_cursor,watch_summaries:Vec::new(),watch_page:None,notice:None}).await;
                             },
-                            Err(error)=>update(&updates,UiUpdate::BrowserPatchFailed {generation:ticket.generation,error:error.to_string()}).await,
+                            Ok(ThreadPageResult::Watch(prepared))=>{
+                                browser.adopt_page(generation,prepared.read_sequence,&prepared.page.items,prepared.scope.as_ref());
+                                update(&updates,UiUpdate::Threads {generation,read_sequence:prepared.read_sequence,requested_cursor,threads:prepared.page.items,display_times:prepared.display_times,next_cursor:prepared.page.next_cursor,watch_summaries:prepared.watch_summaries,notice:prepared.notice,watch_page:Some(WatchPageInfo {read_at:prepared.read_at,limited_titles:prepared.limited_titles,continuation_limited:prepared.continuation_limited})}).await;
+                            },
+                            Err(error)=>update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await,
                         }
                     }
                 },
@@ -3044,7 +3087,7 @@ async fn run_with_delivery(
                         selection.changed(&parent);
                         dirty_threads.insert(parent);
                     }
-                    browser.changed(&thread_id);
+                    browser.changed(&thread_id);descendants.changed(&thread_id);
                     management.usage_changed(&thread_id);
                     streams.invalidate(&thread_id);
                     selection.changed(&thread_id);
@@ -3086,7 +3129,7 @@ async fn run_with_delivery(
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     status_dirty |= status_enabled;
                     management.usage_lagged();
-                    browser.request_resync("会話一覧の変更通知を取りこぼしました。最新のページから再取得します");
+                    descendants.resync();browser.request_resync("会話一覧の変更通知を取りこぼしました。最新のページから再取得します");
                     #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
@@ -3141,6 +3184,7 @@ async fn run_with_delivery(
     read_cancel.cancel();
     drop(live_output);
     drop(browser);
+    drop(descendants);
     selection.cancel.cancel();
     cancel.cancel();
     drop(background_rx);

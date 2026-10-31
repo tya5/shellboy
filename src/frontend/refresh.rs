@@ -12,7 +12,7 @@ pub(super) struct Query {
     pub epoch: u64,
     pub render_width: u16,
     pub tool_scope: Option<ToolObservation>,
-    pub browser: Option<browser::Ticket>,
+    pub views: view_read::Tickets,
 }
 
 struct RawVisible {
@@ -161,7 +161,7 @@ pub(super) async fn run(
         epoch,
         render_width,
         tool_scope,
-        mut browser,
+        views,
     } = query;
     let _permit = permit;
     tokio::select! {biased;_=stop.cancelled()=>{},_=async {
@@ -178,40 +178,38 @@ pub(super) async fn run(
             if let Some(revision)=tool_revision {
                 update(&updates,UiUpdate::ToolFacts {thread_id:thread.clone(),generation,revision,result:Err(error.to_string())}).await;
             }
-            if let Some(ticket)=browser.take() {
-                let _=sender.send(BackgroundResult::BrowserPatch {ticket,result:Err(error.clone())}).await;
-            }
+            if !views.is_empty() {let _=sender.send(BackgroundResult::ViewFacts {tickets:views.clone(),result:Err(error.clone())}).await;}
             let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(Err(error)),epoch,generation:Some(generation)}).await;
             return;
         };
         let target=thread.clone();
         let waits=control.pending_wait_sources();
-        let browser_scope=browser.clone();
+        let view_scopes=views.clone();
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             let receipts=receipt_states_tx(db,&ids)?;
             // Keep typed per-surface errors until the display mapper can distinguish
             // retryable WAL contention from a true storage failure.
             let visible=read_visible_tx(db,&target,tool_scope,waits.as_deref(),sequence);
-            let browser=browser_scope.map(|ticket|{
-                if ticket.stop.is_cancelled() {return Err(StorageError::from(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")));}
-                super::browser::read_tx(db,&ticket,None)
-            });
-            Ok((receipts,visible,browser))
+            let facts=if view_scopes.is_empty() {None}else{Some(super::view_read::read_tx(db,&view_scopes))};
+            Ok((receipts,visible,facts))
         }).await;
         drop(_progress_permit);
         let (receipts,visible,browser_result,sequence)=match checked_storage(&control,read).await {
             Ok(((receipts,visible,browser),sequence))=>(Ok(receipts),visible.map_err(snapshot::storage_error),browser.map(|result|result.map_err(snapshot::storage_error)),sequence),
             Err(error)=>(Err(error.clone()),Err(error.clone()),Some(Err(error)),0),
         };
-        if let Some(ticket)=browser.take() {
+        if !views.is_empty() {
             let result=match browser_result {
-                Some(Ok(raw))=>super::browser::project(raw,sequence,ticket.generation).await,
+                Some(Ok(raw))=>{
+                    let project=views.clone();
+                    presentation_work(move||super::view_read::prepare(raw,sequence,&project)).await.map(|prepared|(prepared,sequence))
+                },
                 Some(Err(error))=>Err(error),
-                None=>Err(ApiError::new(ErrorCode::InvalidState,"Browser observation unavailable")),
+                None=>Err(ApiError::new(ErrorCode::InvalidState,"Visible observations unavailable")),
             };
             let result=checked_storage(&control,result).await;
-            let _=sender.send(BackgroundResult::BrowserPatch {ticket,result}).await;
+            let _=sender.send(BackgroundResult::ViewFacts {tickets:views.clone(),result}).await;
         }
         let result=async {
             let raw=checked_storage(&control,visible).await?;
@@ -483,6 +481,7 @@ mod tests {
             let tx=db.transaction()?;
             tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','paired saved name','/','','p','m','2026-01-01T00:00:00Z')",[])?;
             tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z');")?;
+            tx.execute_batch("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t-child','t','unowned descendant','/','','p','m','2026-01-01T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r-child','t-child','live','2026-01-01T00:00:00Z');")?;
             shellboy_fixture_input(&tx,"held-paired",false)?;
             tx.commit()?;Ok(())
         }).await.unwrap();
@@ -506,6 +505,9 @@ mod tests {
             .observe(7, "".into(), Some("t".into()), true)
             .unwrap();
         let ticket = browser.take(tokio::time::Instant::now()).unwrap();
+        let mut descendants = lineage_observer::Observer::default();
+        descendants.observe(9, vec!["t".into()]).unwrap();
+        let descendant_ticket = descendants.take(tokio::time::Instant::now()).unwrap();
         let (updates, received) = std::sync::mpsc::sync_channel(16);
         let (sender, mut results) = mpsc::channel(8);
         let slots = Arc::new(Semaphore::new(1));
@@ -521,7 +523,10 @@ mod tests {
                     epoch: 0,
                     render_width: 80,
                     tool_scope: None,
-                    browser: Some(ticket),
+                    views: view_read::Tickets {
+                        browser: Some(ticket),
+                        descendants: Some(descendant_ticket),
+                    },
                 },
                 control.clone(),
                 updates,
@@ -539,8 +544,20 @@ mod tests {
         let mut receipts_seen = false;
         while let Ok(result) = results.try_recv() {
             match result {
-                BackgroundResult::BrowserPatch { result, .. } => {
-                    browser_sequence = Some(result.unwrap().patch.unwrap().read_sequence)
+                BackgroundResult::ViewFacts { result, .. } => {
+                    let (prepared, sequence) = result.unwrap();
+                    let patch = prepared.browser.unwrap().unwrap().patch.unwrap();
+                    assert_eq!(patch.read_sequence, sequence);
+                    let observed = prepared.descendants.unwrap().unwrap();
+                    assert_eq!(observed.queried_roots, 1);
+                    assert_eq!(observed.snapshots.len(), 1);
+                    assert_eq!(observed.snapshots[0].root, "t");
+                    assert_eq!(observed.snapshots[0].threads, ["t-child"]);
+                    assert_eq!(
+                        (observed.snapshots[0].active, observed.snapshots[0].recovery),
+                        (1, 0)
+                    );
+                    browser_sequence = Some(sequence);
                 }
                 BackgroundResult::Refreshed {
                     receipts, progress, ..

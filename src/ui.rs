@@ -55,6 +55,10 @@ mod view;
 use draft::{adjust_folds, prev_grapheme};
 pub use threads::ThreadDisplayTime;
 pub use view::ThreadView;
+pub use watch::{
+    BrowserMode, CompletionIdentity, DescendantCount, PreparedWatchDetail, WatchActionTarget,
+    WatchPageInfo, WatchSummary,
+};
 
 use crossterm::{
     event::{
@@ -462,7 +466,16 @@ pub enum UiAction {
         filter: String,
         selected: Option<String>,
         visible: bool,
+        mode: BrowserMode,
+        descendant_root: Option<String>,
+        detail_ids: Vec<String>,
+        detail_parent_ids: Vec<String>,
     },
+    ObserveDescendants {
+        generation: u64,
+        roots: Vec<String>,
+    },
+    WatchAction(WatchActionTarget),
     ObserveLiveWork {
         thread_id: String,
         generation: u64,
@@ -629,6 +642,10 @@ pub enum UiAction {
         cursor: Option<String>,
         filter: String,
         generation: u64,
+        mode: BrowserMode,
+        descendant_root: Option<String>,
+        seen_completions: Vec<CompletionIdentity>,
+        seen_history_limited: bool,
     },
     SelectThread {
         thread_id: String,
@@ -715,6 +732,18 @@ pub struct DraftRecoveryTarget {
 }
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    WatchDetails {
+        generation: u64,
+        read_sequence: u64,
+        details: Vec<PreparedWatchDetail>,
+        missing_ids: Vec<String>,
+    },
+    Descendants {
+        generation: u64,
+        read_sequence: u64,
+        counts: Vec<DescendantCount>,
+        error: Option<String>,
+    },
     ProgramStatus(crate::program_status::Snapshot),
 
     BrowserPatch {
@@ -871,6 +900,9 @@ pub enum UiUpdate {
         threads: Vec<ThreadSummary>,
         display_times: Vec<ThreadDisplayTime>,
         next_cursor: Option<String>,
+        watch_summaries: Vec<WatchSummary>,
+        watch_page: Option<WatchPageInfo>,
+        notice: Option<String>,
     },
     Thread {
         generation: u64,
@@ -1103,6 +1135,7 @@ pub enum ThreadDeletionReply {
 }
 #[derive(Clone, Debug)]
 enum Confirmation {
+    Watch(WatchActionTarget),
     MessageQueue {
         action: Box<UiAction>,
         detail: String,
@@ -1443,6 +1476,7 @@ impl Confirmation {
     }
     fn layout(&self, area: Rect) -> (String, u16) {
         let text = match self {
+                Confirmation::Watch(target)=>format!("表示中の保存済み対象を{}しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",if target.kind==watch::WatchActionKind::Stop {"停止"}else{"再試行"},target.thread_id,target.run_id),
                 Confirmation::MessageQueue {detail,..}=>detail.clone(),
                 Confirmation::ThreadDeletion(dialog)=>dialog.text(),
                 Confirmation::EditStop{run_id,..}=>format!("旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"),
@@ -1486,6 +1520,7 @@ pub struct UiState {
     pub views: BTreeMap<String, ThreadView>,
     pub active: String,
     thread_browser: threads::ThreadBrowser,
+    descendants: watch::DescendantView,
     pub selection_mode: bool,
     selection_frozen_at: Option<String>,
     pub help_visible: bool,
@@ -1580,6 +1615,7 @@ impl UiState {
             views: BTreeMap::from([(active.clone(), view)]),
             active,
             thread_browser: threads::ThreadBrowser::default(),
+            descendants: Default::default(),
             selection_mode: false,
             selection_frozen_at: None,
             help_visible: false,
@@ -1861,6 +1897,35 @@ impl UiState {
             if let Some(action) = self.live_work_mut().observe(thread, generation, visible) {
                 self.deferred_actions.push(action);
             }
+        }
+        let mut roots = Vec::with_capacity(2);
+        if !self.selection_mode
+            && !self.is_quitting()
+            && self.viewport.width >= 8
+            && self.viewport.height >= 5
+        {
+            if let Some(root) = self.view().thread_id.clone() {
+                roots.push(root);
+            }
+            if browser_visible && let Some(root) = self.thread_browser.descendant_root() {
+                roots.push(root.into());
+            }
+        }
+        if let Some(action) = self.descendants.observe(roots) {
+            self.deferred_actions
+                .retain(|action| !matches!(action, UiAction::ObserveDescendants { .. }));
+            self.deferred_actions.push(action);
+            let count = self
+                .thread_browser
+                .descendant_root()
+                .and_then(|root| self.descendants.get(root))
+                .cloned();
+            let status = self
+                .thread_browser
+                .descendant_root()
+                .and_then(|root| self.descendants.label(root));
+            self.thread_browser.set_descendant_count(count);
+            self.thread_browser.set_descendant_status(status);
         }
         std::mem::take(&mut self.deferred_actions)
     }
@@ -2479,6 +2544,47 @@ impl UiState {
                     self.active_view_mut().status = "起動cwdが未解決です".into();
                 }
             }
+            UiUpdate::WatchDetails {
+                generation,
+                read_sequence,
+                details,
+                missing_ids,
+            } => {
+                if self.top_overlay() == Some(overlay::Overlay::Threads)
+                    && self.thread_browser.mode() == BrowserMode::Watch
+                {
+                    self.dirty |= self.thread_browser.apply_watch_details(
+                        generation,
+                        read_sequence,
+                        details,
+                        missing_ids,
+                    );
+                }
+            }
+            UiUpdate::Descendants {
+                generation,
+                read_sequence,
+                counts,
+                error,
+            } => {
+                if self
+                    .descendants
+                    .accept(generation, read_sequence, counts, error)
+                {
+                    let count = self
+                        .thread_browser
+                        .descendant_root()
+                        .and_then(|root| self.descendants.get(root))
+                        .cloned();
+                    let status = self
+                        .thread_browser
+                        .descendant_root()
+                        .and_then(|root| self.descendants.label(root));
+                    self.thread_browser.set_descendant_count(count);
+                    self.thread_browser.set_descendant_status(status);
+                    self.dirty = true;
+                }
+            }
             UiUpdate::BrowserPatch { patch } => {
                 self.dirty |= self.thread_browser.patch(*patch);
             }
@@ -2499,6 +2605,9 @@ impl UiState {
                 threads,
                 display_times,
                 next_cursor,
+                watch_summaries,
+                watch_page,
+                notice,
             } => {
                 let drafts = self.local_drafts(self.thread_browser.filter());
                 let active = self.view().thread_id.clone();
@@ -2513,6 +2622,18 @@ impl UiState {
                     active,
                 ) {
                     return;
+                }
+                self.thread_browser.apply_watch_summaries(
+                    generation,
+                    read_sequence,
+                    watch_summaries,
+                );
+                if let Some(info) = watch_page {
+                    self.thread_browser
+                        .apply_watch_page_info(generation, read_sequence, info);
+                }
+                if let Some(notice) = notice {
+                    self.thread_browser.notice(notice);
                 }
             }
             UiUpdate::AgentsSelected {
@@ -3470,6 +3591,7 @@ impl UiState {
             .collect()
     }
     pub fn select_thread(&mut self, thread_id: String) -> Vec<UiAction> {
+        self.thread_browser.mark_opened(&thread_id);
         self.operations = None;
         self.invalidate_management();
         self.models = None;
@@ -3593,6 +3715,11 @@ impl UiState {
             .advance_clock(now);
         let visible = self.composer_active() && self.top_overlay().is_none();
         if visible && self.live_work_mut().advance(now) {
+            self.dirty = true;
+        }
+        let browser_visible =
+            self.top_overlay() == Some(overlay::Overlay::Threads) && !self.selection_mode;
+        if self.thread_browser.watch_tick(browser_visible, now) {
             self.dirty = true;
         }
         let phase = self.view().footer_phase();
@@ -3885,7 +4012,16 @@ impl UiState {
             "/threads" => {
                 let drafts = self.local_drafts(argument);
                 let preferred = self.view().thread_id.clone();
-                vec![self.thread_browser.open(argument.into(), drafts, preferred)]
+                if argument == "active" {
+                    vec![
+                        self.thread_browser
+                            .open_watch(String::new(), None, preferred),
+                    ]
+                } else if argument == "descendants" {
+                    self.open_descendant_watch()
+                } else {
+                    vec![self.thread_browser.open(argument.into(), drafts, preferred)]
+                }
             }
             "/switch" if !argument.is_empty() => self.select_thread(argument.into()),
             "/compact-max" => vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
@@ -4626,6 +4762,16 @@ impl UiState {
         }
         self.confirmation_scroll = 0;
         match self.confirmation.take() {
+            Some(Confirmation::Watch(target)) => {
+                if self.thread_browser.validates_watch_target(&target) {
+                    vec![UiAction::WatchAction(target)]
+                } else {
+                    self.thread_browser.notice(
+                        "対象が変わったため確認を取り消しました。選び直してください".into(),
+                    );
+                    vec![]
+                }
+            }
             Some(Confirmation::MessageQueue { action, .. }) => {
                 self.queue_popup.visible = false;
                 vec![*action]
@@ -4761,8 +4907,26 @@ impl UiState {
             .promote_status_notice(history_interaction::NoticeKind::Failure);
         vec![]
     }
+    fn open_descendant_watch(&mut self) -> Vec<UiAction> {
+        let Some(root) = self.view().thread_id.clone() else {
+            return self.command_error("子孫の監視には保存済みの会話を選んでください");
+        };
+        vec![
+            self.thread_browser
+                .open_watch(String::new(), Some(root), None),
+        ]
+    }
     fn thread_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         match self.thread_browser.key(key) {
+            threads::ThreadOutcome::WatchAction(target) => {
+                if target.kind == watch::WatchActionKind::Output {
+                    vec![UiAction::WatchAction(target)]
+                } else {
+                    self.confirmation = Some(Confirmation::Watch(target));
+                    self.confirmation_scroll = 0;
+                    vec![]
+                }
+            }
             threads::ThreadOutcome::Delete(thread) => self.begin_thread_deletion(thread),
             threads::ThreadOutcome::None => vec![],
             threads::ThreadOutcome::Load(action) => vec![*action],
@@ -5207,7 +5371,7 @@ fn draw_input(
 fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let view = state.view();
     let phase = view.footer_phase();
-    let spans =
+    let mut spans =
         if view.thread_id.is_some() && view.activity.snapshot.is_none() && view.sending().is_none()
         {
             vec![Span::styled(
@@ -5239,6 +5403,13 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
             })
         })
         .or(recovery);
+    if let Some(label) = view
+        .thread_id
+        .as_deref()
+        .and_then(|root| state.descendants.label(root))
+    {
+        spans.push(Span::raw(format!(" · {label}")));
+    }
     let mut lines = chrome::footer_lines(
         view,
         area.width,

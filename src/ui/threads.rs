@@ -1,6 +1,10 @@
 //! Thread-list presentation; previews use the same Markdown parser as history.
 use super::theme;
 use super::thread_patch::BrowserPatch;
+use super::watch::{
+    BrowserMode, PreparedWatchDetail, WatchActionKind, WatchActionTarget, WatchPageInfo,
+    WatchState, WatchSummary,
+};
 use super::{UiAction, popup};
 use crate::protocol::ThreadSummary;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -33,7 +37,18 @@ const FILTER_DELAY: Duration = Duration::from_millis(150);
 
 #[derive(Default)]
 pub(super) struct ThreadBrowser {
+    paint: std::cell::Cell<Option<popup::PaintBounds>>,
     collapsed: BTreeSet<String>,
+    mode: BrowserMode,
+    descendant_root: Option<String>,
+    descendant_count: Option<super::watch::DescendantCount>,
+    descendant_status: Option<String>,
+    watch: RefCell<WatchState>,
+    watch_summaries: BTreeMap<String, WatchSummary>,
+    watch_scope_ids: BTreeSet<String>,
+    watch_visible_ids: RefCell<Vec<String>>,
+    watch_page_anchor: Option<(Option<String>, Option<usize>)>,
+    watch_page_info: Option<WatchPageInfo>,
     display_times: BTreeMap<String, ThreadDisplayTime>,
     items: Vec<ThreadSummary>,
     visible: bool,
@@ -56,7 +71,7 @@ pub(super) struct ThreadBrowser {
     limited_titles: BTreeSet<String>,
     stale_excerpts: BTreeSet<String>,
     excerpt_error: Option<(String, String)>,
-    observed_scope: Option<(u64, String, Option<String>, bool)>,
+    observed_scope: Option<BrowserObservation>,
     filter_deadline: Option<Instant>,
     tree: OnceCell<TreeCache>,
     tree_revision: u64,
@@ -66,12 +81,24 @@ pub(super) struct ThreadBrowser {
     tree_rebuilds: std::cell::Cell<usize>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BrowserObservation {
+    generation: u64,
+    filter: String,
+    selected: Option<String>,
+    visible: bool,
+    mode: BrowserMode,
+    root: Option<String>,
+    detail_ids: Vec<String>,
+    detail_parent_ids: Vec<String>,
+}
 pub(super) enum ThreadOutcome {
     None,
     Load(Box<UiAction>),
     Open(String),
     Delete(String),
     Info(String),
+    WatchAction(WatchActionTarget),
 }
 
 struct TreeRow {
@@ -94,6 +121,9 @@ struct TreeCache {
 
 impl ThreadBrowser {
     fn invalidate_tree(&mut self) {
+        // Cached ordering is not painted geometry. A metadata patch and its
+        // detail facts may arrive together before the next frame; the existing
+        // on-screen IDs remain consumers until that frame replaces them.
         self.tree_revision = self.tree_revision.wrapping_add(1);
         self.tree.take();
     }
@@ -132,10 +162,17 @@ impl ThreadBrowser {
     pub fn close(&mut self) {
         self.visible = false;
         self.filter_deadline = None;
+        self.watch.get_mut().close();
+        self.watch_visible_ids.get_mut().clear();
     }
     fn invalidate(&mut self, cursor: Option<String>) {
         self.next_cursor = cursor;
+        self.watch_page_info = None;
         self.generation = self.generation.wrapping_add(1);
+        self.watch
+            .get_mut()
+            .begin_generation(self.generation, false);
+        self.watch_visible_ids.get_mut().clear();
         self.reset_patch_evidence();
         self.loading = true;
         self.error = None;
@@ -157,7 +194,7 @@ impl ThreadBrowser {
             || self
                 .observed_scope
                 .as_ref()
-                .is_some_and(|(_, _, _, visible)| !*visible)
+                .is_some_and(|scope| !scope.visible)
             || self.filter_deadline.is_none_or(|deadline| now < deadline)
         {
             return None;
@@ -170,7 +207,7 @@ impl ThreadBrowser {
             || self
                 .observed_scope
                 .as_ref()
-                .is_some_and(|(_, _, _, visible)| !*visible)
+                .is_some_and(|scope| !scope.visible)
         {
             return None;
         }
@@ -182,7 +219,46 @@ impl ThreadBrowser {
             cursor,
             filter: self.filter.clone(),
             generation: self.generation,
+            mode: self.mode,
+            descendant_root: self.descendant_root().map(str::to_owned),
+            seen_completions: if self.mode == BrowserMode::Watch {
+                self.watch.borrow().seen_completions()
+            } else {
+                vec![]
+            },
+            seen_history_limited: self.mode == BrowserMode::Watch
+                && self.watch.borrow().seen_history_limited(),
         }
+    }
+    pub fn mode(&self) -> BrowserMode {
+        self.mode
+    }
+    pub fn set_descendant_count(&mut self, count: Option<super::watch::DescendantCount>) {
+        self.descendant_count = count;
+    }
+    pub fn set_descendant_status(&mut self, status: Option<String>) {
+        self.descendant_status = status;
+    }
+    pub fn descendant_root(&self) -> Option<&str> {
+        if self.mode == BrowserMode::Watch {
+            self.descendant_root.as_deref()
+        } else {
+            None
+        }
+    }
+    pub fn open_watch(
+        &mut self,
+        filter: String,
+        root: Option<String>,
+        preferred: Option<String>,
+    ) -> UiAction {
+        let action = self.open(filter, vec![], preferred);
+        self.mode = BrowserMode::Watch;
+        self.descendant_root = root;
+        self.watch.get_mut().begin_generation(self.generation, true);
+        self.invalidate_tree();
+        let _ = action;
+        self.request(None)
     }
     pub fn open(
         &mut self,
@@ -191,6 +267,10 @@ impl ThreadBrowser {
         preferred: Option<String>,
     ) -> UiAction {
         self.visible = true;
+        self.mode = BrowserMode::List;
+        self.descendant_root = None;
+        self.watch_visible_ids.get_mut().clear();
+        self.watch_scope_ids.clear();
         self.filter = filter;
         self.preferred = preferred;
         self.preferred_screen = None;
@@ -204,6 +284,7 @@ impl ThreadBrowser {
         // Filtering/paging still clears it through normal invalidation.
         let notice = self.notice.take().filter(|_| !self.notice_seen.get());
         let action = self.begin(None);
+        self.watch.get_mut().begin_generation(self.generation, true);
         self.notice = notice;
         action
     }
@@ -255,6 +336,20 @@ impl ThreadBrowser {
         }
         self.items
             .retain(|thread| !deleted.contains(thread.thread_id.as_str()));
+        let retained = self.items.iter().map(|row| row.thread_id.clone()).collect();
+        self.watch
+            .get_mut()
+            .begin_generation(self.generation, false);
+        self.watch.get_mut().prune_to(&retained);
+        if !self.visible {
+            self.watch.get_mut().close();
+        }
+        self.watch_summaries
+            .retain(|id, _| !deleted.contains(id.as_str()));
+        self.watch_scope_ids
+            .retain(|id| !deleted.contains(id.as_str()));
+        self.watch_visible_ids.get_mut().clear();
+        self.watch_page_anchor = None;
         self.collapsed.retain(|id| !deleted.contains(id.as_str()));
         self.display_times
             .retain(|id, _| !deleted.contains(id.as_str()));
@@ -289,6 +384,18 @@ impl ThreadBrowser {
         {
             return false;
         }
+        if self.mode == BrowserMode::Watch {
+            let id = self.preferred.clone().or_else(|| {
+                self.items
+                    .get(self.selected)
+                    .map(|row| row.thread_id.clone())
+            });
+            self.watch_page_anchor = Some((
+                id,
+                self.preferred_screen
+                    .or_else(|| self.selected_position().map(|_| self.selected_screen_row())),
+            ));
+        }
         let preferred = self.preferred.clone();
         let selected = preferred.clone().or_else(|| {
             self.items
@@ -315,7 +422,8 @@ impl ThreadBrowser {
                     .get(id)
                     .is_none_or(|(sequence, present)| *present && *sequence <= read_sequence)
         });
-        let exhaustive = requested_cursor.is_none() && next_cursor.is_none();
+        let exhaustive =
+            self.mode == BrowserMode::List && requested_cursor.is_none() && next_cursor.is_none();
         if exhaustive {
             if preferred.as_ref().is_some_and(|id| {
                 !items
@@ -367,6 +475,14 @@ impl ThreadBrowser {
                     || self.patch_overlay.contains(&row.thread_id)
                     || self.preferred.as_deref() == Some(row.thread_id.as_str())
                     || self.reconfirming_row.as_deref() == Some(row.thread_id.as_str())
+                    || (!exhaustive
+                        && self.watch.borrow().retains(&row.thread_id)
+                        && crate::control::db::thread_summary::matches_filter(
+                            &row.thread_id,
+                            &row.title,
+                            &row.cwd,
+                            &self.filter,
+                        ))
             });
         }
         let mut positions: BTreeMap<_, _> = self
@@ -487,6 +603,9 @@ impl ThreadBrowser {
     }
     pub fn observe(&mut self, visible: bool) -> Option<UiAction> {
         let visible = visible && self.visible;
+        if !visible {
+            self.clear_watch_detail_scope();
+        }
         if !visible && self.visible && self.loading && self.filter_deadline.is_none() {
             self.filter_deadline = Some(Instant::now());
         }
@@ -500,12 +619,33 @@ impl ThreadBrowser {
             })
             .flatten()
             .filter(|id| !id.starts_with("draft:"));
-        let scope = (
-            self.generation,
-            self.filter.clone(),
-            selected.clone(),
+        let detail_ids = if visible && self.mode == BrowserMode::Watch {
+            self.watch_visible_ids.borrow().clone()
+        } else {
+            vec![]
+        };
+        let detail_parent_ids = detail_ids
+            .iter()
+            .filter_map(|id| {
+                self.items
+                    .iter()
+                    .find(|row| &row.thread_id == id)
+                    .and_then(|row| row.parent_id.clone())
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .take(128)
+            .collect::<Vec<_>>();
+        let scope = BrowserObservation {
+            generation: self.generation,
+            filter: self.filter.clone(),
+            selected: selected.clone(),
             visible,
-        );
+            mode: self.mode,
+            root: self.descendant_root().map(str::to_owned),
+            detail_ids: detail_ids.clone(),
+            detail_parent_ids: detail_parent_ids.clone(),
+        };
         if self.observed_scope.as_ref() == Some(&scope)
             || (self.observed_scope.is_none() && !visible)
         {
@@ -517,6 +657,10 @@ impl ThreadBrowser {
             filter: self.filter.clone(),
             selected,
             visible,
+            mode: self.mode,
+            descendant_root: self.descendant_root().map(str::to_owned),
+            detail_ids,
+            detail_parent_ids,
         })
     }
     pub fn resync(&mut self, generation: u64, reason: String) -> bool {
@@ -554,7 +698,7 @@ impl ThreadBrowser {
             missing_ids,
             limited_titles,
             excerpt,
-            watch_summaries: _,
+            watch_summaries,
         } = patch;
         if generation != self.generation
             || self
@@ -672,6 +816,7 @@ impl ThreadBrowser {
             changed |= self.remove_patch_row(&id, read_sequence);
         }
         self.sort_items();
+        self.apply_watch_summaries(generation, read_sequence, watch_summaries);
         self.invalidate_tree();
         let visible = self.visible_indices();
         self.selected = selected
@@ -770,6 +915,213 @@ impl ThreadBrowser {
         }
         thread.excerpt.clone()
     }
+    pub fn apply_watch_summaries(
+        &mut self,
+        generation: u64,
+        sequence: u64,
+        summaries: Vec<WatchSummary>,
+    ) -> bool {
+        if generation != self.generation || summaries.len() > 2000 {
+            return false;
+        }
+        let anchor = self.watch_page_anchor.take().unwrap_or_else(|| {
+            (
+                self.items
+                    .get(self.selected)
+                    .map(|row| row.thread_id.clone()),
+                self.selected_position().map(|_| self.selected_screen_row()),
+            )
+        });
+        let ids = self
+            .items
+            .iter()
+            .map(|row| row.thread_id.clone())
+            .collect::<BTreeSet<_>>();
+        self.watch_summaries.retain(|id, _| ids.contains(id));
+        self.watch_scope_ids.retain(|id| ids.contains(id));
+        let admitted = summaries
+            .into_iter()
+            .filter(|row| {
+                ids.contains(&row.thread_id)
+                    && self
+                        .row_versions
+                        .get(&row.thread_id)
+                        .is_none_or(|(saved, present)| *present && *saved <= sequence)
+            })
+            .collect::<Vec<_>>();
+        for row in &admitted {
+            self.watch_summaries
+                .insert(row.thread_id.clone(), row.clone());
+            if self.mode == BrowserMode::Watch {
+                self.watch_scope_ids.insert(row.thread_id.clone());
+            }
+        }
+        let watch = self.watch.get_mut();
+        watch.prune_to(&ids);
+        let changed = watch.reconcile(generation, sequence, admitted);
+        if self.mode == BrowserMode::Watch {
+            self.restore_watch_anchor(anchor.0, anchor.1);
+        }
+        changed
+    }
+    pub fn apply_watch_page_info(
+        &mut self,
+        generation: u64,
+        sequence: u64,
+        info: WatchPageInfo,
+    ) -> bool {
+        if self.mode != BrowserMode::Watch
+            || generation != self.generation
+            || sequence != self.page_read_sequence
+            || info.limited_titles.len() > 128
+            || info.read_at.len() > 128
+        {
+            return false;
+        }
+        // A page may have accepted only some rows after a newer patch. Its
+        // title witnesses cannot erase the newer row's uncertainty evidence.
+        self.limited_titles.retain(|id| {
+            !self
+                .row_versions
+                .get(id)
+                .is_some_and(|(saved, present)| *present && *saved == sequence)
+        });
+        for id in &info.limited_titles {
+            if self
+                .row_versions
+                .get(id)
+                .is_some_and(|(saved, present)| *present && *saved <= sequence)
+            {
+                self.limited_titles.insert(id.clone());
+            }
+        }
+        self.watch_page_info = Some(info);
+        true
+    }
+    fn restore_watch_anchor(&mut self, id: Option<String>, screen: Option<usize>) {
+        self.invalidate_tree();
+        let visible = self.visible_indices();
+        self.selected = id
+            .and_then(|id| self.tree().ids.get(&id).copied())
+            .filter(|index| visible.contains(index))
+            .or_else(|| visible.first().copied())
+            .unwrap_or(0);
+        self.restore_screen_row(screen.unwrap_or(0));
+    }
+    pub(super) fn invalidate_paint(&mut self) {
+        self.paint.set(None);
+        self.clear_watch_detail_scope();
+    }
+    pub(super) fn clear_watch_detail_scope(&mut self) {
+        self.watch_visible_ids.get_mut().clear();
+    }
+    pub fn apply_watch_details(
+        &mut self,
+        generation: u64,
+        sequence: u64,
+        details: Vec<PreparedWatchDetail>,
+        missing_ids: Vec<String>,
+    ) -> bool {
+        if !self.visible
+            || self.mode != BrowserMode::Watch
+            || generation != self.generation
+            || details.len() > 128
+            || missing_ids.len() > 128
+        {
+            return false;
+        }
+        let scope = self
+            .watch_visible_ids
+            .borrow()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let details = details
+            .into_iter()
+            .filter(|detail| {
+                scope.contains(&detail.facts().thread_id)
+                    && self
+                        .row_versions
+                        .get(&detail.facts().thread_id)
+                        .is_none_or(|(saved, present)| *present && *saved <= sequence)
+            })
+            .collect::<Vec<_>>();
+        let missing_ids = missing_ids
+            .into_iter()
+            .filter(|id| scope.contains(id))
+            .collect::<Vec<_>>();
+        let selected = self
+            .items
+            .get(self.selected)
+            .map(|row| row.thread_id.clone());
+        let screen = self.selected_screen_row();
+        let mut changed = self
+            .watch
+            .get_mut()
+            .apply_details(generation, sequence, details);
+        for id in &missing_ids {
+            if self
+                .row_versions
+                .get(id)
+                .is_none_or(|(saved, _)| *saved <= sequence)
+            {
+                changed |= self.remove_patch_row(id, sequence);
+            }
+        }
+        let actual_missing = missing_ids
+            .into_iter()
+            .filter(|id| {
+                self.row_versions
+                    .get(id)
+                    .is_some_and(|(saved, present)| !*present && *saved <= sequence)
+            })
+            .collect::<Vec<_>>();
+        changed |= self.watch.get_mut().remove(generation, &actual_missing);
+        if changed && self.mode == BrowserMode::Watch {
+            self.restore_watch_anchor(selected, Some(screen));
+        }
+        changed
+    }
+    pub fn watch_tick(&mut self, visible: bool, now: Instant) -> bool {
+        if !visible || self.mode != BrowserMode::Watch {
+            return false;
+        }
+        self.watch
+            .get_mut()
+            .tick(self.watch_visible_ids.get_mut(), now)
+    }
+    pub fn validates_watch_target(&self, target: &WatchActionTarget) -> bool {
+        self.mode == BrowserMode::Watch && self.watch.borrow().validates(target)
+    }
+    pub fn mark_opened(&mut self, id: &str) {
+        let selected = self
+            .items
+            .get(self.selected)
+            .map(|row| row.thread_id.clone());
+        let screen = self.selected_screen_row();
+        let changed = self.watch.get_mut().mark_opened(id).is_some();
+        if changed && self.mode == BrowserMode::Watch {
+            self.restore_watch_anchor(selected, Some(screen));
+        }
+    }
+    pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
+        self.paint.get()
+    }
+    pub(super) fn wheel(&mut self, delta: isize) -> bool {
+        let visible = self.visible_indices();
+        let Some(position) = visible.iter().position(|index| *index == self.selected) else {
+            return false;
+        };
+        let next = popup::move_selection(position, delta, visible.len());
+        if next == position {
+            return false;
+        }
+        let index = visible[next];
+        self.clear_preferred();
+        self.clear_watch_detail_scope();
+        self.selected = index;
+        true
+    }
     pub fn key(&mut self, key: KeyEvent) -> ThreadOutcome {
         self.key_at(key, Instant::now())
     }
@@ -777,9 +1129,72 @@ impl ThreadBrowser {
         if key.kind == KeyEventKind::Release {
             return ThreadOutcome::None;
         }
-        if key.code == KeyCode::Delete
-            || (matches!(key.code, KeyCode::Char('d' | 'D'))
-                && key.modifiers == KeyModifiers::CONTROL)
+        if matches!(
+            key.code,
+            KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+        ) {
+            self.clear_watch_detail_scope();
+        }
+        if key.code == KeyCode::Tab && key.modifiers.is_empty() {
+            self.remember_selection();
+            self.mode = if self.mode == BrowserMode::List {
+                BrowserMode::Watch
+            } else {
+                BrowserMode::List
+            };
+            self.invalidate_tree();
+            let action = self.begin(None);
+            let scoped = self.mode == BrowserMode::Watch && self.descendant_root.is_some();
+            if scoped {
+                self.watch.get_mut().prune_to(&self.watch_scope_ids);
+                if self
+                    .preferred
+                    .as_ref()
+                    .is_some_and(|id| !self.watch_scope_ids.contains(id))
+                {
+                    self.clear_preferred();
+                    self.reconfirming_row = None;
+                }
+            }
+            let summaries = self
+                .watch_summaries
+                .values()
+                .filter(|row| !scoped || self.watch_scope_ids.contains(&row.thread_id))
+                .cloned()
+                .collect();
+            self.watch
+                .get_mut()
+                .reconcile(self.generation, 0, summaries);
+            self.restore_watch_anchor(self.preferred.clone(), None);
+            return ThreadOutcome::Load(Box::new(action));
+        }
+        if self.mode == BrowserMode::Watch {
+            let kind = match key.code {
+                KeyCode::Char('s') if key.modifiers == KeyModifiers::CONTROL => {
+                    Some(WatchActionKind::Stop)
+                }
+                KeyCode::Char('r') if key.modifiers == KeyModifiers::ALT => {
+                    Some(WatchActionKind::Retry)
+                }
+                KeyCode::Char('o') if key.modifiers == KeyModifiers::ALT => {
+                    Some(WatchActionKind::Output)
+                }
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                return self.items.get(self.selected).and_then(|row|self.watch.borrow().action_target(&row.thread_id,kind))
+                    .map(ThreadOutcome::WatchAction).unwrap_or_else(||ThreadOutcome::Info("現在の対象はこの操作を受け付けません。表示中の保存状態と詳細を確認してください".into()));
+            }
+        }
+        if self.mode == BrowserMode::List
+            && (key.code == KeyCode::Delete
+                || (matches!(key.code, KeyCode::Char('d' | 'D'))
+                    && key.modifiers == KeyModifiers::CONTROL))
         {
             self.clear_preferred();
             return self.items.get(self.selected).map_or(ThreadOutcome::None, |thread| {
@@ -808,8 +1223,28 @@ impl ThreadBrowser {
             KeyCode::F(1) => {
                 self.clear_preferred();
                 if let Some(thread) = self.items.get(self.selected) {
+                    let page = self
+                        .watch_page_info
+                        .as_ref()
+                        .map(|info| {
+                            format!(
+                                "\n候補ページ取得: {}（行の現在状態は後続通知で更新）{}",
+                                info.read_at,
+                                if info.continuation_limited {
+                                    "\n候補検査は上限まで。続きのページを確認してください。"
+                                } else {
+                                    ""
+                                }
+                            )
+                        })
+                        .unwrap_or_default();
+                    let controls = if self.mode == BrowserMode::Watch {
+                        "Tab: 一覧へ。Ctrl+S: 対象Runの停止確認。Alt+R: 復旧対象の再試行確認。Alt+O: 保存出力の詳細。監視画面では削除しません。"
+                    } else {
+                        "Delete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。"
+                    };
                     return ThreadOutcome::Info(format!(
-                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}\n\nDelete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。文字入力/Backspaceは絞り込みです。",
+                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}{page}\n\n{controls}文字入力/Backspaceは絞り込みです。",
                         thread.thread_id,
                         if self.limited_titles.contains(&thread.thread_id) {
                             format!("{}（検索条件との一致は未確認）", thread.title)
@@ -854,6 +1289,8 @@ impl ThreadBrowser {
                     self.selected = index;
                 }
             }
+            KeyCode::Left if self.mode == BrowserMode::Watch => {}
+            KeyCode::Right if self.mode == BrowserMode::Watch => {}
             KeyCode::Left => {
                 if !self.collapse(self.selected)
                     && let Some(parent) = self.parent_index(self.selected)
@@ -877,7 +1314,9 @@ impl ThreadBrowser {
             KeyCode::Enter => {
                 self.clear_preferred();
                 if let Some(thread) = self.items.get(self.selected) {
-                    return ThreadOutcome::Open(thread.thread_id.clone());
+                    let id = thread.thread_id.clone();
+                    self.watch.get_mut().mark_opened(&id);
+                    return ThreadOutcome::Open(id);
                 }
             }
             KeyCode::PageDown => {
@@ -962,6 +1401,43 @@ impl ThreadBrowser {
 
     fn build_tree(&self) -> TreeCache {
         let threads = &self.items;
+        if self.mode == BrowserMode::Watch {
+            let ids = threads
+                .iter()
+                .enumerate()
+                .map(|(index, row)| (row.thread_id.clone(), index))
+                .collect::<BTreeMap<_, _>>();
+            let visible = self
+                .watch
+                .borrow()
+                .ordered_ids()
+                .iter()
+                .filter_map(|id| ids.get(id).copied())
+                .collect::<Vec<_>>();
+            let mut positions = vec![None; threads.len()];
+            for (position, index) in visible.iter().enumerate() {
+                positions[*index] = Some(position);
+            }
+            let rows = visible
+                .iter()
+                .map(|index| TreeRow {
+                    index: *index,
+                    ancestors: vec![],
+                    depth: 0,
+                    last: true,
+                    missing_parent: false,
+                    cycle: false,
+                    children: false,
+                })
+                .collect();
+            return TreeCache {
+                rows,
+                visible,
+                positions,
+                ids,
+                revision: self.tree_revision,
+            };
+        }
         let ids: BTreeMap<_, _> = threads
             .iter()
             .enumerate()
@@ -1124,6 +1600,10 @@ impl ThreadBrowser {
         active_thread: Option<&str>,
         notice_visible: bool,
     ) {
+        if self.mode == BrowserMode::Watch {
+            self.draw_watch(frame, area, active_thread);
+            return;
+        }
         let threads = &self.items;
         let selected_index = self.selected;
         let filter = &self.filter;
@@ -1132,7 +1612,7 @@ impl ThreadBrowser {
         let error = self.error.as_deref().or(self.patch_error.as_deref());
         let rows = self.rows();
         let title = format!(
-            "会話 · {}件{}{}",
+            "会話一覧 · {}件{}{}",
             rows.len(),
             if rows.len() != threads.len() {
                 format!(" / 取得{}件", threads.len())
@@ -1155,7 +1635,7 @@ impl ThreadBrowser {
             format!("取得失敗 · Esc戻る\nCtrl+R再取得 · {}", one_line(error))
         } else {
             let mut keys = if footer_width >= 90 {
-                "Esc戻る ↑↓選択 ←→展開 Enter切替 Delete/Ctrl+D削除 F1会話情報 Ctrl+R再取得"
+                "Esc戻る ↑↓選択 ←→展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得"
                     .to_owned()
             } else if footer_width >= 45 {
                 "Esc戻る Enter切替 Delete/Ctrl+D削除\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得"
@@ -1191,7 +1671,7 @@ impl ThreadBrowser {
         } else if self.reconfirming_row.is_some() {
             context.push_str(" · 前回の行を再確認中");
         }
-        let inner = popup::panel(frame, area, &title, &context, &footer_text);
+        let inner = popup::panel_recorded(frame, area, &title, &context, &footer_text, &self.paint);
         // Tiny popups omit their context row. Use the shared geometry rather
         // than consuming a notice which was never rendered on screen.
         if notice_visible
@@ -1379,6 +1859,157 @@ impl ThreadBrowser {
         fit(&label, width)
     }
 
+    fn draw_watch(&self, frame: &mut Frame<'_>, area: Rect, active_thread: Option<&str>) {
+        let count = self.rows().len();
+        let title = format!(
+            "{} · {}件{}",
+            if self.descendant_root.is_some() {
+                "子孫の監視"
+            } else {
+                "作業の監視"
+            },
+            count,
+            if self.loading { " · 読込み中" } else { "" }
+        );
+        let mut context = format!("検索 › {}", one_line(&self.filter));
+        if let Some(error) = self.error.as_deref().or(self.patch_error.as_deref()) {
+            context = format!("取得失敗 {} · {context}", one_line(error));
+        } else if let Some(notice) = &self.notice {
+            context = format!("{} · {context}", one_line(notice));
+        }
+        if let Some(label) = self.descendant_status.clone().or_else(|| {
+            self.descendant_count
+                .as_ref()
+                .and_then(super::watch::DescendantCount::label)
+        }) {
+            context.push_str(" · ");
+            context.push_str(&label);
+        }
+        let footer = "Tab 一覧 · Enter 開く · Ctrl+S 停止確認 · Alt+R 再試行確認\nAlt+O 出力詳細 · Ctrl+R 更新 · PgDn 続き · 詳細は表示128件まで";
+        let inner = popup::panel_recorded(frame, area, &title, &context, footer, &self.paint);
+        if inner.height == 0 || inner.width == 0 {
+            self.watch_visible_ids.borrow_mut().clear();
+            return;
+        }
+        let height = if inner.width < 48 || inner.height < 2 {
+            1
+        } else {
+            2
+        };
+        let capacity = usize::from(inner.height) / height;
+        self.table_body_rows.set(capacity);
+        let selected = self.selected_position();
+        {
+            let watch = self.watch.borrow();
+            let rows = self
+                .rows()
+                .iter()
+                .filter_map(|row| {
+                    let summary = &self.items[row.index];
+                    let detail = watch.row(&summary.thread_id)?;
+                    let current = active_thread == Some(summary.thread_id.as_str());
+                    let chosen = row.index == self.selected;
+                    let prefix = if chosen {
+                        "›"
+                    } else if current {
+                        "●"
+                    } else {
+                        "·"
+                    };
+                    let pending = if self.preferred.as_deref() == Some(summary.thread_id.as_str())
+                        || self.reconfirming_row.as_deref() == Some(summary.thread_id.as_str())
+                    {
+                        "[再確認中] "
+                    } else {
+                        ""
+                    };
+                    let parent = if detail.parent_title.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · 親 {}", detail.parent_title)
+                    };
+                    let uncertainty = if self.limited_titles.contains(&summary.thread_id) {
+                        "[検索未確認] "
+                    } else {
+                        ""
+                    };
+                    let first = format!(
+                        "{prefix} {pending}{uncertainty}{} · {} {}{parent}",
+                        detail.title, detail.status, detail.state_age
+                    );
+                    let first = Line::from(fit(&first, usize::from(inner.width)));
+                    let second = Line::from(Span::styled(
+                        fit(
+                            &format!("  {} {}", detail.secondary, detail.secondary_age),
+                            usize::from(inner.width),
+                        ),
+                        Style::default().fg(theme::MUTED),
+                    ));
+                    let text = if height == 1 {
+                        ratatui::text::Text::from(first)
+                    } else {
+                        ratatui::text::Text::from(vec![first, second])
+                    };
+                    let phase = match detail.category {
+                        super::watch::WatchCategory::Recovery => {
+                            crate::activity::ActivityPhase::Recovery
+                        }
+                        super::watch::WatchCategory::Failed => {
+                            crate::activity::ActivityPhase::Failed
+                        }
+                        super::watch::WatchCategory::Unread => {
+                            crate::activity::ActivityPhase::Completed
+                        }
+                        super::watch::WatchCategory::Active => {
+                            crate::activity::ActivityPhase::Tools
+                        }
+                        super::watch::WatchCategory::Background => {
+                            crate::activity::ActivityPhase::Background
+                        }
+                        _ => crate::activity::ActivityPhase::Idle,
+                    };
+                    let style = if chosen {
+                        activity_style(phase).bg(theme::SELECTION_BACKGROUND)
+                    } else {
+                        activity_style(phase)
+                    };
+                    Some(
+                        Row::new(vec![Cell::from(text)])
+                            .height(height as u16)
+                            .style(style),
+                    )
+                })
+                .collect::<Vec<_>>();
+            if rows.is_empty() {
+                frame.render_widget(
+                    Paragraph::new(
+                        if self.next_cursor.is_some()
+                            || self
+                                .watch_page_info
+                                .as_ref()
+                                .is_some_and(|info| info.continuation_limited)
+                        {
+                            "続きの候補があります · PgDnで確認"
+                        } else if self.loading {
+                            "監視対象を取得中…"
+                        } else {
+                            "現在表示する作業はありません"
+                        },
+                    ),
+                    inner,
+                );
+                self.watch_visible_ids.borrow_mut().clear();
+                return;
+            }
+            let table = Table::new(rows, [Constraint::Min(1)]);
+            let mut state = self.table_state.borrow_mut();
+            state.select(selected);
+            frame.render_stateful_widget(table, inner, &mut *state);
+        }
+        let offset = self.table_state.borrow().offset();
+        let scope = self.watch.borrow_mut().visible_scope(offset, capacity);
+        *self.watch_visible_ids.borrow_mut() = scope.ids;
+    }
     fn draw_detail(&self, frame: &mut Frame<'_>, area: Rect, thread: Option<&ThreadSummary>) {
         let block = Block::default().borders(Borders::TOP);
         let inner = block.inner(area);
@@ -1571,8 +2202,21 @@ mod tests {
     #[test]
     fn ux_title_uses_the_same_conversation_term_as_its_rows() {
         let shown = text(&capture(&[thread("fixture", None)], 0, 60, 18, None));
-        assert!(shown.contains("会話 ·"), "{shown}");
+        assert!(shown.contains("会話一覧 ·"), "{shown}");
         assert!(!shown.contains("スレッド"));
+        let mut browser = ThreadBrowser::default();
+        browser.open_watch(String::new(), None, None);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 18)).unwrap();
+        terminal
+            .draw(|frame| browser.draw(frame, frame.area(), None, true))
+            .unwrap();
+        let watch = text(terminal.backend().buffer());
+        assert!(watch.contains("作業の監視 ·"), "{watch}");
+        assert!(
+            !watch.contains("会話一覧 ·"),
+            "List and Watch have distinct task meanings"
+        );
     }
     #[test]
     fn ux_compact_read_failure_keeps_failure_and_return_visible_without_context_rows() {
@@ -1701,16 +2345,13 @@ mod tests {
         browser.remove_deleted(&["first".into()]);
         assert_eq!(browser.items[browser.selected].thread_id, "chosen");
         let generation = browser.generation();
-        assert!(
-            matches!(browser.take_filter_request(Instant::now() + Duration::from_secs(1)),
-            Some(UiAction::LoadThreads { generation: g, cursor: None, filter })
-            if g == generation && filter == "latest")
-        );
-        assert!(
-            browser
-                .take_filter_request(Instant::now() + Duration::from_secs(1))
-                .is_none()
-        );
+        let due = browser
+            .filter_deadline
+            .expect("pending visible request has a deadline");
+        assert!(matches!(browser.take_filter_request(due),
+            Some(UiAction::LoadThreads { generation: g, cursor: None, filter,.. })
+            if g == generation && filter == "latest"));
+        assert!(browser.take_filter_request(due).is_none());
         browser.close();
         browser.remove_deleted(&["chosen".into()]);
         assert!(browser.filter_wait(Instant::now()).is_none());
@@ -2590,7 +3231,7 @@ mod filter_tests {
         let generation = browser.generation();
         assert!(
             matches!(browser.take_filter_request(now + Duration::from_millis(250)),
-            Some(UiAction::LoadThreads { cursor: None, filter, generation: g }) if filter == "ab" && g == generation)
+            Some(UiAction::LoadThreads { cursor: None, filter, generation: g,.. }) if filter == "ab" && g == generation)
         );
         assert!(
             browser
@@ -3415,5 +4056,550 @@ mod patch_tests {
             "late preferred result must not snap selection back"
         );
         assert!(browser.reconfirming_row.is_none());
+    }
+}
+
+#[cfg(test)]
+mod watch_integration_tests {
+    use super::super::watch::{WatchActionKind, WatchDetail};
+    use super::super::{UiState, UiUpdate};
+    use super::*;
+    use crossterm::event::Event;
+    fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
+        ThreadSummary {
+            thread_id: id.into(),
+            title: format!("task {id}"),
+            cwd: "/synthetic".into(),
+            parent_id: Some("parent".into()),
+            state: "live".into(),
+            activity: phase,
+            latest_run_stop_reason: None,
+            revisit: None,
+            updated_at: "saved".into(),
+            excerpt: String::new(),
+        }
+    }
+    fn detail(
+        id: &str,
+        run: &str,
+        phase: crate::activity::ActivityPhase,
+        generation: u64,
+    ) -> PreparedWatchDetail {
+        WatchDetail {
+            thread_id: id.into(),
+            latest_run_id: Some(run.into()),
+            answer_id: (phase == crate::activity::ActivityPhase::Completed)
+                .then(|| format!("answer-{id}")),
+            turn_id: Some(format!("turn-{id}")),
+            turn_generation: Some(generation),
+            phase,
+            parent_title: Some("prepared parent".into()),
+            state_age: None,
+            model_request_age: None,
+            work: None,
+            recovery_reason: Some("saved recovery reason".into()),
+            answer_preview: Some("saved final answer".into()),
+            pending_messages: 0,
+            revisit: None,
+        }
+        .prepare()
+    }
+    fn browser() -> ThreadBrowser {
+        use crate::activity::ActivityPhase::*;
+        let mut browser = ThreadBrowser::default();
+        browser.open_watch(String::new(), None, None);
+        let rows = vec![
+            row("recover", Recovery),
+            row("active", Tools),
+            row("done", Completed),
+        ];
+        let summaries = rows
+            .iter()
+            .map(|row| {
+                WatchSummary::prepare(row).with_identity(
+                    Some(format!("run-{}", row.thread_id)),
+                    (row.activity == Completed).then(|| format!("answer-{}", row.thread_id)),
+                )
+            })
+            .collect();
+        browser.apply(
+            browser.generation,
+            10,
+            None,
+            rows,
+            vec![],
+            None,
+            vec![],
+            None,
+        );
+        browser.apply_watch_summaries(browser.generation, 10, summaries);
+        paint(&browser, 120, 28);
+        browser.apply_watch_details(
+            browser.generation,
+            11,
+            vec![
+                detail("recover", "run-recover", Recovery, 1),
+                detail("active", "run-active", Tools, 1),
+                detail("done", "run-done", Completed, 1),
+            ],
+            vec![],
+        );
+        browser
+    }
+    fn paint(browser: &ThreadBrowser, width: u16, height: u16) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| browser.draw(frame, frame.area(), None, true))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..height {
+            let mut x = 0;
+            while x < width {
+                let symbol = buffer[(x, y)].symbol();
+                text.push_str(symbol);
+                x += symbol.width().max(1) as u16;
+            }
+            text.push('\n');
+        }
+        text
+    }
+    #[test]
+    fn watch_renders_prepared_priority_rows_and_observes_only_painted_details_and_parents() {
+        let mut browser = browser();
+        let text = paint(&browser, 120, 28);
+        assert!(text.contains("作業の監視"), "{text}");
+        assert!(text.contains("復旧待ち"), "{text}");
+        assert!(text.contains("saved recovery reason"));
+        assert!(text.contains("prepared parent"));
+        assert_eq!(
+            browser.items[browser.visible_indices()[0]].thread_id,
+            "recover"
+        );
+        let Some(UiAction::ObserveBrowser {
+            mode,
+            detail_ids,
+            detail_parent_ids,
+            ..
+        }) = browser.observe(true)
+        else {
+            panic!()
+        };
+        assert_eq!(mode, BrowserMode::Watch);
+        assert_eq!(detail_ids.len(), 3);
+        assert_eq!(detail_parent_ids, ["parent"]);
+        assert!(browser.observe(true).is_none());
+        let narrow = paint(&browser, 36, 20);
+        assert!(narrow.contains("監視"));
+        assert!(
+            !narrow.contains("saved recovery reason"),
+            "narrow Watch uses one line per row"
+        );
+        assert!(
+            !matches!(
+                browser.key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
+                ThreadOutcome::Delete(_)
+            ),
+            "deletion is List only"
+        );
+    }
+    #[test]
+    fn tab_keeps_selection_filter_and_seen_identity_snapshot_but_changes_real_page_mode() {
+        let mut browser = browser();
+        paint(&browser, 120, 28);
+        browser.selected = browser
+            .items
+            .iter()
+            .position(|row| row.thread_id == "done")
+            .unwrap();
+        browser.mark_opened("done");
+        browser.filter = "task".into();
+        let id = browser.items[browser.selected].thread_id.clone();
+        let result = browser.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(
+            matches!(result,ThreadOutcome::Load(action) if matches!(*action,UiAction::LoadThreads {mode:BrowserMode::List,ref seen_completions,..} if seen_completions.is_empty()))
+        );
+        assert_eq!(browser.items[browser.selected].thread_id, id);
+        assert_eq!(browser.filter, "task");
+        let result = browser.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(
+            matches!(result,ThreadOutcome::Load(action) if matches!(*action,UiAction::LoadThreads {mode:BrowserMode::Watch,ref seen_completions,..} if seen_completions.iter().any(|key|key.run_id=="run-done" && key.answer_id=="answer-done")))
+        );
+        assert_eq!(
+            browser.items[browser.selected].thread_id, id,
+            "read row stays within this open Watch session"
+        );
+    }
+    #[test]
+    fn watch_empty_limited_page_keeps_explicit_next_cursor_and_scope() {
+        let mut browser = ThreadBrowser::default();
+        let request = browser.open_watch("sparse".into(), Some("root".into()), None);
+        assert!(
+            matches!(request,UiAction::LoadThreads {mode:BrowserMode::Watch,descendant_root:Some(root),..} if root=="root")
+        );
+        browser.apply(
+            browser.generation,
+            10,
+            None,
+            vec![],
+            vec![],
+            Some("continuation".into()),
+            vec![],
+            None,
+        );
+        browser.apply_watch_summaries(browser.generation, 10, vec![]);
+        browser.notice("検査範囲に達しました。続きから確認できます".into());
+        let text = paint(&browser, 100, 20);
+        assert!(text.contains("続きの候補があります"));
+        assert!(
+            matches!(browser.key(KeyEvent::new(KeyCode::PageDown,KeyModifiers::NONE)),ThreadOutcome::Load(action) if matches!(&*action,UiAction::LoadThreads {cursor:Some(cursor),mode:BrowserMode::Watch,descendant_root:Some(root),..} if cursor=="continuation" && root=="root"))
+        );
+    }
+    #[test]
+    fn stop_and_retry_confirmations_capture_run_and_recovery_generation_without_late_retarget() {
+        use crate::activity::ActivityPhase::Recovery;
+        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        ui.thread_browser = browser();
+        ui.thread_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert!(
+            matches!(&ui.confirmation,Some(super::super::Confirmation::Watch(target)) if target.run_id=="run-recover")
+        );
+        let generation = ui.thread_browser.generation;
+        paint(&ui.thread_browser, 120, 28);
+        ui.thread_browser.apply_watch_details(
+            generation,
+            20,
+            vec![detail("recover", "replacement", Recovery, 2)],
+            vec![],
+        );
+        assert!(
+            ui.confirmation_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+                .is_empty()
+        );
+        ui.thread_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT));
+        paint(&ui.thread_browser, 120, 28);
+        ui.thread_browser.apply_watch_details(
+            generation,
+            21,
+            vec![detail("recover", "replacement", Recovery, 3)],
+            vec![],
+        );
+        assert!(
+            ui.confirmation_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+                .is_empty(),
+            "old recovery must not retry a later recovery of the same Run"
+        );
+        ui.thread_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert!(
+            matches!(ui.confirmation_key(KeyEvent::new(KeyCode::Char('y'),KeyModifiers::NONE)).as_slice(),[UiAction::WatchAction(target)] if target.kind==WatchActionKind::Stop && target.run_id=="replacement")
+        );
+    }
+    #[test]
+    fn descendant_hotkey_respects_custom_send_binding_and_scope_clears_for_f2() {
+        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        ui.select_thread("root".into());
+        ui.viewport = Rect::new(0, 0, 100, 30);
+        let actions = ui.event(Event::Key(KeyEvent::new(
+            KeyCode::Char('d'),
+            KeyModifiers::ALT,
+        )));
+        assert!(actions.iter().any(|action|matches!(action,UiAction::LoadThreads {mode:BrowserMode::Watch,descendant_root:Some(root),..} if root=="root")));
+        let scope = ui.take_deferred_actions();
+        let generation = scope
+            .iter()
+            .find_map(|action| match action {
+                UiAction::ObserveDescendants { generation, roots } => {
+                    assert_eq!(roots, &vec!["root".to_string()]);
+                    Some(*generation)
+                }
+                _ => None,
+            })
+            .unwrap();
+        ui.event(Event::Key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
+        assert!(ui.take_deferred_actions().iter().any(|action|matches!(action,UiAction::ObserveDescendants {generation:g,roots} if *g>generation && roots.is_empty())));
+        let mut config = crate::config::Config::default();
+        config.ui.send_key = "Alt+D".into();
+        let mut configured = UiState::new(&config, std::path::PathBuf::new());
+        configured.select_thread("root".into());
+        configured.event(Event::Key(KeyEvent::new(
+            KeyCode::Char('d'),
+            KeyModifiers::ALT,
+        )));
+        assert!(
+            !configured.thread_browser.visible(),
+            "configured send shortcut has precedence over descendant Watch"
+        );
+    }
+    #[test]
+    fn external_deletion_advances_watch_generation_without_losing_surviving_live_details() {
+        use crate::activity::ActivityPhase::Tools;
+        let mut browser = browser();
+        paint(&browser, 120, 28);
+        let old_generation = browser.generation;
+        browser.selected = browser
+            .items
+            .iter()
+            .position(|row| row.thread_id == "active")
+            .unwrap();
+        browser.remove_deleted(&["recover".into()]);
+        assert_ne!(browser.generation, old_generation);
+        assert_eq!(browser.watch.borrow().generation(), browser.generation);
+        assert!(browser.watch.borrow().row("recover").is_none());
+        assert!(!browser.watch_summaries.contains_key("recover"));
+        assert_eq!(browser.items[browser.selected].thread_id, "active");
+        paint(&browser, 120, 28);
+        assert!(!browser.apply_watch_details(
+            old_generation,
+            100,
+            vec![detail("active", "stale", Tools, 1)],
+            vec![]
+        ));
+        assert!(browser.apply_watch_details(
+            browser.generation,
+            1,
+            vec![detail("active", "replacement", Tools, 1)],
+            vec![]
+        ));
+        let target = browser
+            .watch
+            .borrow()
+            .action_target("active", WatchActionKind::Stop)
+            .unwrap();
+        assert_eq!(target.run_id, "replacement");
+        assert_eq!(target.browser_generation, browser.generation);
+        paint(&browser, 120, 28);
+        let Some(UiAction::ObserveBrowser { detail_ids, .. }) = browser.observe(true) else {
+            panic!()
+        };
+        assert!(!detail_ids.iter().any(|id| id == "recover"));
+    }
+
+    #[test]
+    fn queued_watch_details_are_rejected_after_cover_resize_and_scope_change() {
+        use crate::activity::ActivityPhase::Tools;
+        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        ui.thread_browser = browser();
+        paint(&ui.thread_browser, 120, 28);
+        let generation = ui.thread_browser.generation;
+        ui.help_visible = true;
+        ui.apply(UiUpdate::WatchDetails {
+            generation,
+            read_sequence: 30,
+            details: vec![detail("active", "covered", Tools, 1)],
+            missing_ids: vec!["done".into()],
+        });
+        assert_eq!(
+            ui.thread_browser
+                .watch
+                .borrow()
+                .action_target("active", WatchActionKind::Stop)
+                .unwrap()
+                .run_id,
+            "run-active"
+        );
+        assert!(ui.thread_browser.watch.borrow().row("done").is_some());
+        ui.help_visible = false;
+        ui.event(Event::Resize(1, 1));
+        ui.apply(UiUpdate::WatchDetails {
+            generation,
+            read_sequence: 31,
+            details: vec![detail("active", "resized", Tools, 1)],
+            missing_ids: vec![],
+        });
+        assert_eq!(
+            ui.thread_browser
+                .watch
+                .borrow()
+                .action_target("active", WatchActionKind::Stop)
+                .unwrap()
+                .run_id,
+            "run-active"
+        );
+        ui.event(Event::Resize(80, 9));
+        ui.thread_browser.selected = ui
+            .thread_browser
+            .items
+            .iter()
+            .position(|row| row.thread_id == "done")
+            .unwrap();
+        paint(&ui.thread_browser, 80, 9);
+        assert_eq!(
+            ui.thread_browser.watch_visible_ids.borrow().as_slice(),
+            ["done"]
+        );
+        // A newly painted small viewport replaces the old scope before a queued old read arrives.
+        ui.apply(UiUpdate::WatchDetails {
+            generation,
+            read_sequence: 32,
+            details: vec![
+                detail("active", "offscreen", Tools, 1),
+                detail("done", "fresh-done", Tools, 1),
+            ],
+            missing_ids: vec!["recover".into()],
+        });
+        assert_eq!(
+            ui.thread_browser
+                .watch
+                .borrow()
+                .action_target("active", WatchActionKind::Stop)
+                .unwrap()
+                .run_id,
+            "run-active"
+        );
+        assert_eq!(
+            ui.thread_browser
+                .watch
+                .borrow()
+                .action_target("done", WatchActionKind::Stop)
+                .unwrap()
+                .run_id,
+            "fresh-done"
+        );
+        assert!(ui.thread_browser.watch.borrow().row("recover").is_some());
+    }
+    #[test]
+    fn watch_page_provenance_discloses_bounded_titles_without_overwriting_newer_patch_evidence() {
+        let mut browser = browser();
+        browser.limited_titles.insert("recover".into());
+        browser.row_versions.insert("recover".into(), (30, true));
+        assert!(browser.apply_watch_page_info(
+            browser.generation,
+            10,
+            WatchPageInfo {
+                read_at: "2026-10-31T10:00:00Z".into(),
+                limited_titles: vec!["active".into()],
+                continuation_limited: true,
+            }
+        ));
+        assert!(
+            browser.limited_titles.contains("recover"),
+            "an older page cannot clear a newer patch's limited title"
+        );
+        assert!(browser.limited_titles.contains("active"));
+        let text = paint(&browser, 120, 28);
+        assert!(text.contains("検索未確認"));
+        let ThreadOutcome::Info(info) =
+            browser.key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE))
+        else {
+            panic!()
+        };
+        assert!(info.contains("候補ページ取得: 2026-10-31T10:00:00Z"));
+        assert!(info.contains("行の現在状態は後続通知で更新"));
+        assert!(info.contains("候補検査は上限まで"));
+        assert!(!browser.apply_watch_page_info(
+            browser.generation,
+            9,
+            WatchPageInfo {
+                read_at: "old".into(),
+                limited_titles: vec![],
+                continuation_limited: false
+            }
+        ));
+        assert_eq!(
+            browser.watch_page_info.as_ref().unwrap().read_at,
+            "2026-10-31T10:00:00Z"
+        );
+        browser.mode = BrowserMode::List;
+        assert!(!browser.apply_watch_page_info(
+            browser.generation,
+            10,
+            WatchPageInfo {
+                read_at: "wrong mode".into(),
+                limited_titles: vec![],
+                continuation_limited: false
+            }
+        ));
+    }
+    #[test]
+    fn coherent_metadata_then_detail_reply_preserves_actual_painted_scope_until_next_frame() {
+        use crate::activity::ActivityPhase::Recovery;
+        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        ui.thread_browser = browser();
+        paint(&ui.thread_browser, 120, 28);
+        let generation = ui.thread_browser.generation;
+        let changed = row("active", Recovery);
+        let summary =
+            WatchSummary::prepare(&changed).with_identity(Some("new-recovery-run".into()), None);
+        ui.apply(UiUpdate::BrowserPatch {
+            patch: Box::new(BrowserPatch {
+                generation,
+                read_sequence: 40,
+                rows: vec![changed],
+                display_times: vec![],
+                missing_ids: vec![],
+                limited_titles: vec![],
+                excerpt: None,
+                watch_summaries: vec![summary],
+            }),
+        });
+        assert!(
+            ui.thread_browser
+                .watch_visible_ids
+                .borrow()
+                .iter()
+                .any(|id| id == "active"),
+            "metadata cache invalidation cannot discard a currently painted consumer"
+        );
+        ui.apply(UiUpdate::WatchDetails {
+            generation,
+            read_sequence: 40,
+            details: vec![detail("active", "new-recovery-run", Recovery, 7)],
+            missing_ids: vec![],
+        });
+        let target = ui
+            .thread_browser
+            .watch
+            .borrow()
+            .action_target("active", WatchActionKind::Retry)
+            .unwrap();
+        assert_eq!(target.run_id, "new-recovery-run");
+        assert_eq!(target.turn_generation, Some(7));
+        // Explicit navigation retires the old painted window before a redraw.
+        ui.thread_browser
+            .key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(ui.thread_browser.watch_visible_ids.borrow().is_empty());
+        ui.apply(UiUpdate::WatchDetails {
+            generation,
+            read_sequence: 41,
+            details: vec![detail("active", "late", Recovery, 8)],
+            missing_ids: vec![],
+        });
+        assert_eq!(
+            ui.thread_browser
+                .watch
+                .borrow()
+                .action_target("active", WatchActionKind::Retry)
+                .unwrap()
+                .run_id,
+            "new-recovery-run"
+        );
+        paint(&ui.thread_browser, 120, 28);
+        ui.thread_browser.observe(false);
+        assert!(
+            ui.thread_browser.watch_visible_ids.borrow().is_empty(),
+            "covering the popup retires painted consumers too"
+        );
+    }
+
+    #[test]
+    fn list_and_watch_wheel_select_rows_without_pagination_deletion_or_tree_actions() {
+        let mut browser = browser();
+        paint(&browser, 100, 30);
+        let first = browser.selected;
+        assert!(browser.wheel(1));
+        assert_ne!(browser.selected, first);
+        assert!(
+            browser.watch_visible_ids.borrow().is_empty(),
+            "wheel retires detail geometry until repaint"
+        );
+        assert!(browser.wheel(100));
+        assert!(!browser.wheel(3));
+        browser.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        browser.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        paint(&browser, 100, 30);
+        assert!(browser.wheel(-100));
+        assert!(!browser.wheel(-3));
+        assert_eq!(browser.mode, BrowserMode::List);
     }
 }

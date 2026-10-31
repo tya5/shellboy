@@ -46,6 +46,9 @@ fn list(ui: &mut UiState, ids: &[&str]) {
             .collect(),
         display_times: vec![],
         next_cursor: None,
+        watch_summaries: Vec::new(),
+        watch_page: None,
+        notice: None,
     });
 }
 fn request(actions: Vec<UiAction>, execute_expected: bool) -> (u64, ThreadDeleteArgs) {
@@ -190,6 +193,9 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
         }],
         display_times: vec![],
         next_cursor: None,
+        watch_summaries: Vec::new(),
+        watch_page: None,
+        notice: None,
     });
     assert_eq!(ui.threads().len(), 1);
     assert_ne!(ui.threads()[0].title, "stale deleted row");

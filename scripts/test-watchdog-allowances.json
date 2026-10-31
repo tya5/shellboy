@@ -664,22 +664,6 @@
     "reason": "Pure animation state test passes a future Instant as data; it neither waits for real time nor asserts real-time latency."
   },
   {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "24a7ca1401f08d7cbc13024aa9ab26668d740e7841c3802b7495de45ad8b3301",
-    "function": "deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/ui/threads.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "c23f0c67d7d6e6ac54c481466743ccead25f14c90a08b4b5c44569b8eb789c72",
-    "function": "deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing deletion_keeps_surviving_selection_and_reschedules_only_pending_visible_reads test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
     "file": "tests/attachments.rs",
     "rule": "wall-deadline",
     "fingerprint": "2757169064da75923fe6cda13fc53ebfc0b551bad13be8294561c1019ed231a5",

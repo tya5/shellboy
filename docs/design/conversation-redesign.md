@@ -742,3 +742,18 @@ prechecks cannot make the write atomic; it is not a new lifecycle/command/table,
 worker/queue or generic mutation engine. Output ownership checks are display
 reads and use readonly admission. Accepted mutations retain existing Control
 admission/shutdown/durability ownership even if the browser closes.
+
+
+The explicit Watch output action reuses canonical ShellRead for retained bytes,
+decoding/cursors and source availability. Its normal Core metadata/read lifecycle
+remains owned by that existing operation rather than duplicated in the UI; only
+the frontend ownership check is a readonly presentation snapshot. This explicit
+user read is distinct from recurring visible Watch facts/counts, which must stay
+on the shared readonly lane. No second output decoder or read engine is added.
+
+The existing popup panel can record its own painted body rectangle. Watch wheel
+input is routed only inside that body, and a resize invalidates the old rectangle
+and visible-detail IDs before another queued result can be adopted. Footer
+descendant labels reserve their width before less urgent facts are fitted, so a
+positive count is not silently clipped by a long tool/Revisit status. These are
+F view-ownership/layout boundaries, not the transferred #83–#87 display work.

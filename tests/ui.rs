@@ -2855,6 +2855,9 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
                 ),
             })
             .collect(),
+        watch_summaries: Vec::new(),
+        watch_page: None,
+        notice: None,
     });
     let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();

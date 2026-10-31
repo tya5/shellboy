@@ -20,7 +20,9 @@ impl UiUpdate {
             | Self::EditRequestLoaded { .. }
             | Self::SavedMessage { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
-            Self::ProgramStatus(_)
+            Self::WatchDetails { .. }
+            | Self::Descendants { .. }
+            | Self::ProgramStatus(_)
             | Self::BrowserPatch { .. }
             | Self::BrowserPatchFailed { .. }
             | Self::BrowserResync { .. }

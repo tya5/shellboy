@@ -230,8 +230,28 @@ impl UiState {
             }
             Event::Resize(width, height) => {
                 let viewport = Rect::new(0, 0, width, height);
+                if self.viewport != viewport {
+                    self.thread_browser.invalidate_paint();
+                }
                 self.dirty |= self.viewport != viewport;
                 self.viewport = viewport;
+                vec![]
+            }
+            Event::Mouse(mouse) if self.top_overlay() == Some(Overlay::Threads) => {
+                if self.thread_browser.paint_bounds().is_some_and(|bounds| {
+                    bounds
+                        .body
+                        .contains(ratatui::layout::Position::new(mouse.column, mouse.row))
+                }) {
+                    let delta = match mouse.kind {
+                        MouseEventKind::ScrollUp => Some(-3),
+                        MouseEventKind::ScrollDown => Some(3),
+                        _ => None,
+                    };
+                    if let Some(delta) = delta {
+                        self.dirty |= self.thread_browser.wheel(delta);
+                    }
+                }
                 vec![]
             }
             Event::Mouse(mouse)
@@ -297,6 +317,19 @@ impl UiState {
         ) = self.top_overlay()
         {
             return self.overlay_key(owner, key);
+        }
+        if self.composer_active()
+            && key.code == KeyCode::Char('d')
+            && key.modifiers == KeyModifiers::ALT
+            && !key_matches(&self.config.ui.send_key, key)
+            && !self
+                .config
+                .ui
+                .newline_keys
+                .iter()
+                .any(|binding| key_matches(binding, key))
+        {
+            return self.open_descendant_watch();
         }
         if let Some(actions) = self.live_work_key(key) {
             return actions;

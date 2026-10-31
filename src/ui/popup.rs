@@ -12,6 +12,31 @@ use ratatui::{
     },
 };
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct PaintBounds {
+    pub outer: Rect,
+    pub body: Rect,
+}
+pub(super) fn move_selection(selected: usize, delta: isize, count: usize) -> usize {
+    selected
+        .saturating_add_signed(delta)
+        .min(count.saturating_sub(1))
+}
+pub(super) fn panel_recorded(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    context: &str,
+    footer: &str,
+    paint: &std::cell::Cell<Option<PaintBounds>>,
+) -> Rect {
+    let layout = PanelLayout::new(area, context, footer, None);
+    paint.set(Some(PaintBounds {
+        outer: layout.outer,
+        body: layout.body(),
+    }));
+    panel(frame, area, title, context, footer)
+}
 /// The existing application status remains visible below every popup.
 pub(super) const STATUS_ROWS: u16 = 2;
 pub(super) fn viewport(area: Rect) -> Rect {

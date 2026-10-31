@@ -130,6 +130,7 @@ impl Browser {
         self.detail_dirty.clear();
         self.inflight = None;
     }
+    #[cfg(test)]
     pub fn observe(
         &mut self,
         generation: u64,
@@ -252,6 +253,7 @@ impl Browser {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn begin_page(
         &mut self,
         generation: u64,
@@ -662,40 +664,8 @@ pub(super) fn prepare(raw: RawObservation, read_sequence: u64, generation: u64) 
     Observation { patch, details }
 }
 
-pub(super) async fn read(
-    control: &Control,
-    ticket: &Ticket,
-    progress_slots: Arc<Semaphore>,
-) -> Result<Observation, ApiError> {
-    let scope = ticket.clone();
-    let permit = tokio::select! {biased;
-        _=ticket.stop.cancelled()=>return Err(observation_closed()),
-        permit=progress_slots.acquire_owned()=>permit.map_err(|_|observation_closed())?,
-    };
-    let result = super::snapshot::read_sequenced(
-        control.store.database.path().to_path_buf(),
-        ticket.stop.clone(),
-        move |db, _sequence| read_tx(db, &scope, None),
-    )
-    .await;
-    drop(permit);
-    let (raw, read_sequence) = checked_storage(control, result).await?;
-    if ticket.stop.is_cancelled() {
-        return Err(observation_closed());
-    }
-    project(raw, read_sequence, ticket.generation).await
-}
-
 fn observation_closed() -> ApiError {
     ApiError::new(ErrorCode::InvalidState, "Browser observation closed")
-}
-
-pub(super) async fn project(
-    raw: RawObservation,
-    read_sequence: u64,
-    generation: u64,
-) -> Result<Observation, ApiError> {
-    presentation_work(move || prepare(raw, read_sequence, generation)).await
 }
 
 pub(super) async fn page(

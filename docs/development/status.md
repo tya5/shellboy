@@ -1993,3 +1993,23 @@ of the standard check: exact stop/retry, no repeated replay effects, replacement
 generation/deleted/invalid witness rejection, absent-Turn and rollback cases.
 The new tests use the canonical60s watchdog. This evidence describes the combined
 F runtime tree, not every intermediate extraction commit in isolation.
+
+
+## F runtime UI/broker connected locally
+
+The prepared F runtime connects List/Watch mode, scoped discovery, actual painted
+row/parent witnesses, visible clocks, session unread state, exact confirmations
+and wheel routing. Current conversation, browser and descendant tickets share
+the existing single progress lane/readonly snapshot and500ms admission; E's
+same-deadline priority is retained. Changed/overflow events drive bounded scope
+proof or resync; output hints compare only visible in-memory execution markers.
+UI detail/count adoption is fenced by visibility, generation and read sequence.
+No G forms, inspector models or transferred #83–#87 features are included.
+
+Standard checks on the combined prepared source pass1981 Rust tests/0 failures/
+35ignored, Python18, layout93, watchdog policy, formatter and strict Clippy on
+native macOS/Rust1.99.1. This includes an actual blocked-writer test pairing the
+selected view/browser with an unowned descendant count in one read sequence,
+all10 Watch widget/integration tests and the5 private mutation tests. Exact
+source/proof and remaining native/performance/guide gates are recorded next;
+local success is not F main admission or native Windows/physical-terminal proof.

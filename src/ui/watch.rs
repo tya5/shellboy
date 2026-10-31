@@ -916,6 +916,85 @@ impl DescendantCount {
         ))
     }
 }
+#[derive(Default)]
+pub(super) struct DescendantView {
+    generation: u64,
+    roots: Vec<String>,
+    read_sequence: u64,
+    counts: BTreeMap<String, DescendantCount>,
+    error: Option<String>,
+}
+impl DescendantView {
+    pub fn observe(&mut self, mut roots: Vec<String>) -> Option<super::UiAction> {
+        roots.sort();
+        roots.dedup();
+        roots.truncate(2);
+        if self.roots == roots {
+            return None;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.read_sequence = 0;
+        self.error = None;
+        self.counts.retain(|root, _| roots.contains(root));
+        self.roots = roots.clone();
+        Some(super::UiAction::ObserveDescendants {
+            generation: self.generation,
+            roots,
+        })
+    }
+    pub fn accept(
+        &mut self,
+        generation: u64,
+        sequence: u64,
+        counts: Vec<DescendantCount>,
+        error: Option<String>,
+    ) -> bool {
+        if generation != self.generation
+            || sequence < self.read_sequence
+            || counts.len() > 2
+            || counts.iter().any(|count| !self.roots.contains(&count.root))
+        {
+            return false;
+        }
+        let error = error.map(|text| safe(&text, 512));
+        let mut next = BTreeMap::new();
+        for root in &self.roots {
+            let count = counts
+                .iter()
+                .find(|count| &count.root == root)
+                .cloned()
+                .or_else(|| error.as_ref().and_then(|_| self.counts.get(root).cloned()))
+                .unwrap_or_else(|| DescendantCount {
+                    root: root.clone(),
+                    available: false,
+                    active: 0,
+                    recovery: 0,
+                    truncated: false,
+                    cycle: false,
+                });
+            next.insert(root.clone(), count);
+        }
+        self.read_sequence = sequence;
+        let changed = self.counts != next || self.error != error;
+        self.counts = next;
+        self.error = error;
+        changed
+    }
+    pub fn label(&self, root: &str) -> Option<String> {
+        let count = self.get(root)?;
+        if self.error.is_some() {
+            return Some(match count.label() {
+                Some(label) if count.available => format!("{label}（前回の値・更新失敗）"),
+                _ => "子孫数は更新失敗・未確認".into(),
+            });
+        }
+        count.label()
+    }
+    pub fn get(&self, root: &str) -> Option<&DescendantCount> {
+        self.counts.get(root)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -32,6 +32,9 @@ fn page(ui: &mut UiState, cursor: Option<&str>, items: Vec<ThreadSummary>, next:
         threads: items,
         display_times: vec![],
         next_cursor: next.map(String::from),
+        watch_summaries: Vec::new(),
+        watch_page: None,
+        notice: None,
     });
 }
 fn selected(ui: &UiState) -> &str {
@@ -126,6 +129,9 @@ fn additional_pages_merge_by_id_preserve_selection_and_reject_stale_cursors() {
         threads: vec![item("late", None)],
         display_times: vec![],
         next_cursor: None,
+        watch_summaries: Vec::new(),
+        watch_page: None,
+        notice: None,
     });
     assert!(ui.threads().iter().all(|t| t.thread_id != "late"));
     page(&mut ui, None, vec![item("query-result", None)], None);
