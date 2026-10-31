@@ -57,9 +57,7 @@ fn exact_statistics_periods_states_unknowns_and_read_only_counts() {
 fn malformed_legacy_usage_zero_and_independent_numeric_validation() {
     let db=fixture();
     for (id,raw) in [("bad","garbage"),("null","null"),("negative","{\"input_tokens\":-1}"),("real","{\"input_tokens\":1e0}"),("big","{\"input_tokens\":9223372036854775808}"),("str","{\"input_tokens\":\"3\"}"),("zero","{\"input_tokens\":0,\"input_tokens_details\":{\"cached_tokens\":0}}") ] {
-        db.pragma_update(None,"ignore_check_constraints",true).unwrap();
         insert(&db,id,"t1","2026-10-31T00:00:00Z","completed",Some(raw));
-        db.pragma_update(None,"ignore_check_constraints",false).unwrap();
     }
     insert(&db,"cancelled","t1","2026-10-31T00:00:00Z","cancelled",Some("{\"input_tokens\":999}"));
     insert(&db,"active","t1","2026-10-31T00:00:00Z","inflight",Some("{\"input_tokens\":999}"));
@@ -158,10 +156,10 @@ fn descendants_overflow_and_unreported_input_are_not_inferred() {
 #[test]
 fn legacy_non_utc_and_missing_times_are_counted_not_guessed() {
     let db=fixture();
-    for id in ["offset","z","null"] {insert(&db,id,"t1","2026-10-31T00:00:00Z","completed",None);}
+    for id in ["offset","z","empty"] {insert(&db,id,"t1","2026-10-31T00:00:00Z","completed",None);}
     db.execute("UPDATE model_attempt SET started_at='2026-10-31T09:00:00+09:00' WHERE id='offset'",[]).unwrap();
     db.execute("UPDATE model_attempt SET started_at='2026-10-31T00:00:00Z' WHERE id='z'",[]).unwrap();
-    db.execute("UPDATE model_attempt SET started_at=NULL WHERE id='null'",[]).unwrap();
+    db.execute("UPDATE model_attempt SET started_at='' WHERE id='empty'",[]).unwrap();
     let v=read(&db,&args("thread"),"f").unwrap();
     assert_eq!(v["excluded_time_count"],3);assert_eq!(v["scanned_candidates"],3);
     assert!(v["items"].as_array().unwrap().is_empty());
