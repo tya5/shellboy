@@ -869,6 +869,11 @@ impl Details {
                 )
             })
     }
+    fn shared_original_context(&self, view: &ThreadView) -> String {
+        self.described_command_context(view)
+            .map(|s| format!("共有assistant原文（隣接callを含む） · {s} · "))
+            .unwrap_or_default()
+    }
     pub(super) fn open_source(&mut self, node_id: String, next: &mut u64) -> UiAction {
         self.change_source(node_id);
         self.original(None, next)
@@ -1178,9 +1183,7 @@ impl Details {
                 .map(|body| {
                     format!(
                         "{}保存 {} · 表示受信 {}",
-                        self.described_command_context(view)
-                            .map(|s| format!("{s} · 共有assistant原文（隣接callを含む） · "))
-                            .unwrap_or_default(),
+                        self.shared_original_context(view),
                         safe(&body.provenance.created_at),
                         self.original_observed_at.as_deref().unwrap_or("未確認")
                     )
@@ -2840,6 +2843,35 @@ mod description_context_tests {
             let context = details.described_command_context(&view).unwrap();
             assert!(context.contains("call b") && context.contains("EXACT_COMMAND_b"));
             assert!(!context.contains("EXACT_COMMAND_a"));
+        }
+        for width in [80u16, 140] {
+            let caption = details.shared_original_context(&view);
+            assert!(caption.starts_with("共有assistant原文（隣接callを含む）"));
+            let backend = ratatui::backend::TestBackend::new(width.saturating_sub(8), 1);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(
+                        ratatui::widgets::Paragraph::new(caption.clone()),
+                        frame.area(),
+                    )
+                })
+                .unwrap();
+            let shown: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(
+                shown.contains("共有assistant原文") && shown.contains("call b"),
+                "{width}: {shown}"
+            );
+            assert!(!shown.contains("call a") && !shown.contains("EXACT_COMMAND_a"));
+            if width == 140 {
+                assert!(shown.contains("EXACT_COMMAND_b"));
+            }
         }
         view.describe_calls = false;
         assert!(details.described_command_context(&view).is_none());
