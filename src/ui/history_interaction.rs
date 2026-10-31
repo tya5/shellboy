@@ -1064,3 +1064,54 @@ mod heading_focus_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod description_original_identity_tests {
+    use super::*;
+    use crate::presentation::{
+        BlockKind, NodePresentation, PresentationBlock, PresentationKind, ToolPresentation,
+    };
+    #[test]
+    fn described_original_targets_exact_call_source_not_adjacent_result() {
+        let mut ui = UiState::new(&crate::config::Config::default(), std::env::temp_dir());
+        let tools = ["a", "b"].map(|call| ToolPresentation {
+            group_id: Some("g".into()),
+            call_id: call.into(),
+            command: format!("ACTUAL-{call}"),
+            description: Some(format!("LABEL-{call}")),
+            call_node_id: Some(format!("call-{call}")),
+            result_node_id: Some(format!("result-{call}")),
+            status: "completed".into(),
+            exit_code: Some(0),
+            ..Default::default()
+        });
+        *ui.active_view_mut().nodes_mut_for_test() = tools
+            .iter()
+            .map(|tool| UiNode {
+                node_id: tool.call_node_id.clone().unwrap(),
+                role: "assistant".into(),
+                presentation: NodePresentation {
+                    kind: PresentationKind::Assistant,
+                    blocks: vec![PresentationBlock {
+                        kind: BlockKind::ToolCall,
+                        tool: Some(tool.clone()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .collect();
+        for tool in &tools {
+            let key = ItemKey::tool(tool, tool.call_node_id.as_ref().unwrap(), 0);
+            ui.active_view_mut().items.active = true;
+            ui.active_view_mut().items.focus = Some(key);
+            let actions = ui.open_history_details(false, true);
+            assert_eq!(actions.len(), 1);
+            assert!(
+                matches!(&actions[0], UiAction::LoadOriginal { node_id, cursor: None, .. }
+                if Some(node_id) == tool.call_node_id.as_ref())
+            );
+        }
+    }
+}

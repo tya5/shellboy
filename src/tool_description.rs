@@ -9,7 +9,7 @@ pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Stri
 pub(crate) fn label(raw: Option<&str>) -> Option<String> {
     let safe = crate::presentation::sanitize_plain(raw?, 0)
         .0
-        .replace(['\n', '\r'], " ");
+        .replace(['\n', '\r', '\t', '\u{2028}', '\u{2029}'], " ");
     let safe = safe.trim();
     (!safe.is_empty()).then(|| safe.chars().take(MAX_CHARS).collect())
 }
