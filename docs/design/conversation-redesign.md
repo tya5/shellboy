@@ -840,3 +840,34 @@ Offscreen rows retain their fixed heights as empty Ratatui rows, so selection
 and Home/End scrolling retain native table geometry without formatting every
 loaded title on each draw. Both neighborhoods have a one-row margin; no new
 cache or persistent state is introduced.
+## Manual navigation across a short folded tail (#93)
+
+Upward history gestures remain manual navigation even when the currently loaded
+source window fits inside the viewport. At its older edge, request the existing
+bounded history window and preserve follow=false while the read, refresh or
+repaint is pending. History-focus Up at its first loaded item uses this same
+navigation path rather than repeatedly selecting that item and cancelling reads.
+
+A closed, typed tool-result source has known rendered summary rows even if its
+hidden canonical output window has an unloaded prefix/suffix. Moving between
+those rows must not hydrate hidden output before loading older source nodes.
+Ordinary prose, mixed/unknown sources and expanded tool bodies retain their
+existing bounded body-window navigation and immutable source anchors.
+
+A positive gesture that moves no rendered row in a partial short window is not
+proof of reaching the bottom: it must not enable follow. Actual downward motion
+to the true tail, an entirely loaded short history, explicit Ctrl+End, and the
+existing send-intent behavior retain their established follow contracts. No
+refresh/animation/geometry calculation enables follow by itself. Keep generation,
+view/read revisions, pending navigation and coalescing fences; no new lifecycle,
+protocol, worker or persisted state is introduced.
+
+The direction of crossing a local projection boundary follows the gesture, not
+only the clamped row coordinate. When the rendered neighborhood is shorter than
+the viewport, max-row is zero: an upward target can be nonnegative and >= max
+without becoming a forward gesture. Never alternate backward/forward projection
+focus on that geometry. Drawing also skips closed typed result hydration; manual
+navigation supersedes presentation-only reads by advancing its view revision,
+while an actual navigation request retains and accumulates pending movement.
+
+The existing 128-source and192KiB projection budgets remain unchanged.

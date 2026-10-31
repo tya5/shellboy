@@ -176,6 +176,13 @@ In selection/copy mode, Ctrl+L redraws the latest state once, including response
 
 Each Thread retains its draft, source-character anchor, and follow state. Movement is measured in display rows. At the end, history aligns to the last screen and follows; reading upward stops following. Wheels do not move the conversation behind help/details overlays. Offscreen bodies/layouts may be evicted from cache without deleting source history. `本文未キャッシュ` (body not cached) is fetched again according to scroll position.
 
+At the older edge, wheel-up, PgUp and history-focus Up request earlier nodes even
+when folded tools make the loaded page shorter than the screen. Closed tool
+outputs are not expanded merely to move past their summary rows. Updates and
+repaints keep manual reading paused; a zero-distance downward gesture on a
+partial short page does not resume follow. Use Ctrl+End to return explicitly.
+
+
 F1 (`/help`) groups common controls, conversation navigation, details/activity, models, and attachments by purpose. Up/Down scroll one row, PgUp/PgDn one page, and Esc/Enter/F1 close. Return to the conversation with Esc before entering commands. `/model`, `/cwd`, and F1 in the conversation list show model settings, working directory, and selected-conversation information respectively.
 
 ## Completion and input history

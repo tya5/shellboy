@@ -239,6 +239,14 @@ impl UiState {
                     .focus
                     .as_ref()
                     .and_then(|key| items.iter().position(|(_, item)| &item.key == key));
+                if current.is_some_and(|index| {
+                    (key.code == KeyCode::Up && index == 0)
+                        || (key.code == KeyCode::Down && index + 1 == items.len())
+                }) {
+                    // Preserve an in-flight navigation read instead of reselecting
+                    // the edge item and cancelling its pending movement.
+                    return Some(self.scroll(if key.code == KeyCode::Up { -1 } else { 1 }));
+                }
                 let next = if key.code == KeyCode::Up {
                     current.unwrap_or(items.len()).saturating_sub(1)
                 } else {

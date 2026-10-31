@@ -5103,3 +5103,77 @@ results, final SHA, record-line audit and integration status are tracked in #5;
 this structural evidence alone is not an unrun native-OS test result. serve,
 shutdown RPC, shared signal observation and real headless child-process tests
 remain later stages. User data, installed owner/binary and releases are untouched.
+## Folded-history scroll diagnosis (#93)
+
+Native macOS ARM64, Rust1.99.1; starting main5fc5cc0. Temporary source fixtures
+and real PTY/data-dir/loopback only; no user DB/log/clipboard/provider is used.
+The user allowed the overlap with F67cc688 after the initial file-overlap stop.
+The earlier summary request failed with EOF before response.completed; the one
+authorized retry selected about half its source characters and completed
+(1,744,861 ->1,531,188 replay characters). No additional summary retry was made.
+
+On unchanged production source, the initial short-tool UI probes fail for
+zero-distance Down resuming follow and history-focus Up returning no navigation.
+A partial large-output source additionally sends LoadNodeWindow for hidden output
+rather than LoadHistoryWindow for older nodes. The native initial harness first
+failed its synthetic output_item.status NOT NULL constraint; that fixture error
+was corrected, not hidden in the migration. Later native probes expose the
+short local-projection problem while a synthetic model response is gated.
+
+The saved ui_history filter intentionally suppresses window_applied when node
+count does not shrink and follow is unchanged. Therefore an absent record alone
+does not prove no metadata read happened. Typed request vectors, rendered old
+command witnesses and the actual trace are used together. A partial repair still
+showed a50-node user_follow pause at view revision51 and no older-command frame:
+upward nonnegative targets in a short local neighborhood could be mistaken for
+the forward edge, causing projection-focus oscillation until the finite guard.
+The existing128-source/192KiB budgets can make the rendered neighborhood shorter
+than the viewport, so that direction test matters even for a loaded50-node tail.
+Those projection budgets remain unchanged; hidden closed output is not hydrated
+just to navigate summary rows.
+
+Native harness refinements retain the60-second shared watchdog: fixture FK/status
+and a temporary catch-unwind delimiter error were corrected; repeated full repaint
+requests hit the existing4MiB flood guard during failed investigations. Fixed
+command expectations across a later bounded snapshot were not a valid source
+anchor. The final observer synchronizes wheel gestures with actual repaint/footer
+output and selects an older command witness from that frame, rather than relying
+on a settling delay or a presumed final scroll position. Temporary debug output
+is removed from product code before the final gate.
+
+The local standard, final native fixture and latest-main rebase are independent
+gates still to be recorded; branch/main CI is intentionally not dispatched by
+this worker under the integration-worker workflow. Existing records are retained.
+
+The final temporary-data native fixture now passes: real wheel input crosses the
+initial50-node tool-result tail, observes an older canonical command (CMD069 in
+the recorded run), completes the gated synthetic response, receives a separate
+CLI title update and still displays older history. Saved ui_history records one
+true->false user_follow pause and no false->true transition. Same-sized window
+reads are intentionally filtered; visible older commands prove the older read.
+Shutdown drains the PTY concurrently with child.wait using async readiness, so
+PTY backpressure is not mistaken for an owner shutdown defect. The preliminary
+full gate passed all other integration cases (934/1/17) but exercised the older,
+non-draining harness; a final full gate must use the corrected fixture.
+
+A controlled final comparison reran the same corrected synthetic fixtures with
+only the three production UI files restored temporarily to starting main5fc5cc0.
+The baseline fails six regressions (including actual PTY older-history progress),
+4 other filtered cases pass; no time bound was changed. The script restores the
+fixed files from dd55c23 on exit and verifies a clean tree. With the fixed UI,
+the real PTY case passes in the recorded run: it shows an older CMD069 witness,
+completes the held request, observes REFRESHED_PAUSED through the separate CLI,
+keeps older history visible and follow=false, drains shutdown and exits0. That
+5.14s observation is not a latency assertion. Only the shared60s watchdog guards
+permanent stalls. No diagnostic-policy relaxation or new timer was introduced.
+
+Final rebased source e80b723 on main9b4ae34 passes
+CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=2 sh scripts/check.sh:
+1,960 passed /0 failed /33 ignored; layout94, Python18, fmt, strict Clippy and
+watchdog policy pass. The native short-history regression also passes in this
+full run, without timing suppression. src/ui.rs changes exactly line1728 in
+UiState::prepare_visible_render_width (function1697-1795); it only excludes
+known closed result hydration. ui/history_interaction.rs and ui/view.rs own the
+navigation changes. Existing projection/body budgets, rendering, Core and schema
+are unchanged. The record is delivered to worker4 with review required; no local
+workflow_dispatch or main push is authorized under this handoff workflow.

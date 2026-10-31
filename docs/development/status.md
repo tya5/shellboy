@@ -2390,3 +2390,35 @@ regression lines per OS. Long P2/P5 remains live; no F main approval/admission.
 Ignored private G preflight records current CLI/catalogue/migration differences
 and backs up both existing archive layers without changing the root index/tree.
 G extraction/admission remains ordered after F.
+## Folded-history manual navigation (#93)
+
+Latest-main 5fc5cc0 synthetic regressions reproduce hidden-output hydration,
+edge-focus nonprogress and zero-distance follow resumption. The repair keeps
+manual navigation separate from presentation hydration, preserves its direction
+at a zero-height scroll range without changing existing projection budgets. Typed closed results remain known
+summary rows; expanded/prose sources retain source-window reads and anchors.
+
+Production changes are localized to ui/view.rs and ui/history_interaction.rs. ui.rs has one changed filter in
+prepare_visible_render_width (line1728 on this base), skipping closed-result
+hydration. F overlap was acknowledged by the user; worker4 receives the final
+line mapping with a review-required branch. No Core/protocol/schema change,
+installed binary, user data or clipboard operation is involved. Final local
+standard/native gates remain separate; CI and main integration belong to worker4.
+The corrected real PTY regression passes: older command witness before and after
+saved model completion/separate CLI refresh, follow stays false, normal exit0.
+A final unchanged-production5fc5cc0 comparison with that same fixture fails,
+confirming the latest-main reproduction rather than assuming the user hypothesis.
+Full latest-main local validation passes1,960/0/33, layout94, Python18, fmt/Clippy
+and watchdog policy. Native wheel/paused-update/shutdown passes; worker4 owns
+review-required integration/CI. The src/ui.rs change is only line1728 in
+prepare_visible_render_width (function1697-1795), no rendering logic rewrite.
+
+
+## F follows main folded-history fix0a7e521
+
+F incorporates main0a7e521 (#93) while preserving its separately published
+4b61c0f source/performance witnesses. The only conflict was appended design
+text; both F read-admission/row-design and #93 navigation contracts are kept.
+The one ui.rs hydration filter and history_interaction/view changes follow
+main unchanged. No new Core/protocol/migration or G work is included. New
+combined-source standard/CI remain required; earlier3OS success is not relabelled.

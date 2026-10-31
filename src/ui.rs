@@ -1763,7 +1763,7 @@ impl UiState {
         let mut requests = view
             .nodes()
             .iter()
-            .filter(|node| working.contains(&node.node_id))
+            .filter(|node| working.contains(&node.node_id) && !view.closed_tool_source(node))
             .filter_map(|node| {
                 let offset = if view.anchor.node_id.as_ref() == Some(&node.node_id) && !view.follow
                 {
