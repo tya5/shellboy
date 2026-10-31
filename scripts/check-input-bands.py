@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--mark", default="⤷")
+    parser.add_argument("--mark", default="⇥")
     args = parser.parse_args()
     binary, fixture = args.binary.resolve(), args.fixture.resolve()
     args.out.mkdir(parents=True, exist_ok=False)

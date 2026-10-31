@@ -1978,3 +1978,10 @@ and 20 Python tests. Three external-mark candidates pass 18 native PTY sessions;
 A is restored and independently recaptured. Source/binary evidence and earlier
 failed attempts are in acceptance. User mark selection still blocks main;
 worker4 owns CI/integration and the user owns issue closure.
+
+## #91 selected external-input mark
+
+The user selected B (⇥) on 2026-10-31. The common External/外から row and the PTY
+driver default now use B; an explicit regression assertion binds mark/label/CJK
+width. The prior A branch remains historical, not the integration candidate.
+The selected branch is being requalified and sent to worker4 as visually approved.

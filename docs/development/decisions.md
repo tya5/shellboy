@@ -2185,3 +2185,11 @@ only inside pipe-drained PTYs. GUI capture is unsuitable for clipboard checks
 because it can forward OSC52 to the host; reject clipboard-related GUI input.
 Routine tests use scratch config/data and injected clipboard backends where
 appropriate. This is test isolation, not a guarantee about arbitrary programs.
+
+## #91 external mark selected by the user
+
+2026-10-31, active: the user selected candidate B, ⇥, from the recorded real-PTY
+comparison. The common External row remains labeled 外から, uses the existing
+user-marker palette and has width_cjk()==1. Candidate A was provisional only.
+The reviewer states this visual choice is approved; qualification/integration
+remain delegated to worker4. No confirmation dialog, color or protocol is added.
