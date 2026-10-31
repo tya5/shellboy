@@ -214,7 +214,10 @@ pub(crate) fn prepare(raw: Raw) -> Result<Value, ApiError> {
             .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Invalid bounded list metadata"))?;
         if let Some(prefix) = value.get("command_prefix").and_then(Value::as_str) {
             let (safe, truncated) = super::shell::snippet(prefix);
-            let full = value["command_prefix_limited"].as_bool().unwrap_or(false);
+            let full = value["command_prefix_limited"]
+                .as_bool()
+                .or_else(|| value["command_prefix_limited"].as_i64().map(|n| n == 1))
+                .unwrap_or(false);
             value["command_excerpt"] = Value::String(safe);
             value["command_truncated"] = Value::Bool(truncated || full);
         }
@@ -222,6 +225,19 @@ pub(crate) fn prepare(raw: Raw) -> Result<Value, ApiError> {
             let description = crate::tool_description::label(Some(description))
                 .map(|s| super::shell::snippet(&s).0);
             value["description"] = description.map_or(Value::Null, Value::String);
+        }
+        for name in [
+            "available",
+            "downstream_available",
+            "automatic_recorded",
+            "body_available",
+            "output_complete",
+        ] {
+            if let Some(number) = value.get(name).and_then(Value::as_i64) {
+                if number == 0 || number == 1 {
+                    value[name] = Value::Bool(number == 1);
+                }
+            }
         }
         if let Some(object) = value.as_object_mut() {
             object.remove("command_prefix");
