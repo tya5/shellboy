@@ -108,15 +108,42 @@ impl Deadline {
                 "Response header deadline exceeds the monotonic clock range",
             )
         })?;
+        let timeout = || {
+            ModelError::new(
+                "timeout",
+                format!(
+                    "HTTP response-header wait timed out after {} ms (limit {} ms; {}); request delivery is not inferred from this deadline",
+                    self.started.elapsed().as_millis(),
+                    limit.as_millis(),
+                    setting
+                ),
+            )
+        };
+        tokio::pin!(future);
+        // Do not start polling a new outgoing request after its wait expired.
+        // Once admitted on time, later ready headers retain classification priority.
+        let first = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(if cancel.is_cancelled() {
+                Err(cancelled())
+            } else if Instant::now() >= at {
+                Err(timeout())
+            } else {
+                Ok(future.as_mut().poll(cx))
+            })
+        })
+        .await?;
+        if let std::task::Poll::Ready(result) = first {
+            return Ok(result);
+        }
         tokio::select! {
             biased;
             _ = cancel.cancelled() => Err(cancelled()),
-            // Preserve ready status facts before an expired local wait can
-            // misclassify a permanent response as retryable unknown transport.
-            result = future => Ok(result),
-            _ = tokio::time::sleep_until(at) => Err(ModelError::new("timeout", format!("HTTP response-header wait timed out after {} ms (limit {} ms; {}); request delivery is not inferred from this deadline", self.started.elapsed().as_millis(), limit.as_millis(), setting))),
+            // Preserve ready status facts instead of inventing an unknown timeout.
+            result = &mut future => Ok(result),
+            _ = tokio::time::sleep_until(at) => Err(timeout()),
         }
     }
+
     pub(super) fn received(&mut self) {
         self.received = Instant::now();
     }
@@ -232,15 +259,17 @@ mod tests {
                 ..Default::default()
             };
             let deadline = Deadline::new(ApiEndpoint::Responses, &connection, "fixture").unwrap();
-            tokio::time::advance(Duration::from_millis(500)).await;
             let cancel = CancellationToken::new();
-            let observed = deadline
-                .wait_headers(&cancel, std::future::ready(status))
-                .await;
+            let (send, receive) = tokio::sync::oneshot::channel();
+            let waiting = deadline.wait_headers(&cancel, receive);
+            tokio::pin!(waiting);
+            assert!(futures_util::poll!(&mut waiting).is_pending());
+            tokio::time::advance(Duration::from_millis(500)).await;
+            send.send(status).unwrap();
             assert_eq!(
-                observed.unwrap(),
+                waiting.await.unwrap().unwrap(),
                 status,
-                "a scheduler-late poll must classify available permanent headers, not invent a status-free retryable timeout"
+                "a scheduler-late poll must classify available permanent headers"
             );
             cancel.cancel();
             assert_eq!(
@@ -261,6 +290,38 @@ mod tests {
                 "pending headers still expire"
             );
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_initial_header_wait_does_not_poll_a_new_request() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let config = Connection {
+            response_header_timeout_ms: 500,
+            ..Default::default()
+        };
+        let deadline = Deadline::new(ApiEndpoint::Responses, &config, "fixture").unwrap();
+        tokio::time::advance(Duration::from_millis(500)).await;
+        let polled = Arc::new(AtomicBool::new(false));
+        let observed = polled.clone();
+        let outgoing = async move {
+            observed.store(true, Ordering::SeqCst);
+            400_u16
+        };
+        assert_eq!(
+            deadline
+                .wait_headers(&CancellationToken::new(), outgoing)
+                .await
+                .unwrap_err()
+                .kind,
+            "timeout"
+        );
+        assert!(
+            !polled.load(Ordering::SeqCst),
+            "an expired entry must not initiate another outgoing request"
+        );
     }
 
     #[tokio::test]

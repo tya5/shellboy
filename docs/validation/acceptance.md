@@ -5269,3 +5269,9 @@ qualification are recorded in #95. Three runs of the split Windows layout are
 requested from worker4; local macOS results are not Windows evidence. Real
 providers, charges and the historical CI's exact scheduling remain unverified.
 No user DB, installed owner/binary, release/tag or #5 branch is modified by #95.
+
+The #95 header guard also preserves expired-entry safety: an unstarted outgoing
+future is never polled after its initial deadline. The tie test now first polls
+a pending header receiver on time, then makes both it and the timeout ready; a
+separate virtual-clock probe checks no late initial poll. This avoids trading
+ready-header classification for initiation of a new expired request.
