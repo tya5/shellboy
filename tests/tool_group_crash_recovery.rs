@@ -590,3 +590,6 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[path = "support/watchdog.rs"]
+pub(crate) mod test_watchdog;

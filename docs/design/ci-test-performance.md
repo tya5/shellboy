@@ -190,3 +190,34 @@ The former arrival watchdog was already60s; this cleanup does not establish
 that runner load caused either failure or prove that all arrival stalls are
 fixed. Qualify the exact revised branch with at least two native Windows runs
 before main admission; retain any additional failure without automatic retry.
+
+## State-based test guards (#77)
+
+The earlier short negative observation windows and wall-clock latency assertions
+are superseded: test success depends on saved state, notifications, counts and
+recovery, never runner speed. All real-time deadlock protection uses the single
+60-second constant in tests/support/watchdog.rs. The helper identifies the
+awaited operation and call site, returns the original timeout result, and permits
+existing failure branches to retrieve saved progress diagnostics. No product
+deadline, grace, busy timeout, lifecycle or process policy changes.
+
+Virtual-clock tests may directly exercise timers and deadlines; each exception
+must have an explicit reason in the checker allowance inventory. Native socket,
+filesystem and database waits must not use a paused clock. Negative assertions
+inspect completed-operation counts or explicitly poll a blocked future, rather
+than infer absence from elapsed time. Subscribe before a saved-state inspection
+and reinspect on notifications/lag where an existing notification is available;
+otherwise retain the observation polling interval inside the shared watchdog.
+
+Shutdown duration is not a guarantee. A guard only detects stuck test execution.
+Crash fixtures vary persisted shutdown boundaries and force the owned process
+to die, then verify durable facts, interrupted-work recovery and no duplicate
+side effects. Preserve the Unix SIGKILL and Windows Job-object boundaries.
+
+Files currently changed by issue-41/shared-read are deferred, with exact existing
+occurrences recorded as temporary allowances, not blanket file exemptions. #41
+integration must migrate those tests to this helper and remove their allowances.
+Minimal cfg(test) module wiring is shared infrastructure, not a rewrite of #41.
+A source scanner in the standard checks rejects new raw test timeouts and
+real-time deadline assertions, including newly added occurrences in deferred
+files. Its allowlist gives a reason for each intentionally retained occurrence.

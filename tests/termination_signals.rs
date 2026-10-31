@@ -718,3 +718,6 @@ async fn one_signal_deadline_is_enforced_even_when_the_main_thread_is_stalled() 
     let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
     assert!(log.contains("signal_deadline"));
 }
+
+#[path = "support/watchdog.rs"]
+pub(crate) mod test_watchdog;
