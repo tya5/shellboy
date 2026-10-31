@@ -4,7 +4,7 @@ Baseline: main e8c1ff2 after independently completed #58. Follow the issue body
 and comments through6524373262 (including the #59 sender boundary).
 The latest user instruction permits independent usable main increments, each
 with complete local standard checks and main three-OS CI. Do not close #41
-until every adopted requirement is delivered. Keep #58 separate and first;
+until every retained #41 requirement is delivered. Keep #58 separate and first;
 English migration (#35) follows #41. Each implementation increment and meaningful
 subpart gets a reviewable commit; avoid a combined redesign commit.
 
@@ -40,7 +40,7 @@ when updating main; do not import the archived combined F/G development branch.
 | A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
-| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local live UI/ownership/wait/output and delivery source807ac97 qualifies1777/0/32 plus6 actual PTYs; P2/P5/global planner and applicable native gates pending |
+| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | D2 shipped in main per6539106715; cross-increment P2/P3/P5 measurements remain tracked with E/F, not a new D admission or transferred display work |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Implemented locally; initial three-OS CI exposed repaired same-deadline admission race. Rebased #77/#79 check, repaired-source CI and P3/P5 qualification remain gates; main admission awaits Claude |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
@@ -397,13 +397,13 @@ manual CI measurement job, distinct from functional/native UI tests.
 These later additions are transferred by6539106715 to #84/#87. They are
 historical handoff rows, not required work for #41 E/F/G admission.
 
-| ID | Required outcome | Evidence required before G admission |
+| ID | Required outcome | Requested evidence at the owning issue |
 | --- | --- | --- |
 | G-C1 | A manually typed leading slash command still executes when only its arguments contain pasted IDs. A wholly pasted leading slash remains literal, visibly explained rather than silently submitted as a command. | Typed `/copy ` plus pasted ID, wholly pasted command and input-hint tests plus actual PTY records. |
 | G-C2 | One-key copy from focused answer (fallback reading position), clear composer/help/F2 escape route for long answers, and factual page/remaining instructions beyond64KiB. | Actual saved-original identity, Unicode/body/page boundaries and discoverability PTY records; host clipboard changes require explicit fixture isolation. |
 | G-C3 | Popup letter keys accept upper/lowercase consistently; hints and operation catalogue agree. | Table-driven popup key parity and native records. |
 | G-C4 | Per-code-block number/copy affordance; focus+one key or click copies the whole block from saved raw Markdown, never folded/wrapped paint text. | Long prompt/code examples, multiple blocks, exact original bytes/text and1–2-action native captures without entering node IDs. |
-| G-C5 | Argumentless `/copy` offers the single code block directly and a choice when multiple blocks exist; whole-answer copy remains explicit and discoverable. Final syntax/default is decided in G's adopted design, with factual block number/character-count success notice. | Catalogue/help/command parser and original-block extraction agree; existing Markdown parser/extraction is reused. No independent rendering parser. |
+| G-C5 | Argumentless `/copy` offers the single code block directly and a choice when multiple blocks exist; whole-answer copy remains explicit and discoverable. Final syntax/default belongs to #87, with factual block number/character-count success notice. | Catalogue/help/command parser and original-block extraction agree; existing Markdown parser/extraction is reused. No independent rendering parser. |
 | G-C6 | Empty-composer/help/slash discovery for `/image` and `/attach`; image-only paste guidance only when observable, and failure explains `/attach <path>` fallback. | Facts-only clipboard adapter cases and native discoverability capture; no guessed clipboard contents. |
 
 Sources: review comments6536761757,6536813721,6536844049,6536999852 and
@@ -420,7 +420,7 @@ B-S inventory is retained for handoff, not #41 work or an E verification claim.
 
 | ID | Requested outcome | Required evidence / placement |
 | --- | --- | --- |
-| B-S1 | One presentation rule controls blank spacing at item-kind transitions, including answer/tool and notification boundaries; adjacent tool rows remain compact. | Adopt the concrete pair rules in conversation design before implementation; one shared layout policy. No saved nodes or extra selectable rows. Separate reviewable B presentation follow-up, after E's independent admission. |
+| B-S1 | One presentation rule controls blank spacing at item-kind transitions, including answer/tool and notification boundaries; adjacent tool rows remain compact. | Adopt the concrete pair rules in conversation design before implementation; one shared layout policy. No saved nodes or extra selectable rows. #83 owns the separate presentation follow-up and may proceed independently of E/F/G. |
 | B-S2 | Padding participates in the same measured layout and viewport/focus mapping as drawing; F6/F7 still resolve actual saved items and blank lines cannot receive focus. | Boundary, wrapped text, scroll anchor and focus tests, plus actual80-column PTY captures. |
 | B-S3 | Long-conversation scrolling retains P1 performance. | Repeat the applicable128-node/50-tool-row workload against the same baseline; do not infer speed from screenshots or a single layout test. |
 
