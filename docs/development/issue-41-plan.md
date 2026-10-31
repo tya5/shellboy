@@ -8,6 +8,24 @@ until every retained #41 requirement is delivered. Keep #58 separate and first;
 English migration (#35) follows #41. Each implementation increment and meaningful
 subpart gets a reviewable commit; avoid a combined redesign commit.
 
+## G final admission batch (2026-11-01)
+
+Reviewer approval6550616411 and the subsequent user instruction authorize G's
+single main batch after integrating main4035457 (#72/#97/#112/#114), completing
+the local standard and successful exact-integrated-SHA native3OS CI. G54e377b
+already passes CI41251630243: Linux2329/0/34, macOS2328/0/35, Windows2191/0/26.
+Those results qualify54e377b only, not the new mergef96f5a2. The latter is the
+current qualification source; the final exact-SHA CI and admission report are
+recorded on [#41](https://github.com/tya5/shellboy/issues/41).
+
+The reviewer explicitly transfers lifetime-growing context/latest-compaction
+reads, repeated small queries and CLI binding duplication to #115. These are
+known followups, not secretly proven bounded or G landing blockers. Preserve
+existing source/query/copy caps; do not add a migration or counter to hide the
+followup. #107–#109 coordinator registration happens after G's main landing and
+is not part of this batch. E/F are already admitted; no release, installation or
+user-data change is authorized here.
+
 ## 2026-11-01 owner-approved offload (#107–#109)
 
 The user explicitly permits offloaded work to become separate issues outside
@@ -32,7 +50,7 @@ test counts, quiet/hidden zero-work and zero-failure integrated checks, without
 latency/CPU/bin thresholds. Commits stay split by route/refactor boundary.
 
 #41 retains G catalogue/forms/readers, the initial twelve inspectors, retained
-HistoryGet/List currently being finished, existing G reader/source/SQL hardening,
+HistoryGet/List implemented and qualified, existing G reader/source/SQL hardening,
 shared-consumer P3/current counts and review/exact-source3OS/main admission.
 Header/lifecycle/context files already changed by G stay coordinator-owned.
 Earlier display/copy transfers to #83–#87 remain unchanged.
@@ -71,13 +89,13 @@ when updating main; do not import the archived combined F/G development branch.
 | Increment | Scope | State |
 | --- | --- | --- |
 | Prerequisite #58 | Follow ownership, paid-text retention, body hydration, stale replies and private-safe diagnostics | Complete: e8c1ff2, native three-OS CI41034892332 green |
-| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
+| A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C/D2/E/F shipped; G final admission batch tracked above |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | D2 shipped in main per6539106715; cross-increment P2/P3/P5 measurements remain tracked with E/F, not a new D admission or transferred display work |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Admitted to main d0a92bf after exact-SHA ordinary3OS CI41181650657, approval6540583854 and accepted qualified producer3/P3 evidence. |
-| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Corrected source3c6d9f3: native standard2037/0/35 and Ctrl+T8 conditions; final publication/exact3OS follows. Prior4b61c0f3OS verified, long measurement running; separate main review/admission pending. |
-| G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
+| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Admitted to mainfff2076 with approval6543719886 and exact-source3OS CI41204955956; preserve subsequent main corrections including #100. |
+| G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Implemented and reviewer-approved; final latest-main qualification/admission batch recorded above and on #41. |
 
 Each increment must be usable independently. A requirement that crosses these
 boundaries must land with its complete action/read/render path, not a stub.
@@ -751,7 +769,7 @@ units below; names describe scope, not a new engine/framework.
 | G9 storage/migration | Only necessary indexed reads; reconcile existing indexes and preserve explicit source/query caps | Source5244ebe/5ba1cdd native scope/count tests pass. Existing indexes serve adopted readers; exact own-row work is recorded, not declared constant. Tied-Turn index extension is optional; no G migration is adopted, schema17 remains. No invented migration-slot/upgrade gate. Final integrated standard8f0ad72 passes2328/0/35; exact-SHA3OS remains. |
 | G10 functional/native | Complete effect/label/catalogue mapping and freshness ledger, actual80/wide dark/light/NO_COLOR/fallback forms, standard checks and secret scan | Current source-qualified evidence: standard5ba1cdd2326/0/35, Python71/layout95/watchdog/fmt/strict all-target Clippy; IPC7984c0c14/0; cb1d480 native form matrix; v29 native80/140 wheel smoke. Source hashes and unchanged-code limits are in acceptance. Final integrated standard8f0ad72 passes2328/0/35; exact-SHA3OS remains. No physical Windows UI success inferred. |
 | G11 P6/counts |64KiB original, actual input stream, bounded frame/cache/wrap counts; no paint on unchanged inputs; times recorded against available original baseline only | Sourcea8bbcf0 keyboard/wheel80/140 passes four600-event/10s cases:219–241 draws,0 warm rebuilds,1493 rows/446375 bytes. Original keyboard comparison is recorded; unsupported original wheel is unavailable. Relevant original-reader/cache source is unchanged. Native popup v29 and P3 collector5ba1cdd separately close their local count evidence. No latency/CPU/bin/variance gate. Final integrated standard8f0ad72 passes2328/0/35; exact-SHA3OS remains. |
-| G12 admission | Separate G publication/CI/reviewer approval, current main reconciliation and exact-source3OS, #41 shipped/residual report | Open. F approval is not G approval; no release/install/user-data authority is inferred. |
+| G12 admission | Separate G publication/CI/reviewer approval, current main reconciliation and exact-source3OS, #41 shipped/residual report | G54e377b is published and native3OS green; G main admission is separately approved6550616411 plus current user instruction. Latest main4035457 mergesf96f5a2. Final exact-SHA qualification/admission report is tracked on #41; #107–#109 registration follows landing, #115 is nonblocking. No release/install/user-data authority. |
 
 ### G saved-read coverage and qualification inventory
 

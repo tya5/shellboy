@@ -21,6 +21,11 @@ and coordinator integration after G. Product reactivity remains adopted; these
 features are not claimed shipped by #41. See the current issue41 plan for exact
 retained G scope, count-only completion gates and ordering.
 
+Reviewer-approved #115 separately tracks lifetime-growing context/latest-summary
+reads and small query/catalogue maintenance followups found in G54e377b. These
+are not claimed solved by G, and the user explicitly excludes them from G's
+admission blockers. #107–#109 integration/registration follows G main landing.
+
 ## #41 performance acceptance policy
 
 User/reviewer decision6543044236 makes p95/CPU/DB-work durations observations,

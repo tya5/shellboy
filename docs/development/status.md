@@ -1,6 +1,21 @@
 # Development status
 
-## G review-candidate qualification after offload
+## G latest-main admission batch
+
+G54e377b is published; native3OS CI41251630243 succeeds: Linux2329/0/34,
+macOS2328/0/35 and Windows2191/0/26. Reviewer6550616411 and the user's latest
+instruction approve the single G main batch after latest-main standard and
+exact-integrated-SHA3OS checks. Mergef96f5a2 includes main4035457 with
+#72/#97/#112/#114, without textual conflicts. This merge is not qualified by
+54e377b's older results. Current qualification and the authoritative admission
+transition are reported on [#41](https://github.com/tya5/shellboy/issues/41).
+
+Known context/latest-compaction lifetime growth and query/catalogue followups
+are tracked in #115 by explicit reviewer/user decision; they do not block G and
+are not claimed fixed. #107–#109 registration remains a separate coordinator
+batch after G main. No new release, install or user-data change is part of G.
+
+## Historical G54e377b qualification before final admission
 
 Production source5ba1cdd passes native standard2326/0/35 (library1350,
 integration957, termination12, crash7), Python71, layout95/watchdog, formatting

@@ -1,6 +1,25 @@
 # Validation record
 
-## G profile-integrated standard6c8eeca and latest-main qualification
+## G54e377b exact-source CI and final integration boundary
+
+Ordinary native3OS CI41251630243 succeeds at exact source
+54e377b62dd234a6935af46e634ed7b381f408b3: Linux2329 passed/0 failed/34 ignored,
+macOS2328/0/35 and Windows2191/0/26. Python71 and each platform's configured
+layout/watchdog/fmt/Clippy checks pass. gh run watch exits0; all three native
+jobs are terminal success, measure is intentionally skipped. Counts subtract
+the listed ignored cases from each binary's discovered tests, with exit0 for
+every test binary. Private complete CI logs are preserved locally. This proves
+native CI, not physical Windows terminal screenshots or paid API behavior.
+
+Main4035457 (#72/#97/#112/#114) merges cleanly atf96f5a2; the previous CI does
+not qualify its new code. The final local standard and exact-SHA admission CI
+are reported separately on [#41](https://github.com/tya5/shellboy/issues/41).
+Reviewer/user authorize main only after those gates. #115 is an explicitly
+nonblocking followup for lifetime-growing reads and maintenance; #107–#109
+registration remains after G. No new schema/table/worker/queue/dependency,
+release, installation or user-data change is claimed.
+
+## Historical G profile-integrated standard6c8eeca and latest-main qualification
 
 Native macOS shared-target `RUST_TEST_THREADS=2 sh scripts/check.sh` v30 exits0:
 Python71, layout95/watchdog, formatting, strict all-target Clippy and2326 Rust
