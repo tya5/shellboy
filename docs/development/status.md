@@ -1904,3 +1904,11 @@ and source/copy operations do not absorb decoration. Every span receives only
 the band background override. The external mark remains provisional (⤷ / ⇥ / ⤳).
 Native validation and the clipboard-fixture incident are recorded in acceptance.
 Main integration is blocked pending user choice; CI/integration belongs to worker4.
+
+### Final #91 branch qualification (2026-10-31)
+
+On the #76/E/#74 main baseline, the final standard check passes 1,956 Rust tests
+and 20 Python tests. Three external-mark candidates pass 18 native PTY sessions;
+A is restored and independently recaptured. Source/binary evidence and earlier
+failed attempts are in acceptance. User mark selection still blocks main;
+worker4 owns CI/integration and the user owns issue closure.
