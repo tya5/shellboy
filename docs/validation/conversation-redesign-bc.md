@@ -115,7 +115,7 @@ synthetic debug evidence, not a general terminal/OS latency guarantee.
 
 Identical private instrumentation/fixture in detached baseline1fec7f0 and
 candidate216b213 worktrees:128 canonical nodes,50 validated successful saved
-tools,64KiB stdout each (3,276,800 raw bytes total), saved live Run, no model
+tools,64KiB stdout each (3,276,800 raw bytes total), saved completed Run, no model
 driver/network. Execute the actual visible `frontend::refresh::run` path.
 10 warmups and30 measured refreshes, drained512-entry UI channel. Count actual
 `Command::Run` executions and total closure work time; exclude queue wait,
@@ -135,6 +135,13 @@ metadata remains available. Instrumentation is private/test-only and is not a
 new production diagnostic, worker or dependency. D–G must still qualify shared
 coalescing and their additional consumers; seven jobs are not advertised as the
 future one-job-per-consumer target.
+
+Correction recorded2026-10-31: the original retained instrumentation in both
+detached subjects inserts `measure-run` as `completed`, with an ended timestamp;
+the previous phrase "saved live Run" was incorrect. The counts/times above remain
+observations of that completed-Run refresh fixture. They do not establish live
+Run/background activity cost, current E List coalescing or F consumers. A new
+P3 fixture must explicitly assert and record its actual saved Run/Turn states.
 
 ## P7: shared preview accounting and lifecycle
 

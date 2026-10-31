@@ -2028,3 +2028,15 @@ each fingerprint is preferable to disguising it to evade the lexical checker.
 There is no file-wide exemption or new short asynchronous guard. The merged
 layout/watchdog policy and Python18 tests pass; Rust standard qualification is
 performed separately. F/G and migration changes remain excluded.
+
+## #41 historical P3 fixture state correction (2026-10-31)
+
+While preparing E's P3, inspected the retained instrumented frontend modules in
+both original detached baseline1fec7f0 and candidate216b213 worktrees. Each SQL
+seed inserts measure-run as completed with ended_at, contradicting the B+C
+qualification document's phrase saved live Run. Correct that phrase and retain
+the historical counts/times with their actual completed-Run scope. Do not infer
+live/background or E/F combined-consumer performance from those values. New P3
+must assert actual saved lifecycle states along with node/tool population and
+consumer scope. This is an evidence correction, not a change to run semantics
+or an invalidation of the observed completed-Run query-cost measurements.

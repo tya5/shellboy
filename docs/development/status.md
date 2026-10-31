@@ -1629,3 +1629,12 @@ PTY/P1 proof. It is an optional separate B presentation follow-up after E,
 not silently included in E or treated as implemented. F/G remain independent.
 Remote measurement branch remainsCBC; subsequent publication/main admission
 awaits delegated-reviewer approval. No installed binary or user data changed.
+
+## P3 evidence correction during E follow-up (2026-10-31)
+
+Retained original baseline/candidate SQL proves that the historical B+C P3
+fixture used a completed Run, despite its record saying live. Corrected the
+qualification text and added an explicit limit; original measurements remain
+completed-Run observations. New E P3 must record actual lifecycle states and
+List/selected-conversation consumers. This documentation correction does not
+change frozen CI candidate7c6f4d6 or infer any pending test success.
