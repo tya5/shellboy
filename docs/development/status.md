@@ -1533,3 +1533,14 @@ Bash signal/exit oracles also pass. Full local standard checks have passed; fina
 rebased checks and Linux/macOS/Windows CI remain separate gates. No installed
 binary, real owner/data, release or paid provider is used. Escaped groups and
 stop-time guarantees remain outside scope; no stored-PID cleanup is attempted.
+
+## Typed slash commands with pasted arguments (#84)
+
+The composer tracks a transient manually entered leading prefix. A complete
+typed command name still dispatches with pasted arguments; pasted names remain
+literal and show a keyed warning/retyping hint. Long paste folding and explicit
+send remain unchanged. Core, protocol and persisted draft formats are unchanged.
+The minimum version omits a confirmation dialog and per-character provenance;
+reloaded/recalled source text stays conservative. Focused contract tests pass;
+exact-source standard checks, native CI and PTY observations are tracked in #84
+and acceptance, separately from unmeasured P1 latency and physical terminals.

@@ -1961,3 +1961,15 @@ Escaped groups, intentional guardian tampering, kernel-stop latency and observin
 old-version survivors are outside this minimum implementation. Windows Job and
 normal owner shutdown policies are not changed. Revisit the helper layout only
 if native tests or a future shell runtime change invalidate these bounds.
+
+## 2026-10-31: Minimal command-prefix provenance (#84)
+
+Treat the whole leading slash name as manual only when it lies in the contiguous
+manually entered prefix. Paste can truncate trust but cannot grant it; a typed
+slash alone cannot authorize a pasted name. This bounded local counter is
+skipped by serialization, keeping saved formats/Core/protocol unchanged.
+Snapshots inside the UI retain trust; reloaded/recalled source text does not.
+Choose an inline keyed warning instead of an execution/submit dialog.
+Conservative edits can require retyping the name after an insertion/deletion;
+do not add per-character tracking merely to recover trust. Revisit if concrete
+editing workflows show the minimal prefix rule is insufficient.

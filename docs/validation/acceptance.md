@@ -4023,3 +4023,26 @@ native three-OS CI, not inferred from these earlier gates. Linux process behavio
 and Windows build/tests remain unqualified until that CI completes. Full cleanup
 of deliberately escaped groups, protection from deliberate guardian tampering,
 absolute stop-time guarantees and stale-PID recovery are not implemented.
+
+## Typed command prefixes and pasted arguments (#84)
+
+Source: task branch `issue-84/typed-command`, based on `72f7889`; macOS arm64,
+debug build, synthetic temporary data and loopback SSE only. No provider, user
+data, installed binary or release asset is used. The focused composer contract
+suite passed 11/11 before final gate qualification.
+
+Repeat the native screen observation with Python 3 plus the test-only `pyte`
+package: `python3 scripts/check-paste-commands.py --binary target/debug/shellboy
+--out /tmp/issue-84-pty-UNIQUE`. This opens a real Unix PTY and decodes its cells;
+80/140 columns each cover dark/light, NO_COLOR and TERM=vt100. It observes
+paste-only, pasted arguments followed by a manually entered leading command,
+typed command followed by pasted arguments, folded long slash-containing paste,
+a literal pasted slash warning and an explicit-send synthetic SSE reply. Only
+the #77 60-second hang watchdog bounds waits, not a response-time assertion.
+
+Initial harness observations exposed pyte's differential wide-cell display
+exception and blocked shutdown when output was not drained. Those harness
+failures are not passing product observations. Final PTY results, standard
+checks and native CI must be recorded independently after they complete.
+Unqualified: physical terminal/IME/clipboard operation, Windows ConPTY, and
+matched-baseline P1 timing (no unnecessary release build for this task).

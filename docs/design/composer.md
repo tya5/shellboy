@@ -55,3 +55,24 @@ Normal send waits at a boundary; explicit immediate delivery uses Ctrl+Enter
 unless configured as ordinary send, or Ctrl+X then Ctrl+S. Composer focus changes
 reset the chord. Esc dismissal takes priority over exact-Turn interruption;
 Ctrl+C remains full Run stop. The queue uses the shared popup/list/reader layout.
+
+## Typed command prefixes with pasted arguments (#84)
+
+A leading slash command executes only when its entire name (up to the first
+whitespace) is manually entered. Pasted arguments do not disable that command.
+Track only the contiguous manually entered byte prefix, not per-character
+provenance for the whole draft. Insertion of pasted text truncates that prefix;
+manual insertion within it extends it; deletion can shorten it but never trusts
+previously pasted suffix bytes. This also permits typing a command and a space
+at Home before pasted arguments. Typing only `/` before a pasted name does not
+authorize it. Leading whitespace is not newly accepted.
+
+Keep `literal_paste` and paste folds unchanged. A pasted leading slash that is
+not authorized displays a composer warning and instructions to retype the name;
+there is no execution/submit dialog. The warning has a named text key for future
+#35 translation and uses the existing palette, without new color or marker.
+The trusted-prefix counter is transient (`serde(skip)`): saved draft formats,
+Core state and protocol do not change. Recall, restored source text and reloaded
+drafts stay conservative; manual provenance is not reconstructed after restart.
+Local snapshots retain it for rejected operations and original-draft recall.
+No worker, queue, dependency, database I/O or polling is added.
