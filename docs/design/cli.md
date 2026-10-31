@@ -305,3 +305,6 @@ are not owner identity. Existing driver environment assembly issues child-owner
 identity for each shell. API-key and proxy environment variables remain intact;
 no runtime global environment mutation is needed. This stage adds no table,
 worker, queue or UI adapter. Core review is required before integration.
+
+Owner replacement/reload does not transfer running work in this feature. Keep
+#82 ownership cleanup; no exec handover, UI reconnect or late UI attach is added.

@@ -2615,3 +2615,9 @@ row above an unnecessary offset. List and Watch now reconcile the actual offset
 when all rows fit; Watch does so before bounded formatting/detail scope.
 Membership, F admission guards and overflow anchors are unchanged. Fresh local
 checks and the exact reviewed candidate are reported in issue #100.
+### #5 stage 2 resumed on F
+
+The startup-only candidate is rebased onto admitted F. Ready/error JSON and
+explicit data-dir use the common bootstrap; the stage 3 shutdown draft remains
+separate. Owner reload/work transfer, UI reconnect and late attach are excluded
+per the latest issue #5 scope. Final qualification and submission live in #5.
