@@ -4057,3 +4057,9 @@ The second harness attempt deadlocked on a blocking master write; bidirectional
 nonblocking delivery with the same 60-second watchdog fixes that fixture issue.
 No product change was required for these harness corrections. Raw bytes,
 `results.json` and `*-complete.txt` remain local synthetic evidence, not user logs.
+
+The first standard check caught an unnecessary transient-prefix difference on
+ordinary non-command text in the existing attachment/restart equality test;
+tracking is now restricted to leading slash drafts. The same run also hit the
+existing persisted-output observer watchdog. Neither failure is erased; the
+final standard gate runs with two test threads to bound concurrent memory use.

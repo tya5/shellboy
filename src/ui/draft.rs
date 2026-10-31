@@ -39,6 +39,9 @@ impl DraftSnapshot {
             self.folds.sort_by_key(|f| f.start);
         }
         self.literal_paste |= pasted;
+        if !self.text.starts_with('/') {
+            self.typed_prefix = 0;
+        }
     }
     pub(super) fn delete_at_cursor(&mut self, backwards: bool) {
         let (mut start, mut end) = if backwards {
@@ -62,6 +65,9 @@ impl DraftSnapshot {
             };
             self.text.replace_range(start..end, "");
             self.cursor = start;
+            if !self.text.starts_with('/') {
+                self.typed_prefix = 0;
+            }
         }
     }
     pub(super) fn move_cursor(&mut self, key: KeyCode) {

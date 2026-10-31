@@ -697,6 +697,15 @@ mod contract_tests {
         );
     }
     #[test]
+    fn ordinary_text_has_no_transient_command_provenance() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("ordinary text", false);
+        assert_eq!(ui.view().draft.typed_prefix, 0);
+        let restored: DraftSnapshot =
+            serde_json::from_value(serde_json::to_value(&ui.view().draft).unwrap()).unwrap();
+        assert_eq!(restored, ui.view().draft);
+    }
+    #[test]
     fn provenance_is_transient_and_local_snapshots_preserve_it() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.insert("/switch ", false);
