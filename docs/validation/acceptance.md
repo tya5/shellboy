@@ -4798,3 +4798,47 @@ The helper/test source is unchanged from 5bf85f3. The rebased scripts-only check
 pass again: Python25, layout94/watchdog, help, py_compile, diff and self-use record
 retention. Evidence: /tmp/issue-94-1-repair-tests.log and
 /tmp/issue-94-1-repair-record-delta.json. Rust/native CI are not newly claimed.
+
+## Standard-library disposable PTY helper (#94.2)
+
+2026-10-31, macOS26.3.1(a)/ARM64, Python3.12.7. The extracted #84 transport now
+uses a bounded standard-library cell decoder rather than pyte. On base5fc5cc0,
+32 Python tests pass: the 18 existing tests plus 14 VT/frame/config/CLI/Unix-child
+checks. Coverage includes split UTF-8/escape sequences, CJK/combining/ZWJ cells,
+indexed/RGB colors, alternate screen/wrap, cluster/output bounds, OSC52/hyperlink
+removal, unsupported operations, explicit OSC52/no-auth loopback preflight,
+minimal child environment, scratch argument paths, normal cleanup, replay,
+output overwrite refusal, and rejection of image/raw-key actions before spawn.
+Live Unix cases are skipped on Windows; portable replay/cell tests remain active.
+
+No Rust build is run: validation reuses the existing #91 candidate binary
+1e3b3be21c2787a8025c347ecba6ea5054a2441815155e9a3861d035222e9e42
+and its matching visual_fixture. The extracted #84 driver passes eight sessions
+and 80 completed screens across 80/140 columns x dark/light/NO_COLOR/vt100;
+each session makes its one explicit synthetic-loopback model request. An in-memory
+adapter binds #91's existing six-session band/canonical-copy fixture to the new
+transport; all six pass, including decoded OSC52 body/selection/original copy.
+It does not edit the #91 worktree or make pyte a new helper/test dependency.
+The CLI's live help capture and offline replay are immediately used in this task.
+A historical #83 80x36 static frame replays byte-for-text equal to its saved pyte
+cell text; that is replay evidence, not a new product/terminal run.
+
+Failed observations are retained: an initial test syntax error was fixed; a live
+help wait for /copy timed out because that text was below the visible help page,
+so the example now waits for its actual modal footer. The first adapter import
+lacked the old fixture_safety module path and was corrected. A live legacy #83
+row assertion expected the old human-looking mark while the reused #91 binary
+renders external input as its provisional distinct mark; that run is not called
+a passing main-baseline row-vocabulary test. The old static-frame replay and
+#91-specific fixture validate the shared decoder separately without weakening
+the legacy row assertion or rebuilding Rust.
+
+Evidence: /tmp/issue-94-2-tests-final-pre.log, /tmp/issue-94-2-paste-final/,
+/tmp/issue-94-2-bands-2/, /tmp/issue-94-2-live-final.json,
+/tmp/issue-94-2-replay-final.json, /tmp/issue-94-2-old-row-replay.json.
+py_compile, integration-layout/watchdog checks and git diff --check pass. The
+#94.1 record-delta tool checks these records. Product changes and sh scripts/check.sh
+are deliberately not run for this scripts-only stage per the user; no local CI
+job dispatch, main integration or issue closure occurs. Three-OS CI belongs to
+worker4. Full VT/emoji/font/IME/ConPTY/physical terminal fidelity and the multi-day
+aggregate token/time reduction are not established by these checks.
