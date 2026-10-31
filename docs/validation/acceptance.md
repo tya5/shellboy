@@ -3949,3 +3949,23 @@ to #41 and recorded in #79; no F6 rendering files are edited here. That is remai
 scope, not a claim of a completed TUI test. The old #78 unpublished draft branch was
 removed after user authorization; no tags, releases, installed binary or user DB
 are touched by this task. Status/acceptance old lines are preserved and audited.
+
+## #79 read-only connection/file worker separation (2026-10-31)
+
+The initial implementation ended its transaction but retained the read-only
+connection while checking paths on a presentation closure. Review correctly
+identified that this did not separate DB and filesystem lifetimes. The corrected
+reader returns owned AttachmentDetails and explicitly drops the connection. A
+second await then runs metadata/open through InstructionLoader's existing bounded
+control-file admission, shared with AGENTS/cwd preparation. No pool is added; its
+configured deadline and actual-task permit lifetime remain in force. Timeout error
+text is generalized from AGENTS-specific wording to control-file preparation.
+
+All 25 attachment integration tests pass locally, including the actual list SQL
+EXPLAIN, held-writer progress, current path reads/changes/deletion/retention and
+bounded detached notices. A new shared-admission test holds the actual file closure
+behind a channel gate, observes the existing permit in use, releases it, and waits
+for idle; it uses #77's 60-second watchdog and no speed criterion. The file phase
+receives only owned rows, not a connection or transaction. Full standard checks,
+role checks, exact-source native CI and record-line audit are tracked in #79.
+Tests use temporary files/databases and no provider. F6 remains deferred to #41.

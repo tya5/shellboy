@@ -208,6 +208,35 @@ impl Store {
                 .map_err(storage_error)?
                 .and_then(MutationResult::value);
         }
+        if let Command::AttachmentList(args) = &request.command {
+            let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
+            let path = self.database.path().to_path_buf();
+            let mut items = crate::presentation::work(move || {
+                let mut db = rusqlite::Connection::open_with_flags(
+                    path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .map_err(sql_error)?;
+                db.busy_timeout(std::time::Duration::from_millis(250))
+                    .map_err(sql_error)?;
+                db.pragma_update(None, "query_only", true)
+                    .map_err(sql_error)?;
+                let tx = db.transaction().map_err(sql_error)?;
+                let items = crate::attachments::list_tx(&tx, &thread)?;
+                tx.commit().map_err(sql_error)?;
+                drop(db);
+                Ok::<_, ApiError>(items)
+            })
+            .await??;
+            return MutationResult::value(
+                self.instructions
+                    .file_work(move || {
+                        crate::attachments::observe_paths(&mut items);
+                        Ok(items)
+                    })
+                    .await?,
+            );
+        }
         if matches!(
             request.command,
             Command::UsageGet(_)
@@ -216,7 +245,6 @@ impl Store {
                 | Command::TurnGet(_)
                 | Command::CompactList(_)
                 | Command::ShellList(_)
-                | Command::AttachmentList(_)
         ) {
             let mut store = self.clone();
             store.usage_context = crate::usage_totals::read_context();
@@ -232,13 +260,6 @@ impl Store {
                 db.pragma_update(None, "query_only", true)
                     .map_err(sql_error)?;
                 let tx = db.transaction().map_err(sql_error)?;
-                if let Command::AttachmentList(args) = &request.command {
-                    let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
-                    let mut items = crate::attachments::list_tx(&tx, &thread)?;
-                    tx.commit().map_err(sql_error)?;
-                    crate::attachments::observe_paths(&mut items);
-                    return MutationResult::value(items);
-                }
                 let value = store.dispatch(
                     &tx,
                     &request.command,

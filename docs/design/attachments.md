@@ -86,3 +86,11 @@ Detached context exclusions retain their existing bounded path notices instead
 of duplicating an unbounded path in per-request metadata. This preserves notice
 budget/progress and original provenance; ordinary selected attachments carry the
 full path, and CLI list retains the full stored absolute path.
+
+### #79 reader/file admission review correction
+
+Attachment list returns owned rows from its read-only projection closure and drops
+the SQLite connection before starting path observations. Metadata/open probes then
+reuse the existing control-file admission owned by InstructionLoader (the same
+finite permit/deadline/actual-closure lifetime as AGENTS/cwd reads). No additional
+worker, queue, DB connection or cache is created for the file phase.

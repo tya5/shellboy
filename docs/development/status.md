@@ -1,5 +1,12 @@
 # Development status
 
+## Attachment list file admission review (#79)
+
+Read-only attachment rows now leave the projection closure and its connection
+before path metadata/open work starts. File checks share existing control-file
+admission with AGENTS/cwd preparation; no additional pool or queue is created.
+Targeted attachment tests pass; standard/native validation is recorded in #79.
+
 ## Managed clipboard paths (#79)
 
 Managed images use the existing path field in CLI results and current request
