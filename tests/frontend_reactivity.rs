@@ -33,6 +33,7 @@ struct Fixture {
     view_sequences: Vec<u64>,
     browser_sequences: Vec<u64>,
     browser_pages: usize,
+    browser_trace: std::collections::VecDeque<Value>,
     browser_selected_ready: bool,
     required_browser_row: Option<String>,
     watch_details: Vec<(u64, shellboy::ui::watch::PreparedWatchDetail)>,
@@ -97,6 +98,7 @@ impl Fixture {
             view_sequences: Vec::new(),
             browser_sequences: Vec::new(),
             browser_pages: 0,
+            browser_trace: std::collections::VecDeque::new(),
             browser_selected_ready: false,
             required_browser_row: None,
             watch_details: Vec::new(),
@@ -118,12 +120,18 @@ impl Fixture {
             }
             UiUpdate::BrowserPatch { patch } => {
                 self.browser_sequences.push(patch.read_sequence);
+                self.browser_trace.push_back(json!({"kind":"patch","generation":patch.generation,"sequence":patch.read_sequence,"rows":patch.rows.iter().take(8).map(|row|json!({"id":row.thread_id,"state":row.state})).collect::<Vec<_>>(),"missing":patch.missing_ids.iter().take(8).collect::<Vec<_>>()}));
+                while self.browser_trace.len()>32 {self.browser_trace.pop_front();}
                 self.browser_selected_ready |= patch
                     .excerpt
                     .as_ref()
                     .is_some_and(|(id, value)| id == "reactive" && value.is_ok());
             }
-            UiUpdate::Threads { .. } => self.browser_pages += 1,
+            UiUpdate::Threads { .. } => {
+                self.browser_pages += 1;
+                self.browser_trace.push_back(json!({"kind":"page","number":self.browser_pages}));
+                while self.browser_trace.len()>32 {self.browser_trace.pop_front();}
+            },
             UiUpdate::WatchDetails {
                 read_sequence,
                 details,
@@ -206,7 +214,7 @@ impl Fixture {
         label: &str,
         mut predicate: impl FnMut(&UiState, &str) -> bool,
     ) -> String {
-        watchdog("frontend saved-state predicate", async {
+        let result=watchdog("frontend saved-state predicate", async {
             loop {
                 let screen = self.pump().await;
                 if predicate(&self.ui, &screen) {
@@ -214,14 +222,18 @@ impl Fixture {
                 }
                 self.wait_update_or_action().await;
             }
-        })
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "{label}: frontend watchdog; bridge_finished={}",
-                self.bridge.is_finished()
-            )
-        })
+        }).await;
+        match result {
+            Ok(screen)=>screen,
+            Err(_)=>{
+                let saved=watchdog("frontend failure saved-state diagnostics", self.control.store.database.call(|db|{
+                    let mut q=db.prepare("SELECT json_object('thread',r.thread_id,'run',r.id,'state',r.state,'turn_state',u.state,'attempt_state',a.state,'failure_kind',CASE WHEN json_valid(a.error_json) THEN json_extract(a.error_json,'$.error.kind') END,'generation',u.generation) FROM run r LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY rowid DESC LIMIT 1) LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id ORDER BY rowid DESC LIMIT 1) ORDER BY r.rowid DESC LIMIT 8")?;
+                    q.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>().map_err(Into::into)
+                })).await;
+                let rows=self.ui.threads().iter().take(8).map(|row|(&row.thread_id,&row.state)).collect::<Vec<_>>();
+                panic!("{label}: frontend watchdog; bridge_finished={}; ui_rows={rows:?}; saved={saved:?}; browser_generation={}; pages={}; browser_trace={:?}",self.bridge.is_finished(),self.ui.list_generation(),self.browser_pages,self.browser_trace)
+            }
+        }
     }
     async fn observed_until(
         &mut self,
@@ -1446,7 +1458,7 @@ async fn open_browser_keeps_reordered_running_rows_visible_without_reopen() {
             .unwrap()
             .unwrap();
         let screen = fixture
-            .until("running row facts", |ui, _| {
+            .until(&format!("running row facts cycle={cycle} worker={worker}"), |ui, _| {
                 ui.threads()
                     .iter()
                     .any(|row| row.thread_id.as_str() == worker.as_str() && row.state == "running")
