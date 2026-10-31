@@ -1795,3 +1795,13 @@ Combined-source standard check is next. Published measurement7c6f4d6 remains
 frozen; main, installed binaries and user data are not changed. The new merge
 will have its own test/source record and does not inherit exact-source timing
 claims from0b/7c. E publication still requires the promised separate approval.
+
+## F local planning boundary
+
+A dedicated F-only preparation branch based on E10d6df8 now carries the F1–F16
+requirement/proof ledger. It is planning only: no F implementation or publication,
+no G import, no transferred display work. Parent E remains pending its combined
+standard result and separate main approval. Before F admission, update to the
+actually admitted main and recheck schema/index numbering. Old combined-source
+results are not evidence for this branch. This preserves main admission order
+while making the next reviewable unit concrete during independent E checks.

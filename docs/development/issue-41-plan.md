@@ -478,3 +478,40 @@ check and default is30000ms. Preserve those meanings unless separately changed;
 missing saved facts are unknown, not an invented infinite wait. No adopted new
 setting or marker choice beyond the user-selected heading is implied by this
 requirement inventory.
+
+## F standalone preparation ledger (not admitted)
+
+Prepared on a dedicated local F branch whose parent is E candidate10d6df8.
+This is a stacked local planning boundary, not main admission or push approval.
+Before publishing/admitting F, rebase/merge the actually admitted current main,
+including final E fixes and independent #83/#84 work. E/F/G enter main separately
+in that order. No G inspector/catalogue/forms or #83–#87 addition is imported here.
+Old archive9e314f1 is a source reference only; none of its tests qualifies this
+new branch. All proof cells below are pending until the source is ported/tested.
+
+| ID | Retained #41 requirement | Planned source / admission evidence |
+| --- | --- | --- |
+| F1 | BrowserMode List/Watch, Tab mode switch without consuming filter input, visible mode name and stable selection; List keeps tree/delete. `/threads`, active and descendants routes plus one conflict-checked descendant shortcut. | ui/watch, ui/threads, command/completion/help mappings. Test filter/focus/page switches and shortcut/editor collision before adopting the final key. |
+| F2 | Flat priority categories recovery/failed/unread/active/background; two-line detail with narrow reduction and parent title. Category changes reorder, clock/output-age ticks do not. | Prepared/sanitized Watch row models and cached tree/filter/mode revisions; test stable stale-output order and80/wide native captures. |
+| F3 | Session-only unread by completed Run/answer identity, not updated_at. Open marks seen; visible read rows remain until close; reopen excludes idle/read; eviction becomes explicit uncertainty. | Bounded2000-row/seen LRU and lifecycle tests, settings-only mutation, completion replacement and repeated reopen. No persistent unread table or TTL expiry. |
+| F4 | Visible-ID batched facts/details, one in flight/500ms, shared current-view/List/Watch/count plan and read snapshot; hidden/covered consumers do no work. | Port archived read ownership into current E snapshot/sequence broker; retain E's same-deadline fix. Actual query/caller counts and simultaneous-consumer P3, cancellation/late result/pool contention proof. |
+| F5 | Watch details reuse saved D facts, pending/Revisit nonzero hints, saved time and explicit unknown/stale/error observations. Local clocks do not query, format layouts or reorder unchanged text. | Existing activity classifier and preformatted bounded details; no per-row activity::project. F P2/P5 and source-field/clock tests. |
+| F6 | Recovery/answer witnesses obey per-row16KiB and aggregate64KiB source bounds; all external strings are sanitized/width-bounded and retained memory accounted. | Check SQL payload length before Rust copy/parse, including malformed/large command JSON and multibyte labels. Do not equate512 characters with512 bytes or charge witness budget only after copying. |
+| F7 | Enter opens; confirmed stop/retry/output use existing operations, no composer/send or delete action inside Watch. Stale confirmation cannot affect a replacement Run. | watch_action exact target/generation/saved recovery facts; real-CLI late replacement/cancel/failure tests and inspect/output navigation. No new mutation engine. |
+| F8 | Descendants follow parent_thread_id (not Run ownership), breadth-first/depth8/discovered256/cycle dedupe. Lightweight latest Run/Turn classifier, separate recovery counts, hidden zeros and explicit truncated lower bound. | One bounded recursive SQL using parent index; unowned live Run, stopped/deleted/cycle/depth/cap/empty fixtures. No per-descendant full activity projection. |
+| F9 | Retained children through deleted intermediate only where actual deletion semantics support it; missing/truncated scope is not a false exact total. | Inspect current deletion/GC behavior, lifecycle races, missing parent/root and retained-grandchild fixtures before adopting detailed traversal policy. |
+| F10 | Relevant/new descendant Changed invalidates visible parent counts, including a new child just beyond depth/cap frontier. Unknown unrelated IDs get bounded membership proof, not a whole-tree recount. | lineage_observer cache/debounce/generation tests; new child of known frontier,257th discovery, unrelated ordinary node changes, lag/overflow/resync and close/switch. No extra poller. |
+| F11 | Descendant-scoped Watch shares the same bounded lineage/watermark scope and shows truncation; pages and seen-witness budgets remain finite. | Scoped watch_page/read/action integration; cursor/filter/mode/root mismatch, pagination, newly introduced descendant and stale discovery tests. |
+| F12 | Add only actually needed indexes with reasons/costs; current main schema15 already occupies archived15. Fresh schema and isolated atomic migration agree; backup warning before upgrade. | Archived33724db parent index and0af2ccc lookup-index evidence are inputs, not copy-ready version numbers. Recheck actual current main/index overlap immediately before admission, then validate rollback/reopen/schema ledger. No new table. |
+| F13 | Saved Core facts keep shared meanings; frontend owns view/unread/discovery state. Any new large Core read projection has an explicit ownership/cost reason; G models do not enter F to satisfy an import. | Design/code/public type review. Reuse ordinary modules, existing finite presentation pool and E readonly connections; no repository/job engine/new worker/queue. |
+| F14 | Preserve #71 auto_history, #54 conditional status tick, canonical #77 watchdogs, source/generation/cache/paid-text invariants and main #82/#84. | Exact-source standard, real notification readiness, secret scan and meaningful commits; retain prior failures and native-vs-mock distinction. |
+| F15 | P3 current+List/Watch/count work/cost; P4 depth8/256 one query p95<=50ms; P2/P5 native long windows through manual CI measure. | Separate List and Watch cases (modes are exclusive). For hidden-output Watch, ensure producer is outside all visible scopes; visible clocks/output ages are genuine work, not silently treated as hidden. Retain original P2 strict-bin/CPU limits until resolved. |
+| F16 | Complete independent guides/help/source labels and native80/wide dark/light/plain/fallback proof; three-OS main CI after approval. | Update English TUI/Agent and Japanese User Guide as applicable. Physical Windows UX stays explicitly unverified unless observed; no #83–#87 implementation. |
+
+Archive extraction anchors (not an admission recipe):33724db parent index,
+a410fb3 state/targets,8f43bf8 bounded Watch facts,0af2ccc lookup indexes,
+cfae7e7 scoped frontend,bbb36c6 Watch UI and7e53232 formatting. Later readonly
+and ordering fixes1057c1d/c7f4183 must be reconciled with E. Never merge the whole
+combined branch or overwrite staged operation/usage/attachment G work. Keep
+F primitives, shared-reader integration, UI/actions and qualification commits
+separately reviewable, then wait for delegated approval before F publication.
