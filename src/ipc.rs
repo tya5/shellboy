@@ -34,6 +34,7 @@ struct Welcome {
     instance_id: String,
 }
 pub struct Invocation {
+    pub(crate) reply_completed: Option<CancellationToken>,
     pub request: Request,
     pub reply: oneshot::Sender<Response<Value>>,
     /// Only wait/observation should consult this; accepted writes must continue.
@@ -115,9 +116,13 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
                 return Ok(());
             }
         };
+        let reply_completed =
+            matches!(request.command, Command::OwnerShutdown(_)).then(CancellationToken::new);
+        let _reply_completion_guard = reply_completed.clone().map(CancellationToken::drop_guard);
         let (reply, receiver) = oneshot::channel();
         requests
             .send(Invocation {
+                reply_completed,
                 request,
                 reply,
                 disconnected: disconnected.clone(),
@@ -372,6 +377,18 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
         ));
     }
     Ok(response)
+}
+
+/// An explicit data-directory shutdown never uses an inherited environment endpoint.
+pub async fn shutdown_owner(
+    data_dir: &Path,
+    operation_id: Option<String>,
+) -> Result<Response<Value>, ApiError> {
+    let endpoint = read_endpoint(data_dir).await?;
+    let command = Command::OwnerShutdown(crate::protocol::OwnerShutdownArgs {
+        instance_id: endpoint.instance_id.clone(),
+    });
+    connect(endpoint, command, operation_id, None).await
 }
 
 #[cfg(test)]

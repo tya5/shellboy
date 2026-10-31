@@ -411,6 +411,7 @@ struct EditableRequest {
 fn command_title(command: &Command) -> String {
     let name = match command {
         Command::Status(_) => "作業状態",
+        Command::OwnerShutdown(_) => "Owner shutdown",
         Command::ModelList(_) => "モデル一覧",
         Command::ThreadList(_) => "会話一覧",
         Command::ThreadGet(_) => "会話の詳細",

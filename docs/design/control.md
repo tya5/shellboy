@@ -484,3 +484,22 @@ sends remain unobserved as before. This prevents the 32 send permits from being
 held behind the shared two-slot presentation admission while queued closing
 sends still need to commit. No worker, queue, capacity, timer or durable format
 is added; ordinary nonclosing projection and receipt delivery are unchanged.
+
+## Headless owner shutdown
+
+Only a serve adapter enables its fixed optional shutdown signal. owner.shutdown
+is a receipt-bearing mutation bound to the expected owner instance; TUI rejects
+it before receipt creation. It uses existing reserved stop admission. Acceptance
+commits before new Core/tool admission closes; acceptance is not completion.
+The transport settles the shutdown invocation on reply-write completion or
+observer disconnect. Its handler releases both admissions before signalling
+the session, never awaiting shutdown in its own active-request scope. Replayed
+receipts have no new effect; old-instance requests cannot stop a new owner.
+
+The adapter owns transport close, existing snapshot/cancel/drain and DataOwner
+close. Unix signal reception is shared without importing TUI force/deadline
+policy. Startup cancellation cleans up without readiness. After readiness,
+normal final output records completion/failure; forced termination may omit it.
+SQLite transactions and existing startup repair preserve committed facts; no
+shutdown intent is replayed at next startup. No handover or automatic resume is
+introduced and no completion duration is promised.

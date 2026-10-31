@@ -402,3 +402,18 @@ Startup failure is one stderr JSON object with protocol_version, ok=false and
 error; there is no successful stdout result. Failure to write readiness closes
 the prepared session before reporting failure. Existing IPC commands, version,
 validation and authorization remain unchanged in this startup-only stage.
+
+## Explicit owner shutdown
+
+owner.shutdown takes instance_id and requires a durable operation receipt. Only
+serve owners accept it; local IPC/OS access remains the authority, not a human
+label. It does not change conversation context. Result state=accepted with
+shutdown_complete=false acknowledges committed acceptance at that instance,
+not successful process termination. The session final stdout row event=stopped
+reports state=stopped/failed and ok after cleanup. Startup cancellation instead
+reports state=cancelled without a ready row. All rows carry protocol_version;
+ready/final rows name data_dir and instance_id when startup reached ownership.
+No final row is guaranteed after force-kill or a closed output receiver. CLI
+shutdown requires explicit data-dir, reads that endpoint rather than inherited
+owner variables, and pins the request to its instance. Old saved acceptance
+remains inspectable but does not authorize stopping a restarted owner.

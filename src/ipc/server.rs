@@ -37,7 +37,9 @@ impl WorkAdmission {
     }
     pub(super) fn try_acquire(&self, command: &Command) -> Result<OwnedSemaphorePermit, ApiError> {
         let slots = match command {
-            Command::RunStop(_) | Command::ShellStop(_) => &self.control,
+            Command::RunStop(_) | Command::ShellStop(_) | Command::OwnerShutdown(_) => {
+                &self.control
+            }
             Command::Status(_) => &self.observation,
             _ => &self.ordinary,
         };

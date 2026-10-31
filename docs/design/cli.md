@@ -297,7 +297,11 @@ One flushed stdout JSON line with event/state `ready`, absolute `data_dir`,
 `instance_id` and `protocol_version` follows IPC binding and dispatcher startup.
 Startup errors are JSON on stderr, with no stdout result. stdin is not read and
 EOF does not request shutdown. No daemonization, fork, setsid or breakaway is added.
-Shutdown RPC, Unix signal handling and the normal final line are stage 3 work.
+shutdown --data-dir DIR is a separate receipt-bearing request bound to that
+serve instance. Its accepted reply is not successful termination. Unix TERM/HUP
+use the same session cleanup; TUI termination policy is unchanged. The normal
+final stdout row is event=stopped with ok and state=stopped/failed. Force-kill or
+closed stdout may omit that row; no cleanup duration is guaranteed.
 
 Startup never calls the CLI endpoint/origin lookup: the required explicit path
 wins over inherited SHELLBOY_DATA_DIR, and inherited socket/instance/origin values

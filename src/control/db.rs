@@ -81,6 +81,7 @@ pub(crate) fn draft_send_fingerprint(
 
 #[derive(Debug, Clone, Default)]
 pub struct MutationResult {
+    pub owner_shutdown: bool,
     pub result: Value,
     pub wake_threads: Vec<String>,
     /// Publish committed metadata without starting or resuming a driver.
@@ -1000,6 +1001,20 @@ impl Store {
         now: &str,
     ) -> Result<MutationResult> {
         match command {
+            Command::OwnerShutdown(args) => {
+                if args.instance_id != self.instance_id {
+                    return Err(error(
+                        ErrorCode::ProtocolMismatch,
+                        "Shutdown targets a different owner instance",
+                    ));
+                }
+                Ok(MutationResult {
+                    owner_shutdown: true,
+                    result: json!({"state":"accepted","instance_id":self.instance_id,"shutdown_complete":false}),
+                    ..MutationResult::default()
+                })
+            }
+
             Command::Status(_) => Err(error(
                 ErrorCode::InvalidState,
                 "Status uses the dedicated read-only projection",
@@ -2161,6 +2176,7 @@ fn retry_run(
     )
     .map_err(sql_error)?;
     Ok(MutationResult {
+        owner_shutdown: false,
         result: serde_json::to_value(run_details(tx, id)?).unwrap(),
         wake_threads: vec![],
         changed_threads: vec![],

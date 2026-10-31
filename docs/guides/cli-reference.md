@@ -675,6 +675,18 @@ Inherited owner socket/origin/data variables do not select this owner. Shells
 started by it receive its own identity; an inapplicable inherited Unix socket
 is cleared on Windows. API-key and normal proxy variables are not cleared.
 
-This incremental startup stage does not yet add a graceful shutdown command or
-signal adapter. Those and the final normal stdout row are tracked in #5 stage 3;
-use only disposable test directories until the remaining lifecycle stages land.
+Use `shellboy shutdown --data-dir DIR` to request cleanup of that serve owner.
+The reply acknowledges saved acceptance, not successful termination. Observe the
+owner process and its final stdout JSON (`event: "stopped"`, `ok` and `state`).
+A normal lifecycle emits ready plus stopped, each flushed; failures after ready
+use the final JSON and exit 1, not startup stderr. Missing final output after a
+force-kill or closed pipe is not success. Unix SIGTERM/SIGHUP use the same cleanup;
+Windows CTRL_BREAK is not a shutdown interface. No duration guarantee is made.
+
+The directory is required for shutdown too; inherited endpoint variables cannot
+select another owner. Requests are pinned to the observed instance, and a stale
+instance cannot stop a restarted owner. TUI owners reject this command. Existing
+local IPC/OS access is the authority, not sender-label or a human approval claim.
+Owner replacement does not transfer work or reconnect a UI. Parent background
+shell/nested Job and full failure-boundary qualification remain #5 stage 4; use
+disposable directories until those lifecycle checks land.

@@ -340,6 +340,7 @@ impl IndexArgs {
 impl Command {
     pub fn validate(&self) -> Result<(), ApiError> {
         match self {
+            Self::OwnerShutdown(a) => nonempty(&a.instance_id, "instance_id"),
             Self::Status(a) => a.validate(),
             Self::CompactList(a) => a.validate(),
             Self::ShellList(a) => a.validate(),

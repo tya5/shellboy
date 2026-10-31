@@ -31,6 +31,8 @@ pub struct Cli {
 pub enum CliCommand {
     /// Start an owner without a terminal; requires an explicit --data-dir.
     Serve,
+    /// Ask a terminal-free owner to shut down; requires an explicit --data-dir.
+    Shutdown,
     /// Run saved work noninteractively; validate only its final JSON answer locally.
     Exec(crate::exec_client::ExecOptions),
     /// Inspect recorded work; no model call or persistent job engine.
@@ -762,6 +764,7 @@ impl Cli {
                 include_children: a.include_children,
             }),
             CliCommand::Serve
+            | CliCommand::Shutdown
             | CliCommand::Exec(_)
             | CliCommand::Docs { .. }
             | CliCommand::Rag(_)

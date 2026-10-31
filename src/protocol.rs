@@ -563,9 +563,15 @@ pub enum WaitCondition {
     },
 }
 
+args!(OwnerShutdownArgs {
+    instance_id: String
+});
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "command", content = "args")]
 pub enum Command {
+    #[serde(rename = "owner.shutdown")]
+    OwnerShutdown(OwnerShutdownArgs),
     #[serde(rename = "status")]
     Status(StatusArgs),
     #[serde(rename = "model.list")]

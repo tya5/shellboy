@@ -441,5 +441,9 @@ shell without a TUI. Use a disposable explicit directory and wait for its stdout
 rejects reuse of a live owner's data. EOF on the background shell's stdin is not
 a shutdown request. The child remains owned work, not a detached daemon; model
 requests to its configured endpoint have their usual cost. Startup failures use
-stderr. Graceful CLI/signal termination and the full cleanup recipe are later
-#5 stages; this startup-only increment is not yet a complete lifecycle recipe.
+stderr. Use `shutdown --data-dir DIR` on every OS, or Unix SIGTERM/SIGHUP, to
+request the common cleanup. Accepted means saved request, not completed cleanup:
+observe the process and final stopped JSON. No final row after force-kill does
+not establish success. No bounded completion time or owner handover/reconnect is
+promised. TUI owners reject shutdown RPC. Parent/nested Job qualification and the
+complete recovery-wait workflow remain later #5 checks; use disposable data.

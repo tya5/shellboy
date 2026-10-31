@@ -122,6 +122,20 @@ fn main() -> ExitCode {
             ));
         }
     }
+    if matches!(cli.command, Some(CliCommand::Shutdown))
+        && cli
+            .data_dir
+            .as_ref()
+            .is_none_or(|p| p.as_os_str().is_empty())
+    {
+        return print_error(
+            ApiError::new(
+                ErrorCode::InvalidArgument,
+                "shutdown requires an explicit --data-dir DIR",
+            ),
+            cli.operation_id,
+        );
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -181,13 +195,47 @@ fn main() -> ExitCode {
         );
     }
     match cli.command.take() {
-        Some(CliCommand::Serve) => match runtime.block_on(shellboy::serve::run(
-            cli.config,
-            cli.data_dir.expect("serve path checked before runtime"),
-        )) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => shellboy::serve::startup_error(error),
-        },
+        Some(CliCommand::Serve) => {
+            let Some(data) = cli.data_dir else {
+                return shellboy::serve::startup_error(ApiError::new(
+                    ErrorCode::InvalidArgument,
+                    "serve requires an explicit --data-dir DIR",
+                ));
+            };
+            match runtime.block_on(shellboy::serve::run(cli.config, data)) {
+                Ok(true) => ExitCode::SUCCESS,
+                Ok(false) => ExitCode::FAILURE,
+                Err(error) => shellboy::serve::startup_error(error),
+            }
+        }
+        Some(CliCommand::Shutdown) => {
+            let data = match resolve_cli_data_dir(
+                cli.data_dir.as_deref(),
+                &PathEnvironment::current(),
+                &cwd,
+            ) {
+                Ok(data) => data,
+                Err(_) => {
+                    return print_error(
+                        ApiError::new(
+                            ErrorCode::InvalidArgument,
+                            "Cannot resolve shutdown data directory",
+                        ),
+                        cli.operation_id,
+                    );
+                }
+            };
+            match runtime.block_on(ipc::shutdown_owner(&data, cli.operation_id.clone())) {
+                Ok(response) => match serde_json::to_value(response) {
+                    Ok(value) => standalone_response(value),
+                    Err(_) => print_error(
+                        ApiError::new(ErrorCode::IoFailed, "Cannot encode shutdown response"),
+                        cli.operation_id,
+                    ),
+                },
+                Err(error) => print_error(error, cli.operation_id),
+            }
+        }
         Some(CliCommand::Exec(options)) => {
             let data = match resolve_cli_data_dir(
                 cli.data_dir.as_deref(),

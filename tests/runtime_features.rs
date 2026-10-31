@@ -2653,3 +2653,209 @@ async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_res
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
     }).await.expect("automatic summary recovery fixture watchdog");
 }
+
+struct HeadlessOwner {
+    child: tokio::process::Child,
+    stdout: tokio::io::BufReader<tokio::process::ChildStdout>,
+    stderr: tokio::process::ChildStderr,
+    ready: Value,
+}
+impl HeadlessOwner {
+    async fn start(data: &std::path::Path, config: &std::path::Path) -> Self {
+        use tokio::io::AsyncBufReadExt;
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .args(["serve", "--data-dir"])
+            .arg(data)
+            .arg("--config")
+            .arg(config)
+            .current_dir(data.parent().unwrap())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdout = tokio::io::BufReader::new(child.stdout.take().unwrap());
+        let stderr = child.stderr.take().unwrap();
+        let mut line = String::new();
+        stdout.read_line(&mut line).await.unwrap();
+        let ready: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(ready["event"], "ready");
+        Self {
+            child,
+            stdout,
+            stderr,
+            ready,
+        }
+    }
+    async fn finish(mut self, normal: bool, record: &std::path::Path) {
+        let status = self.child.wait().await.unwrap();
+        assert_eq!(status.success(), normal);
+        let mut tail = String::new();
+        self.stdout.read_to_string(&mut tail).await.unwrap();
+        let mut errors = String::new();
+        self.stderr.read_to_string(&mut errors).await.unwrap();
+        assert!(errors.is_empty(), "{errors}");
+        if normal {
+            assert_eq!(tail.lines().count(), 1, "{tail}");
+            let ended: Value = serde_json::from_str(&tail).unwrap();
+            assert_eq!(ended["event"], "stopped");
+            assert_eq!(ended["ok"], true);
+            assert_eq!(ended["instance_id"], self.ready["instance_id"]);
+        } else {
+            assert!(tail.is_empty());
+        }
+        std::fs::write(record, format!("{}\n{tail}", self.ready)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(record).unwrap().lines().count(),
+            if normal { 2 } else { 1 }
+        );
+    }
+}
+async fn headless_cli(data: &std::path::Path, args: &[&str]) -> Value {
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .arg("--data-dir")
+        .arg(data)
+        .args(args)
+        .output()
+        .await
+        .unwrap();
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        output.status.success(),
+        "{value} {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(value["ok"], true);
+    value["result"].clone()
+}
+fn headless_db(data: &std::path::Path) -> rusqlite::Connection {
+    rusqlite::Connection::open_with_flags(
+        data.join("shellboy.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap()
+}
+fn record_headless_request(path: &std::path::Path, body: &Value) {
+    use std::io::Write;
+    writeln!(
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap(),
+        "{body}"
+    )
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_counts() {
+    for mode in [
+        "before_request",
+        "running_tool",
+        "saved_result",
+        "rpc",
+        "signal",
+    ] {
+        if mode == "signal" && !cfg!(unix) {
+            continue;
+        }
+        crate::test_watchdog::watchdog("headless counted stop/restart boundary", async {
+            let root = tempfile::tempdir().unwrap();
+            let (url, mut incoming, proxy_task) = proxy().await;
+            let data = root.path().join("data");
+            let config = root.path().join("config.toml");
+            std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n")).unwrap();
+            let counter = root.path().join("effects.txt");
+            let requests = root.path().join("requests.jsonl");
+            std::fs::write(&requests, "").unwrap();
+            let mut process = HeadlessOwner::start(&data, &config).await;
+            let first_instance=process.ready["instance_id"].clone();
+            let mut held = None;
+            let mut thread = None;
+            let expected_requests;
+            if mode=="before_request" { expected_requests=0; }
+            else {
+                let created=headless_cli(&data, &["thread","create"]).await;
+                let id=created["thread_id"].as_str().unwrap().to_owned();
+                headless_cli(&data, &["message","send","--thread",&id,"--text","run one counted tool"]).await;
+                let first=incoming.recv().await.unwrap();
+                record_headless_request(&requests, &first.body);
+                #[cfg(unix)]
+                let quoted=counter.to_string_lossy().replace('\'',"'\"'\"'");
+                #[cfg(unix)]
+                let mut command=format!("printf 'once\\n' >> '{quoted}'");
+                #[cfg(windows)]
+                let mut command=format!("[IO.File]::AppendAllText('{}', \"once`n\")", counter.to_string_lossy().replace('\'',"''"));
+                if mode=="running_tool" {
+                    #[cfg(unix)] { command.push_str("; while :; do sleep 3600; done"); }
+                    #[cfg(windows)] { command.push_str("; Start-Sleep -Seconds 3600"); }
+                }
+                first.reply.send((200,json!({"id":"one-counted-call","status":"completed","output":[{
+                    "type":"function_call","call_id":"count-once","name":"shell","arguments":json!({"command":command}).to_string()
+                }]}))).unwrap();
+                if mode=="running_tool" {
+                    loop {
+                        if std::fs::read_to_string(&counter).is_ok_and(|s|s.lines().count()==1) {break;}
+                        tokio::task::yield_now().await;
+                    }
+                    let db=headless_db(&data);
+                    let count:i64=db.query_row("SELECT COUNT(*) FROM tool_result WHERE call_id='count-once'",[],|r|r.get(0)).unwrap();
+                    assert_eq!(count,0);
+                    expected_requests=1;
+                } else {
+                    let next=incoming.recv().await.unwrap();
+                    assert!(next.body["input"].as_array().unwrap().iter().any(|v|v["type"]=="function_call_output" && v["call_id"]=="count-once"));
+                    record_headless_request(&requests,&next.body);
+                    held=Some(next);
+                    expected_requests=2;
+                }
+                thread=Some(id);
+                assert_eq!(std::fs::read_to_string(&counter).unwrap().lines().count(),1);
+            }
+            let normal=matches!(mode,"rpc"|"signal");
+            if mode=="rpc" {
+                let accepted=headless_cli(&data,&["shutdown"]).await;
+                assert_eq!(accepted["state"],"accepted");
+                assert_eq!(accepted["shutdown_complete"],false);
+            } else if mode=="signal" {
+                #[cfg(unix)] assert_eq!(unsafe{libc::kill(process.child.id().unwrap() as i32,libc::SIGTERM)},0);
+            } else { process.child.kill().await.unwrap(); }
+            process.finish(normal,&root.path().join("first-stdout.jsonl")).await;
+            drop(held);
+            let restarted=HeadlessOwner::start(&data,&config).await;
+            assert_ne!(restarted.ready["instance_id"],first_instance);
+            let db=headless_db(&data);
+            let integrity:String=db.query_row("PRAGMA quick_check",[],|r|r.get(0)).unwrap();
+            assert_eq!(integrity,"ok");
+            let attempts:i64=db.query_row("SELECT COUNT(*) FROM model_attempt",[],|r|r.get(0)).unwrap();
+            assert_eq!(attempts,expected_requests);
+            if let Some(thread)=thread {
+                let (state,reason):(String,String)=db.query_row("SELECT state,stop_reason FROM run WHERE thread_id=?1 ORDER BY rowid LIMIT 1",[&thread],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+                assert_eq!(state,"stopped");
+                assert_eq!(reason,if normal {"app_shutdown"} else {"previous_instance_interrupted"});
+                let results:i64=db.query_row("SELECT COUNT(*) FROM tool_result WHERE call_id='count-once'",[],|r|r.get(0)).unwrap();
+                assert_eq!(results,1);
+                assert_eq!(std::fs::read_to_string(&counter).unwrap().lines().count(),1);
+                drop(db);
+                let continuation=headless_cli(&data,&["message","send","--thread",&thread,"--text","continue without redoing saved work"]).await;
+                let resumed=incoming.recv().await.unwrap();
+                record_headless_request(&requests,&resumed.body);
+                assert!(resumed.body["input"].as_array().unwrap().iter().any(|v|v["type"]=="function_call_output" && v["call_id"]=="count-once"));
+                resumed.reply.send((200,answer("finished without another tool"))).unwrap();
+                let resumed_run=continuation["run_id"].as_str().unwrap();
+                loop {
+                    let state:String=headless_db(&data).query_row("SELECT state FROM run WHERE id=?1",[resumed_run],|r|r.get(0)).unwrap();
+                    if state=="completed" {break;}
+                    tokio::task::yield_now().await;
+                }
+                assert_eq!(std::fs::read_to_string(&counter).unwrap().lines().count(),1);
+            } else {drop(db);}
+            assert_eq!(std::fs::read_to_string(&requests).unwrap().lines().count(),expected_requests as usize+usize::from(mode!="before_request"));
+            headless_cli(&data,&["shutdown"]).await;
+            restarted.finish(true,&root.path().join("restart-stdout.jsonl")).await;
+            proxy_task.abort(); let _=proxy_task.await;
+        }).await.unwrap();
+    }
+}
