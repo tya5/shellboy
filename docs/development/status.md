@@ -2035,3 +2035,11 @@ consults the existing refreshing set; real Changed/epoch handling stays intact.
 The strict original 16-edit paired observation test remains byte-identical and
 passes three native macOS runs. Exact final checks and new native qualification
 are tracked in #95; no claim that the old Windows schedule was fully traced.
+
+## Terminal-owned URL and file opening (#103)
+
+The TUI guide and both User Guides explain terminal link gestures, default
+WezTerm file URLs and optional bare-path rules. The Agent Guide asks for absolute
+file URLs only when asking a user to open a file/folder. No path detector,
+existence check, launcher or product setting is added; source/bundle validation
+limits and the user's terminal observation are separated in acceptance.
