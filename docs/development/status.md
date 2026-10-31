@@ -2842,3 +2842,14 @@ The bounded projection places pause state below expanded fields; investigate
 and retain the actual-screen assertion. This is a product presentation issue
 until disproved, not a reason to remove the assertion. Full standard remains
 unqualified; its private log survives the build-output cleanup.
+
+## G saved-index status visibility correction
+
+The resumed native PTY failure was a presentation regression, not an obsolete
+expectation. The common report ordering now keeps primary lifecycle/pause and
+destructive permission facts ahead of expanded coverage/count sections, without
+changing pointer identity, caps or full detail. Dense-field regressions2/0 and
+the unchanged actual PTY flow1/0 pass using the single root target. The preceding
+failed standard remains recorded; a fresh full check is still required.
+Latest main has advanced to5321310, including #85/#91; merge it before the next
+G checkpoint and preserve its footer/header/real-PTY corrections.

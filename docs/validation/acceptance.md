@@ -6022,3 +6022,11 @@ measurement executables (40.78GiB logical). Source/instrumentation, private
 logs/results and Git worktrees remain. No open file in the retired G target
 was observed before deleting it. The one retained build location is the clone
 root target; all future local measurements use that CARGO_TARGET_DIR.
+
+The G index repaint failure is corrected in common field ordering. Native
+`cargo test --locked --lib saved_review_field_tests` passes2/0 and the unchanged
+`cargo test --locked --test integration real_tui_accepts_text_renders_proxy_response_and_exits_cleanly`
+passes1/0 (5.06s recorded, not an acceptance threshold). Exact paused JSON
+pointer appears immediately after the original-detail action; coverage, spaces,
+definitions and full retained detail are still asserted. All builds use the
+root shared target. No full-standard/three-OS success is inferred.

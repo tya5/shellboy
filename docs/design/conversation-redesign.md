@@ -296,6 +296,11 @@ metadata pointers can reserve blocker counts without expanding their large Run
 list first; permission/snapshot/source-reference fields remain visible. Do not
 clone the raw body to reorder it, raise the field cap, or add per-list geometry
 exceptions. Full retained detail remains separately budgeted and addressable.
+The common result ordering must keep primary lifecycle/pause and destructive
+permission facts before expandable coverage/count/definition sections. Admission
+priority alone is insufficient if a later lexical sort pushes those facts below
+the initial viewport. Keep exact JSON pointers and the retained full detail;
+do not duplicate pause aliases or weaken the real-screen refresh assertion.
 
 Saved attachment inspection reads selection/source/delivery/managed-file facts,
 not current external-file contents or filesystem availability. A list copies at

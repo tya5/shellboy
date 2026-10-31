@@ -147,7 +147,17 @@ pub(super) fn report(value: Value, budget: usize) -> Report {
         };
         (parent, rank, key.to_owned())
     }
-    fields.sort_by_cached_key(|field| order(&field.key));
+    // Keep primary status/permission facts visible before expansive sections.
+    // This ordering is shared by result popups; exact pointers/full detail stay
+    // unchanged, and nested per-row states do not crowd out the primary state.
+    fn summary_rank(pointer: &str) -> u8 {
+        match pointer {
+            "/state" | "/paused" | "/management/status/paused" => 0,
+            "/deletable_now" | "/snapshot_only" | "/result_uncertain" => 1,
+            _ => 2,
+        }
+    }
+    fields.sort_by_cached_key(|field| (summary_rank(&field.key), order(&field.key)));
     fn count(value: &Value) -> usize {
         match value {
             Value::Object(items) => items.values().map(count).sum(),
@@ -851,6 +861,36 @@ mod attachment_reference_tests {
 #[cfg(test)]
 mod saved_review_field_tests {
     use super::*;
+    #[test]
+    fn primary_index_pause_state_precedes_expansive_management_sections() {
+        let value = serde_json::json!({
+            "management": {
+                "status": {"paused": false, "counts": {
+                    "done": {"value": 200, "complete": true},
+                    "pending": {"value": 0, "complete": true}
+                }},
+                "coverage": {"not_indexed_sources": 0},
+                "definitions": {"not_indexed_sources": "Current visible source coverage"},
+                "spaces": (0..50).map(|i| serde_json::json!({
+                    "id": format!("space-{i}"), "state": "active"
+                })).collect::<Vec<_>>()
+            }
+        });
+        let result = report(value.clone(), 8 * 1024 * 1024);
+        // The common original-detail action stays first; primary saved state
+        // must follow it, independent of the number of admitted section rows.
+        assert_eq!(result.fields[1].key, "/management/status/paused");
+        assert_eq!(result.fields[1].value, "false");
+        assert!(result.fields[1].label.ends_with("一時停止"));
+        for section in [
+            "/management/coverage/not_indexed_sources",
+            "/management/definitions/not_indexed_sources",
+            "/management/spaces",
+        ] {
+            assert!(result.fields.iter().any(|field| field.key == section));
+        }
+        assert_eq!(result.detail, Some(value));
+    }
     #[test]
     fn dense_blockers_cannot_hide_snapshot_permission_scope_or_reference_limits() {
         let value = serde_json::json!({"thread_id":"root","snapshot_only":true,"deletable_now":false,"root_revision":4,"blockers":{"live_run_count":50,"stopping_run_count":0,"runs":(0..50).map(|i|serde_json::json!({"id":format!("run-{i}"),"thread_id":format!("child-{i}"),"state":"live"})).collect::<Vec<_>>()},"selection":{"thread_count":50},"references":{"shared_path_nodes":3},"observation":{"references_complete":false},"view_observation":{"observed_at":"read-time"}});
