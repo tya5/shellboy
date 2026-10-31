@@ -1895,3 +1895,12 @@ projections alongside E's shared summary/readonly bounded display contract.
 The row vocabulary and composer are unchanged from this main. Combined-source
 validation is pending; no CI result or performance value is inherited by this
 new merge. F remains separately saved at b41135c, not included in E.
+
+## Input band structure and external mark review (#91)
+
+Input rows separate the source mark, canonical body, and optional muted metadata.
+Sender labels use existing bounded receipt facts and display identity; wrapping
+and source/copy operations do not absorb decoration. Every span receives only
+the band background override. The external mark remains provisional (⤷ / ⇥ / ⤳).
+Native validation and the clipboard-fixture incident are recorded in acceptance.
+Main integration is blocked pending user choice; CI/integration belongs to worker4.

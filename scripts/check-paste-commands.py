@@ -46,8 +46,12 @@ class Mock(BaseHTTPRequestHandler):
         pass
 
 
+from fixture_safety import require_osc52
+
+
 class Terminal:
     def __init__(self, binary, root, cols, palette, term, no_color):
+        require_osc52(root / "config.toml")
         self.screen = pyte.Screen(cols, 36)
         self.stream = pyte.Stream(self.screen)
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
@@ -56,7 +60,9 @@ class Terminal:
         self.completed_text = ""
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, cols, 0, 0))
-        env = dict(os.environ, TERM=term)
+        env = dict(os.environ, TERM=term, HOME=str(root / "isolated-home"),
+                   XDG_CONFIG_HOME=str(root / "isolated-home/config"),
+                   XDG_DATA_HOME=str(root / "isolated-home/data"))
         env.pop("COLORTERM", None)
         env.pop("NO_COLOR", None)
         # Do not inherit the agent's conversation/owner context.
@@ -180,7 +186,7 @@ def main():
                         'default_connection = "fixture"\ndefault_model = "fixture"\n'
                         '[connections.fixture]\n'
                         f'base_url = "http://127.0.0.1:{server.server_port}/v1"\n'
-                        f'[ui]\npalette = "{palette}"\nbell = false\n')
+                        f'[ui]\ncopy_backend="osc52"\npalette = "{palette}"\nbell = false\n')
                     terminal = Terminal(binary, root, cols, palette, term, no_color)
                     start_requests = len(Mock.requests)
                     captures = []

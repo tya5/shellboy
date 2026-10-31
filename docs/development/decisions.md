@@ -2154,3 +2154,21 @@ preserve the existing attempt/recovery path and mark the absence of sending.
 No auto-switch/resume or input-preparation optimization. Header facts suffice
 without a possibly stalled error body. Existing reason text/run get are the
 initial UI boundary; bottom-line presentation belongs to #85 to avoid #41 F/G.
+
+## 2026-10-31: Separate input-band decoration and isolate clipboard checks (#91)
+
+Use three explicit display parts, with non-RGB layout-only decoration markers
+excluded from source matching and stripped before terminal rendering. Preserve
+body wrapping and foreground/link styles; omit the whole metadata group before
+sacrificing body. Sender labels are unverified receipt facts, not authority.
+Keep existing source glyphs and move their labels to optional right metadata;
+external/unknown input uses a provisional distinct width-one shared-table glyph.
+User selection among ⤷, ⇥ and ⤳ blocks main integration. No per-character source
+or copy API changes, schema/protocol changes, additional query or worker is needed.
+
+After a test-side Auto-backend clipboard write, require explicit OSC52 in
+synthetic fixture configs, preflight shared PTY startup, and inspect OSC52 bytes
+only inside pipe-drained PTYs. GUI capture is unsuitable for clipboard checks
+because it can forward OSC52 to the host; reject clipboard-related GUI input.
+Routine tests use scratch config/data and injected clipboard backends where
+appropriate. This is test isolation, not a guarantee about arbitrary programs.

@@ -26,7 +26,7 @@ def main():
     binary = str(args.binary.resolve())
     config = root / 'config.toml'
     config.write_text('default_connection="fixture"\ndefault_model="current-model"\n'
-                      '[connections.fixture]\nbase_url="http://127.0.0.1:9/v1"\n')
+                      '[connections.fixture]\nbase_url="http://127.0.0.1:9/v1"\n[ui]\ncopy_backend="osc52"\n')
     data = root / 'data'
     endpoint = data / 'endpoint.json'
     env = {key: value for key, value in os.environ.items() if not key.startswith('SHELLBOY_')}
@@ -79,7 +79,7 @@ def main():
             os.close(master)
 
     def cli(label, *words, ok=True):
-        result = subprocess.run([binary, '--data-dir', str(data), *words],
+        result = subprocess.run([binary, '--config', str(config), '--data-dir', str(data), *words],
                                 env=env, capture_output=True, text=True, timeout=25)
         value = json.loads(result.stdout)
         assert value['ok'] is ok, (label, value)

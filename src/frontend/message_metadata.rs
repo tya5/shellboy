@@ -44,6 +44,7 @@ const COMMON_SOURCES: &str = "WITH requested AS (SELECT DISTINCT value AS id FRO
 struct Metadata {
     created_at: Option<String>,
     source: InputSource,
+    sender_label: Option<String>,
 }
 struct RawSource {
     node_id: String,
@@ -242,6 +243,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
         let metadata = project(raw, facts.viewed.as_deref(), facts.parent.as_deref());
         node.presentation.created_at = metadata.created_at;
         node.presentation.input_source = metadata.source;
+        node.presentation.input_sender_label = metadata.sender_label;
         node.presentation.bound_metadata();
     }
 }
@@ -308,6 +310,9 @@ fn project(raw: &RawSource, viewed: Option<&str>, parent: Option<&str>) -> Metad
     Metadata {
         created_at: raw.created_at.clone(),
         source,
+        sender_label: crate::protocol::MessageSender::from_saved(raw.sender.as_deref())
+            .label
+            .filter(|label| !label.trim().is_empty()),
     }
 }
 
@@ -749,6 +754,11 @@ mod tests {
             crate::protocol::SenderKind::Unknown,
             "explicit sender inspection remains unknown for legacy null"
         );
+        assert_eq!(
+            nodes[0].presentation.input_sender_label.as_deref(),
+            Some("human")
+        );
+        assert!(nodes[1].presentation.input_sender_label.is_none());
         assert!(nodes.iter().all(|node|node.presentation.read_revision==77 && node.presentation.body_evicted));
     }
 
