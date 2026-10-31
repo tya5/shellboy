@@ -142,6 +142,16 @@ pub(super) fn footer_lines(
     };
     let phase = view.footer_phase();
     let mut facts = Vec::new();
+    if let Some(limit) = view
+        .activity
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.recovery.as_ref())
+        .and_then(|r| r.limit_summary())
+    {
+        facts.push(limit);
+    }
+
     if !view.follow {
         facts.push(if view.unseen {
             "↓ new".into()
@@ -188,9 +198,6 @@ pub(super) fn footer_lines(
         facts.push(format!("× {}", view.cancelled_calls));
     }
     if let Some(snapshot) = view.activity.snapshot.as_ref() {
-        if let Some(limit) = snapshot.recovery.as_ref().and_then(|r| r.limit_summary()) {
-            facts.push(limit);
-        }
         if let Some(retry) = snapshot.automatic_retry.as_ref() {
             facts.push(retry.label());
         }

@@ -33,8 +33,27 @@ pub(super) struct PhaseClock {
 }
 impl PhaseClock {
     pub fn observe(view: &ActivityView, previous: Option<Self>, at: Instant) -> Option<Self> {
+        Self::for_phase(view, view.phase(), previous, at)
+    }
+    pub fn request(view: &ActivityView, previous: Option<Self>, at: Instant) -> Option<Self> {
+        let s = view.snapshot.as_ref()?;
+        if s.phase != ActivityPhase::AwaitingModel {
+            return None;
+        }
+        let phase = if s.attempt_id.is_some() && view.received_attempt == s.attempt_id {
+            ActivityPhase::Receiving
+        } else {
+            ActivityPhase::AwaitingModel
+        };
+        Self::for_phase(view, phase, previous, at)
+    }
+    fn for_phase(
+        view: &ActivityView,
+        phase: ActivityPhase,
+        previous: Option<Self>,
+        at: Instant,
+    ) -> Option<Self> {
         let snapshot = view.snapshot.as_ref()?;
-        let phase = view.phase();
         if !phase.is_active() {
             return None;
         }

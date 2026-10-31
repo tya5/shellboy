@@ -87,3 +87,18 @@ Resolved execution recovery disappears on a fresh successful saved-state read;
 independent command failures keep their existing notice ownership. Typed #76
 usage-limit facts supply reset kind/time and wait or /model guidance. A passed
 reset timestamp never promises automatic retry or bypass of connection cooldown.
+
+Structured EngineEvent errors carrying saved recovery facts invalidate the
+existing selected-view read instead of creating an unrelated sticky operation
+notice. The saved RecoverySnapshot owns that footer and its resolution; storage
+or unclassified errors retain their existing notification path. This is frontend
+presentation ownership only: saved errors, diagnostics and Core events do not
+change. No text matching or TTL is used to infer resolution.
+
+Age anchors are data, not independent schedulers: both the primary tool/stage and
+secondary request anchor advance only from the existing UI monotonic now. Saved
+wall timestamps are parsed at snapshot acceptance, not on every footer frame.
+Repeated identical anchors do not reset ages; generation/attempt changes reset
+only the relevant stage. Send acceptance and reflection also have separate local
+stage ages, choosing the oldest pending item of the displayed stage rather than
+an unrelated older pending stage. Unknown or future saved times stay unknown.
