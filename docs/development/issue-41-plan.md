@@ -726,6 +726,12 @@ units below; names describe scope, not a new engine/framework.
 
 ### G remaining saved-read coverage inventory (not implementation evidence)
 
+Integrated native standard78abbf8 includes mainca317a8:2308/0/35, Python71,
+layout95/watchdog/format/strict all-target Clippy. No current native P6/P3 or
+three-OS/review/main admission follows. The new private P6 driver's count-policy
+and restore guards are prepared; historical baseline evidence stays unchanged.
+
+
 Latest-compaction envelope checkpoint18b2b5f (design7e87880): shared canonical
 queries run with scoped256KiB value/row limits,2500 progress callbacks at
 approximately100 instructions, pre-copy512-byte scalars and256KiB aggregate

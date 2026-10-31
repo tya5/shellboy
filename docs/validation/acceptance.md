@@ -1,5 +1,25 @@
 # Validation record
 
+## G integrated native standard78abbf8
+
+On native macOS/Rust1.99.1, `RUST_TEST_THREADS=2 sh scripts/check.sh` exits0
+using the existing shared root target (job1, incremental disabled). Python71,
+layout95/watchdog, format and strict all-target Clippy pass. Rust2308 passed,
+0 failed,35 ignored: library1332/15 ignored; integration957/17 ignored;
+termination12/1 ignored; crash7/2 ignored; main and three examples0. Private
+issue-41-g-mainca317-standard-v21.log records the actual run. Check source78abbf8
+includes mainca317a8 and preserves #88/#97;21342a9 changed documentation only.
+
+This closes that integration check, not G as a whole. Native P6/wheel/P3,
+remaining reactive route/source/SQL inventory and exact-SHA three-OS/review/main
+admission remain open. The candidate private P6 driver now has count-only gates
+and shared-target/fail-closed restoration guards. Synthetic policy checks reject
+wrong event/source/frame/sample/cache counts and do not reject arbitrarily long
+durations; they are harness checks, not native product performance evidence.
+Historical baseline scripts/results are unmodified; unsupported baseline wheels
+remain unavailable, not a zero-cost baseline. No paid API/user data/install/push.
+
+
 ## G latest-compaction resource envelope checkpoint18b2b5f
 
 Native macOS/Rust1.99.1; one shared root CARGO_TARGET_DIR, incremental disabled,

@@ -9,13 +9,18 @@ measurement instructions use the shared target directly rather than executable
 copies. Driver, preview reader/streams/tools, conversation insets, serve and OS
 signals match main byte-for-byte. Index auto_history guards remain in place.
 
-One announced shared-target `RUST_TEST_THREADS=2 sh scripts/check.sh` is running.
-Python71, layout95/watchdog and strict all-target Clippy have passed; Rust test
-compilation is live. This is not a full-standard success. Resume by polling the
-existing standard-check process and private issue-41-g-mainca317-standard-v21.log;
-do not restart merely because observation expires. After qualification continue
-the complete G saved-route inventory, header/SQL bounds and P3/P6/native gates.
-No push, main admission, installed binary or user data change.
+The announced shared-target `RUST_TEST_THREADS=2 sh scripts/check.sh` exits0:
+Python71, layout95/watchdog, formatting and strict all-target Clippy pass; native
+Rust2308 passed/0 failed/35 ignored (library1332, integration957, termination12,
+crash7; main/three examples0). Evidence: private
+issue-41-g-mainca317-standard-v21.log. Rust source78abbf8 remained unchanged
+through the check;21342a9 only records documentation. No three-OS claim follows.
+Continue the complete G saved-route inventory, header/SQL bounds and P3/P6/native
+gates. P6's new private driver preserves historical baseline evidence, uses the
+shared target directly, restores temporary instrumentation with hash checks and
+replaces superseded latency/bin gates with source/event/frame/cache counts.
+Only that driver's syntax/count-policy checks pass so far; no current native P6
+result is claimed. No push, main admission, installed binary or user data change.
 
 
 ## G latest-compaction display resource envelope
