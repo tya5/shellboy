@@ -425,7 +425,15 @@ fn capture_context(
         let captured = (|| -> Result<(), StorageError> {
             let runs = snapshot_section(tx, RUN_SNAPSHOT, &thread, at, "runs", reason)?;
             let turns = snapshot_section(tx, TURN_SNAPSHOT, &thread, at, "turns", reason)?;
-            let shells = snapshot_section(tx, SHELL_SNAPSHOT, &thread, at, "shells", reason)?;
+            let shell_sql = if cfg!(unix) && reason == "previous_instance_interrupted" {
+                SHELL_SNAPSHOT.replace(
+                    "'startup_state', 'stopped'",
+                    "'startup_state', 'failed', 'os_state', 'unverified'",
+                )
+            } else {
+                SHELL_SNAPSHOT.to_owned()
+            };
+            let shells = snapshot_section(tx, &shell_sql, &thread, at, "shells", reason)?;
             let tool_calls =
                 snapshot_section(tx, TOOL_CALL_SNAPSHOT, &thread, at, "tool_calls", reason)?;
             let revisits = snapshot_section(tx, REVISIT_SNAPSHOT, &thread, at, "revisits", reason)?;

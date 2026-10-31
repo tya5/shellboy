@@ -49,12 +49,11 @@ impl InstructionLoader {
             .map_err(|_| failed("Control-file workers closed during shutdown"))?;
         Ok(())
     }
-    /// The owned permit lives in the actual blocking task even after timeout.
-    pub async fn prepare(
+    /// Reuse the existing control-file admission; no DB connection may enter it.
+    pub(crate) async fn file_work<T: Send + 'static>(
         &self,
-        cwd: PathBuf,
-        source_path: PathBuf,
-    ) -> Result<Option<InstructionSnapshot>, ApiError> {
+        work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+    ) -> Result<T, ApiError> {
         let deadline = tokio::time::Instant::now() + self.timeout;
         let permit = tokio::time::timeout_at(deadline, self.workers.clone().acquire_owned())
             .await
@@ -62,6 +61,19 @@ impl InstructionLoader {
             .map_err(|_| failed("Control file worker closed"))?;
         let task = tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            work()
+        });
+        tokio::time::timeout_at(deadline, task).await
+            .map_err(|_| failed("Control file preparation timed out; the underlying file task may still be running"))?
+            .map_err(|_| failed("Control file worker failed"))?
+    }
+    /// The owned permit lives in the actual blocking task even after timeout.
+    pub async fn prepare(
+        &self,
+        cwd: PathBuf,
+        source_path: PathBuf,
+    ) -> Result<Option<InstructionSnapshot>, ApiError> {
+        self.file_work(move || {
             let meta = std::fs::metadata(&cwd).map_err(|_| {
                 failed("Thread cwd is missing or unreadable; change cwd then retry")
             })?;
@@ -89,8 +101,8 @@ impl InstructionLoader {
                 ));
             }
             read_snapshot(source_path, meta).map(Some)
-        });
-        tokio::time::timeout_at(deadline,task).await.map_err(|_|failed("AGENTS/cwd preparation timed out; the underlying file task may still be running"))?.map_err(|_|failed("Control file worker failed"))?
+        })
+        .await
     }
 }
 // Keep the stat/read boundary explicit: file changes between them must not
@@ -140,6 +152,35 @@ fn failed(message: &str) -> ApiError {
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn shared_file_work_holds_existing_permit_until_real_exit() {
+        crate::test_watchdog::watchdog("control-file observation admission", async {
+            let mut config = Config::default();
+            config.workers.control_file = 1;
+            let loader = InstructionLoader::new(&config);
+            let (entered, ready) = tokio::sync::oneshot::channel();
+            let (release, gate) = std::sync::mpsc::channel();
+            let worker = loader.clone();
+            let pending = tokio::spawn(async move {
+                worker
+                    .file_work(move || {
+                        entered.send(()).unwrap();
+                        gate.recv().unwrap();
+                        Ok(7)
+                    })
+                    .await
+            });
+            ready.await.unwrap();
+            assert_eq!(loader.workers.available_permits(), 0);
+            release.send(()).unwrap();
+            assert_eq!(pending.await.unwrap().unwrap(), 7);
+            loader.wait_idle().await.unwrap();
+            assert_eq!(loader.workers.available_permits(), 1);
+        })
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn stat_read_race_size_describes_captured_body_and_growth_stays_bounded() {

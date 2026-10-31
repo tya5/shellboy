@@ -23,6 +23,8 @@ use tokio::process::Command;
 #[cfg(unix)]
 mod unix_group;
 #[cfg(unix)]
+mod unix_lifeline;
+#[cfg(unix)]
 use unix_group::{cleanup_group, signal_group};
 
 mod io_session;
@@ -340,15 +342,29 @@ impl ShellSupervisor {
             )
             .details(serde_json::json!({"reason":"turn_interrupted_before_spawn"})));
         }
+        let lifeline = unix_lifeline::Prepared::configure(&mut command).map_err(|error| {
+            ApiError::new(
+                ErrorCode::IoFailed,
+                format!("shell lifeline setup failed: {error}"),
+            )
+        })?;
         let spawned_at = Instant::now();
         // Serialize native publication with emergency force cleanup. No await
         // or DB/file work occurs while this short native ownership lock is held.
         let mut groups = self.native_groups.lock().unwrap_or_else(|e| e.into_inner());
         self.admit_start()?;
-        let mut child = command.spawn().map_err(|error| {
-            ApiError::new(ErrorCode::IoFailed, format!("shell spawn failed: {error}"))
-        })?;
-        let pgid = child.id().ok_or_else(|| {
+        let child = command.spawn();
+        // Release the parent's copies of guardian/exec-error endpoints before
+        // observing EOF on the private launch acknowledgment.
+        drop(command);
+        let mut child = lifeline
+            .attached(child.map_err(|error| {
+                ApiError::new(ErrorCode::IoFailed, format!("shell spawn failed: {error}"))
+            })?)
+            .map_err(|error| {
+                ApiError::new(ErrorCode::IoFailed, format!("shell exec failed: {error}"))
+            })?;
+        let pgid = child.child.id().ok_or_else(|| {
             ApiError::new(ErrorCode::IoFailed, "spawned shell has no process handle")
         })? as i32;
         groups.insert(pgid);
@@ -361,9 +377,17 @@ impl ShellSupervisor {
         drop(groups);
         drop(turn_gate);
         let owned_group = unix_group::OwnedGroup::new(self.native_groups.clone(), pgid);
-        let stdin = Arc::new(Mutex::new(child.stdin.take().map(ShellStdin::Unix)));
-        let stdout = child.stdout.take().expect("stdout configured as piped");
-        let stderr = child.stderr.take().expect("stderr configured as piped");
+        let stdin = Arc::new(Mutex::new(child.child.stdin.take().map(ShellStdin::Unix)));
+        let stdout = child
+            .child
+            .stdout
+            .take()
+            .expect("stdout configured as piped");
+        let stderr = child
+            .child
+            .stderr
+            .take()
+            .expect("stderr configured as piped");
         let (io, handle, rx) = IoSession::start(
             stdin,
             stdout,
@@ -407,9 +431,26 @@ impl ShellSupervisor {
                     format!("shell wait failed: {error}"),
                 );
             }
+            if status.is_ok()
+                && !matches!(timeout(drain_timeout, child.reap_shell()).await, Ok(Ok(())))
+            {
+                record_failure(
+                    &io.failure,
+                    FailureKind::ProcessWait,
+                    "Unix shell reap was not confirmed".into(),
+                );
+            }
             let (group_confirmed, group_forced) =
                 cleanup_group(pgid, kill_at, term_grace, drain_timeout).await;
             owned_group.complete(group_confirmed);
+            child.release();
+            if !matches!(timeout(drain_timeout, child.child.wait()).await, Ok(Ok(_))) {
+                record_failure(
+                    &io.failure,
+                    FailureKind::ProcessWait,
+                    "Unix guardian reap was not confirmed".into(),
+                );
+            }
             forced |= group_forced;
             let (state, reason, output_complete) =
                 io.finish(drain_timeout, stopped_before_exit).await;

@@ -2040,3 +2040,45 @@ live/background or E/F combined-consumer performance from those values. New P3
 must assert actual saved lifecycle states along with node/tool population and
 consumer scope. This is an evidence correction, not a change to run semantics
 or an invalidation of the observed completed-Run query-cost measurements.
+
+## 2026-10-31: Unix lifeline ownership (#82)
+
+Use one native guardian per live Unix execution. Its PID reserves the model PGID
+while it waits outside that group, so existing normal TERM/grace/KILL probes do
+not count the guardian as surviving work. A short-lived setup child creates its
+private group, preventing an owner-group SIGKILL from killing the guardian too.
+Steady owner/guardian overhead is two FDs each (lifeline and status), not just
+the proposal's one owner FD. The status acknowledgment preserves the existing
+natural-exit/late-stop contract; exec-error acknowledgment is startup-only.
+All use the existing supervisor task; no runtime worker, queue, table or package
+is added. The low-level fork branches perform native operations only.
+
+Do not add a persistent PID registry or attempt startup kills by old numbers.
+Startup records OS-unverified Unix shells as failed rather than claiming stopped.
+Escaped groups, intentional guardian tampering, kernel-stop latency and observing
+old-version survivors are outside this minimum implementation. Windows Job and
+normal owner shutdown policies are not changed. Revisit the helper layout only
+if native tests or a future shell runtime change invalidate these bounds.
+
+## 2026-10-31: Minimal command-prefix provenance (#84)
+
+Treat the whole leading slash name as manual only when it lies in the contiguous
+manually entered prefix. Paste can truncate trust but cannot grant it; a typed
+slash alone cannot authorize a pasted name. This bounded local counter is
+skipped by serialization, keeping saved formats/Core/protocol unchanged.
+Snapshots inside the UI retain trust; reloaded/recalled source text does not.
+Choose an inline keyed warning instead of an execution/submit dialog.
+Conservative edits can require retyping the name after an insertion/deletion;
+do not add per-character tracking merely to recover trust. Revisit if concrete
+editing workflows show the minimal prefix rule is insufficient.
+
+## Local E reconciliation with main2327636 (2026-10-31)
+
+Prepare the E admission branch against current main including #79 worker release,
+#82 Unix lifeline and #84 typed slash/pasted-argument fixes. Preserve both append-
+only development/validation histories; Rust merges automatically. This is local
+preparation, not E main admission or another push approval. Frozen published
+measurement7c6f4d6 stays unchanged. Original P2/P5 and P3 source witnesses remain
+0d4/7c and0b respectively; do not relabel them as measurements of this merge.
+Recheck the combined local source with the standard suite. Keep #71 admission,
+#54 conditional tick, canonical #77 guards and #84 provenance behavior intact.

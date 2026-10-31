@@ -81,7 +81,7 @@ impl Owner {
             self.finished = true;
         }
         if let Some(group) = self.native_group.take()
-            && unsafe { libc::getpgid(group) } == group
+            && unsafe { libc::kill(-group, 0) } == 0
         {
             unsafe {
                 libc::kill(-group, libc::SIGKILL);
@@ -224,7 +224,7 @@ impl Fixture {
             "read fixture_input"
         };
         let shell = format!(
-            "printf '%s\\n' \"$$\" > {quoted}; printf '%s\\n' \"$PPID\" > {owner_quoted}; {prefix}printf SIGNAL_SHELL_READY; {workload}",
+            "printf '%s\\n' \"$$\" > {quoted}; ps -o ppid= -p \"$PPID\" > {owner_quoted}; {prefix}printf SIGNAL_SHELL_READY; {workload}",
             prefix = if ignore_term { "trap '' TERM; " } else { "" }
         );
         let server = tokio::spawn(async move {
@@ -350,7 +350,7 @@ impl Fixture {
         crate::test_watchdog::watchdog("tests/termination_signals.rs: running_with",async {loop {
             fixture.owner.drain();
             if let Ok(text)=std::fs::read_to_string(&pidfile) && text.ends_with('\n') && let Ok(pid)=text.trim().parse::<i32>() {
-                assert!(pid>1);fixture.owner.native_group=Some(pid);
+                assert!(pid>1); let group=unsafe {libc::getpgid(pid)}; assert!(group>1); fixture.owner.native_group=Some(group);
                 let db=rusqlite::Connection::open_with_flags(directory.join("shellboy.db"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
                 let ready:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution s JOIN output_chunk o ON o.execution_id=s.id WHERE s.state='running' AND o.bytes=CAST('SIGNAL_SHELL_READY' AS BLOB))",[],|r|r.get(0)).unwrap();if ready{break;}
             }

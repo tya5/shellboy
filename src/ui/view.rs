@@ -1611,6 +1611,7 @@ impl ThreadView {
             self.draft.folds = Vec::new();
             self.draft.cursor = 0;
             self.draft.literal_paste = false;
+            self.draft.typed_prefix = 0;
             self.draft.edit = None;
             self.draft.revision += 1;
         }
@@ -1662,6 +1663,7 @@ impl ThreadView {
         draft.text = text;
         draft.attachments = attachments;
         draft.literal_paste = true;
+        draft.typed_prefix = 0;
         self.draft = draft;
         self.status = "保存済みの依頼を入力欄へ戻しました".into();
     }

@@ -1,5 +1,12 @@
 # Development status
 
+## Attachment list file admission review (#79)
+
+Read-only attachment rows now leave the projection closure and its connection
+before path metadata/open work starts. File checks share existing control-file
+admission with AGENTS/cwd preparation; no additional pool or queue is created.
+Targeted attachment tests pass; standard/native validation is recorded in #79.
+
 ## Managed clipboard paths (#79)
 
 Managed images use the existing path field in CLI results and current request
@@ -1742,3 +1749,49 @@ Next: reconcile latest main (#82), complete the local combined-source standard
 check and await the separate E main approval. No additional push/install/data
 change. Archived F extraction points are mapped privately without touching its
 combined branch or beginning G publication.
+
+
+## Unix owner-death shell lifetime (#82, 2026-10-31)
+
+A per-execution native guardian holds a close-on-exec owner lifeline and a status
+socket, reserves the execution PGID with its live PID, and waits outside both
+model and owner groups. EOF requests group KILL. A short-lived setup child is
+reaped before publication; no runtime worker, queue, table or dependency is added.
+The owner and guardian each retain two FDs per execution; launch-only descriptors
+and native ownership/cleanup bounds are recorded in the Shell design.
+
+Unix restart records interrupted active shells as failed with
+previous_instance_interrupted_os_state_unverified, without inventing exit/signal
+or confirmed group cleanup. Existing terminal outputs and Windows startup/Job
+handling are unchanged. Normal owner Ctrl+Q/SIGTERM routing and TERM/grace/KILL
+policy are preserved; raw shell status/reap acknowledgment is native-adapter work.
+
+Native macOS mock/real-process tests pass for two independent shell groups under
+owner-PID and owner-group KILL, real owner restart with no replay, natural exit /
+late stop, exec failure/script fallback, and normal signal/PTY shutdown. Direct
+Bash signal/exit oracles also pass. Full local standard checks have passed; final
+rebased checks and Linux/macOS/Windows CI remain separate gates. No installed
+binary, real owner/data, release or paid provider is used. Escaped groups and
+stop-time guarantees remain outside scope; no stored-PID cleanup is attempted.
+
+## Typed slash commands with pasted arguments (#84)
+
+The composer tracks a transient manually entered leading prefix. A complete
+typed command name still dispatches with pasted arguments; pasted names remain
+literal and show a keyed warning/retyping hint. Long paste folding and explicit
+send remain unchanged. Core, protocol and persisted draft formats are unchanged.
+The minimum version omits a confirmation dialog and per-character provenance;
+reloaded/recalled source text stays conservative. Local standard checks and
+eight native PTY sessions pass; native CI/integration are tracked in #84 and
+acceptance, separately from unmeasured P1 latency and physical terminals.
+
+## Latest-main E local preparation (2026-10-31)
+
+Main2327636 (main CI41171514740 green) includes #79/#82/#84 and is merged into
+the local E admission candidate. The #84 leading-command provenance/input paths
+are retained; no #83–#87 feature is implemented by this work. Conflict resolution
+only concatenates existing decision/status/acceptance records; Rust auto-merges.
+Combined-source standard check is next. Published measurement7c6f4d6 remains
+frozen; main, installed binaries and user data are not changed. The new merge
+will have its own test/source record and does not inherit exact-source timing
+claims from0b/7c. E publication still requires the promised separate approval.

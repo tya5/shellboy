@@ -57,7 +57,14 @@ async fn restart_records_uncertainty_without_reexecuting_or_killing_pids() {
         .await
         .unwrap();
     assert_eq!(values.0, "stopped");
-    assert_eq!(values.1.0, "previous_instance_interrupted");
+    assert_eq!(
+        values.1.0,
+        if cfg!(unix) {
+            "previous_instance_interrupted_os_state_unverified"
+        } else {
+            "previous_instance_interrupted"
+        }
+    );
     assert_eq!(values.1.1, 0);
     second.shutdown().await.unwrap();
 }

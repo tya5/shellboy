@@ -22,6 +22,11 @@ impl DraftSnapshot {
         let start = self.cursor;
         adjust_folds(&mut self.folds, start, start, text.len());
         self.adjust_attachments(start, start, text.len());
+        if pasted {
+            self.typed_prefix = self.typed_prefix.min(start);
+        } else if start <= self.typed_prefix {
+            self.typed_prefix += text.len();
+        }
         self.text.insert_str(start, text);
         self.cursor += text.len();
         if let Some(id) = fold_id {
@@ -34,6 +39,9 @@ impl DraftSnapshot {
             self.folds.sort_by_key(|f| f.start);
         }
         self.literal_paste |= pasted;
+        if !self.text.starts_with('/') {
+            self.typed_prefix = 0;
+        }
     }
     pub(super) fn delete_at_cursor(&mut self, backwards: bool) {
         let (mut start, mut end) = if backwards {
@@ -50,8 +58,16 @@ impl DraftSnapshot {
         if start != end {
             adjust_folds(&mut self.folds, start, end, 0);
             self.adjust_attachments(start, end, 0);
+            self.typed_prefix = if end <= self.typed_prefix {
+                self.typed_prefix - (end - start)
+            } else {
+                self.typed_prefix.min(start)
+            };
             self.text.replace_range(start..end, "");
             self.cursor = start;
+            if !self.text.starts_with('/') {
+                self.typed_prefix = 0;
+            }
         }
     }
     pub(super) fn move_cursor(&mut self, key: KeyCode) {
@@ -86,6 +102,7 @@ impl DraftSnapshot {
         self.attachments
             .sort_by_key(|a| a.position.unwrap_or(self.text.len()));
         self.text.clear();
+        self.typed_prefix = 0;
         for attachment in &mut self.attachments {
             if attachment.position.is_some() {
                 attachment.position = Some(self.text.len());
@@ -111,6 +128,7 @@ impl DraftSnapshot {
     pub(super) fn insert_attachment(&mut self, mut attachment: UiAttachment, position: usize) {
         adjust_folds(&mut self.folds, position, position, MARKER.len());
         self.adjust_attachments(position, position, MARKER.len());
+        self.typed_prefix = self.typed_prefix.min(position);
         self.text.insert_str(position, MARKER);
         if self.cursor >= position {
             self.cursor += MARKER.len();
@@ -128,6 +146,7 @@ impl DraftSnapshot {
             let end = position + MARKER.len();
             adjust_folds(&mut self.folds, position, end, 0);
             self.adjust_attachments(position, end, 0);
+            self.typed_prefix = self.typed_prefix.min(position);
             self.text.replace_range(position..end, "");
             if self.cursor > position {
                 self.cursor = self.cursor.saturating_sub(MARKER.len()).max(position);

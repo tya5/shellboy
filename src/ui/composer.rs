@@ -3,6 +3,40 @@ use super::theme;
 use super::*;
 use std::collections::VecDeque;
 
+// Named text keys keep this local UI copy ready for the #35 translation layer.
+enum ComposerText {
+    LiteralPasteWarning,
+    RetypeCommandHint,
+}
+impl ComposerText {
+    fn text(self) -> &'static str {
+        match self {
+            Self::LiteralPasteWarning => "貼り付けた文として送ります（コマンドは実行しません）",
+            Self::RetypeCommandHint => {
+                "実行するには先頭の /コマンド名 を消して手で入力してください"
+            }
+        }
+    }
+}
+
+impl DraftSnapshot {
+    pub(super) fn command_is_typed(&self) -> bool {
+        if !self.literal_paste {
+            return true;
+        }
+        if !self.text.starts_with('/') {
+            return false;
+        }
+        let Some(prefix) = self.text.get(..self.typed_prefix) else {
+            return false;
+        };
+        // Inspect only the trusted prefix, not an arbitrarily long pasted tail.
+        prefix.contains(char::is_whitespace)
+            || self.typed_prefix == self.text.len()
+            || self.text[self.typed_prefix..].starts_with(char::is_whitespace)
+    }
+}
+
 struct CommandHint {
     name: &'static str,
     help: &'static str,
@@ -218,7 +252,7 @@ impl UiState {
     }
     fn completions(&self) -> Vec<&'static CommandHint> {
         let draft = &self.view().draft;
-        if draft.literal_paste
+        if !draft.command_is_typed()
             || draft.cursor != draft.text.len()
             || !draft.text.starts_with('/')
             || draft.text.chars().any(char::is_whitespace)
@@ -290,6 +324,7 @@ impl UiState {
                     draft.cursor = draft.text.len();
                     draft.folds.clear();
                     draft.literal_paste = false;
+                    draft.typed_prefix = draft.text.len();
                     return Some(vec![]);
                 }
                 KeyCode::Esc => {
@@ -462,6 +497,7 @@ impl UiState {
                     vec![]
                 };
                 view.draft.literal_paste = true;
+                view.draft.typed_prefix = 0;
                 view.draft.revision = view.draft.revision.wrapping_add(1);
                 let recall = view.composer.recall.as_mut().unwrap();
                 recall.ordinal = Some(ordinal);
@@ -523,6 +559,26 @@ impl UiState {
         if !self.composer_active() {
             return;
         }
+        let draft = &self.view().draft;
+        if draft.text.starts_with('/') && !draft.command_is_typed() {
+            let height = 2.min(input.y);
+            let warning = Rect::new(
+                input.x + 1,
+                input.y - height,
+                input.width.saturating_sub(2),
+                height,
+            );
+            frame.render_widget(Clear, warning);
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(ComposerText::LiteralPasteWarning.text()),
+                    Line::from(ComposerText::RetypeCommandHint.text()),
+                ])
+                .style(self.palette.header()),
+                warning,
+            );
+            return;
+        }
         let candidates = self.completions();
         if candidates.is_empty() {
             return;
@@ -572,6 +628,104 @@ impl UiState {
 #[cfg(test)]
 mod contract_tests {
     use super::*;
+    fn enter(ui: &mut UiState) -> Vec<UiAction> {
+        ui.event(crossterm::event::Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )))
+    }
+    #[test]
+    fn pasted_arguments_do_not_disable_a_manually_typed_command() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("/switch ", false);
+        ui.insert("synthetic-thread", true);
+        assert!(ui.view().draft.literal_paste);
+        assert!(ui.view().draft.command_is_typed());
+        assert!(
+            enter(&mut ui).iter().any(|action| matches!(action, UiAction::SelectThread { thread_id, .. } if thread_id == "synthetic-thread"))
+        );
+    }
+    #[test]
+    fn pasting_first_then_typing_the_complete_name_at_home_is_explicit() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("synthetic-thread", true);
+        ui.active_view_mut().draft.cursor = 0;
+        for ch in "/switch ".chars() {
+            ui.insert(&ch.to_string(), false);
+        }
+        assert!(
+            enter(&mut ui).iter().any(|action| matches!(action, UiAction::SelectThread { thread_id, .. } if thread_id == "synthetic-thread"))
+        );
+    }
+    #[test]
+    fn pasted_name_or_name_suffix_is_never_authorized_by_a_typed_slash() {
+        for (typed, pasted) in [
+            ("", "/quit"),
+            ("/", "quit"),
+            ("/qu", "it"),
+            ("/quit", "-suffix"),
+        ] {
+            let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+            ui.insert(typed, false);
+            ui.insert(pasted, true);
+            assert!(!ui.view().draft.command_is_typed());
+            assert!(!ui.has_completions());
+            assert!(matches!(
+                enter(&mut ui).first(),
+                Some(UiAction::Send { .. })
+            ));
+        }
+    }
+    #[test]
+    fn deleting_pasted_prefix_does_not_promote_the_pasted_suffix() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("x/quit", true);
+        ui.active_view_mut().draft.cursor = 0;
+        ui.delete(false);
+        assert!(!ui.view().draft.command_is_typed());
+        for _ in 0..5 {
+            ui.delete(false);
+        }
+        for ch in "/quit".chars() {
+            ui.insert(&ch.to_string(), false);
+        }
+        assert!(ui.view().draft.command_is_typed());
+        assert!(
+            enter(&mut ui)
+                .iter()
+                .any(|action| matches!(action, UiAction::Quit))
+        );
+    }
+    #[test]
+    fn ordinary_text_has_no_transient_command_provenance() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("ordinary text", false);
+        assert_eq!(ui.view().draft.typed_prefix, 0);
+        let restored: DraftSnapshot =
+            serde_json::from_value(serde_json::to_value(&ui.view().draft).unwrap()).unwrap();
+        assert_eq!(restored, ui.view().draft);
+    }
+    #[test]
+    fn provenance_is_transient_and_local_snapshots_preserve_it() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("/switch ", false);
+        ui.insert("synthetic-thread", true);
+        let local = ui.view().draft.clone();
+        assert!(local.command_is_typed());
+        let json = serde_json::to_value(&local).unwrap();
+        assert!(json.get("typed_prefix").is_none());
+        let restored: DraftSnapshot = serde_json::from_value(json).unwrap();
+        assert!(!restored.command_is_typed());
+    }
+    #[test]
+    fn long_paste_is_folded_and_never_submitted_on_insert() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert(&format!("/quit\n{}", "synthetic text ".repeat(100)), true);
+        assert_eq!(ui.view().draft.folds.len(), 1);
+        assert!(!ui.view().draft.folds[0].expanded);
+        assert!(!ui.view().draft.command_is_typed());
+        assert!(ui.take_deferred_actions().is_empty());
+    }
     #[test]
     fn every_completion_has_help_and_dispatches_after_real_tab_completion() {
         let config = Config::default();

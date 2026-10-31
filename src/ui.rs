@@ -111,6 +111,9 @@ pub struct DraftSnapshot {
     pub attachments: Vec<UiAttachment>,
     pub folds: Vec<PasteFold>,
     pub literal_paste: bool,
+    /// Contiguous manually entered prefix in bytes; never restored from storage.
+    #[serde(skip)]
+    pub typed_prefix: usize,
     #[serde(default)]
     pub edit: Option<EditRequestTarget>,
 }
@@ -124,6 +127,7 @@ impl Default for DraftSnapshot {
             attachments: Vec::new(),
             folds: Vec::new(),
             literal_paste: false,
+            typed_prefix: 0,
             edit: None,
         }
     }
@@ -2990,6 +2994,7 @@ impl UiState {
                 view.draft.cursor = text.len();
                 view.draft.text = text;
                 view.draft.literal_paste = true;
+                view.draft.typed_prefix = 0;
                 view.draft.attachments = attachments;
                 view.draft.edit = Some(EditRequestTarget {
                     thread_id,
@@ -3355,6 +3360,7 @@ impl UiState {
             view.draft.attachments.clear();
             view.draft.folds.clear();
             view.draft.literal_paste = false;
+            view.draft.typed_prefix = 0;
             view.draft.edit = None;
         }
         view.draft.revision += 1;
@@ -3392,6 +3398,7 @@ impl UiState {
         draft.attachments.clear();
         draft.folds.clear();
         draft.literal_paste = false;
+        draft.typed_prefix = 0;
         draft.edit = None;
         let action = UiAction::DraftAttachments {
             draft_id: draft.draft_id.clone(),
@@ -3611,13 +3618,14 @@ impl UiState {
                 return vec![];
             }
         };
-        if text.starts_with('/') && !self.view().draft.literal_paste {
+        if text.starts_with('/') && self.view().draft.command_is_typed() {
             let source = self.active.clone();
             let original = self.view().draft.clone();
             {
                 let draft = &mut self.active_view_mut().draft;
                 draft.clear_text();
                 draft.literal_paste = false;
+                draft.typed_prefix = 0;
                 draft.revision += 1;
             }
             let cleared = self.view().draft.clone();
@@ -4269,6 +4277,7 @@ impl UiState {
             }
             let draft = &mut self.active_view_mut().draft;
             draft.adjust_attachments(fold.start, fold.end, 0);
+            draft.typed_prefix = draft.typed_prefix.min(fold.start);
             draft.text.replace_range(fold.start..fold.end, "");
             adjust_folds(&mut draft.folds, fold.start, fold.end, 0);
             draft.cursor = fold.start;

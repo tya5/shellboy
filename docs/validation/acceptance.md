@@ -4189,3 +4189,129 @@ PTY, physical Windows or future F/G/full-consumer proof is inferred.
 Private prep/example errors are retained and not passing measurements; the
 accepted source/harness/file/binary witnesses are checked. Frozen7c6f4d6 and main
 remain untouched. E own P3 scope is qualified; later combined P3 remains open.
+
+## #79 read-only connection/file worker separation (2026-10-31)
+
+The initial implementation ended its transaction but retained the read-only
+connection while checking paths on a presentation closure. Review correctly
+identified that this did not separate DB and filesystem lifetimes. The corrected
+reader returns owned AttachmentDetails and explicitly drops the connection. A
+second await then runs metadata/open through InstructionLoader's existing bounded
+control-file admission, shared with AGENTS/cwd preparation. No pool is added; its
+configured deadline and actual-task permit lifetime remain in force. Timeout error
+text is generalized from AGENTS-specific wording to control-file preparation.
+
+All 25 attachment integration tests pass locally, including the actual list SQL
+EXPLAIN, held-writer progress, current path reads/changes/deletion/retention and
+bounded detached notices. A new shared-admission test holds the actual file closure
+behind a channel gate, observes the existing permit in use, releases it, and waits
+for idle; it uses #77's 60-second watchdog and no speed criterion. The file phase
+receives only owned rows, not a connection or transaction. Full standard checks,
+role checks, exact-source native CI and record-line audit are tracked in #79.
+Tests use temporary files/databases and no provider. F6 remains deferred to #41.
+
+
+## Unix owner-death lifeline (#82)
+
+2026-10-31, native macOS ARM64 / Rust 1.99.1, main 0d4f63a base. Temporary HOME,
+data and loopback Responses fixtures only; no installed binary, real owner,
+user data, release or paid provider is changed.
+
+The Unix adapter adds a fixed native guardian, not a runtime worker/queue/table.
+Its live PID reserves the model PGID, with the guardian outside both model and
+owner groups. A startup-only child creates its private group and is reaped before
+publication. Steady overhead is two owner FDs and two guardian FDs per execution;
+three close-on-exec socket pairs are launch-only, and group setup temporarily
+uses a pipe/two FDs. The status handshake is required to retain the natural-exit /
+late-stop contract. No FD is allocated while waiting for the Turn gate. See the
+Shell design for post-fork operations and descriptor closure responsibility.
+
+Evidence on this source:
+- Native shell suite passes stdin/encoding/profile/env/argv, natural exit,
+  nonzero/signal status, backpressure/late stop, descendant cleanup and raw bounds.
+  A direct Bash oracle compares SIGPIPE, SIGTERM and nonzero exit/outputs.
+  Missing executable failure and no-shebang executable-script fallback preserve
+  the launch result. The private mechanism does not add a public CLI helper.
+- A subprocess owner starts two real shell groups with sleep descendants. Tests
+  KILL only its PID, then separately its whole owner group; both model groups
+  must disappear by native ESRCH observation. Test fallback cleanup runs only
+  after observation/assertion and cannot make a passing outcome. Cross-execution
+  inherited descriptors therefore cannot keep the lifelines alive in this fixture.
+- The real DataOwner/Control crash regression now kills only the owner, not the
+  shell group in the test. It observes the group gone, reopens the same DB, checks
+  failed/unverified shell get with no fabricated exit/signal/forced/group facts,
+  retains adjacent call/result repair and confirms no repeated shell execution.
+- Full ordinary local checks pass normal Ctrl+Q, SIGTERM/HUP, terminal loss and
+  forced shutdown fixtures. Their native identities are observed with getpgid
+  rather than assuming shell PID=PGID or PPID=owner after the guardian change.
+  Windows Job and its startup repair path are not modified.
+
+Two development failures were retained and fixed: the first shell suite found
+that reaping before relaying status could let late stop relabel natural exit;
+waitid(WNOWAIT), owner receipt and reap acknowledgment fix the native handoff
+without weakening the existing assertion. The first crash observation rejected
+transient EPERM as though it must already be ESRCH; it now keeps observing unknown
+states and still requires actual ESRCH before success. No short timeout, settling
+window, latency assertion or new watchdog allowance was added. New test waits
+use the shared #77 watchdog only; existing product stop/drain budgets are reused.
+
+Local full checks passed twice during development (the second: 1,866 passed /
+0 failed / 33 ignored, layout 93, Python 18, fmt and strict all-target Clippy).
+The subsequent direct-launch oracle passed separately. Final source after native
+FD-admission placement/documentation and rebase needs its own standard check and
+native three-OS CI, not inferred from these earlier gates. Linux process behavior
+and Windows build/tests remain unqualified until that CI completes. Full cleanup
+of deliberately escaped groups, protection from deliberate guardian tampering,
+absolute stop-time guarantees and stale-PID recovery are not implemented.
+
+## Typed command prefixes and pasted arguments (#84)
+
+Source: task branch `issue-84/typed-command`, based on `72f7889`; macOS arm64,
+debug build, synthetic temporary data and loopback SSE only. No provider, user
+data, installed binary or release asset is used. The focused composer contract
+suite passed 11/11 before final gate qualification.
+
+Repeat the native screen observation with Python 3 plus the test-only `pyte`
+package: `python3 scripts/check-paste-commands.py --binary target/debug/shellboy
+--out /tmp/issue-84-pty-UNIQUE`. This opens a real Unix PTY and decodes its cells;
+80/140 columns each cover dark/light, NO_COLOR and TERM=vt100. It observes
+paste-only, pasted arguments followed by a manually entered leading command,
+typed command followed by pasted arguments, folded long slash-containing paste,
+a literal pasted slash warning and an explicit-send synthetic SSE reply. Only
+the #77 60-second hang watchdog bounds waits, not a response-time assertion.
+
+Initial harness observations exposed pyte's differential wide-cell display
+exception and blocked shutdown when output was not drained. Those harness
+failures are not passing product observations. Final PTY results, standard
+checks and native CI must be recorded independently after they complete.
+Unqualified: physical terminal/IME/clipboard operation, Windows ConPTY, and
+matched-baseline P1 timing (no unnecessary release build for this task).
+
+PTY result (2026-10-31): all eight sessions passed, with 10 screen observations
+each and exactly one explicitly submitted synthetic SSE request per session.
+The PTY bytes in `/tmp/issue-84-pty-third` were decoded again at Ratatui's
+end-of-frame cursor sequence to replace partial-repaint snapshots with 80
+complete-frame text captures, without rerunning the TUI. At 80 columns both
+warning/retyping lines and the 41-line/1326-character paste chip are readable.
+The second harness attempt deadlocked on a blocking master write; bidirectional
+nonblocking delivery with the same 60-second watchdog fixes that fixture issue.
+No product change was required for these harness corrections. Raw bytes,
+`results.json` and `*-complete.txt` remain local synthetic evidence, not user logs.
+
+The first standard check caught an unnecessary transient-prefix difference on
+ordinary non-command text in the existing attachment/restart equality test;
+tracking is now restricted to leading slash drafts. The same run also hit the
+existing persisted-output observer watchdog. Neither failure is erased; the
+final standard gate runs with two test threads to bound concurrent memory use.
+
+Final local source `869fa2e` (rebased on `72f7889`):
+`CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 sh scripts/check.sh` passes layout 93,
+watchdog policy, Python 18, fmt, strict all-target Clippy, and Rust 1,875 passed /
+0 failed / 33 ignored. Both previously failing native identities pass.
+The final debug binary SHA-256 is
+`6179bc85d8146955bc5b01481ee0e8b37ec7b43e951130cd3d147a3993ac2ec3`.
+The completed-frame PTY driver passes all eight sessions/80 observations again
+on that binary (`/tmp/issue-84-pty-final`); manifest, screen text, raw bytes and
+request counts remain synthetic local evidence. No timing threshold is asserted.
+Subsequent evidence-only documentation changes do not alter the tested Rust tree.
+Native three-OS CI and integration status are tracked in issue #84.

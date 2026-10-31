@@ -513,3 +513,214 @@ async fn stop_after_reaped_natural_exit_does_not_relabel_the_process_as_stopped(
         "a later stop cannot change the already reaped process outcome"
     );
 }
+
+#[cfg(unix)]
+#[test]
+#[ignore = "isolated owner-death lifeline fixture child"]
+fn lifeline_owner_fixture() {
+    use std::io::Write;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let supervisor = ShellSupervisor::new(&config());
+        let mut executions = Vec::new();
+        let mut identities = Vec::new();
+        for index in 0..2 {
+            let mut execution = supervisor
+                .spawn(
+                    format!("lifeline-{index}"),
+                    PathBuf::from("/"),
+                    args("sleep 600 & printf '%s\\n' \"$$\"; wait"),
+                    BTreeMap::new(),
+                )
+                .await
+                .unwrap();
+            let mut bytes = Vec::new();
+            let pid = crate::test_watchdog::watchdog("both native shells are ready", async {
+                loop {
+                    let ShellEvent::Output(chunk) = execution.events.recv().await.unwrap();
+                    bytes.extend_from_slice(&chunk.bytes);
+                    if let Some(at) = bytes.iter().position(|b| *b == b'\n') {
+                        break std::str::from_utf8(&bytes[..at])
+                            .unwrap()
+                            .parse::<i32>()
+                            .unwrap();
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            let group = unsafe { libc::getpgid(pid) };
+            assert!(group > 1);
+            identities.push((pid, group));
+            executions.push(execution);
+        }
+        println!(
+            "LIFELINES_READY {}",
+            serde_json::to_string(&identities).unwrap()
+        );
+        std::io::stdout().flush().unwrap();
+        std::future::pending::<()>().await;
+        drop(executions);
+    });
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn owner_pid_and_owner_group_death_close_independent_lifelines() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    struct Groups(Vec<i32>);
+    impl Drop for Groups {
+        fn drop(&mut self) {
+            for group in &self.0 {
+                unsafe {
+                    libc::kill(-*group, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    for whole_group in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "shell::lifeline_owner_fixture",
+                "--ignored",
+                "--nocapture",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .kill_on_drop(true)
+            .process_group(0)
+            .env("HOME", root.path());
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("SHELLBOY_") {
+                command.env_remove(key);
+            }
+        }
+        let mut child = command.spawn().unwrap();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let identities: Vec<(i32, i32)> =
+            crate::test_watchdog::watchdog("isolated owner publishes two groups", async {
+                loop {
+                    let line = lines
+                        .next_line()
+                        .await
+                        .unwrap()
+                        .expect("fixture exited before ready");
+                    if let Some(json) = line.strip_prefix("LIFELINES_READY ") {
+                        break serde_json::from_str(json).unwrap();
+                    }
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(identities.len(), 2);
+        assert_ne!(identities[0].1, identities[1].1);
+        let owner = child.id().unwrap() as i32;
+        let mut groups = Groups(
+            identities
+                .into_iter()
+                .map(|(_, group)| {
+                    assert_ne!(group, owner);
+                    group
+                })
+                .collect(),
+        );
+        assert_eq!(
+            unsafe { libc::kill(if whole_group { -owner } else { owner }, libc::SIGKILL) },
+            0
+        );
+        let status = crate::test_watchdog::watchdog("killed owner reaped", child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        crate::test_watchdog::watchdog("all independent model groups disappeared", async {
+            while !groups.0.is_empty() {
+                groups.0.retain(|group| {
+                    !(unsafe { libc::kill(-*group, 0) } != 0
+                        && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH))
+                });
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn lifeline_exec_failure_and_executable_script_fallback_preserve_spawn_contract() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cfg = config();
+    cfg.shell.executable = Some(root.path().join("absent"));
+    let error = crate::test_watchdog::watchdog(
+        "missing executable fails before publishing shell",
+        ShellSupervisor::new(&cfg).spawn(
+            "missing".into(),
+            root.path().into(),
+            args("must not execute"),
+            BTreeMap::new(),
+        ),
+    )
+    .await
+    .unwrap()
+    .err()
+    .expect("missing program must fail spawn");
+    assert_eq!(error.code, ErrorCode::IoFailed);
+    use std::os::unix::fs::PermissionsExt;
+    let wrapper = root.path().join("wrapper");
+    std::fs::write(&wrapper, b"printf 'wrapper:%s' \"$5\"; exit 7\n").unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+    cfg.shell.executable = Some(wrapper);
+    let (chunks, done) = collect(spawn(&cfg, args("unaltered command")).await).await;
+    assert_eq!(
+        joined(&chunks, OutputStream::Stdout),
+        b"wrapper:unaltered command"
+    );
+    assert_eq!(done.exit_code, Some(7));
+    assert_eq!(done.state, ShellState::Exited);
+    assert!(done.group_cleanup_confirmed);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn lifeline_matches_direct_launch_signal_and_exit_status() {
+    for script in [
+        "kill -PIPE $$; printf survived",
+        "kill -TERM $$; printf survived",
+        "printf ok; exit 17",
+    ] {
+        let direct = crate::test_watchdog::watchdog(
+            "direct-launch signal oracle",
+            tokio::process::Command::new("bash")
+                .args(["--noprofile", "--norc", "-c", "--", script])
+                .env("BASH_ENV", "/dev/null")
+                .stdin(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let mut cfg = config();
+        cfg.shell.env.insert("BASH_ENV".into(), "/dev/null".into());
+        let (chunks, done) = collect(spawn(&cfg, args(script)).await).await;
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(done.exit_code, direct.status.code(), "{script}");
+        assert_eq!(done.exit_signal, direct.status.signal(), "{script}");
+        assert_eq!(
+            joined(&chunks, OutputStream::Stdout),
+            direct.stdout,
+            "{script}"
+        );
+    }
+}
