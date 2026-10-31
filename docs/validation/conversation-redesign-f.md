@@ -133,3 +133,24 @@ SHA CI reuse). These main changes retain their authored implementation. F's
 parent index remains17 after checking main's16 ledger. New combined-source
 standard/native CI and reviewer admission are separate from all evidence above.
 Do not rename earlier source hashes to the new integration commit.
+
+
+## Formal native P2/P5 comparison, run41186128587
+
+Manual CI compares E d0a92bf with F67cc688, producer1 for P2 and producer3 for P5. Each Linux/macOS width runs on the same runner, sequentially. All32 available Unix windows have valid fixtures/source/binary/harness witnesses, full requested duration, exit0 and no window model requests. Windows performance is explicitly unavailable, not a pass. CPU is process RUSAGE_SELF percent of one core; results are observations, not speedup claims.
+
+| OS/columns | P2 CPU before / F | F Watch CPU / draws | P5 hidden CPU before / F | P5 List CPU before / F | F hidden Watch CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Linux/80 | 3.77033 / 3.77156 | 3.78386 / 600 | 7.29593 / 7.38648 | 7.29765 / 7.56725 | 7.37251 |
+| Linux/140 | 3.81142 / 3.81588 | 3.83549 / 600 | 7.98942 / 7.27279 | 8.14751 / 7.40454 | 7.91009 |
+| macOS/80 | 0.33397 / 0.26241 | 0.35435 / 551 | 3.83993 / 3.93900 | 3.88507 / 4.55461 | 4.82305 |
+| macOS/140 | 0.37605 / 0.36209 | 0.33549 / 473 | 3.26414 / 3.54596 | 3.56914 / 3.53822 | 3.38308 |
+
+Every P5 case draws0 frames at an actual committed-output rate>=40/s (Linux approximately150/s; macOS53.71–55.64/s). Every window has0 UI writer jobs,0 readonly opens and0 UI read-task admissions. Normal P2 draws600 frames; maximum fixed-one-second draw bin is1 after F and1–2 before. Candidate-only Watch has no E counterpart: Linux600 draws, macOS551 at80 columns/473 at140, maximum bin1. Fewer draws are not reported as a missing minimum-frequency requirement.
+
+These measurements qualify67cc688, preceding later cancellation/main integration and Watch presentation fixes. They are retained as original evidence and will not be relabelled to a later SHA.
+
+Published950c9ed CI41187246963 artifacts verify Linux2,020/0/34,
+macOS2,019/0/35 and Windows1,888/0/26. All3 cancellation regressions,
+paired-snapshot and scoped-Watch CLI tests have actual successful harness
+lines at the exact source SHA on every OS.
