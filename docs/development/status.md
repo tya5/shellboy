@@ -1727,3 +1727,18 @@ Codex completion gates. No transferred feature was implemented. Preserve those
 other threads' future main changes; keep the frozen E CI candidate unchanged.
 E main admission is still separately approval-gated after producer3 review.
 Current local work remains E's matched-services/caller-classified P3 measurement.
+
+## E own P3 scope qualified (2026-10-31)
+
+Matched services/caller components and actual real-CLI/Changed/frontend/drawn
+view at0b7bd73 now qualify the E selected+List scope. Actual16 large-fixture
+mutations each use1 RO snapshot,1 shared-sequence observation/patch and0 List
+reload, with p95 observed-event-to-draw496.6643ms. The direct old work comprises
+2 UI writer closures plus1–2 index scheduler reads; E has0 UI writer/1 RO.
+Read latency is not advertised as lower; exact costs and environment limits are
+in E qualification. Full F/G combined-consumer P3 and P2/P4/P6 remain future
+original #41 work. #83–#87 additions stay outside this assignment.
+Next: reconcile latest main (#82), complete the local combined-source standard
+check and await the separate E main approval. No additional push/install/data
+change. Archived F extraction points are mapped privately without touching its
+combined branch or beginning G publication.

@@ -4170,3 +4170,22 @@ promise no worsening. P3's lifecycle/caller asymmetry remains open. Green job
 status is a fixture/source success, not blanket performance acceptance. Windows
 TUI unavailable records, initial short-SHA checkout failure and raw maintenance
 work remain explicit. No main integration, release/install or user-data change.
+
+## E matched P3 and real CLI/frontend qualification (2026-10-31)
+
+The [E record](conversation-redesign-e.md) adds matched-startup30-sample direct
+costs and actual frontend16-mutation evidence at0b7bd73. Old2 UI writer closures
+plus1–2 index next_delay jobs are distinguished; E's corresponding read is1 RO
+snapshot. E component pipeline times increase and are not sold as a speedup.
+The original unmatched observation remains retained with its limitation.
+
+The actual128-node/50-tool/50-Thread workload uses real CLI/IPC/Changed/frontend,
+drawn TestBackend180x40,4 warmups then16 samples:1 executed RO read each,
+1 current observation and identical browser sequence,0 page reload/generation
+change,50 retained tools. RO p95=4.9858ms; observed Changed receipt-to-draw
+p95=496.6643ms. CLI mutation1/index next_delay2 are separate, with exact caller
+count/time checksums and0 overflow. Normal owner shutdown completes. No native
+PTY, physical Windows or future F/G/full-consumer proof is inferred.
+Private prep/example errors are retained and not passing measurements; the
+accepted source/harness/file/binary witnesses are checked. Frozen7c6f4d6 and main
+remain untouched. E own P3 scope is qualified; later combined P3 remains open.

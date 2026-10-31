@@ -141,3 +141,70 @@ the unknown-caller field. Windows TUI jobs upload explicit unavailable.json; no
 ConPTY performance result is inferred. Initial short-ref checkout failure
 41166177038 remains separate. Main admission still needs later reviewer approval;
 P3 matched-service/caller follow-up and full #41 remain unfinished.
+
+## Matched-services P3 components and actual reactive frontend
+
+The first direct-read asymmetry above is resolved in a separate matched-v3
+observation; it is not retrospectively removed from the old record. Both normal
+release subjects call Control.start before10 warmups, assert saved live Run /
+completed Turn /128 selected nodes after every sample, and stop Control before
+closing the owner. Both alternate automatic/explicit titles for30 observations.
+A bounded64-caller map records actual generic DB closures and readonly scope;
+its per-caller counts and nanoseconds sum exactly to aggregate counters, with
+zero overflow. Runtime source/harness witnesses, file and copied-binary hashes
+match before0d4f63a and after0b7bd73. The host remained shared with other builds.
+
+| Title | Before UI writer closures | Before index next_delay closures | After UI work | Before pipeline p50/p95 ms | After pipeline p50/p95 ms |
+| --- | ---: | ---: | --- | ---: | ---: |
+| Automatic |2|1–2|1 readonly snapshot,0 UI writer|3.3690 /4.5948|8.9473 /12.9444|
+| Explicit |2|1–2|1 readonly snapshot,0 UI writer|2.9590 /6.1231|6.5917 /8.8985|
+
+The2 legacy UI closures are frontend::refresh::run and control::db::Store::execute
+(the single explicit ThreadList request). The remaining1–2 are
+index::IndexService::next_delay, not UI reads or embedding/provider requests.
+After has only readonly::frontend::snapshot::read in the measured maps. Each
+mode has15 samples; nearest-rank p95 is that group's maximum. After readonly
+lexical p95 is9.4216/6.4789ms, not pure SQL time or a latency improvement.
+This exercises a50-ID patch, while the following actual event workload performs
+single-target mutations. These costs must not be merged into one timing series.
+
+A separate runtime-v4 release example then reuses the existing
+frontend_reactivity fixture's actual local IPC server, separate CLI processes,
+Frontend::run, notification/deadline waits, UiState and drawn Ratatui TestBackend.
+Only the synthetic seed and measurement loop differ. It does not run a native
+terminal or modify a product flag/module. The normal example build has no
+cfg(test), but uses dev-dependency feature union; it is not a baseline CPU
+comparison. Its source is0b7bd73, with private source/harness/binary witnesses.
+
+Dataset:50 Threads,128 canonical nodes,50 successful saved tools with50x64KiB
+raw output; current page50 tools, latest Run/Turn completed. The idle lifecycle
+is intentional for isolating Changed work, not the matched-v3 live-Run case.
+Four warmups precede16 consecutive real `thread set --title` CLI mutations.
+The browser remains open; no refresh/navigation input is added between mutations.
+Every drawn accepted view retains128 total nodes and50 current tool rows.
+
+| Actual runtime observation,16 samples | Result |
+| --- | --- |
+| Current-view observations per mutation |1|
+| Browser patch sequence |Exactly the same as current view in every sample|
+| Extra canonical List page loads / generation changes |0 /0|
+| UI readonly connections per mutation |1 in every sample|
+| UI readonly lexical p50 / p95 |2.6890 /4.9858ms|
+| CLI mutation Store::execute closures |1 per sample, separately classified|
+| Index next_delay closures |2 per sample, separately classified|
+| Observed Changed receipt to drawn backend p50 / p95 |495.4997 /496.6643ms|
+| Caller-map overflow / count or duration checksum mismatch |0 /0|
+
+Read counts come from real executed connections, not only emitted update counts.
+Source asserts still require one selected observation, identical patch sequence,
+unchanged page/generation and all50 tools. No clock-speed assertion or sleep is
+used to manufacture readiness; the existing scheduled action wait and shared60s
+watchdog are retained. The owner/frontend completes normal shutdown. Initial
+example-only namespace/private-field compile errors were corrected through the
+existing public accessors; no product API was added. Raw prep/build/failure
+records are separate from accepted measurements.
+
+This qualifies E's own selected-view plus List P3 work/cost scope on native
+macOS, alongside the ordinary3OS functional test. It does not qualify native
+Windows terminal UX, physical PTY latency, UI-frame timing, or the future F/G
+combined-consumer workload. P2 strict clock/CPU and later P3/P4/P6 remain open.
