@@ -2925,9 +2925,13 @@ async fn headless_shutdown_requires_explicit_directory_and_final_output_loss_is_
 
 fn serve_quote(path: &std::path::Path) -> String {
     #[cfg(unix)]
-    return format!("'{}'", path.to_string_lossy().replace('\'', "'\"'\"'"));
+    {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\"'\"'"))
+    }
     #[cfg(windows)]
-    return format!("'{}'", path.to_string_lossy().replace('\'', "''"));
+    {
+        format!("'{}'", path.to_string_lossy().replace('\'', "''"))
+    }
 }
 async fn serve_pid_live(pid: u32) -> bool {
     #[cfg(unix)]
@@ -3051,7 +3055,7 @@ async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_ree
             assert_eq!(std::fs::read_to_string(&child_log).unwrap().lines().count(), 2);
             headless_cli(&child_data, &["shutdown"]).await;
             restarted.finish(true, &root.path().join("child-restart-stdout.jsonl")).await;
-            eprintln!("nested-parent {}", json!({"mode":mode,"parent_http":2,"child_http":1,"effects":1,"live_processes":0}));
+            eprintln!("nested-parent {}", json!({"mode":mode,"parent_http":2,"child_http_before_continue":1,"child_http":2,"effects":1,"live_processes":0}));
             parent_proxy.abort(); child_proxy.abort();
         }).await.unwrap();
     }
@@ -3242,7 +3246,7 @@ async fn headless_native_startup_snapshot_and_database_close_kills_keep_committe
                 .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn().unwrap();
             loop {
-                if std::fs::read_to_string(&witness).is_ok_and(|s| s.lines().count() == 1) { break; }
+                if std::fs::read_to_string(&witness).is_ok_and(|s| s.ends_with('\n') && serde_json::from_str::<Value>(&s).is_ok_and(|v| v["cut"] == cut)) { break; }
                 assert!(child.try_wait().unwrap().is_none(), "cutpoint child exited before {cut}");
                 tokio::task::yield_now().await;
             }
