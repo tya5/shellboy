@@ -5927,3 +5927,12 @@ Untested: physical GUI terminal rendering, real OS clipboard completion, native
 Windows/Linux PTYs and a fresh opt-in release P1 latency/memory profile. The
 standard functional suite is not claimed as that performance measurement. No
 new worker, queue, timer, DB read or source-format field is introduced.
+
+#91 additional explicit trailing-cell qualification: test-only script changes
+assert every live/PageUp/return-to-tail conversation row, not just save colors.
+All 21 live width/palette cases pass again, producing 63 per-scene edge audits:
+colored continuations fill the entire inset, and non-band rows keep both last
+content cells at the normal background. Fresh Python66 also passes. Evidence:
+`/tmp/issue-91-width-edge-audited/`, `/tmp/issue-91-width-edge-audited.log`, execution
+669162aa-3da8-4187-a790-6b0346d02b37 exit0. Product src and binary are unchanged
+from the standard-tested 3670eac; this adds no new Rust qualification claim.

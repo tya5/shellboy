@@ -124,6 +124,19 @@ def main():
                         subprocess.run(command, check=True, capture_output=True, env=env, timeout=capture.WATCHDOG_SECONDS)
                         terminal.expect(lambda s: "LIVE_EDGE_END" in s and "PASTE_FIXTURE_REPLY" in s, "live band")
                         def save_cells(label):
+                            rows = terminal.text().splitlines()
+                            end = next(i for i, text in enumerate(rows) if text.startswith("┌"))
+                            audit = {"band_rows": 0, "normal_rows": 0}
+                            for y in range(1, end):
+                                cells = terminal.screen.buffer[y]
+                                assert cells[0].bg == cells[cols - 1].bg == "default", (name, label, y, "margin")
+                                if not plain and cells[1].bg == expected_bg:
+                                    assert all(cells[x].bg == expected_bg for x in range(1, cols - 1)), (name, label, y, "continuation extent")
+                                    audit["band_rows"] += 1
+                                else:
+                                    assert cells[cols - 3].bg == cells[cols - 2].bg == "default", (name, label, y, "normal trailing cells")
+                                    audit["normal_rows"] += 1
+                            (out / (label + "-edge-checks.json")).write_text(json.dumps(audit) + "\n")
                             (out / (label + ".txt")).write_text(terminal.text() + "\n")
                             (out / (label + "-cells.json")).write_text(json.dumps([
                                 [{"x": x, "text": c.data, "fg": c.fg, "bg": c.bg} for x, c in enumerate(row)]
