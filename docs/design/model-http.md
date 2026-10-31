@@ -261,3 +261,15 @@ A long 429 Retry-After is sufficient at headers: return its rate-limit fact
 without waiting for the error body. Consequently that case does not extract
 body-specific plan/window details. Body-based quota recognition still requires
 a complete valid supported object. This avoids waiting on a stalled error body.
+
+## Ready-header classification before an expired wait (#95)
+
+For generation response headers, cancellation wins first, then an already-ready
+response, then the header wait timeout. A scheduler-late poll must not discard
+available status-bearing headers and manufacture a status-free timeout that the
+driver could retry as unknown transport failure. This is an observational wait,
+not an absolute generation cutoff; pending headers still expire. Embedding and
+model-list total deadlines remain strict. Error-body stalls preserve the already
+received status, so permanent statuses remain ineligible for automatic resend.
+Virtual-clock ties and explicit header-reception fences test this ordering;
+passing a wall-clock rerun alone does not explain a CI failure or count HTTP sends.
