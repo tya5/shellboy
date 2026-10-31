@@ -408,7 +408,7 @@ impl Fixture {
             String::from_utf8_lossy(&self.owner.terminal_tail)
         )
     }
-    fn assert_graceful(&self) {
+    fn assert_graceful_database(&self) {
         let db = rusqlite::Connection::open_with_flags(
             self.database(),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -465,6 +465,9 @@ impl Fixture {
             "{}",
             self.shutdown_diagnostic()
         );
+    }
+    fn assert_graceful(&self) {
+        self.assert_graceful_database();
         let records = self
             .log()
             .lines()
@@ -588,12 +591,16 @@ async fn eof_without_a_controlling_terminal_signal_still_drains_owner() {
         "noncontrolling PTY EOF: {status}\n{}",
         fixture.shutdown_diagnostic()
     );
-    fixture.assert_graceful();
-    let log = fixture.log();
-    assert!(
-        log.contains("terminal_lost") && !log.contains("signal_hup"),
-        "{log}"
-    );
+    fixture.assert_graceful_database();
+    // Shutdown drains accepted diagnostics, but try_send may have dropped any
+    // record before that drain. Durable DB/process facts are the success gate.
+    for line in fixture.log().lines() {
+        let record: Value = serde_json::from_str(line).unwrap();
+        if record["shutdown"]["scope"] == "signal" {
+            assert_eq!(record["shutdown"]["stage"], "terminal_lost");
+            assert_eq!(record["shutdown"]["boundary"], "begin");
+        }
+    }
     assert!(
         unsafe { libc::kill(-native, 0) } < 0
             && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH),

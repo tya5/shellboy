@@ -175,6 +175,10 @@ pub(super) fn snippet(raw: &str) -> (String, bool) {
         "private_key:",
         "convertto-securestring",
         "--password",
+        "--secret-access-key",
+        "_key=",
+        "_token=",
+        "_secret=",
         "--api-key",
     ]
     .iter()
@@ -182,6 +186,10 @@ pub(super) fn snippet(raw: &str) -> (String, bool) {
     let tokens = lower
         .split_whitespace()
         .map(|t| t.trim_matches(['\'', '"', '(', ')', ',', ';']));
+    let sshpass_password = tokens
+        .clone()
+        .any(|t| t.rsplit('/').next() == Some("sshpass"))
+        && tokens.clone().any(|t| t == "-p");
     let shaped = tokens.clone().any(|t| {
         [
             "--token",
@@ -192,6 +200,7 @@ pub(super) fn snippet(raw: &str) -> (String, bool) {
             "--passwd",
         ]
         .contains(&t)
+            || (t.starts_with("-p") && t.len() > 2)
             || t == "-u"
             || t == "--user"
             || t.starts_with("--user=")
@@ -205,7 +214,7 @@ pub(super) fn snippet(raw: &str) -> (String, bool) {
                     .nth(1)
                     .is_some_and(|s| s.split('/').next().is_some_and(|s| s.contains('@'))))
     });
-    if obvious || shaped {
+    if obvious || shaped || sshpass_password {
         ("[redacted: credential-like command]".into(), true)
     } else {
         (cleaned.chars().take(512).collect(), false)

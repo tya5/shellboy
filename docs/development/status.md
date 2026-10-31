@@ -1,5 +1,28 @@
 # Development status
 
+## README overview (#78)
+
+The user selected candidate C: 89 colors, mean original-channel error about
+1.0/255, with no visually discernible difference confirmed by the user. The
+621,395-byte PNG is after the README title with alt text; intro/Features remain.
+Original and comparison files stay outside Git. Optimization hashes, layout
+checks and their limits are recorded in acceptance; exact-source CI is in #78.
+
+## Noncontrolling EOF test observation
+
+Only the noncontrolling-PTY EOF shutdown test now treats best-effort diagnostic
+rows as optional. Durable tool/Run/shell state and native process cleanup remain
+mandatory. Other termination tests and runtime logging/shutdown are unchanged;
+validation and original/same-SHA rerun history are recorded in issue #75.
+
+## Readback follow-up (#75)
+
+Shell snippets also suppress secret-access-key flags, sshpass password arguments,
+attached -p values and generic credential-suffix assignments. Usage documentation
+states explicitly that boundary-crossing lifetimes belong to their start side.
+Targeted synthetic redaction checks pass; final standard/native CI evidence is
+recorded in issue #75. No user database or installed runtime is changed.
+
 ## Saved readback (#75, unreleased main)
 
 CLI now reads retained compaction observations, latest compaction in thread get,

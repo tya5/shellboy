@@ -258,7 +258,9 @@ continuation cursor; follow it until absent. Cursor scope/filter and insertion
 watermark are bound, while each page reads current saved metadata. No output body
 is returned. Snippets are bounded to 512 characters, stripped of controls and
 conservatively suppressed for obvious credential shapes; this is not a guarantee
-against arbitrary obfuscated secrets. Explicit shell get/read remain separate.
+against arbitrary obfuscated secrets. Suppression includes secret-access-key flags,
+sshpass password arguments, attached -p values and *_KEY/*_TOKEN/*_SECRET assignments.
+Explicit shell get/read remain separate.
 
 These operations run on read-only WAL snapshots through the existing finite
 presentation admission, not the writer's queue. No new tables, workers or queues.

@@ -3763,3 +3763,80 @@ Correct that sentence and align both User Guides with reactive saved updates,
 selection retention and explicit resync. Guides are embedded, so the final review
 candidate receives another full standard check after this documentation change.
 No Rust UI behavior changes, F/G implementation, push or release is introduced.
+
+## #75 small redaction and usage-boundary follow-up (2026-10-31)
+
+Native macOS arm64, Rust 1.99.1: targeted command_redaction test passes with
+synthetic secret-access-key flags (separate/equals), sshpass -p (bare/path),
+mysql attached -p (quoted/unquoted), mixed-case credential-suffix assignments,
+and PowerShell environment syntax. Ordinary mkdir -p/mysql --port remain visible.
+The existing 60-second watchdog applies; no performance deadline is asserted.
+Tests inspect returned strings only: no subprocess, provider, receipt or request
+log is produced (zero new request-log rows). Usage guidance now explicitly puts
+whole boundary-crossing lifetimes on their start side. This does not extend the
+heuristic into arbitrary-secret detection. Exact-source standard/native checks
+are recorded in issue #75; no installed binary, user DB or owner is changed.
+
+## Noncontrolling EOF diagnostic observation (2026-10-31)
+
+Main 912b2e2 run 41160166609 attempt 1 failed on macOS because the EOF test required
+a scope=signal diagnostic row; Ubuntu/Windows passed. The same-SHA failed job was
+rerun as attempt 2 before changing the test; its result is retained in issue #75.
+
+Diagnostics enqueue uses sender.try_lock and try_send, incrementing a dropped
+counter on failure. Orderly shutdown closes the sender and joins the writer, so
+accepted rows are drained, but rows dropped before admission cannot be recovered
+by waiting. The EOF test therefore keeps all read-only DB state, saved tool result,
+success exit and native process-group cleanup assertions. It validates any retained
+signal diagnostic as terminal_lost/begin, without requiring a row or substituting
+log text for durable facts. The other termination tests retain their existing
+assertions; this scoped change avoids the worker's separate #77 work. No runtime
+logging contract, timeout, transport retry or shutdown implementation changes.
+
+Native macOS arm64/Rust 1.99.1: the exact EOF test passes. Full standard-check,
+role-test and exact-source native CI results are recorded in issue #75. Fixtures
+use temporary stores/processes, not the installed owner, real data or providers.
+
+## #78 selected README overview (2026-10-31)
+
+The user's latest final-source comment supersedes the old issue-body/attachment
+hashes. User selection is candidate C: reduced to 89 colors; mean absolute channel
+error from the original is about 1.0/255 (measured 1.0024/255). The user compared
+the images visually and confirmed no discernible difference. That is user visual
+acceptance, not an assertion that palette quantization is pixel-lossless.
+
+| Image | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Original final source, outside Git | 1,739,810 | `951579fba21b4c402b08aaf6ad1ad202e3c95ec78478d2ca65e557e7a46c7216` |
+| A: lossless comparison, outside Git | 1,444,851 | `2a31b67e6757b4ea27fa4cd3ad6765c781a0994784dbbeb3932e9fe70d6fd66c` |
+| B: high comparison, outside Git | 827,044 | `7ad3fc3663799d0998e0d84fb148982689390fb0a179ed1717ec9bc9e85f792f` |
+| C: docs/assets/shellboy-overview.png | 621,395 | `eccf659fb93d7751afbc2d886a51ca163f03da24808a73bf36ac1413e2119627` |
+
+Local pngquant 3.0.3: B uses --quality=85-100 --speed 1 (256 colors, reported Q96);
+C uses 128 --quality=60-85 --speed 1 (89 used colors, reported Q90), with default
+dithering. Dimensions remain 1672 x 941; all candidates are fully opaque. Copying
+selected C into docs/assets preserves its SHA-256 exactly. The source and unused
+comparison candidates are not committed. No external image/model service is used.
+
+The image is directly after the README title with descriptive alt. Removing only
+the inserted image and endpoint sentence reproduces the previous README exactly:
+intro and Features are retained. The nearby sentence applies configured embedding
+requirements to both history and explicitly configured local documents. The
+reviewed fork/source/delegation relationships and final wording are unchanged by
+layout edits. No embedded-model, offline/free API, all-files indexing or full
+external-document-copy guarantee is added. Models still have one shell tool.
+
+On native macOS 26.3.1, local Chrome 156 headless uses GitHub-like image max-width
+CSS on light (#ffffff) and dark (#0d1117) backgrounds. Desktop viewport 1000px
+renders the image at 850 x 478; CDP mobile viewport 390px renders 358 x 201. All
+four cases load the 1672px-wide asset, retain alt/aspect ratio and have no horizontal
+overflow. The opaque light image is not inverted in dark surroundings. Local
+on-device Apple Vision OCR retains major headings and the final endpoint note.
+Actual GitHub GUI, physical phones and screen-reader behavior are unverified;
+mobile fine print may require zoom or the retained text. OCR/layout checks alone
+are not subjective visual acceptance; the user's comparison supplies that check.
+
+Standard-library tests check PNG hash, dimensions, palette, chunk CRCs,
+decompression, placement and textual alternatives without image-library/network
+requirements. Exact-source standard/native CI and text-file line-count audits
+are recorded in #78. No runtime, user configuration, DB or installed binary change.
