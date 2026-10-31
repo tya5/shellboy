@@ -716,7 +716,7 @@ units below; names describe scope, not a new engine/framework.
 | G3 standalone forms | docs/config/RAG/exec and attach shorthand share catalogue and exact current CLI fields | Local16 typed standalone builders plus captured-context client dispatch connected at333fd9d. Existing clients are reused; RAG owned-input boundary c4bc793 has real provenance/input tests. Native forms/final validation remain open. |
 | G4 popup interaction | Wheel only top painted popup; outside/edge/no-op and F2 do not dirty history; stable original/copy identities; bounded revision/width wrapping cache | Local common wheel/paint identity and bounded lazy reader cache are implemented atb833ffe; standard2089/0/35 verifies new ownership/edge/F2/replacement/reuse/source tests. Real terminal/P6 and any remaining list/form layout-cache inventory remain open. |
 | G5 reactive reads | All mutable saved F8/reference targets update via exact notifications; retained target/selection, stale/late/cancel fences; justified snapshots show source/read time and refresh route | Initial explicit shell/message/Revisit reads now use bounded readonly snapshots;8 targeted and1143 combined library tests pass, including a blocked writer and unchanged receipts. Run/Turn initial reads now retain exact canonical totals in one readonly snapshot; the expanded blocked-writer test and full standard2109/0/35 pass. Live notification coverage is still open. The archived12-target enum does not prove coverage of activity status/history/current readback fields. Follow the explicit per-field coverage/domain-boundary design; add current CLI mutations, rollback/replay and delayed-result evidence. |
-| G6 shared admission | Visible current/inspector reads share bounded readonly WAL snapshot/sequence using existing pool; metadata500ms and usage3s retain separate cadence, no hidden work | Open. Preserve F/#95 guards; current simultaneous-consumer P3/count/cancellation evidence. |
+| G6 shared admission | Visible current/inspector reads share bounded readonly WAL snapshot/sequence using existing pool; metadata500ms and usage3s retain separate cadence, no hidden work | Initial twelve groups are connected at5f17374; full merged standard at51772d2 and focused follow-ups54dac64 pass. Visibility/late/cancel/usage/physical unit and actual frontend tests are qualified. Current simultaneous-consumer P3/count evidence and per-route CLI rollback/replay/hidden-zero-work remain open. In particular the reused owner-completion hint is advisory (RequestGuard also wakes on read-only/replayed requests); qualify its actual receipt/storage read counts rather than treating a hint as a committed mutation. Preserve F/#95 guards. |
 | G7 domain projections | Private saved index/deletion/GC observations beside canonical semantics, with explicit Core rationale, finite SQL/source/channel bounds and honest unknowns | Storage saved/physical observation is extracted with explicit Core rationale and finite budgets; native8+1 targeted tests/strict lib Clippy pass. Bounded deletion facts and dense review metadata are now extracted; standard2160/0/35 qualifies their current native source. Initial bounded index metadata/coverage is now extracted;13 index tests,1 blocked-writer route and strict library Clippy pass. Existing frontend integration passes1/0; canonical index tests pass42/0/1. A resumed standard exposed a real PTY status-visibility regression;0d36d78 fixes it without changing the PTY assertion. Current merged source0a5569b (main5321310) passes standard2194/0/35, Python70 and strict all-target Clippy. Context-usage reader/formatter is now shared with canonical semantics and display-only scalar limits; native5+1 tests/strict library Clippy pass. Live integration, latest-attempt/replacement SQL cost and final qualification remain open. No generic Repository, table/worker/queue/job engine. |
 | G8 source inspections | Attachment/operation/context/provenance/receipt/downstream identities are exact; source witnesses bound copies before parse; stale retained coverage is explicit | Operation exact-key and attachment exact-selection/source readers are extracted; the common field/actual frontend checkpoint passes standard2124/0/35. Existing CLI reason/replay semantics are shared. Live receipt/attachment/GC notifications and the remaining mutable consumers are still open; preserve both archive layers. |
 | G9 storage/migration | Only necessary indexed reads; inspect actual slot after main17, avoid overlapping indexes, atomic ledger/schema rollback/reopen and pre-upgrade backup | Open. Re-evaluate three archived lookup indexes plus the existing turns_by_run ID tie-breaker extension (local preflight only);18 is a candidate, not reserved. |
@@ -725,6 +725,22 @@ units below; names describe scope, not a new engine/framework.
 | G12 admission | Separate G publication/CI/reviewer approval, current main reconciliation and exact-source3OS, #41 shipped/residual report | Open. F approval is not G approval; no release/install/user-data authority is inferred. |
 
 ### G remaining saved-read coverage inventory (not implementation evidence)
+
+Latest integration checkpoint: Rust source51772d2 merges main805efc9 (#87/#102)
+and passes full native standard2276/0/35, Python70/layout95/watchdog/fmt/strict
+all-target Clippy. Canonical Run wait facts and chooser geometry/wheel/copy
+identity are retained. Subsequent F1 dispatch and cleared-human-target fixes54dac64 pass focused
+UI449/0/3, actual frontend inspection11/0 and strict all-target Clippy; the
+earlier standard is not their success proof. Native original-predicate form/help
+matrix8x4 and canonical-copy8x4 pass at binary18f9a813/source54dac64. Manual
+capture inspection then exposes incorrect shared Enter/help hints; cb1d480
+fixes them through the catalogue verb/cache. Atcb1d480, UI450/0/3, strict
+all-target Clippy, Python70/layout95 and the strengthened native32-form matrix
+pass; representative bottom rows were inspected. The initial matrix alone is
+not visual acceptance; remaining native wheel/P3/P6 are open.
+The captured/current-source page contract is now explicit in adopted design,
+including exact bounded metadata and unchanged originals/cursors. The routes
+below still require implementation and actual source-qualified evidence.
 
 Local G5/G6 composition update (base1479a59): the original twelve target groups
 are now wired through shared readonly admission, including independent usage
@@ -735,8 +751,8 @@ operation changes and pending receipts before held external I/O. The first
 standard passes these library/Python/Clippy gates but fails one stale-detail
 fixture in integration951/1/17; its corrected exact correlated-failure regression
 now passes1/0. This paragraph does not close the rows below. No G
-push/admission or current-source3OS/native/P3/P6 result is implied. Fetched
-main805efc9 (#87/#102) remains to reconcile after this checkpoint.
+push/admission or current-source3OS/native/P3/P6 result is implied;
+that checkpoint preceded the main805efc9 (#87/#102) integration recorded above.
 
 The initial twelve archived targets do not close G5. Reconcile this inventory
 with the current typed catalogue before declaring reactive coverage complete.

@@ -1,5 +1,62 @@
 # Validation record
 
+## G plus main805efc9: full local standard at Rust source51772d2
+
+Native macOS/Rust1.99.1, `sh scripts/check.sh`:2276 passed/0 failed/35 ignored.
+Named harnesses: library1304/0/15; integration953/0/17; termination_signals12/0/1;
+tool_group_crash_recovery7/0/2; main and three example harnesses0 tests. Python70,
+layout95, watchdog policy, fmt and strict all-target Clippy pass. One shared root
+target, incremental disabled, one build job/two test threads; build notices in
+#41. Private named-harness log/audit retain this run separately from earlier
+failures. Later design-only0f771b3 does not change this Rust source; no current
+source3OS/native-matrix/P3/P6 or G admission is inferred. No paid API/user data.
+
+The merge initially failed strict Clippy because preserving #102's wait facts
+enlarged a private enum. A boxed Lifecycle payload fixes that without a lint
+exception. New passing regressions cover the canonical saved Run wait reason,
+its removal and exact4/5-query bound, plus the actual painted code chooser's
+wheel selection, outside/edge no-ops and exact original/block/hash copy binding
+at80/140 columns with TestBackend. These do not establish physical-terminal or
+Windows UI success.
+
+After standard success, an actual macOS process/Unix PTY using only disposable
+synthetic data reproduced an additional semantic #87 overlap: F8 -> RunGet ->
+F1 opened general help, not the form's explanation. Captured binary SHA256
+dd10352b1ac0f01dcac65b0cf7fd4f367c241405a84953a063f940f145b86233;
+private screen retained. Form-help and cleared-target follow-ups are qualified
+separately below, not covered by that standard.
+Focused source54dac64 now passes UI449/0/3, actual frontend inspection11/0
+and strict all-target Clippy. The first focused run passed UI448/0/3 but failed
+one of11 runtime fixtures: it observed the intentional pending-operation frame
+before the final ThreadGet result. The corrected fixture waits for that exact
+result title and still asserts canonical missing-target failure, no saved
+inspection and unchanged viewing Thread. The corrected F1 dispatch tests also
+keep pending client confirmation/general-help layering and refuse execution.
+The fresh native binary18f9a81318cf5d2a0a359b9d2276f43a183b8a2e20ab3486d028b0f85c513ef1
+passes the original form/help matrix8 cases x4 forms and canonical-copy8 cases
+x4 exact intercepted OSC52 payloads. Each matrix covers80/140 columns and
+dark/light/NO_COLOR/vt100, with disposable fixtures and no paid API/host
+clipboard. Private manifests, text/raw frames and failures are retained.
+
+Manual inspection of the captured80-column Run help reveals a further issue:
+the common bottom hint still says Enter/send on a read form and advertises
+field editing while help is open. This was outside the initial driver's
+predicates; do not call that initial matrix complete visual acceptance.
+Follow-upcb1d480 reuses the catalogue EnterVerb in the hint/cache identity,
+classifies form explanations as Help and separates F1 ownership from hint
+classification. New regression coverage includes custom composer bindings and
+same-verb cache reuse; the strengthened native driver asserts bottom-row verb
+and help semantics. Atcb1d480, focused UI450/0/3, strict all-target Clippy,
+Python70 and current layout95/watchdog policy pass. A fresh normal build has
+SHA256cd7e087f85a4607fdff1e7b17160c00720f15d92cd0d5a86470a347511d9faa8;
+the strengthened eight-case32-form native matrix passes. Captured80-dark Run
+form/help and140-light execute/send forms were inspected: their bottom hints
+respect the catalogue verb and help navigation. This qualifies actual Unix
+process/PTY frames, not physical screenshots/Windows or the remaining G native
+wheel/P3/P6 inventory. The earlier canonical-copy matrix remains scoped to its
+actual54dac64 source; it is not silently attributed to later code. No complete
+standard or three-OS success is claimed forcb1d480.
+
 ## G saved-inspection composition: native library checkpoint
 
 Native macOS, Rust1.99.1, working source based on1479a59 with the G5/G6

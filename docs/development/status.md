@@ -1,5 +1,30 @@
 # Development status
 
+## G integration with main805efc9: local standard checkpoint
+
+Merged main's #87 canonical code-copy/contextual help and #102 saved boundary
+waits without dropping G's painted popup geometry, lazy readers or live
+inspection. Rust source51772d2 passes the native standard2276/0/35, Python70,
+layout95, watchdog/fmt and strict all-target Clippy. Details/chooser/help merge
+seams have explicit regressions; Run inspection reuses the canonical wait reader
+in its shared readonly snapshot. No migration or public operation was added.
+
+A subsequent actual Unix PTY reproduces F1 reaching general help instead of
+the operation form's promised ID explanation. Its local follow-up preserves
+form-owned F1 and general-help layering elsewhere. Another follow-up removes
+the viewing-Thread fallback when a human explicitly clears the ThreadGet target;
+reply ownership must not authorize a target. Focused UI449/0/3, actual frontend
+inspection11/0 and strict all-target Clippy pass at54dac64; the preceding full standard does not qualify this later
+source. Native form/help8x4 and canonical-copy8x4 checks pass against the
+fresh shared-target binary18f9a813 (not installed/user data). Manual capture
+review then finds misleading common form/help bottom hints. Follow-upcb1d480
+uses the catalogue EnterVerb/help context, and strengthens the native bottom-row
+assertions. Atcb1d480, UI450/0/3, strict all-target Clippy, Python70 and the
+strengthened32-form native matrix now pass; captured read/execute/send/help
+hints were inspected. Remaining G5 status/list/history/readback observation,
+G9 bounds/query work, native matrix/P3/P6 and review/3OS/main admission remain
+open. G is local; no push/release/install or user-data change.
+
 ## G saved-inspection composition (local checkpoint, not admission)
 
 The initial twelve saved-target groups now join the existing readonly view
@@ -23,9 +48,8 @@ acceptance and the G1–G12 ledger for remaining scope.
 
 G5 is not closed: status, generic lists and retained history/readback mutable
 facts still need their own bounded observations. G9 SQL/scalar work, P3/P6,
-native layouts and reviewer/3OS/main admission remain open. Fetched main805efc9
-adds #87/#102 after the currently merged5321310; reconcile it after this
-checkpoint without dropping canonical copy/context-wait behavior. No push,
+native layouts and reviewer/3OS/main admission remain open. This checkpoint
+preceded main805efc9's #87/#102 integration, recorded separately above. No push,
 release, installation or user-data change is authorized by this checkpoint.
 
 ## Exact-SHA CI reuse (#92)
