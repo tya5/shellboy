@@ -6032,3 +6032,17 @@ now defers any additional Rust build/check until worker1's #96 check releases
 the host; already-running processes are not interrupted. This supersedes the
 earlier final-source-capture gap only, not the pending standard check/P1 or
 canonical code-copy implementation gaps.
+
+Final stage-1 standard-check result: the existing latest-main check completed
+exit0. RUST_TEST_THREADS=2 sh scripts/check.sh passed Python41, integration-layout/
+watchdog policy, format and Clippy. Rust results: library1016 passed/13 ignored,
+integration936 passed/17 ignored, live-thread-patch12 passed/1 ignored,
+usage-aggregates7 passed/2 ignored; total1971 passed/0 failed/33 ignored.
+Evidence: /tmp/issue-87-check-rebased.log, execution
+513db94c-5cc0-4132-8538-df43a3d4652f. The selection-guidance regression is included.
+This supersedes the pending-check status above; it does not establish the cause
+of the earlier frontend watchdog failure, OS-wide success, P1 performance or
+completion of the remaining canonical code-copy/image-failure work. No Rust
+process remains from this task. Both worker1 and worker2 received one concrete
+slot-released notice so #85's quiet observation can proceed; no new Rust run is
+started during that observation.
