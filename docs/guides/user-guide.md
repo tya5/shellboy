@@ -96,6 +96,8 @@ Until acceptance completes, the submitted text and attachments remain visible. E
 - `/threads` or Ctrl+T opens a one-row-per-item list. Select with Up/Down and Enter. Left/Right expand, collapse, or move through parent/child relationships; typing filters the list. Details and a short conversation excerpt appear below; F1 opens full values.
 - If you know an ID, use `/switch THREAD_ID`.
 
+Saved title, state, additions and deletions update the open list automatically while keeping selection and collapsed branches. A new row may be above your retained reading position; use Up to reach it. `再確認中` means a previously selected row is being checked after refresh. Ctrl+R explicitly reloads the list; lost notifications trigger an explained resynchronization.
+
 Each Thread retains its own draft and reading position. Switching does not stop execution. Shells or child Runs in the previous Thread continue. Background work may keep a Run live after its Turn's answer completes. See [Delegation](delegation.md) for the Thread/Run/Turn distinction.
 
 ### Read the conversation

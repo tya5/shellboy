@@ -3752,3 +3752,18 @@ intermittent cause or complete E's performance gates.
 ## Manual P2/P5 measurement tooling
 
 [CI procedure](../development/native-tui-ci.md) separates fixture/source validity errors from record-only CPU/read/draw observations. Python20/0 and YAML syntax checks pass locally. Instrumented sourcee5870d0 builds in release mode, and native macOS80-column2s P2/P5/P5-list fixture smokes pass. Initial wide-character exporter failure is retained and corrected with a focused regression. Full CI windows, baseline execution and the instrumented E+#75 measurement binary remain unqualified. Windows is explicitly unavailable until a native ConPTY fixture exists. These procedure checks do not qualify P2/P5 performance.
+
+
+### Stronger E selected-observation gate: complete check
+
+Measurement candidate d3b611d passes the complete standard check1891/0/32,
+layout93/Python20/fmt/strict Clippy, including the corrected paired-observation
+fixture. Its Rust sources/tests/migrations exactly match E cut42bab84. This is a
+new complete result, not an isolated rerun used to hide branch63a7f17's failure.
+The initial-overlap explanation remains provisional; all strict assertions stay.
+
+A final guide audit found the old TUI sentence calling the list a fixed snapshot.
+Correct that sentence and align both User Guides with reactive saved updates,
+selection retention and explicit resync. Guides are embedded, so the final review
+candidate receives another full standard check after this documentation change.
+No Rust UI behavior changes, F/G implementation, push or release is introduced.
