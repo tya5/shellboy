@@ -105,6 +105,7 @@ fn frozen_header_label(width: u16, frozen_at: Option<&str>) -> String {
         choices.push("表示固定 · F2/Esc解除".into());
     }
     choices.push("表示固定".into());
+    choices.push("固定".into());
     let label = choices
         .into_iter()
         .find(|label| label.width() <= usize::from(width))
@@ -504,7 +505,11 @@ mod tests {
             assert!(ui.help_visible && ui.selection_mode);
             let shown = frame_text(&mut ui, width, height);
             assert!(
-                shown.lines().next().unwrap().contains("表示固定"),
+                shown.lines().next().unwrap().contains(if width < 10 {
+                    "固定"
+                } else {
+                    "表示固定"
+                }),
                 "{width}x{height}: {shown}"
             );
         }
@@ -567,7 +572,9 @@ mod tests {
                 assert!(text.contains('…'));
             }
             let buffer = terminal.backend().buffer();
-            assert_eq!(buffer[(0, 0)].symbol(), "!");
+            assert_eq!(buffer[(0, 0)].symbol(), " ");
+            assert_eq!(buffer[(1, 0)].symbol(), "!");
+            assert_eq!(buffer[(width - 1, 0)].symbol(), " ");
         }
         assert_eq!(ui.view().title, original);
         ui.view_mut().title = "短い題名".into();

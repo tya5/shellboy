@@ -1038,3 +1038,7 @@ painting and restore normal rows' trailing cells from their own line/span style;
 this keeps differential scrolling from inheriting a previous band's edge color.
 Foreground, links, code-surface colors, canonical text and hit positions remain
 separate from background extent. NO_COLOR adds no band colors or new columns.
+At the minimum eight-column viewport the inset leaves six content cells; the
+selection banner uses the compact "固定" label rather than disappearing or
+painting over the margin. Wider headers keep the existing full freeze label,
+time and resume guidance according to their available content width.
