@@ -4,6 +4,7 @@ pub mod activity;
 pub mod app;
 pub mod attachments;
 pub mod cli;
+pub mod client_operation;
 pub mod compaction;
 pub mod config;
 pub mod config_setup;
@@ -24,10 +25,8 @@ pub mod ipc;
 mod json_pointer;
 pub mod memory;
 pub mod model;
-pub mod owner_session;
-// G1 metadata is qualified before the G2 runtime form wiring.
-#[cfg(test)]
 mod operations;
+pub mod owner_session;
 pub mod presentation;
 pub mod program_status;
 pub mod protocol;

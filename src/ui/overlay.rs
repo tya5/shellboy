@@ -139,6 +139,7 @@ impl UiState {
                 UiAction::SubmittedCommand { action, .. } => needs_scope(action),
                 UiAction::LoadReceived { .. }
                 | UiAction::Manage(_)
+                | UiAction::ClientOperation(_)
                 | UiAction::ReloadAttachments { .. }
                 | UiAction::IndexPreview(_)
                 | UiAction::FollowManagement { .. }
@@ -533,6 +534,10 @@ impl UiState {
                     operations::Outcome::Execute(command) => {
                         self.operations = None;
                         self.execute_operation(command)
+                    }
+                    operations::Outcome::Client(operation) => {
+                        self.operations = None;
+                        self.execute_client_operation(operation)
                     }
                     operations::Outcome::None => vec![],
                 }

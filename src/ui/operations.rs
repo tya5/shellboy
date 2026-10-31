@@ -1,8 +1,20 @@
 //! Typed TUI operation forms. This module never parses arbitrary JSON or runs CLI.
 use super::{activity::ActivityPhase, popup, prev_grapheme, theme};
+use crate::operations::{CompactMode, DefaultOrigin, Effect, FieldId, OperationId};
 use crate::protocol::*;
+mod client_forms;
+mod metadata;
+use crate::client_operation::ClientOperation;
+#[cfg(test)]
+mod owner_tests;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Frame, layout::Rect, style::Style, text::Line, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Style,
+    text::Line,
+    widgets::{List, ListItem, ListState, Paragraph},
+};
 use std::path::{Path, PathBuf};
 
 // A smaller initial management page leaves room to inspect each row in the TUI.
@@ -23,10 +35,10 @@ const STORAGE_CHOICES: &[&str] = &[
 // One Rust variant declaration supplies both the enum and its complete list.
 // Form fields/builders remain ordinary typed Rust; this is not a form DSL.
 macro_rules! operation_kinds {
-    ($($name:ident),+ $(,)?)=> {
+    ($($name:ident),+ ; $($client:ident),+ $(,)?)=> {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-        pub(super) enum OpKind {$($name),+}
-        impl OpKind {pub const ALL:&'static [Self]=&[$(Self::$name),+];}
+        pub(super) enum OpKind {$($name),+,$($client),+}
+        impl OpKind {fn catalogue(self)->OperationId {match self {$(Self::$name=>OperationId::$name),+,$(Self::$client=>OperationId::$client),+}} #[cfg(test)] pub const OWNER:&'static [Self]=&[$(Self::$name),+];pub const ALL:&'static [Self]=&[$(Self::$name),+,$(Self::$client),+];}
     };
 }
 operation_kinds! {
@@ -48,6 +60,7 @@ ThreadList,
     HistoryList,
     HistoryGet,
     HistorySearch,
+    ShellList,
     ShellGet,
     ShellRead,
     ShellWrite,
@@ -56,6 +69,7 @@ ThreadList,
     AttachmentAdd,
     AttachmentList,
     AttachmentRemove,
+    CompactList,
     Compact,
     IndexStatus,
     IndexBackfill,
@@ -67,6 +81,13 @@ ThreadList,
     HistoryRelations,
     ThreadDeletePreview,
     Status,
+    MessageCancel,
+    RevisitSet,
+    RevisitGet,
+    RevisitCancel,
+    IndexPreview,
+    IndexProbe;
+    Exec,ConfigInit,ConfigCheck,DocsList,DocsGet,DocsSearch,RagInit,RagSourceAdd,RagSourceList,RagSourceRemove,RagIndex,RagIngest,RagStatus,RagInspect,RagSearch,RagGet,
 }
 /// Display-field references; not command routing or a public protocol target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,92 +140,18 @@ impl Context {
 }
 impl OpKind {
     pub fn label(self) -> &'static str {
-        match self {
-            Self::ThreadList => "会話 · 一覧",
-            Self::ThreadGet => "会話 · 詳細",
-            Self::UsageGet => "使用量 · 合計",
-            Self::ThreadCreate => "会話 · 作成",
-            Self::ThreadFork => "会話 · 分岐",
-            Self::ThreadDelete => "会話 · 削除",
-            Self::ThreadSet => "会話 · 設定",
-            Self::MessageSend => "依頼 · 送信",
-            Self::MessageGet => "依頼 · 割当/回答",
-            Self::OperationGet => "操作 · 受付結果",
-            Self::RunGet => "作業 · 詳細",
-            Self::RunRetry => "作業 · 再試行",
-            Self::RunStop => "作業 · 停止",
-            Self::TurnGet => "応答処理 · 詳細",
-            Self::Wait => "待機 · 条件を観測",
-            Self::HistoryList => "履歴 · 一覧",
-            Self::HistoryGet => "履歴 · 原文",
-            Self::HistorySearch => "履歴 · 検索",
-            Self::ShellGet => "shell · 詳細",
-            Self::ShellRead => "shell · 原文",
-            Self::ShellWrite => "shell · 入力を送る",
-            Self::ShellEof => "shell · 入力を閉じる",
-            Self::ShellStop => "shell · 停止",
-            Self::AttachmentAdd => "添付 · 追加",
-            Self::AttachmentList => "添付 · 一覧",
-            Self::AttachmentRemove => "添付 · 除外",
-            Self::Compact => "圧縮 · 要求",
-            Self::IndexStatus => "索引 · 状態",
-            Self::IndexBackfill => "索引 · 過去履歴を追加",
-            Self::IndexRetry => "索引 · 失敗分を再試行",
-            Self::IndexRebuild => "索引 · 作り直す",
-            Self::StorageStatus => "保存 · 状態",
-            Self::StorageCollect => "保存 · 回収",
-            Self::ModelList => "モデル · 一覧",
-            Self::HistoryRelations => "履歴 · 関係",
-            Self::ThreadDeletePreview => "会話 · 削除影響",
-            Self::Status => "作業 · 状態一覧",
-        }
+        metadata::text(self.catalogue().label_text())
     }
-    fn wire_name(self) -> &'static str {
-        match self {
-            Self::ThreadList => "thread.list",
-            Self::ThreadGet => "thread.get",
-            Self::UsageGet => "usage.get",
-            Self::ThreadCreate => "thread.create",
-            Self::ThreadFork => "thread.fork",
-            Self::ThreadDelete => "thread.delete",
-            Self::ThreadSet => "thread.set",
-            Self::MessageSend => "message.send",
-            Self::MessageGet => "message.get",
-            Self::OperationGet => "operation.get",
-            Self::RunGet => "run.get",
-            Self::RunRetry => "run.retry",
-            Self::RunStop => "run.stop",
-            Self::TurnGet => "turn.get",
-            Self::Wait => "wait",
-            Self::HistoryList => "history.list",
-            Self::HistoryGet => "history.get",
-            Self::HistorySearch => "history.search",
-            Self::ShellGet => "shell.get",
-            Self::ShellRead => "shell.read",
-            Self::ShellWrite => "shell.write",
-            Self::ShellEof => "shell.eof",
-            Self::ShellStop => "shell.stop",
-            Self::AttachmentAdd => "attachment.add",
-            Self::AttachmentList => "attachment.list",
-            Self::AttachmentRemove => "attachment.remove",
-            Self::Compact => "compact",
-            Self::IndexStatus => "index.status",
-            Self::IndexBackfill => "index.backfill",
-            Self::IndexRetry => "index.retry",
-            Self::IndexRebuild => "index.rebuild",
-            Self::StorageStatus => "storage.status",
-            Self::StorageCollect => "storage.collect",
-            Self::ModelList => "model.list",
-            Self::HistoryRelations => "history.relations",
-            Self::ThreadDeletePreview => "thread.delete_preview",
-            Self::Status => "status",
-        }
+    #[cfg(test)]
+    fn wire_name(self) -> String {
+        self.catalogue()
+            .primary_cli()
+            .path
+            .join(".")
+            .replace('-', "_")
     }
     fn cli(self) -> String {
-        format!(
-            "shellboy {}",
-            self.wire_name().replace('.', " ").replace('_', "-")
-        )
+        format!("shellboy {}", self.catalogue().primary_cli().path.join(" "))
     }
     fn shortcut(self) -> Option<&'static str> {
         match self {
@@ -255,14 +202,17 @@ struct Field {
     name: &'static str,
     label: &'static str,
     value: String,
+    initial_value: String,
     kind: Kind,
 }
 impl Field {
     fn new(name: &'static str, label: &'static str, value: impl Into<String>, kind: Kind) -> Self {
+        let value = value.into();
         Self {
             name,
             label,
-            value: value.into(),
+            initial_value: value.clone(),
+            value,
             kind,
         }
     }
@@ -274,6 +224,7 @@ impl Field {
             "true" => "はい",
             "false" => "いいえ",
             "" => "未指定",
+            "thread_settled" => "会話の完了・復旧・停止",
             "turn_completed" => "応答処理の回答完了",
             "run_ended" => "作業の終了",
             "shell_ended" => "コマンドの終了",
@@ -289,6 +240,13 @@ impl Field {
             "keep" => "変更しない",
             "set" => "設定する",
             "auto" => "自動",
+            "deferred" => "次の境界で圧縮",
+            "maximal" => "自動で最大圧縮",
+            "spill" => "指定範囲を退避",
+            "summary" => "指定範囲を要約",
+            "trim" => "指定末尾まで除去",
+            "omit" => "指定範囲を省略",
+            "restore" => "省略・退避を復元",
             "previous" => "直前",
             "next" => "直後",
             "sources" => "出典",
@@ -303,21 +261,38 @@ pub(super) struct Operations {
     context: Context,
     page: std::cell::Cell<usize>,
     filter: String,
+    cached_rows: std::cell::OnceCell<Vec<OpKind>>,
+    paint: std::cell::Cell<Option<popup::PaintBounds>>,
+    #[cfg(test)]
+    row_builds: std::cell::Cell<usize>,
 }
 type BuildCommand = fn(&Form, &Path) -> Result<Command, String>;
+#[derive(Clone, Copy)]
+enum FormBuilder {
+    Owner(BuildCommand),
+    Client(fn(&Form, &Path) -> Result<ClientOperation, String>),
+}
 
 struct Form {
     operation: OpKind,
     fields: Vec<Field>,
-    build: BuildCommand,
+    build: FormBuilder,
     selected: usize,
     conditions: Vec<WaitCondition>,
     error: Option<String>,
+    follows_current: bool,
+    help: bool,
+    help_scroll: std::cell::Cell<u16>,
+    help_page: std::cell::Cell<u16>,
+    client_confirmation: Option<ClientOperation>,
+    reader: std::cell::RefCell<popup::ReaderCache>,
+    help_revision: u64,
 }
 pub(super) enum Outcome {
     None,
     Close,
     Execute(Command),
+    Client(ClientOperation),
 }
 impl Operations {
     pub fn new(context: Context) -> Self {
@@ -327,6 +302,10 @@ impl Operations {
             context,
             page: std::cell::Cell::new(8),
             filter: String::new(),
+            cached_rows: std::cell::OnceCell::new(),
+            paint: std::cell::Cell::new(None),
+            #[cfg(test)]
+            row_builds: std::cell::Cell::new(0),
         };
         if let Some(first) = result.rows().first() {
             result.selected = OpKind::ALL.iter().position(|kind| kind == first).unwrap();
@@ -373,7 +352,14 @@ impl Operations {
             2
         }
     }
-    fn rows(&self) -> Vec<OpKind> {
+    fn rows(&self) -> &[OpKind] {
+        self.cached_rows.get_or_init(|| {
+            #[cfg(test)]
+            self.row_builds.set(self.row_builds.get() + 1);
+            self.build_rows()
+        })
+    }
+    fn build_rows(&self) -> Vec<OpKind> {
         let query = self.filter.to_lowercase();
         let mut rows = Vec::with_capacity(OpKind::ALL.len());
         for &kind in self
@@ -385,10 +371,11 @@ impl Operations {
             if !rows.contains(&kind)
                 && (query.is_empty()
                     || format!(
-                        "{} {} {}",
+                        "{} {} {} {}",
                         kind.label(),
                         kind.cli(),
-                        kind.shortcut().unwrap_or("")
+                        kind.shortcut().unwrap_or(""),
+                        kind.catalogue().spec().meaning
                     )
                     .to_lowercase()
                     .contains(&query))
@@ -410,18 +397,26 @@ impl Operations {
         }
     }
     fn filter_text(&mut self, text: &str) {
+        let before = self.filter.len();
         let remaining = 128usize.saturating_sub(self.filter.chars().count());
         self.filter
             .extend(text.chars().filter(|ch| !ch.is_control()).take(remaining));
+        if self.filter.len() != before {
+            self.cached_rows.take();
+        }
         self.ensure_selection();
     }
     pub fn refresh_activity(&mut self, phase: ActivityPhase, run: String, turn: String) {
+        let previous = self.suggested();
         self.context.phase = phase;
         if self.context.follows_current {
             self.context.run = run.clone();
             self.context.turn = turn;
         }
         self.context.current_run = run;
+        if previous != self.suggested() {
+            self.cached_rows.take();
+        }
         self.ensure_selection();
     }
     pub fn select(&mut self, operation: OpKind) {
@@ -440,6 +435,31 @@ impl Operations {
     }
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
         if let Some(form) = &mut self.form {
+            if form.client_confirmation.is_some() {
+                return form.key(key, &self.context.cwd);
+            }
+            if form.help {
+                if matches!(key.code, KeyCode::Esc | KeyCode::F(1)) {
+                    form.help = false;
+                    form.reader.borrow_mut().clear();
+                    return Outcome::None;
+                }
+                let current = form.help_scroll.get();
+                let next = match key.code {
+                    KeyCode::Home => Some(0),
+                    KeyCode::End => Some(u16::MAX),
+                    _ => popup::reader_key(key.code, current, form.help_page.get()),
+                };
+                if let Some(next) = next {
+                    form.help_scroll.set(next);
+                }
+                return Outcome::None;
+            }
+            if key.code == KeyCode::F(1) {
+                form.help = true;
+                form.help_scroll.set(0);
+                return Outcome::None;
+            }
             if key.code == KeyCode::Esc {
                 self.form = None;
                 return Outcome::None;
@@ -447,6 +467,7 @@ impl Operations {
             match key.code {
                 KeyCode::PageUp => {
                     form.selected = form.selected.saturating_sub(self.page.get());
+                    form.help_revision = form.help_revision.wrapping_add(1);
                     return Outcome::None;
                 }
                 KeyCode::PageDown => {
@@ -454,48 +475,53 @@ impl Operations {
                         .selected
                         .saturating_add(self.page.get())
                         .min(form.fields.len().saturating_sub(1));
+                    form.help_revision = form.help_revision.wrapping_add(1);
                     return Outcome::None;
                 }
                 _ => {}
             }
             return form.key(key, &self.context.cwd);
         }
-        let rows = self.rows();
-        let selected = rows
+        let selected = self
+            .rows()
             .iter()
             .position(|kind| *kind == OpKind::ALL[self.selected])
             .unwrap_or(0);
+        let count = self.rows().len();
         let next = match key.code {
             KeyCode::Esc if !self.filter.is_empty() => {
                 self.filter.clear();
+                self.cached_rows.take();
                 self.ensure_selection();
                 return Outcome::None;
             }
             KeyCode::Esc | KeyCode::F(8) => return Outcome::Close,
             KeyCode::Up => Some(selected.saturating_sub(1)),
-            KeyCode::Down => Some((selected + 1).min(rows.len().saturating_sub(1))),
+            KeyCode::Down => Some((selected + 1).min(count.saturating_sub(1))),
             KeyCode::PageUp => Some(selected.saturating_sub(self.page.get())),
             KeyCode::PageDown => Some(
                 selected
                     .saturating_add(self.page.get())
-                    .min(rows.len().saturating_sub(1)),
+                    .min(count.saturating_sub(1)),
             ),
             KeyCode::Home => Some(0),
-            KeyCode::End => Some(rows.len().saturating_sub(1)),
+            KeyCode::End => Some(count.saturating_sub(1)),
             KeyCode::Enter => {
-                if let Some(kind) = rows.get(selected) {
-                    self.form = Some(Form::new(*kind, &self.context));
+                if let Some(kind) = self.rows().get(selected).copied() {
+                    self.form = Some(Form::new(kind, &self.context));
                 }
                 return Outcome::None;
             }
             KeyCode::Backspace => {
                 self.filter
                     .truncate(prev_grapheme(&self.filter, self.filter.len()));
+                self.cached_rows.take();
                 self.ensure_selection();
                 None
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.filter.clear();
+                self.cached_rows.take();
                 self.ensure_selection();
                 None
             }
@@ -509,50 +535,148 @@ impl Operations {
             }
             _ => None,
         };
-        if let Some(kind) = next.and_then(|index| rows.get(index)) {
+        if let Some(kind) = next.and_then(|index| self.rows().get(index)).copied() {
             self.selected = OpKind::ALL
                 .iter()
-                .position(|candidate| candidate == kind)
+                .position(|candidate| *candidate == kind)
                 .unwrap();
         }
         Outcome::None
     }
 
+    pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
+        self.paint.get()
+    }
+    pub(super) fn wheel(&mut self, delta: isize) -> bool {
+        if let Some(form) = &mut self.form {
+            if form.help || form.client_confirmation.is_some() {
+                let old = form.help_scroll.get();
+                let next = popup::move_reader(old, delta, form.reader.borrow().bounds().maximum);
+                form.help_scroll.set(next);
+                return old != next;
+            }
+            let next = popup::move_selection(form.selected, delta, form.fields.len());
+            if next == form.selected {
+                return false;
+            }
+            form.selected = next;
+            form.help_revision = form.help_revision.wrapping_add(1);
+            return true;
+        }
+        let Some(old) = self
+            .rows()
+            .iter()
+            .position(|kind| *kind == OpKind::ALL[self.selected])
+        else {
+            return false;
+        };
+        let next = popup::move_selection(old, delta, self.rows().len());
+        if old == next {
+            return false;
+        }
+        let kind = self.rows()[next];
+        self.selected = OpKind::ALL
+            .iter()
+            .position(|candidate| *candidate == kind)
+            .expect("listed operation");
+        true
+    }
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
         if let Some(form) = &self.form {
-            let context = if form.operation == OpKind::Wait {
-                format!(
-                    "{} / {}項目 · 待機条件 {}件（対象は停止しません）",
-                    form.selected + 1,
-                    form.fields.len(),
-                    form.conditions.len()
-                )
+            if let Some(operation) = &form.client_confirmation {
+                let body = popup::panel_recorded(
+                    frame,
+                    area,
+                    &format!("{} · 確認", form.operation.label()),
+                    &form.operation.cli(),
+                    "Y 実行 · N/Esc 入力欄へ · ↑↓/PgUp/PgDn 説明を読む",
+                    &self.paint,
+                );
+                form.help_page.set(body.height.max(1));
+                form.help_scroll.set(form.reader.borrow_mut().render(
+                    frame,
+                    body,
+                    form.help_revision.wrapping_mul(2).wrapping_add(1),
+                    form.help_scroll.get(),
+                    || client_forms::confirmation_lines(operation),
+                ));
+                return;
+            }
+            let spec = form.operation.catalogue().spec();
+            if form.help {
+                let footer = "Esc/F1 入力欄へ · ↑↓/PgUp/PgDn 説明を読む";
+                let body = popup::panel_recorded(
+                    frame,
+                    area,
+                    &format!("{} · 使い方", form.operation.label()),
+                    &form.operation.cli(),
+                    footer,
+                    &self.paint,
+                );
+                form.help_page.set(body.height.max(1));
+                form.help_scroll.set(form.reader.borrow_mut().render(
+                    frame,
+                    body,
+                    form.help_revision.wrapping_mul(2),
+                    form.help_scroll.get(),
+                    || form.help_lines(),
+                ));
+                return;
+            }
+            let field_context = if form.fields.is_empty() {
+                "入力項目なし".into()
             } else {
-                format!(
-                    "{} / {}項目 · 入力値で操作を依頼します",
-                    form.selected + 1,
-                    form.fields.len()
-                )
+                format!("{}/{}項目", form.selected + 1, form.fields.len())
             };
+            let context = format!(
+                "{} · {}{}",
+                form.effect().text().fallback,
+                field_context,
+                if form.operation == OpKind::Wait {
+                    format!(" · 観測条件 {}件", form.conditions.len())
+                } else {
+                    String::new()
+                }
+            );
             let footer = if form.operation == OpKind::Wait {
-                "Esc 一覧 · Enter 送信 · Tab/↑↓/PgUp/PgDn 選択\nF9 条件追加 · F10 最後を削除 · ←→ 選択値"
+                format!(
+                    "Esc 一覧 · Enter {} · F1 説明とIDの探し方\nTab/↑↓/PgUp/PgDn 選択 · F9条件追加 · F10削除",
+                    form.verb()
+                )
             } else {
-                "Esc 一覧 · Enter 送信 · Tab/↑↓/PgUp/PgDn 選択\n←→ 選択値 · Ctrl+U 消去 · Ctrl+J 複数行改行"
+                format!(
+                    "Esc 一覧 · Enter {} · F1 説明とIDの探し方\nTab/↑↓/PgUp/PgDn 選択 · ←→選択値 · Ctrl+U消去",
+                    form.verb()
+                )
             };
             let height = form
                 .fields
                 .len()
                 .saturating_mul(3)
-                .saturating_add(7 + usize::from(form.error.is_some()) * 2)
+                .saturating_add(11 + usize::from(form.error.is_some()) * 2)
                 .min(u16::MAX as usize) as u16;
-            let mut body = popup::compact(
+            let mut body = popup::compact_recorded(
                 frame,
                 area,
                 form.operation.label(),
                 &context,
-                footer,
+                &footer,
                 height,
+                &self.paint,
             );
+            if body.height >= 4 {
+                let info_height = body.height.saturating_sub(2).min(3);
+                let info = vec![Line::from(spec.meaning), Line::from(form.field_hint())];
+                frame.render_widget(
+                    Paragraph::new(info).wrap(ratatui::widgets::Wrap { trim: false }),
+                    Rect {
+                        height: info_height,
+                        ..body
+                    },
+                );
+                body.y += info_height;
+                body.height -= info_height;
+            }
             if let Some(error) = &form.error {
                 let lines = super::presentation::hanging_wrap(
                     vec![Line::from(crate::presentation::sanitize_plain(error, 0).0)],
@@ -603,21 +727,22 @@ impl Operations {
                 .map(|kind| kind.cli())
                 .unwrap_or_default();
             let context = format!(
-                "{source} · {}/{}件 · 絞込み: {}\n{cli}",
+                "{cli} · {}/{}件 · CLIと同じ操作 · {source} · 絞込み: {}",
+                selected + 1,
                 rows.len(),
-                OpKind::ALL.len(),
                 if self.filter.is_empty() {
                     "未指定"
                 } else {
                     &self.filter
                 }
             );
-            let body = popup::panel(
+            let body = popup::panel_recorded(
                 frame,
                 area,
                 "操作",
                 &context,
-                "文字入力で絞込み · Ctrl+U 解除 · ↑↓/PgUp/PgDn 選択\nEnter 入力フォーム · Esc 絞込み解除/戻る · F8 閉じる",
+                "絞込み · ↑↓/PgUp/PgDn · Ctrl+U解除 · Esc戻る/F8閉\nEnter 入力フォーム · [変更]保存 [制御]処理",
+                &self.paint,
             );
             self.page
                 .set(usize::from(body.height).saturating_sub(1).max(1));
@@ -628,32 +753,43 @@ impl Operations {
                 );
             } else {
                 let mut previous = None;
-                let items = rows
-                    .iter()
-                    .map(|kind| {
-                        let section = self.section(*kind);
-                        let label = format!(
-                            "{}{}",
-                            kind.label(),
-                            kind.shortcut()
-                                .map(|shortcut| format!("  {shortcut}"))
-                                .unwrap_or_default()
-                        );
-                        let text = if previous != Some(section) {
-                            let header = match section {
-                                0 => "この会話で",
-                                1 => "よく使う",
-                                _ => "すべての操作",
-                            };
-                            previous = Some(section);
-                            format!("{header}\n{label}")
-                        } else {
-                            label
+                let mut items = Vec::new();
+                let mut selected_row = 0;
+                for (action, kind) in rows.iter().enumerate() {
+                    let section = self.section(*kind);
+                    if self.filter.is_empty() && previous != Some(section) {
+                        let header = match section {
+                            0 => "この会話で",
+                            1 => "よく使う",
+                            _ => "その他の操作",
                         };
-                        popup::item(&text, body.width)
-                    })
-                    .collect();
-                popup::list(frame, body, items, selected);
+                        items.push(ListItem::new(
+                            Line::from(header).style(Style::default().fg(theme::MUTED)),
+                        ));
+                        previous = Some(section);
+                    }
+                    if action == selected {
+                        selected_row = items.len();
+                    }
+                    let label = format!(
+                        "{}{}{}",
+                        metadata::text(kind.catalogue().spec().effect.list_marker()),
+                        kind.label(),
+                        kind.shortcut()
+                            .map(|shortcut| format!("  {shortcut}"))
+                            .unwrap_or_default()
+                    );
+                    items.push(ListItem::new(label));
+                }
+                let mut state = ListState::default().with_selected(Some(selected_row));
+                frame.render_stateful_widget(
+                    List::new(items)
+                        .style(popup::normal_style())
+                        .highlight_style(popup::selected_style())
+                        .highlight_symbol("› "),
+                    body,
+                    &mut state,
+                );
             }
         }
     }
@@ -691,6 +827,22 @@ impl Form {
             ]
         };
         let (fields, build): (Vec<Field>, BuildCommand) = match operation {
+            OpKind::Exec
+            | OpKind::ConfigInit
+            | OpKind::ConfigCheck
+            | OpKind::DocsList
+            | OpKind::DocsGet
+            | OpKind::DocsSearch
+            | OpKind::RagInit
+            | OpKind::RagSourceAdd
+            | OpKind::RagSourceList
+            | OpKind::RagSourceRemove
+            | OpKind::RagIndex
+            | OpKind::RagIngest
+            | OpKind::RagStatus
+            | OpKind::RagInspect
+            | OpKind::RagSearch
+            | OpKind::RagGet => return client_forms::new(operation, c),
             OpKind::ThreadList => (
                 {
                     let mut v = list();
@@ -705,21 +857,70 @@ impl Form {
                     }))
                 },
             ),
+            OpKind::ShellList => (
+                vec![
+                    thread(),
+                    f("since", "開始日時", String::new(), Text),
+                    f("until", "終了日時（未満）", String::new(), Text),
+                    f("command_contains", "コマンドを含む", String::new(), Text),
+                    f("state", "状態", String::new(), Text),
+                    f("exit_code", "終了コード", String::new(), Number),
+                    f("limit", "件数", "50".into(), Number),
+                    f("cursor", "続きcursor", String::new(), Text),
+                ],
+                |form, _| {
+                    Ok(Command::ShellList(ShellListArgs {
+                        thread_id: form.optional("thread")?,
+                        since: form.optional("since")?,
+                        until: form.optional("until")?,
+                        command_contains: form.optional("command_contains")?,
+                        state: form.optional("state")?,
+                        exit_code: form.optional_number("exit_code")?,
+                        limit: form.number("limit")?,
+                        cursor: form.optional("cursor")?,
+                    }))
+                },
+            ),
+            OpKind::CompactList => (
+                vec![
+                    thread(),
+                    f("since", "開始日時", String::new(), Text),
+                    f("until", "終了日時（未満）", String::new(), Text),
+                    f("limit", "件数", "50".into(), Number),
+                ],
+                |form, _| {
+                    Ok(Command::CompactList(CompactListArgs {
+                        thread_id: form.optional("thread")?,
+                        since: form.optional("since")?,
+                        until: form.optional("until")?,
+                        limit: form.number("limit")?,
+                    }))
+                },
+            ),
             OpKind::ThreadGet => (vec![thread()], |form, _cwd| {
                 Ok(Command::ThreadGet(form.thread_target()?))
             }),
             OpKind::UsageGet => (
                 vec![
                     thread(),
+                    f("since", "開始日時", String::new(), Text),
+                    f("until", "終了日時（未満）", String::new(), Text),
+                    f("run", "作業ID（指定時は会話を空に）", String::new(), Text),
+                    f(
+                        "turn",
+                        "応答処理ID（指定時は会話を空に）",
+                        String::new(),
+                        Text,
+                    ),
                     f("children", "子会話を含む", "false".into(), Boolean),
                 ],
                 |form, _cwd| {
                     Ok(Command::UsageGet(UsageGetArgs {
-                        since: None,
-                        until: None,
+                        since: form.optional("since")?,
+                        until: form.optional("until")?,
                         thread_id: form.thread_target()?.thread_id,
-                        run_id: None,
-                        turn_id: None,
+                        run_id: form.optional("run")?,
+                        turn_id: form.optional("turn")?,
                         include_children: form.boolean("children")?,
                     }))
                 },
@@ -814,11 +1015,18 @@ impl Form {
                 vec![
                     thread(),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
+                    f(
+                        "sender_label",
+                        "送信者の表示名（任意）",
+                        String::new(),
+                        Text,
+                    ),
+                    f("now", "優先送信", "false".into(), Boolean),
                 ],
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
-                        sender_label: None,
-                        now: false,
+                        sender_label: form.optional("sender_label")?,
+                        now: form.boolean("now")?,
                         thread_id: form.optional("thread")?,
                         text: form.owned("text")?,
                     }))
@@ -832,6 +1040,45 @@ impl Form {
                     }))
                 },
             ),
+            OpKind::MessageCancel => (
+                vec![f(
+                    "messages",
+                    "取消する入力ID（空白区切り）",
+                    String::new(),
+                    Text,
+                )],
+                |form, _| {
+                    Ok(Command::MessageCancel(MessageCancelArgs {
+                        message_ids: form
+                            .value("messages")?
+                            .split_whitespace()
+                            .map(str::to_owned)
+                            .collect(),
+                    }))
+                },
+            ),
+            OpKind::RevisitSet => (
+                vec![
+                    run(),
+                    f("text", "通常完了時の次の指示", String::new(), Multiline),
+                ],
+                |form, _| {
+                    Ok(Command::RevisitSet(RevisitSetArgs {
+                        run_id: form.optional("run")?,
+                        text: form.owned("text")?,
+                    }))
+                },
+            ),
+            OpKind::RevisitGet => (vec![run()], |form, _| {
+                Ok(Command::RevisitGet(RevisitArgs {
+                    run_id: form.optional("run")?,
+                }))
+            }),
+            OpKind::RevisitCancel => (vec![run()], |form, _| {
+                Ok(Command::RevisitCancel(RevisitArgs {
+                    run_id: form.optional("run")?,
+                }))
+            }),
             OpKind::OperationGet => (
                 vec![f("operation", "operation ID", c.operation.clone(), Text)],
                 |form, _cwd| {
@@ -865,10 +1112,23 @@ impl Form {
                         "condition",
                         "観測する条件",
                         "turn_completed".into(),
-                        Choice(&["turn_completed", "run_ended", "shell_ended", "shell_output"]),
+                        Choice(&[
+                            "turn_completed",
+                            "run_ended",
+                            "shell_ended",
+                            "shell_output",
+                            "thread_settled",
+                        ]),
                     ),
                     f("target", "対象ID", c.turn.clone(), Text),
                     f("cursor", "出力観測の開始cursor", String::new(), Text),
+                    f("after", "前回waitのcursor", String::new(), Text),
+                    f(
+                        "settled_states",
+                        "会話の観測状態（空白区切り）",
+                        "completed recovery_wait failed stopped".into(),
+                        Text,
+                    ),
                     f(
                         "timeout",
                         "観測の待機上限 ms",
@@ -886,9 +1146,9 @@ impl Form {
                             conditions.push(form.condition()?);
                         }
                         Command::Wait(WaitArgs {
-                            after: None,
                             conditions,
                             timeout_ms: form.number("timeout")?,
+                            after: form.optional("after")?,
                         })
                     })
                 },
@@ -925,13 +1185,14 @@ impl Form {
             OpKind::HistoryGet => (
                 vec![
                     node(),
+                    f("final_answer_only", "最終回答のみ", "false".into(), Boolean),
                     f("limit", "取得byte数", "65536".into(), Number),
                     f("cursor", "続きcursor", String::new(), Text),
                     f("encoding", "encoding", DEFAULT_ENCODING.into(), Text),
                 ],
                 |form, _cwd| {
                     Ok(Command::HistoryGet(HistoryGetArgs {
-                        final_answer_only: false,
+                        final_answer_only: form.boolean("final_answer_only")?,
                         node_id: form.owned("node")?,
                         limit_bytes: form.number("limit")?,
                         cursor: form.optional("cursor")?,
@@ -1053,21 +1314,102 @@ impl Form {
                     }))
                 },
             ),
-            OpKind::Compact => (vec![thread()], |form, _cwd| {
-                Ok(Command::Compact(form.thread_target()?))
-            }),
+            OpKind::Compact => (
+                vec![
+                    thread(),
+                    f(
+                        "action",
+                        "圧縮・編集方法",
+                        "deferred".into(),
+                        Choice(&[
+                            "deferred", "maximal", "spill", "summary", "trim", "omit", "restore",
+                        ]),
+                    ),
+                    f("from_node", "範囲先頭node ID", String::new(), Text),
+                    f("to_node", "範囲末尾node ID", String::new(), Text),
+                    f(
+                        "max_chars",
+                        "要約文字数上限（空=設定値）",
+                        String::new(),
+                        Number,
+                    ),
+                    f(
+                        "max_percent",
+                        "要約割合上限（空=設定値）",
+                        String::new(),
+                        Number,
+                    ),
+                ],
+                |form, _| {
+                    let action = match form.value("action")? {
+                        "deferred" => {
+                            if form.optional("from_node")?.is_some()
+                                || form.optional("to_node")?.is_some()
+                                || form.optional("max_chars")?.is_some()
+                                || form.optional("max_percent")?.is_some()
+                            {
+                                return Err(
+                                    "範囲を指定するときは圧縮・編集方法を選択してください".into()
+                                );
+                            }
+                            return Ok(Command::Compact(form.thread_target()?));
+                        }
+                        "summary" => ContextEditAction::Summary,
+                        "maximal" => ContextEditAction::Maximal,
+                        "spill" => ContextEditAction::Spill,
+                        "trim" => ContextEditAction::Trim,
+                        "omit" => ContextEditAction::Omit,
+                        "restore" => ContextEditAction::Restore,
+                        _ => return Err("圧縮・編集方法を選択してください".into()),
+                    };
+                    Ok(Command::ContextEdit(ContextEditArgs {
+                        thread_id: form.optional("thread")?,
+                        action,
+                        from_node_id: form.optional("from_node")?,
+                        to_node_id: form.optional("to_node")?,
+                        max_chars: form.optional_number("max_chars")?,
+                        max_percent: form.optional_number("max_percent")?,
+                    }))
+                },
+            ),
             OpKind::IndexStatus => (index_fields(operation), |form, _cwd| {
                 Ok(Command::IndexStatus(form.index_args()?))
             }),
+            OpKind::IndexPreview => (index_fields(operation), |form, _| {
+                Ok(Command::IndexPreview(form.index_args()?))
+            }),
+            OpKind::IndexProbe => (
+                vec![f(
+                    "dimensions",
+                    "要求次元（空=設定値）",
+                    String::new(),
+                    Number,
+                )],
+                |form, _| {
+                    Ok(Command::IndexProbe(IndexProbeArgs {
+                        dimensions: form.optional_number("dimensions")?,
+                    }))
+                },
+            ),
             OpKind::IndexBackfill => (index_fields(operation), |form, _cwd| {
                 Ok(Command::IndexBackfill(form.index_args()?))
             }),
             OpKind::IndexRetry => (index_fields(operation), |form, _cwd| {
                 Ok(Command::IndexRetry(form.index_args()?))
             }),
-            OpKind::IndexRebuild => (index_fields(operation), |form, _cwd| {
-                Ok(Command::IndexRebuild(form.index_args()?))
-            }),
+            OpKind::IndexRebuild => (
+                {
+                    let mut fields = index_fields(operation);
+                    fields.push(f(
+                        "dimensions",
+                        "要求次元（空=設定値）",
+                        String::new(),
+                        Number,
+                    ));
+                    fields
+                },
+                |form, _cwd| Ok(Command::IndexRebuild(form.index_args()?)),
+            ),
             OpKind::StorageStatus => (
                 vec![f(
                     "category",
@@ -1134,6 +1476,12 @@ impl Form {
             ),
             OpKind::Status => (
                 vec![
+                    f(
+                        "memory",
+                        "メモリを観測（絞込みと併用不可）",
+                        "false".into(),
+                        Boolean,
+                    ),
                     f("thread", "会話（空=全体）", c.thread.clone(), Text),
                     f("run", "所有作業（空=指定なし）", String::new(), Text),
                     f("since", "記録日時以降（RFC3339）", String::new(), Text),
@@ -1144,7 +1492,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::Status(StatusArgs {
-                        memory: false,
+                        memory: form.boolean("memory")?,
                         thread_id: form.optional("thread")?,
                         run_id: form.optional("run")?,
                         since: form.optional("since")?,
@@ -1163,10 +1511,17 @@ impl Form {
         Self {
             operation,
             fields,
-            build,
+            build: FormBuilder::Owner(build),
             selected: 0,
             conditions: Vec::new(),
             error: None,
+            follows_current: c.follows_current,
+            help: false,
+            help_scroll: std::cell::Cell::new(0),
+            help_page: std::cell::Cell::new(1),
+            client_confirmation: None,
+            reader: std::cell::RefCell::new(popup::ReaderCache::default()),
+            help_revision: 0,
         }
     }
     fn value(&self, name: &str) -> Result<&str, String> {
@@ -1186,6 +1541,15 @@ impl Form {
         self.value(name)?
             .parse()
             .map_err(|_| format!("{name}: 正の数値を入力してください"))
+    }
+    fn optional_number<T: std::str::FromStr>(&self, name: &str) -> Result<Option<T>, String> {
+        self.optional(name)?
+            .map(|value| {
+                value
+                    .parse()
+                    .map_err(|_| format!("{name}: 数値を入力してください"))
+            })
+            .transpose()
     }
     fn boolean(&self, name: &str) -> Result<bool, String> {
         self.value(name)?
@@ -1229,6 +1593,14 @@ impl Form {
             return Err("待機対象IDが必要です".into());
         }
         Ok(match self.value("condition")? {
+            "thread_settled" => WaitCondition::ThreadSettled {
+                thread_ids: id.split_whitespace().map(str::to_owned).collect(),
+                states: self
+                    .value("settled_states")?
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect(),
+            },
             "turn_completed" => WaitCondition::TurnCompleted { turn_id: id },
             "run_ended" => WaitCondition::RunEnded { run_id: id },
             "shell_ended" => WaitCondition::ShellEnded { execution_id: id },
@@ -1240,18 +1612,51 @@ impl Form {
         })
     }
     fn insert(&mut self, text: &str) {
+        if self.client_confirmation.is_some() {
+            return;
+        }
         let bytes = self.fields.iter().map(|f| f.value.len()).sum::<usize>();
         if bytes.saturating_add(text.len()) > 1024 * 1024 {
             self.error = Some("入力field合計は1MiBまでです。既存内容を保持しました".into());
             return;
         }
-        let field = &mut self.fields[self.selected];
+        let Some(field) = self.fields.get_mut(self.selected) else {
+            return;
+        };
         if matches!(field.kind, Kind::Text | Kind::Multiline | Kind::Number) {
             field.value.push_str(text);
+            self.help_revision = self.help_revision.wrapping_add(1);
             self.error = None;
         }
     }
     fn key(&mut self, key: KeyEvent, cwd: &Path) -> Outcome {
+        if self.client_confirmation.is_some() {
+            match key.code {
+                KeyCode::Char('y' | 'Y') => {
+                    return Outcome::Client(
+                        self.client_confirmation
+                            .take()
+                            .expect("confirmed client request"),
+                    );
+                }
+                KeyCode::Esc | KeyCode::Char('n' | 'N') => {
+                    self.client_confirmation = None;
+                    self.help_scroll.set(0);
+                }
+                _ => {
+                    if let Some(next) =
+                        popup::reader_key(key.code, self.help_scroll.get(), self.help_page.get())
+                    {
+                        self.help_scroll.set(next);
+                    }
+                }
+            }
+            return Outcome::None;
+        }
+        if self.fields.is_empty() && key.code != KeyCode::Enter {
+            return Outcome::None;
+        }
+        self.help_revision = self.help_revision.wrapping_add(1);
         match key.code {
             KeyCode::Tab | KeyCode::Down => self.selected = (self.selected + 1) % self.fields.len(),
             KeyCode::BackTab | KeyCode::Up => {
@@ -1306,8 +1711,13 @@ impl Form {
             KeyCode::F(10) if self.operation == OpKind::Wait => {
                 self.conditions.pop();
             }
-            KeyCode::Enter => match self.command(cwd) {
-                Ok(command) => return Outcome::Execute(command),
+            KeyCode::Enter => match self.invocation(cwd) {
+                Ok(Outcome::Client(operation)) if operation.effect() != Effect::Inspect => {
+                    self.client_confirmation = Some(operation);
+                    self.help_scroll.set(0);
+                    self.error = None;
+                }
+                Ok(outcome) => return outcome,
                 Err(error) => self.error = Some(error),
             },
             KeyCode::Char(ch)
@@ -1341,7 +1751,11 @@ impl Form {
     }
     fn index_args(&self) -> Result<IndexArgs, String> {
         Ok(IndexArgs {
-            dimensions: None,
+            dimensions: if self.operation == OpKind::IndexRebuild {
+                self.optional_number("dimensions")?
+            } else {
+                None
+            },
             scope: match self.value("scope")? {
                 "" => None,
                 value => Some(IndexScope::parse(value).ok_or("scopeを選択してください")?),
@@ -1367,8 +1781,30 @@ impl Form {
             ),
         })
     }
+    fn invocation(&self, cwd: &Path) -> Result<Outcome, String> {
+        match self.build {
+            FormBuilder::Owner(_) => self.command(cwd).map(Outcome::Execute),
+            FormBuilder::Client(build) => {
+                if self
+                    .fields
+                    .iter()
+                    .map(|field| field.value.len())
+                    .sum::<usize>()
+                    > 1024 * 1024
+                {
+                    return Err(
+                        "フォームの入力合計は1MiBまでです。本文ファイル入力も利用できます".into(),
+                    );
+                }
+                build(self, cwd).map(Outcome::Client)
+            }
+        }
+    }
     fn command(&self, cwd: &Path) -> Result<Command, String> {
-        let command = (self.build)(self, cwd)?;
+        let FormBuilder::Owner(build) = self.build else {
+            return Err("この操作は独立クライアントとして実行します".into());
+        };
+        let command = build(self, cwd)?;
         command.validate().map_err(|e| e.to_string())?;
         Ok(command)
     }
@@ -1478,6 +1914,11 @@ mod tests {
                 "history.search",
                 json!({"query":"synthetic text","limit":10,"thread_id":null}),
             ),
+            (
+                OpKind::ShellList,
+                "shell.list",
+                json!({"thread_id":id(1),"limit":50}),
+            ),
             (OpKind::ShellGet, "shell.get", json!({"execution_id":id(8)})),
             (
                 OpKind::ShellRead,
@@ -1509,6 +1950,11 @@ mod tests {
                 OpKind::AttachmentRemove,
                 "attachment.remove",
                 json!({"thread_id":id(1),"attachment_id":id(9)}),
+            ),
+            (
+                OpKind::CompactList,
+                "compact.list",
+                json!({"thread_id":id(1),"limit":50}),
             ),
             (OpKind::Compact, "compact", json!({"thread_id":id(1)})),
             (
@@ -1557,9 +2003,31 @@ mod tests {
                 "status",
                 json!({"thread_id":id(1),"limit":50,"all":false}),
             ),
+            (
+                OpKind::MessageCancel,
+                "message.cancel",
+                json!({"message_ids":[id(3)]}),
+            ),
+            (
+                OpKind::RevisitSet,
+                "revisit.set",
+                json!({"run_id":id(5),"text":"synthetic text"}),
+            ),
+            (OpKind::RevisitGet, "revisit.get", json!({"run_id":id(5)})),
+            (
+                OpKind::RevisitCancel,
+                "revisit.cancel",
+                json!({"run_id":id(5)}),
+            ),
+            (
+                OpKind::IndexPreview,
+                "index.preview",
+                json!({"scope":"threads","thread_ids":[id(1)]}),
+            ),
+            (OpKind::IndexProbe, "index.probe", json!({})),
         ];
         assert_eq!(
-            OpKind::ALL,
+            OpKind::OWNER,
             expected.iter().map(|row| row.0).collect::<Vec<_>>()
         );
         // Expected durable intentions, independent of dispatch ownership and
@@ -1570,6 +2038,9 @@ mod tests {
             "thread.delete",
             "thread.set",
             "message.send",
+            "message.cancel",
+            "revisit.set",
+            "revisit.cancel",
             "run.retry",
             "run.stop",
             "wait",
@@ -1582,6 +2053,7 @@ mod tests {
             "index.backfill",
             "index.retry",
             "index.rebuild",
+            "index.probe",
             "storage.collect",
         ]);
         let mut names = std::collections::HashSet::new();
@@ -1601,6 +2073,7 @@ mod tests {
                         "text" | "query" => "synthetic text".into(),
                         "path" => "synthetic.txt".into(),
                         "attachment" => id(9),
+                        "messages" => id(3),
                         "model" => "model".into(),
                         _ => String::new(),
                     };
@@ -1626,6 +2099,8 @@ mod tests {
                         | "wait"
                         | "history.search"
                         | "index.status"
+                        | "index.preview"
+                        | "index.probe"
                         | "index.backfill"
                         | "index.retry"
                         | "index.rebuild"
@@ -1651,6 +2126,8 @@ mod tests {
                         | "index.backfill"
                         | "index.rebuild"
                         | "index.retry"
+                        | "index.preview"
+                        | "index.probe"
                         | "storage.collect"
                         | "storage.status"
                         | "shell.get"
@@ -1670,6 +2147,9 @@ mod tests {
                         | "thread.delete"
                         | "thread.set"
                         | "message.send"
+                        | "message.cancel"
+                        | "revisit.set"
+                        | "revisit.cancel"
                         | "run.retry"
                         | "run.stop"
                         | "attachment.add"
@@ -1686,8 +2166,11 @@ mod tests {
                         | "thread.list"
                         | "thread.get"
                         | "usage.get"
+                        | "shell.list"
+                        | "compact.list"
                         | "thread.delete_preview"
                         | "message.get"
+                        | "revisit.get"
                         | "operation.get"
                         | "run.get"
                         | "turn.get"
@@ -1699,6 +2182,7 @@ mod tests {
                         | "shell.read"
                         | "attachment.list"
                         | "index.status"
+                        | "index.preview"
                         | "storage.status"
                 )
             );
@@ -2225,14 +2709,14 @@ mod entry_tests {
         assert!(quoted >= 20, "the scan must cover the full guide set");
     }
     #[test]
-    fn recovery_candidates_alias_filter_and_empty_results_keep_all_thirty_six_typed_operations() {
+    fn recovery_candidates_alias_filter_and_empty_results_keep_all_owner_typed_operations() {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 37);
+        assert_eq!(rows.len(), 61);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            37
+            61
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -2244,7 +2728,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 37);
+        assert_eq!(operations.rows().len(), 61);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));
@@ -2309,7 +2793,7 @@ mod entry_tests {
             assert!(text.contains("絞込み"));
             assert!(text.contains("Enter 入力フォーム"));
             if height > 20 {
-                for heading in ["この会話で", "よく使う", "すべての操作"] {
+                for heading in ["この会話で", "よく使う", "その他の操作"] {
                     assert!(text.contains(heading), "{heading}: {text}");
                 }
             }
@@ -2317,7 +2801,7 @@ mod entry_tests {
             let text = screen(&operations, width, height);
             assert!(text.contains("作業 · 詳細"));
             assert!(text.contains("Esc 一覧"));
-            assert!(text.contains("Enter 送信"));
+            assert!(text.contains("Enter 表示"));
             if height > 20 {
                 assert!(
                     text.lines().take(8).all(|line| line.trim().is_empty()),

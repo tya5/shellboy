@@ -5,6 +5,7 @@ mod program_status;
 use admission::{spawn_read, spawn_work};
 mod browser;
 mod browser_read;
+mod client_operations;
 mod draft_images;
 mod draft_saver;
 mod header;
@@ -761,6 +762,11 @@ async fn run_with_delivery(
     #[cfg(test)] startup: Option<receipt_delivery::Startup>,
 ) -> Result<(), ApiError> {
     actions.close_tool_starts_on_quit(&control);
+    let client_context = client_operations::ClientContext {
+        config_path: owner.loaded.config_path.clone(),
+        data_dir: owner.loaded.data_dir.clone(),
+        cwd: cwd.clone(),
+    };
     let mut selection = selection::Selection::default();
     let mut live_output = live_output::Observation::default();
     let observed_control = control.clone();
@@ -1494,6 +1500,42 @@ async fn run_with_delivery(
                         } else if !spawn_read(&mut read_workers, &read_slots, &read_cancel, work) {
                             update(&updates, UiUpdate::ThreadDeletion { request_id, args: refusal_args, execute, result: Err(ApiError::new(ErrorCode::InvalidState, "読取りキューが満杯です。削除確認を再操作してください")) }).await;
                         }
+                    }
+                    UiAction::ClientOperation(operation) => {
+                        let title = operation.catalogue().spec().label.to_owned();
+                        let mutation = operation.effect() != crate::operations::Effect::Inspect;
+                        let notice_owner = management::NoticeOwner::capture(
+                            context.as_ref(), submission.as_ref(),
+                            selection.active_thread.as_deref(), selection.active_draft.as_deref(),
+                        );
+                        let Ok(permit) = command_slots.clone().try_acquire_owned() else {
+                            management_status(&updates, context, "操作キューが満杯です。未受付です").await;
+                            continue;
+                        };
+                        let generation = management.next_generation();
+                        let client_context = client_context.clone();
+                        let control = control.clone();
+                        let sender = background_tx.clone();
+                        let outcomes = updates.worker();
+                        spawn_work(&mut workers, permit, async move {
+                            let response = client_operations::execute(*operation, client_context).await.map(|mut value| {
+                                value["client_observation"] = serde_json::json!({
+                                    "completed_at": chrono::Utc::now().to_rfc3339(),
+                                    "scope": "standalone client result",
+                                    "refresh": "Reopen the same F8 form to read again; an explicit mutation or exec can repeat work and costs",
+                                });
+                                value
+                            });
+                            if mutation && let Some(owner) = notice_owner {
+                                let success = response.as_ref().is_ok_and(|value| {
+                                    value.get("ok").and_then(Value::as_bool) != Some(false)
+                                        && value.get("exit_code").and_then(Value::as_u64).is_none_or(|code| code == 0)
+                                });
+                                update(&outcomes, owner.update(format!("{title} · {}", if success {"処理結果を受信"} else {"失敗 · 詳細を確認してください"}))).await;
+                            }
+                            let result = prepare_management(response, control.store.config.cache.body_bytes).await;
+                            let _ = sender.send(BackgroundResult::Command { work_status: false, context, generation, title, result }).await;
+                        });
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
                         let title = command_title(&command);

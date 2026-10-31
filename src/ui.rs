@@ -614,6 +614,7 @@ pub enum UiAction {
         thread_id: String,
     },
     IndexPreview(IndexArgs),
+    ClientOperation(Box<crate::client_operation::ClientOperation>),
     Manage(Command),
     Command(Command),
     RestoreSnapshot {
@@ -4662,6 +4663,24 @@ impl UiState {
             generation: view.generation,
             args,
         }]
+    }
+
+    fn execute_client_operation(
+        &mut self,
+        operation: crate::client_operation::ClientOperation,
+    ) -> Vec<UiAction> {
+        let spec = operation.catalogue().spec();
+        self.details = None;
+        self.management.mode = management::ManagementMode::General;
+        self.management.open_text(ManagementView {
+            title: spec.label.into(),
+            text: format!(
+                "{}\n処理しています。閉じても受付済みの処理は続行します。",
+                spec.meaning
+            ),
+            scroll: 0,
+        });
+        vec![UiAction::ClientOperation(Box::new(operation))]
     }
 
     fn execute_operation(&mut self, command: Command) -> Vec<UiAction> {

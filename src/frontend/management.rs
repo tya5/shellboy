@@ -43,7 +43,7 @@ impl NoticeOwner {
 }
 /// Only work status results enable overview navigation; operation lookups do not.
 pub(super) fn work_status(command: &Command) -> bool {
-    matches!(command, Command::Status(_))
+    matches!(command, Command::Status(args) if !args.memory)
 }
 pub(super) fn completion_text(
     title: &str,
@@ -499,6 +499,13 @@ mod tests {
     #[test]
     fn status_receipt_lookup_does_not_enable_overview_navigation() {
         assert!(work_status(&Command::Status(StatusArgs::default())));
+        assert!(
+            !work_status(&Command::Status(StatusArgs {
+                memory: true,
+                ..Default::default()
+            })),
+            "memory facts do not enable activity-list navigation"
+        );
         assert!(!work_status(&Command::OperationGet(OperationTarget {
             operation_id: "fixture:receipt".into(),
         })));
