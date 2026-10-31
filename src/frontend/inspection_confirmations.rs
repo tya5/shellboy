@@ -106,6 +106,9 @@ pub(crate) fn prepare_confirmation_notice(
     preview_pending: bool,
 ) -> ObservationNotice {
     let owned = visible && !cancelled && &capture.identity == current;
+    let same_scope = capture.identity.owner == current.owner
+        && capture.identity.target == current.target
+        && capture.identity.generation == current.generation;
     let enabled = owned && !preview_pending && !capture.stale && capture.targets.available();
     ObservationNotice {
         kind: capture.kind,
@@ -118,7 +121,11 @@ pub(crate) fn prepare_confirmation_notice(
         } else {
             Freshness::Stale
         },
-        next_action: if visible && !cancelled { NextAction::RenewPreview } else { NextAction::None },
+        next_action: if visible && !cancelled && same_scope && !preview_pending {
+            NextAction::RenewPreview
+        } else {
+            NextAction::None
+        },
         confirmation_enabled: enabled,
     }
 }
@@ -233,8 +240,17 @@ mod tests {
         assert_eq!(notice(&captured, &identity(1)).freshness, Freshness::Unavailable);
         assert!(!notice(&captured, &identity(1)).confirmation_enabled);
         let captured = capture(1, ObservationKind::Index);
-        assert!(!prepare_confirmation_notice(&captured, &identity(1), true, false, true).confirmation_enabled);
-        assert!(!notice(&captured, &identity(2)).confirmation_enabled);
+        let pending = prepare_confirmation_notice(&captured, &identity(1), true, false, true);
+        assert!(!pending.confirmation_enabled);
+        assert_eq!(pending.next_action, NextAction::None);
+        let mut other = identity(1);
+        other.owner = "popup:other".into();
+        let stale_owner = notice(&captured, &other);
+        assert!(!stale_owner.confirmation_enabled);
+        assert_eq!(stale_owner.next_action, NextAction::None);
+        let renewed = notice(&captured, &identity(2));
+        assert!(!renewed.confirmation_enabled);
+        assert_eq!(renewed.next_action, NextAction::RenewPreview);
         assert!(captured.metadata_bytes <= MAX_METADATA_BYTES);
     }
 }
