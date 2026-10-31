@@ -871,3 +871,14 @@ navigation supersedes presentation-only reads by advancing its view revision,
 while an actual navigation request retains and accumulates pending movement.
 
 The existing 128-source and192KiB projection budgets remain unchanged.
+
+
+### F browser mode on shortcut reopen
+
+Ctrl+T reopens the last List/Watch mode stored in the existing browser enum for
+this UI process. Slash entry remains explicit: /threads opens List, /threads
+active opens global Watch, and /threads descendants/Alt+D chooses the current
+Thread scope. Shortcut reopening remembers the mode only, not a previous
+Thread's descendant root or filter; this avoids silently monitoring an old
+root after a conversation switch. A new UI process starts with List. No saved
+preference, Core field, worker or queue is added.

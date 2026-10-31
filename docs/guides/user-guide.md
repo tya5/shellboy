@@ -93,7 +93,7 @@ Until acceptance completes, the submitted text and attachments remain visible. E
 ## 3. Switch conversations
 
 - `/new` or Ctrl+N opens a new draft. It is not a saved Thread until the first send.
-- `/threads` or Ctrl+T opens a one-row-per-item list. Select with Up/Down and Enter. Left/Right expand, collapse, or move through parent/child relationships; typing filters the list. Details and a short conversation excerpt appear below; F1 opens full values.
+- `/threads` opens a one-row-per-item list. Ctrl+T reopens the previous List/Watch mode for this UI process (initially List), without retaining a descendant scope or filter. Select with Up/Down and Enter. Left/Right expand, collapse, or move through parent/child relationships; typing filters the list. Details and a short conversation excerpt appear below; F1 opens full values.
 - Tab in the list switches to Watch. `/threads active` opens Watch directly; `/threads descendants` or Alt+D watches the selected conversation's descendants. Enter opens a row; Ctrl+S/Alt+R confirm Run stop/recovery retry, and Alt+O reads saved output. See [Watch](tui.md#watch-work-and-descendants).
 - If you know an ID, use `/switch THREAD_ID`.
 

@@ -375,7 +375,15 @@ impl UiState {
                         .map(|thread_id| vec![UiAction::Background { thread_id }])
                         .unwrap_or_default();
                 }
-                KeyCode::Char('t') => return self.slash("/threads"),
+                KeyCode::Char('t') => {
+                    return self.slash(
+                        if self.thread_browser.mode() == watch::BrowserMode::Watch {
+                            "/threads active"
+                        } else {
+                            "/threads"
+                        },
+                    );
+                }
                 KeyCode::Char('n') => return self.new_chat(),
                 KeyCode::End => {
                     let view = self.active_view_mut();
@@ -574,6 +582,63 @@ mod tests {
         );
         UiState::new(&config, PathBuf::from("/"))
     }
+    #[test]
+    fn ctrl_t_remembers_browser_mode_but_explicit_threads_and_new_ui_start_in_list() {
+        fn mode(actions: &[UiAction]) -> watch::BrowserMode {
+            match actions {
+                [UiAction::LoadThreads { mode, .. }] => *mode,
+                _ => panic!("one browser request expected"),
+            }
+        }
+        fn close(ui: &mut UiState) {
+            ui.event(key(KeyCode::Esc, KeyModifiers::NONE));
+            assert!(!ui.threads_visible());
+        }
+        let mut ui = state();
+        assert_eq!(
+            mode(&ui.event(key(KeyCode::Char('t'), KeyModifiers::CONTROL))),
+            watch::BrowserMode::List
+        );
+        close(&mut ui);
+        assert_eq!(
+            mode(&ui.slash("/threads active")),
+            watch::BrowserMode::Watch
+        );
+        close(&mut ui);
+        assert_eq!(
+            mode(&ui.event(key(KeyCode::Char('t'), KeyModifiers::CONTROL))),
+            watch::BrowserMode::Watch
+        );
+        assert_eq!(
+            mode(&ui.event(key(KeyCode::Tab, KeyModifiers::NONE))),
+            watch::BrowserMode::List
+        );
+        close(&mut ui);
+        assert_eq!(
+            mode(&ui.event(key(KeyCode::Char('t'), KeyModifiers::CONTROL))),
+            watch::BrowserMode::List
+        );
+        close(&mut ui);
+        ui.slash("/threads active");
+        close(&mut ui);
+        assert_eq!(mode(&ui.slash("/threads filter")), watch::BrowserMode::List);
+        assert_eq!(ui.thread_filter(), "filter");
+        close(&mut ui);
+        ui.thread_browser
+            .open_watch(String::new(), Some("old-root".into()), None);
+        close(&mut ui);
+        let actions = ui.event(key(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert_eq!(mode(&actions), watch::BrowserMode::Watch);
+        assert!(
+            matches!(&actions[0], UiAction::LoadThreads { descendant_root: None, filter, .. } if filter.is_empty())
+        );
+        let mut fresh = state();
+        assert_eq!(
+            mode(&fresh.event(key(KeyCode::Char('t'), KeyModifiers::CONTROL))),
+            watch::BrowserMode::List
+        );
+    }
+
     #[test]
     fn f2_captures_entry_time_once_and_all_exits_release_it() {
         let mut ui = state();

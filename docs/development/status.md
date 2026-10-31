@@ -2422,3 +2422,21 @@ text; both F read-admission/row-design and #93 navigation contracts are kept.
 The one ui.rs hydration filter and history_interaction/view changes follow
 main unchanged. No new Core/protocol/migration or G work is included. New
 combined-source standard/CI remain required; earlier3OS success is not relabelled.
+
+
+## F mode-memory audit correction
+
+The source27e7733 including main #93 passes native standard2,033/0/35,
+Python39, strict Clippy/fmt/layout/watchdog; secret scan4b61c0f..27e7733 scans5
+commits/no leaks. This success predates the following correction.
+
+The retained session-mode requirement was missed: Ctrl+T always called the
+explicit-List slash route. Actual native PTY at frozen4b61c0f reopens List after
+Watch, contradicting expected Watch; captured cells/raw output and exit0 remain.
+Two earlier private harness imports/config preflights failed before product
+startup and are not that product reproduction. The UI key path now reuses the
+existing mode enum and global Watch/List routes. Explicit /threads stays List;
+new UI starts List; old descendant root/filter is cleared. No new saved/Core
+state or worker/queue. The focused actual-key/slash/Tab regression passes1/0.
+Help and English/Japanese user guides match the corrected contract. Final
+combined-source standard/native/CI still need qualification before publication.

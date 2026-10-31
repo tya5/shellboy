@@ -159,7 +159,7 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 | Mouse wheel | Move history three display rows, measured after wrapping |
 | PgUp / PgDn | Move history by viewport height minus one row |
 | Ctrl+End | Refetch the latest history and resume following |
-| Ctrl+T / Ctrl+N | Conversation list / new draft |
+| Ctrl+T / Ctrl+N | Previous List/Watch mode / new draft |
 | F1 | Task-oriented help, showing currently configured send/newline keys |
 | F2 | Enter/leave terminal selection and copy mode |
 | F3 / F4 / F5 | Inspect / edit / remove the latest paste block |
@@ -299,7 +299,10 @@ Tab switches the same conversation browser between List and Watch while keeping
 its filter and selection when available. `/threads active` opens Watch directly;
 `/threads descendants` or Alt+D scopes it to the selected saved conversation's
 descendants. A configured send/newline binding takes precedence over Alt+D.
-These are TUI slash commands, not CLI subcommands.
+These are TUI slash commands, not CLI subcommands. Ctrl+T reopens the last
+List/Watch mode in this UI process; a new process starts in List. It reopens
+global Watch, not a previous descendant root or filter. `/threads` explicitly
+opens List regardless of the remembered mode.
 
 Watch is a flat priority view: recovery, failed, unread completion, active work
 and background work, with saved details below each title. Enter opens a
@@ -330,7 +333,7 @@ history. Normal source availability/GC rules still apply.
 
 ### Deleting from the conversation list
 
-In Ctrl+T's list, select a saved conversation and press Delete or Ctrl+D for impact and confirmation. On macOS, fn+delete means Delete; ordinary delete/Backspace still removes filter characters.
+In `/threads` List mode, select a saved conversation and press Delete or Ctrl+D for impact and confirmation. On macOS, fn+delete means Delete; ordinary delete/Backspace still removes filter characters.
 
 Deleting child conversations is off by default. Toggling D/Space requeries impact. Only Y with the latest impact permitting deletion executes; N/Esc cancel. Reasons explain live/stopping Run blockers and similar restrictions. State is checked again during execution even after confirmation, and failures remain in the list.
 

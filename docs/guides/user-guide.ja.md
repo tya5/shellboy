@@ -96,7 +96,7 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 ## 3. 会話を切り替える
 
 - `/new`またはCtrl+Nで新しい下書きを作ります。最初の送信前はまだ保存済みThreadではありません。
-- `/threads`またはCtrl+Tで1行ずつの一覧を開き、上下キーとEnterで選びます。左右キーで親子を開閉・移動し、文字入力で絞り込みます。選択した項目の詳細と短い会話抜粋は下部、完全値はF1から確認できます。
+- `/threads`で1行ずつの一覧を開き、上下キーとEnterで選びます。Ctrl+TはこのUI内の直前の一覧／Watchを開きます（起動時は一覧、以前の子孫範囲や絞り込みは引き継ぎません）。左右キーで親子を開閉・移動し、文字入力で絞り込みます。選択した項目の詳細と短い会話抜粋は下部、完全値はF1から確認できます。
 - 一覧内のTabでWatchへ切り替えます。`/threads active`で直接開き、`/threads descendants`またはAlt+Dで現在の会話の子孫を監視できます。Enterで会話へ移動、Ctrl+S/Alt+RでRun停止／復旧待ちの再試行を確認し、Alt+Oで保存出力を読みます。[Watchの詳細](tui.md#watch-work-and-descendants)も参照してください。
 - IDが分かる場合は`/switch THREAD_ID`で移動できます。
 

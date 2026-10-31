@@ -2212,3 +2212,15 @@ executing read may finish and still passes its existing stale-result fences.
 This closes the queued-read gap without Core state, a new event/table/worker,
 separate cancellation queue, or an unbounded family of subscriptions. Revisit
 only if another actual bounded consumer joins this same snapshot.
+
+
+## F shortcut mode memory without scope persistence
+
+The final F requirement audit found Ctrl+T shared /threads' explicit-List route,
+so the previous-mode contract was missing. Reuse the existing browser enum to
+choose the existing global Watch or List entry path; do not add a preference,
+configuration key or Core state. Only mode is retained. A previous descendant
+root/filter is intentionally cleared, because after switching conversations it
+could silently monitor an unrelated old root; explicit /threads descendants
+or Alt+D selects the current saved Thread. Revisit if a separate scope-memory
+requirement is adopted. Slash commands remain explicit and a new UI starts List.

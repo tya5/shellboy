@@ -79,7 +79,7 @@ impl Page {
         page.entry("ホイール", "会話を上下にスクロールする");
         page.entry("PgUp / PgDn", "会話を画面単位で前後に読む");
         page.entry("Ctrl+End", "会話の末尾へ戻り、新しい出力に追従する");
-        page.entry("Ctrl+T", "会話一覧を開く（/threads）");
+        page.entry("Ctrl+T", "一覧/Watchを直前のモードで開く（/threadsは一覧）");
         page.entry("一覧内 Tab", "一覧とWatchを切り替える。文字入力は絞り込み");
         page.entry(
             "/threads active",
