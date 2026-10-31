@@ -61,6 +61,8 @@ def main():
                     terminal.send("\tb")
                     scene("chooser", lambda s: "コードの塊をコピー" in s and "[2] コピー" in s)
                     copy("2", "second 日本語 e\u0301🙂\n", "second-block")
+                    terminal.send("\x1b")
+                    scene("chooser-closed", lambda s: "コードの塊をコピー" not in s)
                     terminal.send("\x1b[1;5F")
                     copy("/copy all\r", many, "whole-body")
                     terminal.send("/switch visual-copy-none\r")
