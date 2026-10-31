@@ -62,7 +62,8 @@ def main():
                             terminal.send("/switch visual-notice-parent\r")
                             scene("current-name", lambda s: "現在の名前: Twin" in s)
                             terminal.send("\t")
-                            scene("paused-child", lambda s: "固定" in s and "現在の名前: Twin" in s)
+                            # Tab pauses follow and selects history, not F2 display freeze.
+                            scene("paused-child", lambda s: "o 原文" in s and "↓" in s and "現在の名前: Twin" in s)
                             cli("thread", "set", "--thread", "visual-notice-child", "--title", "RenamedChild")
                             scene("renamed-without-input", lambda s: "現在の名前: RenamedChild" in s)
                             terminal.send("\r")

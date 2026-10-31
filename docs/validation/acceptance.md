@@ -6057,3 +6057,39 @@ P1 measurements and the new `scripts/check-code-copy.py` real PTY matrix remain
 pending. Earlier stage-1 PTY captures do not prove these additional behaviors.
 Only synthetic fixtures and intercepted OSC52 are planned; no installed binary,
 real clipboard, paid model request or user data is part of this qualification.
+
+### #88 Saved Notification References: Partial Native Qualification
+
+macOS/aarch64, exact8097b1d on main805efc9, shared target, two build jobs and
+two test threads: `sh scripts/check.sh` passed formatting, clippy, layout94,
+70 Python tests and2116 Rust tests (0 failed,35 ignored). All four new source,
+rename/delete, generation/scope and off-window original unit cases passed.
+`cargo build --locked --bin shellboy --example visual_fixture` passed; both
+binaries were immediately copied to the task's `.local-bin/` before testing.
+Execution d77c5af6-fbd2-4169-8fa6-8c789aa6fdc2 ended1 after383.004s with confirmed
+process-group cleanup. Binary SHA256:
+`a798074f53d4dc1e1b4a3f9f213d8111bddc62636f37a6464c5228e9bacff211`;
+fixture SHA256:
+`114ea0672883a09ee94d3e15514414c94a0301ca37658b52ea422f41a474052c`.
+
+The synthetic PTY matrix passed80/dark/shell including exact original outside
+the current history window.80/dark/child showed the current name, then timed
+out at its60s watchdog awaiting a display-freeze label after Tab. Saved scenes
+show selected-history original/copy hints and the paused-follow down arrow;
+`history_interaction::select_history_item` sets follow=false, `chrome::footer_lines`
+renders that arrow, and the freeze label belongs to the separate F2 mode.
+The harness predicate is corrected to those actual selected-history/follow
+signals, but has not been rerun. Native rename/delete and14 unstarted matrix
+cases remain unqualified. Evidence: `/tmp/issue-88-second-qualification-pty/`
+and saved shell output parts `/tmp/issue-88-second-qualification-shell.json`,
+`/tmp/issue-88-second-qualification-tail.json`,
+`/tmp/issue-88-second-qualification-tail2.json`,
+`/tmp/issue-88-second-qualification-tail3.json`.
+
+The first chain e97a1c3d-e65a-4fac-9f97-8c565fb5ce57 stopped101 at clippy's E0425
+(new test in the wrong module); no Rust tests/build/PTY ran in that chain.
+That failure remains in `/tmp/issue-88-first-qualification-shell.json`.
+Python SQLite3.51 synthetic SQL/query-plan observations are non-Rust evidence,
+not native acceptance. No paid API, user data, installed binary or host clipboard
+was used. P1 is deferred, record-only and non-gating. No matrix rerun, cross-OS
+qualification or overall acceptance is claimed by this record.
