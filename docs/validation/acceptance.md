@@ -5138,7 +5138,7 @@ free, failed publication clears the slot, and completion/later-call isolation
 rules are retained. The original integration multiple_calls test passes without
 changing its commands, assertions or waits.
 
-Windows run 41192626561/job124512348162 reported draft revision99, 30 user nodes,
+Windows run 41192626561/job124512348162 reported draft revision 99, 30 user nodes,
 30 accepted receipts and an unfinished frontend. Send workers held their 32
 permits across optional HistoryReader::saved display work. Quit drops the
 background result receiver but did not cancel those reads; stalled presentation
@@ -5165,9 +5165,9 @@ Full latest-main standard checks, role/delta audit and exact submitted SHA are
 recorded in #96 rather than substituting an older tree's successful result.
 
 Latest-main local qualification on afe4c087 plus #96 succeeds: standard checks
-1,965 passed / 0 failed / 33 ignored, layout94, Python41, watchdog policy, format
+1,965 passed / 0 failed / 33 ignored, layout 94, Python 41, watchdog policy, format
 and strict all-target Clippy. The separate document-role test passes; bundled
-docs checks pass33 CLI checks / 13 guides / 3 categories / 147 links, in empty
+docs checks pass 33 CLI checks / 13 guides / 3 categories / 147 links, in empty
 cwd with cleared environment, absent config and no owner API. No earlier source
 success replaces the submitted tree's prepush recheck. Build contention was
 observed while other task builds ran; it is not a runtime performance result.
