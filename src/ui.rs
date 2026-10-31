@@ -5345,6 +5345,15 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         )),
         content,
     );
+    // Header markers may reset their own background; the surface owns its full extent.
+    frame.buffer_mut().set_style(
+        area,
+        Style::default().bg(state
+            .palette
+            .header()
+            .bg
+            .unwrap_or(ratatui::style::Color::Reset)),
+    );
 }
 fn draw_conversation(
     frame: &mut Frame<'_>,
@@ -7921,17 +7930,22 @@ mod band_extent_tests {
                     state.palette = theme::Palette::from_capabilities(mode, plain, true);
                     let mut terminal = Terminal::new(TestBackend::new(width, 4)).unwrap();
                     terminal
-                        .draw(|frame| draw_header(frame, Rect::new(0, 0, width, 1), &state))
+                        .draw(|frame| {
+                            draw_header(frame, Rect::new(0, 0, width, 1), &state);
+                            for x in 0..width {
+                                assert_eq!(
+                                    frame.buffer_mut()[(x, 0)].bg,
+                                    state.palette.header().bg.unwrap_or(Color::Reset),
+                                    "frame width={width} plain={plain} x={x}"
+                                );
+                            }
+                        })
                         .unwrap();
                     let row = terminal.backend().buffer();
                     assert_eq!(row[(0, 0)].symbol(), " ");
                     assert_eq!(row[(width - 1, 0)].symbol(), " ");
-                    for x in 0..width {
-                        assert_eq!(
-                            row[(x, 0)].bg,
-                            state.palette.header().bg.unwrap_or(Color::Reset)
-                        );
-                    }
+                    // TestBackend skips wide-glyph continuation cells. The frame
+                    // assertions above and real VT capture cover those colors.
                     assert_ne!(row[(1, 0)].symbol(), " ");
                 }
             }

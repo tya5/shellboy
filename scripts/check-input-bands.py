@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--mark", default="⇥")
     parser.add_argument("--columns", type=int, nargs="+", default=[80, 140])
     parser.add_argument("--live-probe", action="store_true")
+    parser.add_argument("--term", default="xterm-256color")
     args = parser.parse_args()
     binary, fixture = args.binary.resolve(), args.fixture.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
@@ -51,7 +52,8 @@ def main():
                 with sqlite3.connect(root / "data/shellboy.db") as db:
                     expected = [json.loads(row[0])["content"] for row in db.execute(
                         "SELECT payload_json FROM node WHERE id LIKE 'visual-input-bands-node-%' ORDER BY id")]
-                terminal = capture.Terminal(binary, root, cols, palette, "xterm-256color", no_color)
+                terminal = capture.Terminal(binary, root, cols, palette, args.term, no_color)
+                plain = no_color or "256color" not in args.term
                 try:
                     terminal.expect(lambda text: "F1 help" in text, "ready")
                     terminal.send("/switch visual-input-bands\r")
@@ -67,9 +69,9 @@ def main():
                     mark_rows = [i for i, row in enumerate(rows) if args.mark in row]
                     assert len(mark_rows) == 4, text
                     band_end = next(i for i, row in enumerate(rows) if "CODE_END" in row)
-                    expected_bg = "default" if no_color else ("262626" if palette == "dark" else "dadada")
+                    expected_bg = "default" if plain else ("262626" if palette == "dark" else "dadada")
                     header = terminal.screen.buffer[0]
-                    header_bg = "default" if no_color else ("1c1c1c" if palette == "dark" else "d0d0d0")
+                    header_bg = "default" if plain else ("1c1c1c" if palette == "dark" else "d0d0d0")
                     assert header[0].data == header[cols - 1].data == " ", (name, "header inset")
                     assert all(header[x].bg == header_bg for x in range(cols)), (name, "header background")
                     color_evidence = []
@@ -78,7 +80,7 @@ def main():
                         if not rows[y].strip():
                             continue
                         backgrounds = [row[x].bg for x in range(cols)]
-                        if no_color:
+                        if plain:
                             assert set(backgrounds) == {"default"}, (name, y, backgrounds)
                         else:
                             colored = [x for x, bg in enumerate(backgrounds) if bg == expected_bg]
