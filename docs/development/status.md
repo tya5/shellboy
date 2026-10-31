@@ -2783,11 +2783,18 @@ and subsequent model input. Only execution deserialization/display labels are
 80-character bounded; no normalization or truncation marker is persisted.
 Updated exact-source qualification is recorded in issue #97 after its next lease.
 
-## #88 notification references: implementation in progress
+## #88 notification references: native qualification complete, review required
 
 The UI-only bounded metadata projection and exact original-reference navigation
-are prepared on landed #87/main805efc9. Synthetic unit cases cover identity,
-rename/delete, query counts/plans and stale dependency ownership. First native
+are implemented on landed #87/main805efc9. At8f9e457, the corrected16-case native
+PTY matrix passed (80/140 columns, dark/light/NO_COLOR/vt100, shell/child),
+including exact original access, duplicate short names, reactive rename while
+paused and deletion without input. Latest-HEAD standard checks then passed2116
+Rust tests (0 failures,35 ignored),70 Python tests, layout94, fmt and clippy.
+Review is required; this is not cross-OS qualification or reviewer acceptance.
+The following earlier failed attempts remain part of the validation history.
+Synthetic unit cases cover identity, rename/delete, query counts/plans and stale
+dependency ownership. First native
 qualification passed formatting, integration layout (94 suites) and 70 Python
 tests, then stopped at clippy compilation: the new exact-original UI test was
 placed in a sibling module without its fixture/key helpers (E0425). The test is
@@ -2798,8 +2805,8 @@ out-of-window original, and the child PTY displayed its current name. That child
 case then hit the 60-second watchdog waiting for the wrong pause label: Tab
 selects history and pauses follow (observed original/copy hints and down arrow),
 whereas the expected freeze label belongs to F2 display freeze. The harness now
-checks the selected-history hint plus paused-follow arrow; this correction has
-not been rerun. Rename/delete and the other 14 matrix cases remain unqualified.
+checks the selected-history hint plus paused-follow arrow. The third chain
+subsequently qualified all16 cases, superseding that earlier partial result.
 The first failed chain ran no Rust tests/build/PTY. Python SQLite3.51 synthetic
 metadata/query-plan observations remain separate non-Rust evidence. No Core
 event, protocol or storage schema is changed. P1 remains deferred and non-gating.

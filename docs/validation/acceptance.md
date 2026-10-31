@@ -6093,3 +6093,35 @@ Python SQLite3.51 synthetic SQL/query-plan observations are non-Rust evidence,
 not native acceptance. No paid API, user data, installed binary or host clipboard
 was used. P1 is deferred, record-only and non-gating. No matrix rerun, cross-OS
 qualification or overall acceptance is claimed by this record.
+
+### #88 Corrected Full Matrix And Latest-HEAD Standard
+
+The third chain supersedes the partial-matrix limitation above, not its failure
+history. On macOS/aarch64 at8f9e457af8dbafa6be92f1f5278393a877b7d2e8,
+`git fetch origin` confirmed main805efc9 and rebase was a no-op. Rust/Cargo inputs
+were identical to8097b1d; copied binary/fixture SHA256 values matched the recorded
+`a798074f...` / `114ea067...` hashes before use. No rebuild was needed.
+
+`python3 scripts/check-notice-references.py --binary "$PWD/.local-bin/shellboy"
+--fixture "$PWD/.local-bin/visual_fixture" --out /tmp/issue-88-third-qualification-pty`
+passed all16 cases:80/140 columns x dark/light/NO_COLOR/vt100 x shell/child.
+Each shell scene displayed bounded command/background facts without raw output,
+then opened the exact saved original outside the current history window.
+Each child scene distinguished two identical short names by saved identity,
+showed the new current name without input while history-follow was paused,
+opened only the correct child, and reacted to deletion without input. No OSC52
+clipboard command was emitted. Raw captures and screen snapshots are retained
+with the manifest in `/tmp/issue-88-third-qualification-pty/`.
+
+The same bounded chain then ran `sh scripts/check.sh` at latestHEAD: layout94,
+70 Python tests, fmt, clippy and2116 Rust tests passed (0 failures,35 ignored).
+Execution7716219a-0ed5-4133-8cfc-e357a38b7aae exited0 after360.771s with confirmed
+process-group cleanup. Saved output is in
+`/tmp/issue-88-third-qualification-0.json` through
+`/tmp/issue-88-third-qualification-3.json`. Two build jobs/test threads and the
+shared target were used. No additional Rust/PTY/P1 chain started on release.
+
+These are synthetic native macOS results, not Windows/Linux or physical-terminal
+qualification. P1 remains deferred, record-only and non-gating. Python SQLite
+observations remain separately classified. Both prior failed attempts remain
+recorded. Push approval does not imply acceptance; reviewer review is required.
