@@ -5256,7 +5256,16 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         .snapshot
         .as_ref()
         .and_then(|s| s.recovery.as_ref())
-        .map(|r| (r.message.as_str(), true));
+        .map(|r| {
+            (
+                if r.usage_limit.is_some() {
+                    activity::FooterText::RecoveryActions.text()
+                } else {
+                    r.message.as_str()
+                },
+                true,
+            )
+        });
     let notice = state
         .input_notice
         .map(|text| (text, true))
@@ -6185,6 +6194,8 @@ mod layout_cache_tests {
         let revision = ui.view().history_revision();
         let generation = ui.view().generation;
         let snapshot = ActivitySnapshot {
+            timing: Default::default(),
+            tool_running: false,
             live_work: None,
             revisit: None,
             context_reduction: None,

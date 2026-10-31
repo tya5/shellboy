@@ -162,9 +162,9 @@ pub(super) fn footer_lines(
         .as_ref()
         .is_some_and(|snapshot| snapshot.turn_in_progress)
         && phase != super::activity::ActivityPhase::Recovery
-        && let Some(elapsed) = view.activity.displayed_elapsed_ms()
+        && let Some(elapsed) = view.activity.phase_time_note(std::time::Instant::now())
     {
-        facts.push(format!("{}s", elapsed / 1000));
+        facts.push(elapsed);
     }
     if !view
         .activity
@@ -174,6 +174,9 @@ pub(super) fn footer_lines(
         && let Some(work) = view.live_work.footer()
     {
         facts.push(work);
+    }
+    if let Some(secondary) = view.activity.secondary_note(std::time::Instant::now()) {
+        facts.push(secondary);
     }
     if view.pending_messages.total > 0 {
         facts.push(format!("待ち {}", view.pending_messages.total));
@@ -185,6 +188,9 @@ pub(super) fn footer_lines(
         facts.push(format!("× {}", view.cancelled_calls));
     }
     if let Some(snapshot) = view.activity.snapshot.as_ref() {
+        if let Some(limit) = snapshot.recovery.as_ref().and_then(|r| r.limit_summary()) {
+            facts.push(limit);
+        }
         if let Some(retry) = snapshot.automatic_retry.as_ref() {
             facts.push(retry.label());
         }
