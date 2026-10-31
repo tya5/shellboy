@@ -12,6 +12,7 @@ mod header;
 mod history_reader;
 mod input_history;
 mod inspection_attachments;
+mod inspection_deletion;
 mod inspection_lifecycle;
 mod inspection_operation;
 mod inspection_saved;
@@ -184,6 +185,12 @@ async fn management_request_trigger(
     cancel: CancellationToken,
     trigger: crate::usage_totals::UsageTrigger,
 ) -> Result<Value, ApiError> {
+    if let Command::ThreadDeletePreview(args) = command {
+        return match inspection_deletion::request(control, args, cancel).await {
+            Ok(value) => Ok(value),
+            Err(error) => Ok(serde_json::json!({"error":error})),
+        };
+    }
     if matches!(command, Command::StorageStatus(_)) {
         return match inspection_storage::request(control, cancel).await {
             Ok(value) => Ok(value),

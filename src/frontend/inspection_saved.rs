@@ -885,7 +885,17 @@ mod tests {
                 )
                 .await
                 .unwrap();
-                (values, storage)
+                let deletion = super::super::management_request(
+                    &control,
+                    Command::ThreadDeletePreview(crate::protocol::ThreadDeleteArgs {
+                        thread_id: "target".into(),
+                        descendants: false,
+                    }),
+                    tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+                (values, storage, deletion)
             })
             .await;
         // Always release before asserting so the intentional red cannot strand
@@ -901,7 +911,12 @@ mod tests {
             .unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
-        let (values, storage) = observed.unwrap();
+        let (values, storage, deletion) = observed.unwrap();
+        assert_eq!(deletion["thread_id"], "target");
+        assert_eq!(deletion["snapshot_only"], true);
+        assert_eq!(deletion["deletable_now"], false);
+        assert_eq!(deletion["blockers"]["live_run_count"], 1);
+        assert_eq!(deletion["view_observation"]["thread_id"], "target");
         assert!(storage["logical"]["bytes"].as_u64().is_some());
         assert_eq!(storage["physical_observation"]["available"], true);
         assert!(storage["view_observation"].get("thread_id").is_none());

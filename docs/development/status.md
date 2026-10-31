@@ -2793,3 +2793,16 @@ Native library1186/0/15, the selected storage/history-detail integration1/0 and
 strict all-target Clippy pass. This is not a new full-standard/3OS claim. G5/G6
 notifications/visibility/late/cancel/shared admission, remaining G7 domain reads,
 and G9–G12 gates are open. No G push/main admission/release/install/user-data change.
+
+## G7 saved deletion review checkpoint
+
+Generic F8 deletion previews now read bounded saved facts on readonly snapshots;
+the dedicated exact confirmation/execution remains unchanged. Domain ownership,
+limits, unknown negative evidence, positive blockers and512-byte scalar rejection
+are explicit. Common review metadata stays visible beside dense lists without
+raising output caps. Native standard2160/0/35 and Python70/strict all-target
+Clippy pass on main66d2746 plus current G. See acceptance for exact harnesses and
+scope. No live-observer/P3/P6/native-screen/three-OS completion follows from this.
+Next finish remaining index/context saved reads and connect the existing bounded
+observer/shared admission, with status/history/readback inventory still mandatory.
+G remains local; no main admission/push/release/install/user-data change.

@@ -5718,8 +5718,7 @@ Clippy/Python/layout/watchdog but stopped1149/1/15 in the library: a newly added
 ordering fixture used NULL where started_at is NOT NULL. That fixture now uses a
 legal empty timestamp; no schema constraint, assertion or watchdog was relaxed.
 Final `sh scripts/check.sh` v6 completed successfully on this commit's runtime
-source:2109 passed/0 failed/35 ignored (library1150, integration940, block
-replacement12, frontend structure7), Python66, layout94, watchdog/fmt and strict
+source:2109 passed/0 failed/35 ignored (library1150, integration940, termination_signals12, tool_group_crash_recovery7), Python66, layout94, watchdog/fmt and strict
 all-target Clippy. The exact initial totals/deleted marker, legal empty ordering,
 blocked writer across all five targets, and existing overview/history/edit detail
 integration tests all ran and passed. These results do not qualify live subscriptions,
@@ -5747,7 +5746,7 @@ Runtime source: this attachment/reference unit plus its common-field parent,
 on288ec0d. Native macOS, pinned Rust1.99.1; temporary synthetic databases and
 loopback-discard configuration; no model API, user database or installed binary.
 Final `sh scripts/check.sh` v6:2124 passed/0 failed/35 ignored (library1164,
-integration941, block replacement12, frontend structure7), Python66, layout95,
+integration941, termination_signals12, tool_group_crash_recovery7), Python66, layout95,
 watchdog/fmt and strict all-target Clippy pass. Actual named tests for bounded
 metadata roots, exact selection outside the list cohort, explicit foreign record
 scope/source, blocked writer across eight read routes and existing structured
@@ -5945,3 +5944,36 @@ presentation; canonical CLI StorageStatus fields are unchanged. Diff checks reta
 main-identical os_signals, owner_shutdown, preview_reads, streams and tools files.
 Full standard and three-OS/runtime qualification for this merged source remain
 unperformed; earlier full standards qualify their own sources only.
+
+## G7 bounded deletion observations and dense review metadata
+
+Runtime source: this deletion-read unit and its common-field parent on885ee14.
+Native macOS, pinned Rust1.99.1, synthetic temporary SQLite only. Targeted domain
+suite7/0, blocked-writer management route1/0 and strict library Clippy passed.
+Final `sh scripts/check.sh` v2:2160 passed/0 failed/35 ignored (library1194,
+integration947, termination_signals12, tool_group_crash_recovery7, four zero-test
+harnesses), Python70, layout95, watchdog/fmt and strict all-target Clippy pass.
+Earlier G checkpoint harness labels were corrected against their saved Running
+lines; totals/source results are unchanged, not new test evidence.
+
+The readonly saved preview examines256 descendant candidates with a sentinel,
+depth8 and1024 combined relationship witnesses. Existing physical indexes admit
+candidates before deleted/noncompleted exclusions; larger hidden populations do
+not turn negative evidence into a full scan or an invented zero. Small complete
+results match canonical preview, including deleted bridge semantics, shared paths,
+replacement sources and attachments. Scope/reference truncation keeps unproven
+negative counts/permission unknown; a known live/stopping Run still denies deletion.
+A1MiB scalar is rejected with InputLimit before UTF-8 decoding/owned copy, and
+restoring the cell restores canonical parity. No read modifies selected paths,
+receipts or target state. The dedicated exact confirmation/execution and Core
+deletion implementation are unchanged; generic preview facts are not authorization.
+
+Dense results reserve permission/snapshot/reference metadata and exact blocker
+count pointers under the existing128-field/64KiB field cap; full retained detail
+is unchanged. The regression uses50 Run rows and asserts both exact counts and
+snapshot/permission/coverage/time facts. Storage category help now states the
+canonical rule: collection filters, status shows all categories. GC saved views
+reuse the existing terminal-state predicate. No new schema/index/worker/queue or
+Core protocol operation. No new observed test failure on this unit. Reactive
+notifications/shared admission, remaining index/context/history/status/readback
+coverage and G9–G12 evidence remain incomplete.

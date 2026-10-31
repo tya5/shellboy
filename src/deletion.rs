@@ -1,4 +1,5 @@
 //! Snapshot facts for deletion review; no independent GC reachability engine.
+pub(crate) mod observation;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 

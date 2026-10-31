@@ -302,7 +302,7 @@ pub(crate) fn read_tx(
             .collect::<Result<Vec<_>, _>>()?;
         remaining -= used;
         executions.push(Execution {
-            terminal: matches!(state.as_str(), "exited" | "failed" | "stopped"),
+            terminal: super::terminal(&state),
             pinned,
             marked,
             ended,
