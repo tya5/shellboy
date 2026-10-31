@@ -273,3 +273,8 @@ model-list total deadlines remain strict. Error-body stalls preserve the already
 received status, so permanent statuses remain ineligible for automatic resend.
 Virtual-clock ties and explicit header-reception fences test this ordering;
 passing a wall-clock rerun alone does not explain a CI failure or count HTTP sends.
+
+An already-expired wait is rejected before the first poll of a new outgoing
+request. The ready-response preference applies after on-time initial admission;
+it must not initiate a late POST merely to look for headers. Virtual-clock tests
+cover both the late-wakeup tie and this no-initial-poll boundary.
