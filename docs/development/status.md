@@ -2049,3 +2049,18 @@ and applicable P2/P3/P4/P5 with native/manual CI. The2 explicit P4 timing/stress
 tests are ignored, not qualified. E main admission still awaits separate review
 approval; F/G are not admitted. Windows/Linux ordinary CI and physical terminals
 are untested for this source. #83–#87 remain outside this work.
+
+
+## F actual scoped Watch/CLI proof
+
+An actual separate CLI/local IPC/Control/Frontend/Ratatui fixture now covers
+unowned descendant admission, parent-title dependency, recovery and terminal
+counts without candidate-page reload or parent-conversation reload. Metadata,
+painted details and counts share one sequence. A real confirmed retry packet is
+delayed across a separate CLI retry/recovery: the old generation is rejected
+and exactly2 model attempts exist, with no third HTTP request. Action failures
+now retain the action title and explicit unapplied status. Native macOS focused
+case passes1/0/0 (939 filtered), using only loopback mock HTTP and temporary data;
+observed event-to-paint477/496/494ms are observations, not performance pass guards.
+Canonical60s watchdogs/readiness replace imported15s limits. This source has not
+yet received a new full standard check or native three-OS/physical-terminal proof.

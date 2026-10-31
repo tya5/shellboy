@@ -34,6 +34,8 @@ struct Fixture {
     browser_sequences: Vec<u64>,
     browser_pages: usize,
     browser_selected_ready: bool,
+    watch_details: Vec<(u64, shellboy::ui::watch::PreparedWatchDetail)>,
+    descendant_snapshots: Vec<(u64, Vec<shellboy::ui::watch::DescendantCount>)>,
 }
 impl Fixture {
     async fn new(url: &str) -> Self {
@@ -95,6 +97,8 @@ impl Fixture {
             browser_sequences: Vec::new(),
             browser_pages: 0,
             browser_selected_ready: false,
+            watch_details: Vec::new(),
+            descendant_snapshots: Vec::new(),
         };
         fixture
             .until("initial selected header", |ui, screen| {
@@ -118,6 +122,24 @@ impl Fixture {
                     .is_some_and(|(id, value)| id == "reactive" && value.is_ok());
             }
             UiUpdate::Threads { .. } => self.browser_pages += 1,
+            UiUpdate::WatchDetails {
+                read_sequence,
+                details,
+                ..
+            } => self.watch_details.extend(
+                details
+                    .iter()
+                    .cloned()
+                    .map(|detail| (*read_sequence, detail)),
+            ),
+            UiUpdate::Descendants {
+                read_sequence,
+                counts,
+                error: None,
+                ..
+            } => self
+                .descendant_snapshots
+                .push((*read_sequence, counts.clone())),
             _ => {}
         }
         if let UiUpdate::DetailLinks {
@@ -214,6 +236,31 @@ impl Fixture {
                 self.bridge.is_finished()
             )
         })
+    }
+    async fn command(&mut self, text: &str) {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        // Pasted slash text is deliberately literal user content. Type a real
+        // command here, rather than asking a model to execute its quoted text.
+        for event in text
+            .chars()
+            .map(|ch| Event::Key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)))
+            .chain(std::iter::once(Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            ))))
+        {
+            for action in self.ui.event(event) {
+                self.actions.send(action).await.unwrap();
+            }
+        }
+    }
+    async fn cli_thread(&self, thread: &str, args: &[&str]) -> (Value, Instant) {
+        let mut events = self.control.subscribe();
+        let thread = thread.to_owned();
+        let observed =
+            tokio::spawn(async move { changed_thread_at(&mut events, &thread, false).await });
+        let (value, _) = self.cli_only(args).await;
+        (value, observed.await.unwrap())
     }
     async fn cli(&self, args: &[&str]) -> (Value, Instant) {
         let mut changed = self.control.subscribe();
@@ -973,4 +1020,246 @@ async fn foreign_cli_creates_and_deletes_unloaded_browser_rows_without_input_or_
     assert_eq!(fixture.ui.list_generation(), generation);
     assert_eq!(fixture.browser_pages, pages);
     fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retry_confirmation() {
+    watchdog("scoped Watch CLI lifecycle and stale confirmation", async {
+
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use shellboy::activity::ActivityPhase;
+    let (url, mut requests, proxy) = failing_proxy().await;
+    let mut fixture = Fixture::new(&url).await;
+    let (forked, _) = fixture
+        .cli_only(&[
+            "thread",
+            "fork",
+            "--thread",
+            "reactive",
+            "--node",
+            "paid-baseline",
+        ])
+        .await;
+    let child = forked["result"]["thread_id"].as_str().unwrap().to_owned();
+    fixture
+        .cli_only(&[
+            "thread",
+            "set",
+            "--thread",
+            &child,
+            "--title",
+            "F_SCOPED_UNOWNED_CHILD",
+        ])
+        .await;
+    let prior_pages = fixture.browser_pages;
+    fixture.command("/threads descendants").await;
+    fixture
+        .observed_until("scoped Watch opens actual candidate page", |f, screen| {
+            f.ui.threads_visible() && screen.contains("子孫の監視") && f.browser_pages > prior_pages
+        })
+        .await;
+    let generation = fixture.ui.list_generation();
+    let pages = fixture.browser_pages;
+    let (sent, commit) = fixture
+        .cli_thread(
+            &child,
+            &[
+                "message",
+                "send",
+                "--thread",
+                &child,
+                "--text",
+                "F_UNOWNED_CHILD_REQUEST",
+            ],
+        )
+        .await;
+    let run = sent["result"]["run_id"].as_str().unwrap().to_owned();
+    let first = watchdog("controlled proxy request", requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    fixture
+        .observed_until(
+            "new unowned descendant appears without input",
+            |f, screen| {
+                screen.contains("F_SCOPED_UNOWNED_CHILD")
+                    && f.descendant_snapshots.last().is_some_and(|(_, counts)| {
+                        counts.iter().any(|count| {
+                            count.root == "reactive" && count.active == 1 && count.recovery == 0
+                        })
+                    })
+            },
+        )
+        .await;
+    latency("watch_new_unowned_descendant", commit);
+    fixture
+        .observed_until("painted child gets bounded real details", |f, _| {
+            f.watch_details.iter().rev().any(|(_, detail)| {
+                detail.facts().thread_id == child
+                    && detail.facts().phase == ActivityPhase::AwaitingModel
+            })
+        })
+        .await;
+    let (_, commit) = fixture
+        .cli(&[
+            "thread",
+            "set",
+            "--thread",
+            "reactive",
+            "--title",
+            "F_PARENT_TITLE_CHANGED",
+        ])
+        .await;
+    fixture
+        .observed_until("parent-only dependency refreshes visible child", |f, _| {
+            f.ui.view().title == "F_PARENT_TITLE_CHANGED"
+                && f.watch_details
+                    .iter()
+                    .rev()
+                    .find(|(_, detail)| detail.facts().thread_id == child)
+                    .is_some_and(|(_, detail)| {
+                        detail.facts().parent_title.as_deref() == Some("F_PARENT_TITLE_CHANGED")
+                    })
+        })
+        .await;
+    latency("watch_parent_title_dependency", commit);
+    fixture.view_sequences.clear();
+    fixture.browser_sequences.clear();
+    fixture.watch_details.clear();
+    fixture.descendant_snapshots.clear();
+    let mut events = fixture.control.subscribe();
+    let target = child.clone();
+    let recovery = tokio::spawn(async move { changed_thread_at(&mut events, &target, true).await });
+    first.reply.send(()).unwrap();
+    let commit = recovery.await.unwrap();
+    fixture
+        .observed_until(
+            "same read updates Watch recovery and parent counts",
+            |f, _| {
+                f.descendant_snapshots.last().is_some_and(|(_, counts)| {
+                    counts.iter().any(|count| {
+                        count.root == "reactive" && count.active == 0 && count.recovery == 1
+                    })
+                }) && f
+                    .watch_details
+                    .iter()
+                    .rev()
+                    .find(|(_, detail)| detail.facts().thread_id == child)
+                    .is_some_and(|(_, detail)| detail.facts().phase == ActivityPhase::Recovery)
+            },
+        )
+        .await;
+    latency("watch_recovery_and_parent_counts", commit);
+    let count_sequence = fixture.descendant_snapshots.last().unwrap().0;
+    assert!(
+        fixture.browser_sequences.contains(&count_sequence),
+        "metadata and counts share one transaction"
+    );
+    assert!(
+        fixture
+            .watch_details
+            .iter()
+            .any(|(seq, detail)| *seq == count_sequence && detail.facts().thread_id == child),
+        "visible details share the count snapshot"
+    );
+    assert!(
+        fixture.view_sequences.is_empty(),
+        "an unowned child change must not reload the parent's conversation"
+    );
+    assert_eq!(fixture.ui.list_generation(), generation);
+    assert_eq!(
+        fixture.browser_pages, pages,
+        "ordinary changes must not reload candidates"
+    );
+    let old_generation = fixture
+        .watch_details
+        .last()
+        .unwrap()
+        .1
+        .facts()
+        .turn_generation
+        .unwrap();
+    for action in fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('r'),
+        KeyModifiers::ALT,
+    ))) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture
+        .until("exact retry confirmation", |_, screen| {
+            screen.contains("再試行しますか") && screen.contains(&run)
+        })
+        .await;
+    // Capture a genuinely confirmed UI packet, then delay delivery while another
+    // CLI changes the same Turn. This exercises the DB guard, not a forged ID.
+    let confirmed = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('y'),
+        KeyModifiers::NONE,
+    )));
+    assert!(
+        matches!(confirmed.as_slice(),[UiAction::WatchAction(target)] if target.turn_generation==Some(old_generation))
+    );
+    fixture.cli_only(&["run", "retry", "--run", &run]).await;
+    let second = watchdog("controlled proxy request", requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut events = fixture.control.subscribe();
+    let target = child.clone();
+    let recovered =
+        tokio::spawn(async move { changed_thread_at(&mut events, &target, true).await });
+    second.reply.send(()).unwrap();
+    recovered.await.unwrap();
+    fixture
+        .observed_until("new recovery generation is visible", |f, _| {
+            f.watch_details
+                .iter()
+                .rev()
+                .find(|(_, detail)| detail.facts().thread_id == child)
+                .is_some_and(|(_, detail)| {
+                    detail.facts().phase == ActivityPhase::Recovery
+                        && detail
+                            .facts()
+                            .turn_generation
+                            .is_some_and(|generation| generation > old_generation)
+                })
+        })
+        .await;
+    for action in confirmed {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture
+        .until(
+            "delayed confirmation fails without retrying replacement work",
+            |_, screen| screen.contains("未適用"),
+        )
+        .await;
+    let saved_run = run.clone();
+    let (turn_generation,attempts):(u64,u64)=fixture.control.store.database.call(move|db|{
+        Ok((db.query_row("SELECT generation FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[&saved_run],|row|row.get::<_,i64>(0))? as u64,
+            db.query_row("SELECT count(*) FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.run_id=?1",[saved_run],|row|row.get::<_,i64>(0))? as u64))
+    }).await.unwrap();
+    assert_eq!(turn_generation, old_generation + 1);
+    assert_eq!(
+        attempts, 2,
+        "stale confirmation must not create a third model attempt"
+    );
+    assert!(requests.try_recv().is_err());
+    fixture.cli_only(&["run", "stop", "--run", &run]).await;
+    fixture
+        .observed_until("terminal unowned descendant count settles", |f, _| {
+            f.descendant_snapshots.last().is_some_and(|(_, counts)| {
+                counts.iter().any(|count| {
+                    count.root == "reactive"
+                        && count.available
+                        && count.active == 0
+                        && count.recovery == 0
+                })
+            })
+        })
+        .await;
+    fixture.finish().await;
+    proxy.abort();
+
+    }).await.expect("scoped Watch lifecycle watchdog");
 }

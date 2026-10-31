@@ -1878,7 +1878,7 @@ async fn run_with_delivery(
                             if output {
                                 let result=prepare_management(response,control.store.config.cache.body_bytes).await;
                                 let _=results.send(BackgroundResult::Command {work_status:false,context:None,generation,title,result}).await;
-                            } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,error).await,}}
+                            } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,format!("{title}は未適用 · {error}")).await,}}
                         });
                     },
                     UiAction::ProgramStatusSeen { thread_id, run_id } => {
