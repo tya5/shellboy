@@ -2350,3 +2350,21 @@ bounded formatting bands and visible-ID scope; do not broaden formatting work.
 The patch is confined to presentation, with no new state/epoch/table/index/
 worker/queue/pool/timer and no replay of the unreviewed E browser draft. User
 binary, owner and databases remain unchanged; Core/UI review is required.
+## #5 stage 2: startup-only adapter and failure observation (2026-10-31)
+
+Use the shared owner_session assembly and cleanup, keeping TUI in-process. serve
+requires explicit nonempty data-dir, performs ordinary config resolution and
+emits a flushed ready JSON only for an assembled IPC/dispatcher. It never obtains
+owner identity from inherited CLI endpoint/origin variables. Existing per-tool
+identity assembly is reused; Windows clears an inapplicable inherited Unix
+socket. API/proxy environment and runtime global environment are not rewritten.
+
+Readiness JSON requires a UTF-8 absolute path; reject a nonrepresentable path
+with cleanup rather than fabricate a lossy directory identity. Startup errors
+remain stderr, distinct from normal CLI Response stdout. The ready-write failure
+fixture uses an inherited read-only file, not scheduling sleeps or a production
+fault-injection hook. Tokio output() would replace that handle, so use explicit
+spawn/wait_with_output. No new table, worker, queue or owner mode-specific Core
+engine is introduced. Graceful shutdown, signal ordering and final lifecycle
+rows are stage 3, not a claimed property of this startup-only increment. Core
+review and integration approval remain required for the final stage 2 source.
