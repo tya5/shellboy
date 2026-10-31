@@ -162,6 +162,13 @@ impl Browser {
         self.last_visible = false;
         Some(value)
     }
+    pub fn blocks_selected_refresh(&self, thread: &str) -> bool {
+        self.scope
+            .as_ref()
+            .is_some_and(|scope| scope.visible && scope.selected.as_deref() == Some(thread))
+            && self.dirty.contains(thread)
+            && self.inflight.is_some()
+    }
     pub fn deadline(&self) -> Option<tokio::time::Instant> {
         (self.scope.as_ref().is_some_and(|s| s.visible)
             && self.resync.is_none()
@@ -294,6 +301,63 @@ pub(super) async fn page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn pending_selected_change_waits_for_combined_read_after_prior_ticket_completes() {
+        let mut browser = Browser::default();
+        browser
+            .observe(1, "".into(), Some("selected".into()), true)
+            .unwrap();
+        let start = tokio::time::Instant::now();
+        let previous = browser.take(start).unwrap();
+        browser.changed("selected");
+        let dirty = std::collections::HashSet::from(["selected".to_owned()]);
+        tokio::time::advance(PERIOD).await;
+        assert!(
+            browser.deadline().is_none(),
+            "previous browser read still owns its ticket"
+        );
+        assert!(browser.blocks_selected_refresh("selected"));
+        assert!(!browser.blocks_selected_refresh("other"));
+        assert!(browser.complete(&previous));
+        assert!(!browser.blocks_selected_refresh("selected"));
+        assert!(
+            browser.deadline().is_some(),
+            "old browser can complete before its paired view worker"
+        );
+        assert!(
+            super::super::standalone_browser_deadline(
+                &browser,
+                Some("selected"),
+                &dirty,
+                Some(start + PERIOD)
+            )
+            .is_none(),
+            "an inflight selected read makes refresh_deadline absent, not permission for a standalone browser read"
+        );
+        assert!(
+            super::super::standalone_browser_deadline(
+                &browser,
+                Some("selected"),
+                &std::collections::HashSet::new(),
+                Some(start + PERIOD)
+            )
+            .is_some(),
+            "browser-only work retains its existing deadline"
+        );
+        assert!(
+            super::super::standalone_browser_deadline(
+                &browser,
+                Some("other"),
+                &dirty,
+                Some(start + PERIOD)
+            )
+            .is_some()
+        );
+        let combined = browser.take(tokio::time::Instant::now()).unwrap();
+        assert_eq!(combined.selected.as_deref(), Some("selected"));
+        assert_eq!(combined.ids, ["selected"]);
+    }
+
     #[test]
     fn coalesces_exact_ids_and_keeps_one_flight_with_a_global_start_deadline() {
         let mut browser = Browser::default();
