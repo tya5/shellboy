@@ -627,3 +627,17 @@ archived inspector over that work. Issue5 stage1 moves owner assembly from
 frontend/startup.rs to a shared module. Reconcile F's two startup fixture lines
 with that owner path on the later side. This is integration coordination, not
 authorization for F/G main admission or an expansion into transferred UI work.
+
+
+## F pre-admission evidence at4b61c0f
+
+The [F evidence map](../validation/conversation-redesign-f.md#requirement-evidence-map-before-final-admission)
+now traces F1–F16 to implementation and actual tests/observations. Candidate
+4b61c0f retains main2b3cd91 and passes native standard2,026/0/35, final native
+Watch8 conditions/56 stages and P3 six cases/96 actual CLI changes. It is
+published only on the F branch. Ordinary3OS41193738579 and final-source long
+P2/P5 comparison41193740385 are running. Remaining gates: inspect their actual
+artifacts, resolve strict P2 CPU/bin interpretation with review, retain newer
+main/admission fixes such as #95, and obtain separate F main approval. Historical
+"open" paragraphs above retain their own observation dates and are not used to
+claim these later gates never ran. F/G main order and transferred scope remain.

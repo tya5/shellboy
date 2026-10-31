@@ -187,3 +187,60 @@ emoji titles are ellipsized while the leading state, factual state age, parent
 and footer remain visible. Both actual images were reviewed; these captures do
 not substitute for live-shell lifecycle or Windows terminal evidence. No paid
 provider, user's database, clipboard or running terminal session is used.
+
+
+## Latest-main candidate4b61c0f
+
+This F source includes main2b3cd91 (#5 stage1 owner_session extraction and #94
+helpers), with no G implementation. Native macOS standard succeeds:2,026
+passed/0 failed/35 ignored, Python39, format, strict all-target Clippy and layout/
+watchdog checks. The seven explicitly checked harness lines include both new
+Watch render regressions, all three cancellation regressions, paired snapshot
+and actual scoped-Watch CLI lifecycle. Node CI-reuse suite:12/0. Gitleaks
+950c9ed..4b61c0f:15 commits/no leaks. Record-delta versus main2b3cd91:
+status+431, acceptance+225, decisions+44; all deleted0.
+
+Actual native macOS PTY on the measurement-only frozen release binary passes
+8 conditions/56 stages (80/140, dark/light/NO_COLOR/vt100), including parent/
+child creation through actual CLI, active→unread, Tab List/Watch, Esc and normal
+/quit exit0. Binary witness13542afa1ab8031d967d85ba13806c7809f1cad89b9b29380f2dafb578578d20.
+The two real WezTerm images above use separately frozen earlier Watch-layout
+code c5785c5, not falsely relabelled to this integration.
+
+### P3 follow-up on4b61c0f
+
+The same temporary50-Thread/128-node/50x64KiB dataset and real CLI/native
+140x40 controller run3 modes with Program Status on/off:6 independent cases,
+4 warmups+16 measured updates each. All96 measured changes reach header and
+visible row/parent facts, exit0, no provider request,0 UI writer jobs. On cases
+show exactly16 snapshot.rs and16 preexisting program_status.rs opens; off
+cases isolate16 shared reads. This preserves the #54 consumer rather than
+hiding it from totals. Lexical RO lifetime and RPC-start latency have the same
+limits as the earlier P3 observation.
+
+| Program Status | Mode | Total RO reads | Aggregate RO ms | RPC-start-to-drawn p95 ms |
+| --- | --- | ---: | ---: | ---: |
+| on | descendants | 32 | 136.826 | 532.374 |
+| on | list | 32 | 117.328 | 529.906 |
+| on | watch | 32 | 121.010 | 534.304 |
+| off | descendants | 16 | 67.454 | 550.954 |
+| off | list | 16 | 81.544 | 521.318 |
+| off | watch | 16 | 64.527 | 555.899 |
+
+The first two attempts passed a relative output/config path while also setting
+cwd to that output directory. Saved startup screens show the duplicated path
+and configuration-read failure, before dataset creation, samples or metrics.
+Those attempts both exit1 and remain failed fixture observations. The v2
+controller normalizes the path and uses a new directory; product code is not
+changed to obtain these results.
+
+Exact-source ordinary3OS CI41193738579 is running on4b61c0f. Fresh long native
+P2/P5 CI41193740385 compares E d0a92bf with4b61c0f (P2 producer1, P5 producer3),
+using immutable tooling cbac862. This repeat is justified by the changed Watch
+render path; prior results remain tied to67cc688. The tooling workflow's
+additional Windows-only ordinary check is not qualification of4b61c0f; the
+separate exact-source workflow is authoritative. Native Windows performance
+remains unavailable. F main still requires reviewer approval after gates; #95's
+approved admission guard is owned by its integration thread and must be retained
+when its main change is incorporated. No main admission, release, installed
+binary, paid request, user-store or clipboard change is implied.

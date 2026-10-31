@@ -2357,3 +2357,16 @@ worker ownership and cleanup remain unchanged. F's migration is still17 after
 checking main16. The design now removes the superseded wait-for-F/G scheduling
 sentence as well as retaining the coordination plan. Final standard/native CI
 and reviewer admission remain pending; no F/G main admission occurred.
+
+
+## F candidate4b61c0f published for final source CI
+
+F-only branch issue-41/f-standalone-prep now publishes4b61c0f. Latest-main
+native standard:2,026/0/35, Python39; Node12/0 and secret scan succeed. Native
+Watch passes8 conditions/56 stages; native P3 all6 modes/status cases pass96
+measured actual CLI changes with one shared read per edit (plus existing
+Program Status when on). Failed relative-path fixture attempts remain distinct.
+See the F qualification record for source/binary witnesses and measurements.
+Exact-source3OS CI41193738579 and fresh long P2/P5 comparison41193740385 are
+running. F main is not authorized yet; G and transferred UI issues remain out
+of this candidate. Adopt #95's reviewed guard when its integration reaches main.
