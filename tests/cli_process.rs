@@ -558,9 +558,15 @@ async fn headless_ready_accepts_cli_after_stdin_eof_and_rejects_duplicate_owner(
         assert_eq!(ready["event"], "ready");
         assert_eq!(ready["state"], "ready");
         let reported_data = std::path::Path::new(ready["data_dir"].as_str().unwrap());
-        assert!(reported_data.is_absolute(), "readiness must name an absolute directory");
-        assert_eq!(reported_data.canonicalize().unwrap(), data.canonicalize().unwrap(),
-            "readiness must identify the actual child directory, not its parent");
+        assert!(
+            reported_data.is_absolute(),
+            "readiness must name an absolute directory"
+        );
+        assert_eq!(
+            reported_data.canonicalize().unwrap(),
+            data.canonicalize().unwrap(),
+            "readiness must identify the actual child directory, not its parent"
+        );
         assert_ne!(ready["instance_id"], "parent-instance");
         assert_eq!(
             ready["protocol_version"],
