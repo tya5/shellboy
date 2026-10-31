@@ -2119,7 +2119,20 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await
     .unwrap();
     next_update(&mut incoming, |update| match update {
-        UiUpdate::Status { text, .. } if text.contains("管理結果が更新") => Some(()),
+        UiUpdate::ManagementDetailFailure {
+            request_id,
+            detail_request_id: 1,
+            pointer,
+            error,
+        } if request_id == report_id && pointer == "/text" => {
+            assert!(error.contains("管理結果が更新"));
+            Some(())
+        }
+        // A stale detail request must fail as that exact request, never expose
+        // the replacement result as if it belonged to the old original.
+        UiUpdate::ManagementDetail { request_id, .. } if request_id == report_id => {
+            panic!("stale history detail request returned replacement bytes")
+        }
         _ => None,
     })
     .await;
