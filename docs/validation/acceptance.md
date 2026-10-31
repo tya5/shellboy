@@ -6006,3 +6006,19 @@ standard check. Targeted13/0, blocked-writer1/0, frontend1/0, canonical index42/
 and strict library Clippy remain their separately qualified results. Commit
 secret scan7c04dbc..2ae8c40 passes. Resume with the standard check before claiming
 whole-source qualification; no G publication/admission follows from this record.
+
+## G index resumed standard attempt and cleanup
+
+On source2ae8c40/1bb0441, the resumed native standard attempt passed layout95,
+watchdog policy, Python70, formatting and strict all-target Clippy, then library
+passed. Integration ended946 passed/1 failed/17 ignored: the real PTY test
+`real_tui_accepts_text_renders_proxy_response_and_exits_cleanly` could not see
+`一時停止: false` after refreshing index status. The assertion is retained and
+the display is under investigation; no full-standard success is claimed.
+The earlier SIGTERM was explained by the user's emergency disk cleanup.
+
+User-authorized cleanup removed retired measurement targets and completed
+measurement executables (40.78GiB logical). Source/instrumentation, private
+logs/results and Git worktrees remain. No open file in the retired G target
+was observed before deleting it. The one retained build location is the clone
+root target; all future local measurements use that CARGO_TARGET_DIR.

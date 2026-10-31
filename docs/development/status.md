@@ -2821,3 +2821,24 @@ spaces/coverage/definitions and absence of a receipt link. Canonical index tests
 no current full-standard or three-OS qualification is claimed.
 G5/G6 live notification/shared admission, context/status/history/readback coverage
 and G9–G12 remain open. G remains local; no push/main/release/install/data change.
+
+## Local build storage consolidation
+
+Per the user request, completed E/F measurement target directories and copied
+executables were removed after checking that no process used them. G's retired
+output directory was removed only after its standard-check process exited.
+The deletion inventory totals40.78GiB of logical output; filesystem free space
+is a separate observation, about124GiB afterward (APFS sharing means these
+figures need not differ by the logical total). Local measurement sources,
+uncommitted instrumentation, archive patches, logs and result JSON remain.
+All subsequent local Cargo/measurement commands use the clone's root target
+directory and CARGO_INCREMENTAL=0, never a per-measurement build directory.
+The local environment helper is outside Git; setup documents the portable
+common-repository calculation. No push/install/user-data change.
+
+The resumed standard check was not interrupted: library passed, but native
+integration failed946/1/17 at the real TUI index-status repaint assertion.
+The bounded projection places pause state below expanded fields; investigate
+and retain the actual-screen assertion. This is a product presentation issue
+until disproved, not a reason to remove the assertion. Full standard remains
+unqualified; its private log survives the build-output cleanup.

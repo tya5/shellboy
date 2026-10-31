@@ -55,6 +55,36 @@ GitHub Actionsの定義はローカル成功とは別です。pushしていな�
 
 通常試験は一時DBとloopback mockを使い、API資格情報を要求しません。ignoredの性能・実OS・実API試験は個別の明示実行であり、通常テスト成功に含めません。[端末fixture](../validation/manual-terminal.md) はAPIなしで操作を確認できます。実機がない項目は未実施と記録し、mockで代用合格にしません。
 
+## One local build directory for all worktrees
+
+Use the same Cargo output directory for ordinary checks and measurements across
+local worktrees. Do not create a target directory per measurement or candidate.
+From any worktree in this clone, set this before Cargo or measurement commands:
+
+```sh
+shellboy_git_common="$(git rev-parse --path-format=absolute --git-common-dir)"
+shellboy_build_root="$(cd "$shellboy_git_common/.." && pwd -P)"
+export CARGO_TARGET_DIR="$shellboy_build_root/target"
+export CARGO_INCREMENTAL=0
+```
+
+In PowerShell, use the same repository-common location:
+
+```powershell
+$shellboyGitCommon = git rev-parse --path-format=absolute --git-common-dir
+$env:CARGO_TARGET_DIR = Join-Path (Split-Path -Parent $shellboyGitCommon) 'target'
+$env:CARGO_INCREMENTAL = '0'
+```
+
+Run baseline and candidate builds sequentially. Preserve their source SHA,
+configuration and measurement results; rebuild each source before running it
+rather than assuming a shared executable still represents the previous checkout.
+Keep logs/results outside Cargo output. Remove obsolete measurement executables
+and retired target directories after all processes using them have exited.
+Keep modified source worktrees and uncommitted measurement instrumentation.
+A shared directory can still accumulate obsolete artifacts; inspect disk use
+and clean only idle, reproducible build output when necessary.
+
 ## Integration layout and native timing (#46)
 
 Python 3.11 or newer is used by the layout/timing scripts (standard library
