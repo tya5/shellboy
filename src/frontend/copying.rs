@@ -96,6 +96,9 @@ pub(super) async fn text(
     block: Option<usize>,
     expected_hash: Option<String>,
 ) -> Result<String, ApiError> {
+    if block.is_some_and(|index| index >= BLOCKS) {
+        return Err(limit());
+    }
     let text = source(
         control,
         node_id,

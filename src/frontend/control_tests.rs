@@ -1902,6 +1902,13 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
         ErrorCode::InvalidArgument
     );
     assert_eq!(
+        super::copying::text(&control, "copy-long".into(), Some(128), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InputLimit
+    );
+    assert_eq!(
         super::copying::text(&control, "copy-large-block".into(), Some(0), None)
             .await
             .unwrap_err()
