@@ -5702,3 +5702,12 @@ Latest logs: /tmp/issue-99-focused-latest.log,/tmp/issue-99-standard-latest.log,
 /tmp/issue-99-native-versioned/. Earlier null-counter and lint-failure records
 remain historical. Final submission/review and all-OS CI are not established by
 these local results. The issue comment contains the detailed reproducible report.
+
+Final pure-rebase qualification on main d29e0fc: the serialized standard check
+completed exit0 with Rust2061 passed/0 failed/35 ignored and Python66. Layout/
+watchdog policy,fmt,Clippy and all targets pass. Evidence:
+/tmp/issue-99-standard-final-rebase.log, execution
+7748ea6f-0efe-4ba0-b18e-19567feb8e2c. The rebase changes no #99 source; only main's
+already-approved ui/threads.rs viewport correction differs from the previously
+native-tested baseline. This supersedes the queued-final-recheck gap in the
+issue comment, not review-required status or all-OS/native testing limits.
