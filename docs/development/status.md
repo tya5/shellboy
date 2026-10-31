@@ -1975,3 +1975,21 @@ actions, cancellation/contention tests and F performance/visual gates remain
 pending. Dead-code warnings for these unwired components remain unsuppressed;
 this is not full standard/strict Clippy success or F admission. No main push,
 installed-binary/default-data change, release or paid API.
+
+
+## F private exact-target action boundary
+
+The F candidate adds private ExpectedRun/RunAction guards around the existing
+canonical stop/retry transaction and operation receipt. The displayed latest
+Thread/Run/Turn/generation is compared atomically before dispatch; replay retains
+original effects semantics. Output ownership is checked on a readonly display
+snapshot. An existing live-marker accessor admits at most128 Watch executions
+without a database query, new worker or queue. No public CLI/wire or saved table
+is added. Core owns this narrow guard because a frontend precheck cannot close
+the read/write race.
+
+On the combined prepared runtime source, all5 mutation-guard tests pass as part
+of the standard check: exact stop/retry, no repeated replay effects, replacement/
+generation/deleted/invalid witness rejection, absent-Turn and rollback cases.
+The new tests use the canonical60s watchdog. This evidence describes the combined
+F runtime tree, not every intermediate extraction commit in isolation.

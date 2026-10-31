@@ -22,6 +22,7 @@ pub mod output;
 pub(crate) mod receipt;
 pub mod replay;
 pub(crate) mod revisit;
+pub(crate) mod run_action;
 pub(crate) mod state;
 mod wait;
 
@@ -1579,6 +1580,24 @@ mod progress_tests;
 impl Control {
     pub(crate) fn shell_output_notification(&self) -> &Notify {
         &self.shell_output_changed
+    }
+    pub(crate) async fn committed_watch_output_markers(
+        &self,
+        executions: &[String],
+    ) -> Result<Vec<(String, Option<std::time::Instant>)>, ApiError> {
+        if executions.len() > 128 || executions.iter().any(|id| id.is_empty() || id.len() > 256) {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                "Watch output exceeds128 valid executions",
+            ));
+        }
+        Ok(self
+            .live
+            .output_markers(executions)
+            .await
+            .into_iter()
+            .map(|(id, at)| (id, Some(at)))
+            .collect())
     }
     pub(crate) async fn committed_output_markers(
         &self,

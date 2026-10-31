@@ -1,4 +1,5 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
+mod run_action;
 pub(crate) mod thread_summary;
 use crate::digest::sha256_hex as hash;
 use std::{

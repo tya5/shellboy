@@ -723,3 +723,22 @@ One observer retains one flight/500ms and its start deadline across hiding or
 replacement. Output hints only compare already-visible shell markers, not poll
 new rows. Runtime Watch exposure waits for actual UI consumption and actions;
 backend primitives alone do not claim a usable screen.
+
+
+### F UI/read/action integration
+
+Browser and selected-footer descendant roots share one500ms admission and one
+readonly snapshot with selected history/queue facts when due together. A scope
+change/close retires tickets; the UI adopts only matching generation and read
+sequence. Watch details are delivered to the visible Watch rows, not silently
+discarded. Descendant counts preserve unknown/error/last-observed distinctions.
+Local visible age ticks do not request database work.
+
+Stop/retry confirmations retain exact Thread/Run/Turn/generation identities.
+Control checks that saved target in the same existing mutation transaction as
+the canonical stop/retry reducer and operation receipt, preventing replacement
+and generation races. This narrow private guard is Core-owned because frontend
+prechecks cannot make the write atomic; it is not a new lifecycle/command/table,
+worker/queue or generic mutation engine. Output ownership checks are display
+reads and use readonly admission. Accepted mutations retain existing Control
+admission/shutdown/durability ownership even if the browser closes.
