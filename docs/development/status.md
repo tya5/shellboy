@@ -2716,3 +2716,10 @@ pass 27 width/palette/fallback conditions, with live input and scroll-return in
 baseline; exact geometry is enforced without claiming that symptom's root cause.
 Fresh release P1 profiling and native non-macOS/physical-terminal validation
 remain untested. #99 and #87 retain their separate review/qualification scope.
+## Context-edit driver wait (#102)
+
+Saved summary end time matches the reported request gap; current/afe4c08 source
+shares the existing Thread boundary. Draft exposes protected inflight reason in
+run get/footer, with no new lifecycle state. Gated SSE/background reproduction,
+virtual-clock and malformed/terminal tests are written but not yet compiled.
+#99 owns preview read/fetched-at behavior; no duplicate fix here. Evidence in#102.

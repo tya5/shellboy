@@ -3269,3 +3269,53 @@ async fn headless_native_startup_snapshot_and_database_close_kills_keep_committe
         proxy_task.abort();
     }).await.unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
+async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background_completion() {
+    crate::test_watchdog::watchdog("summary boundary observation",async {
+        let root=tempfile::tempdir().unwrap();let (url,mut receive,server)=proxy_with_sse(true).await;
+        let owner=owner(root.path(),&url).await;let control=Control::start(owner.store.clone(),owner.shell.clone());
+        let thread=thread(&control).await;
+        for n in 0..2 {send(&control,&thread,&format!("older-{n} {}","x".repeat(4000))).await;incoming(&control,&mut receive).await.reply.send((200,answer("older answer"))).unwrap();settled(&control,&thread).await;}
+        send(&control,&thread,"foreground and background gate").await;
+        let response=json!({"id":"tool-gates","status":"completed","output":[
+            {"type":"function_call","call_id":"background","name":"shell","arguments":json!({"command":"cat >/dev/null # background-gate","background":true,"stdin_open":true}).to_string()},
+            {"type":"function_call","call_id":"foreground","name":"shell","arguments":json!({"command":"read -r line; exit 1 # foreground-gate","stdin_open":true}).to_string()}
+        ]});
+        let mut events=control.subscribe();incoming(&control,&mut receive).await.reply.send((200,response)).unwrap();
+        let (background,foreground,run)=loop {
+            let target=thread.clone();let rows=control.store.database.call(move|db|{
+                let mut q=db.prepare("SELECT id,owner_run_id,json_extract(shell_json,'$.command') FROM shell_execution WHERE owner_run_id=(SELECT id FROM run WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1) ORDER BY rowid")?;
+                q.query_map([target],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<Result<Vec<_>,_>>().map_err(Into::into)
+            }).await.unwrap();
+            if rows.len()==2 {break(rows[0].0.clone(),rows[1].0.clone(),rows[0].1.clone());}
+            let _=events.recv().await;
+        };
+        let accepted=request(&control,Command::Compact(ThreadTarget {thread_id:Some(thread.clone())})).await;
+        request(&control,Command::ShellEof(ExecutionTarget {execution_id:foreground.clone()})).await;
+        let summary=incoming(&control,&mut receive).await;
+        assert_eq!(summary.body["tools"],json!([]),"the boundary owner issues the summary, not a new ordinary attempt");
+        let blocked=request(&control,Command::RunGet(RunTarget {run_id:run.clone()})).await;
+        assert_eq!(blocked["waiting_reason"]["kind"],"context_edit_boundary");
+        assert_eq!(blocked["waiting_reason"]["operation_id"],accepted["operation_id"]);
+        assert_eq!(blocked["waiting_reason"]["action"],"compact");
+        // Finishing the background shell cannot release the held summary boundary.
+        request(&control,Command::ShellEof(ExecutionTarget {execution_id:background.clone()})).await;
+        loop {
+            let ended=request(&control,Command::ShellGet(ExecutionTarget {execution_id:background.clone()})).await;
+            if ended["state"]=="exited" {break;}let _=events.recv().await;
+        }
+        let still=request(&control,Command::RunGet(RunTarget {run_id:run.clone()})).await;
+        assert_eq!(still["waiting_reason"],blocked["waiting_reason"]);
+        assert!(receive.try_recv().is_err());
+        summary.reply.send((200,answer("Earlier decisions retained."))).unwrap();
+        let resumed=incoming(&control,&mut receive).await;
+        assert_ne!(resumed.body["tools"],json!([]));
+        let resumed_run=request(&control,Command::RunGet(RunTarget {run_id:run.clone()})).await;
+        assert!(resumed_run.get("waiting_reason").is_none());
+        assert!(resumed.body.to_string().contains("shell_ended"),"saved shell completions enter the next request boundary");
+        resumed.reply.send((200,answer("resumed after summary"))).unwrap();settled(&control,&thread).await;
+        control.shutdown().await;owner.shutdown().await.unwrap();server.abort();
+    }).await.unwrap();
+}

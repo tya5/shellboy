@@ -111,6 +111,7 @@ pub(super) struct RawProjection {
     tools: u64,
     cancelled: u64,
     live_work: Option<super::live_work::RawLiveWork>,
+    waiting_reason: Option<crate::protocol::RunWaitReason>,
 }
 
 /// Latest Run owns the selected Turn; an older Turn cannot revive a newer Run.
@@ -147,6 +148,7 @@ pub(super) fn read_tx_with_waits(
             tools: 0,
             cancelled: 0,
             live_work: None,
+            waiting_reason: None,
         });
     };
     let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
@@ -163,6 +165,7 @@ pub(super) fn read_tx_with_waits(
     };
     let mut raw = RawProjection {
         run: None,
+        waiting_reason: crate::readback::run_wait_reason(db,thread,run_id).map_err(crate::storage::StorageError::from)?,
         turn: None,
         attempt: None,
         revisit,
@@ -235,6 +238,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         tools,
         cancelled,
         live_work,
+        waiting_reason,
     } = raw;
     let Some((run_id, run_state, stop_reason, ended_at)) = run else {
         return Projection {
@@ -262,6 +266,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             ..Default::default()
         },
         live_work: live_work.map(super::live_work::prepare),
+        waiting_reason,
         revisit,
         run_id: Some(run_id),
         ..Default::default()

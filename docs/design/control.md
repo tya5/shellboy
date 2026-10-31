@@ -520,3 +520,19 @@ force/deadline policy are unchanged. Once drain begins, further TERM/HUP/INT do
 not escalate it; external SIGKILL remains forceful termination. Signal stream
 exhaustion parks rather than panicking. Background serve remains a normal owned
 shell descendant; its own tools keep their ordinary lifeline/Job ownership.
+
+## Context-edit boundary wait observation (#102)
+
+Explicit summary/context-edit work retains the existing per-Thread safe-boundary
+mutex across its API work; the driver must not prepare a competing request from
+the changing selected path. Shell completion persistence remains independent;
+events enter replay at the next runnable request boundary, not their OS finish.
+Expose this wait from the existing protected compact.inflight metadata and its
+receipt, only for the exact live Run with a preparing/running Turn. It is a
+read-only saved-fact projection, not a new lifecycle state, timeout, background-
+shell wait policy or worker. Run get and selected activity share one projection;
+operation identity/action/accepted time are facts, not elapsed lock-acquisition
+measurements. Completion/cancellation removes the same saved inflight witness,
+so stale reasons cannot outlive it. Invalid queue/receipt facts must not be
+silently presented as a known reason. Queue admission wakes the existing selected
+read; clock ticks do not issue extra DB work. Detailed reproduction is in#102.

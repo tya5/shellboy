@@ -418,3 +418,9 @@ No final row is guaranteed after force-kill or a closed output receiver. CLI
 shutdown requires explicit data-dir, reads that endpoint rather than inherited
 owner variables, and pins the request to its instance. Old saved acceptance
 remains inspectable but does not authorize stopping a restarted owner.
+
+Run get optionally includes `waiting_reason` for a protected in-flight context
+edit on its exact live Run/active Turn. Fields identify kind, primary operation,
+action, accepted_at and operation_count; no completion time or OS state is
+inferred. Empty/terminal/ordinary background runs omit it. Same saved projection
+feeds the TUI, without a new Run/Turn state or protocol-version change (#102).

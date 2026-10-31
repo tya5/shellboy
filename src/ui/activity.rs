@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use timing::PhaseClock;
 pub use timing::SavedTiming;
 
+mod wait;
+pub(super) use wait::label as context_wait_label;
 pub use crate::activity::ActivityPhase;
 /// Stable footer vocabulary for the later #35 translation layer.
 #[derive(Clone, Copy, Debug)]
@@ -138,6 +140,7 @@ pub struct ActivitySnapshot {
     pub phase: ActivityPhase,
     pub turn_in_progress: bool,
     pub live_work: Option<super::live_work::LiveWorkSnapshot>,
+    pub waiting_reason: Option<crate::protocol::RunWaitReason>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Motion {

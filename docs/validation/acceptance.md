@@ -5936,3 +5936,11 @@ content cells at the normal background. Fresh Python66 also passes. Evidence:
 `/tmp/issue-91-width-edge-audited/`, `/tmp/issue-91-width-edge-audited.log`, execution
 669162aa-3da8-4187-a790-6b0346d02b37 exit0. Product src and binary are unchanged
 from the standard-tested 3670eac; this adds no new Rust qualification claim.
+## Context-edit wait observation (#102)
+
+Reconstruction/prototype only; exact operation timing/source references and log
+coverage limitation are in#102. Existing safe-boundary policy is retained, with
+read-only waiting_reason projection and queue-start invalidation. Synthetic SSE
+with controlled foreground/background stdin, plus virtual-clock readback cases,
+are not yet run. No Rust build/standard/CI or integration claim. #99 preview/read
+ownership is preserved. No actual provider or user DB mutation was performed.

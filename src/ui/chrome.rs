@@ -154,6 +154,9 @@ pub(super) fn footer_lines(
         facts.push(limit);
     }
 
+    if let Some(reason)=view.activity.snapshot.as_ref().and_then(|snapshot|snapshot.waiting_reason.as_ref()) {
+        facts.push(super::activity::context_wait_label(reason));
+    }
     if !view.follow {
         facts.push(if view.unseen {
             "↓ new".into()
