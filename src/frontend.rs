@@ -10,6 +10,7 @@ mod draft_saver;
 mod header;
 mod history_reader;
 mod input_history;
+mod lineage;
 mod live_output;
 mod live_work;
 mod message_metadata;

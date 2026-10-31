@@ -654,3 +654,17 @@ Optional stored identities/timestamps remain unknown when absent. This is a
 bounded read model on the caller's existing transaction, not a persistent table,
 new command, worker, queue or lifecycle authority. Frontend retains membership,
 watch/unread/session and presentation ownership. No G inspector model is added.
+
+
+### F retained descendant membership
+
+Current `control::db::delete_thread` tombstones Thread rows and retains their
+parent identity; history GC removes obsolete path/replacement payload ownership
+without deleting the Thread row. A retained nondeleted grandchild can therefore
+remain reachable through a deleted intermediate. The bounded traversal includes
+those intermediates as discovery/invalidation witnesses, excludes them from
+counts and public Watch membership, and still spends the discovery/depth budget
+on them. A deleted/missing root is unavailable, not an exact empty scope.
+Run ownership is deliberately irrelevant to ancestry. These conclusions concern
+the inspected current deletion/GC implementation; they do not authorize changing
+deletion behavior or inventing missing lineage after future physical removal.

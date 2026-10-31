@@ -515,3 +515,25 @@ and ordering fixes1057c1d/c7f4183 must be reconciled with E. Never merge the who
 combined branch or overwrite staged operation/usage/attachment G work. Keep
 F primitives, shared-reader integration, UI/actions and qualification commits
 separately reviewable, then wait for delegated approval before F publication.
+
+
+### F primitive evidence (local only, not F admission)
+
+- b637112: isolated session Watch state, seven focused native macOS tests pass.
+  F1/F2/F3/F7 still need actual frontend/UI/action integration and later fixes.
+- 24043c4: shared saved summary/activity decoding, three focused tests pass.
+  Optional identities are stored facts, not inferred lifecycle timestamps.
+- Parent migration candidate uses16 after inspecting origin/main e933054's
+  schema15; recheck immediately before admission. Initial parent/hot-index
+  focused integration run passes4 tests; schema bootstrap/checkpoint/corruption
+  library run passes3. Final edited fixture/helper integration source passes32/0/0 (907 filtered)
+  at the parent-index primitive af6a0b0; layout/watchdog also pass.
+- Bounded lineage reader tests pass7, with2 explicit performance/stress tests
+  ignored. Covers read-only SQLite, one statement per actual root, saved-fact
+  classification, deleted bridges, depth/row/cycle bounds, new-child invalidation
+  and cardinality-independent indexed work. This does not establish P4 timing,
+  presentation-pool wiring, combined-consumer P3 or any Watch screen behavior.
+
+No F row is complete solely from these primitives. Strict Clippy remains an
+admission gate: unused projected facts/helpers are intentionally unsuppressed
+until real F consumers are wired. No G/new display scope is imported.

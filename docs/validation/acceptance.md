@@ -4344,3 +4344,22 @@ rejection guidance. Number16 remains provisional until F admission. This is not
 a full standard/strict Clippy/three-OS result; incomplete F reader consumers
 currently produce dead-code warnings without suppression. No main push,
 installed binary, default-data change, paid API or release.
+
+
+## F lineage reader primitive (2026-10-31)
+
+The F-only lineage module uses one indexed bounded recursive statement per
+actual root, at most two roots, and separates saved Thread ancestry from Run
+ownership. Depth8/discovery256 plus one sentinel bound traversal, including
+deleted bridges. Lightweight saved native states classify counts; no descendant
+title/body/tool/attempt reads are introduced. Changed identities use cached
+positive membership or one bounded upward PK query for new/frontier children.
+
+Native macOS focused `cargo test --locked --lib frontend::lineage::` passes7/0/2
+(997 filtered). This includes a physically read-only SQLite connection, one
+statement per root, unavailable versus exact zero, deleted bridge, cycle/depth/
+wide-frontier semantics and query VM work unaffected by10,000 unrelated Threads.
+The two explicitly ignored P4 timing/million-sibling observations remain unrun.
+The existing presentation-pool/shared consumer broker is not wired to this new
+module yet; this is not a working Watch screen or all-consumer P3 qualification.
+Formatting/layout93/watchdog pass. Primitive diff secret scan has0 findings.
