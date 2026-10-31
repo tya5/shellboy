@@ -485,3 +485,143 @@ async fn cross_data_directory_sender_label_survives_but_model_origin_is_stripped
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn headless_startup_errors_stay_on_stderr_without_opening_an_inherited_owner() {
+    crate::test_watchdog::watchdog("headless startup error subprocesses", async {
+        let root = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["serve"],
+            vec!["serve", "--data-dir="],
+            vec!["serve", "--unknown-headless-option"],
+            vec![
+                "serve",
+                "--data-dir",
+                "child",
+                "--operation-id",
+                "not-an-rpc",
+            ],
+        ] {
+            let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+                .args(args)
+                .current_dir(root.path())
+                .env("SHELLBOY_DATA_DIR", root.path().join("inherited"))
+                .output()
+                .await
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(output.stdout.is_empty());
+            let text = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(text.lines().count(), 1, "{text}");
+            let error: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(error["error"]["code"], "invalid_argument");
+            assert!(!root.path().join("inherited").exists());
+            assert!(!root.path().join("child").exists());
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn headless_ready_accepts_cli_after_stdin_eof_and_rejects_duplicate_owner() {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    crate::test_watchdog::watchdog("headless ready, EOF and lock subprocesses", async {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let data = root.path().join("child");
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .args(["serve", "--data-dir", "child", "--config"])
+            .arg(&config)
+            .current_dir(root.path())
+            .env("SHELLBOY_DATA_DIR", root.path().join("parent"))
+            .env("SHELLBOY_SOCKET", "/not-the-child-owner.socket")
+            .env("SHELLBOY_INSTANCE_ID", "parent-instance")
+            .env("SHELLBOY_THREAD_ID", "parent-thread")
+            .env("SHELLBOY_RUN_ID", "parent-run")
+            .env("SHELLBOY_ORIGIN_TOKEN", "parent-token")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut stderr = child.stderr.take().unwrap();
+        let mut ready_line = String::new();
+        assert!(stdout.read_line(&mut ready_line).await.unwrap() > 0);
+        let ready: Value = serde_json::from_str(&ready_line).unwrap();
+        assert_eq!(ready["event"], "ready");
+        assert_eq!(ready["state"], "ready");
+        assert_eq!(ready["data_dir"], data.to_str().unwrap());
+        assert_ne!(ready["instance_id"], "parent-instance");
+        assert_eq!(
+            ready["protocol_version"],
+            shellboy::protocol::PROTOCOL_VERSION
+        );
+        for _ in 0..2 {
+            let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+                .arg("--data-dir")
+                .arg(&data)
+                .args(["thread", "list"])
+                .env_remove("SHELLBOY_DATA_DIR")
+                .output()
+                .await
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(response["ok"], true);
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "EOF must not stop owner"
+            );
+        }
+        let duplicate = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .args(["serve", "--data-dir"])
+            .arg(&data)
+            .arg("--config")
+            .arg(&config)
+            .output()
+            .await
+            .unwrap();
+        assert!(!duplicate.status.success());
+        assert!(duplicate.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8(duplicate.stderr).unwrap().lines().count(),
+            1
+        );
+        child.kill().await.unwrap();
+        child.wait().await.unwrap();
+        let mut tail = String::new();
+        stdout.read_to_string(&mut tail).await.unwrap();
+        assert!(tail.is_empty(), "no unsolicited stdout after ready: {tail}");
+        let mut errors = String::new();
+        stderr.read_to_string(&mut errors).await.unwrap();
+        assert!(errors.is_empty(), "{errors}");
+        let record = root.path().join("stdout.jsonl");
+        std::fs::write(&record, &ready_line).unwrap();
+        assert_eq!(std::fs::read_to_string(record).unwrap().lines().count(), 1);
+        assert!(!root.path().join("parent").exists());
+        let db = rusqlite::Connection::open_with_flags(
+            data.join("shellboy.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        for table in ["operation_receipt", "model_attempt"] {
+            assert_eq!(
+                db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+    })
+    .await
+    .unwrap();
+}
