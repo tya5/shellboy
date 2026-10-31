@@ -583,6 +583,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         |bytes| {
             bytes.windows(4).any(|b| b == b"\x1b[2J")
                 && emitted_text(bytes).contains("EDITABLE_WHILE_WAITING")
+                && emitted_text(bytes).contains("↓")
         },
     )
     .await;

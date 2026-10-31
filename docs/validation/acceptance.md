@@ -3882,3 +3882,14 @@ recorded as deferred (now135 deferred +14 deliberate). No #75 production code or
 migration was changed. Rebase conflicts were only src/lib.rs's appended module
 declarations (readback plus cfg(test) test_watchdog both retained) and validation
 appendices (complete upstream prefix retained). New combined native gates follow.
+
+
+### Final repaint capture observation
+
+A local latest-main preflight retained all runtime assertions but caught one
+manual-repaint fixture failure: capture stopped at draft bytes before the
+footer's pause arrow had arrived. The capture predicate now includes that same
+pre-existing arrow requirement, so the assertions inspect the full required
+facts rather than race a partial PTY read. No350ms wait or relaxed assertion was
+restored, and production rendering is unchanged. Final combined-source native
+qualification is repeated after this fixture correction.
