@@ -538,3 +538,13 @@ omit the auxiliary reason without failing Run get or selected activity; SQL erro
 still propagate. Invalid facts must not be presented as a known reason.
 Queue admission wakes the existing selected
 read; clock ticks do not issue extra DB work. Detailed reproduction is in#102.
+
+## Driver retirement and accepted stops
+
+Driver slot removal precedes the final check for a committed stopping Run. A
+stop that already found the old slot must not be abandoned when the driver had
+chosen its exit before cancellation; a later stop sees the absent slot itself.
+The absent-driver path uses the existing Thread boundary and rechecks canonical
+Run state before drain, so concurrent stop/retirement cannot repeat terminal
+mutation. Primary-key lookups are bounded. Terminal facts commit before Changed
+is published; live/recovery/completed Runs are not stopped merely by retirement.

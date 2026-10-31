@@ -1055,26 +1055,40 @@ impl Control {
                         error,
                     });
                 }
-                control
-                    .live
-                    .remove_driver_if_current(&thread_id, &slot.id)
-                    .await;
-                control.changed(&thread_id);
-                control.nudge_owner(&slot.run_id).await;
-                // An accepted send/retry can race the previous driver's final
-                // observation and map removal. Recheck after releasing its slot.
-                if !control.stop.is_cancelled() {
-                    let thread = thread_id.clone();
-                    let pending=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn t JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND r.state='live' AND (t.state IN ('preparing','running','waiting') OR (t.state='recovery_wait' AND t.interrupt_requested_at IS NOT NULL)))",[thread],|row|row.get::<_,bool>(0))?)).await;
-                    match pending {
-                        Ok(true) => control.kick_quiet(thread_id).await,
-                        Err(_) => control.fail_storage().await,
-                        _ => {}
-                    }
-                }
+                control.retire_driver(thread_id, slot).await;
             });
         })
     }
+    async fn retire_driver(self: &Arc<Self>, thread_id: String, slot: DriverSlot) {
+        self.live
+            .remove_driver_if_current(&thread_id, &slot.id)
+            .await;
+        // A stop may have found this slot after drive already chose its exit.
+        // Retire first: later stop handlers then own the absent-driver path.
+        if let Err(error) = driver::stop_without_driver(self, &slot.run_id).await {
+            if error.is_storage_failure() {
+                self.fail_storage().await;
+            }
+            self.publish_event(EngineEvent::Error {
+                thread_id: thread_id.clone(),
+                error,
+            });
+        }
+        self.changed(&thread_id);
+        self.nudge_owner(&slot.run_id).await;
+        // An accepted send/retry can race the previous driver's final
+        // observation and map removal. Recheck after releasing its slot.
+        if !self.stop.is_cancelled() {
+            let thread = thread_id.clone();
+            let pending=self.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn t JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND r.state='live' AND (t.state IN ('preparing','running','waiting') OR (t.state='recovery_wait' AND t.interrupt_requested_at IS NOT NULL)))",[thread],|row|row.get::<_,bool>(0))?)).await;
+            match pending {
+                Ok(true) => self.kick_quiet(thread_id).await,
+                Err(_) => self.fail_storage().await,
+                _ => {}
+            }
+        }
+    }
+
     /// Close admission immediately while the adapter preserves its drafts and
     /// drains already accepted work. This method never waits for a lock or I/O.
     pub fn begin_shutdown(&self) {

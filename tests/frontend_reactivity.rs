@@ -310,7 +310,9 @@ impl Fixture {
     // Return invocation start as a conservative bound including process/IPC.
     async fn cli_only(&self, args: &[&str]) -> (Value, Instant) {
         let started = Instant::now();
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+        let binary = std::env::var_os("SHELLBOY_TEST_BINARY")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_shellboy").into());
+        let mut command = tokio::process::Command::new(binary);
         command
             .arg("--config")
             .arg(&self.config)
