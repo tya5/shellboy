@@ -123,6 +123,10 @@ pub enum UsageCommand {
 }
 #[derive(Debug, Clone, Args)]
 pub struct UsageOptions {
+    #[arg(long)]
+    pub since: Option<String>,
+    #[arg(long)]
+    pub until: Option<String>,
     #[arg(long="thread", conflicts_with_all=["run_id","turn_id"])]
     pub thread_id: Option<String>,
     #[arg(long = "run", conflicts_with = "turn_id")]
@@ -232,6 +236,8 @@ pub enum HistoryCommand {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum ShellCommand {
+    /// List saved executions across conversations without reading their output.
+    List(ShellListOptions),
     /// Inspect the original command, recorded context, native state, and output completion.
     #[command(
         after_help = "  shellboy shell get --execution WORK_EXECUTION_ID\n  shellboy shell read --execution WORK_EXECUTION_ID --limit-bytes 65536\n\nWORK_EXECUTION_ID comes from the shell tool that started the work. The shell running this observation has a different ID. Guide: shellboy docs get --id shellboy/shell"
@@ -305,6 +311,40 @@ pub struct StatusOptions {
     #[arg(long)]
     pub cursor: Option<String>,
 }
+#[derive(Debug, Clone, Subcommand)]
+pub enum CompactCommand {
+    List(CompactListOptions),
+}
+#[derive(Debug, Clone, Args)]
+pub struct CompactListOptions {
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    #[arg(long)]
+    pub since: Option<String>,
+    #[arg(long)]
+    pub until: Option<String>,
+    #[arg(long, default_value_t = 50)]
+    pub limit: u32,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ShellListOptions {
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    #[arg(long)]
+    pub since: Option<String>,
+    #[arg(long)]
+    pub until: Option<String>,
+    #[arg(long)]
+    pub command_contains: Option<String>,
+    #[arg(long)]
+    pub state: Option<String>,
+    #[arg(long, allow_negative_numbers = true)]
+    pub exit_code: Option<i32>,
+    #[arg(long, default_value_t = 50)]
+    pub limit: u32,
+    #[arg(long)]
+    pub cursor: Option<String>,
+}
 #[derive(Debug, Clone, Args)]
 pub struct ThreadOptions {
     #[arg(long = "thread")]
@@ -313,6 +353,8 @@ pub struct ThreadOptions {
 #[derive(Debug, Clone, Args)]
 #[command(group(clap::ArgGroup::new("edit_action").args(["spill", "summary", "trim", "omit", "restore", "maximal"]).multiple(false)))]
 pub struct CompactOptions {
+    #[command(subcommand)]
+    pub command: Option<CompactCommand>,
     /// Override the absolute summary limit (minimum effective limit: 2000 characters).
     #[arg(long, requires = "summary")]
     pub max_chars: Option<u64>,
@@ -703,6 +745,8 @@ impl Cli {
             CliCommand::Usage {
                 command: UsageCommand::Get(a),
             } => C::UsageGet(wire::UsageGetArgs {
+                since: a.since,
+                until: a.until,
                 thread_id: a.thread_id,
                 run_id: a.run_id,
                 turn_id: a.turn_id,
@@ -838,6 +882,16 @@ impl Cli {
                 }),
             },
             CliCommand::Shell { command } => match command {
+                ShellCommand::List(a) => C::ShellList(wire::ShellListArgs {
+                    thread_id: a.thread_id,
+                    since: a.since,
+                    until: a.until,
+                    command_contains: a.command_contains,
+                    state: a.state,
+                    exit_code: a.exit_code,
+                    limit: a.limit,
+                    cursor: a.cursor,
+                }),
                 ShellCommand::Get(a) => C::ShellGet(wire::ExecutionTarget {
                     execution_id: a.execution_id,
                 }),
@@ -879,6 +933,33 @@ impl Cli {
                 kind: a.kind,
             }),
             CliCommand::Compact(a) => {
+                if let Some(CompactCommand::List(list)) = a.command {
+                    if a.spill
+                        || a.summary
+                        || a.trim
+                        || a.omit
+                        || a.restore
+                        || a.maximal
+                        || a.from_node_id.is_some()
+                        || a.to_node_id.is_some()
+                        || a.max_chars.is_some()
+                        || a.max_percent.is_some()
+                    {
+                        return Err(wire::ApiError::new(
+                            wire::ErrorCode::InvalidArgument,
+                            "compact list cannot be mixed with edit flags",
+                        ));
+                    }
+                    let cmd = C::CompactList(wire::CompactListArgs {
+                        thread_id: list.thread_id.or(a.thread_id),
+                        since: list.since,
+                        until: list.until,
+                        limit: list.limit,
+                    });
+                    cmd.validate()?;
+                    return Ok(Some(cmd));
+                }
+
                 if (a.max_chars.is_some() || a.max_percent.is_some()) && !a.summary {
                     return Err(invalid("summary limits require --summary"));
                 }

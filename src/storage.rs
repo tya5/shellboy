@@ -29,6 +29,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (12, "0012_revisit_metadata"),
     (13, "0013_message_path_admission"),
     (14, "0014_turn_interrupt"),
+    (15, "0015_readback_indexes"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -583,5 +584,27 @@ mod schema_validation_tests {
                 .unwrap(),
             9
         );
+    }
+}
+
+#[cfg(test)]
+mod readback_migration_tests {
+    #[tokio::test]
+    async fn schema14_index_upgrade_keeps_source_rows_and_malformed_optional_receipts() {
+        tokio::time::timeout(std::time::Duration::from_secs(60),async {
+            let root=tempfile::tempdir().unwrap();let path=root.path().join("db");
+            {
+                let c=rusqlite::Connection::open(&path).unwrap();c.execute_batch(super::CURRENT_SCHEMA).unwrap();
+                c.execute_batch("DROP INDEX shell_started_readback;DROP INDEX shell_owner_started_readback;DROP INDEX compact_operation_thread;DROP INDEX automatic_compaction_turn;DELETE FROM schema_migration WHERE version=15;PRAGMA user_version=14;PRAGMA ignore_check_constraints=ON;INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','2026-10-31T00:00:00Z');PRAGMA ignore_check_constraints=OFF;").unwrap();
+                c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('keep','/','','p','m','2026-10-31T00:00:00Z')",[]).unwrap();
+            }
+            let failure=match super::DbWorker::open(&path).await {Err(error)=>error,Ok(worker)=>{worker.shutdown().await.unwrap();panic!("existing CHECK corruption must still reject owner startup")}};
+            assert!(failure.to_string().contains("quick_check"),"{failure}");
+            let c=rusqlite::Connection::open(&path).unwrap();
+            assert_eq!(c.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),15);
+            assert_eq!(c.query_row("SELECT result_ref_json FROM operation_receipt WHERE operation_id='corrupt'",[],|r|r.get::<_,String>(0)).unwrap(),"malformed");
+            assert_eq!(c.query_row("SELECT count(*) FROM thread WHERE id='keep'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+            assert_eq!(c.query_row("SELECT count(*) FROM schema_migration",[],|r|r.get::<_,i64>(0)).unwrap(),15);
+        }).await.expect("derived index upgrade watchdog");
     }
 }

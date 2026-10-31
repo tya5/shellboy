@@ -1923,3 +1923,21 @@ argument-free compact, leaving #50 recovery handling unchanged. Size-free omissi
 commands honor user configuration. A request-budget-only configuration section
 uses D-015's default size policy; single size keys retain their existing meaning.
 Source: reviewer request, issue #73 review, issue #68 D-017. No new persistence or worker.
+
+
+## #75 saved readback placement (2026-10-31, active)
+
+The user authorizes these core interfaces as generic bounded reads of existing
+facts, not a supervisor-specific engine. Reuse finite presentation admission and
+read-only WAL connections, retaining writer ownership for mutations. Select whole
+usage lifetimes by saved starts (Run creation) in half-open periods; never invent
+unknown times or costs. Bound shell candidates and snippets, redact obvious
+credentials conservatively, and expose continuation even for empty filtered pages.
+
+Schema15 adds four justified access paths: global/owner shell start time, sparse
+compaction receipt target and sparse automatic attempt. Existing model/Run indexes
+serve periods. The measured index sizes/write cost and legacy/retention gaps are
+explicit in validation/storage docs. No new tables, workers, queues or denormalized
+source copies. Revisit only if real scoped-query workloads justify another access
+path; mocks/query plans are not real-provider or general latency guarantees.
+Source: issue75 and user-approved query-plan/read-only/watchdog/redaction constraints.

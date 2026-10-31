@@ -208,6 +208,41 @@ impl Store {
                 .map_err(storage_error)?
                 .and_then(MutationResult::value);
         }
+        if matches!(
+            request.command,
+            Command::UsageGet(_)
+                | Command::ThreadGet(_)
+                | Command::RunGet(_)
+                | Command::TurnGet(_)
+                | Command::CompactList(_)
+                | Command::ShellList(_)
+        ) {
+            let mut store = self.clone();
+            store.usage_context = crate::usage_totals::read_context();
+            let path = self.database.path().to_path_buf();
+            return crate::presentation::work(move || {
+                let mut db = rusqlite::Connection::open_with_flags(
+                    path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .map_err(sql_error)?;
+                db.busy_timeout(std::time::Duration::from_millis(250))
+                    .map_err(sql_error)?;
+                db.pragma_update(None, "query_only", true)
+                    .map_err(sql_error)?;
+                let tx = db.transaction().map_err(sql_error)?;
+                let value = store.dispatch(
+                    &tx,
+                    &request.command,
+                    caller.as_ref(),
+                    &request.operation_id,
+                    &chrono::Utc::now().to_rfc3339(),
+                );
+                tx.commit().map_err(sql_error)?;
+                value
+            })
+            .await?;
+        }
         let plan = self.prepare_agents(&request, &caller).await?;
         let mut store = self.clone();
         store.usage_context = crate::usage_totals::read_context();
@@ -963,7 +998,26 @@ impl Store {
                     self.usage_context,
                     self.usage_diagnostics.as_ref(),
                 )?);
+                let compact = crate::readback::compactions(
+                    tx,
+                    &details.thread_id,
+                    &crate::protocol::CompactListArgs {
+                        thread_id: Some(details.thread_id.clone()),
+                        since: None,
+                        until: None,
+                        limit: 1,
+                    },
+                )?;
+                details.last_compaction =
+                    compact["items"].as_array().and_then(|a| a.first()).cloned();
                 MutationResult::value(details)
+            }
+            Command::CompactList(args) => {
+                let id = target(args.thread_id.as_deref(), caller)?;
+                MutationResult::value(crate::readback::compactions(tx, &id, args)?)
+            }
+            Command::ShellList(args) => {
+                MutationResult::value(crate::readback::shells(tx, args, &self.instance_id)?)
             }
             Command::UsageGet(args) => {
                 let scope = if let Some(id) = &args.turn_id {
@@ -976,11 +1030,12 @@ impl Store {
                         children: args.include_children,
                     }
                 };
-                MutationResult::value(crate::usage_totals::read_logged(
+                MutationResult::value(crate::usage_totals::read_period_logged(
                     tx,
                     &scope,
                     self.usage_context,
                     self.usage_diagnostics.as_ref(),
+                    &crate::readback::Window::new(args.since.as_deref(), args.until.as_deref())?,
                 )?)
             }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
@@ -1617,7 +1672,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails{ usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection

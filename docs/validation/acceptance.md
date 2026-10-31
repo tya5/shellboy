@@ -3607,3 +3607,59 @@ root. The previously failing parent-shell PTY test passes both bash and zsh;
 retain the initial failure as unexplained instead of claiming causal repair.
 No E/F/G source, migration15/16, paid API, installed update or push is included.
 Native main three-OS CI and CI long measurements remain separate unexecuted gates.
+
+
+## #75 saved readback qualification
+
+2026-10-31, native macOS 26.3.1 arm64 / Rust 1.99.1. Local standard check
+`sh scripts/check.sh` succeeds: **1,845 passed / 0 failed / 32 ignored**,
+layout93, Python9, format and strict all-target Clippy. Exact-source native CI
+is recorded separately in issue #75; this local result is not an OS/terminal or
+real-provider qualification.
+
+- Compact list combines retained operation results, automatic failure records and
+  replacements. Synthetic summary, ordinary spill, automatic omission and restore
+  show correct sizes/ranges/current-request omission count. Shared replacement
+  operations coalesce with representative ID/count; restore does not merge into
+  its old omission. Legacy summary text including Unicode/NUL measures exactly;
+  missing metrics remain null. thread get includes the latest retained observation.
+- Usage [since,until) selects requests/shells by start and Runs by creation, not
+  overlap/proration. Boundary, offset-equivalent/nanosecond, empty-window, active
+  and unknown-start cases preserve saved-state aggregation/unknown rules. Read-only
+  total_changes is unchanged. Existing slow-only usage logging/trigger tests pass.
+- Shell list checks scope, state, exit code, literal command substring, pagination,
+  insertion watermark and query-bound cursor rejection. A 2,001-row fixture has an
+  empty filtered first page at the 2,000-candidate budget, then a matching final
+  page; no false terminal page. Snippets are at most 512 Unicode characters, remove
+  controls/bidi, suppress obvious credential shapes, and expose no output body.
+  Timestamp keys test offsets, lowercase t/z, nanoseconds, leap seconds and unknowns.
+- A loopback endpoint records **requests.jsonl 0->0** while all six heavy-read
+  commands complete with the writer deliberately gated. One pre-existing receipt
+  stays **1->1**, model attempts **0->0**; no observation receipt/provider call.
+  Tests use 60-second watchdogs only, not speed pass/fail thresholds.
+- EXPLAIN QUERY PLAN seeks every persistent source for compact/usage/shell queries,
+  including spill association, both shell scopes and period filters. SCANs of
+  materialized/JSON iterators are not shared-table scans. Scalar time ranges were
+  added after the tuple-only expression-index query correctly failed this test.
+- dbstat on 5,000 rows per indexed source / 4KiB pages: shell_started_readback
+  118,784 B; shell_owner_started_readback 139,264 B; compact_operation_thread
+  221,184 B; automatic_compaction_turn 217,088 B. Fixture IDs are short (t/other,
+  sNNNNN, opN, aN); UUID/other real datasets differ. These are B-tree sizes, not
+  whole-file/schema-text overhead or a storage guarantee. Two shell entries and
+  one eligible partial receipt/automatic-attempt entry are the explicit write cost.
+- Startup migration15 is index-only; no source rows/body copies or new workers.
+  Partial JSON predicates tolerate malformed metadata during index construction.
+  Existing quick_check still rejects CHECK-corrupt owner startup after preserving
+  its rows; it is not weakened. Old-version fixtures remove the new indexes when
+  deliberately constructing old schemas, rather than making migration idempotent.
+  Public-v0.3.0 upgrade helper now has explicit expected-new-schema14/15 handling;
+  the public-binary upgrade script was not rerun as part of this readback task.
+
+Initial checks found and corrected new-field/exhaustive-match compile errors,
+index-seek and credential-header cases, plus old-schema fixture preparation.
+The existing frontend::persisted_output_identity_is_delivered_before_each_history_window
+watchdog also failed once (Elapsed/RecvError); unchanged isolated and full reruns
+pass. Cause remains unproven, not claimed fixed by this task. No retries/timeouts
+were relaxed to hide it. No user DB, installed binary, owner or public tag/Release
+is changed. Real-provider billing/quality and giant real-history latency remain
+unverified; readbacks report retained facts, not recovered deleted data.

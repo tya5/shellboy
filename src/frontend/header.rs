@@ -80,7 +80,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
          LEFT JOIN turn u ON u.thread_id=t.id AND u.run_id=r.id AND u.state IN ('preparing','running','waiting','recovery_wait')
          WHERE t.id=?1 AND t.deleted_at IS NULL",
         [thread], |row| Ok((ThreadDetails {
-            thread_id:thread.into(), title:row.get(0)?, cwd:row.get(1)?, connection:row.get(2)?,
+            last_compaction:None,thread_id:thread.into(), title:row.get(0)?, cwd:row.get(1)?, connection:row.get(2)?,
             model:row.get(3)?, effort:row.get(4)?, parent_id:row.get(5)?, agents_path:row.get(6)?,
             run_id:row.get(8)?,turn_id:row.get(9)?,recovery_reason:row.get(10)?,
             children_count:row.get::<_,i64>(11)? as u64,shells_count:row.get::<_,i64>(12)? as u64,

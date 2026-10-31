@@ -6685,6 +6685,7 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
+            last_compaction: None,
             thread_id: "t".into(),
             title: "paired header".into(),
             cwd: "/".into(),

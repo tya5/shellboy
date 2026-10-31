@@ -105,7 +105,7 @@ that a particular provider/model implements every feature.
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children]` | All-time saved model usage and separate Run/model/shell durations. At most one scope ID. Default is the authenticated caller's Thread; external callers supply an ID. Children apply only to Thread scope. No provider call, receipt or period flags. |
+| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME]` | Saved model usage and separate Run/model/shell durations, optionally time-filtered. At most one scope ID. Default is the authenticated caller's Thread; external callers supply an ID. Children apply only to Thread scope. No provider call or receipt. |
 
 `thread get`, `run get` and `turn get` also include `usage_totals`. Counts use saved
 completed/failed/incomplete model attempts, not proof of client transmission.
@@ -529,3 +529,52 @@ pending source authorizations/bootstrap/segment jobs held while auto_history is
 false. Explicit pending work, running/failed/done and space selection retain
 their existing meaning. Re-enable or explicitly reauthorize to release applicable
 held entries. No saved job state is changed by this status projection.
+
+
+## Saved compaction and shell observations
+
+These unreleased-main commands require the matching owner and CLI; public v0.4.0
+alone does not provide them. They do not start/stop work, read shell output, call a
+provider or allocate operation receipts.
+
+```sh
+shellboy compact list --thread THREAD_ID --limit 20
+shellboy compact list --thread THREAD_ID --since 2026-10-31T00:00:00Z --until 2026-11-01T00:00:00Z
+shellboy usage get --thread THREAD_ID --since 2026-10-31T00:00:00Z --until 2026-11-01T00:00:00Z
+shellboy shell list --command-contains "rag search" --state exited --exit-code 0 --limit 50
+shellboy shell list --thread THREAD_ID --cursor CURSOR
+```
+
+Replace example IDs/times. Times are RFC3339 with an explicit offset and four-digit
+year. Intervals include since and exclude until; either bound may be omitted.
+Usage selects model requests and shells by saved start, Runs by saved creation,
+and a Turn's own lifetime by its creation. Selected durations are whole, not
+prorated overlap. Unknown start times are excluded only when time filtering; saved
+usage states/unknowns/overflow still apply. Totals are not invoices or prices.
+
+Compaction observations merge known operation results, automatic-failure records
+and retained replacements, newest first. Replacement creation is the timestamp
+when available; otherwise operation completion or attempt end/start is identified
+by timestamp_basis. Restore is a distinct operation, not its old omission. A
+coalesced shared replacement has one representative operation ID and the saved
+operation count. Missing legacy counts/sizes remain null; after receipts expire,
+restores and operation associations may be unavailable. Coverage indicates the
+bounded source-candidate limit; narrow the time range if it was reached. thread get
+includes its latest retained observation, including failed/no-target observations
+with their state, rather than claiming every observation changed input.
+
+Shell list defaults to all saved conversations; --thread restricts ownership.
+Filters are literal/case-sensitive command substring, native state and signed
+exit code. Pages return at most 200 rows and inspect at most 2,000 candidates;
+filtered pages can be empty with next_cursor. Follow that cursor until absent,
+keeping filters unchanged (page size may change). Cursors bind the owner instance,
+normalized filters and insertion watermark. Each page sees current metadata;
+restart after owner/database replacement or to see new work. This is not a frozen
+audit snapshot under concurrent state changes, deletions or SQLite rowid reuse.
+
+Only IDs, times, state, exit code and a 512-character command excerpt are returned.
+Controls/bidi formatting are removed; obvious credential shapes suppress the
+whole snippet, with a redaction flag. This conservative convenience cannot detect
+arbitrary obfuscated secrets: keep results private. No stdout/stderr/body is
+returned; explicitly use shell get/read for the chosen execution ID and raw output.
+All IDs/metrics describe retained facts; collected history cannot be reconstructed.
