@@ -1,5 +1,34 @@
 # Validation record
 
+## G latest-compaction resource envelope checkpoint18b2b5f
+
+Native macOS/Rust1.99.1; one shared root CARGO_TARGET_DIR, incremental disabled,
+job1/test threads2; announced in #41. Sequential `cargo test --locked --lib
+readback::` passes15/0; `cargo test --locked --lib
+frontend::inspection_tests::` passes12/0; `cargo clippy --locked --all-targets
+-- -D warnings` exits0. Integration layout95 and watchdog policy pass. Private
+logs use issue-41-g-compact-bounds-{,runtime-,clippy-}v20 names. Source18b2b5f
+implements design7e87880; earlier standards do not qualify this source.
+
+Five new domain tests prove canonical parity, forced owned interruption, oversized
+source/scalar handling, aggregate copy exhaustion and propagation of unrelated
+SQL errors. The first four also preserve canonical source/results; guarded
+transaction cases prove the original length limit, a large subsequent scalar,
+a recursive query exceeding the previous hook budget and an open shared
+transaction after the scoped read. The actual frontend route retains foreign
+Thread identity/body availability under a held writer; after release, actual
+ThreadSet updates its title despite oversized compaction metadata and exposes
+`last_compaction` as limited. Full CLI restore readback remains available.
+
+The prior v19 failure was a fixture UPDATE without a key predicate, which collided
+with other app_meta primary keys; v20 qualifies the corrected source without
+weakening assertions. No paid API, user DB, installed binary or host clipboard
+was touched. The2500 progress-callback allowance uses SQLite's approximate100
+instruction cadence, not an exact VM/time bound. Broader indexed SQL/query
+plans, all remaining reactive routes, P3/P6, native wheel, latest-main integration,
+standard/three-OS/admission checks remain open.
+
+
 ## G Thread compaction raw/preparation checkpoint35f45ce
 
 Native macOS/Rust1.99.1, existing shared root target/job, incremental disabled/two

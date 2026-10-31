@@ -726,6 +726,16 @@ units below; names describe scope, not a new engine/framework.
 
 ### G remaining saved-read coverage inventory (not implementation evidence)
 
+Latest-compaction envelope checkpoint18b2b5f (design7e87880): shared canonical
+queries run with scoped256KiB value/row limits,2500 progress callbacks at
+approximately100 instructions, pre-copy512-byte scalars and256KiB aggregate
+SQL-to-Rust text. Only owned limits make last_compaction unknown; current Thread
+facts still update. Native readback15/0, actual inspections12/0, strict all-target
+Clippy/layout95/watchdog pass, including canonical preservation and continued
+same-transaction reads. This is not exact VM/time or broader G9 plan proof;
+header bounds and remaining inventory/P3/P6/native/admission gates stay open.
+
+
 Compaction preparation checkpoint35f45ce: Thread's last-compaction capture now
 shares canonical readback queries and prepares after its readonly snapshot.
 Readback10/0, actual frontend inspections12/0 and strict all-target Clippy pass;

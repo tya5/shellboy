@@ -1,5 +1,25 @@
 # Development status
 
+## G latest-compaction display resource envelope
+
+Source18b2b5f implements design7e87880: canonical compaction capture is shared
+with a display-only SQLite value/progress envelope and pre-copy text budget.
+An owned limit makes only `last_compaction` unknown with a field witness; other
+Thread facts remain live and full CLI readback stays unchanged. The guard
+restores connection limits and removes its callback before the shared snapshot
+continues. This adds no schema, worker, queue or public API.
+
+Native macOS readback15/0, actual frontend inspection12/0, strict all-target
+Clippy and layout95/watchdog checks pass. The source/oversize/aggregate/cleanup
+cases include continued queries in the same transaction and real ThreadSet
+refresh with an oversized compaction record. An initial synthetic UPDATE omitted
+its app_meta key predicate; fixing the fixture preserves all assertions.
+These are focused checks, not a new full-standard or three-OS result. G9
+indexed-query/header bounds, remaining reactive inventory, P3/P6/native-wheel
+and review/admission gates remain open. Latest origin/mainca317a8 has been
+fetched but is not yet merged into this checkpoint. No push/install/user data.
+
+
 ## G Thread compaction preparation after readonly capture
 
 Source35f45ce splits canonical compaction readback into raw capture and pure
