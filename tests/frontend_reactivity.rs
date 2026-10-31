@@ -34,6 +34,7 @@ struct Fixture {
     browser_sequences: Vec<u64>,
     browser_pages: usize,
     browser_selected_ready: bool,
+    required_browser_row: Option<String>,
     watch_details: Vec<(u64, shellboy::ui::watch::PreparedWatchDetail)>,
     descendant_snapshots: Vec<(u64, Vec<shellboy::ui::watch::DescendantCount>)>,
 }
@@ -97,6 +98,7 @@ impl Fixture {
             browser_sequences: Vec::new(),
             browser_pages: 0,
             browser_selected_ready: false,
+            required_browser_row: None,
             watch_details: Vec::new(),
             descendant_snapshots: Vec::new(),
         };
@@ -150,6 +152,12 @@ impl Fixture {
             self.source_snapshots.push(snapshot.clone());
         }
         self.ui.apply(update);
+        if let Some(id) = &self.required_browser_row {
+            assert!(
+                self.ui.threads().iter().any(|row| &row.thread_id == id),
+                "open browser lost an existing unfiltered row after an individual update: {id}"
+            );
+        }
     }
     async fn pump(&mut self) -> String {
         while let Ok(update) = self.updates.try_recv() {
@@ -1262,4 +1270,94 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
     proxy.abort();
 
     }).await.expect("scoped Watch lifecycle watchdog");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_list_keeps_running_foreign_row_through_repeated_cli_reordering() {
+    watchdog("running row remains in open List", async {
+        let (url, mut requests, proxy) = failing_proxy().await;
+        let mut fixture = Fixture::new(&url).await;
+        let (worker, _) = fixture.cli_only(&["thread", "create"]).await;
+        let worker = worker["result"]["thread_id"].as_str().unwrap().to_owned();
+        let (other, _) = fixture.cli_only(&["thread", "create"]).await;
+        let other = other["result"]["thread_id"].as_str().unwrap().to_owned();
+        fixture.command("/threads").await;
+        fixture
+            .until("both foreign rows loaded", |ui, _| {
+                ui.threads_visible()
+                    && [&worker, &other]
+                        .iter()
+                        .all(|id| ui.threads().iter().any(|row| &row.thread_id == *id))
+            })
+            .await;
+        fixture.required_browser_row = Some(worker.clone());
+        let generation = fixture.ui.list_generation();
+        let pages = fixture.browser_pages;
+        fixture
+            .cli_thread(
+                &worker,
+                &[
+                    "message",
+                    "send",
+                    "--thread",
+                    &worker,
+                    "--text",
+                    "SYNTHETIC_RUNNING_ROW",
+                ],
+            )
+            .await;
+        let request = watchdog("local held model request", requests.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        fixture
+            .until("foreign worker running", |ui, _| {
+                ui.threads()
+                    .iter()
+                    .any(|row| row.thread_id == worker && row.state == "running")
+            })
+            .await;
+        for step in 0..16 {
+            // Advance a competing row first, then the running row: both orders
+            // move while the same unfiltered browser generation remains open.
+            let other_title = format!("OTHER_ROW_{step}");
+            fixture
+                .cli_thread(
+                    &other,
+                    &["thread", "set", "--thread", &other, "--title", &other_title],
+                )
+                .await;
+            fixture
+                .until("competing row advances", |ui, _| {
+                    ui.threads()
+                        .iter()
+                        .any(|row| row.thread_id == other && row.title == other_title)
+                })
+                .await;
+            let title = format!("RUNNING_ROW_{step}");
+            fixture
+                .cli_thread(
+                    &worker,
+                    &["thread", "set", "--thread", &worker, "--title", &title],
+                )
+                .await;
+            fixture
+                .until("running row advances", |ui, _| {
+                    ui.threads().iter().any(|row| {
+                        row.thread_id == worker && row.title == title && row.state == "running"
+                    })
+                })
+                .await;
+            assert_eq!(fixture.ui.list_generation(), generation);
+            assert_eq!(
+                fixture.browser_pages, pages,
+                "no reopen/full reload masks disappearance"
+            );
+        }
+        drop(request);
+        fixture.finish().await;
+        proxy.abort();
+    })
+    .await
+    .unwrap();
 }
