@@ -6251,3 +6251,24 @@ content cells at the normal background. Fresh Python66 also passes. Evidence:
 `/tmp/issue-91-width-edge-audited/`, `/tmp/issue-91-width-edge-audited.log`, execution
 669162aa-3da8-4187-a790-6b0346d02b37 exit0. Product src and binary are unchanged
 from the standard-tested 3670eac; this adds no new Rust qualification claim.
+
+## G saved index plus main5321310: exact-source standard qualification
+
+Source0a5569b2ac4d0a7d9e582fbedfb0ed5f0fbc061a, native macOS/Rust1.99.1,
+`sh scripts/check.sh` on the shared root CARGO_TARGET_DIR succeeds:2194 passed,
+0 failed,35 ignored. Harnesses: library1223/0/15; integration952/0/17;
+termination_signals12/0/1; tool_group_crash_recovery7/0/2; main and three examples
+have zero tests. Python70, layout95, watchdog policy, formatting and strict
+all-target Clippy pass. Commit secret scan7c04dbc..0a5569b passes. Private
+named-harness audit/log retained; these are this source's results, not the old
+2160-test run or the intervening interrupted/failed attempts. The original PTY
+index refresh assertion succeeds. No paid API or user data.
+
+After qualification, the authorized cleanup ran Cargo clean only after no open
+file/process in root target was observed: Cargo reports24978 files/39.7GiB
+removed. Its missing target makes a subsequent du return ENOENT; this does not
+mean cargo clean failed. Earlier retired .local cleanup inventory is preserved.
+Workspace2.7GiB/.local2.6GiB and disk free162GiB were then observed separately.
+No new semantic code followed qualification. Next build must use the one root
+location and be announced in #41 before long Rust/clippy work. No three-OS,
+G5/G6/P3/P6/final native-layout or complete-G admission is established here.

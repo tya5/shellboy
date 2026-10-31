@@ -76,6 +76,8 @@ $env:CARGO_TARGET_DIR = Join-Path (Split-Path -Parent $shellboyGitCommon) 'targe
 $env:CARGO_INCREMENTAL = '0'
 ```
 
+For current #41 work, announce long Rust builds or clippy in the issue before
+starting, so other sandbox workers can coordinate their serial build queue.
 Run baseline and candidate builds sequentially. Preserve their source SHA,
 configuration and measurement results; rebuild each source before running it
 rather than assuming a shared executable still represents the previous checkout.

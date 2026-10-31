@@ -2912,3 +2912,27 @@ pass 27 width/palette/fallback conditions, with live input and scroll-return in
 baseline; exact geometry is enforced without claiming that symptom's root cause.
 Fresh release P1 profiling and native non-macOS/physical-terminal validation
 remain untested. #99 and #87 retain their separate review/qualification scope.
+
+## G index checkpoint on latest main; build storage cleaned
+
+Source0a5569b merges main5321310 without reverting #99/#85/#91/#5. The full native
+macOS standard now passes2194/0/35 (library1223, integration952, termination_signals12,
+tool_group_crash_recovery7); Python70, layout95, watchdog/fmt, strict all-target
+Clippy and commit secret scan pass. This supersedes the current qualification
+status of the interrupted/failed attempts, whose records remain intact. The
+unchanged real PTY index-refresh assertion passes after0d36d78.
+
+User-authorized cleanup removed40.78GiB logical retired .local outputs plus
+24978 files/39.7GiB in the idle root Cargo target. The workspace now occupies
+about2.7GiB (.local2.6GiB); observed free disk is162GiB. These are different
+logical/filesystem observations, not an assertion that APFS sharing is absent.
+Cargo clean itself succeeded; a following du of the now-absent target returned
+ENOENT, as expected. Source worktrees, uncommitted instrumentation, both archive
+patch layers and private logs/results remain. No installed binary or user data
+was changed. Future builds use only root target and are announced in #41 before
+long Rust/clippy work to coordinate the sandbox's serial queue.
+
+Next connect the extracted readonly facts to G5/G6 visibility/notifications/shared
+admission, finish context/status/history/readback coverage and G9–G12 evidence.
+The expanded command-level inventory prevents blanket snapshot exemptions.
+No G push/main/release/install/user-data admission is claimed.

@@ -717,13 +717,65 @@ units below; names describe scope, not a new engine/framework.
 | G4 popup interaction | Wheel only top painted popup; outside/edge/no-op and F2 do not dirty history; stable original/copy identities; bounded revision/width wrapping cache | Local common wheel/paint identity and bounded lazy reader cache are implemented atb833ffe; standard2089/0/35 verifies new ownership/edge/F2/replacement/reuse/source tests. Real terminal/P6 and any remaining list/form layout-cache inventory remain open. |
 | G5 reactive reads | All mutable saved F8/reference targets update via exact notifications; retained target/selection, stale/late/cancel fences; justified snapshots show source/read time and refresh route | Initial explicit shell/message/Revisit reads now use bounded readonly snapshots;8 targeted and1143 combined library tests pass, including a blocked writer and unchanged receipts. Run/Turn initial reads now retain exact canonical totals in one readonly snapshot; the expanded blocked-writer test and full standard2109/0/35 pass. Live notification coverage is still open. The archived12-target enum does not prove coverage of activity status/history/current readback fields. Follow the explicit per-field coverage/domain-boundary design; add current CLI mutations, rollback/replay and delayed-result evidence. |
 | G6 shared admission | Visible current/inspector reads share bounded readonly WAL snapshot/sequence using existing pool; metadata500ms and usage3s retain separate cadence, no hidden work | Open. Preserve F/#95 guards; current simultaneous-consumer P3/count/cancellation evidence. |
-| G7 domain projections | Private saved index/deletion/GC observations beside canonical semantics, with explicit Core rationale, finite SQL/source/channel bounds and honest unknowns | Storage saved/physical observation is extracted with explicit Core rationale and finite budgets; native8+1 targeted tests/strict lib Clippy pass. Bounded deletion facts and dense review metadata are now extracted; standard2160/0/35 qualifies their current native source. Initial bounded index metadata/coverage is now extracted;13 index tests,1 blocked-writer route and strict library Clippy pass. Existing frontend integration passes1/0; canonical index tests pass42/0/1. The full standard check was interrupted by SIGTERM during all-target Clippy and is not a pass. Context helpers, live integration and final qualification remain open. No generic Repository, table/worker/queue/job engine. |
+| G7 domain projections | Private saved index/deletion/GC observations beside canonical semantics, with explicit Core rationale, finite SQL/source/channel bounds and honest unknowns | Storage saved/physical observation is extracted with explicit Core rationale and finite budgets; native8+1 targeted tests/strict lib Clippy pass. Bounded deletion facts and dense review metadata are now extracted; standard2160/0/35 qualifies their current native source. Initial bounded index metadata/coverage is now extracted;13 index tests,1 blocked-writer route and strict library Clippy pass. Existing frontend integration passes1/0; canonical index tests pass42/0/1. A resumed standard exposed a real PTY status-visibility regression;0d36d78 fixes it without changing the PTY assertion. Current merged source0a5569b (main5321310) passes standard2194/0/35, Python70 and strict all-target Clippy. Context helpers, live integration and final qualification remain open. No generic Repository, table/worker/queue/job engine. |
 | G8 source inspections | Attachment/operation/context/provenance/receipt/downstream identities are exact; source witnesses bound copies before parse; stale retained coverage is explicit | Operation exact-key and attachment exact-selection/source readers are extracted; the common field/actual frontend checkpoint passes standard2124/0/35. Existing CLI reason/replay semantics are shared. Live receipt/attachment/GC notifications and the remaining mutable consumers are still open; preserve both archive layers. |
 | G9 storage/migration | Only necessary indexed reads; inspect actual slot after main17, avoid overlapping indexes, atomic ledger/schema rollback/reopen and pre-upgrade backup | Open. Re-evaluate three archived lookup indexes plus the existing turns_by_run ID tie-breaker extension (local preflight only);18 is a candidate, not reserved. |
 | G10 functional/native | Complete effect/label/catalogue mapping and freshness ledger, actual80/wide dark/light/NO_COLOR/fallback forms, standard checks and secret scan | Open. No physical Windows UI success inferred from mocks/CI. |
 | G11 P6/counts |64KiB original, actual input stream, bounded frame/cache/wrap counts; no paint on unchanged inputs; times recorded against available original baseline only | Open. Policy6543044236 applies: no8ms/+2ms/CPU acceptance or variance/strict-bin reruns; unsupported old wheel is unavailable, not zero cost. |
 | G12 admission | Separate G publication/CI/reviewer approval, current main reconciliation and exact-source3OS, #41 shipped/residual report | Open. F approval is not G approval; no release/install/user-data authority is inferred. |
 
+### G remaining saved-read coverage inventory (not implementation evidence)
+
+The initial twelve archived targets do not close G5. Reconcile this inventory
+with the current typed catalogue before declaring reactive coverage complete.
+The rows below are obligations, not assertions that notifications are connected.
+Read-only initial routes and their native tests remain separately qualified.
+
+| Route/result | Mutable facts and retained evidence | Remaining connection/qualification |
+| --- | --- | --- |
+| ThreadGet | Exact target settings, lifecycle, selected path, last input/answer/compaction; retain captured form target | Share current-view header in the same readonly snapshot; retain canonical additional fields and independently observed usage/context. |
+| RunGet / TurnGet | Lifecycle, ownership, recovery, saved usage, owned work | Reuse extracted scalar/JSON guards; exact Thread dependencies, independent3s usage, late/stop/retry tests. |
+| ShellGet / MessageGet / RevisitGet | Native execution/delivery/Revisit state; immutable command or accepted message source | Reuse extracted readers; committed lifecycle/delivery/owner-output invalidation without retargeting the viewer. |
+| OperationGet | Immutable acceptance/expiry versus current downstream delivery/compaction | Subscribe to receipt/downstream changes and expiry; never replay an operation while observing it. |
+| AttachmentList / followed attachment | Selection/delivery/managed retention versus immutable source and path | Exact point reader remains independent of list cohort; committed GC/availability changes, no periodic external-file reads. |
+| IndexStatus | Saved profile/pause/work/space state and finite source window | Preserve management namespace, pause-state visibility and selected cursor; committed index hints, no self-echo or consumed worker wake. |
+| StorageStatus | Saved category/eligibility bounds and separately timed physical sample | Pure DB refresh must not call the initial wrapper that samples physical storage; physical dirty admission remains separate3s work. |
+| ThreadDeletePreview | Saved scope/blockers/references versus retained destructive confirmation | Refresh advisory facts and mark obsolete confirmation stale; never turn a bounded observation into execution permission. |
+| UsageGet / Thread context usage | Exact captured filter/configuration, known/unknown saved scalars | Readonly same-snapshot usage with3s dirty cadence; profile/model mismatch remains explicitly old observation. |
+| Status | Current saved jobs/ownership/model/recovery and bounded list membership | Inventory all native rows and scope/defaults; initial whole-owner snapshot is not a permanent exception. |
+| ThreadList | Saved page rows, selected mode and membership | Reuse F browser facts/bounds where possible; prove generic F8 route as well as dedicated browser; preserve #100 and later header changes. |
+| ShellList / CompactList | Saved page row state and retention, original requested cursor/window | Update mutable row facts; define watermark/newer-result indication without silently advancing a user's cursor. |
+| HistoryList / HistoryGet / HistoryRelations | Obtained immutable node/body/provenance and current selection/availability | Preserve original bytes/hash/page; separately observe mutable path/tombstone/source facts and cursor validity. |
+| HistorySearch / received source references | Retained match/result evidence and current source availability/path | No automatic query embedding or rewritten historical result; observe bounded selected sources, label result time and explicit repeat route. |
+| ShellRead / wait result | Obtained bytes/cursor/encoding or completed wait outcome; current target lifecycle is distinct | Preserve captured result; live lifecycle/availability facts cannot be inferred from an old page/outcome. |
+| IndexPreview / mutation confirmation | Retained source/cost/confirmation evidence | Invalidate on changed facts and keep existing stronger execution checks; no hidden repeated paid request. |
+| ModelList / native memory / standalone clients | Explicit external/native observation or completed client result | Show observed/completion time and refresh/repeat route; no hidden provider/OS/file polling or repeated mutation. |
+
+For each mutable route record actual CLI mutation, committed invalidation,
+rollback/replay silence, hidden-consumer zero work, dirty coalescing, cancellation
+and stale-result adoption. Grouping a row does not permit omitting one command.
+Keep metadata500ms and usage/physical3s independent on existing finite workers.
+No new table, public Core command, worker or generic observation engine follows
+from this inventory.
+
 Preserve the root archive and private staged/unstaged backups. Extraction uses
 ordinary Rust modules and existing ownership/admission. New evidence belongs to
 its exact source; functional/count gates cannot be replaced by timing success.
+
+### G build coordination after the disk interruption
+
+The earlier SIGTERM was the user's emergency disk intervention. Retired .local
+measurement output has been removed and the idle root target was explicitly
+cleaned with user authorization. Subsequent Cargo/check/measurement commands
+use only the clone root CARGO_TARGET_DIR, with incremental output disabled.
+Before a long Rust build or clippy, post the source/command in #41 so sandbox
+workers can keep their build queue serial. Do not recreate per-measurement
+targets. Keep logs/result witnesses separately from reproducible output.
+
+Merged main5321310 is source0a5569b. #99 preview_reads/streams/tools, #85 driver,
+#91 view body and #5 serve/os_signals are unchanged relative to that main.
+Future G5/G6 work must retain visible painted-row/saved-output-version preview
+admission (no1s timeout), Changed after persisted inflight adoption, one-column
+conversation insets and headless lifecycle separation. These touchpoints were
+reported in #41; the inventory above is still unimplemented/reactively unqualified
+where marked open. Register every new tests/*.rs in tests/integration/main.rs.
