@@ -448,6 +448,54 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
     fields
 }
 
+/// Reserve common metadata roots before a large list consumes the bounded field
+/// window. Reuses the existing collector without cloning/reordering source JSON.
+pub(crate) fn prioritized_fields(value: &Value, roots: &[&str]) -> Vec<PresentationField> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut used = 0usize;
+    for (prefix, source) in roots
+        .iter()
+        .filter_map(|key| {
+            value.get(*key).map(|part| {
+                (
+                    format!("/{}", crate::json_pointer::escape_segment(key)),
+                    part,
+                )
+            })
+        })
+        .chain(std::iter::once((String::new(), value)))
+    {
+        for mut field in fields_of_value(source) {
+            if !prefix.is_empty() {
+                let count_label = field.label.ends_with(" 件数");
+                field.key = format!("{prefix}{}", field.key);
+                field.label = if count_label {
+                    format!("{} 件数", short(&field.key, 256))
+                } else {
+                    short(&field.key, 256)
+                };
+            }
+            if seen.contains(&field.key) {
+                continue;
+            }
+            let bytes = field
+                .key
+                .len()
+                .saturating_add(field.label.len())
+                .saturating_add(field.value.len())
+                .saturating_add(size_of::<PresentationField>());
+            if out.len() >= MAX_FIELDS || used.saturating_add(bytes) > MAX_METADATA_BYTES {
+                return out;
+            }
+            used += bytes;
+            seen.insert(field.key.clone());
+            out.push(field);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,5 +560,44 @@ mod tests {
                 .displayed(),
             "opaque-value"
         );
+    }
+    #[test]
+    fn metadata_roots_survive_large_arrays_without_duplicate_pointers_or_larger_budget() {
+        let value = serde_json::json!({"attachments":(0..1000).map(|i|serde_json::json!({"attachment_id":format!("item-{i}"),"source_node_id":"source","path":"/synthetic","state":"active"})).collect::<Vec<_>>(),"scope":{"kind":"thread"},"count":{"value":1000,"relation":"lower_bound"},"thread_id":"actual","view_observation":{"observed_at":"saved-time"}});
+        let fields =
+            prioritized_fields(&value, &["thread_id", "scope", "count", "view_observation"]);
+        for key in [
+            "/thread_id",
+            "/scope/kind",
+            "/count/value",
+            "/count/relation",
+            "/view_observation/observed_at",
+        ] {
+            assert!(fields.iter().any(|f| f.key == key), "missing {key}");
+        }
+        assert!(
+            fields
+                .iter()
+                .any(|f| f.key == "/attachments/0/attachment_id")
+        );
+        let unique = fields
+            .iter()
+            .map(|f| &f.key)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), fields.len());
+        assert!(fields.len() <= MAX_FIELDS);
+        assert!(
+            fields
+                .iter()
+                .map(|f| f.key.len()
+                    + f.label.len()
+                    + f.value.len()
+                    + size_of::<PresentationField>())
+                .sum::<usize>()
+                <= MAX_METADATA_BYTES
+        );
+        for f in &fields {
+            assert!(value.pointer(&f.key).is_some(), "{}", f.key);
+        }
     }
 }

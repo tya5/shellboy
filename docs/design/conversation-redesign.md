@@ -278,6 +278,28 @@ receipt envelope preparation stay in control::receipt and are reused by both
 CLI and display. No observer can replay the operation. The first exact read is
 not itself completion of commit notifications or live subscriptions.
 
+General management results reserve common identity/state/scope/coverage/limit/read-
+time fields before admitting expansive array fields. Reuse the existing bounded
+pointer/preview collector for selected metadata roots and the remaining source;
+deduplicate exact pointers under the same128-field/64KiB output budget. Do not
+clone the raw body to reorder it, raise the field cap, or add per-list geometry
+exceptions. Full retained detail remains separately budgeted and addressable.
+
+Saved attachment inspection reads selection/source/delivery/managed-file facts,
+not current external-file contents or filesystem availability. A list copies at
+most128 rows across indexed active/excluded prefixes, with a body-free overflow
+sentinel and explicit lower-bound/global-order coverage. Each path/reason copy
+is at most512 bytes; IDs/kinds are bounded separately. Native file availability
+remains an explicit CLI observation, not a periodically sampled saved fact.
+Canonical managed-file unavailability takes precedence over selection exclusion
+reasons. Share that pure domain precedence with CLI; an unread oversized reason
+is explicitly limited, not replaced with an invented missing-reason default.
+A followed attachment uses the exact (Thread,attachment) selection primary key,
+independent of list membership or the128-row cohort. Its count describes only
+that exact selection; a missing saved selection never means the entire Thread
+has no attachments. Resolve Thread from the selected record itself, never the
+viewer/current Thread. Source-node references continue to the original node.
+
 Private domain helpers are permitted only where they avoid duplicating canonical
 schema/semantics: index saved views know private space/pause/failure keys and must
 not call the heavyweight full-status/provider path; GC observations know category

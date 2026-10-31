@@ -87,7 +87,24 @@ pub(super) fn report(value: Value, budget: usize) -> Report {
     if safe.get("filters").is_some() && safe.get("items").is_some() {
         return work_report(safe, budget);
     }
-    let mut fields = presentation::fields_of_value(&safe);
+    let mut fields = presentation::fields::prioritized_fields(
+        &safe,
+        &[
+            "thread_id",
+            "run_id",
+            "turn_id",
+            "operation_id",
+            "state",
+            "scope",
+            "count",
+            "complete",
+            "selection_exhausted",
+            "global_order_complete",
+            "notice",
+            "view_limits",
+            "view_observation",
+        ],
+    );
     presentation::fields::decorate(&mut fields, &safe);
     fn order(pointer: &str) -> (String, u8, String) {
         let (parent, key) = pointer.rsplit_once('/').unwrap_or(("", pointer));
