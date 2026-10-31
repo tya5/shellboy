@@ -5670,3 +5670,28 @@ was added. These are synthetic UI buffers/owned CLI processes and loopback only,
 not a trace of the user's original terminal geometry or real-provider behavior.
 Final standard/doc-role/bin/docs/record checks and SHA are recorded in #100;
 fresh native CI and user review remain the integration coordinator's gates.
+
+## G first saved metadata readonly checkpoint
+
+Source: G worktree based on merge dd1ae66 (main d29e0fc plus G1–G4), with the
+first saved-metadata extraction in this commit. Native macOS, pinned Rust1.99.1;
+synthetic temporary databases/configuration, no model API or user database.
+`cargo test --locked --lib frontend::inspection_saved::`:8 passed/0 failed.
+`cargo test --locked --lib`:1143 passed/0 failed/15 ignored.
+`cargo clippy --locked --lib -- -D warnings`, watchdog policy and fmt pass.
+The initial library compile failed because the fixture awaited DbReply directly;
+it now uses its canonical receive method. This was a test compile error, not a
+product failure or suppressed retry. The first targeted run after correction and
+the full library run both pass.
+
+The blocked-writer fixture exercises actual management_request for all three
+commands while the writer is gated; release and shutdown precede assertions.
+It verifies exact target identity, observed time and no operation-receipt growth.
+Other tests cover canonical message/shell parity, tombstones, terminal Revisit
+rejection, malformed/oversized metadata without invented zero values, combined
+64KiB JSON budget, closed allowlist before SQL and bounded latest-output work.
+No elapsed-time acceptance threshold is introduced; the shared60s watchdog is
+only a deadlock guard. Optional scalar copies are bounded before decoding;
+required identity overflow is explicit. This does not qualify the full standard,
+integration suite, live refresh/shared snapshots, P3/P6, native popup screens or
+3OS CI for this source. Those remain open in the G ledger.

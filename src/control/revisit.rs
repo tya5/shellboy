@@ -30,8 +30,17 @@ fn key(run: &str) -> String {
 fn malformed_state() -> ApiError {
     invalid("Malformed Revisit state").hint("Revisit counters are unavailable. Stop this Run to discard unreadable reservation metadata, or restart the owner; do not assume a zero count")
 }
+fn decode_state(body: &str) -> Result<State> {
+    serde_json::from_str(body).map_err(|_| malformed_state())
+}
 pub(crate) fn capture_state_valid(body: &str) -> bool {
-    serde_json::from_str::<State>(body).is_ok()
+    decode_state(body).is_ok()
+}
+/// Canonical saved view for already-authorized readonly observations. This
+/// function has no database access and grants no right to operate on a Run.
+pub(crate) fn inspect_saved(run: &str, body: Option<&str>, limit: Option<u64>) -> Result<Value> {
+    let state = body.map(decode_state).transpose()?.unwrap_or_default();
+    Ok(view_with_limit(run, &state, limit))
 }
 fn load(db: &Connection, run: &str) -> Result<Option<State>> {
     let saved: Option<String> = db
@@ -40,9 +49,7 @@ fn load(db: &Connection, run: &str) -> Result<Option<State>> {
         })
         .optional()
         .map_err(sql)?;
-    saved
-        .map(|body| serde_json::from_str(&body).map_err(|_| malformed_state()))
-        .transpose()
+    saved.map(|body| decode_state(&body)).transpose()
 }
 fn save(db: &Connection, run: &str, state: &State) -> Result<()> {
     db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2) ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![key(run),serde_json::to_string(state).expect("Revisit JSON")]).map_err(sql)?;
@@ -89,7 +96,10 @@ fn target(
     Ok((run.into(), thread, setter))
 }
 fn view(run: &str, state: &State, config: &Config) -> Value {
-    json!({"run_id":run,"pending":state.pending,"consumed_count":state.consumed_count,"last_fired_at":state.last_fired_at,"limit":config.limits.revisit_max_per_run})
+    view_with_limit(run, state, config.limits.revisit_max_per_run)
+}
+fn view_with_limit(run: &str, state: &State, limit: Option<u64>) -> Value {
+    json!({"run_id":run,"pending":state.pending,"consumed_count":state.consumed_count,"last_fired_at":state.last_fired_at,"limit":limit})
 }
 pub(super) fn get(
     db: &Connection,

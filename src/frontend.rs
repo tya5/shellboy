@@ -11,6 +11,7 @@ mod draft_saver;
 mod header;
 mod history_reader;
 mod input_history;
+mod inspection_saved;
 mod lineage;
 mod lineage_observer;
 mod live_output;
@@ -178,6 +179,12 @@ async fn management_request_trigger(
     cancel: CancellationToken,
     trigger: crate::usage_totals::UsageTrigger,
 ) -> Result<Value, ApiError> {
+    if inspection_saved::supports(&command) {
+        return match inspection_saved::request(control, command, cancel).await {
+            Ok(value) => Ok(value),
+            Err(error) => Ok(serde_json::json!({"error":error})),
+        };
+    }
     let is_read_projection = !command.requires_receipt();
     let index_args = if let Command::IndexStatus(args) = &command {
         Some(args.clone())

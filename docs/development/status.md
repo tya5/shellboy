@@ -2662,3 +2662,17 @@ row above an unnecessary offset. List and Watch now reconcile the actual offset
 when all rows fit; Watch does so before bounded formatting/detail scope.
 Membership, F admission guards and overflow anchors are unchanged. Fresh local
 checks and the exact reviewed candidate are reported in issue #100.
+
+## G5 first readonly saved-metadata extraction
+
+G has merged main d29e0fc, including #100's List/Watch fit-offset correction.
+Explicit shell get, message get and explicit-Run Revisit get now collect bounded
+saved facts through the existing readonly snapshot/presentation pool. Canonical
+Revisit decoding and encoding validation are shared, with no new Core command,
+worker, receipt, table or migration. Eight targeted tests pass, including the
+actual management route while the writer is intentionally blocked; the combined
+native library has1143 passed/0 failed/15 ignored and strict library Clippy passes.
+See the source-qualified acceptance record. This is an initial explicit read,
+not completed G5/G6 live subscriptions/shared admission. Next extract bounded
+Run/Turn facts and wire exact target notifications/shared admission, preserving
+F/#95 and #100. G remains local; no main push, release, install or user data change.

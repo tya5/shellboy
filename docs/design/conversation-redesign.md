@@ -227,6 +227,19 @@ readonly WAL snapshot; no I/O, DB work, queue wait or join enters the UI OS thre
 A hidden/closed consumer causes no read. Failure keeps identified old facts stale
 or marks unavailable; it never invents idle/zero/completed values.
 
+The first saved-metadata extraction covers shell get, message get and explicit-Run
+Revisit get. Only these three typed commands enter this reader. Identifiers are
+validated before SQL (at most4096 bytes); point-read scalar cells are bounded to
+64 bytes for native enums and512 bytes for other saved scalars, and JSON source
+copy is at most64KiB (sender plus assignment share that budget). Required identity
+overflow is an explicit error; optional overflow carries field-limit witnesses.
+Decode runs after the readonly snapshot on finite presentation work. Revisit's
+canonical saved-state decoder/view remains in its existing domain module; no
+second business-state interpretation or authorization policy is introduced.
+Initial explicit F8 reads use the existing admission/pool and report their read
+scope/time. This intermediate route is not completion of live target subscriptions
+or the final joint current/browser/inspector snapshot; those remain mandatory.
+
 Private domain helpers are permitted only where they avoid duplicating canonical
 schema/semantics: index saved views know private space/pause/failure keys and must
 not call the heavyweight full-status/provider path; GC observations know category

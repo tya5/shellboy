@@ -726,7 +726,7 @@ fn validate_cursor(
     }
     Ok(())
 }
-fn canonical_encoding(label: &str) -> Result<&'static Encoding> {
+pub(crate) fn canonical_encoding(label: &str) -> Result<&'static Encoding> {
     let normalized = label.trim().to_ascii_lowercase().replace('_', "-");
     match normalized.as_str() {
         "utf8" | "utf-8" => Ok(encoding_rs::UTF_8),
