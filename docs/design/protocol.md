@@ -391,3 +391,30 @@ and snapshot.changes/more when these conditions are present. ThreadSummary and
 ThreadDetails add last_answer/last_input optional saved-fact objects. They do not
 change lifecycle, authorization, MessageSender identity or model-facing tools.
 Schema16 contains only derived indexes; protocol version remains2.
+
+## Terminal-free startup rows (#5 stage 2)
+
+`serve` is a local process adapter, not a new IPC operation. Its readiness row
+has protocol_version, event/state `ready`, absolute UTF-8 data_dir and instance_id;
+it is not an operation Response and does not issue an operation receipt or use
+an inherited Origin. It is flushed only after IPC binding and dispatcher startup.
+Startup failure is one stderr JSON object with protocol_version, ok=false and
+error; there is no successful stdout result. Failure to write readiness closes
+the prepared session before reporting failure. Existing IPC commands, version,
+validation and authorization remain unchanged in this startup-only stage.
+
+## Explicit owner shutdown
+
+owner.shutdown takes instance_id and requires a durable operation receipt. Only
+serve owners accept it; local IPC/OS access remains the authority, not a human
+label. It does not change conversation context. Result state=accepted with
+shutdown_complete=false acknowledges committed acceptance at that instance,
+not successful process termination. The session final stdout row event=stopped
+reports state=stopped/failed and ok after cleanup. Startup cancellation instead
+reports state=cancelled without a ready row. All rows carry protocol_version;
+normal ready/stopped rows identify the session; cancellation before readiness
+may carry null data_dir and instance_id.
+No final row is guaranteed after force-kill or a closed output receiver. CLI
+shutdown requires explicit data-dir, reads that endpoint rather than inherited
+owner variables, and pins the request to its instance. Old saved acceptance
+remains inspectable but does not authorize stopping a restarted owner.

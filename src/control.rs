@@ -5,6 +5,7 @@ pub(crate) mod interruption;
 mod live;
 mod memory;
 pub(crate) mod message_delivery;
+mod owner_shutdown;
 pub(crate) mod pending_messages;
 mod runtime;
 pub(crate) mod submission_retention;
@@ -108,6 +109,7 @@ pub struct Control {
     maintenance: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     index_workers: tokio::sync::OnceCell<Mutex<Option<crate::index::IndexWorkers>>>,
     shutdown_context: tokio::sync::OnceCell<Result<(), ApiError>>,
+    owner_shutdown: std::sync::OnceLock<CancellationToken>,
     compactor: crate::compaction::Compactor,
     compact_tasks: Mutex<HashMap<String, CancellationToken>>,
     boundaries: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
@@ -185,6 +187,7 @@ impl Control {
             index,
             index_workers: tokio::sync::OnceCell::new(),
             shutdown_context: tokio::sync::OnceCell::new(),
+            owner_shutdown: std::sync::OnceLock::new(),
             compactor,
             boundaries: Mutex::new(HashMap::new()),
             compact_tasks: Mutex::new(HashMap::new()),
@@ -307,7 +310,20 @@ impl Control {
                 let (reply, effects) = control
                     .evaluate(invocation.request, invocation.disconnected)
                     .await;
+                let shutdown = effects
+                    .as_ref()
+                    .is_some_and(|effects| effects.owner_shutdown);
+                if shutdown {
+                    control.freeze_owner_admission();
+                }
                 let _ = invocation.reply.send(reply);
+                if shutdown {
+                    if let Some(completed) = invocation.reply_completed {
+                        completed.cancelled().await;
+                    }
+                    drop(_guard);
+                    drop(_admission);
+                }
                 // A self-stop receipt is handed to the transport before killing
                 // its caller. The finite grace also handles disconnected clients.
                 control.apply_effects(effects).await;
@@ -335,6 +351,13 @@ impl Control {
                     Err(error) => return Response::failure(request.operation_id, error),
                 };
                 let (reply, effects) = control.evaluate(request, disconnected).await;
+                if effects
+                    .as_ref()
+                    .is_some_and(|effects| effects.owner_shutdown)
+                {
+                    control.freeze_owner_admission();
+                    drop(_guard);
+                }
                 control.apply_effects(effects).await;
                 reply
             }),
@@ -714,6 +737,20 @@ impl Control {
         let observation_name = request.command.name();
         let result = async {
             request.validate()?;
+            if let Command::OwnerShutdown(args) = &request.command {
+                if self.owner_shutdown.get().is_none() {
+                    return Err(ApiError::new(
+                        ErrorCode::InvalidState,
+                        "shutdown is only available for serve owners",
+                    ));
+                }
+                if args.instance_id != self.store.instance_id {
+                    return Err(ApiError::new(
+                        ErrorCode::ProtocolMismatch,
+                        "Shutdown targets a different owner instance",
+                    ));
+                }
+            }
             let origin = self.validate_origin(&request.origin).await?;
             if !matches!(&request.command, Command::Status(a) if a.memory) {
                 self.start().await?;
@@ -848,6 +885,12 @@ impl Control {
         let Some(effects) = effects else {
             return;
         };
+        if effects.owner_shutdown {
+            if let Some(stop) = self.owner_shutdown.get() {
+                stop.cancel();
+            }
+            return;
+        }
         self.index.wake();
         for thread in effects.changed_threads {
             self.changed(&thread);
@@ -1044,9 +1087,7 @@ impl Control {
     /// Capture before cancellation releases waits or terminalizes owned Runs.
     /// A failed snapshot must still cancel/drain; shutdown propagates this result.
     pub async fn prepare_shutdown(&self) -> Result<(), ApiError> {
-        self.shell.close_start_admission();
-        self.admission_closed.store(true, Ordering::SeqCst);
-        self.changed.notify_waiters();
+        self.freeze_owner_admission();
         let result = self
             .shutdown_context
             .get_or_init(|| async {

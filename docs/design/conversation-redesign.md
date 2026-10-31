@@ -167,6 +167,16 @@ where an empty value can be discovered. The list explains that it runs the same
 operations as the CLI and shows the selected CLI syntax; the form shows that
 operation's explanation/effect, replacing generic prepared/request wording.
 
+The latest main adds headless process lifecycle commands serve/shutdown (#5).
+These are launch/termination controls for a separate terminal-free owner, not
+operations executable inside the current TUI: Core explicitly rejects `owner.shutdown` through its TUI adapter. Keep both CLI paths in a separate, explicit
+lifecycle inventory with their global options, beside the launch/help/version
+boundary; do not invent a successful F8 form or bypass that Core admission rule.
+The UI operation catalogue remains complete for its applicable commands. Command
+caption lookup returns an explicit no-form classification for OwnerShutdown;
+future Command variants remain exhaustively matched. Review this choice if main
+adds a supported TUI lifecycle operation or an explicit other-owner launcher.
+
 Prove a complete mapping between catalogue operations and executable CLI paths,
 including standalone docs/RAG, attach shorthand, and executable parents with
 optional subcommands (compact itself as well as compact list). Enumerate these
@@ -1139,3 +1149,38 @@ clamped formatting offset is not sufficient if rendering still uses an older
 TableState offset. Keep c5785c5's bounded neighborhood formatting and the
 2b9514e open-list membership regression. No browser ticket/admission, saved
 membership, timestamps, rows, workers, queues or pools change for this fix.
+
+## Preview lifetime and one tool disclosure owner (#99)
+
+A preview read has no wall-clock failure deadline. Byte/row limits and the
+existing eight read-worker slots remain its bounds; genuine read/admission
+errors remain errors. Each existing ItemState entry owns a cancellation token
+for its current request revision and passes a clone with its UI action. Closing,
+leaving the visible target, replacing/evicting the entry or changing outcome
+cancels it synchronously, even before backend action admission. The frontend
+also retains its existing Thread-selection cancellation fence. Late UI replies
+remain Thread/generation/request-revision checked. ItemState retains its
+128-entry bound and the existing eight read slots remain unchanged; there is no
+secondary request registry, new worker, queue, timer or persistent state.
+
+Every projected occurrence of a tool uses the same best correlated outcome and
+one ItemKey for its disclosure state. Disclosure uses outcome class, so equivalent
+saved/current terminal aliases and exit-metadata refinements do not undo a close.
+In particular an older exact-result block
+cannot fall back to its own attention default after the header was explicitly
+closed. Empty result nodes with an unambiguous exact result-node reference from
+an already-rendered tool are not independent placeholder items. Ambiguous
+references or unrelated nodes are never coalesced by command text or ID prefix.
+These changes require review independently of #98's display-only corrections.
+
+A Changed/history snapshot no longer performs implicit raw-output tail reads.
+Default-open failures and explicit opens use the same cancellable ItemState
+request path (automatic total2KiB, explicit up to configured16KiB). Metadata
+already read in the bounded tool-source batch includes saved_sequence and
+output_complete as nonserialized UI facts; no schema/protocol or new query is
+added. A disclosure's state and output revision are separate: new output keeps
+an explicit open/close choice, retires only an older read and permits one fresh
+snapshot. Unchanged terminal+complete observations do not reread or mint a new
+"取得" timestamp. Retention generation alone does not invalidate paid display
+text. No animation/draw path reads raw output. Legacy raw-preview constructors
+remain test-only fixtures for bounds/identity tests, not production refresh work.

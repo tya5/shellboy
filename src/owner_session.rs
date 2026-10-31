@@ -24,7 +24,7 @@ impl Prepared {
         close(self.owner, Some(self.control), Some(self.server)).await
     }
 }
-async fn close(
+pub(crate) async fn close(
     owner: DataOwner,
     control: Option<Arc<Control>>,
     server: Option<LocalServer>,

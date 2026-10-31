@@ -1307,7 +1307,17 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     } else {
         tool.exit_code
     };
-    format!("{state}:{code:?}:{}", tool.requires_attention())
+    let kind = if state == "exited" && code.is_none() {
+        RowKind::Unknown
+    } else {
+        crate::presentation::rows::tool_kind(state, tool.requires_attention())
+    };
+    // Progress and metadata refinements must not undo an explicit close.
+    let disclosure = format!("{kind:?}");
+    match tool.output_revision {
+        Some((sequence, complete)) => format!("{disclosure}|output:{sequence}:{complete}"),
+        None => disclosure,
+    }
 }
 
 fn tool_metadata(
@@ -1616,6 +1626,58 @@ fn append_node_cached(
         );
     }
 }
+pub(super) fn tool_observation_rank(
+    block: &crate::presentation::PresentationBlock,
+) -> (bool, bool) {
+    (
+        block.tool.as_ref().is_some_and(|tool| {
+            tool.group_id
+                .as_ref()
+                .is_some_and(|group| !group.is_empty())
+                && !tool.call_id.is_empty()
+        }),
+        block.kind == BlockKind::ToolResult,
+    )
+}
+fn result_owners(view: &ThreadView, begin: usize, end: usize) -> BTreeMap<String, Option<ItemKey>> {
+    let mut owners = BTreeMap::new();
+    for node in view.nodes().iter().take(end).skip(begin) {
+        for (index, block) in node.presentation.blocks.iter().enumerate() {
+            if let Some(tool) = &block.tool
+                && let Some(result) = &tool.result_node_id
+            {
+                let key = ItemKey::tool(tool, &node.node_id, index);
+                if matches!(key, ItemKey::Tool { .. }) {
+                    owners
+                        .entry(result.clone())
+                        .and_modify(|owner: &mut Option<ItemKey>| {
+                            if owner.as_ref() != Some(&key) {
+                                *owner = None;
+                            }
+                        })
+                        .or_insert(Some(key));
+                }
+            }
+        }
+    }
+    owners
+}
+fn correlated_tool_key(
+    tool: &crate::presentation::ToolPresentation,
+    node: &str,
+    index: usize,
+    owners: &BTreeMap<String, Option<ItemKey>>,
+) -> ItemKey {
+    let key = ItemKey::tool(tool, node, index);
+    if matches!(key, ItemKey::LocalTool { .. })
+        && let Some(Some(owner @ ItemKey::Tool { call_id, .. })) = owners.get(node)
+        && call_id == &tool.call_id
+    {
+        owner.clone()
+    } else {
+        key
+    }
+}
 fn typed_history(
     view: &ThreadView,
     begin: usize,
@@ -1627,12 +1689,18 @@ fn typed_history(
     let mut lines = Vec::new();
     let mut sources: Vec<RowSource> = Vec::new();
     let mut links = Vec::new();
+    let owners = result_owners(view, begin, end);
     let mut best = BTreeMap::<ItemKey, (usize, usize)>::new();
     for (index, node) in view.nodes().iter().enumerate().take(end).skip(begin) {
         for (block_index, block) in node.presentation.blocks.iter().enumerate() {
             if let Some(tool) = &block.tool {
-                let key = ItemKey::tool(tool, &node.node_id, block_index);
-                if !best.contains_key(&key) || block.kind == BlockKind::ToolResult {
+                let key = correlated_tool_key(tool, &node.node_id, block_index, &owners);
+                if best.get(&key).is_none_or(|&(old_node, old_block)| {
+                    tool_observation_rank(block)
+                        >= tool_observation_rank(
+                            &view.nodes()[old_node].presentation.blocks[old_block],
+                        )
+                }) {
                     best.insert(key, (index, block_index));
                 }
             }
@@ -1646,6 +1714,18 @@ fn typed_history(
         }
         let node = &view.nodes()[index];
         let before = lines.len();
+        if node.presentation.blocks.is_empty()
+            && (node.role == "tool" || node.presentation.kind == PresentationKind::ToolResult)
+            && owners
+                .get(&node.node_id)
+                .and_then(Option::as_ref)
+                .is_some_and(|owner| seen.contains(owner))
+        {
+            if let Some(last) = sources.last_mut() {
+                last.covered_end = index + 1;
+            }
+            continue;
+        }
         if let Some(summary) = interruption_group(&view.nodes()[index..end]) {
             let summary_index = index + summary;
             let summary_node = &view.nodes()[summary_index];
@@ -1676,17 +1756,22 @@ fn typed_history(
         {
             for (block_index, block) in node.presentation.blocks.iter().enumerate() {
                 if let Some(tool) = &block.tool {
-                    let key = ItemKey::tool(tool, &node.node_id, block_index);
+                    let key = correlated_tool_key(tool, &node.node_id, block_index, &owners);
                     if !seen.insert(key.clone()) {
                         // Exact canonical output stays at its own source ordinal,
                         // while sharing the one earlier header's item identity.
                         if block.kind != BlockKind::ToolResult || !block.source_exact {
                             continue;
                         }
-                        let outcome = tool_outcome(tool);
+                        let (best_node, best_block) = best[&key];
+                        let canonical = view.nodes()[best_node].presentation.blocks[best_block]
+                            .tool
+                            .as_ref()
+                            .expect("typed tool");
+                        let outcome = tool_outcome(canonical);
                         if view
                             .items
-                            .is_open(&key, tool.requires_attention(), &outcome)
+                            .is_open(&key, canonical.requires_attention(), &outcome)
                             && view.items.preview_for(&key, &outcome).is_none()
                         {
                             let mut copy = node.clone();
@@ -1717,7 +1802,7 @@ fn typed_history(
                                     primary_node_id: node.node_id.clone(),
                                     execution_id: tool.execution_id.clone(),
                                     expandable: true,
-                                    default_open: tool.requires_attention(),
+                                    default_open: canonical.requires_attention(),
                                     outcome,
                                 },
                                 width,
@@ -1831,6 +1916,10 @@ fn typed_history(
                                 width,
                                 view.palette,
                             ));
+                        } else if tool.execution_id.is_some()
+                            && (default_open || view.items.preview_loading(&key, &region.outcome))
+                        {
+                            chunk.extend(tool_note("出力を取得中 · F6 原文", width, view.palette));
                         } else if exact_body.source_exact {
                             let mut copy = node.clone();
                             copy.presentation.blocks = vec![exact_body.clone()];
@@ -3929,6 +4018,151 @@ mod conversation_item_tests {
                 .map(|n| n.text.clone())
                 .collect::<Vec<_>>(),
             original
+        );
+    }
+    #[test]
+    fn equivalent_terminal_metadata_does_not_reset_a_closed_disclosure() {
+        let mut saved = tool("one", "failed");
+        saved.exit_code = Some(1);
+        let mut observed = saved.clone();
+        observed.current_state = Some("exited".into());
+        observed.current_exit_code = Some(1);
+        assert_eq!(tool_outcome(&saved), tool_outcome(&observed));
+        let mut success = tool("one", "completed");
+        let before = tool_outcome(&success);
+        success.current_state = Some("exited".into());
+        success.current_exit_code = Some(0);
+        assert_eq!(before, tool_outcome(&success));
+        assert_ne!(tool_outcome(&saved), tool_outcome(&success));
+    }
+    #[test]
+    fn duplicate_result_outcomes_cannot_reopen_a_closed_canonical_header() {
+        use crate::config::Config;
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let call = tool("shared", "running");
+        let mut old = tool("shared", "failed");
+        old.exit_code = Some(7);
+        let latest = tool("shared", "completed");
+        let key = ItemKey::tool(&latest, "latest", 0);
+        let outcome = tool_outcome(&latest);
+        assert!(view.items.toggle(key.clone(), false, &outcome));
+        assert!(!view.items.toggle(key.clone(), false, &outcome));
+        // The old duplicate-body predicate used this stale result's own default.
+        assert!(
+            view.items
+                .is_open(&key, old.requires_attention(), &tool_outcome(&old))
+        );
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(call),
+                    ..Default::default()
+                }],
+            ),
+            node("middle", "KEEP_PROSE", vec![prose("KEEP_PROSE", 0)]),
+            node(
+                "old",
+                "STALE_RESULT_ERROR",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    source_exact: true,
+                    text: "STALE_RESULT_ERROR".into(),
+                    tool: Some(old),
+                    ..Default::default()
+                }],
+            ),
+            node(
+                "latest",
+                "LATEST_RESULT",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    source_exact: true,
+                    text: "LATEST_RESULT".into(),
+                    tool: Some(latest),
+                    ..Default::default()
+                }],
+            ),
+        ];
+        let shown = plain(&history(&view, 80).0);
+        assert!(shown.contains("KEEP_PROSE"));
+        assert_eq!(shown.matches("printf synthetic").count(), 1);
+        assert!(
+            !shown.contains("STALE_RESULT_ERROR") && !shown.contains("LATEST_RESULT"),
+            "{shown}"
+        );
+    }
+    #[test]
+    fn missing_group_result_uses_its_exact_owner_and_keeps_richer_observed_header() {
+        use crate::config::Config;
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut call = tool("owner", "completed");
+        call.result_node_id = Some("legacy".into());
+        let key = ItemKey::tool(&call, "call", 0);
+        let outcome = tool_outcome(&call);
+        assert!(view.items.toggle(key.clone(), false, &outcome));
+        assert!(!view.items.toggle(key, false, &outcome));
+        let mut legacy = tool("owner", "failed");
+        legacy.group_id = None;
+        legacy.exit_code = Some(7);
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(call),
+                    ..Default::default()
+                }],
+            ),
+            node(
+                "legacy",
+                "STALE_LEGACY",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(legacy),
+                    source_exact: true,
+                    text: "STALE_LEGACY".into(),
+                    ..Default::default()
+                }],
+            ),
+        ];
+        let shown = plain(&history(&view, 80).0);
+        assert_eq!(shown.matches("printf synthetic").count(), 1);
+        assert!(shown.contains("✓ printf synthetic"), "{shown}");
+        assert!(!shown.contains("STALE_LEGACY"), "{shown}");
+    }
+    #[test]
+    fn empty_exact_result_members_do_not_leave_separate_detail_placeholders() {
+        use crate::config::Config;
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut call = tool("shared", "completed");
+        call.result_node_id = Some("empty-result".into());
+        let mut result = node("empty-result", "", vec![]);
+        result.role = "tool".into();
+        result.presentation.kind = PresentationKind::ToolResult;
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(call),
+                    ..Default::default()
+                }],
+            ),
+            result,
+        ];
+        let (lines, _, sources) = history(&view, 80);
+        let shown = plain(&lines);
+        assert_eq!(shown.matches("printf synthetic").count(), 1);
+        assert!(!shown.contains("詳細で内容・参照を確認"), "{shown}");
+        assert!(
+            sources
+                .iter()
+                .all(|s| !matches!(s.item.as_ref().map(|i| &i.key), Some(ItemKey::Node(_))))
         );
     }
     #[test]

@@ -32,6 +32,33 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
+    assert_eq!(leaves.len(), 64, "track new CLI lifecycle paths explicitly");
+    for name in ["serve", "shutdown"] {
+        let lifecycle = leaves
+            .remove(name)
+            .expect("tracked headless lifecycle path");
+        let actual = lifecycle
+            .get_arguments()
+            .filter(|arg| !matches!(arg.get_id().as_str(), "help" | "version"))
+            .map(|arg| {
+                format!(
+                    "--{}",
+                    arg.get_long().expect("lifecycle only has global options")
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual,
+            GLOBAL_ARGUMENTS
+                .iter()
+                .map(|arg| arg.spelling.to_owned())
+                .collect()
+        );
+        assert!(
+            !CLI_BINDINGS.iter().any(|binding| binding.path == [name]),
+            "headless lifecycle must not be offered as a TUI form"
+        );
+    }
     assert_eq!(
         leaves.len(),
         62,
@@ -533,4 +560,12 @@ fn executable_compact_parent_and_new_saved_read_flags_are_reachable() {
             .iter()
             .any(|binding| binding.path == ["compact", "list"])
     );
+}
+
+#[test]
+fn headless_shutdown_has_no_tui_form_and_keeps_core_admission_boundary() {
+    let command = crate::protocol::Command::OwnerShutdown(crate::protocol::OwnerShutdownArgs {
+        instance_id: "current-owner".into(),
+    });
+    assert_eq!(OperationId::from_owner_command(&command), None);
 }

@@ -2370,3 +2370,75 @@ G9 must confirm the complete query and migration/rollback using bundled SQLite;
 recheck the schema slot and backup requirement before adoption. No production
 schema/index is changed by this checkpoint. Revisit if current main supplies a
 suitable covering index or canonical ordering changes.
+## #5 stage 2: startup-only adapter and failure observation (2026-10-31)
+
+Use the shared owner_session assembly and cleanup, keeping TUI in-process. serve
+requires explicit nonempty data-dir, performs ordinary config resolution and
+emits a flushed ready JSON only for an assembled IPC/dispatcher. It never obtains
+owner identity from inherited CLI endpoint/origin variables. Existing per-tool
+identity assembly is reused; Windows clears an inapplicable inherited Unix
+socket. API/proxy environment and runtime global environment are not rewritten.
+
+Readiness JSON requires a UTF-8 absolute path; reject a nonrepresentable path
+with cleanup rather than fabricate a lossy directory identity. Startup errors
+remain stderr, distinct from normal CLI Response stdout. The ready-write failure
+fixture uses an inherited read-only file, not scheduling sleeps or a production
+fault-injection hook. Tokio output() would replace that handle, so use explicit
+spawn/wait_with_output. No new table, worker, queue or owner mode-specific Core
+engine is introduced. Graceful shutdown, signal ordering and final lifecycle
+rows are stage 3, not a claimed property of this startup-only increment. Core
+review and integration approval remain required for the final stage 2 source.
+
+## #5 scope boundary after F (2026-10-31)
+
+Keep owner replacement without interrupted work out of this implementation.
+No exec-in-place transfer, inherited live shell handover, reconnect protocol or
+late TUI attach is introduced. #82 cleanup ownership remains unchanged. Stage 2
+only provides explicit terminal-free startup and existing CLI access; stage 3
+will separately define shutdown acceptance/reply ordering before implementation.
+
+### #5 stdout failure observation correction
+
+The read-only handle fixture is superseded: Rust stdout may discard EBADF as a
+successful write. Use the standard portable pipe writer with its reader already
+closed to obtain a real BrokenPipe, without a production injection hook or
+scheduling sleep. Verify cleanup at the real failed-write boundary, retaining
+the existing shared watchdog and assertions. This changes the fixture, not
+startup/shutdown behavior, and does not broaden stage 2 into handover/reconnect.
+
+## #99: Separate disclosure outcome from output progress
+
+A tool's stable group/call identity owns disclosure. Its outcome class (running,
+success, failure, cancellation, unknown) decides when an explicit choice can be
+reset; equivalent saved/current terminal spellings and numeric exit metadata do
+not. Saved output sequence/completeness decides whether an open snapshot can be
+refreshed. This preserves explicit closes during metadata-only observations and
+prevents completed-output timestamps from becoming a redraw clock. Revisit if a
+future contract permits one group/call to acquire a genuinely different execution;
+such a change needs an explicit identity transition, not a display-string guess.
+## #5 stage 3 shutdown ownership
+
+The shutdown handler commits acceptance and closes admission, but must not drain
+its own active-request scope. Reuse existing reserved stop admission and retain
+one optional transport-completion token only for shutdown invocations. Release
+request/transport admission before signalling the adapter. The adapter owns the
+existing snapshot/cancel/drain/DB close sequence. A fixed optional Control token
+marks serve capability; TUI does not enable it. Saved acceptance is not restart
+intent and expected instance identity prevents stale shutdown of a new owner.
+No new table, queue, worker, timer or capacity is needed. Tests count committed
+facts and side effects at named boundaries, not elapsed shutdown seconds.
+
+## G reconciliation with #5 headless lifecycle controls
+
+Main66d2746 introduces serve/shutdown and OwnerShutdown. Core's new tests require
+TUI shutdown requests to be rejected before receipts, while the headless adapter
+owns admission/reply/drain. Treat these CLI paths as explicit lifecycle inventory
+alongside launch controls, not fake F8 actions on the current TUI owner. Preserve
+all new Unix-only signal conversion, preview lifetime (#99), owner admission and
+shutdown semantics. Catalogue matching remains exhaustive with an explicit None
+for the no-form OwnerShutdown; command captions remain defined, so an externally
+constructed UI request is rejected by Core instead of panicking in the caption.
+Reason: exposing these as normal current-owner forms would contradict main's
+adopted transport boundary. Revisit if supported TUI/other-owner lifecycle
+semantics are added; this is a reviewer-visible integration judgment, not a new
+Core capability or silent coverage omission.

@@ -657,3 +657,36 @@ HTTP observation. Owner restart forgets the memory; already-in-flight requests
 are not cancelled. Input preparation is not skipped. Embeddings and model-list
 requests are outside this first version. Short bottom-line TUI rendering is
 tracked separately in #85; use run get/the existing recovery reason for now.
+
+## Terminal-free owner startup (#5, unreleased)
+
+`shellboy serve --data-dir DIR [--config FILE]` starts an owner without a terminal.
+The data directory must be explicit and is protected by the normal owner lock;
+an already-owned directory is an error, not an attach request. Configuration
+lookup is the same as TUI startup. The process stays part of its caller's shell;
+it does not daemonize and stdin EOF does not stop it.
+
+Wait for the flushed stdout JSON row with `event: "ready"` before sending CLI
+requests to that explicit data directory. It reports the absolute data path,
+owner instance and protocol version, not a model connection check. Startup
+failures are JSON on stderr, never a successful stdout row. A data directory
+that cannot be represented in UTF-8 readiness JSON is rejected with cleanup.
+Inherited owner socket/origin/data variables do not select this owner. Shells
+started by it receive its own identity; an inapplicable inherited Unix socket
+is cleared on Windows. API-key and normal proxy variables are not cleared.
+
+Use `shellboy shutdown --data-dir DIR` to request cleanup of that serve owner.
+The reply acknowledges saved acceptance, not successful termination. Observe the
+owner process and its final stdout JSON (`event: "stopped"`, `ok` and `state`).
+A normal lifecycle emits ready plus stopped, each flushed; failures after ready
+use the final JSON and exit 1, not startup stderr. Missing final output after a
+force-kill or closed pipe is not success. Unix SIGTERM/SIGHUP use the same cleanup;
+Windows CTRL_BREAK is not a shutdown interface. No duration guarantee is made.
+
+The directory is required for shutdown too; inherited endpoint variables cannot
+select another owner. Requests are pinned to the observed instance, and a stale
+instance cannot stop a restarted owner. TUI owners reject this command. Existing
+local IPC/OS access is the authority, not sender-label or a human approval claim.
+Owner replacement does not transfer work or reconnect a UI. Parent background
+shell/nested Job and full failure-boundary qualification remain #5 stage 4; use
+disposable directories until those lifecycle checks land.

@@ -5805,3 +5805,120 @@ existing frontend assertion now verifies the new byte-observation value and
 complete flag instead of the old exact-scalar presentation. Integration/full
 standard on this unit, live refresh cadence/visibility/cancellation, P3/P6/native
 popup screens and three-OS qualification remain unperformed.
+## #5 stage 2: terminal-free startup
+
+2026-10-31, native macOS arm64 / Rust 1.99.1. An actual child executable starts
+with stdin null and stdout/stderr piped, an explicit relative data directory,
+empty synthetic config, and bogus parent SHELLBOY data/socket/instance/origin
+values. Its ready row identifies its own absolute directory and fresh instance;
+two real read-only CLI requests succeed after EOF. A second owner on that data
+is rejected, the parent data directory is not created, and receipt/model-attempt
+counts remain 0. Captured stdout JSONL grows 0->1 row, remains 1 after repeated
+CLI reads and forced fixture cleanup; stderr remains 0. This is not a normal-
+shutdown result (stage 3 is separate).
+
+Missing/empty data, invalid serve syntax and inappropriate operation IDs produce
+0 stdout / 1 stderr JSON row without opening the inherited data directory. A
+non-UTF-8 directory cannot panic readiness serialization: startup rejects it
+and closes any acquired owner/endpoint. The latter fixture is Unix-only. All new
+process waits use the existing shared 60-second watchdog, not a speed assertion.
+The first native path assertion exposed macOS /var versus /private/var aliases;
+its expected path now uses filesystem canonical identity, not relaxed readiness.
+
+Existing driver assembly overrides each shell's data/instance/Thread/Run/Turn/
+execution/origin; Windows additionally clears an inherited Unix-only socket.
+API keys/proxy variables are not globally removed. There is no runtime global
+namespace mutation, new table, worker or queue, nor an installed-owner change.
+Exact-source standard/doc-role/bundled-guide checks and CI integration are
+reported in #5. These local startup fixtures do not qualify Windows nested Jobs,
+parent-owned shell termination, normal shutdown, all crash boundaries or a real
+provider. Later stages must establish those separately before declaring #5 done.
+
+### Stage 2 restart and readiness-failure fixture correction
+
+After the 20:34 owner restart, worktree/branch state was inspected before any
+rerun. Only the expected startup-row specification and process fixture were
+uncommitted. The completed #95 serialized check/push had saved exit 0 before
+shutdown; interrupted work is not counted as a passing run. Stage 2 is rebased
+onto main containing #91/#93 and approved #96, without the private stage 3 draft.
+
+The initial failed-ready fixture timed out because Tokio 1.54.1 Command::output
+unconditionally replaces stdout/stderr with pipes (process/mod.rs:1065 onward).
+That bypassed its configured read-only stdout handle, so serve correctly stayed
+alive after successful readiness. The fixture now uses spawn/wait_with_output
+and explicitly pipes stderr, preserving the read-only handle. It retains the
+shared 60-second watchdog and exact output/cleanup assertions; production
+startup, shutdown and timeout behavior are not changed to accommodate the test.
+
+The first rerun after restart also identified an old non-serve normal executable
+in the previously shared target: its actual --help lacked serve, and all four
+new subprocess tests rejected its stdout. That run is not serve qualification.
+An explicit local bin rebuild and serve-help check precede subsequent process
+checks; prior shared-target artifact identity is not inferred from Git HEAD.
+The actual corrected process results, standard check, record delta and exact
+submitted SHA are recorded in issue #5. Windows/Linux native execution, nested
+Jobs, parent termination and shutdown/crash boundaries remain later gates.
+
+### Correction to the inherited stdout fault fixture
+
+The fresh serve binary passes missing/invalid startup, non-UTF-8 cleanup and
+EOF/duplicate-owner tests. The read-only stdout fixture still waited because
+Rust stdout can treat EBADF as a silent sink on Unix: a standalone native probe
+with the exact writeln/flush pattern returned Ok for read-only stdout, but
+BrokenPipe for a writer whose reader was dropped. Thus read-only stdout was not
+proof of a failed ready write; do not classify that timeout as a product cleanup
+deadlock. Preserve the failed attempt and replace the fixture with portable
+std::io::pipe, dropping its reader before spawn. Keep explicit spawn plus piped
+stderr (Tokio output would replace the configured writer), the shared watchdog,
+and exact error/endpoint/lock/database integrity assertions. Production behavior
+is unchanged. The final fresh-source process and standard results are recorded
+in issue #5; earlier read-only fixture descriptions are superseded by this note.
+## #99 development checkpoint (not final qualification)
+
+The first serialized focused run passed 44 preview-related tests. The initial
+standard run stopped at Clippy (test-only imports, a now-test-only source accessor,
+and a collapsible eviction cancellation branch); these were corrected without
+lint allowances. The next standard check completed exit0: Rust1975 passed,
+0 failed,33 ignored and Python66 passed, with layout/watchdog/fmt/Clippy.
+The bin/preview_gate example build also passed. Evidence:
+/tmp/issue-99-focused.log, /tmp/issue-99-standard-v2.log and
+/tmp/issue-99-build-v2.log. Newer terminal-no-raw proof, shared observation ranking
+and fixture-request-counter changes still require their next serialized run;
+this record does not qualify those untested deltas.
+
+Eight real PTYs passed actual DB-worker-gated open, close while pending, reopen,
+release, raw-output delivery and final close (80/140,dark/light/NO_COLOR/vt100).
+Each also received three real Thread-title Changed updates while keeping its
+observed preview notice unchanged. Raw/frames are /tmp/issue-99-native/.
+The tested example predates its optional request-counter output; results correctly
+record requests=null, not a measured SQLite/raw-read count. Controlled-clock and
+DB-gate unit tests, rather than elapsed wall time, establish pending-read behavior.
+No paid provider or OS clipboard was involved. A next rebuilt fixture run and
+review-required handoff remain pending. No all-OS/native or latency guarantee is
+claimed from these local observations.
+
+The later serialized run on the rebased main passed focused3/0 and standard
+Rust2059 passed/0 failed/35 ignored, Python66, layout/watchdog,fmt,Clippy and
+bin/preview_gate build. Rebuilt native eight-condition results and the versioned
+driver pass with exactly two admitted UI preview requests (one retired, one
+reopened), fixed observation notices and three unrelated title changes per case.
+This is a UI-request count, not a SQLite statement count; the valid-source test
+with output_chunk absent separately proves metadata enrichment does not read raw.
+Latest logs: /tmp/issue-99-focused-latest.log,/tmp/issue-99-standard-latest.log,
+/tmp/issue-99-build-latest.log,/tmp/issue-99-native-latest/ and
+/tmp/issue-99-native-versioned/. Earlier null-counter and lint-failure records
+remain historical. Final submission/review and all-OS CI are not established by
+these local results. The issue comment contains the detailed reproducible report.
+
+Final pure-rebase qualification on main d29e0fc: the serialized standard check
+completed exit0 with Rust2061 passed/0 failed/35 ignored and Python66. Layout/
+watchdog policy,fmt,Clippy and all targets pass. Evidence:
+/tmp/issue-99-standard-final-rebase.log, execution
+7748ea6f-0efe-4ba0-b18e-19567feb8e2c. The rebase changes no #99 source; only main's
+already-approved ui/threads.rs viewport correction differs from the previously
+native-tested baseline. This supersedes the queued-final-recheck gap in the
+issue comment, not review-required status or all-OS/native testing limits.
+## Pairwise conflict forecast (#104)
+
+Simplified --attr-source helper:4 synthetic cases pass on native Git2.50.1.
+Latest-main standard passes2,056/0/35 and Python70; details in#104. Other OS Git/CI remain unqualified.

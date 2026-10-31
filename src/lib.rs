@@ -26,11 +26,14 @@ mod json_pointer;
 pub mod memory;
 pub mod model;
 mod operations;
+#[cfg(unix)]
+mod os_signals;
 pub mod owner_session;
 pub mod presentation;
 pub mod program_status;
 pub mod protocol;
 pub mod rag;
+pub mod serve;
 pub mod shell;
 pub mod status;
 pub mod storage;

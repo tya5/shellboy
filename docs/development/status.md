@@ -8,6 +8,14 @@ all checks, and manual dispatch always runs native checks. The reviewer approved
 reuse only; Windows retains the original single job/four test threads. Rejected
 split experiments and #95 failures are retained in acceptance. Native unsplit
 qualification and live main-push reuse remain pending on the reuse-only source.
+## Terminal-free owner startup (#5 stage 2)
+
+serve now requires an explicit data directory and reuses owner_session without
+a terminal or TUI. Readiness is one flushed stdout JSON row after binding IPC
+and starting its dispatcher; startup failures use stderr. EOF is not a stop.
+Process tests cover inherited owner variables, CLI availability, duplicate locks
+and output isolation. Shutdown/signals and parent/process crash checks remain
+stages 3/4; Core review and exact-source integration are tracked in #5.
 
 ## Shared owner bootstrap (#5 stage 1)
 
@@ -2732,3 +2740,45 @@ new source. Latest fetched main66d2746 includes #5 Windows termination changes;
 merge it after this independent local checkpoint and preserve F/#95/#100 guards.
 Next continue the saved-target observer/joint read plan and remaining domain
 coverage. G remains local; no release/install/user-data change.
+### #5 stage 2 resumed on F
+
+The startup-only candidate is rebased onto admitted F. Ready/error JSON and
+explicit data-dir use the common bootstrap; the stage 3 shutdown draft remains
+separate. Owner reload/work transfer, UI reconnect and late attach are excluded
+per the latest issue #5 scope. Final qualification and submission live in #5.
+## Preview lifetime and closed disclosure (#99, in progress)
+
+Implementation removes the 1-second preview deadline and pairs each UI request
+with an ItemState-owned cancellation token. Thread/generation/revision fences,
+read-slot and byte limits remain. Renderer occurrences use the canonical best
+outcome for one disclosure key; exact empty result members no longer become
+independent placeholders. Synthetic counterexample, virtual-clock cancellation,
+and actual DB-worker-gate tests are prepared. A marked disposable real-TUI
+example gates its DB worker for open/close/reopen verification without a paid
+provider or clipboard access. This is uncompiled until the serialized Rust slot
+is released and is not yet a validated submission. Review remains required.
+
+#99 qualification supersedes the earlier in-progress note: the latest-main
+focused DB/virtual-clock/no-raw tests, standard check and rebuilt marked fixture
+pass. Eight native conditions confirm open/close/reopen with the actual DB worker
+held, then three unrelated Changed events without new UI preview requests or a
+moving observation notice. The implementation remains review-required; source
+and verification details are recorded in the issue comment, not as design history.
+## Conflict forecast helper (#104)
+
+Small Python helper uses Git2.40+ --attr-source for committed union attributes.
+Four synthetic cases and full standard check pass; coordinator review/CI are pending.
+
+## #5 stage 3: explicit owner shutdown
+
+The candidate adds instance-bound shutdown acceptance and session-owned cleanup,
+Unix signal reception separated from TUI force/deadline policy, and final JSON.
+It retains existing receipt, snapshot, repair and process-ownership boundaries.
+Review, counted-fault evidence and native qualification are tracked in issue #5;
+parent background/nested Job coverage remains stage 4, not an inferred result.
+
+### #5 stage 3 cfg portability correction
+
+TUI termination maps the shared Unix signal type only on Unix; Windows keeps its
+existing Source directly. No TUI policy, protocol or shutdown ordering changes.
+The pure-stage3 resubmission excludes stage4 and unlanded UI work; checks in #5.

@@ -27,6 +27,8 @@ pub(crate) mod draft;
 mod help;
 mod history_interaction;
 mod history_items;
+#[cfg(test)]
+pub(crate) use history_items::ItemState as PreviewItemState;
 pub use history_items::{ItemKey, Preview as ToolPreview};
 mod input;
 mod lifecycle;
@@ -680,6 +682,8 @@ pub enum UiAction {
         generation: u64,
         key: ItemKey,
         request_revision: u64,
+        cancel: tokio_util::sync::CancellationToken,
+        limit_bytes: usize,
         source_node_id: String,
         group_id: Option<String>,
         call_id: String,

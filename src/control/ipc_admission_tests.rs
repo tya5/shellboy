@@ -178,6 +178,7 @@ base_url="http://127.0.0.1:1/v1"
         let disconnected = CancellationToken::new();
         disconnected.cancel();
         send.send(Invocation {
+            reply_completed: None,
             request: Request::new(
                 format!("{}:{number}", owner.instance_id),
                 Command::ThreadCreate(ThreadCreateArgs {

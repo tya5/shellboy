@@ -33,7 +33,6 @@ struct ProjectedVisible {
     nodes: Vec<UiNode>,
     info: HistoryInfo,
     before_cursor: Option<String>,
-    tools: tools::ToolFacts,
     received: Option<received::Prepared>,
     activity: activity::Projection,
     tool_scope: Option<ToolObservation>,
@@ -137,7 +136,6 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
         nodes,
         info,
         before_cursor: before_cursor?,
-        tools,
         received,
         activity,
         tool_scope,
@@ -218,8 +216,8 @@ pub(super) async fn run(
             let mut frame=presentation_work(move || project(raw,render_width)).await??;
             let page_len=frame.nodes.len();
             if let Some(scope)=&mut frame.tool_scope {frame.nodes.append(&mut scope.nodes);}
-            // Page and paused observations share one finite preview deadline.
-            streams::enrich_previews_observed(&control,&mut frame.nodes,render_width,&frame.tools).await?;
+            // Raw previews are owned by visible UI items, not every Changed snapshot.
+            streams::seal_nodes(&mut frame.nodes).await?;
             if let Some(scope)=&mut frame.tool_scope {scope.nodes=frame.nodes.split_off(page_len);}
             let received=frame.received.map(|received|Box::new(UiUpdate::IncompleteResponses {
                 thread_id:thread.clone(),generation,selection_revision:received.selection_revision,

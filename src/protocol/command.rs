@@ -11,6 +11,7 @@ pub(crate) enum CommandRoute {
 impl Command {
     fn name_and_route(&self) -> (&'static str, CommandRoute) {
         match self {
+            Self::OwnerShutdown(_) => ("owner.shutdown", CommandRoute::Database),
             Self::Status(a) => (
                 "status",
                 if a.memory {
@@ -93,7 +94,8 @@ impl Command {
             | Self::IndexProbe(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => true,
-            Self::ThreadList(_)
+            Self::OwnerShutdown(_)
+            | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::CompactList(_)
             | Self::ShellList(_)
@@ -133,7 +135,8 @@ impl Command {
     pub(crate) fn runtime_allowed_while_stopping(&self) -> bool {
         match self {
             Self::ShellEof(_) | Self::ShellStop(_) => true,
-            Self::Status(_)
+            Self::OwnerShutdown(_)
+            | Self::Status(_)
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
@@ -196,7 +199,8 @@ impl Command {
             | Self::AttachmentRemove(_)
             | Self::Compact(_)
             | Self::ContextEdit(_) => true,
-            Self::Status(_)
+            Self::OwnerShutdown(_)
+            | Self::Status(_)
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
@@ -256,7 +260,8 @@ impl Command {
             | Self::IndexStatus(_)
             | Self::IndexPreview(_)
             | Self::StorageStatus(_) => true,
-            Self::ThreadCreate(_)
+            Self::OwnerShutdown(_)
+            | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
             | Self::ThreadSet(_)

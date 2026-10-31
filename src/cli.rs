@@ -18,7 +18,7 @@ pub struct Cli {
     /// Data directory for the owner and RAG defaults; independent from shell/thread cwd.
     #[arg(long, global = true)]
     pub data_dir: Option<PathBuf>,
-    /// Configuration file for the TUI owner or standalone RAG embeddings.
+    /// Configuration file for the owner or standalone RAG embeddings.
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
     /// Request ID. Mutations replay saved outcomes; observations read current state without a receipt.
@@ -29,6 +29,10 @@ pub struct Cli {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum CliCommand {
+    /// Start an owner without a terminal; requires an explicit --data-dir.
+    Serve,
+    /// Ask a terminal-free owner to shut down; requires an explicit --data-dir.
+    Shutdown,
     /// Run saved work noninteractively; validate only its final JSON answer locally.
     Exec(crate::exec_client::ExecOptions),
     /// Inspect recorded work; no model call or persistent job engine.
@@ -759,7 +763,9 @@ impl Cli {
                 turn_id: a.turn_id,
                 include_children: a.include_children,
             }),
-            CliCommand::Exec(_)
+            CliCommand::Serve
+            | CliCommand::Shutdown
+            | CliCommand::Exec(_)
             | CliCommand::Docs { .. }
             | CliCommand::Rag(_)
             | CliCommand::Config { .. } => {

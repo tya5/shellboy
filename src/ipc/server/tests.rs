@@ -770,3 +770,26 @@ fn startup_failures_explain_the_phase_without_mutation_recovery_advice() {
             .contains("receipts")
     );
 }
+
+#[test]
+fn shutdown_uses_existing_stop_reserve_without_expanding_any_budget() {
+    let work = WorkAdmission::new();
+    let held: Vec<_> = (0..MAX_IPC_WORK)
+        .map(|_| work.ordinary.clone().try_acquire_owned().unwrap())
+        .collect();
+    let command = Command::OwnerShutdown(crate::protocol::OwnerShutdownArgs {
+        instance_id: "owner".into(),
+    });
+    assert!(!command.is_read_only());
+    assert!(command.requires_receipt());
+    assert!(!command.changes_context());
+    assert!(!command.runtime_cancellable());
+    let first = work.try_acquire(&command).unwrap();
+    let second = work.try_acquire(&command).unwrap();
+    assert_eq!(MAX_CONTROL_WORK, 2);
+    assert!(work.try_acquire(&command).is_err());
+    assert_eq!(work.ordinary.available_permits(), 0);
+    drop((first, second, held));
+    assert_eq!(work.control.available_permits(), MAX_CONTROL_WORK);
+    assert_eq!(work.ordinary.available_permits(), MAX_IPC_WORK);
+}

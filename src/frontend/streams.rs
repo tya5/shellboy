@@ -1,15 +1,15 @@
 //! Display-only tails. Original node text/items and CLI raw reads remain immutable.
 use super::presentation_work;
+#[cfg(test)]
+use crate::presentation::{BlockKind, OutputStream, PresentationBlock, PresentationField};
 use crate::{
     control::{
         Control,
         output::preview::{PreviewLimits, PreviewPage, preview_tail},
     },
-    presentation::{BlockKind, OutputStream, PresentationBlock, PresentationField},
     protocol::*,
     ui::UiNode,
 };
-use tokio::time::{Duration, Instant};
 
 /// Preview-only terminal current-line overwrite. The input has already been
 /// byte-bounded; no terminal execution or unbounded scrollback is involved.
@@ -164,11 +164,13 @@ pub(super) async fn enrich(
     super::tools::enrich(control, nodes).await?;
     super::recovery::enrich(control, nodes).await?;
     super::usage::enrich(control, nodes).await?;
-    enrich_previews(control, nodes, width).await
+    let _ = width;
+    seal_nodes(nodes).await
 }
 
 /// Existing paused-tool refresh shares the same finite raw-preview work without
 /// reloading message bodies or unrelated recovery/usage metadata.
+#[cfg(test)]
 pub(super) async fn enrich_previews(
     control: &Control,
     nodes: &mut [UiNode],
@@ -179,6 +181,7 @@ pub(super) async fn enrich_previews(
 
 /// Facts and source projection belong to the same admitted read transaction.
 /// Reuse that exact correlation without another DB-worker source lookup.
+#[cfg(test)]
 pub(super) async fn enrich_previews_observed(
     control: &Control,
     nodes: &mut [UiNode],
@@ -188,14 +191,13 @@ pub(super) async fn enrich_previews_observed(
     enrich_previews_inner(control, nodes, width, Some(facts)).await
 }
 
+#[cfg(test)]
 async fn enrich_previews_inner(
     control: &Control,
     nodes: &mut [UiNode],
     width: u16,
     observed: Option<&super::tools::ToolFacts>,
 ) -> Result<(), ApiError> {
-    let deadline = Instant::now()
-        + Duration::from_millis(control.store.config.io.file_prepare_timeout_ms.min(1000));
     for node in nodes.iter_mut() {
         let mut seen = std::collections::HashSet::new();
         let failed = node
@@ -214,28 +216,18 @@ async fn enrich_previews_inner(
             })
             .collect::<Vec<_>>();
         for (group, call, expected_execution) in failed {
-            let result = match tokio::time::timeout_at(deadline, async {
-                match observed {
-                    None => preview(control, &node.node_id, group.as_deref(), &call, 2048).await,
-                    Some(facts) => {
-                        let execution = observed_execution(
-                            facts,
-                            &node.node_id,
-                            group.as_deref(),
-                            &call,
-                            expected_execution.as_deref(),
-                        )?;
-                        execution_preview(control, execution, 2048).await
-                    }
+            let result = match observed {
+                None => preview(control, &node.node_id, group.as_deref(), &call, 2048).await,
+                Some(facts) => {
+                    let execution = observed_execution(
+                        facts,
+                        &node.node_id,
+                        group.as_deref(),
+                        &call,
+                        expected_execution.as_deref(),
+                    )?;
+                    execution_preview(control, execution, 2048).await
                 }
-            })
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(ApiError::new(
-                    ErrorCode::IoFailed,
-                    "Stream preview deadline reached",
-                )),
             };
             if let Err(error) = &result
                 && error.is_storage_failure()
@@ -252,6 +244,10 @@ async fn enrich_previews_inner(
             .await?;
         }
     }
+    seal_nodes(nodes).await
+}
+
+pub(super) async fn seal_nodes(nodes: &mut [UiNode]) -> Result<(), ApiError> {
     let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
     let sealed = presentation_work(move || {
         let mut owned = owned;
@@ -267,6 +263,7 @@ async fn enrich_previews_inner(
     Ok(())
 }
 
+#[cfg(test)]
 fn observed_execution(
     facts: &super::tools::ToolFacts,
     node: &str,
@@ -294,6 +291,7 @@ fn observed_execution(
     source.execution_id.clone().ok_or_else(unavailable)
 }
 
+#[cfg(test)]
 fn apply_preview(
     p: &mut crate::presentation::NodePresentation,
     group: Option<&str>,
@@ -446,7 +444,12 @@ pub(super) fn seal_node(node: &mut UiNode) {
         if let Some(tool) = &block.tool
             && serde_json::to_writer(
                 &mut hasher,
-                &(&tool.group_id, &tool.call_node_id, &tool.result_node_id),
+                &(
+                    &tool.group_id,
+                    &tool.call_node_id,
+                    &tool.result_node_id,
+                    tool.output_revision,
+                ),
             )
             .is_err()
         {

@@ -2085,7 +2085,7 @@ mod tests {
             assert_eq!(command.name(), name);
             assert_eq!(
                 OperationId::from_owner_command(&command),
-                operation.catalogue(),
+                Some(operation.catalogue()),
                 "form and result must use the same typed operation identity"
             );
             use crate::protocol::CommandRoute;

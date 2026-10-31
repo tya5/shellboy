@@ -3701,9 +3701,10 @@ impl OperationId {
         Self::RagSearch,
         Self::RagGet,
     ];
-    pub(crate) fn from_owner_command(command: &crate::protocol::Command) -> Self {
+    pub(crate) fn from_owner_command(command: &crate::protocol::Command) -> Option<Self> {
         use crate::protocol::Command;
-        match command {
+        Some(match command {
+            Command::OwnerShutdown(_) => return None,
             Command::Status(_) => Self::Status,
             Command::ModelList(_) => Self::ModelList,
             Command::ThreadList(_) => Self::ThreadList,
@@ -3750,7 +3751,7 @@ impl OperationId {
             Command::IndexRebuild(_) => Self::IndexRebuild,
             Command::StorageStatus(_) => Self::StorageStatus,
             Command::StorageCollect(_) => Self::StorageCollect,
-        }
+        })
     }
     pub(crate) fn spec(self) -> &'static OperationSpec {
         SPECS

@@ -345,13 +345,17 @@ impl UiState {
             self.active_view_mut().items.cancel_request(&item.key);
             return vec![];
         }
-        self.request_tool_preview(&item).into_iter().collect()
+        self.request_tool_preview(&item, true).into_iter().collect()
     }
-    fn request_tool_preview(&mut self, item: &ItemRegion) -> Option<UiAction> {
-        if item.execution_id.is_none()
-            || !self.view().items.needs_preview(&item.key, &item.outcome)
-            || self.view().items.pending_previews() >= 3
-        {
+    fn request_tool_preview(&mut self, item: &ItemRegion, explicit: bool) -> Option<UiAction> {
+        let needed = if explicit {
+            self.view().items.needs_preview(&item.key, &item.outcome)
+        } else {
+            self.view()
+                .items
+                .needs_visible_preview(&item.key, &item.outcome, item.default_open)
+        };
+        if item.execution_id.is_none() || !needed || self.view().items.pending_previews() >= 3 {
             return None;
         }
         let mut call = None;
@@ -371,6 +375,12 @@ impl UiState {
         let (group_id, call_id) = call?;
         let thread_id = self.view().thread_id.clone()?;
         let generation = self.view().generation;
+        let limit_bytes = if explicit || self.view().items.is_open(&item.key, false, &item.outcome)
+        {
+            16 * 1024
+        } else {
+            2048
+        };
         let request_revision = self
             .active_view_mut()
             .items
@@ -380,6 +390,12 @@ impl UiState {
             generation,
             key: item.key.clone(),
             request_revision,
+            cancel: self
+                .view()
+                .items
+                .preview_cancel(&item.key)
+                .expect("registered preview request"),
+            limit_bytes,
             source_node_id: item.primary_node_id.clone(),
             group_id,
             call_id,
@@ -405,13 +421,24 @@ impl UiState {
             .iter()
             .map(|item| item.key.clone())
             .collect::<Vec<_>>();
-        self.active_view_mut().items.mark_visible(&keys);
+        let _ = self.active_view_mut().items.mark_visible(&keys);
+        for item in &items {
+            if self.view().items.preview_request(&item.key).is_some()
+                && (!self
+                    .view()
+                    .items
+                    .is_open(&item.key, item.default_open, &item.outcome)
+                    || !self.view().items.preview_loading(&item.key, &item.outcome))
+            {
+                self.active_view_mut().items.cancel_request(&item.key);
+            }
+        }
         for item in items {
             if self
                 .view()
                 .items
-                .needs_visible_preview(&item.key, &item.outcome)
-                && let Some(action) = self.request_tool_preview(&item)
+                .needs_visible_preview(&item.key, &item.outcome, item.default_open)
+                && let Some(action) = self.request_tool_preview(&item, false)
             {
                 self.deferred_actions.push(action);
             }
@@ -502,9 +529,7 @@ impl UiState {
                         })
                 })
                 .filter(|(node, index, _, tool)| ItemKey::tool(tool, &node.node_id, *index) == key)
-                .max_by_key(|(_, _, block, _)| {
-                    u8::from(block.kind == crate::presentation::BlockKind::ToolResult)
-                })
+                .max_by_key(|(_, _, block, _)| presentation::tool_observation_rank(block))
                 .map(|(_, _, _, tool)| presentation::tool_outcome(tool));
             if outcome
                 .as_deref()
@@ -513,12 +538,7 @@ impl UiState {
                 // Retire only this matching in-flight token. A source/outcome
                 // change cannot strand one of the three preview slots, and an
                 // older reply must not cancel a newer request for the same key.
-                self.dirty |= view.items.accept_failed_preview(
-                    &key,
-                    request_revision,
-                    "表示対象が更新されました。閉じて開くと再取得できます".into(),
-                    budget,
-                );
+                self.dirty |= view.items.retire_request(&key, request_revision);
                 return;
             }
             let changed = match result {
@@ -882,6 +902,8 @@ mod tests {
             generation: ui.view().generation,
             key: key.clone(),
             request_revision,
+            cancel: ui.view().items.preview_cancel(&key).unwrap(),
+            limit_bytes: 16384,
             source_node_id: "source".into(),
             group_id: Some("g".into()),
             call_id: "c".into(),
