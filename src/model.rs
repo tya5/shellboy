@@ -145,7 +145,7 @@ pub(crate) struct EmbeddingFailure {
 pub fn shell_tool() -> Value {
     json!({"type":"function","name":"shell","strict":false,
     "description":"Execute the command directly in Bash or PowerShell in this Thread cwd. For example, to start a background job call shell with command and background:true, then use a later shell call with command: shellboy shell get --execution ID or shellboy shell read --execution ID --encoding UTF-8. IDs are flag values, never positional arguments. To wait for completion use shellboy wait --conditions-json '[{\"type\":\"shell_ended\",\"execution_id\":\"ID\"}]' --timeout-ms 30000. execution_id identifies the process started by THIS call. If command is shellboy message send, that process sends a message and its stdout is the receipt JSON; its execution_id is NOT a shell requested in the message. Use shellboy --help for history, messages, children, wait and attachments. Foreground is default; background must be explicit.",
-    "parameters":{"type":"object","additionalProperties":false,"required":["command"],"properties":{
+    "parameters":{"type":"object","additionalProperties":false,"required":["command","description"],"properties":{
         "command":{"type":"string"},"description":{"type":"string","maxLength":80,"description":"Briefly describe what this command actually does in the conversation language, at most 80 characters. Not a substitute for the command."},"background":{"type":"boolean"},"stdin_open":{"type":"boolean"},"initial_stdin":{"type":"string"},"input_encoding":{"type":"string"},"output_encoding":{"type":"string"}
     }}})
 }
@@ -156,6 +156,9 @@ pub fn configure_shell_description(request: &mut Value, enabled: bool) {
                 && let Some(properties) = tool["parameters"]["properties"].as_object_mut()
             {
                 properties.remove("description");
+                if let Some(required) = tool["parameters"]["required"].as_array_mut() {
+                    required.retain(|field| field.as_str() != Some("description"));
+                }
             }
         }
     }

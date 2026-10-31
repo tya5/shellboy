@@ -6217,3 +6217,11 @@ gate. Evidence: `/tmp/issue-72-windows-lifetime-python.log` and
 `/tmp/issue-72-windows-lifetime-scale.json`; execution
 fa8d6e3e-90f7-4dbc-8537-4f6179101955 exited0 with process-group cleanup confirmed.
 These local assertions do not replace a new native Windows run.
+
+## #97 required description follow-up: pending qualification
+
+Source-only schema change and regression fixtures cover enabled/opt-out required
+sets, absent/empty execution and command label fallback. The required-entry-only
+serialized request delta is14 UTF-8 bytes; token/model compliance is not inferred.
+Two synthetic real shell calls must persist exited/exit0 facts; no provider or
+user database is used. Rust/standard results remain pending shared allocation.

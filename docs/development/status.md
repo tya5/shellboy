@@ -2838,3 +2838,11 @@ close and audits query/fixture cursor ownership, without retries/GC/sleeps/error
 suppression. All15 targeted catalogue tests pass locally, including3 explicit
 retained-handle/fault regressions. Refreshed full-standard/native Windows checks
 remain pending. Original failure history remains in acceptance and issue72.
+
+## Shell description required generation follow-up (#97)
+
+When describe_calls is enabled, generated shell schema now requires description
+alongside command. Opt-out removes both property and required entry. Inbound
+missing/empty descriptions remain executable and display command fallback; raw
+arguments are unchanged. Schema/label tests and a synthetic two-call real shell
+execution/replay fixture are authored. Shared-slot Rust checks are pending.
