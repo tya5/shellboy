@@ -3748,3 +3748,18 @@ case after requiring the selected excerpt result. Its exact shared-sequence,
 one-observation and no-reload assertions remain intact. A full check on the
 final review branch is still required; one focused success does not prove the
 intermittent cause or complete E's performance gates.
+
+
+### Stronger E selected-observation gate: complete check
+
+Measurement candidate d3b611d passes the complete standard check1891/0/32,
+layout93/Python20/fmt/strict Clippy, including the corrected paired-observation
+fixture. Its Rust sources/tests/migrations exactly match E cut42bab84. This is a
+new complete result, not an isolated rerun used to hide branch63a7f17's failure.
+The initial-overlap explanation remains provisional; all strict assertions stay.
+
+A final guide audit found the old TUI sentence calling the list a fixed snapshot.
+Correct that sentence and align both User Guides with reactive saved updates,
+selection retention and explicit resync. Guides are embedded, so the final review
+candidate receives another full standard check after this documentation change.
+No Rust UI behavior changes, F/G implementation, push or release is introduced.

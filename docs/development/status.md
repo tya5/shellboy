@@ -1517,3 +1517,18 @@ an earlier row retains the selected screen anchor, changes the count, and makes
 the new row selectable by Up. Every fixture exits0; no paid/default-store or
 clipboard action occurs. This supersedes the pre-#75 native scope for these
 specific behaviors, not physical Windows UX or full performance acceptance.
+
+
+### Stronger E selected-observation gate: complete check
+
+Measurement candidate d3b611d passes the complete standard check1891/0/32,
+layout93/Python20/fmt/strict Clippy, including the corrected paired-observation
+fixture. Its Rust sources/tests/migrations exactly match E cut42bab84. This is a
+new complete result, not an isolated rerun used to hide branch63a7f17's failure.
+The initial-overlap explanation remains provisional; all strict assertions stay.
+
+A final guide audit found the old TUI sentence calling the list a fixed snapshot.
+Correct that sentence and align both User Guides with reactive saved updates,
+selection retention and explicit resync. Guides are embedded, so the final review
+candidate receives another full standard check after this documentation change.
+No Rust UI behavior changes, F/G implementation, push or release is introduced.
