@@ -480,6 +480,10 @@ impl UiState {
         if key.code == KeyCode::F(1)
             && self.confirmation.is_none()
             && self.top_overlay() != Some(Overlay::Threads)
+            && !(self.top_overlay() == Some(Overlay::Operations)
+                && self.operations.as_ref().is_some_and(|operations| {
+                    operations.hint_context() == key_hints::Context::Form
+                }))
         {
             self.selection_mode = false;
             if self.top_overlay() == Some(Overlay::Help) {
@@ -694,6 +698,68 @@ mod tests {
         ui.event(Event::Paste("selection-mode paste".into()));
         assert!(!ui.selection_mode);
         assert!(ui.selection_frozen_at.is_none());
+    }
+    #[test]
+    fn f1_dispatch_keeps_operation_field_help_and_layered_general_help_distinct() {
+        use ratatui::{Terminal, backend::TestBackend};
+        for (width, height) in [(80, 24), (140, 40)] {
+            let mut ui = state();
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            ui.event(key(KeyCode::F(8), KeyModifiers::NONE));
+            ui.event(Event::Paste("run get".into()));
+            ui.event(key(KeyCode::Enter, KeyModifiers::NONE));
+            ui.event(key(KeyCode::F(1), KeyModifiers::NONE));
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut ui))
+                .unwrap();
+            let explanation = rendered(&terminal);
+            assert!(
+                explanation.contains("作業 · 詳細 · 使い方"),
+                "{explanation}"
+            );
+            assert!(explanation.contains("Run ID"), "{explanation}");
+            assert!(!ui.help_visible, "global help must not steal form F1");
+            ui.event(key(KeyCode::Esc, KeyModifiers::NONE));
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut ui))
+                .unwrap();
+            let form = rendered(&terminal);
+            assert!(
+                form.contains("Enter 表示") && !form.contains("使い方"),
+                "{form}"
+            );
+            ui.event(key(KeyCode::Esc, KeyModifiers::NONE));
+            ui.event(key(KeyCode::F(1), KeyModifiers::NONE));
+            assert!(ui.help_visible && ui.help_above_popups);
+            assert!(
+                ui.operations.is_some(),
+                "list is retained beneath general help"
+            );
+            ui.event(key(KeyCode::Esc, KeyModifiers::NONE));
+            assert_eq!(ui.top_overlay(), Some(Overlay::Operations));
+        }
+    }
+    #[test]
+    fn f1_above_client_confirmation_neither_executes_nor_drops_the_choice() {
+        let mut ui = state();
+        for event in [
+            key(KeyCode::F(8), KeyModifiers::NONE),
+            Event::Paste("config init".into()),
+            key(KeyCode::Enter, KeyModifiers::NONE),
+            key(KeyCode::Enter, KeyModifiers::NONE),
+        ] {
+            assert!(ui.event(event).is_empty());
+        }
+        assert_eq!(ui.hint_context(), key_hints::Context::Confirmation);
+        assert!(ui.event(key(KeyCode::F(1), KeyModifiers::NONE)).is_empty());
+        assert!(ui.help_visible && ui.help_above_popups);
+        assert!(ui.event(key(KeyCode::Esc, KeyModifiers::NONE)).is_empty());
+        assert_eq!(ui.hint_context(), key_hints::Context::Confirmation);
+        assert!(
+            ui.event(key(KeyCode::Char('n'), KeyModifiers::NONE))
+                .is_empty()
+        );
+        assert_eq!(ui.hint_context(), key_hints::Context::Form);
     }
     #[test]
     fn derived_owner_keeps_valid_stacking_without_extra_mode_state() {

@@ -166,6 +166,10 @@ help identifies its ID type, actual default source (current Thread/Run etc.) and
 where an empty value can be discovered. The list explains that it runs the same
 operations as the CLI and shows the selected CLI syntax; the form shows that
 operation's explanation/effect, replacing generic prepared/request wording.
+F1 inside an operation form opens that operation's field/ID explanation and
+Esc/F1 returns to the unchanged form. General help may layer above the operation
+list and other popups, retaining #87's escape route; its global handler must not
+intercept the form-specific explanation promised by the form footer.
 
 The latest main adds headless process lifecycle commands serve/shutdown (#5).
 These are launch/termination controls for a separate terminal-free owner, not
