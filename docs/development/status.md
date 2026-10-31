@@ -1995,3 +1995,13 @@ The original assertions/timeouts remain; native fixed-order red/green tests and
 existing end-to-end recovery/closing tests pass locally. #91 band rendering is
 not the originating path. Core review and exact-source native CI are tracked in
 #96; original CI did not record all registration/pool-admission events.
+## Tool-row correction (#98)
+
+The user requested restoration of B's normal-row ID policy and truthful foreground
+classification. Compact tool rows no longer prefix execution-ID fragments; exact
+identity/source/detail references are retained. Background is derived only from
+positive background/release facts. The user also requested #91-style separate
+left body/right metadata, with noncritical metadata yielding to body and attention
+facts retained. Runtime elapsed painting preserves the separated body and metadata.
+Validation is pending the serialized Rust slot and native three-state PTY check;
+this entry is not a claim of completed acceptance or #97's selected inspection UI.

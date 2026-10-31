@@ -745,3 +745,22 @@ navigation supersedes presentation-only reads by advancing its view revision,
 while an actual navigation request retains and accumulates pending movement.
 
 The existing 128-source and192KiB projection budgets remain unchanged.
+
+## Ordinary tool rows: body and right-side facts (#98)
+
+Restore B's diagnostic-ID boundary: compact tool rows contain only the shared
+mark and sanitized command/description body at left. Execution IDs remain exact
+ItemRegion/source and detail references, never ordinary row prefixes. #97 owns
+the selected-description/command inspection surface; #98 does not add a second
+selection or navigation model. Existing expanded/original/F6 references and
+Enter notification-to-source navigation are retained, with no new reads.
+
+Use the same mark/body/metadata composition as #91 input bands. Background/reason,
+exit code and elapsed are right-side decorated spans excluded from body/source
+matching. Background requires an explicit background flag, background_current,
+or typed human/additional-input release reason; running/running_current alone
+is not background. Drop noncritical metadata before taking body space. A failure
+or cancellation fact retains attention styling and may reserve body space only
+after other metadata has been dropped. Clock painting uses the cached mark/body
+and updates right-side metadata without discarding background reasons, reparsing
+Markdown, changing source anchors or reading the database.

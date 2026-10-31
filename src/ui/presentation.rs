@@ -1310,96 +1310,87 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     format!("{state}:{code:?}:{}", tool.requires_attention())
 }
 
+fn tool_metadata(
+    tool: &crate::presentation::ToolPresentation,
+    elapsed: Option<u64>,
+) -> (RowKind, String, Option<String>) {
+    let status = tool.current_state.as_deref().unwrap_or(&tool.status);
+    let code = if tool.current_state.as_deref().is_some_and(|s| s != "observation_unavailable") {
+        tool.current_exit_code
+    } else { tool.exit_code };
+    let kind = if status == "exited" && code.is_none() { RowKind::Unknown }
+        else { crate::presentation::rows::tool_kind(status, tool.requires_attention()) };
+    let background = tool.background || status == "background_current"
+        || matches!(tool.reason_kind, crate::presentation::ToolReasonKind::HumanBackgrounded
+            | crate::presentation::ToolReasonKind::AdditionalInput);
+    let mut parts = Vec::new();
+    if background {
+        parts.push(match tool.reason_kind {
+            crate::presentation::ToolReasonKind::HumanBackgrounded => "背景（利用者）",
+            crate::presentation::ToolReasonKind::AdditionalInput => "背景（追加入力）",
+            _ => "背景",
+        }.to_owned());
+    }
+    let outcome = if kind == RowKind::Unknown { Some(kind.spec().1.to_owned()) }
+        else { code.map(|code| format!("終了 {code}")).or_else(||
+            matches!(kind, RowKind::Failure | RowKind::Cancelled).then(|| kind.spec().1.to_owned())) };
+    let critical = outcome.clone().filter(|_| matches!(kind, RowKind::Failure | RowKind::Cancelled));
+    if let Some(outcome) = outcome { parts.push(outcome); }
+    if let Some(seconds) = elapsed { parts.push(format!("{seconds}秒")); }
+    else if let Some(ms) = tool.elapsed_ms { parts.push(format!("{}.{:01}秒", ms / 1000, (ms % 1000) / 100)); }
+    else if kind == RowKind::Running && tool.started_at.is_some() { parts.push("経過未取得".into()); }
+    (kind, parts.join(" · "), critical)
+}
+fn tool_text_fit(text: &str, width: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    if text.width() <= width { return text.to_owned(); }
+    if width == 0 { return String::new(); }
+    let mut result = String::new();
+    let mut used = 1;
+    for glyph in text.graphemes(true) {
+        if used + glyph.width() > width { break; }
+        result.push_str(glyph);
+        used += glyph.width();
+    }
+    result.push('…');
+    result
+}
+fn tool_row(
+    mark: Span<'static>, mut body: Line<'static>, metadata: String,
+    critical: Option<String>, width: u16, color: Color,
+) -> Line<'static> {
+    use unicode_width::UnicodeWidthStr;
+    let width_usize = usize::from(width);
+    let metadata = if mark.width() + body.width() + metadata.width() + 2 <= width_usize {
+        Some(metadata)
+    } else if let Some(critical) = critical {
+        // Noncritical metadata never takes body space. Attention is the exception.
+        let available = width_usize.saturating_sub(mark.width() + critical.width() + 2);
+        let text = body.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+        let style = body.spans.first().map_or(Style::default(), |span| span.style);
+        body = Line::from(Span::styled(tool_text_fit(&text, available), style));
+        Some(critical)
+    } else { None };
+    InputBandRow {
+        mark: Some(mark), body,
+        metadata: metadata.filter(|s| !s.is_empty()).map(|text|
+            Span::styled(text, Style::default().fg(color).underline_color(INPUT_DECORATION_MARKER))),
+    }.into_line(width, Style::default())
+}
 fn compact_tool_line(
     tool: &crate::presentation::ToolPresentation,
     width: u16,
     palette: theme::Palette,
 ) -> Line<'static> {
-    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-    let status = tool.current_state.as_deref().unwrap_or(&tool.status);
-    let failed = tool.requires_attention();
-    let code = if tool
-        .current_state
-        .as_deref()
-        .is_some_and(|state| state != "observation_unavailable")
-    {
-        tool.current_exit_code
-    } else {
-        tool.exit_code
-    };
-    let row_kind = if status == "exited" && code.is_none() {
-        RowKind::Unknown
-    } else {
-        crate::presentation::rows::tool_kind(status, failed)
-    };
-    let mark = row_kind.mark();
-    let mut right = code.map(|code| format!("終了 {code}")).unwrap_or_default();
-    if row_kind == RowKind::Running && tool.started_at.is_some() {
-        right = "経過未取得".into();
-    }
-    if row_kind == RowKind::Unknown {
-        right = RowKind::Unknown.spec().1.into();
-    }
-    if let Some(ms) = tool.elapsed_ms {
-        if !right.is_empty() {
-            right.push_str(" · ");
-        }
-        right.push_str(&format!("{}.{:01}秒", ms / 1000, (ms % 1000) / 100));
-    }
-    let command = crate::presentation::sanitize_plain(&tool.command, 0)
-        .0
-        .replace(['\n', '\r'], " ");
-    let command = if command.trim().is_empty() {
-        "shell"
-    } else {
-        command.trim()
-    };
-    let right = if right.width() + 5 < usize::from(width) {
-        right
-    } else {
-        String::new()
-    };
-    let available =
-        usize::from(width).saturating_sub(right.width() + if right.is_empty() { 2 } else { 4 });
-    let background = if tool.background || status == "background_current" || status == "running" {
-        match tool.reason_kind {
-            crate::presentation::ToolReasonKind::HumanBackgrounded => "背景（利用者） ",
-            crate::presentation::ToolReasonKind::AdditionalInput => "背景（追加入力） ",
-            _ => "背景 ",
-        }
-    } else {
-        ""
-    };
-    let identity = tool
-        .execution_id
-        .as_deref()
-        .map(|id| format!("{} ", id.chars().take(8).collect::<String>()))
-        .unwrap_or_default();
-    let mut left = format!("{mark} {background}{identity}");
-    let prefix_len = left.len();
-    let mut used = left.width();
-    for ch in command.chars() {
-        let next = ch.width().unwrap_or(0);
-        if used + next > available {
-            break;
-        }
-        left.push(ch);
-        used += next;
-    }
-    if left[prefix_len..].trim_start() != command && available > 3 {
-        left.push('…');
-    }
-    let mut line = Line::from(Span::styled(left, Style::default().fg(row_kind.spec().2)));
-    if !right.is_empty() {
-        line.spans.push(Span::raw(" ".repeat(
-            usize::from(width).saturating_sub(line.width() + right.width()),
-        )));
-        line.spans.push(Span::styled(
-            right,
-            Style::default().fg(row_kind.metadata_color(palette)),
-        ));
-    }
-    line
+    let (kind, metadata, critical) = tool_metadata(tool, None);
+    let mark = Span::styled(format!("{} ", kind.mark()),
+        Style::default().fg(kind.spec().2).underline_color(INPUT_DECORATION_MARKER));
+    let command = crate::presentation::sanitize_plain(&tool.command, 0).0.replace(['\n','\r'], " ");
+    let command = if command.trim().is_empty() { "shell" } else { command.trim() };
+    let body = Line::from(Span::styled(tool_text_fit(command, usize::from(width).saturating_sub(mark.width())),
+        Style::default().fg(kind.spec().2)));
+    tool_row(mark, body, metadata, critical, width, kind.metadata_color(palette))
 }
 fn append_item_rows(
     lines: &mut Vec<Line<'static>>,
@@ -2135,12 +2126,12 @@ pub(super) fn borrowed<'a>(lines: &'a [Line<'static>]) -> Vec<Line<'a>> {
 /// Paint live seconds over cached rows; no source/layout revision or DB read.
 pub(super) fn paint_live_times(
     lines: &mut [Line<'_>],
+    cached: &[Line<'static>],
     sources: &[RowSource],
     view: &ThreadView,
     width: u16,
     now: std::time::Instant,
 ) {
-    use unicode_width::UnicodeWidthStr;
     if !lines.iter().any(|line| {
         line.spans
             .first()
@@ -2148,7 +2139,7 @@ pub(super) fn paint_live_times(
     }) {
         return;
     }
-    for (line, source) in lines.iter_mut().zip(sources) {
+    for ((line, cached), source) in lines.iter_mut().zip(cached).zip(sources) {
         if !line
             .spans
             .first()
@@ -2156,32 +2147,23 @@ pub(super) fn paint_live_times(
         {
             continue;
         }
-        let Some(start) = source.item.as_ref().and_then(|item| {
+        let Some(tool) = source.item.as_ref().and_then(|item| {
             view.nodes()
                 .get(source.node)?
                 .presentation
                 .blocks
                 .iter()
                 .filter_map(|block| block.tool.as_ref())
-                .find(|tool| tool.execution_id == item.execution_id)?
-                .elapsed_observation
-        }) else {
-            continue;
-        };
+                .find(|tool| tool.execution_id == item.execution_id)
+        }) else { continue; };
+        let Some(start) = tool.elapsed_observation else { continue; };
         let seconds = (start.0 + now.saturating_duration_since(start.1)).as_secs();
-        let elapsed = format!("{seconds}秒");
-        let Some(left) = line.spans.first().cloned() else {
-            continue;
-        };
-        let padding = usize::from(width).saturating_sub(left.content.width() + elapsed.width());
-        line.spans = vec![
-            left,
-            Span::raw(" ".repeat(padding)),
-            Span::styled(
-                elapsed,
-                Style::default().fg(RowKind::Running.metadata_color(view.palette)),
-            ),
-        ];
+        let Some(mark) = cached.spans.first().cloned() else { continue; };
+        let body = Line::from(body_spans(cached).cloned().collect::<Vec<_>>());
+        let (kind, metadata, critical) = tool_metadata(tool, Some(seconds));
+        let mut painted = tool_row(mark, body, metadata, critical, width, kind.metadata_color(view.palette));
+        for span in &mut painted.spans { span.style.underline_color = None; }
+        *line = painted;
     }
 }
 
@@ -3808,6 +3790,60 @@ mod conversation_item_tests {
         );
     }
     #[test]
+    fn compact_tool_rows_hide_ids_and_only_label_factual_background_work() {
+        use crate::presentation::ToolReasonKind;
+        let palette = theme::Palette::detect(crate::config::PaletteMode::Dark);
+        for status in ["running", "running_current", "completed", "exited", "cancelled"] {
+            for (explicit_background, reason, expected) in [
+                (false, ToolReasonKind::Unknown, ""),
+                (true, ToolReasonKind::Unknown, "背景"),
+                (false, ToolReasonKind::HumanBackgrounded, "背景（利用者）"),
+                (false, ToolReasonKind::AdditionalInput, "背景（追加入力）"),
+            ] {
+                let mut value = tool("display-only", status);
+                value.execution_id = Some("3153b821-full-diagnostic-id".into());
+                value.background = explicit_background;
+                value.reason_kind = reason;
+                for width in [80, 140] {
+                    let line = compact_tool_line(&value, width, palette);
+                    let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+                    assert!(!text.contains("3153b821"), "{text}");
+                    assert_eq!(text.contains("背景"), !expected.is_empty(), "{status}: {text}");
+                    if !expected.is_empty() { assert!(text.contains(expected), "{text}"); }
+                    assert!(text.contains("printf synthetic"), "{text}");
+                }
+                assert_eq!(value.execution_id.as_deref(), Some("3153b821-full-diagnostic-id"));
+            }
+        }
+        let mut released = tool("display-only", "running");
+        released.current_state = Some("background_current".into());
+        let line = compact_tool_line(&released,80,palette);
+        assert!(line.spans.last().unwrap().content.contains("背景"));
+    }
+    #[test]
+    fn compact_tool_metadata_never_enters_body_and_yields_to_body_before_attention() {
+        let palette = theme::Palette::detect(crate::config::PaletteMode::Dark);
+        let mut value = tool("parts", "completed");
+        value.background = true;
+        value.elapsed_ms = Some(12_400);
+        let line = compact_tool_line(&value, 80, palette);
+        let body = body_spans(&line).map(|span| span.content.as_ref()).collect::<String>();
+        assert_eq!(body, "printf synthetic");
+        assert_eq!(line.spans.last().unwrap().content, "背景 · 終了 0 · 12.4秒");
+        assert_eq!(line.width(), 80);
+        value.command = "abcdefghijklmnopqrstuvwxyz0123456789".into();
+        let line = compact_tool_line(&value, 30, palette);
+        let body = body_spans(&line).map(|span| span.content.as_ref()).collect::<String>();
+        assert_eq!(body, tool_text_fit(&value.command, 28));
+        assert!(!line.spans.iter().any(|s| s.content.contains("背景")));
+        value.status = "failed".into();
+        value.exit_code = Some(7);
+        let line = compact_tool_line(&value, 30, palette);
+        assert!(line.spans.last().unwrap().content.contains("終了 7"));
+        assert_eq!(line.spans.last().unwrap().style.fg, Some(RowKind::Failure.metadata_color(palette)));
+        assert_eq!(line.width(), 30);
+    }
+    #[test]
     fn compact_shell_metadata_uses_shared_palette_without_changing_text() {
         use crate::config::PaletteMode;
         for (status, code, kind) in [
@@ -3863,6 +3899,7 @@ mod conversation_item_tests {
         let mut painted = borrowed(&lines);
         paint_live_times(
             &mut painted,
+            &lines,
             &sources,
             &view,
             80,
@@ -3878,12 +3915,13 @@ mod conversation_item_tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(shown.contains("⏵ 背景（利用者）"), "{shown}");
+        assert!(shown.contains("⏵ printf synthetic"), "{shown}");
+        assert!(shown.contains("背景（利用者） · 323秒"), "{shown}");
         assert!(shown.contains("323秒"), "{shown}");
         assert_eq!(
             painted
                 .iter()
-                .find(|line| line.spans.last().is_some_and(|s| s.content == "323秒"))
+                .find(|line| line.spans.last().is_some_and(|s| s.content.ends_with("323秒")))
                 .unwrap()
                 .spans
                 .last()
