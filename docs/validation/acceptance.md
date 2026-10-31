@@ -5714,4 +5714,4 @@ issue comment, not review-required status or all-OS/native testing limits.
 ## Pairwise conflict forecast (#104)
 
 Simplified --attr-source helper:4 synthetic cases pass on native Git2.50.1.
-Probe/results are in #104; full standard check and other OS Git remain unqualified.
+Latest-main standard passes2,056/0/35 and Python70; details in#104. Other OS Git/CI remain unqualified.

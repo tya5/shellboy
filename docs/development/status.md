@@ -2642,4 +2642,4 @@ and verification details are recorded in the issue comment, not as design histor
 ## Conflict forecast helper (#104)
 
 Small Python helper uses Git2.40+ --attr-source for committed union attributes.
-Four synthetic cases pass; full standard check and review remain pending after#85.
+Four synthetic cases and full standard check pass; coordinator review/CI are pending.
