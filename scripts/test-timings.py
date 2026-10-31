@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from windows_shards import load as load_shards, selection as shard_selection
 
 
 def run(command, log):
@@ -16,6 +17,23 @@ def run(command, log):
         result = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, check=False)
     return {'command': command, 'seconds': time.monotonic() - started,
             'exit_code': result.returncode, 'log': log.name}
+
+
+def run_batches(binary, batches, log):
+    if len(batches) == 1:
+        return run([binary, *batches[0]], log)
+    results = []
+    with log.open('w', encoding='utf-8') as combined:
+        for number, arguments in enumerate(batches):
+            part = log.with_name(f'{log.stem}-part-{number:03d}.log')
+            result = run([binary, *arguments], part)
+            results.append(result)
+            combined.write(part.read_text(encoding='utf-8', errors='replace'))
+            combined.write('\n')
+    return {'commands': [result['command'] for result in results],
+            'seconds': sum(result['seconds'] for result in results),
+            'exit_code': next((result['exit_code'] for result in results if result['exit_code']), 0),
+            'log': log.name, 'batches': len(results)}
 
 
 def identities(target, names):
@@ -52,8 +70,11 @@ def main():
     mode.add_argument('--inventory-only', action='store_true')
     mode.add_argument('--profile-only', action='store_true', help='inventory plus isolated profiles, without full suite execution')
     parser.add_argument('--compare', type=Path, help='same-OS baseline results.json; require identical tests/ignored sets')
+    parser.add_argument('--windows-shard', choices=['1', '2'], help='execute an explicit partition; inventory all targets')
     parser.add_argument('--per-test', default='', help='comma-separated suite names for extra isolated-process profiles')
     args = parser.parse_args()
+    if args.windows_shard and (args.inventory_only or args.profile_only or args.per_test):
+        parser.error('--windows-shard requires ordinary execution without isolated profiles')
     if args.inventory_only and args.per_test:
         parser.error('--inventory-only cannot execute --per-test; use --profile-only')
     if not Path('Cargo.toml').is_file():
@@ -64,6 +85,8 @@ def main():
               'cpu_count': os.cpu_count(), 'python': sys.version,
               'runner_image': {key: os.environ.get(key) for key in ['ImageOS', 'ImageVersion']},
               'harnesses': [], 'isolated_tests': [], 'failures': []}
+    if args.windows_shard:
+        record.update(windows_shard=args.windows_shard, executed_tests=[], executed_ignored=[])
     result_path = args.output / 'results.json'
 
     def save():
@@ -102,16 +125,26 @@ def main():
             item = {'target': target, 'tests': len(names), 'ignored': len(ignored)}
             all_tests.extend(identities(target, names))
             all_ignored.extend(identities(target, ignored))
+            selected, filters = names, [[]]
+            if args.windows_shard:
+                selected, filters = shard_selection(target, names, args.windows_shard, load_shards())
+                if filters is None:
+                    record['harnesses'].append(item)
+                    continue
+                record['executed_tests'].extend(identities(target, selected))
+                record['executed_ignored'].extend(identities(target, [n for n in ignored if n in selected]))
+                item['selected_tests'] = len(selected)
             if not (args.inventory_only or args.profile_only):
                 print(f'Running {target} ({len(names)} tests, {len(ignored)} ignored)', flush=True)
-                item.update(run([binary], args.output / f'harness-{number:03d}.log'))
+                item.update(run_batches(binary, filters, args.output / f'harness-{number:03d}.log'))
                 # A successful process running zero tests must not replace a suite.
                 text = (args.output / item['log']).read_text(encoding='utf-8', errors='replace')
-                summary = re.search(r'test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored;', text)
-                if summary:
-                    item['passed'], item['failed'] = int(summary[2]), int(summary[3])
-                    reported_ignored = int(summary[4])
-                    if item['passed'] + item['failed'] + reported_ignored != len(names):
+                summaries = re.findall(r'test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored;', text)
+                if len(summaries) == item.get('batches', 1):
+                    item['passed'] = sum(int(summary[1]) for summary in summaries)
+                    item['failed'] = sum(int(summary[2]) for summary in summaries)
+                    reported_ignored = sum(int(summary[3]) for summary in summaries)
+                    if item['passed'] + item['failed'] + reported_ignored != len(selected):
                         record['failures'].append({'target': target, 'reason': 'test count mismatch'})
                 else:
                     record['failures'].append({'target': target, 'reason': 'missing harness summary'})
