@@ -360,6 +360,21 @@ These initial shared helpers do not themselves connect live subscriptions or
 prove constant query work; qualify latest-attempt/replacement SQL in G9. Keep the
 existing latest-order/eligibility semantics, without a new schema or cache table.
 
+Thread's latest input/answer reader owns its canonical rowid ordering, natural
+text selection and sender whitelist in thread_observation. Factor its raw read
+and preparation so display snapshots do not decode sender JSON, sanitize text
+or construct public JSON while holding the readonly transaction. CLI wrappers
+keep their existing unlimited scalar/source contract and512-character excerpt.
+Display reads cap scalar cells at512 bytes before String copying and share a
+64KiB source allowance across the two node payloads and sender JSON. A payload
+which exceeds the remaining allowance is not JSON-walked; retain its saved body
+availability but show excerpt/sender as unknown with exact limited-field
+witnesses, not an empty known value. Two indexed point reads and at most two
+exact-node excerpt queries use the caller's snapshot. This private domain model
+shares semantics with canonical callers; no table, worker, queue or public API.
+Last-compaction projection and overall Thread/header SQL bounds remain separate
+G9 obligations rather than being hidden by these two bounded message facts.
+
 The next extraction covers saved Run/Turn metadata. Their initial explicit reads
 must retain canonical saved usage totals in the same readonly transaction; normal
 reactive refresh later separates metadata500ms and usage3s. Run metadata copies
