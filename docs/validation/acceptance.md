@@ -4774,3 +4774,19 @@ do not extract body-specific plan/window details. Real-provider compatibility
 is unverified. src/ui/activity.rs and src/ui/chrome.rs are untouched; #85 tracks
 the deferred short status display, with the data contract in its comment
 6540361176. Existing reason text and run get already expose the reset.
+
+## Developer record-delta helper (#94.1)
+
+2026-10-31, native macOS ARM64/Python3.12. The standard-library-only helper uses
+Git's line-change semantics, including staged/unstaged changes, explicit refs
+and worktrees, and produces one compact JSON result. Disposable Git fixtures
+cover unchanged/additive records, middle insertions, same-count replacements,
+deletions, missing/binary records, missing baseline paths, option-shaped invalid
+refs and inherited Git routing. Seven new tests pass within the 25-test Python
+suite. CLI help, py_compile, integration-layout/watchdog checks and diff checks
+pass. The helper is immediately used on this task and the #91 worktree.
+No Rust/product changes or build are needed per the user's scripts-only scope;
+sh scripts/check.sh and native CI are not claimed. CI/integration is delegated
+to worker4; no CI dispatch/main merge/issue close occurs here. #94.2 PTY capture
+and #94.3 batch replacement remain separate subsequent changes. Native Windows
+and Linux execution and the multi-day token/time reduction are not yet measured.
