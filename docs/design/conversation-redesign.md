@@ -265,6 +265,19 @@ before coding/admission; current main is17. Document a closed-owner backup of
 the complete data directory before any schema upgrade; never run the validation
 on user data or automatically migrate their installed binary.
 
+Operation inspection uses the exact operation-receipt primary key, never an ID
+prefix or the viewing Thread as authority. A receipt outcome may legally reach
+8MiB; inspect its length before copying or invoking SQLite JSON functions. The
+outcome and compact-result/pending/inflight JSON witnesses share a64KiB copy
+budget; oversized witnesses leave explicit unavailable facts, not empty targets
+or guessed queue state. Scalar identity/time/state witnesses are capped512 bytes.
+Pending sends can resolve their actual Thread through the unique message receipt
+operation key; finalized sends resolve current downstream delivery independently
+of their immutable saved acceptance. Canonical outcome expiry/replay policy and
+receipt envelope preparation stay in control::receipt and are reused by both
+CLI and display. No observer can replay the operation. The first exact read is
+not itself completion of commit notifications or live subscriptions.
+
 Private domain helpers are permitted only where they avoid duplicating canonical
 schema/semantics: index saved views know private space/pause/failure keys and must
 not call the heavyweight full-status/provider path; GC observations know category

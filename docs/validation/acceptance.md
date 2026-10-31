@@ -5724,3 +5724,19 @@ all-target Clippy. The exact initial totals/deleted marker, legal empty ordering
 blocked writer across all five targets, and existing overview/history/edit detail
 integration tests all ran and passed. These results do not qualify live subscriptions,
 shared500ms/3s admission, P3/P6, native popup layouts or three-OS CI for G.
+
+## G exact operation receipt extraction
+
+This commit on9adcb77 adds the operation primary-key readonly reader and shares
+canonical receipt decoding/envelope preparation with CLI. Native macOS, Rust1.99.1,
+synthetic temporary databases. Targeted saved-inspection suite21/0 (including six
+operation cases), canonical control::receipt suite10/0/1 ignored, integration
+operation_contract suite11/0/1 ignored, strict library Clippy and fmt pass.
+The actual blocked-writer management request covers six target kinds and unchanged
+receipt count. Operation tests prove canonical null/expiry/old-instance parity,
+message and queued/running/completed compact downstream facts,64KiB aggregate
+witness limits, no SQLite JSON parsing/copy of8MiB outcomes, explicit corruption/
+missing errors, and constant exact-key query work with1000/10000 unrelated receipts.
+This checkpoint has not rerun the full standard and is not live subscription,
+shared admission, native-layout/P6 or three-OS qualification. No schema, worker,
+queue, operation or authorization change; replay/expiry semantics stay canonical.

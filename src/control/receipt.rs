@@ -43,6 +43,55 @@ pub(super) fn expired_error() -> ApiError {
     error.hint=Some("Inspect current state with shellboy operation get --operation ID and the target's get command. A new operation ID starts a new request; check side effects before doing so.".into());
     error
 }
+/// Saved receipt interpretation shared by exact CLI and bounded display reads.
+pub(crate) fn decode_operation_outcome(body: Option<&str>) -> Result<(Option<Value>, bool)> {
+    let expired = body == Some(EXPIRED_OUTCOME);
+    let outcome = body
+        .map(|body| {
+            if expired {
+                Ok(json!({"error":expired_error()}))
+            } else {
+                serde_json::from_str(body).map_err(|_| {
+                    ApiError::new(ErrorCode::InvalidState, "operation receipt is malformed")
+                })
+            }
+        })
+        .transpose()?;
+    Ok((outcome, expired))
+}
+pub(crate) fn operation_envelope(
+    id: &str,
+    instance: &str,
+    created_at: &str,
+    state: &str,
+    outcome: &Option<Value>,
+    expired: bool,
+    current_instance: &str,
+) -> Value {
+    let mut targets = serde_json::Map::new();
+    for key in [
+        "thread_id",
+        "message_id",
+        "run_id",
+        "turn_id",
+        "execution_id",
+        "attachment_id",
+        "space_id",
+    ] {
+        if let Some(value) = outcome
+            .as_ref()
+            .and_then(|v| v.get("result"))
+            .and_then(|v| v.get(key))
+            .filter(|v| v.is_string())
+        {
+            targets.insert(key.into(), value.clone());
+        }
+    }
+    json!({"operation_id":id,"instance_id":instance,"created_at":created_at,
+        "current_instance":instance==current_instance,"state":state,"outcome":outcome,
+        "result_uncertain":state=="pending","result_expired":expired,
+        "replay_policy":if state=="pending" {"do_not_reexecute"} else if expired {"operation_expired"} else {"return_saved_outcome"},"targets":targets})
+}
 type Result<T> = std::result::Result<T, ApiError>;
 fn sql(_: rusqlite::Error) -> ApiError {
     crate::storage::save_error("Cannot maintain operation receipts")

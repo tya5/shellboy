@@ -543,6 +543,7 @@ mod tests {
          UPDATE turn SET answer_node_id='answer' WHERE id='turn';
          INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,result_json)VALUES('receipt','fixture:message','{\"kind\":\"human\",\"label\":\"Author\"}','target','message','run','turn','applied','2026-01-01T00:00:00Z','{\"assignment\":\"new_turn\"}');
          INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,exit_code,output_complete)VALUES('shell','run','turn','shell','exited','/','{\"command\":\"printf done\",\"completion\":{\"elapsed_ms\":42,\"forced\":false,\"exit_signal\":15,\"group_cleanup_confirmed\":true}}','UTF-8','cp932','closed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z',0,1);
+         INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('saved:operation','fixture','null','hash','completed','{\"result\":{\"message_id\":\"message\"}}','2026-01-01T00:00:00Z');
          INSERT INTO output_chunk VALUES('shell',1,'stdout',0,X'61','2026-01-01T00:00:00.5Z');")?;
         Ok(())
     }
@@ -848,6 +849,9 @@ mod tests {
                     Command::TurnGet(crate::protocol::TurnTarget {
                         turn_id: "turn".into(),
                     }),
+                    Command::OperationGet(crate::protocol::OperationTarget {
+                        operation_id: "saved:operation".into(),
+                    }),
                 ] {
                     values.push(
                         super::super::management_request(
@@ -887,6 +891,9 @@ mod tests {
         assert_eq!(values[4]["turn_id"], "turn");
         assert_eq!(values[4]["usage_totals"]["scope"], "turn");
         assert_eq!(values[4]["usage_totals"]["scope_id"], "turn");
+        assert_eq!(values[5]["operation_id"], "saved:operation");
+        assert_eq!(values[5]["downstream"]["state"], "applied");
+        assert_eq!(values[5]["current_instance"], false);
         for value in values {
             assert_eq!(value["view_observation"]["thread_id"], "target");
             assert!(

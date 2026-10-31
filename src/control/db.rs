@@ -2310,39 +2310,17 @@ pub(crate) fn operation_details(
             "operation receipt not found",
         ));
     };
-    let expired = body.as_deref() == Some(super::receipt::EXPIRED_OUTCOME);
-    let outcome: Option<Value> = body
-        .map(|body| {
-            if expired {
-                return Ok(json!({"error":super::receipt::expired_error()}));
-            }
-            serde_json::from_str(&body)
-                .map_err(|_| error(ErrorCode::InvalidState, "operation receipt is malformed"))
-        })
-        .transpose()?;
+    let (outcome, expired) = super::receipt::decode_operation_outcome(body.as_deref())?;
     let result = outcome.as_ref().and_then(|v| v.get("result"));
-    let mut targets = serde_json::Map::new();
-    for key in [
-        "thread_id",
-        "message_id",
-        "run_id",
-        "turn_id",
-        "execution_id",
-        "attachment_id",
-        "space_id",
-    ] {
-        if let Some(value) = result.and_then(|v| v.get(key)).filter(|v| v.is_string()) {
-            targets.insert(key.into(), value.clone());
-        }
-    }
-    let mut value = json!({
-        "operation_id":id, "instance_id":instance, "created_at":created_at,
-        "current_instance":instance == current_instance,
-        "state":state, "outcome":outcome,
-        "result_uncertain":state == "pending", "result_expired":expired,
-        "replay_policy":if state == "pending" { "do_not_reexecute" } else if expired {"operation_expired"} else { "return_saved_outcome" },
-        "targets":targets,
-    });
+    let mut value = super::receipt::operation_envelope(
+        id,
+        &instance,
+        &created_at,
+        &state,
+        &outcome,
+        expired,
+        current_instance,
+    );
     if result.is_some_and(|v| {
         v.get("status").and_then(Value::as_str) == Some("queued")
             && v.get("operation_id").and_then(Value::as_str) == Some(id)

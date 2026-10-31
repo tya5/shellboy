@@ -2691,3 +2691,15 @@ no schema change is included here. Next connect the saved-target observer and
 joint read plan, then complete remaining saved-domain coverage and native/P6
 counts. Root archive is preserved; G remains local with no installed/user-data
 change. Latest fetched main remains d29e0fc, already merged with #100 retained.
+
+## G8 exact operation saved facts
+
+Operation result reads now use the readonly snapshot/presentation pool. Saved
+acceptance and current message/compact downstream are distinct; the receipt
+primary key and unique pending-message operation key determine identity. The
+canonical receipt envelope/expiry decoder is shared. Targeted21/0, receipt10/0/1,
+operation integration11/0/1 and strict library Clippy pass; full standard on this
+new unit remains unqualified. Next complete bounded attachment/reference facts,
+then connect the saved-target observer/joint read plan without bypassing G's full
+mutable-result inventory. G remains local, not admitted, and does not alter
+installed binaries or user data.
