@@ -11,7 +11,7 @@ use shellboy::{
 async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n").unwrap();
+    std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n[ui]\ncopy_backend=\"osc52\"\n").unwrap();
     let data = root.path().join("data");
     let owner = DataOwner::start(Some(config.clone()), Some(data.clone()), root.path().into())
         .await
@@ -447,7 +447,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     use shellboy::{protocol::*, ui::UiAttachment};
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n").unwrap();
+    std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n[ui]\ncopy_backend=\"osc52\"\n").unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -821,7 +821,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     use std::sync::Arc;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config,"default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n").unwrap();
+    std::fs::write(&config,"default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n[ui]\ncopy_backend=\"osc52\"\n").unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -2149,7 +2149,7 @@ async fn stale_history_navigation_recovers_after_path_change(remove_anchor: bool
     use shellboy::history;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[ui]\ncopy_backend='osc52'\n").unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -2911,7 +2911,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     let data = root.path().join("data");
-    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[ui]\ncopy_backend='osc52'\n").unwrap();
     let owner = DataOwner::start(Some(config.clone()), Some(data.clone()), root.path().into())
         .await
         .unwrap();
@@ -3038,7 +3038,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
 async fn mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitted_watermark() {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[ui]\ncopy_backend='osc52'\n").unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -3119,4 +3119,60 @@ async fn mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitt
         .unwrap()
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test]
+async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metadata() {
+    use shellboy::{
+        history::{History, append_node},
+        protocol::HistoryGetArgs,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[ui]\ncopy_backend='osc52'\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let body = "本文だけ e\u{301} 🦀\n```rust\nlet answer = 42;\n```";
+    control.store.database.call(move |db| {
+        let tx = db.transaction()?;
+        tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('copy','/','/AGENTS.md','fixture','fixture-model','now')", [])?;
+        append_node(&tx, "copy", "external-copy", None, "user", &serde_json::json!({"role":"user","content":body}), "2026-10-31T12:34:00Z")?;
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('copy','copy','{\"kind\":\"external_cli\",\"label\":\"Claude（レビュア）\"}','copy','external-copy','applied','2026-10-31T12:34:00Z')", [])?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        frontend::copy_source(&control, "external-copy".into(), None)
+            .await
+            .unwrap(),
+        body
+    );
+    assert_eq!(
+        frontend::copy_source(&control, "external-copy".into(), Some(0))
+            .await
+            .unwrap(),
+        "let answer = 42;\n"
+    );
+    let original = History::new(control.store.database.clone())
+        .get(HistoryGetArgs {
+            node_id: "external-copy".into(),
+            final_answer_only: false,
+            limit_bytes: 65536,
+            cursor: None,
+            encoding: "UTF-8".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(original.text, body);
+    assert_eq!(
+        original.provenance.sender.unwrap().label.as_deref(),
+        Some("Claude（レビュア）")
+    );
+    owner.shutdown().await.unwrap();
 }

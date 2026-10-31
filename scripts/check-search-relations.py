@@ -67,7 +67,7 @@ def main():
         server = ThreadingHTTPServer(('127.0.0.1', 0), Embeddings)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         embedding_endpoint = f'http://127.0.0.1:{server.server_port}/v1'
-    (root / 'config.toml').write_text('default_connection="visual"\ndefault_model="offline-fixture"\n[connections.visual]\nbase_url="http://127.0.0.1:9/v1"\n[connections.embedding]\nbase_url="' + embedding_endpoint + '"\n[embedding]\nconnection="embedding"\nmodel="text-embedding-3-small"\n')
+    (root / 'config.toml').write_text('default_connection="visual"\ndefault_model="offline-fixture"\n[connections.visual]\nbase_url="http://127.0.0.1:9/v1"\n[connections.embedding]\nbase_url="' + embedding_endpoint + '"\n[embedding]\nconnection="embedding"\nmodel="text-embedding-3-small"\n[ui]\ncopy_backend="osc52"\n')
     binary = str(args.binary.resolve())
     env = {key: value for key, value in os.environ.items() if not key.startswith('SHELLBOY_')}
     env['TERM'] = 'xterm-256color'
@@ -91,7 +91,7 @@ def main():
     evidence = {}
 
     def cli(label, *words):
-        result = subprocess.run([binary, '--data-dir', str(root / 'data'), *words], env=env, capture_output=True, text=True, timeout=60)
+        result = subprocess.run([binary, '--config', str(root / 'config.toml'), '--data-dir', str(root / 'data'), *words], env=env, capture_output=True, text=True, timeout=60)
         value = json.loads(result.stdout)
         assert value['ok'] and result.returncode == 0, value
         evidence[label] = value

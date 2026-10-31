@@ -5,9 +5,12 @@ use ratatui::style::Color;
 pub const NOTICE_SOURCE_OUTSIDE_WINDOW: &str =
     "元のtool行は表示範囲外です · F6で保存済み参照を確認";
 
+pub const EXTERNAL_MARK_CANDIDATES: [&str; 3] = ["⤷", "⇥", "⤳"];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowKind {
     Human,
+    External,
     Parent,
     SelfModel,
     OtherModel,
@@ -25,8 +28,9 @@ pub enum RowKind {
     LiveWork,
 }
 impl RowKind {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Human,
+        Self::External,
         Self::Parent,
         Self::SelfModel,
         Self::OtherModel,
@@ -47,6 +51,7 @@ impl RowKind {
     pub fn spec(self) -> (&'static str, &'static str, Color) {
         match self {
             Self::Human => ("›", "利用者", theme::USER_MARKER),
+            Self::External => (EXTERNAL_MARK_CANDIDATES[1], "外から", theme::USER_MARKER),
             Self::Parent => ("↳", "親", theme::USER_MARKER),
             Self::SelfModel => ("↺", "自分", theme::USER_MARKER),
             Self::OtherModel => ("↳", "モデル", theme::USER_MARKER),
@@ -116,6 +121,14 @@ mod tests {
             assert_eq!(mark.width_cjk(), 1);
             assert!(!label.is_empty());
         }
+        for mark in EXTERNAL_MARK_CANDIDATES {
+            assert_eq!(mark.width(), 1);
+            assert_eq!(mark.width_cjk(), 1);
+            assert_ne!(mark, RowKind::Human.mark());
+        }
+        assert_eq!(RowKind::External.mark(), "⇥");
+        assert_eq!(RowKind::External.spec().1, "外から");
+        assert_eq!(RowKind::External.mark().width_cjk(), 1);
         assert_ne!(RowKind::Running.mark(), RowKind::Unknown.mark());
         assert_ne!(RowKind::Notice.mark(), RowKind::Parent.mark());
     }

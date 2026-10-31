@@ -748,6 +748,8 @@ pub struct NodePresentation {
     pub created_at: Option<String>,
     #[serde(skip)]
     pub input_source: InputSource,
+    #[serde(skip)]
+    pub input_sender_label: Option<String>,
     /// Worker-derived display identity; never persisted or a source/provenance hash.
     #[serde(skip)]
     pub projection_stamp: Option<[u8; 32]>,
@@ -838,6 +840,7 @@ impl NodePresentation {
     pub fn retained_bytes(&self) -> usize {
         size_of::<Self>()
             + self.created_at.as_ref().map_or(0, String::capacity)
+            + self.input_sender_label.as_ref().map_or(0, String::capacity)
             + self.title.capacity()
             + self.blocks.capacity() * size_of::<PresentationBlock>()
             + self.fields.capacity() * size_of::<PresentationField>()

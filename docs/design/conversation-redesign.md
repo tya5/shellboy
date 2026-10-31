@@ -48,7 +48,23 @@ Add the frontend configuration enum ui.palette = "dark" | "light", default dark,
 
 Capability resolution happens before the UI loop: NO_COLOR wins and uses plain text plus spacing; known 256/truecolor terminals use the chosen palette; other terminals use reverse/separator fallback. Do not probe terminal background using blocking terminal I/O. NO_COLOR may also need nonchromatic selection cues, so retain markers, labels and borders rather than relying on color.
 
-Human messages are full-width bands covering every wrapped content line, with the saved time muted at the right where space permits. Parent/self/Revisit inputs have a source marker independent of color. Do not classify every role=user as a human: use receipt sender/origin and the saved Revisit event facts. Width reduction sacrifices the timestamp before the message content. Plain mode uses the human marker and blank separators.
+Input bands have three structural parts: a left source mark, body spans, and
+optional right metadata (source label, self-reported sender label, saved HH:MM).
+Only the body participates in source anchors, selection/copy and F6 original;
+metadata never enters canonical text. Keep existing parent/self/other/Revisit
+marks and move their disambiguating labels to metadata. External/unknown input
+gets a distinct width-one mark from the shared row table, not `入力 ·`.
+The external mark is provisional pending user choice among ⤷ / ⇥ / ⤳; do not
+integrate #91 on main until selected. All candidates must pass width_cjk == 1.
+
+Bands cover every span and wrapped row, including code/link spans and padding:
+override backgrounds only, preserving foreground/bold/underline/link identity.
+Plain mode supplies no band background. Build metadata after wrapping the body;
+drop the whole optional metadata group when it cannot fit without sacrificing
+body, and never repeat it on continuation rows. Sender labels come only from
+existing bounded receipt facts, remain unverified, and keep F6's original sender
+inspection. Cache accounting and display projection stamps include that label.
+No schema/protocol, DB query/worker/queue, model input or copy API is added.
 
 The fixed header uses a different band or bottom rule from user bands. Title is prominent, activity has symbol/color, and connection/model/cwd are muted right-side fields. Cwd truncates from the beginning. Footer and composer have their own separators. Narrow width drops optional metadata instead of wrapping the fixed chrome unpredictably.
 
@@ -770,6 +786,10 @@ Revisit, `▸` answer, `▹` request, `⏵` running, `◌` unavailable, `✓` su
 reserved for the #86 work-region heading. The old ambiguous-width `●`, `◇` and
 `◐` are not chosen. Distinct shapes plus labels work without color. Existing
 palette roles are reused; no new theme configuration or translation framework.
+Issue #91 extends this table for external/unknown input with ⇥, labeled 外から.
+The user selected candidate B on 2026-10-31 after the real-PTY comparison; this
+supersedes provisional A (⤷) and the other candidate (⤳). Main integration still
+requires the delegated qualification, not another visual selection.
 Shell right-hand metadata uses the same table: ordinary exit/time facts use the
 active palette's muted role; failure/nonzero-exit and cancellation retain the
 attention role. Live elapsed painting shares this policy. NO_COLOR keeps the
@@ -806,7 +826,9 @@ contract; canonical thread_list explicitly populates them through #74's indexed
 helpers. Explicit UI canonical pages retain the shared ThreadList behavior.
 No new operation or schema is added by E beyond the inherited main schema16.
 The #83 presentation::rows legend and #84 composer remain byte-identical to the
-merged main; preserve #71 auto_history and #54 conditional status ticks.
+merged main for that E admission snapshot; later row-vocabulary extensions such
+as #91 follow their own adopted display contract. Preserve #71 auto_history and
+#54 conditional status ticks.
 
 
 ### F closed-consumer read admission

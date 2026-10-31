@@ -2440,3 +2440,39 @@ new UI starts List; old descendant root/filter is cleared. No new saved/Core
 state or worker/queue. The focused actual-key/slash/Tab regression passes1/0.
 Help and English/Japanese user guides match the corrected contract. Final
 combined-source standard/native/CI still need qualification before publication.
+## Exact batch text replacement (#94.3)
+
+The standard-library stdin-JSON source editor validates all file/rule matches
+before staging any changes. Nonunique/missing matches never partially edit a
+batch. Same-file rules are sequential; explicit roots, UTF-8/newline preservation,
+atomic renames, guarded rollback and reported recovery originals bound failures.
+The helper is already used to edit its own implementation/tests. Developer
+scripts only; Core/storage/protocol/clipboard and installed binaries are untouched.
+
+#94.3's JSON-only submission is superseded by the user's literal-block revision.
+Use --blocks/--marker for normal whole-line changes and JSON for substrings;
+both feed the same all-or-nothing match preflight. Quoted-heredoc and delimiter
+failure checks are included. The superseded b2c5b186 must not be integrated.
+## Input band structure and external mark review (#91)
+
+Input rows separate the source mark, canonical body, and optional muted metadata.
+Sender labels use existing bounded receipt facts and display identity; wrapping
+and source/copy operations do not absorb decoration. Every span receives only
+the band background override. The external mark remains provisional (⤷ / ⇥ / ⤳).
+Native validation and the clipboard-fixture incident are recorded in acceptance.
+Main integration is blocked pending user choice; CI/integration belongs to worker4.
+
+### Final #91 branch qualification (2026-10-31)
+
+On the #76/E/#74 main baseline, the final standard check passes 1,956 Rust tests
+and 20 Python tests. Three external-mark candidates pass 18 native PTY sessions;
+A is restored and independently recaptured. Source/binary evidence and earlier
+failed attempts are in acceptance. User mark selection still blocks main;
+worker4 owns CI/integration and the user owns issue closure.
+
+## #91 selected external-input mark
+
+The user selected B (⇥) on 2026-10-31. The common External/外から row and the PTY
+driver default now use B; an explicit regression assertion binds mark/label/CJK
+width. The prior A branch remains historical, not the integration candidate.
+The selected branch is being requalified and sent to worker4 as visually approved.

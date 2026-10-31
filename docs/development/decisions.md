@@ -2224,3 +2224,28 @@ root/filter is intentionally cleared, because after switching conversations it
 could silently monitor an unrelated old root; explicit /threads descendants
 or Alt+D selects the current saved Thread. Revisit if a separate scope-memory
 requirement is adopted. Slash commands remain explicit and a new UI starts List.
+## 2026-10-31: Separate input-band decoration and isolate clipboard checks (#91)
+
+Use three explicit display parts, with non-RGB layout-only decoration markers
+excluded from source matching and stripped before terminal rendering. Preserve
+body wrapping and foreground/link styles; omit the whole metadata group before
+sacrificing body. Sender labels are unverified receipt facts, not authority.
+Keep existing source glyphs and move their labels to optional right metadata;
+external/unknown input uses a provisional distinct width-one shared-table glyph.
+User selection among ⤷, ⇥ and ⤳ blocks main integration. No per-character source
+or copy API changes, schema/protocol changes, additional query or worker is needed.
+
+After a test-side Auto-backend clipboard write, require explicit OSC52 in
+synthetic fixture configs, preflight shared PTY startup, and inspect OSC52 bytes
+only inside pipe-drained PTYs. GUI capture is unsuitable for clipboard checks
+because it can forward OSC52 to the host; reject clipboard-related GUI input.
+Routine tests use scratch config/data and injected clipboard backends where
+appropriate. This is test isolation, not a guarantee about arbitrary programs.
+
+## #91 external mark selected by the user
+
+2026-10-31, active: the user selected candidate B, ⇥, from the recorded real-PTY
+comparison. The common External row remains labeled 外から, uses the existing
+user-marker palette and has width_cjk()==1. Candidate A was provisional only.
+The reviewer states this visual choice is approved; qualification/integration
+remain delegated to worker4. No confirmation dialog, color or protocol is added.

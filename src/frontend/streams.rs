@@ -435,6 +435,7 @@ pub(super) fn seal_node(node: &mut UiNode) {
         &(
             node.presentation.created_at.as_deref(),
             node.presentation.input_source,
+            node.presentation.input_sender_label.as_deref(),
         ),
     )
     .is_err()
@@ -799,6 +800,10 @@ mod tests {
         seal_node(&mut node);
         let before = node.presentation.projection_stamp;
         node.presentation.created_at = Some("now".into());
+        seal_node(&mut node);
+        assert_ne!(before, node.presentation.projection_stamp);
+        let before = node.presentation.projection_stamp;
+        node.presentation.input_sender_label = Some("self-reported".into());
         seal_node(&mut node);
         assert_ne!(before, node.presentation.projection_stamp);
     }

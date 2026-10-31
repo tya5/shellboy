@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     std::fs::create_dir(&data)?;
     std::fs::write(
         root.join("config.toml"),
-        "default_connection='visual'\ndefault_model='offline-fixture'\n[connections.visual]\nbase_url='http://127.0.0.1:9/v1'\n",
+        "default_connection='visual'\ndefault_model='offline-fixture'\n[connections.visual]\nbase_url='http://127.0.0.1:9/v1'\n[ui]\ncopy_backend='osc52'\n",
     )?;
     let database = DbWorker::open(data.join("shellboy.db")).await?;
     let cwd = root.to_string_lossy().into_owned();
@@ -109,6 +109,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ("visual-scroll-wrap", "スクロール・日本語の折り返し", vec![
                 ("assistant_response", answer(&(1..=40).map(|i| format!("P{i:03} 日本語の折り返し位置を確認します。幅が変わっても、ホイールは文字数ではなく実際に表示される行で動きます。絵文字🙂と結合文字e\u{301}も含めます。")).collect::<Vec<_>>().join("\n\n"))),
             ]),
+            ("visual-input-bands", "External input band fixture", vec![
+                ("user", json!({"role":"user","content":"短い依頼を確認してください。"})),
+                ("user", json!({"role":"user","content":"名前なしの入力です。"})),
+                ("user", json!({"role":"user","content":"LONG_BEGIN 日本語の長い入力を折り返します。本文の途中には `inline code` と https://example.invalid/input を含みます。右側の名乗りは本文に混ぜません。LONG_END"})),
+                ("user", json!({"role":"user","content":"CODE_BEGIN\n```rust\nlet answer = 42;\n```\n[link](https://example.invalid/source) CODE_END"})),
+            ]),
             ("visual-shell-metadata", "Shell metadata palette fixture", vec![
                 ("tool_result", json!({"item":{"type":"function_call_output","call_id":"metadata-success","output":json!({"command":"METADATA_SUCCESS","status":"exited","exit_code":0,"elapsed_ms":12400}).to_string()}})),
                 ("tool_result", json!({"item":{"type":"function_call_output","call_id":"metadata-nonzero","output":json!({"command":"METADATA_NONZERO","status":"exited","exit_code":7,"elapsed_ms":12400}).to_string()}})),
@@ -130,6 +136,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             for (index,(kind,payload)) in nodes.into_iter().enumerate() {
                 append_node(&tx,thread,&format!("{thread}-node-{index}"),None,kind,&payload,"2026-10-24T12:00:00+09:00")?;
             }
+        }
+        for index in 0..4 {
+            let id = format!("visual-input-bands-node-{index}");
+            let sender = if index == 1 { json!({"kind":"external_cli"}) } else { json!({"kind":"external_cli","label":"Claude（レビュア）"}) };
+            tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES(?1,?1,?2,'visual-input-bands',?1,'applied','2026-10-24T12:00:00+09:00')",rusqlite::params![id,sender.to_string()])?;
         }
         // Keep real source relations for the summary original/provenance view.
         // Both source nodes stay visible in this comparison scene on purpose.

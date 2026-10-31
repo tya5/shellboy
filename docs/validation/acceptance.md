@@ -5177,3 +5177,167 @@ known closed result hydration. ui/history_interaction.rs and ui/view.rs own the
 navigation changes. Existing projection/body budgets, rendering, Core and schema
 are unchanged. The record is delivered to worker4 with review required; no local
 workflow_dispatch or main push is authorized under this handoff workflow.
+
+## Exact batch replacement helper (#94.3)
+
+2026-10-31 native macOS/ARM64, Python3.12. The stdin-JSON editor accepts explicit
+existing text paths within a chosen source root. All rules/files are checked in
+memory before any target staging; zero/multiple/overlapping matches fail the
+entire batch. Same-file rules follow JSON order. Empty/no-op arrays do not replace
+inodes. UTF-8, CRLF and executable modes are preserved; missing/binary/linked,
+read-only, non-owned and out-of-root paths are refused. Bounds are 4MiB JSON,
+256 rules and 32MiB aggregate text. Targets on filesystems without hardlinks fail
+before committing. CLI exits and recovery limits are documented in setup/help.
+
+Python54 tests pass (39 prior plus 15 replacement tests): multi-file/sequential
+rules, NFD/emoji/CRLF, nonunique/overlapping failures with unchanged content and
+mtime/mode/inode, empty/no-op rules, invalid/missing/binary/directory/outside paths,
+read-only/hardlinks, Unix symlink/executable mode, stage failure before any commit,
+second-rename failure restoring the original first inode, interruption just after
+rename, concurrent staging/committed edits, incomplete rollback retaining original
+copies, text bounds and real CLI JSON/exit behavior. Faults are synthetic and
+only temporary files are used. A code audit hardened the rename/interrupt recovery
+window and excluded read-atime from preservation assertions before submission.
+No external writer is overwritten in the explicit concurrency regression cases.
+
+Ordinary I/O failures attempt full rollback. This is not an OS/filesystem
+multi-file transaction: power loss, process kill, I/O failure during rollback and
+uncoordinated concurrent editors cannot guarantee global atomicity. Recovery
+failure exits3 with retained original directories rather than claiming success
+or silently discarding originals/new user edits. Successful edits with cleanup
+failure report leftover directories. These limits are not hidden by passing tests.
+
+Immediate self-use: two JSON batches with 7 and 5 exact substitutions update the
+new helper and tests, replacing repeated inline read/replace/write boilerplate.
+No default user data/config path, clipboard or provider is accessed; no Rust build,
+release/install change or paid model test is run. py_compile/help, integration
+layout94/watchdog, diff and record-retention checks pass. Evidence:
+/tmp/issue-94-3-tests-final.log and /tmp/issue-94-3-help.txt. Windows/Linux native
+execution and crash/network-filesystem behavior remain unverified locally; CI is
+delegated to worker4. The issue's original measurement is file rewrite327/1070000
+characters, record checker186/530000, PTY29/80000. Those are the supplied baseline,
+not a newly measured reduction. Multi-day follow-up with the same command-metadata
+counting method remains outstanding; no savings percentage is invented here.
+
+#94.3 input-shape revision supersedes b2c5b186: --blocks accepts literal whole
+lines and --marker changes the exact delimiter prefix. The parser preserves LF/
+CRLF payload bytes after UTF-8 decoding, does not split on Unicode line separators,
+rejects missing/duplicated with/end and nested blocks, and passes the complete
+rule array to the unchanged JSON preflight/commit engine. A malformed later block
+cannot apply an earlier valid block. JSON remains available for partial-line and
+no-final-newline changes; setup leads with the quoted-heredoc block form.
+Python63 tests pass: nine new block tests cover multi-file/same-file ordering,
+exact delimiters, custom-marker collisions, missing delimiters/nesting, empty and
+bad markers, all-or-nothing nonunique matches, real CLI input and a real quoted
+Unix heredoc retaining $variables, quotes and backslashes. The new --blocks form
+is immediately used to update its own setup example (custom %% permits literal
+@@ delimiters inside the example). Evidence: /tmp/issue-94-blocks-tests1.log and
+/tmp/issue-94-blocks-help.txt. No user clipboard/config/data, provider, Rust build
+or installed binary is used in these scripts-only checks. Existing rollback and
+crash/concurrency limitations remain; they are not replaced by parser success.
+## Input band structure and clipboard fixture safety (#91, in progress)
+
+The implementation separates mark/body/optional right metadata, preserves source
+anchors and canonical copy/original text, and applies band backgrounds to all
+spans without changing foreground, emphasis or link identity. Unit coverage uses
+all source classes, palette/plain modes, narrow metadata omission and wrapping;
+frontend copy coverage uses injected FixtureClipboard and temporary stores.
+
+An initial PTY run omitted ui.copy_backend and the Auto backend wrote synthetic
+text to the host OS clipboard. Work stopped and the user authorized continuation
+with explicit temporary OSC52 config. The prior clipboard value was not saved
+or restored. This was a test-side side effect, not a passing copy validation.
+
+A grep audit of scripts/, tests/ and examples/ found omitted copy settings in
+synthetic config generators and omitted --config on several fixture CLI calls.
+Those paths now explicitly use OSC52 and the fixture config. Shared PTY startup
+rejects missing/Auto/OS copy settings before opening a terminal, strips agent
+SHELLBOY context and overrides HOME/XDG directories inside the scratch fixture.
+All fixtures retain explicit disposable --data-dir. Copy/image integration tests
+inject FixtureClipboard rather than calling the native adapter. No direct
+arboard/pbcopy/pbpaste/get/set-clipboard call was found in the audited tests,
+examples or scripts. Default-configuration parsing tests intentionally still
+verify the product defaults without performing clipboard I/O.
+
+OSC52 itself is not an OS-clipboard sandbox when rendered by a GUI terminal.
+The GUI capture helper therefore rejects explicit copy/image commands and
+potential copy shortcut input; clipboard verification uses pipe-drained Unix
+PTY output only. This conservative helper can reject ordinary text containing
+c/C; use the PTY driver for such input. No GUI capture is run for this task.
+These test guards are not a security boundary for arbitrary supplied programs.
+
+Python fixture guard tests pass (20 total tests). The prior local check passed
+1,894 Rust tests with 33 ignored before the safety changes/rebase; it is not final
+source evidence. Early safe PTY attempts exposed ambiguous adjacent Esc handling
+and a predicate that matched the word 名乗り in the synthetic body; cleanup now
+preserves the primary assertion, waits for the full main scene, and clears item
+focus before /quit. Failed watchdog attempts are not accepted sessions.
+
+Final-source standard checks and the three candidate PTY observations follow
+below when complete. Physical glyph rendering/fonts, actual IME/OS clipboard and
+Windows ConPTY remain unverified. The user delegates CI and main integration to
+worker4; no workflow_dispatch is run by this worker. Do not merge before mark
+selection and approval.
+
+### Final #91 local handoff qualification (2026-10-31)
+
+The final Rust/scripts/tests source is a2c7b40ce2c34b059dc5d16e83dba1a0af484d55,
+rebased on main 5fc5cc0c6d67e8986d220e09f1cd7cbe60b207bc (#76/E/#74).
+Environment: macOS26.3.1(a)/25D771280a ARM64, debug, Python3.12.7/pyte0.8.2.
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 sh scripts/check.sh exits0: 1,956 Rust
+passed (1,008+929+12+7), 0 failed, 33 ignored; 94 integration-layout suites,
+watchdog policy, 20 Python tests, fmt and strict all-target Clippy pass.
+Binary/visual_fixture build, Python compile and git diff --check also pass.
+The final regression preserves inherited line foreground/italic styling as well
+as explicit span colors, emphasis and link identity while overriding background.
+
+Three real product builds select only External's candidate index, 0/1/2.
+Each runs 80/140 columns x dark/light/NO_COLOR: 18 accepted Unix PTY sessions.
+Every session validates band cell backgrounds, name/no-name and wrapped/code/link
+input, /copy, item copy and original-panel copy against stored canonical text.
+Those 54 decoded OSC52 copy checks exclude marks, names and padding. The source
+is restored exactly to A, rebuilt, and its six sessions independently repeated.
+The comparison manifest fingerprints the tracked Rust/scripts/examples/tests
+and Cargo inputs, records per-candidate binary hashes, and verifies exact source
+restoration. The final A binary hash is 1e3b3be21c2787a8025c347ecba6ea5054a2441815155e9a3861d035222e9e42.
+
+Earlier a0f7022/d0a92bf-based checks and captures are separate observations, not
+additional accepted final sessions. Safe-driver failures exposed both ambiguous
+Esc handling and a false-positive original-page predicate (main body/footer had
+the same words). The driver now awaits the actual panel title and sender fact;
+cleanup preserves primary failures and clears item focus before normal exit.
+An intermediate assertion expecting identical binary hashes across separate
+links also failed; no binary reproducibility guarantee or product regression was
+inferred. Final qualification binds each actual binary hash and checked source
+content, not equality between independently rebuilt binaries.
+
+Evidence: /tmp/issue-91-check-handoff.log, /tmp/issue-91-build-handoff.log,
+/tmp/issue-91-pty-A-handoff-restored/, /tmp/issue-91-mark-comparison-handoff/,
+/tmp/issue-91-script-grep-full.txt and /tmp/issue-91-clipboard-audit-after.txt.
+Screens and raw bytes remain synthetic temporary artifacts, not repository data.
+The new #94.1 record-delta helper is used on these records to verify no baseline
+lines were deleted. Functional/cell observations do not establish P1 performance,
+physical fonts/terminals, actual IME/OS clipboard or Windows ConPTY success.
+No resumed test writes the host clipboard or real user data/config; no installed
+binary, release/tag or paid product API is used. Knowledge search is separate
+from product verification. This worker does not dispatch CI, integrate main or
+close the issue; worker4 owns CI/integration after user mark selection/review.
+Keep the branch and worktree until confirmed main integration.
+
+## User-selected B external-input mark (#91 final)
+
+2026-10-31: the user selected and approved B (⇥); External remains 外から.
+On main2b3cd91 with integrated #94.2, B Rust/source qualification c9651bb passes
+sh scripts/check.sh: Rust1956 passed/0 failed/33 ignored, Python41, layout94,
+watchdog/fmt/strict Clippy. The explicit selected-mark/label/width_cjk()==1 test
+passes. Build and six fresh 80/140 x dark/light/NO_COLOR PTYs pass with B,
+including18 canonical body/selection/original OSC52 copy checks. Shared PTY/VT
+APIs are unchanged from main and retain fixed OSC52/no-auth/scratch preflight.
+Evidence: /tmp/issue-91-B-check.log, /tmp/issue-91-B-build.log,
+/tmp/issue-91-B-final/results.json and /tmp/issue-91-B-record-delta.json.
+The external-CLI row fixture expectation is updated from the obsolete human-like
+mark to B; an edit indentation error was caught by py_compile and fixed before
+submission. This is a test-only change after Rust qualification; src is unchanged.
+No physical-font/ConPTY/IME or performance qualification is inferred. Three-OS CI,
+main integration and any user-binary replacement remain delegated; provisional A
+must not land. No installed binary, release or real OS clipboard is modified.

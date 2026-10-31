@@ -50,7 +50,7 @@ def main():
     evidence = {}
 
     def cli(label, *words, success=True):
-        result = subprocess.run([binary, '--data-dir', str(root / 'data'), *words], env=env, capture_output=True, text=True, timeout=25)
+        result = subprocess.run([binary, '--config', str(root / 'config.toml'), '--data-dir', str(root / 'data'), *words], env=env, capture_output=True, text=True, timeout=25)
         value = json.loads(result.stdout)
         assert value['ok'] == success, value
         assert result.returncode == (0 if success else 1), result.returncode
