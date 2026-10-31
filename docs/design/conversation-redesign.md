@@ -670,8 +670,10 @@ Revisit, `▸` answer, `▹` request, `⏵` running, `◌` unavailable, `✓` su
 reserved for the #86 work-region heading. The old ambiguous-width `●`, `◇` and
 `◐` are not chosen. Distinct shapes plus labels work without color. Existing
 palette roles are reused; no new theme configuration or translation framework.
-Issue #91 extends this table for external/unknown input with provisional ⤷
-(alternatives ⇥ / ⤳); selection and main integration require user approval.
+Issue #91 extends this table for external/unknown input with ⇥, labeled 外から.
+The user selected candidate B on 2026-10-31 after the real-PTY comparison; this
+supersedes provisional A (⤷) and the other candidate (⤳). Main integration still
+requires the delegated qualification, not another visual selection.
 Shell right-hand metadata uses the same table: ordinary exit/time facts use the
 active palette's muted role; failure/nonzero-exit and cancellation retain the
 attention role. Live elapsed painting shares this policy. NO_COLOR keeps the
