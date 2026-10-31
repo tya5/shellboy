@@ -3736,8 +3736,15 @@ specific behaviors, not physical Windows UX or full performance acceptance.
 The measurement-review branch63a7f17 standard run passed lib965 and Python20,
 but integration had915 successes/1 failure: the paired-browser fixture saw
 browser sequence77 and current-view78. Its initial gate accepted a metadata-only
-patch before the selected-row excerpt observation, leaving legitimate initial
-work in flight when the foreign CLI mutation began. Wait for the actual selected
-excerpt result instead; retain the exact one-observation/shared-sequence/no-reload
+patch without proving the selected-row excerpt observation had completed.
+Initial-work overlap is the working explanation, not a proven product cause.
+Wait for the actual selected excerpt result instead; retain the exact one-observation/shared-sequence/no-reload
 assertions. No product cadence, timeout or sequence fence is relaxed. New focused
 and complete qualification is pending; the original failure log is retained.
+
+
+Focused follow-upc19e5c1 passes1/0 for the exact paired-header/browser integration
+case after requiring the selected excerpt result. Its exact shared-sequence,
+one-observation and no-reload assertions remain intact. A full check on the
+final review branch is still required; one focused success does not prove the
+intermittent cause or complete E's performance gates.

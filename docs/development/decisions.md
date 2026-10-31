@@ -1970,3 +1970,19 @@ explicit in validation/storage docs. No new tables, workers, queues or denormali
 source copies. Revisit only if real scoped-query workloads justify another access
 path; mocks/query plans are not real-provider or general latency guarantees.
 Source: issue75 and user-approved query-plan/read-only/watchdog/redaction constraints.
+
+
+### E paired-observation fixture admission (provisional diagnosis)
+
+The same product tree passed once, then its integration observer saw List77 and
+current-view78 after a title edit. The fixture's initial readiness accepted any
+browser patch, including metadata-only work, rather than confirming the selected
+row's observation. Require the actual selected excerpt result before editing;
+retain the strict one-observation, same-sequence and no-reload checks. The
+separately gated real combined-read test still proves one shared WAL snapshot.
+
+Initial-work overlap is an inference from the insufficient readiness condition,
+not a traced cause. Focusedc19e5c1 now passes. If the full check or native CI fails
+again after this stronger gate, capture ticket IDs/admission and result sequences
+instead of relaxing assertions or adding sleeps/time budgets. No product cadence,
+queue, state or sequence policy changes on this evidence alone.
