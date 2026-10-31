@@ -546,7 +546,46 @@ async fn recover(
     Ok(())
 }
 pub(super) async fn stop_without_driver(control: &Control, run_id: &str) -> Result<(), ApiError> {
-    drain_and_stop(control, run_id, None).await
+    let run = run_id.to_owned();
+    let target: Option<(String, String)> = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db
+                .query_row("SELECT thread_id,state FROM run WHERE id=?1", [run], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .optional()?)
+        })
+        .await
+        .map_err(storage_error)?;
+    let Some((thread, state)) = target else {
+        return Ok(());
+    };
+    if state != "stopping" {
+        return Ok(());
+    }
+    // Reuse the existing Thread boundary so simultaneous retirement/stop handlers
+    // cannot terminalize the same generation twice. Never lock the registry here.
+    let boundary = control.boundary(&thread).await;
+    let _boundary = boundary.lock().await;
+    let run = run_id.to_owned();
+    let stopping = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state='stopping')",
+                [run],
+                |r| r.get::<_, bool>(0),
+            )?)
+        })
+        .await
+        .map_err(storage_error)?;
+    if stopping {
+        drain_and_stop(control, run_id, None).await?;
+    }
+    Ok(())
 }
 
 /// Freeze ownership first; cancel processes and child drivers; record terminal

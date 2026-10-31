@@ -1063,6 +1063,17 @@ impl Control {
         self.live
             .remove_driver_if_current(&thread_id, &slot.id)
             .await;
+        // A stop may have found this slot after drive already chose its exit.
+        // Retire first: later stop handlers then own the absent-driver path.
+        if let Err(error) = driver::stop_without_driver(self, &slot.run_id).await {
+            if error.is_storage_failure() {
+                self.fail_storage().await;
+            }
+            self.publish_event(EngineEvent::Error {
+                thread_id: thread_id.clone(),
+                error,
+            });
+        }
         self.changed(&thread_id);
         self.nudge_owner(&slot.run_id).await;
         // An accepted send/retry can race the previous driver's final

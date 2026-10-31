@@ -1520,3 +1520,21 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
         owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn concurrent_absent_driver_stop_and_retirement_do_not_advance_terminal_generation_twice() {
+    crate::test_watchdog::watchdog("serialized absent-driver stop handoff", async {
+        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let run = accepted.run_id.as_ref().unwrap();
+        control.store.execute(Request::new(format!("{}:stop",owner.instance_id),
+            Command::RunStop(RunTarget {run_id:run.clone()})), None).await.unwrap();
+        let (one,two)=tokio::join!(stop_without_driver(&control,run),stop_without_driver(&control,run));
+        one.unwrap();two.unwrap();
+        let target=run.clone();
+        let observed:(String,String,i64,i64)=control.store.database.call(move|db| Ok(db.query_row(
+            "SELECT r.state,u.state,u.generation,(SELECT COUNT(*) FROM model_attempt) FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1",
+            [target],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?)).await.unwrap();
+        assert_eq!(observed,("stopped".into(),"stopped".into(),2,0));
+        control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
