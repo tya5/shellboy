@@ -1919,3 +1919,12 @@ and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
 key actions and loopback-only configuration. Native captures and replay are used
 immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
 This is developer tooling only; product Rust, schema and workflows are unchanged.
+
+## Exact batch text replacement (#94.3)
+
+The standard-library stdin-JSON source editor validates all file/rule matches
+before staging any changes. Nonunique/missing matches never partially edit a
+batch. Same-file rules are sequential; explicit roots, UTF-8/newline preservation,
+atomic renames, guarded rollback and reported recovery originals bound failures.
+The helper is already used to edit its own implementation/tests. Developer
+scripts only; Core/storage/protocol/clipboard and installed binaries are untouched.
