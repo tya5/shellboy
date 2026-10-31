@@ -2757,8 +2757,9 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
         "saved_result",
         "rpc",
         "signal",
+        "disconnect",
     ] {
-        if mode == "signal" && !cfg!(unix) {
+        if matches!(mode, "signal" | "disconnect") && !cfg!(unix) {
             continue;
         }
         crate::test_watchdog::watchdog("headless counted stop/restart boundary", async {
@@ -2797,7 +2798,7 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
                 }]}))).unwrap();
                 if mode=="running_tool" {
                     loop {
-                        if std::fs::read_to_string(&counter).is_ok_and(|s|s.lines().count()==1) {break;}
+                        if std::fs::read_to_string(&counter).is_ok_and(|s|s=="once\n") {break;}
                         tokio::task::yield_now().await;
                     }
                     let db=headless_db(&data);
@@ -2814,11 +2815,22 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
                 thread=Some(id);
                 assert_eq!(std::fs::read_to_string(&counter).unwrap().lines().count(),1);
             }
-            let normal=matches!(mode,"rpc"|"signal");
+            let normal=matches!(mode,"rpc"|"signal"|"disconnect");
             if mode=="rpc" {
                 let accepted=headless_cli(&data,&["shutdown"]).await;
                 assert_eq!(accepted["state"],"accepted");
                 assert_eq!(accepted["shutdown_complete"],false);
+            } else if mode=="disconnect" {
+                #[cfg(unix)] {
+                    let endpoint:shellboy::app::Endpoint=serde_json::from_slice(&std::fs::read(data.join("endpoint.json")).unwrap()).unwrap();
+                    let mut stream=tokio::net::UnixStream::connect(&endpoint.address).await.unwrap();
+                    write_frame(&mut stream,&json!({"protocol_version":PROTOCOL_VERSION})).await.unwrap();
+                    let welcome:Value=read_frame(&mut stream).await.unwrap().unwrap();
+                    assert_eq!(welcome["instance_id"],first_instance);
+                    let request=Request::new(format!("{}:{}",endpoint.instance_id,uuid::Uuid::new_v4()),Command::OwnerShutdown(OwnerShutdownArgs{instance_id:endpoint.instance_id}));
+                    write_frame(&mut stream,&request).await.unwrap();
+                    drop(stream);
+                }
             } else if mode=="signal" {
                 #[cfg(unix)] assert_eq!(unsafe{libc::kill(process.child.id().unwrap() as i32,libc::SIGTERM)},0);
             } else { process.child.kill().await.unwrap(); }
@@ -2850,12 +2862,63 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
                     if state=="completed" {break;}
                     tokio::task::yield_now().await;
                 }
-                assert_eq!(std::fs::read_to_string(&counter).unwrap().lines().count(),1);
+                assert_eq!(std::fs::read_to_string(&counter).unwrap(),"once\n");
             } else {drop(db);}
             assert_eq!(std::fs::read_to_string(&requests).unwrap().lines().count(),expected_requests as usize+usize::from(mode!="before_request"));
+            assert!(incoming.try_recv().is_err(), "unexpected extra model request");
+            eprintln!("headless-boundary {}",json!({"mode":mode,"first_requests":expected_requests,"all_requests":expected_requests+if mode=="before_request"{0}else{1},"effects":if mode=="before_request"{0}else{1},"first_stdout_rows":if normal{2}else{1},"restart_stdout_rows":2}));
             headless_cli(&data,&["shutdown"]).await;
             restarted.finish(true,&root.path().join("restart-stdout.jsonl")).await;
             proxy_task.abort(); let _=proxy_task.await;
         }).await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn headless_shutdown_requires_explicit_directory_and_final_output_loss_is_not_success() {
+    crate::test_watchdog::watchdog(
+        "headless shutdown addressing and final output failure",
+        async {
+            let root = tempfile::tempdir().unwrap();
+            let config = root.path().join("config.toml");
+            std::fs::write(&config, "").unwrap();
+            let data = root.path().join("data");
+            let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+                .arg("shutdown")
+                .env("SHELLBOY_DATA_DIR", root.path().join("parent"))
+                .output()
+                .await
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(output.stderr.is_empty());
+            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(response["error"]["code"], "invalid_argument");
+            assert!(!root.path().join("parent").exists());
+            let process = HeadlessOwner::start(&data, &config).await;
+            let HeadlessOwner {
+                mut child,
+                stdout,
+                mut stderr,
+                ..
+            } = process;
+            drop(stdout);
+            let accepted = headless_cli(&data, &["shutdown"]).await;
+            assert_eq!(accepted["state"], "accepted");
+            assert!(!child.wait().await.unwrap().success());
+            let mut errors = String::new();
+            stderr.read_to_string(&mut errors).await.unwrap();
+            assert!(
+                errors.is_empty(),
+                "post-ready failures do not become startup stderr"
+            );
+            assert!(!data.join("endpoint.json").exists());
+            let _lock = shellboy::app::OwnerLock::acquire(&data).unwrap();
+            let integrity: String = headless_db(&data)
+                .query_row("PRAGMA quick_check", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(integrity, "ok");
+        },
+    )
+    .await
+    .unwrap();
 }

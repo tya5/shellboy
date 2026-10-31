@@ -131,4 +131,33 @@ mod tests {
         .await
         .unwrap();
     }
+    #[tokio::test]
+    async fn accepted_shutdown_receipt_is_not_replayed_as_restart_intent() {
+        crate::test_watchdog::watchdog("saved shutdown acceptance after reopen", async {
+            let root = tempfile::tempdir().unwrap();
+            let (owner, control) = fixture(root.path()).await;
+            let _stop = control.owner_shutdown_signal();
+            let old = request(&control, owner.instance_id.clone());
+            let accepted = control.store.execute(old.clone(), None).await.unwrap();
+            assert!(accepted.owner_shutdown);
+            assert_eq!(receipts(&control).await, 1);
+            // Simulate death after acceptance and before effect adoption.
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+            drop(control);
+            let (owner, fresh) = fixture(root.path()).await;
+            let stop = fresh.owner_shutdown_signal();
+            fresh.start().await.unwrap();
+            assert_eq!(receipts(&fresh).await, 1);
+            let rejected = fresh.request(old).await;
+            assert_eq!(rejected.error.unwrap().code, ErrorCode::ProtocolMismatch);
+            assert!(!stop.is_cancelled());
+            assert!(!fresh.admission_closed.load(Ordering::SeqCst));
+            assert_eq!(receipts(&fresh).await, 1);
+            fresh.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        })
+        .await
+        .unwrap();
+    }
 }

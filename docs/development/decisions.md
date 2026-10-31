@@ -2396,3 +2396,14 @@ refreshed. This preserves explicit closes during metadata-only observations and
 prevents completed-output timestamps from becoming a redraw clock. Revisit if a
 future contract permits one group/call to acquire a genuinely different execution;
 such a change needs an explicit identity transition, not a display-string guess.
+## #5 stage 3 shutdown ownership
+
+The shutdown handler commits acceptance and closes admission, but must not drain
+its own active-request scope. Reuse existing reserved stop admission and retain
+one optional transport-completion token only for shutdown invocations. Release
+request/transport admission before signalling the adapter. The adapter owns the
+existing snapshot/cancel/drain/DB close sequence. A fixed optional Control token
+marks serve capability; TUI does not enable it. Saved acceptance is not restart
+intent and expected instance identity prevents stale shutdown of a new owner.
+No new table, queue, worker, timer or capacity is needed. Tests count committed
+facts and side effects at named boundaries, not elapsed shutdown seconds.

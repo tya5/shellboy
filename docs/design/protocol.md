@@ -412,7 +412,8 @@ shutdown_complete=false acknowledges committed acceptance at that instance,
 not successful process termination. The session final stdout row event=stopped
 reports state=stopped/failed and ok after cleanup. Startup cancellation instead
 reports state=cancelled without a ready row. All rows carry protocol_version;
-ready/final rows name data_dir and instance_id when startup reached ownership.
+normal ready/stopped rows identify the session; cancellation before readiness
+may carry null data_dir and instance_id.
 No final row is guaranteed after force-kill or a closed output receiver. CLI
 shutdown requires explicit data-dir, reads that endpoint rather than inherited
 owner variables, and pins the request to its instance. Old saved acceptance

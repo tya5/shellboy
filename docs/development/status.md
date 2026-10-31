@@ -2643,3 +2643,11 @@ and verification details are recorded in the issue comment, not as design histor
 
 Small Python helper uses Git2.40+ --attr-source for committed union attributes.
 Four synthetic cases and full standard check pass; coordinator review/CI are pending.
+
+## #5 stage 3: explicit owner shutdown
+
+The candidate adds instance-bound shutdown acceptance and session-owned cleanup,
+Unix signal reception separated from TUI force/deadline policy, and final JSON.
+It retains existing receipt, snapshot, repair and process-ownership boundaries.
+Review, counted-fault evidence and native qualification are tracked in issue #5;
+parent background/nested Job coverage remains stage 4, not an inferred result.
