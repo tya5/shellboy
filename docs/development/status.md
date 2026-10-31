@@ -2820,3 +2820,12 @@ both temporary targets and the probe were deleted. Release/test layout is
 unchanged. The task branch is rebased onto landed #88/mainca317a8; latest-source
 standard qualification and3-OS CI remain pending. See acceptance/decisions and
 issue105 for frozen provenance; older pair results are not substituted.
+## #72 External Error Catalogue: First Version Awaiting Standard Qualification
+
+The optional Python tool implements explicit build/refresh, deterministic bounded
+failure signatures, same-Thread/Turn observed recovery associations, top/similar
+statistics and exact source IDs. No Rust Core, owner startup, UI/G, conversation
+schema or automatic instructions are changed. Twelve synthetic cases and all83
+Python tests pass; a10,000-execution synthetic build/changed-fact refresh observed
+1.324/1.399 seconds (not gates). Full standard/native cross-OS qualification and
+review remain pending. Only temporary synthetic data was read during validation.

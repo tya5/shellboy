@@ -38,3 +38,6 @@ handling. A design document does not establish successful verification. Check th
 
 Terminal-only metadata: [OSC7501 program status](program-status.md) uses the existing
 saved activity classifier and frame-boundary writer, not a conversation renderer.
+
+- [External shell error catalogue (#72)](error-catalog.md): optional read-only,
+  deterministic failure statistics and observed recovery associations.

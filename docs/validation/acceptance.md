@@ -6154,3 +6154,32 @@ confirmed. The older805efc9/3a933824 pair is historical context, not this result
 Main advanced to #88 during measurement; the pair stayed frozen. Subsequent
 rebase/latest-main standard checks and Windows/Linux CI are separate and not yet
 qualified by this record. No extra comparison, P1 run or cold retry was performed.
+### #72 External Shell Error Catalogue: Synthetic Python Qualification
+
+macOS/aarch64, Python3.12.7/SQLite3.51.0:12 new catalogue tests passed; complete
+`scripts/tests` discovery passed83 tests in7.192s. Fixtures initialize the current
+conversation schema17 inside temporary synthetic data directories only. Assertions
+cover deterministic path/number/time/hex grouping, exact group/call/result-node
+references, same Thread/Turn/step/overlap restrictions, counts/paired fractions,
+rare recovery examples, secret canaries (derived bytes and CLI JSON), bounded cut
+input/encoding loss, source SHA256 unchanged/read-only writes rejected, explicit
+rebuild equivalence, in-place completion/GC/deletion refresh, cap/schema/options
+failure, atomic replacement cleanup and symlink/hardlink rejection. Output prefix
+EXPLAIN uses indexed output_stream seeks. No raw stdout was copied.
+
+`python3 scripts/measure-error-catalog.py` created10,000 synthetic executions,
+5,000 failures, then changed one saved exit code before an incremental refresh.
+Observed full1.323557s/refresh1.398745s; refresh identified2 changed facts and9998
+unchanged facts, with5001 failures afterward. These are bounded-rescan/atomic
+replacement observations, not append-only delta reads or performance gates.
+Evidence: `/tmp/issue-72-scale-final.json`, `/tmp/issue-72-python-first.log`;
+execution2472dac9-c44c-4314-a783-fe8bb2f71361 exit0/cleanup confirmed. The scale
+subprocess has only the60s watchdog; its temporary fixture was removed.
+
+Earlier development observations were1.222/1.290s at an earlier source. One
+expanded unit case initially failed because its fixture used literal backslash-n
+instead of a newline; the fixture was corrected and all12 cases reran successfully.
+Redaction remains heuristic (arbitrary-secret detection is not established),
+lexical recovery association is not causation, and data remains untrusted.
+No user DB, model/API, provider credential or real command replay was used.
+Full standard checks/Windows/Linux and reviewer acceptance remain pending.
