@@ -1,5 +1,14 @@
 # Development status
 
+## Managed clipboard paths (#79)
+
+Managed images use the existing path field in CLI results and current request
+metadata. Attachment list observes lifecycle/filesystem availability outside the
+writer lane. Permissions, successful-send hashes and reclamation rules are shared
+with existing attachment behavior. Targeted synthetic tests pass; exact-source
+standard/native checks are tracked in #79. F6 path display is delegated to #41
+because its published display branch overlaps; no rendering changes are included.
+
 ## README overview (#78)
 
 The user selected candidate C: 89 colors, mean original-channel error about

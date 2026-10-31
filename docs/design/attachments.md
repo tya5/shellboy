@@ -81,3 +81,8 @@ presentation worker. This is an observation, not a lease or future-read guarante
 Existing selection/draft/fork/inflight reclamation rules remain unchanged.
 F6 path presentation is delegated to the overlapping #41 display work; #79 does
 not modify its rendering files in this first version.
+
+Detached context exclusions retain their existing bounded path notices instead
+of duplicating an unbounded path in per-request metadata. This preserves notice
+budget/progress and original provenance; ordinary selected attachments carry the
+full path, and CLI list retains the full stored absolute path.

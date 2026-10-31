@@ -1144,7 +1144,7 @@ async fn observed_list(f: &Fixture) -> Vec<shellboy::protocol::AttachmentDetails
 
 #[tokio::test]
 async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("managed attachment observations", async {
         use std::io::Write;
         let mut config = Config::default();
         config.retention.clipboard_bytes = 1;
@@ -1180,6 +1180,36 @@ async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
         let added = f.register(plan).await.unwrap();
         assert_eq!(added[0].path, path.to_str().unwrap());
         assert!(added[0].managed && added[0].unavailable_reason.is_none());
+        let shown = PathBuf::from(observed_list(&f).await[0].path.clone());
+        #[cfg(windows)]
+        let script = {
+            let script = f.path.join("read-image.ps1");
+            std::fs::write(&script, "$ErrorActionPreference='Stop'; [Console]::Write([Convert]::ToBase64String([IO.File]::ReadAllBytes($args[0])))").unwrap();
+            script
+        };
+        let output = tokio::task::spawn_blocking(move || {
+            #[cfg(unix)]
+            let mut command = {
+                let mut command = std::process::Command::new("/bin/sh");
+                command.args(["-c", "cat \"$1\"", "read-managed-image"]);
+                command
+            };
+            #[cfg(windows)]
+            let mut command = {
+                let mut command = std::process::Command::new("powershell.exe");
+                command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"]).arg(script);
+                command
+            };
+            command.arg(shown).output().unwrap()
+        }).await.unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        #[cfg(unix)]
+        assert_eq!(output.stdout, std::fs::read(&path).unwrap());
+        #[cfg(windows)] {
+            use base64::Engine;
+            assert_eq!(base64::engine::general_purpose::STANDARD.decode(String::from_utf8(output.stdout).unwrap().trim()).unwrap(), std::fs::read(&path).unwrap());
+        }
+
         let attachment = added[0].attachment_id.clone();
         drop(image);
         let log_path = f.path.join("observations.jsonl");
@@ -1308,7 +1338,7 @@ async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
 
 #[tokio::test]
 async fn attachment_list_seeks_existing_indexes_and_does_not_wait_for_writer() {
-    timeout(Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("indexed attachment list while writer is held", async {
         let f = Fixture::new(Config::default()).await;
         f.add("regular.txt", b"ordinary").await;
         f.db.call(|db| {

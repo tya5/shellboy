@@ -573,7 +573,15 @@ impl AttachmentService {
                     }
                 }
             }
-            let metadata = json!({"type":"input_text","text":format!("[Shellboy attachment metadata] {}",json!({"attachment_id":s.id,"path":s.path,"unavailable_reason":manifest.error.as_deref().or(s.reason.as_deref()),"source_node_id":s.source_node_id,"source_element_index":s.source_element_index,"content_hash":manifest.content_hash,"previous_hash":manifest.previous_hash,"state":manifest.state,"first_inclusion":manifest.first_inclusion,"version":"current read for this request"}))});
+            let mut facts = json!({"attachment_id":s.id,"source_node_id":s.source_node_id,"source_element_index":s.source_element_index,"content_hash":manifest.content_hash,"previous_hash":manifest.previous_hash,"state":manifest.state,"first_inclusion":manifest.first_inclusion,"version":"current read for this request"});
+            // Detached exclusions already carry a bounded path notice. Do not
+            // duplicate a potentially huge path outside that notice's budget.
+            if !s.detached {
+                facts["path"] = json!(s.path);
+                facts["unavailable_reason"] =
+                    json!(manifest.error.as_deref().or(s.reason.as_deref()));
+            }
+            let metadata = json!({"type":"input_text","text":format!("[Shellboy attachment metadata] {facts}")});
             let mut content = vec![metadata];
             content.extend(expansion);
             if s.detached {

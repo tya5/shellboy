@@ -3907,3 +3907,45 @@ not reinstate120ms settling windows or join labels across unrelated frames. The
 same60s guard protects liveness. This fixture failure is retained, not relabelled
 as an unrelated Windows flake. Main's independent noncontrolling-EOF diagnostic
 follow-up ad6c54b is preserved during rebase; it is not a #77 production change.
+
+## #79 managed clipboard path qualification (2026-10-31)
+
+Scope: keep the existing absolute path field for add/list, expose it in current
+request metadata, and report managed lifecycle/missing-file facts with ordinary
+unavailable_reason semantics. Existing managed preparation already used the same
+successful-send hash comparisons as external files; tests establish that parity
+rather than adding a second baseline or immutable-file rule. No permission,
+schema/index, export, lease, table, worker or queue is added.
+
+On native macOS arm64/Rust 1.99.1, 25 attachment integration tests pass. A temporary
+RGBA PNG is created through save_clipboard_pixels, registered with its ordinary
+reference, listed, and read by an actual native shell (sh on Unix; the native CI
+Windows fixture uses PowerShell). The path is absolute; Unix permissions remain
+0600. Replacing its bytes produces changed=true, before/after hashes and a separate
+change notice; disappearance produces unavailable metadata and list reason. After
+selection removal and release of existing pins, the same reclamation code deletes
+it, with path and clipboard-retention/deleted reason still visible in the list.
+Three actual prepared manifests are recorded in a synthetic observations.jsonl
+(0 to 3 rows). No provider/HTTP request is made, and list does not create operation
+receipts (0 to 0). This is not a real OS clipboard or real-provider format test.
+
+The actual list SQL's EXPLAIN QUERY PLAN requires SEARCH, not SCAN, for selection,
+attachment-ref and managed-file aliases, using existing Thread/ID/unique-path
+indexes. No extra index is needed. A deliberately held DB writer does not block
+the read-only list; ordinary missing external files use the same observation path.
+File observations run after ending the read-only transaction through the existing
+two-slot presentation admission; they do not pin files or guarantee future access.
+
+New tests use #77's shared 60-second watchdog, with no speed threshold or retry.
+Initial validation caught a test argument-type typo and a regression where copying
+huge detached paths into new metadata starved the existing 64-KiB exclusion notice
+budget. Detached references now keep their pre-existing bounded path notice without
+duplicating that path. The unchanged bounded-notice/progress regression test passes.
+Full standard/role/bundled-doc checks and exact-source native CI are recorded in #79.
+
+Before editing, origin/main...origin/issue-41/e-ci-review was checked: F6 rendering
+and frontend files overlap. Per user authorization, F6 path presentation is deferred
+to #41 and recorded in #79; no F6 rendering files are edited here. That is remaining
+scope, not a claim of a completed TUI test. The old #78 unpublished draft branch was
+removed after user authorization; no tags, releases, installed binary or user DB
+are touched by this task. Status/acceptance old lines are preserved and audited.
