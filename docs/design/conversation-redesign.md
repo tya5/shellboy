@@ -670,6 +670,8 @@ Revisit, `▸` answer, `▹` request, `⏵` running, `◌` unavailable, `✓` su
 reserved for the #86 work-region heading. The old ambiguous-width `●`, `◇` and
 `◐` are not chosen. Distinct shapes plus labels work without color. Existing
 palette roles are reused; no new theme configuration or translation framework.
+Issue #91 extends this table for external/unknown input with provisional ⤷
+(alternatives ⇥ / ⤳); selection and main integration require user approval.
 Shell right-hand metadata uses the same table: ordinary exit/time facts use the
 active palette's muted role; failure/nonzero-exit and cancellation retain the
 attention role. Live elapsed painting shares this policy. NO_COLOR keeps the
@@ -706,4 +708,6 @@ contract; canonical thread_list explicitly populates them through #74's indexed
 helpers. Explicit UI canonical pages retain the shared ThreadList behavior.
 No new operation or schema is added by E beyond the inherited main schema16.
 The #83 presentation::rows legend and #84 composer remain byte-identical to the
-merged main; preserve #71 auto_history and #54 conditional status ticks.
+merged main for that E admission snapshot; later row-vocabulary extensions such
+as #91 follow their own adopted display contract. Preserve #71 auto_history and
+#54 conditional status ticks.

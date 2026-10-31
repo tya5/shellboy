@@ -1175,7 +1175,7 @@ struct InputBandRow {
 impl InputBandRow {
     fn into_line(mut self, width: u16, style: Style) -> Line<'static> {
         let decoration = |text| Span::styled(text, style.underline_color(INPUT_DECORATION_MARKER));
-        self.body.style = self.body.style.patch(style);
+        self.body.style = self.body.style.patch(Style { fg: None, ..style });
         self.body.style.bg = style.bg;
         for span in &mut self.body.spans {
             span.style.bg = style.bg;
@@ -4243,7 +4243,12 @@ mod conversation_item_tests {
                         mark,
                         Span::styled("code ", code_style),
                         Span::styled("link", link_style),
-                    ]),
+                    ])
+                    .style(
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
                     Line::from("continuation"),
                 ];
                 user_band(&mut lines, &value, 80, palette);
@@ -4253,6 +4258,8 @@ mod conversation_item_tests {
                     assert_eq!(line.style.bg, expected_bg);
                     assert!(line.spans.iter().all(|s| s.style.bg == expected_bg));
                 }
+                assert_eq!(lines[0].style.fg, Some(Color::Green));
+                assert!(lines[0].style.add_modifier.contains(Modifier::ITALIC));
                 let body = body_spans(&lines[0]).collect::<Vec<_>>();
                 assert_eq!(
                     body.iter().map(|s| s.content.as_ref()).collect::<String>(),
