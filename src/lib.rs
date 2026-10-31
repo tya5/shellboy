@@ -24,6 +24,8 @@ pub mod ipc;
 mod json_pointer;
 pub mod memory;
 pub mod model;
+#[cfg(unix)]
+mod os_signals;
 pub mod owner_session;
 pub mod presentation;
 pub mod program_status;

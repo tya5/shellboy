@@ -182,20 +182,14 @@ impl Shared {
     }
 }
 #[cfg(unix)]
-struct OsSignals {
-    term: tokio::signal::unix::Signal,
-    hup: tokio::signal::unix::Signal,
-}
+use crate::os_signals::OsSignals;
 #[cfg(unix)]
-impl OsSignals {
-    fn new() -> io::Result<Self> {
-        Ok(Self {
-            term: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?,
-            hup: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?,
-        })
-    }
-    async fn recv(&mut self) -> Source {
-        tokio::select! {Some(())=self.term.recv()=>Source::Term,Some(())=self.hup.recv()=>Source::Hup}
+impl From<crate::os_signals::Signal> for Source {
+    fn from(signal: crate::os_signals::Signal) -> Self {
+        match signal {
+            crate::os_signals::Signal::Term => Self::Term,
+            crate::os_signals::Signal::Hup => Self::Hup,
+        }
     }
 }
 #[cfg(not(unix))]
@@ -244,7 +238,7 @@ impl Termination {
                             }
                         } else {std::future::pending::<()>().await}
                     }=>{observed.force(true).await;break;},
-                    source=os.recv()=>observed.signal(source),
+                    source=os.recv()=>observed.signal(source.into()),
                     _=observed.notify.notified()=>{},
                 }
             }
