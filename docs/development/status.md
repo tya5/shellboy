@@ -1935,3 +1935,7 @@ and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
 key actions and loopback-only configuration. Native captures and replay are used
 immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
 This is developer tooling only; product Rust, schema and workflows are unchanged.
+#95's third pinned-tool observation is a fixture navigation-intent ordering error:
+pause before dispatching a non-tail window, not after waiting for its reply.
+Two-order pure-state coverage and the original retained-body assertions remain;
+no UI retention change or longer guard is used for that case.
