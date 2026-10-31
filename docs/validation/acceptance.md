@@ -5869,3 +5869,12 @@ Formatter follow-up gates initially found two obsolete expectations (60秒待機
 versus1分0秒 and133s versus2分13秒) and a guide scanner interpreting a dynamic
 completed-time example as a literal navigation label. Expected strings/example
 notation were corrected without weakening duration/source/clock assertions.
+Before integration of main #98, the formatter/end-time follow-up passed targeted
+elapsed/calendar/activity/footer tests, sh scripts/check.sh (1,977/0/33,
+Python66/layout94/fmt/strict Clippy/policy), and the rebuilt native8/64 matrix,
+now requiring a saved terminal HH:MM alongside completed answer frames. Main
+then advanced to9fd7b1c. Its three presentation conflict hunks were resolved by
+retaining #98 tool geometry, body priority and cached release facts, applying only
+the shared formatter and recognizing an existing hour/minute suffix during paint.
+This latest integrated source requires a fresh final gate; earlier green is not
+claimed as that gate. No force push or own native CI is used for the replacement.
