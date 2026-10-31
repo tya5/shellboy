@@ -140,6 +140,13 @@ still recalls sent messages. Opening details does not submit a new request.
 Copies and originals refer to saved source content, which may contain more than
 the visible preview. F6's original-text page also retains its own copy controls.
 
+URLs and `file://` file/folder paths are opened by your terminal, not Shellboy.
+In WezTerm, use Shift+click to bypass Shellboy's mouse capture; the default rules
+recognize `file://` URLs. Bare paths need a `hyperlink_rules` entry; see the
+[short terminal configuration example](tui.md#open-urls-and-file-paths-with-your-terminal).
+In iTerm2, use Cmd+click. Bindings can vary, and the terminal and OS determine
+what opens and how; Shellboy does not validate paths or launch applications.
+
 Output previews and original pages show a UTC read time captured once per
 successful read. Close/reopen a tool row to reread its output without rerunning
 it. In F6's original page, O refreshes the selected source, N reads the next page

@@ -2640,3 +2640,25 @@ reads, with private domain-helper rationale and query/index evidence before code
 adoption. The archive12-target enum is incomplete evidence for status/history/
 readback inventory; no blanket F8 snapshot exception is accepted. Retain #100's
 independent fix. G remains local/unqualified for main; no install/data changes.
+## Remaining approved #95 work on admitted F
+
+F already contains periodic-poll and pending-selected admission guards. Retain
+that frontend unchanged; do not replay the E browser state over F. A separate
+candidate adds only the still-missing approved HTTP header classification/tests
+and backward-navigation fixture/regression. #100 remains a separate review.
+Source-retention proof, fresh local checks and exact SHA are reported in #95.
+## Terminal-owned URL and file opening (#103)
+
+The TUI guide and both User Guides explain terminal link gestures, default
+WezTerm file URLs and optional bare-path rules. The Agent Guide asks for absolute
+file URLs only when asking a user to open a file/folder. No path detector,
+existence check, launcher or product setting is added; source/bundle validation
+limits and the user's terminal observation are separated in acceptance.
+## #100 fitting viewport correction on admitted F
+
+The preserved E process reproduction still fails on F fff2076 while F's
+2b9514e membership test passes. List retains row data but can hide a promoted
+row above an unnecessary offset. List and Watch now reconcile the actual offset
+when all rows fit; Watch does so before bounded formatting/detail scope.
+Membership, F admission guards and overflow anchors are unchanged. Fresh local
+checks and the exact reviewed candidate are reported in issue #100.

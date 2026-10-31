@@ -3073,6 +3073,69 @@ mod retention_regressions {
         view
     }
     #[test]
+    fn backward_window_intent_is_independent_of_initial_tail_hydration_order() {
+        let window = |range: std::ops::Range<u64>| {
+            range
+                .map(|ordinal| node(&format!("n{ordinal}"), "saved body", 1))
+                .collect::<Vec<_>>()
+        };
+        for hydrated in [false, true] {
+            let mut following = view();
+            following.on_history(
+                if hydrated { window(11..61) } else { vec![] },
+                None,
+                false,
+                11,
+                1,
+                61,
+            );
+            let fallback = following.on_history_window(
+                window(0..50),
+                0,
+                1,
+                61,
+                ViewAnchor {
+                    node_id: Some("n0".into()),
+                    char_offset: 0,
+                },
+                true,
+            );
+            assert_eq!(
+                fallback, !hydrated,
+                "following may only accept a window that still covers its tail"
+            );
+            assert_eq!(
+                following.nodes().iter().any(|n| n.node_id == "n0"),
+                hydrated
+            );
+
+            let mut paused = view();
+            paused.on_history(
+                if hydrated { window(11..61) } else { vec![] },
+                None,
+                false,
+                11,
+                1,
+                61,
+            );
+            paused.follow = false;
+            paused.anchor = ViewAnchor {
+                node_id: Some("n0".into()),
+                char_offset: 0,
+            };
+            assert!(!paused.on_history_window(
+                window(0..50),
+                0,
+                1,
+                61,
+                paused.anchor.clone(),
+                true
+            ));
+            assert!(paused.nodes().iter().any(|n| n.node_id == "n0"));
+        }
+    }
+
+    #[test]
     fn follow_window_keeps_paid_stream_until_canonical_body_is_installed() {
         let mut view = view();
         view.on_history(vec![node("old", "previous Turn", 1)], None, false, 0, 1, 1);

@@ -5591,3 +5591,82 @@ The adopted design records status/history/readback coverage and narrowly justifi
 on-demand/external snapshots plus why private domain helpers may belong in Core.
 #100's separate F-based correction remains to be retained on reconciliation.
 No G push/main/release/install/user-data change occurred.
+## #95 remaining approved changes on F, without E-state replay
+
+Base is admitted F fff2076. Ancestor checks confirm periodic-echo8677807 and
+pending-selected307e531 are already incorporated. The new candidate leaves
+src/frontend.rs, browser.rs and selection.rs byte-identical to that F base.
+Do not interpret a whole E-tree diff as remaining work: F has new Watch/schema/
+UI behavior that must remain intact.
+
+The four remaining files (model/http/deadline.rs, tests/response_retries.rs,
+frontend/control_tests.rs and ui/view.rs) are unchanged between9fd7b1c and F.
+Apply only their previously approved9fd->b01dfe0 delta. After application, each
+of these four files compares byte-identical to approved b01dfe0, while the F
+frontend guard files compare byte-identical to F. No manual source adaptation,
+new policy, #100 viewport/stale-ID patch, reproduction or #103 documentation is
+mixed into this branch. Remaining navigation changes are test-only, preserving
+all existing product retention semantics and assertions.
+
+The source includes ready-header priority with expired-entry no-poll safety,
+paused-clock permanent-error/no-extra-request tests and the pinned-tool fixture
+intent-before-dispatch correction with its tail-hydration-order regression.
+Fresh local standard/doc-role/bin/docs results and SHA are recorded in #95.
+Old0ce ordinary/split successes remain valid only for old source; native/split
+qualification of this post-F candidate is a new integration gate.
+## #103 terminal-owned link guidance (documentation only)
+
+Source: issue #103 decision comment6543709978 and the user's WezTerm/macOS
+observation in comment6543687265 on main afe4c08. The user opened a displayed
+file URL with Shift+click under the terminal's default rules. This is not an
+agent-run physical-terminal test of the new guide or a universal OS guarantee.
+The short optional ASCII absolute-POSIX-path example follows WezTerm's current
+hyperlink_rules documentation (default_hyperlink_rules and capture format $1);
+it is not a Shellboy path detector and was not installed into a real config.
+
+On native macOS, Python document-role1 and README2 tests pass; both updated User
+Guide links resolve to the new source TUI section. check-docs.py against the
+existing installed executable passes33 CLI checks/13 guides/147 bundled links
+with empty cwd, cleared environment, absent config and no owner/API or state
+creation. This checks that executable's pre-existing catalogue, NOT embedding
+of the edited Markdown. The edited bodies and new bundled link must be qualified
+by the next combined exact-source CI; no Rust build/test ran locally. Neither
+installed-binary bytes nor user configuration/data/OS clipboard were changed.
+The Japanese User Guide matches the English guidance. The optional bare-path
+rule, customized terminal bindings and physical iTerm2 behavior remain untested.
+## #100 post-F reproduction and fitting viewport correction
+
+2026-10-31, native macOS arm64 / Rust 1.99.1. New task worktree starts at admitted
+F fff2076. Cherry-picking saved test3de75eb required only an additive EOF merge:
+all existing F test source, including 2b9514e, was retained before appending the
+reproduction. No E-specific browser/admission patch was replayed.
+
+After explicitly building this source's CLI, the preserved real-CLI/held-loopback
+model reproduction is red at cycle0: header/internal membership and CLI retain
+three rows, the promoted worker title is not painted, and closing/reopening
+restores it before the assertion fails. This is an assertion failure, not a
+watchdog failure. On the same unmodified F source, the original 2b9514e open-list
+foreign-running-row test passes. The tests differ deliberately: the original
+checks membership, while the new test also checks actual painted text.
+
+List sorts/retains membership correctly but restores a selected-screen anchor
+by increasing TableState offset. At unchanged geometry it previously clamped
+only when the viewport grew, even if every row fit. Reconcile a fitting List's
+offset to zero. A separate Watch unit is also red on F: its c5785c5 formatting
+band computes a local clamped offset while the actual TableState still starts
+below the first row. Set the actual fitting offset before formatting/rendering/
+visible-detail scope. Keep bounded neighborhood formatting; do not format all
+2000 rows to mask the problem. No timestamp, database, membership or browser
+read-admission changes are made. The withdrawn future-timestamp lead is not a
+clock bug or a reason to repair user data.
+
+After correction, all 58 ThreadBrowser tests pass, including the unchanged
+2000-row viewport-neighborhood count assertions. The actual CLI reproduction
+passes four alternating running/stopped worker cycles (browser-witness.jsonl
+0->8 rows, unchanged browser generation/page count), and the original F test
+passes all 16 competing/running-row reorders. New waits use the existing shared
+watchdog; no speed criterion, allowance, retry, ignore or assertion relaxation
+was added. These are synthetic UI buffers/owned CLI processes and loopback only,
+not a trace of the user's original terminal geometry or real-provider behavior.
+Final standard/doc-role/bin/docs/record checks and SHA are recorded in #100;
+fresh native CI and user review remain the integration coordinator's gates.

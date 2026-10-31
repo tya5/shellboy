@@ -261,3 +261,13 @@ A long 429 Retry-After is sufficient at headers: return its rate-limit fact
 without waiting for the error body. Consequently that case does not extract
 body-specific plan/window details. Body-based quota recognition still requires
 a complete valid supported object. This avoids waiting on a stalled error body.
+
+### Remaining approved header-wait correction after F (#95)
+
+For a response-header wait admitted before its deadline, classify cancellation
+first, then available headers, then local timeout. Never start polling a new
+outgoing request when the entry is already cancelled/expired. Preserve known
+permanent HTTP status even if its body stalls; do not invent unknown transport
+and retry that status. Existing pending deadlines and retry policy are unchanged.
+This is the previously approved #95 transport patch, independent of F browser
+state. Its paused-clock and request-JSONL tests remain part of qualification.

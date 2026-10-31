@@ -996,7 +996,17 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     })
     .await
     .unwrap();
+    // Match real backward navigation before asking for a non-tail window.
+    ui.view_mut().follow = false;
+    ui.view_mut().anchor = ViewAnchor {
+        node_id: Some("call-node".into()),
+        char_offset: 0,
+    };
     let generation = ui.view().generation;
+    assert!(
+        !ui.view().follow,
+        "backward-window navigation intent must precede dispatch, not wait for the non-tail response"
+    );
     sender
         .try_send(UiAction::LoadHistoryWindow {
             thread_id: "thread".into(),
@@ -1029,11 +1039,6 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     })
     .await
     .unwrap();
-    ui.view_mut().follow = false;
-    ui.view_mut().anchor = ViewAnchor {
-        node_id: Some("call-node".into()),
-        char_offset: 0,
-    };
     let original = ui
         .view()
         .nodes()
