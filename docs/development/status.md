@@ -2539,3 +2539,20 @@ including mainf1e2a16, passed standard2039/0/35 and Python66. See the
 F main approval is still pending; dcfe4ba has no remote exact-source gate yet.
 No further performance repeat is needed under6543044236. Retain #95's reviewed
 admission fix when integrated; G starts after F main. No main/install/data change.
+## Tool-row correction (#98)
+
+The user requested restoration of B's normal-row ID policy and truthful foreground
+classification. Compact tool rows no longer prefix execution-ID fragments; exact
+identity/source/detail references are retained. Background is derived only from
+positive background/release facts. The user also requested #91-style separate
+left body/right metadata, with noncritical metadata yielding to body and attention
+facts retained. Runtime elapsed painting preserves the separated body and metadata.
+Validation is pending the serialized Rust slot and native three-state PTY check;
+this entry is not a claim of completed acceptance or #97's selected inspection UI.
+
+#98 final qualification supersedes the pending-validation note: standard check
+passes on main f1e2a16 with serialized single-job Cargo, and eight native PTY
+conditions cover actual foreground/background/completed shells plus focused
+opened/closed rows. The final focus fallback is bold, not a new left marker;
+headings keep their columns. Opened notices use the shared muted indentation.
+#99's preview lifetime/closed-error issue remains separate and requires review.

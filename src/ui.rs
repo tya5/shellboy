@@ -5357,6 +5357,7 @@ fn draw_conversation(
     let mut visible = presentation::borrowed(&history.styled[start..end]);
     presentation::paint_live_times(
         &mut visible,
+        &history.styled[start..end],
         &history.sources[start..end],
         view,
         area.width.saturating_sub(2),

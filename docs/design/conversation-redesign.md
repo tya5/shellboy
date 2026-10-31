@@ -921,3 +921,35 @@ Thread scope. Shortcut reopening remembers the mode only, not a previous
 Thread's descendant root or filter; this avoids silently monitoring an old
 root after a conversation switch. A new UI process starts with List. No saved
 preference, Core field, worker or queue is added.
+## Ordinary tool rows: body and right-side facts (#98)
+
+Restore B's diagnostic-ID boundary: compact tool rows contain only the shared
+mark and sanitized command/description body at left. Execution IDs remain exact
+ItemRegion/source and detail references, never ordinary row prefixes. #97 owns
+the selected-description/command inspection surface; #98 does not add a second
+selection or navigation model. Existing expanded/original/F6 references and
+Enter notification-to-source navigation are retained, with no new reads.
+
+Use the same mark/body/metadata composition as #91 input bands. Background/reason,
+exit code and elapsed are right-side decorated spans excluded from body/source
+matching. Background requires an explicit background flag, background_current,
+or typed human/additional-input release reason; running/running_current alone
+is not background. Drop noncritical metadata before taking body space. A failure
+or cancellation fact retains attention styling and may reserve body space only
+after other metadata has been dropped. Clock painting uses the cached mark/body
+and updates right-side metadata without discarding background reasons, reparsing
+Markdown, changing source anchors or reading the database.
+
+### History focus without changing columns (#98)
+
+The user's final correction supersedes the proposed left-edge marker. Focus
+changes only the first heading row's style, never indentation, column count,
+body text, opened output or read-status rows. Rich dark/light palettes define a
+subtle focus background separate from user bands; NO_COLOR/non-256 terminals
+use bold on that heading only. Link-specific interactive underlining remains
+unchanged. A continuation visible after its heading scrolls away is not styled
+as a new heading. No focus marker is added to selectable/copyable text.
+Opened-output notices (observed time, refreshing, genuine read error and loading)
+use a shared two-space indentation and muted style on every wrapped notice row,
+matching the user's example. This is item-internal structure, not focus
+indentation. Notice spans are decoration and never canonical output-body spans.

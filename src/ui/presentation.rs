@@ -1310,42 +1310,141 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     format!("{state}:{code:?}:{}", tool.requires_attention())
 }
 
-fn compact_tool_line(
+fn tool_metadata(
     tool: &crate::presentation::ToolPresentation,
-    width: u16,
-    palette: theme::Palette,
-) -> Line<'static> {
-    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    elapsed: Option<u64>,
+) -> (RowKind, String, Option<String>) {
     let status = tool.current_state.as_deref().unwrap_or(&tool.status);
-    let failed = tool.requires_attention();
     let code = if tool
         .current_state
         .as_deref()
-        .is_some_and(|state| state != "observation_unavailable")
+        .is_some_and(|s| s != "observation_unavailable")
     {
         tool.current_exit_code
     } else {
         tool.exit_code
     };
-    let row_kind = if status == "exited" && code.is_none() {
+    let kind = if status == "exited" && code.is_none() {
         RowKind::Unknown
     } else {
-        crate::presentation::rows::tool_kind(status, failed)
+        crate::presentation::rows::tool_kind(status, tool.requires_attention())
     };
-    let mark = row_kind.mark();
-    let mut right = code.map(|code| format!("終了 {code}")).unwrap_or_default();
-    if row_kind == RowKind::Running && tool.started_at.is_some() {
-        right = "経過未取得".into();
+    let background = tool.background
+        || status == "background_current"
+        || matches!(
+            tool.reason_kind,
+            crate::presentation::ToolReasonKind::HumanBackgrounded
+                | crate::presentation::ToolReasonKind::AdditionalInput
+        );
+    let mut parts = Vec::new();
+    if background {
+        parts.push(
+            match tool.reason_kind {
+                crate::presentation::ToolReasonKind::HumanBackgrounded => "背景（利用者）",
+                crate::presentation::ToolReasonKind::AdditionalInput => "背景（追加入力）",
+                _ => "背景",
+            }
+            .to_owned(),
+        );
     }
-    if row_kind == RowKind::Unknown {
-        right = RowKind::Unknown.spec().1.into();
+    let outcome = if kind == RowKind::Unknown {
+        Some(kind.spec().1.to_owned())
+    } else {
+        code.map(|code| format!("終了 {code}")).or_else(|| {
+            matches!(kind, RowKind::Failure | RowKind::Cancelled).then(|| kind.spec().1.to_owned())
+        })
+    };
+    let critical = outcome
+        .clone()
+        .filter(|_| matches!(kind, RowKind::Failure | RowKind::Cancelled));
+    if let Some(outcome) = outcome {
+        parts.push(outcome);
     }
-    if let Some(ms) = tool.elapsed_ms {
-        if !right.is_empty() {
-            right.push_str(" · ");
+    if let Some(seconds) = elapsed {
+        parts.push(format!("{seconds}秒"));
+    } else if let Some(ms) = tool.elapsed_ms {
+        parts.push(format!("{}.{:01}秒", ms / 1000, (ms % 1000) / 100));
+    } else if kind == RowKind::Running && tool.started_at.is_some() {
+        parts.push("経過未取得".into());
+    }
+    (kind, parts.join(" · "), critical)
+}
+fn tool_text_fit(text: &str, width: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut result = String::new();
+    let mut used = 1;
+    for glyph in text.graphemes(true) {
+        if used + glyph.width() > width {
+            break;
         }
-        right.push_str(&format!("{}.{:01}秒", ms / 1000, (ms % 1000) / 100));
+        result.push_str(glyph);
+        used += glyph.width();
     }
+    result.push('…');
+    result
+}
+fn tool_row(
+    mark: Span<'static>,
+    mut body: Line<'static>,
+    metadata: String,
+    critical: Option<String>,
+    width: u16,
+    color: Color,
+) -> Line<'static> {
+    use unicode_width::UnicodeWidthStr;
+    let width_usize = usize::from(width);
+    let metadata = if mark.width() + body.width() + metadata.width() + 2 <= width_usize {
+        Some(metadata)
+    } else if let Some(critical) = critical {
+        // Noncritical metadata never takes body space. Attention is the exception.
+        let available = width_usize.saturating_sub(mark.width() + critical.width() + 2);
+        let text = body
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        let style = body
+            .spans
+            .first()
+            .map_or(Style::default(), |span| span.style);
+        body = Line::from(Span::styled(tool_text_fit(&text, available), style));
+        Some(critical)
+    } else {
+        None
+    };
+    InputBandRow {
+        mark: Some(mark),
+        body,
+        metadata: metadata.filter(|s| !s.is_empty()).map(|text| {
+            Span::styled(
+                text,
+                Style::default()
+                    .fg(color)
+                    .underline_color(INPUT_DECORATION_MARKER),
+            )
+        }),
+    }
+    .into_line(width, Style::default())
+}
+fn compact_tool_line(
+    tool: &crate::presentation::ToolPresentation,
+    width: u16,
+    palette: theme::Palette,
+) -> Line<'static> {
+    let (kind, metadata, critical) = tool_metadata(tool, None);
+    let mark = Span::styled(
+        format!("{} ", kind.mark()),
+        Style::default()
+            .fg(kind.spec().2)
+            .underline_color(INPUT_DECORATION_MARKER),
+    );
     let command = crate::presentation::sanitize_plain(&tool.command, 0)
         .0
         .replace(['\n', '\r'], " ");
@@ -1354,52 +1453,34 @@ fn compact_tool_line(
     } else {
         command.trim()
     };
-    let right = if right.width() + 5 < usize::from(width) {
-        right
-    } else {
-        String::new()
-    };
-    let available =
-        usize::from(width).saturating_sub(right.width() + if right.is_empty() { 2 } else { 4 });
-    let background = if tool.background || status == "background_current" || status == "running" {
-        match tool.reason_kind {
-            crate::presentation::ToolReasonKind::HumanBackgrounded => "背景（利用者） ",
-            crate::presentation::ToolReasonKind::AdditionalInput => "背景（追加入力） ",
-            _ => "背景 ",
-        }
-    } else {
-        ""
-    };
-    let identity = tool
-        .execution_id
-        .as_deref()
-        .map(|id| format!("{} ", id.chars().take(8).collect::<String>()))
-        .unwrap_or_default();
-    let mut left = format!("{mark} {background}{identity}");
-    let prefix_len = left.len();
-    let mut used = left.width();
-    for ch in command.chars() {
-        let next = ch.width().unwrap_or(0);
-        if used + next > available {
-            break;
-        }
-        left.push(ch);
-        used += next;
-    }
-    if left[prefix_len..].trim_start() != command && available > 3 {
-        left.push('…');
-    }
-    let mut line = Line::from(Span::styled(left, Style::default().fg(row_kind.spec().2)));
-    if !right.is_empty() {
-        line.spans.push(Span::raw(" ".repeat(
-            usize::from(width).saturating_sub(line.width() + right.width()),
-        )));
-        line.spans.push(Span::styled(
-            right,
-            Style::default().fg(row_kind.metadata_color(palette)),
-        ));
-    }
-    line
+    let body = Line::from(Span::styled(
+        tool_text_fit(command, usize::from(width).saturating_sub(mark.width())),
+        Style::default().fg(kind.spec().2),
+    ));
+    tool_row(
+        mark,
+        body,
+        metadata,
+        critical,
+        width,
+        kind.metadata_color(palette),
+    )
+}
+fn tool_note(text: &str, width: u16, palette: theme::Palette) -> Vec<Line<'static>> {
+    let safe = crate::presentation::sanitize_plain(text, 0).0;
+    let style = Style::default()
+        .fg(palette.muted())
+        .underline_color(INPUT_DECORATION_MARKER);
+    hanging_wrap(vec![Line::from(safe)], width.saturating_sub(2).max(1))
+        .into_iter()
+        .map(|mut line| {
+            line.spans.insert(0, Span::raw("  "));
+            for span in &mut line.spans {
+                span.style = style;
+            }
+            line
+        })
+        .collect()
 }
 fn append_item_rows(
     lines: &mut Vec<Line<'static>>,
@@ -1724,10 +1805,7 @@ fn typed_history(
                                 &copy, false, 0, width, &mut links, false,
                             ));
                             if let Some(notice) = &preview.notice {
-                                chunk.push(Line::from(Span::styled(
-                                    notice.clone(),
-                                    Style::default().fg(view.palette.muted()),
-                                )));
+                                chunk.extend(tool_note(notice, width, view.palette));
                             }
                             if let Some(error) = &preview.refresh_error {
                                 let status = if preview.blocks.is_empty() {
@@ -1735,14 +1813,24 @@ fn typed_history(
                                 } else {
                                     "更新失敗 · 前回の取得内容を表示"
                                 };
-                                chunk.push(Line::from(format!(
-                                    "{status}: {error} · 閉じて開くと再試行"
-                                )));
+                                chunk.extend(tool_note(
+                                    &format!("{status}: {error} · 閉じて開くと再試行"),
+                                    width,
+                                    view.palette,
+                                ));
                             } else if view.items.preview_loading(&key, &region.outcome) {
-                                chunk.push(Line::from("再取得中 · 前回の取得内容を表示"));
+                                chunk.extend(tool_note(
+                                    "再取得中 · 前回の取得内容を表示",
+                                    width,
+                                    view.palette,
+                                ));
                             }
                         } else if view.items.preview_failed(&key, &region.outcome) {
-                            chunk.push(Line::from("出力取得に失敗 · 閉じて開くと再試行 · F6 原文"));
+                            chunk.extend(tool_note(
+                                "出力取得に失敗 · 閉じて開くと再試行 · F6 原文",
+                                width,
+                                view.palette,
+                            ));
                         } else if exact_body.source_exact {
                             let mut copy = node.clone();
                             copy.presentation.blocks = vec![exact_body.clone()];
@@ -1799,10 +1887,7 @@ fn typed_history(
                             if let Some(note) = source.presentation.fields.iter().find(|field| {
                                 field.key == format!("/ui_raw_stream_preview/{}", tool.call_id)
                             }) {
-                                chunk.push(Line::from(Span::styled(
-                                    note.value.clone(),
-                                    Style::default().fg(view.palette.muted()),
-                                )));
+                                chunk.extend(tool_note(&note.value, width, view.palette));
                             }
                         } else if default_open
                             && view.nodes()[source_index]
@@ -1814,23 +1899,29 @@ fn typed_history(
                                         == format!("/ui_raw_stream_preview_error/{}", tool.call_id)
                                 })
                         {
-                            chunk.push(Line::from("  出力を取得できませんでした · F6 原文"));
+                            chunk.extend(tool_note(
+                                "出力を取得できませんでした · F6 原文",
+                                width,
+                                view.palette,
+                            ));
                         } else if tool.execution_id.is_some() {
-                            chunk.push(Line::from(Span::styled(
+                            chunk.extend(tool_note(
                                 if view.items.preview_loading(&key, &region.outcome) {
-                                    "  出力を取得中 · F6 原文"
+                                    "出力を取得中 · F6 原文"
                                 } else {
-                                    "  出力未保持 · 閉じて開くと再取得 · F6 原文"
+                                    "出力未保持 · 閉じて開くと再取得 · F6 原文"
                                 },
-                                Style::default().fg(view.palette.muted()),
-                            )));
+                                width,
+                                view.palette,
+                            ));
                         } else if !tool.reason.is_empty() {
-                            chunk.push(Line::from(Span::styled(
-                                crate::presentation::sanitize_plain(&tool.reason, 0).0,
-                                Style::default().fg(theme::ATTENTION),
-                            )));
+                            chunk.extend(tool_note(&tool.reason, width, view.palette));
                         } else {
-                            chunk.push(Line::from("  出力は原文で確認 · F6 詳細"));
+                            chunk.extend(tool_note(
+                                "出力は原文で確認 · F6 詳細",
+                                width,
+                                view.palette,
+                            ));
                         }
                     }
                     append_item_rows(&mut lines, &mut sources, chunk, node, index, region, width);
@@ -2135,12 +2226,12 @@ pub(super) fn borrowed<'a>(lines: &'a [Line<'static>]) -> Vec<Line<'a>> {
 /// Paint live seconds over cached rows; no source/layout revision or DB read.
 pub(super) fn paint_live_times(
     lines: &mut [Line<'_>],
+    cached: &[Line<'static>],
     sources: &[RowSource],
     view: &ThreadView,
     width: u16,
     now: std::time::Instant,
 ) {
-    use unicode_width::UnicodeWidthStr;
     if !lines.iter().any(|line| {
         line.spans
             .first()
@@ -2148,7 +2239,7 @@ pub(super) fn paint_live_times(
     }) {
         return;
     }
-    for (line, source) in lines.iter_mut().zip(sources) {
+    for ((line, cached), source) in lines.iter_mut().zip(cached).zip(sources) {
         if !line
             .spans
             .first()
@@ -2156,32 +2247,65 @@ pub(super) fn paint_live_times(
         {
             continue;
         }
-        let Some(start) = source.item.as_ref().and_then(|item| {
+        let Some(tool) = source.item.as_ref().and_then(|item| {
             view.nodes()
                 .get(source.node)?
                 .presentation
                 .blocks
                 .iter()
                 .filter_map(|block| block.tool.as_ref())
-                .find(|tool| tool.execution_id == item.execution_id)?
-                .elapsed_observation
+                .find(|tool| tool.execution_id == item.execution_id)
         }) else {
             continue;
         };
-        let seconds = (start.0 + now.saturating_duration_since(start.1)).as_secs();
-        let elapsed = format!("{seconds}秒");
-        let Some(left) = line.spans.first().cloned() else {
+        let Some(start) = tool.elapsed_observation else {
             continue;
         };
-        let padding = usize::from(width).saturating_sub(left.content.width() + elapsed.width());
-        line.spans = vec![
-            left,
-            Span::raw(" ".repeat(padding)),
-            Span::styled(
-                elapsed,
-                Style::default().fg(RowKind::Running.metadata_color(view.palette)),
-            ),
-        ];
+        let seconds = (start.0 + now.saturating_duration_since(start.1)).as_secs();
+        let Some(mark) = cached.spans.first().cloned() else {
+            continue;
+        };
+        let body = Line::from(
+            body_spans(cached)
+                .map(|span| Span::styled(span.content.to_string(), span.style))
+                .collect::<Vec<_>>(),
+        );
+        let (kind, fallback, critical) = tool_metadata(tool, Some(seconds));
+        let metadata = cached
+            .spans
+            .last()
+            .filter(|span| {
+                span.style.underline_color == Some(INPUT_DECORATION_MARKER)
+                    && !span.content.trim().is_empty()
+            })
+            .map(|span| {
+                let mut parts = span.content.split(" · ").collect::<Vec<_>>();
+                if parts
+                    .last()
+                    .is_some_and(|part| *part == "経過未取得" || part.ends_with('秒'))
+                {
+                    parts.pop();
+                }
+                let mut value = parts.join(" · ");
+                if !value.is_empty() {
+                    value.push_str(" · ");
+                }
+                value.push_str(&format!("{seconds}秒"));
+                value
+            })
+            .unwrap_or(fallback);
+        let mut painted = tool_row(
+            mark,
+            body,
+            metadata,
+            critical,
+            width,
+            kind.metadata_color(view.palette),
+        );
+        for span in &mut painted.spans {
+            span.style.underline_color = None;
+        }
+        *line = painted;
     }
 }
 
@@ -3808,6 +3932,115 @@ mod conversation_item_tests {
         );
     }
     #[test]
+    fn compact_tool_rows_hide_ids_and_only_label_factual_background_work() {
+        use crate::presentation::ToolReasonKind;
+        let palette = theme::Palette::detect(crate::config::PaletteMode::Dark);
+        for status in [
+            "running",
+            "running_current",
+            "completed",
+            "exited",
+            "cancelled",
+        ] {
+            for (explicit_background, reason, expected) in [
+                (false, ToolReasonKind::Unknown, ""),
+                (true, ToolReasonKind::Unknown, "背景"),
+                (false, ToolReasonKind::HumanBackgrounded, "背景（利用者）"),
+                (false, ToolReasonKind::AdditionalInput, "背景（追加入力）"),
+            ] {
+                let mut value = tool("display-only", status);
+                value.execution_id = Some("3153b821-full-diagnostic-id".into());
+                value.background = explicit_background;
+                value.reason_kind = reason;
+                for width in [80, 140] {
+                    let line = compact_tool_line(&value, width, palette);
+                    let text = line
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>();
+                    assert!(!text.contains("3153b821"), "{text}");
+                    assert_eq!(
+                        text.contains("背景"),
+                        !expected.is_empty(),
+                        "{status}: {text}"
+                    );
+                    if !expected.is_empty() {
+                        assert!(text.contains(expected), "{text}");
+                    }
+                    assert!(text.contains("printf synthetic"), "{text}");
+                }
+                assert_eq!(
+                    value.execution_id.as_deref(),
+                    Some("3153b821-full-diagnostic-id")
+                );
+            }
+        }
+        let mut released = tool("display-only", "running");
+        released.current_state = Some("background_current".into());
+        let line = compact_tool_line(&released, 80, palette);
+        assert!(line.spans.last().unwrap().content.contains("背景"));
+    }
+    #[test]
+    fn compact_tool_metadata_never_enters_body_and_yields_to_body_before_attention() {
+        let palette = theme::Palette::detect(crate::config::PaletteMode::Dark);
+        let mut value = tool("parts", "completed");
+        value.background = true;
+        value.elapsed_ms = Some(12_400);
+        let line = compact_tool_line(&value, 80, palette);
+        let body = body_spans(&line)
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert_eq!(body, "printf synthetic");
+        assert_eq!(line.spans.last().unwrap().content, "背景 · 終了 0 · 12.4秒");
+        assert_eq!(line.width(), 80);
+        value.command = "abcdefghijklmnopqrstuvwxyz0123456789".into();
+        let line = compact_tool_line(&value, 30, palette);
+        let body = body_spans(&line)
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert_eq!(body, tool_text_fit(&value.command, 28));
+        assert!(!line.spans.iter().any(|s| s.content.contains("背景")));
+        value.status = "failed".into();
+        value.exit_code = Some(7);
+        let line = compact_tool_line(&value, 30, palette);
+        assert!(line.spans.last().unwrap().content.contains("終了 7"));
+        assert_eq!(
+            line.spans.last().unwrap().style.fg,
+            Some(RowKind::Failure.metadata_color(palette))
+        );
+        assert_eq!(line.width(), 30);
+    }
+    #[test]
+    fn wrapped_tool_notes_share_two_space_indent_and_are_not_output_body() {
+        let palette =
+            theme::Palette::from_capabilities(crate::config::PaletteMode::Dark, false, true);
+        for text in [
+            "取得 11:48:32 · 閉じて開くと再取得",
+            "再取得中",
+            "出力取得に失敗 · 閉じて開くと再試行",
+            "読込中",
+        ] {
+            let lines = tool_note(text, 16, palette);
+            assert!(!lines.is_empty());
+            for line in lines {
+                let shown = line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>();
+                assert!(shown.starts_with("  "), "{shown}");
+                assert!(line.width() <= 16);
+                assert_eq!(body_spans(&line).count(), 0);
+                assert!(
+                    line.spans
+                        .iter()
+                        .all(|s| s.style.fg == Some(palette.muted()))
+                );
+            }
+        }
+    }
+    #[test]
     fn compact_shell_metadata_uses_shared_palette_without_changing_text() {
         use crate::config::PaletteMode;
         for (status, code, kind) in [
@@ -3860,9 +4093,16 @@ mod conversation_item_tests {
             }],
         )];
         let (lines, _, sources) = history(&view, 80);
+        // The source node may have less correlation detail than the cached row.
+        view.nodes_mut_for_test()[0].presentation.blocks[0]
+            .tool
+            .as_mut()
+            .unwrap()
+            .reason_kind = crate::presentation::ToolReasonKind::Unknown;
         let mut painted = borrowed(&lines);
         paint_live_times(
             &mut painted,
+            &lines,
             &sources,
             &view,
             80,
@@ -3878,12 +4118,16 @@ mod conversation_item_tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(shown.contains("⏵ 背景（利用者）"), "{shown}");
+        assert!(shown.contains("⏵ printf synthetic"), "{shown}");
+        assert!(shown.contains("背景（利用者） · 323秒"), "{shown}");
         assert!(shown.contains("323秒"), "{shown}");
         assert_eq!(
             painted
                 .iter()
-                .find(|line| line.spans.last().is_some_and(|s| s.content == "323秒"))
+                .find(|line| line
+                    .spans
+                    .last()
+                    .is_some_and(|s| s.content.ends_with("323秒")))
                 .unwrap()
                 .spans
                 .last()

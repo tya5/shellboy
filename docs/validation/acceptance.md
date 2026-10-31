@@ -5408,3 +5408,51 @@ passes locally; py_compile/layout/watchdog/diff/record-retention pass. Windows
 success requires a new CI run and is not claimed from this macOS result.
 Evidence: /tmp/issue-94-crlf-tests.log. This supersedes 7115399 as well as the
 older JSON-only b2c5b186; it is independent of #91 B's passing-parent repair.
+
+## #98 tool rows, right-side facts and heading-only focus
+
+Base main f1e2a16 includes #96. On macOS arm64/Rust1.99.1,
+CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=2 sh scripts/check.sh passes: Rust1969 passed,
+0 failed,33 ignored; Python66, layout/watchdog policy, format and Clippy pass.
+The bin/visual-fixture build also passes. The target cache is owned by this
+worker at ../issue-87/target; the #87 work-in-progress source is not compiled or
+changed by #98. No installed binary, real provider, clipboard or user data is
+changed. Evidence: /tmp/issue-98-standard-v2.log and /tmp/issue-98-build-v2.log.
+
+Synthetic tests cover normal ID suppression without losing identity fields,
+running versus true background/release states, separate body/metadata spans,
+long-body metadata omission and retained attention, palette colors, shared
+notice indentation including wrapped rows, and heading-only focus with no column
+shift in dark/light/NO_COLOR/non-256 modes. Clock painting retains richer cached
+background/release facts while changing seconds only, even if its source node
+has less correlation detail. No elapsed tick performs a query or Markdown parse.
+
+Actual loopback SSE and native PTYs pass eight conditions (80/140 columns,
+dark/light/NO_COLOR/vt100). Each runs one completed, one stdin-held foreground
+and one stdin-held background command. Compact rows have no execution-ID prefix;
+foreground has no background label, true background does, and exit/duration are
+right-aligned. The driver completes the synthetic shells through their exact IDs,
+clicks the foreground heading, opens real output, verifies one colored focus row
+(or emitted bold SGR fallback), and closes it. Note rows share item indentation.
+Evidence: /tmp/issue-98-native-v2/{manifest.json,CASE/*.txt,CASE/raw.vt}. The plain
+VT decoder does not model font attributes; exact heading-only fallback styles
+are additionally verified by TestBackend, while raw VT retains emitted SGR.
+Physical font rendering and Windows native PTYs remain untested.
+
+Failed observations remain recorded: initial focused compile exposed a lifetime
+erasure in body_spans cloning and was corrected with owned display spans.
+The first full check failed an old left-side literal expectation in
+multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons;
+the test now checks command at left and the human-background reason on the same
+row at right, without weakening state/order/cancellation assertions. This also
+exposed lost correlation detail during time painting, now fixed with cached
+metadata preservation. The first native driver selected a notification instead
+of a tool and mistook composer borders for output guides; the corrected driver
+clicks the exact rendered header and requires the specific output text. These
+harness failures do not establish a foreground publication-order regression.
+
+The user permits #98 review to be unnecessary as restoration of B. #97 owns the
+future selected description/command/ID inspection surface; existing exact source,
+expanded/original and F6 diagnostic references remain intact. #99's timeout and
+closed-preview ownership corrections are NOT claimed by this #98 result and
+must be handed off separately as review-required.
