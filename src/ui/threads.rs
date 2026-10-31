@@ -1923,28 +1923,18 @@ impl ThreadBrowser {
                     } else {
                         ""
                     };
-                    let parent = if detail.parent_title.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" · 親 {}", detail.parent_title)
-                    };
                     let uncertainty = if self.limited_titles.contains(&summary.thread_id) {
                         "[検索未確認] "
                     } else {
                         ""
                     };
-                    let first = format!(
-                        "{prefix} {pending}{uncertainty}{} · {} {}{parent}",
-                        detail.title, detail.status, detail.state_age
+                    let (first, second) = watch_lines(
+                        &detail,
+                        prefix,
+                        pending,
+                        uncertainty,
+                        usize::from(inner.width),
                     );
-                    let first = Line::from(fit(&first, usize::from(inner.width)));
-                    let second = Line::from(Span::styled(
-                        fit(
-                            &format!("  {} {}", detail.secondary, detail.secondary_age),
-                            usize::from(inner.width),
-                        ),
-                        Style::default().fg(theme::MUTED),
-                    ));
                     let text = if height == 1 {
                         ratatui::text::Text::from(first)
                     } else {
@@ -2067,6 +2057,74 @@ fn one_line(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Keep factual state and clocks visible before fitting flexible source text.
+/// Uses the same shared frame/table geometry as List; no additional row state.
+fn watch_lines(
+    row: &super::watch::WatchRow<'_>,
+    marker: &str,
+    pending: &str,
+    uncertainty: &str,
+    width: usize,
+) -> (Line<'static>, Line<'static>) {
+    use ratatui::style::Modifier;
+    let marker = fit(&format!("{marker} "), width);
+    let status_width = row
+        .status
+        .width()
+        .min(width.saturating_sub(marker.width()))
+        .min((width / 3).max(6));
+    let status = fit(row.status, status_width);
+    let available = width.saturating_sub(marker.width() + status.width() + 3);
+    let parent = if width >= 64 && !row.parent_title.is_empty() {
+        fit(
+            &format!("親 {}", row.parent_title),
+            (width / 3).min(available.saturating_sub(12)),
+        )
+    } else {
+        String::new()
+    };
+    let title_width = available.saturating_sub(if parent.is_empty() {
+        0
+    } else {
+        parent.width() + 3
+    });
+    let title = fit(&format!("{pending}{uncertainty}{}", row.title), title_width);
+    let title_padding = title_width.saturating_sub(title.width());
+    let mut first = vec![
+        Span::raw(marker),
+        Span::styled(status, Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" · "),
+        Span::raw(title),
+    ];
+    if !parent.is_empty() {
+        first.push(Span::styled(
+            format!("{} · {parent}", " ".repeat(title_padding)),
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+    let clocks = match (row.secondary_age.is_empty(), row.state_age.is_empty()) {
+        (true, _) => row.state_age.to_owned(),
+        (_, true) => row.secondary_age.to_owned(),
+        _ => format!("{} · {}", row.secondary_age, row.state_age),
+    };
+    let available = width.saturating_sub(2);
+    let clocks = fit(&clocks, (width / 2).min(available));
+    let mut second = vec![Span::raw("  ")];
+    let detail_width = if clocks.is_empty() {
+        available
+    } else {
+        let used = clocks.width() + 3;
+        second.push(Span::styled(clocks, Style::default().fg(theme::MUTED)));
+        second.push(Span::raw(" · "));
+        available.saturating_sub(used)
+    };
+    second.push(Span::styled(
+        fit(row.secondary, detail_width),
+        Style::default().fg(theme::MUTED),
+    ));
+    (Line::from(first), Line::from(second))
 }
 
 fn fit(text: &str, width: usize) -> String {
@@ -4609,5 +4667,90 @@ mod watch_integration_tests {
         assert!(browser.wheel(-100));
         assert!(!browser.wheel(-3));
         assert_eq!(browser.mode, BrowserMode::List);
+    }
+    #[test]
+    fn narrow_watch_keeps_state_and_age_when_title_or_command_is_long() {
+        use super::super::live_work::{LiveWorkRow, LiveWorkSnapshot, LiveWorkTarget};
+        use super::super::watch::{WatchAge, WatchAgeOrigin};
+        use crate::activity::ActivityPhase;
+        for width in [80, 140] {
+            for phase in [ActivityPhase::Recovery, ActivityPhase::Background] {
+                let mut browser = ThreadBrowser::default();
+                browser.open_watch(String::new(), None, None);
+                let mut item = row("probe", phase);
+                item.title = if phase == ActivityPhase::Recovery {
+                    "LONG_TITLE_".repeat(30)
+                } else {
+                    "Short title".into()
+                };
+                let summary =
+                    WatchSummary::prepare(&item).with_identity(Some("run-probe".into()), None);
+                let generation = browser.generation;
+                assert!(browser.apply(
+                    generation,
+                    10,
+                    None,
+                    vec![item],
+                    vec![],
+                    None,
+                    vec![],
+                    None
+                ));
+                browser.apply_watch_summaries(generation, 10, vec![summary]);
+                paint(&browser, width, 28);
+                let mut facts = detail("probe", "run-probe", phase, 1).facts().clone();
+                if phase == ActivityPhase::Recovery {
+                    facts.state_age = Some(WatchAge {
+                        elapsed_base: Duration::from_secs(123),
+                        observed_at: Instant::now(),
+                        origin: WatchAgeOrigin::SavedTransition,
+                    });
+                    facts.recovery_reason = Some("LONG_RECOVERY_REASON_".repeat(40));
+                } else {
+                    facts.work = Some(LiveWorkSnapshot {
+                        run_id: "run-probe".into(),
+                        rows: vec![LiveWorkRow {
+                            target: LiveWorkTarget::Shell {
+                                execution_id: "probe-execution".into(),
+                                turn_id: facts.turn_id.clone(),
+                            },
+                            label: format!("printf {}", "LONG_COMMAND_".repeat(80)),
+                            state: "running".into(),
+                            started_at: None,
+                            elapsed_base: Some(Duration::from_secs(123)),
+                            last_output_at: None,
+                            output_age_base: None,
+                        }],
+                        shells: 1,
+                        children: 0,
+                        waits: Some(0),
+                        overflow: 0,
+                        observed_at: Instant::now(),
+                    });
+                }
+                assert!(browser.apply_watch_details(generation, 11, vec![facts.prepare()], vec![]));
+                let text = paint(&browser, width, 28);
+                assert!(
+                    text.contains(phase.column_label()),
+                    "activity disappeared at width{width}: {text}"
+                );
+                if phase == ActivityPhase::Recovery {
+                    assert!(text.contains("LONG_TITLE"), "title disappeared: {text}");
+                    assert!(
+                        text.lines().any(|line| line.contains("状態")
+                            && line.contains("秒")
+                            && line.contains("LONG_RECOVERY")),
+                        "recovery age/detail disappeared: {text}"
+                    );
+                } else {
+                    assert!(
+                        text.lines().any(|line| line.contains("表示内最古の作業")
+                            && line.contains("秒")
+                            && line.contains("printf")),
+                        "work age/command disappeared: {text}"
+                    );
+                }
+            }
+        }
     }
 }

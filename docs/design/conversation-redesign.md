@@ -819,3 +819,16 @@ discard its result. Existing per-consumer checks still omit cancelled parts of
 a partially live snapshot. No new task, worker, queue, Core state or operation
 is introduced. Cancellation is cooperative at admission/worker boundaries; a
 snapshot already executing may finish, and stale-result guards still apply.
+
+### F Watch narrow-row field priority
+
+Watch keeps the existing shared popup frame, constant one/two-line row geometry,
+selection and visible-ID read scope. Give the activity word its own bounded
+leading field so long titles cannot hide recovery/unread/activity meaning,
+including NO_COLOR. The title uses the remaining flexible field; a muted parent
+field is retained when width permits and omitted in the narrow reduction.
+The second line reserves room for available factual clocks before the bounded
+command/recovery/answer detail. A long command must not push a known work age
+off the edge. This changes presentation only: no Core fields, clock source,
+read cadence, worker, queue or dependency changes. Existing original/detail
+navigation retains full facts when the row uses an ellipsis.

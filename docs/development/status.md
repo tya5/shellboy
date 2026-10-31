@@ -2302,3 +2302,11 @@ F retains #83's row vocabulary, #84 paste/composer and #71/#54 conditions.
 Native P3 across List/global Watch/scoped Watch and Program Status on/off is
 now characterized at67cc688 in the F record; native long CI41186128587 is
 still executing. No F/G main admission or installed-binary change is implied.
+
+
+## F Watch narrow-field follow-up
+
+A focused regression reproduces long titles hiding activity state and long
+commands hiding factual work age. Watch now reserves those fields before
+flexible text, without changing Core facts or read/tick policy. Combined
+qualification is pending; previous CI retains its original source SHA.
