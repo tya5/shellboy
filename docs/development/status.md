@@ -1451,3 +1451,31 @@ transient-error tests have been added but not yet executed for this source.
 Canonical initial-page title/excerpt scans remain a known cost; no global SQL or
 P3/P5 performance success is inferred. Main admission and native/3-OS evidence
 remain pending independent review.
+
+
+### #41 E-only candidate after delegated-reviewer main update
+
+Work is isolated on `issue-41/e-admission`; F/G and schema15/16 are absent.
+Main4a6b839 is merged, retaining #71/#73 and the #54 conditional tick. Visible
+conversation/browser patch and explicit browser-page reads now use finite
+readonly snapshots rather than the persistence queue. The public E admission
+ledger is in `issue-41-plan.md`; functional proof and P3/P5 measurement gates are
+separate rows.
+
+Native macOS PTY checks pass at80/140 columns in dark/light/NO_COLOR using
+synthetic stores and no API requests: external rename, unloaded addition with
+stable selected screen anchor, deletion and normal shutdown. These are terminal
+captures, not physical Windows UX or a performance measurement. The first harness
+incorrectly expected an inserted row above the retained viewport anchor to be
+painted immediately; the corrected check requires the new count and stable
+anchor before navigating to the new row. A separate cleanup predicate race in
+the harness was also corrected; neither failure was hidden as a product fix.
+
+Initial standard check passed1880/0/32. During final harness-level #77 alignment,
+one intermediate run failed strict Clippy on duplicate helper registration;
+that wiring is fixed. The next complete run exposed an existing first-send
+fixture equating a pending-derived title with path admission (914 integration
+successes/1 failure). A deterministic readonly pre/post-admission test and an
+explicit admission wait are being qualified; no final-candidate success is yet
+claimed. Preserve both failed logs. E is not pushed. Long P2/P5 tooling remains a
+separate local branch, including a P5 window with List actually visible.

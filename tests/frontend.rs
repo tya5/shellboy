@@ -1,3 +1,4 @@
+use crate::test_watchdog::watchdog;
 use shellboy::{
     app::DataOwner,
     control::Control,
@@ -46,7 +47,7 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
         })
         .await
         .unwrap();
-    let thread = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let thread = watchdog("first saved message receipt", async {
         loop {
             match updates_receive.try_recv() {
                 Ok(UiUpdate::SavedMessage {
@@ -79,12 +80,13 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
             let UiUpdate::History { nodes, .. } = *history else {
                 panic!("paired canonical history")
             };
-            assert!(
-                nodes
-                    .iter()
-                    .any(|node| node.role == "user" && node.text.contains("saved message"))
-            );
-            Some(())
+            // A pending receipt can already supply the automatic title while
+            // the saved selected path is still empty. Wait for actual adoption.
+            header_seen = true;
+            nodes
+                .iter()
+                .any(|node| node.role == "user" && node.text.contains("saved message"))
+                .then_some(())
         }
         UiUpdate::Thread {
             details,
@@ -143,7 +145,7 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
         .await
         .unwrap();
     actions_send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), bridge)
+    watchdog("first-send frontend shutdown", bridge)
         .await
         .unwrap()
         .unwrap()
@@ -648,7 +650,7 @@ async fn next_update<T>(
     receive: &mut std::sync::mpsc::Receiver<UiUpdate>,
     mut select: impl FnMut(UiUpdate) -> Option<T>,
 ) -> T {
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    watchdog("frontend synchronous update channel", async {
         loop {
             match receive.try_recv() {
                 Ok(UiUpdate::SavedMessage {

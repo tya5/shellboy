@@ -580,4 +580,56 @@ mod tests {
         drop(control);
         owner.shutdown().await.unwrap();
     }
+    #[tokio::test]
+    async fn pending_automatic_title_does_not_claim_selected_path_admission() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        owner.db.call(|db| {
+            let tx=db.transaction()?;
+            tx.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','','/','','p','m','now');
+                INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','now','now');
+                INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','now','now');")?;
+            shellboy_fixture_input(&tx,"saved pending title",false)?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let path = owner.db.path().to_path_buf();
+        let (before, before_sequence) =
+            snapshot::read_sequenced(path.clone(), CancellationToken::new(), |db, sequence| {
+                read_visible_tx(db, "t", None, Some(&[]), sequence)
+            })
+            .await
+            .unwrap();
+        owner.db.call(|db| {
+            let tx=db.transaction()?;
+            assert_eq!(crate::history::append_existing_nodes(&tx,"t",0,&["saved pending title".into()],"now")?,1);
+            tx.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id='saved pending title'",[])?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let (after, after_sequence) =
+            snapshot::read_sequenced(path, CancellationToken::new(), |db, sequence| {
+                read_visible_tx(db, "t", None, Some(&[]), sequence)
+            })
+            .await
+            .unwrap();
+        let before = project(before, 80).unwrap();
+        assert_eq!(before.details.title, "saved pending title");
+        assert!(before.nodes.is_empty());
+        assert_eq!(
+            before.info.pending.items[0].message_id,
+            "saved pending title"
+        );
+        let after = project(after, 80).unwrap();
+        assert_eq!(after.details.title, "saved pending title");
+        assert!(
+            after
+                .nodes
+                .iter()
+                .any(|node| node.role == "user" && node.text.contains("saved pending title"))
+        );
+        assert_eq!(after.info.pending.total, 0);
+        assert!(after_sequence > before_sequence);
+        owner.shutdown().await.unwrap();
+    }
 }

@@ -3616,3 +3616,34 @@ pre-open cancellation and retryable query contention. They are prepared, not yet
 run on this exact source. This follow-up adds no F/G feature or migration.
 Applicable E P3/P5 and native 80/wide checks remain open; existing D2 tests or
 moving reads off the persistence queue do not demonstrate those targets.
+
+
+### #41 E isolated candidate: native proof and qualification still open
+
+Environment: macOS ARM64, Rust1.99.1, native PTY plus fixed-screen decoder;
+synthetic temporary data only. E worktree includes main4a6b839; no F/G migration,
+paid provider request, default data change or installed binary update.
+
+Six native cases (80/140 columns × dark/light/NO_COLOR) pass external CLI rename,
+addition/deletion without explicit reload, selected screen anchor retention,
+selectability of the added row and normal exit. NO_COLOR emits no chromatic SGR.
+Raw terminal bytes, screen text and binary hashes remain private local artifacts;
+the binary digest is75f34ac64f4a00ca6ae84c0ac0795d2d265be0ddf242d54b9f4f3a07fec1cceb.
+These observations cover E product source20f424f plus UI-deadline plumbingca27ff3;
+subsequent changes are test helper/admission-fixture changes, not a new native
+binary claim. No Windows GUI/terminal success is implied.
+
+Initial standard:1880 passed/0 failed/32 ignored, layout93/Python9/fmt/strict
+Clippy. Later qualification failures are retained: duplicate helper registration
+(Clippy), then `frontend_first_send_is_saved_and_later_draft_survives_shutdown`
+(the automatic title was visible before path admission). The latter is being
+replaced with an actual admission wait plus a deterministic intermediate-state
+regression. A final standard run is required after that correction.
+
+#77 helper bytes are copied exactly fromc2a5c9e into the lib/integration harness
+scope. Its current policy scanner finds zero raw test guards in E browser,
+snapshot, refresh and frontend_reactivity files. Existing unrelated guards in
+`tests/frontend.rs` remain owned by #77; this increment replaces the affected
+first-receipt/shutdown and shared-next-update guards, not a file-wide exemption.
+P3 actual cost/baseline comparison and P5 CI observations remain open. E is not
+main-integrated or pushed, and no ordinary E three-OS CI exists yet.

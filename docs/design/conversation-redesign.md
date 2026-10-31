@@ -9,7 +9,7 @@ Only the next complete B+C increment is starting; D/E/F/G remain planned.
 
 #58 must ship alone first. Each later main increment is usable independently, passes the local standard, and has green main CI on all three OSes before another main increment proceeds. Report delivered and remaining requirements after each admission; close #41 only when the complete ledger is satisfied. #35 follows #41. No new public protocol command, lifecycle state, schema, persisted UI state, business event, worker or queue is required. Existing Core facts may gain a narrow bounded in-process observation only where D explicitly requires it.
 
-A is the adopted design commit: this text, effective-spec link, complete requirement ledger and decisions. A changes no product behavior and does not advertise features. B+C is one main-admission unit: conversation structure and working inline interaction must ship together. Internal commits may separate projection/read primitives, render/focus, and tests/guides, but a collapsed row may not ship without a working way to open it. D adds live work; E adds reactive browser rows; F adds watch and descendants. E/F may be admitted together if their query sharing makes that smaller. No unfinished screen/key or successful placeholder implementation enters main.
+A is the adopted design commit: this text, effective-spec link, complete requirement ledger and decisions. A changes no product behavior and does not advertise features. B+C is one main-admission unit: conversation structure and working inline interaction must ship together. Internal commits may separate projection/read primitives, render/focus, and tests/guides, but a collapsed row may not ship without a working way to open it. D adds live work; E adds reactive browser rows; F adds watch and descendants. E, F and G are separate main-admission units, in that order, each with its completed requirement ledger and delegated reviewer approval. No unfinished screen/key or successful placeholder implementation enters main.
 
 B+C is intentionally useful without D: existing activity and background controls remain functional while the new fixed live-work region is not yet present. Remove no existing background access until D supplies its replacement. Report the absent live region, background elapsed correction, browser patches/watch and descendant counts as remaining #41 work, not hidden completion claims.
 
@@ -608,3 +608,19 @@ relocation does not qualify globally bounded SQL or prove a performance win.
 Hidden receipt-only delivery remains on its existing authoritative path. E still
 requires exact-source functional/native checks and applicable P3/P5 observations;
 D2-only evidence does not qualify visible browser work.
+
+
+E's test fixture forwards the bounded synchronous terminal channel into one
+bounded async test channel so it can await real update readiness. It also wakes
+for the same pure visible UI action delay used by the native loop (source-link
+coalescing or browser filter debounce). This is test-owned forwarding, not a
+product worker or a new polling cadence. #77's shared watchdog guards completion
+only; saved facts and sequence/count assertions determine success. Paint latency
+is recorded without a wall-clock pass/fail threshold. Native terminal polling
+retains its existing ceiling and never requests DB work merely for this delay.
+
+A receipt-derived automatic title does not imply selected-path admission. A
+coherent readonly snapshot may contain that title, one queued message and no
+selected user node. Display the pending queue honestly; only a later saved path
+observation establishes admission. Tests must preserve this intermediate state
+and wait for the immutable selected node before stopping the Run.

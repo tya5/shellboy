@@ -1923,3 +1923,33 @@ argument-free compact, leaving #50 recovery handling unchanged. Size-free omissi
 commands honor user configuration. A request-budget-only configuration section
 uses D-015's default size policy; single size keys retain their existing meaning.
 Source: reviewer request, issue #73 review, issue #68 D-017. No new persistence or worker.
+
+
+### #41 E admission: readonly display snapshots and #77 test boundaries
+
+Decision: E uses short-lived READ_ONLY/query_only WAL connections on the existing
+finite presentation pool for explicit browser pages, bounded ID patches and the
+paired visible conversation observation. Saved-summary meanings and title
+extraction remain shared with canonical CLI readers; dirty sets, UI admission,
+ordering and formatting belong to Frontend/UI. No new Core worker/table/queue,
+protocol operation, schema migration or polling loop is introduced.
+
+Reason: coalescing writer tasks still delays persistence; finite display work
+can instead pin one consistent WAL snapshot without waiting for that queue.
+Admission-ordered read tokens conservatively prevent older snapshots from
+superseding newer history reads. Busy/locked/interrupted display reads remain
+retryable rather than triggering the owner's persistence failure latch.
+
+Limits and revisit conditions: canonical initial/filter/pagination still uses
+its existing per-row title/excerpt path on the readonly connection. This is a
+writer-ownership improvement, not proof of constant page cost or improved total
+CPU. P3/P5 before/after measurements remain required evidence; change the page
+query only if measured cost justifies a separate bounded refactor. E/F/G remain
+separate admissions, superseding the earlier design's optional E+F grouping.
+
+The E fixture uses #77's exact shared60s watchdog helper at crate harness scope.
+Its bounded update forwarder waits on actual UI notifications and the native
+loop's pure visible-action delay. Latencies are recorded, never used as a speed
+assertion. #77's independent broad timeout cleanup remains on its own branch;
+its scanner is used against the E fixture files without copying its unrelated
+product/test changes or granting file-wide exceptions.
