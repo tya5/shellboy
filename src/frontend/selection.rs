@@ -15,6 +15,7 @@ pub(super) struct Selection {
     refresh_not_before: Option<tokio::time::Instant>,
     // Only the selected projection's bounded child rows are dependencies.
     live_children: Vec<String>,
+    notice_children: Vec<String>,
 }
 impl Selection {
     pub(super) fn refresh_ready(&self, thread: &str, now: tokio::time::Instant) -> bool {
@@ -96,6 +97,7 @@ impl Selection {
     fn replace_token(&mut self) {
         self.tool_scope = None;
         self.live_children.clear();
+        self.notice_children.clear();
         self.refresh_not_before = None;
         self.cancel.cancel();
         self.cancel = CancellationToken::new();
@@ -121,10 +123,14 @@ impl Selection {
         }
         self.generations.entry(thread.to_owned()).or_insert(0);
     }
+    pub(super) fn observe_notices(&mut self,thread:&str,generation:u64,epoch:u64,threads:Vec<String>) {
+        if self.accepts(thread,generation,epoch) {
+            self.notice_children=threads.into_iter().filter(|id|id.len()<=256).take(128).collect();
+        }
+    }
     pub(super) fn dependent_parent(&self, changed: &str) -> Option<String> {
-        self.live_children
-            .iter()
-            .any(|child| child == changed)
+        (self.live_children.iter().chain(&self.notice_children).any(|child|child==changed)
+         || self.tool_scope.as_ref().is_some_and(|scope|scope.nodes.iter().any(|node|node.presentation.fields.iter().any(|f|f.key=="/ui_notice/thread_id"&&f.value==changed))))
             .then(|| self.active_thread.clone())
             .flatten()
     }
@@ -441,6 +447,25 @@ mod live_child_tests {
         assert!(selection.dependent_parent("child").is_none());
         selection.observe_live_children(&snapshot());
         selection.select_thread("other".into(), 3);
+        assert!(selection.dependent_parent("child").is_none());
+    }
+    #[test]
+    fn current_notice_dependencies_are_bounded_generation_fenced_and_cleared_on_switch() {
+        let mut selection=Selection::default();
+        selection.select_thread("parent".into(),2);
+        let epoch=selection.progress_epoch;
+        selection.observe_notices("parent",2,epoch,vec!["child".into()]);
+        assert_eq!(selection.dependent_parent("child").as_deref(),Some("parent"));
+        assert!(selection.dependent_parent("unrelated").is_none());
+        selection.observe_notices("parent",1,epoch,vec![]);
+        assert!(selection.dependent_parent("child").is_some());
+        selection.observe_notices("parent",2,epoch.wrapping_sub(1),vec![]);
+        assert!(selection.dependent_parent("child").is_some());
+        selection.observe_notices("parent",2,epoch,vec!["bounded".into();200]);
+        assert_eq!(selection.notice_children.len(),128);
+        selection.select_thread("other".into(),3);
+        assert!(selection.dependent_parent("bounded").is_none());
+        selection.observe_notices("parent",2,epoch,vec!["child".into()]);
         assert!(selection.dependent_parent("child").is_none());
     }
 }

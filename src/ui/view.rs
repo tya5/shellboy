@@ -249,7 +249,7 @@ impl ThreadView {
         let ids = self.nodes[start..end]
             .iter()
             .filter(|node| {
-                node.presentation
+                node.presentation.fields.iter().any(|f|f.key=="/ui_notice/title") || node.presentation
                     .blocks
                     .iter()
                     .any(|block| block.tool.is_some())

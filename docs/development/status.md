@@ -2782,3 +2782,11 @@ Received shell arguments remain verbatim in response, adopted node, tool_call
 and subsequent model input. Only execution deserialization/display labels are
 80-character bounded; no normalization or truncation marker is persisted.
 Updated exact-source qualification is recorded in issue #97 after its next lease.
+
+## #88 notification references: implementation in progress
+
+The UI-only bounded metadata projection and exact original-reference navigation
+are being prepared on the #102 baseline. Synthetic unit cases cover identity,
+rename/delete, query counts/plans and stale dependency ownership. Rust compilation,
+real PTY fixtures and final standard qualification are pending; this section does
+not claim completion. No Core event, protocol or storage schema is changed.

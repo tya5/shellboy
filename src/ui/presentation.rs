@@ -26,6 +26,7 @@ fn source_candidate(text: &str) -> &str {
 }
 
 fn label(node: &UiNode) -> &str {
+    if let Some(title)=node.presentation.fields.iter().find(|f|f.key=="/ui_notice/title") {return &title.value;}
     if node.presentation.kind == PresentationKind::Event {
         if let Some(fact) = node.presentation.title.strip_prefix("状態変更 · ") {
             return fact;

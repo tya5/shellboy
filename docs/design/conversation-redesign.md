@@ -1159,3 +1159,42 @@ Original pages are the verified shared assistant/source node and can include
 adjacent calls. The selected call ID and actual command preview identify the
 chosen item; the view does not claim an exclusive per-call raw stream. All of
 the selected command remains reachable through those bounded source pages.
+
+## Bounded notification references (#88)
+
+Extend #83's minimum without changing Core events, protocol, schema or canonical
+history. The existing admitted frontend reader resolves at most128 event-node
+IDs in one indexed metadata statement. It follows node.event_id to the saved
+event, execution to the unique tool_call.operation_id and matching shell/group
+Turn, and child Run to its saved Thread. Duplicate call IDs or similar commands
+are never identity evidence. Select bounded command/title/identity fields only;
+never return provider bodies or shell output for display. Missing, deleted and
+expired sources remain explicit. Current Thread titles say "current name";
+a recorded title is not silently replaced with a claimed historical title.
+
+Reuse the finite presentation worker, source metadata allowance, existing
+read-revision/generation fences and paused-source observation scope. Decoration
+lives in bounded /ui_notice fields, not original text or source offsets. Existing
+Changed notifications invalidate only the selected view's bounded referenced
+Threads; no poller, owner scan, per-notification query, new worker or queue.
+Late observations cannot revive a replaced scope, renamed view or deleted source.
+
+Enter first follows an exact loaded execution row. Otherwise an exact saved
+(group,call,node) reference opens that original source through the existing
+Details reader; it must not fall back to a nearby node or search by name/call ID.
+Child navigation uses the saved/resolved Thread identity and never a short name.
+Original-source reads occur only on explicit action. Unknown/deleted targets
+retain factual identifiers and a clear unavailable message instead of guessing.
+
+Synthetic validation covers repeated call IDs, equal short names, rename/delete,
+run-only child references, missing/expired source, out-of-window original access,
+stale scope/generation replies and query plans/counts. Functional PTYs cover
+80/wide, dark/light/NO_COLOR/vt100 without a host clipboard or user data. Record
+P1 observations separately; latency/CPU observations are not acceptance gates.
+The existing finite background-result channel additionally carries one bounded
+reference set (at most128 IDs for the128-node current page). The independent
+paused scope remains bounded to128 nodes. Selection owns these references and
+adopts the current-page set only for the current Thread/generation/
+progress epoch; switching views clears it. This is metadata on an existing
+reader completion, not a durable event, queue or subscription. Unrelated Changed
+IDs do not refresh it. The existing paused scope supplies older visible sources.

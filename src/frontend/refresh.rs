@@ -215,6 +215,9 @@ pub(super) async fn run(
             // begin only after the readonly snapshot released its transaction.
             let mut frame=presentation_work(move || project(raw,render_width)).await??;
             let page_len=frame.nodes.len();
+            let notice_threads=frame.nodes.iter().flat_map(|node|node.presentation.fields.iter())
+                .filter(|field|field.key=="/ui_notice/thread_id").map(|field|field.value.clone()).take(128).collect();
+            let _=sender.send(BackgroundResult::NoticeDependencies {thread_id:thread.clone(),generation,epoch,threads:notice_threads}).await;
             if let Some(scope)=&mut frame.tool_scope {frame.nodes.append(&mut scope.nodes);}
             // Raw previews are owned by visible UI items, not every Changed snapshot.
             streams::seal_nodes(&mut frame.nodes).await?;

@@ -85,6 +85,7 @@ ORDER BY c.ordinal DESC LIMIT 1";
 pub(super) struct ToolFacts {
     sources: Vec<CallSource>,
     truncated_nodes: Vec<String>,
+    notices: Vec<super::notices::Fact>,
 }
 impl ToolFacts {
     #[cfg(test)]
@@ -92,6 +93,9 @@ impl ToolFacts {
         &self.sources
     }
     pub(super) fn append(&mut self, other: Self) {
+        for notice in other.notices {
+            if let Some(old)=self.notices.iter_mut().find(|old| old.node_id==notice.node_id) {*old=notice;} else {self.notices.push(notice);}
+        }
         let mut seen = self
             .sources
             .iter()
@@ -190,6 +194,7 @@ fn read_tx_reference(
     Ok(ToolFacts {
         sources,
         truncated_nodes: Vec::new(),
+        notices: Vec::new(),
     })
 }
 
@@ -242,6 +247,7 @@ pub(super) fn read_tx(
     Ok(ToolFacts {
         sources: read_sources_batch(db, &resolved)?,
         truncated_nodes: Vec::new(),
+        notices: Vec::new(),
     })
 }
 
@@ -260,7 +266,7 @@ SELECT requested.position,n.id,n.kind,
    EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.output')='array' THEN json_extract(n.payload_json,'$.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
    OR EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.response.output')='array' THEN json_extract(n.payload_json,'$.response.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
  ELSE 0 END
-FROM requested CROSS JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result') ORDER BY requested.position";
+FROM requested CROSS JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result','event') ORDER BY requested.position";
 
 // One bounded ordered seek per actual group member. Unlike row_number over a
 // group join, this never reads every call merely to retain its first129 rows.
@@ -370,6 +376,8 @@ pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let notice_ids=nodes.iter().filter(|node| node.kind=="event").map(|node|node.node_id.clone()).collect::<Vec<_>>();
+    let notices=super::notices::read_tx(db,&notice_ids)?;
     let groups = nodes
         .iter()
         .filter(|node| node.kind == "assistant_response" && node.direct.is_none() && node.whole)
@@ -418,12 +426,14 @@ pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts
         return Ok(ToolFacts {
             sources: Vec::new(),
             truncated_nodes,
+            notices,
         });
     }
     let sources = read_sources_batch(db, &requests)?;
     Ok(ToolFacts {
         sources,
         truncated_nodes,
+        notices,
     })
 }
 
@@ -469,6 +479,7 @@ fn read_sources_batch(
 
 pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
     clear_observations(nodes);
+    super::notices::apply(nodes,&facts.notices);
     for source in &facts.sources {
         let Some(node) = nodes.iter_mut().find(|node| node.node_id == source.node_id) else {
             continue;
@@ -566,13 +577,18 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             })
         })
         .collect::<Vec<_>>();
-    if requests.is_empty() {
+    let notice_ids=nodes.iter().filter(|node| node.presentation.kind==crate::presentation::PresentationKind::Event).take(MAX_NODES).map(|node|node.node_id.clone()).collect::<Vec<_>>();
+    if requests.is_empty() && notice_ids.is_empty() {
         return Ok(());
     }
     let facts = control
         .store
         .database
-        .call(move |db| read_tx(db, &requests))
+        .call(move |db| {
+            let mut facts=read_tx(db,&requests)?;
+            facts.notices=super::notices::read_tx(db,&notice_ids)?;
+            Ok(facts)
+        })
         .await
         .map_err(StorageError::into_api_error)?;
     let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();

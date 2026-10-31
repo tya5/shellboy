@@ -184,7 +184,8 @@ impl UiNode {
                 })
             })
             .collect::<Vec<_>>();
-        if blocks.is_empty() {
+        let notice_fields=self.presentation.fields.iter().filter(|f|f.key.starts_with("/ui_notice/")).cloned().collect::<Vec<_>>();
+        if blocks.is_empty() && notice_fields.is_empty() {
             return None;
         }
         Some(Self {
@@ -196,7 +197,9 @@ impl UiNode {
             reasoning_ranges: vec![],
             presentation: NodePresentation {
                 kind: self.presentation.kind.clone(),
+                title: self.presentation.title.clone(),
                 blocks,
+                fields: notice_fields,
                 ..Default::default()
             },
         })
@@ -205,7 +208,14 @@ impl UiNode {
         if self.node_id != source.node_id {
             return false;
         }
-        let mut changed = false;
+        let old=self.presentation.fields.iter().filter(|f|f.key.starts_with("/ui_notice/")).collect::<Vec<_>>();
+        let incoming=source.presentation.fields.iter().filter(|f|f.key.starts_with("/ui_notice/")).collect::<Vec<_>>();
+        let mut changed = old!=incoming;
+        if changed {
+            self.presentation.fields.retain(|f|!f.key.starts_with("/ui_notice/"));
+            self.presentation.fields.extend(incoming.into_iter().cloned());
+            self.presentation.bound_metadata();
+        }
         for block in &mut self.presentation.blocks {
             if let Some(tool) = &mut block.tool
                 && let Some(incoming) = source
