@@ -5176,3 +5176,15 @@ The focused real-owner case passes three native macOS runs. UI source changes
 in this increment are confined to cfg(test); this is not a retention-policy fix.
 The original CI had only Elapsed, so its exact cached-node state was not saved;
 the deterministic counterexample establishes the invalid prerequisite and repair.
+
+### #95 rebase onto admitted #91 B / #93
+
+The adopted-design EOF conflict keeps the complete afe4c087 conversation design
+(including #91/#93) and appends the approved paired-snapshot rule once. No source
+conflict required manual edits. The approved cb75209 src/tests patch and rebased
+patch have stable ID 7ecc4bde107275ae8ccf7737fdc8fa9ce5488b2c. Independently,
+applying the approved source patch onto afe4c087 in a temporary Git index yields
+an exact byte-for-byte src/tests tree match with the rebased candidate. This is
+source-patch equality, not a claim that the older whole repository equals main B.
+Latest-tree standard checks and exact resubmission SHA are recorded in #95;
+Windows split x3 qualification remains integration-owned, with no local dispatch.
