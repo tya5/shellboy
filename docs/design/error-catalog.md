@@ -80,3 +80,9 @@ causality/Turn constraints, counts, provenance, canaries, malformed/oversized te
 read-only source hashes, rebuild equivalence, incremental transitions/deletion,
 limits and query plans. An opt-in synthetic10,000-execution measurement records
 full/incremental durations without timing gates. All test watchdogs use60 seconds.
+
+SQLite transaction scopes do not own connection lifetime. Explicitly close every
+cursor and connection before replacing/deleting the derived file; retain the
+original error if staging cleanup also fails, with the cleanup failure chained.
+Never use collection, delay or retry to release handles. Synthetic fixtures obey
+the same lifetime rule before temporary-directory cleanup.

@@ -72,7 +72,7 @@ class CatalogueTests(unittest.TestCase):
         self.build(steps=3)
         recovery = next(r for r in self.rows() if r['id'] == 'f')['recovery']
         self.assertEqual((recovery['id'], recovery['steps']), ('ok', 3))
-        self.db.execute("UPDATE shell_execution SET ended_at=NULL WHERE id='f'")
+        catalog.read_rows(self.db, "UPDATE shell_execution SET ended_at=NULL WHERE id='f'")
         self.build(steps=3)
         self.assertIsNone(next(r for r in self.rows() if r['id'] == 'f')['recovery'])
 
@@ -97,7 +97,7 @@ class CatalogueTests(unittest.TestCase):
         digest = hashlib.sha256(source.read_bytes()).digest()
         with contextlib.closing(catalog.connect_readonly(source)) as db:
             with self.assertRaises(sqlite3.OperationalError):
-                db.execute("UPDATE shell_execution SET state='failed'")
+                catalog.read_rows(db, "UPDATE shell_execution SET state='failed'")
         self.build()
         saved = self.rows()
         target = self.root / 'derived/errors.sqlite3'
@@ -115,13 +115,13 @@ class CatalogueTests(unittest.TestCase):
         add(self.db, 'running', state='running', code=None, start=3)
         self.build()
         self.assertIsNone(self.rows()[0]['recovery'])
-        self.db.execute("UPDATE shell_execution SET state='exited',exit_code=0 WHERE id='running'")
+        catalog.read_rows(self.db, "UPDATE shell_execution SET state='exited',exit_code=0 WHERE id='running'")
         self.build(incremental=True)
         self.assertEqual(self.rows()[0]['recovery']['id'], 'running')
-        self.db.execute("UPDATE node SET deleted_reason='expired' WHERE id='node-running'")
+        catalog.read_rows(self.db, "UPDATE node SET deleted_reason='expired' WHERE id='node-running'")
         self.build(incremental=True)
         self.assertIsNone(self.rows()[0]['recovery']['node_id'])
-        self.db.execute("UPDATE thread SET deleted_at=?", (time_at(30),))
+        catalog.read_rows(self.db, "UPDATE thread SET deleted_at=?", (time_at(30),))
         result = self.build(incremental=True)
         self.assertEqual(result['executions'], 0)
         self.assertEqual(self.cli('top')['result']['items'], [])
@@ -143,13 +143,13 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(list(target.parent.glob('.errors-*')), [])
         with self.assertRaises(ValueError):
             self.build(incremental=True, steps=6)
-        self.db.execute('PRAGMA user_version=1')
+        catalog.read_rows(self.db, 'PRAGMA user_version=1')
         self.assertFalse(self.cli('build', expected=1)['ok'])
 
     def test_sql_output_seek_categories_control_safety_and_bounded_ids(self):
         add(self.db, 'f')
         self.db.commit()
-        plan = self.db.execute("EXPLAIN QUERY PLAN SELECT substr(bytes,1,4096) FROM output_chunk WHERE execution_id=? AND stream='stderr' ORDER BY stream_offset LIMIT 9", ('f',)).fetchall()
+        plan = catalog.read_rows(self.db, "EXPLAIN QUERY PLAN SELECT substr(bytes,1,4096) FROM output_chunk WHERE execution_id=? AND stream='stderr' ORDER BY stream_offset LIMIT 9", ('f',))
         self.assertTrue(any('SEARCH' in str(r) and 'output_stream' in str(r) for r in plan), plan)
         cases = [('zsh: command not found', 127, 'missing-command-path'), ('Permission denied', 1, 'permission'),
                  ('Connection refused', 1, 'network'), ('invalid argument', 2, 'syntax-arguments'), ('timed out', 1, 'timeout')]
@@ -175,7 +175,7 @@ class CatalogueTests(unittest.TestCase):
         add(self.db, 'f', stderr=None, node=False)
         add(self.db, 'unknown-encoding', encoding='not-a-codec', start=3)
         add(self.db, 'stopped', code=0, state='stopped', reason='timeout', start=6)
-        self.db.execute("UPDATE shell_execution SET shell_json='{}' WHERE id='f'")
+        catalog.read_rows(self.db, "UPDATE shell_execution SET shell_json='{}' WHERE id='f'")
         self.build()
         rows = {r['id']: r for r in self.rows()}
         self.assertFalse(rows['f']['command_known'])
@@ -187,12 +187,12 @@ class CatalogueTests(unittest.TestCase):
 
     def test_redaction_split_chunks_cut_lines_and_quoted_values(self):
         add(self.db, 'f', "FOO='CANARY SPACE' cargo test --password='CANARY FLAG'", stderr='error: Bearer CANARY')
-        self.db.execute("INSERT INTO output_chunk VALUES('f',2,'stderr',20,?,?)", (b'_SPLIT_SECRET\n', time_at(1)))
+        catalog.read_rows(self.db, "INSERT INTO output_chunk VALUES('f',2,'stderr',20,?,?)", (b'_SPLIT_SECRET\n', time_at(1)))
         self.build()
         raw = (self.root / 'derived/errors.sqlite3').read_bytes()
         for canary in (b'CANARY', b'SPLIT_SECRET'):
             self.assertNotIn(canary, raw)
-        self.db.execute("UPDATE output_chunk SET bytes=? WHERE execution_id='f' AND sequence=1", (b'error: safe complete\n' + b'A'*5000,))
+        catalog.read_rows(self.db, "UPDATE output_chunk SET bytes=? WHERE execution_id='f' AND sequence=1", (b'error: safe complete\n' + b'A'*5000,))
         self.build()
         self.assertEqual(self.rows()[0]['error'], 'error: safe complete')
         self.assertTrue(self.rows()[0]['stderr_limited'])
@@ -202,10 +202,116 @@ class CatalogueTests(unittest.TestCase):
         self.build()
         self.build(steps=6)
         self.assertEqual(catalog.read_catalog(self.root / 'derived/errors.sqlite3')[0]['options']['steps'], 6)
-        self.db.execute('PRAGMA user_version=999')
+        catalog.read_rows(self.db, 'PRAGMA user_version=999')
         self.db.commit()
         self.assertFalse(self.cli('build', expected=1)['ok'])
         self.assertFalse(self.cli('top', '--since', 'not-a-time', expected=1)['ok'])
+
+    def tracked_connections(self, failure=None):
+        # Strong references deliberately outlive each operation. A forgotten
+        # close cannot be hidden by CPython refcounting or cyclic collection.
+        connections = []
+        real_connect = sqlite3.connect
+
+        class Cursor(sqlite3.Cursor):
+            def executemany(self, *args, **kwargs):
+                if failure is not None:
+                    raise failure
+                return super().executemany(*args, **kwargs)
+
+            def close(self):
+                self.explicitly_closed = True
+                return super().close()
+
+        class Connection(sqlite3.Connection):
+            def cursor(self):
+                cursor = super().cursor(factory=Cursor)
+                cursor.explicitly_closed = False
+                self.held_cursors.append(cursor)
+                return cursor
+
+            def execute(self, *_args, **_kwargs):
+                raise AssertionError('Use an explicitly scoped cursor')
+
+            def close(self):
+                if not all(cursor.explicitly_closed for cursor in self.held_cursors):
+                    raise AssertionError('A live cursor outlived its scope')
+                self.explicitly_closed = True
+                return super().close()
+
+        def connect(*args, **kwargs):
+            db = real_connect(*args, factory=Connection, **kwargs)
+            db.explicitly_closed = False
+            db.held_cursors = []
+            connections.append(db)
+            return db
+
+        return connections, connect
+
+    def assert_connections_closed(self, connections):
+        self.assertTrue(connections)
+        self.assertTrue(all(db.explicitly_closed for db in connections))
+        self.assertTrue(all(cursor.explicitly_closed for db in connections for cursor in db.held_cursors))
+
+    def test_every_connection_and_cursor_closed_before_replace_unlink_and_refresh(self):
+        add(self.db, 'f')
+        self.db.commit()
+        connections, connect = self.tracked_connections()
+        real_replace = os.replace
+
+        def replace(source, destination):
+            self.assert_connections_closed(connections)
+            return real_replace(source, destination)
+
+        with patch.object(catalog.sqlite3, 'connect', side_effect=connect), patch.object(catalog.os, 'replace', side_effect=replace):
+            catalog.build(self.root)
+            catalog.top(self.root)
+            catalog.similar(self.root, 'f')
+            catalog.build(self.root, incremental=True)
+            self.assert_connections_closed(connections)
+            target = self.root / 'derived/errors.sqlite3'
+            target.unlink()
+            catalog.build(self.root)
+        self.assert_connections_closed(connections)
+
+    def test_write_and_replace_failures_close_handles_preserve_original_and_snapshot(self):
+        add(self.db, 'f')
+        self.build()
+        target = self.root / 'derived/errors.sqlite3'
+        snapshot = target.read_bytes()
+        for write_failure in (True, False):
+            original = sqlite3.OperationalError('synthetic write failure') if write_failure else OSError('synthetic replace failure')
+            connections, connect = self.tracked_connections(original if write_failure else None)
+            real_unlink = os.unlink
+
+            def unlink(path):
+                self.assert_connections_closed(connections)
+                return real_unlink(path)
+
+            with patch.object(catalog.sqlite3, 'connect', side_effect=connect), patch.object(catalog.os, 'unlink', side_effect=unlink), patch.object(catalog.os, 'replace', side_effect=original):
+                with self.assertRaises(type(original)) as caught:
+                    catalog.build(self.root)
+                self.assertIs(caught.exception, original)
+            self.assert_connections_closed(connections)
+            self.assertEqual(target.read_bytes(), snapshot)
+            self.assertEqual(list(target.parent.glob('.errors-*')), [])
+
+    def test_cleanup_failure_is_chained_without_masking_original_error(self):
+        add(self.db, 'f')
+        self.build()
+        target = self.root / 'derived/errors.sqlite3'
+        snapshot = target.read_bytes()
+        original = OSError('synthetic publication failure')
+        cleanup = PermissionError('synthetic cleanup failure')
+        with patch.object(catalog.os, 'replace', side_effect=original), patch.object(catalog.os, 'unlink', side_effect=cleanup):
+            with self.assertRaises(OSError) as caught:
+                catalog.build(self.root)
+            self.assertIs(caught.exception, original)
+            self.assertIs(caught.exception.__cause__, cleanup)
+        self.assertEqual(target.read_bytes(), snapshot)
+        staging = list(target.parent.glob('.errors-*'))
+        self.assertEqual(len(staging), 1)
+        staging[0].unlink()
 
     @unittest.skipIf(os.name == 'nt', 'symlink creation requires Windows privilege')
     def test_symlink_and_hardlink_output_aliases_are_rejected(self):

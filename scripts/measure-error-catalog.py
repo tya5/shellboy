@@ -28,7 +28,7 @@ def measure():
             full = catalog.build(root)
             assert full['executions'] == 10_000 and full['failures'] == 5000
             # In-place terminal correction, not a watermark-only append benchmark.
-            db.execute("UPDATE shell_execution SET exit_code=1 WHERE id='shell-00001'")
+            catalog.read_rows(db, "UPDATE shell_execution SET exit_code=1 WHERE id='shell-00001'")
             db.commit()
             incremental = catalog.build(root, incremental=True)
             assert incremental['executions'] == 10_000 and incremental['failures'] == 5001

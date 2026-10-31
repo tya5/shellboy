@@ -6183,3 +6183,37 @@ Redaction remains heuristic (arbitrary-secret detection is not established),
 lexical recovery association is not causation, and data remains untrusted.
 No user DB, model/API, provider credential or real command replay was used.
 Full standard checks/Windows/Linux and reviewer acceptance remain pending.
+
+### #72 Native Windows Failure And Explicit SQLite Lifetime Fix
+
+Initial batch30 native CI41244820590 passed Linux/macOS but failed Windows job
+124665975622 with20 Python errors: WinError32 during staging-file replacement,
+unlink and temporary-directory cleanup. Evidence:
+`/tmp/shellboy-batch30-ci-failed.log`. This is a task-related resource-lifetime
+regression, not an unrelated timeout eligible for a blind rerun. Python's SQLite
+connection context commits/rolls back but does not close its connection; the
+writer still held the staging database open when publishing it.
+
+The author fix closes statement cursors, finishes commit/rollback and explicitly
+closes the writer connection before replace/unlink. Source/catalog query cursors,
+configuration-failure connections, fixture setup/inserts/test queries and the
+scale fixture are explicitly scoped too. Cleanup failures are chained to the
+original publication exception rather than masking it; the previous snapshot
+remains intact on write/replace faults. No retry, sleep, GC, ignored error or
+weakened assertion is introduced.
+
+Three added regression cases retain strong references to every tracked SQLite
+connection/cursor, assert explicit closure before replacement/unlink, exercise
+read/refresh/rebuild, inject write/replace faults and check exact original error
+identity/atomic snapshot retention, and expose cleanup-error chaining. The15
+catalogue cases pass on macOS after the fix. New native Windows qualification
+and the exact-source standard check remain pending; neither prior macOS success
+nor retained-handle simulation establishes a Windows pass.
+
+After the lifetime changes, complete Python discovery passed86 cases in7.549s
+(macOS/Python3.12.7/SQLite3.51.0). The same synthetic10k fixture passed full and
+changed-fact refresh:1.365133s/1.462936s,2 changed/9998 unchanged facts, no timing
+gate. Evidence: `/tmp/issue-72-windows-lifetime-python.log` and
+`/tmp/issue-72-windows-lifetime-scale.json`; execution
+fa8d6e3e-90f7-4dbc-8537-4f6179101955 exited0 with process-group cleanup confirmed.
+These local assertions do not replace a new native Windows run.

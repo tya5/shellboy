@@ -2829,3 +2829,12 @@ schema or automatic instructions are changed. Twelve synthetic cases and all83
 Python tests pass; a10,000-execution synthetic build/changed-fact refresh observed
 1.324/1.399 seconds (not gates). Full standard/native cross-OS qualification and
 review remain pending. Only temporary synthetic data was read during validation.
+
+### #72 Windows Resource-Lifetime Follow-Up
+
+Batch30 native Windows failed with20 Python WinError32 errors at SQLite staging
+publication/cleanup; Linux/macOS passed. The author corrects the writer's missing
+close and audits query/fixture cursor ownership, without retries/GC/sleeps/error
+suppression. All15 targeted catalogue tests pass locally, including3 explicit
+retained-handle/fault regressions. Refreshed full-standard/native Windows checks
+remain pending. Original failure history remains in acceptance and issue72.

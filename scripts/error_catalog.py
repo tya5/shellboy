@@ -104,10 +104,21 @@ def category(line, state, reason, code):
 
 def connect_readonly(path):
     db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=0)
-    db.row_factory = sqlite3.Row
-    db.execute('PRAGMA query_only=ON')
-    db.execute('PRAGMA trusted_schema=OFF')
-    return db
+    try:
+        db.row_factory = sqlite3.Row
+        read_rows(db, 'PRAGMA query_only=ON')
+        read_rows(db, 'PRAGMA trusted_schema=OFF')
+        return db
+    except BaseException:
+        db.close()
+        raise
+
+
+def read_rows(db, sql, parameters=()):
+    """Finish and close every bounded query cursor before its connection closes."""
+    with contextlib.closing(db.cursor()) as cursor:
+        cursor.execute(sql, parameters)
+        return cursor.fetchall()
 
 
 def paths(data_dir):
@@ -144,7 +155,7 @@ QUERY = '''SELECT s.id, r.thread_id, s.turn_id, s.state, s.exit_code,
 def stderr_line(db, execution, encoding):
     pieces, size, limited, offset = [], 0, False, 0
     # The (execution, stream, offset) index bounds both seeks and copied bytes.
-    for row in db.execute('''SELECT substr(bytes,1,?) part,length(bytes) total,stream_offset FROM output_chunk
+    for row in read_rows(db, '''SELECT substr(bytes,1,?) part,length(bytes) total,stream_offset FROM output_chunk
         WHERE execution_id=? AND stream='stderr' ORDER BY stream_offset LIMIT 9''', (MAX_STDERR, execution)):
         if row['stream_offset'] != offset:
             return '<stderr-prefix-unavailable>', True
@@ -173,16 +184,16 @@ def stderr_line(db, execution, encoding):
 
 def facts(source, repo_root=None):
     with contextlib.closing(connect_readonly(source)) as db:
-        db.execute('BEGIN')
-        if db.execute('PRAGMA user_version').fetchone()[0] != 17:
+        read_rows(db, 'BEGIN')
+        if read_rows(db, 'PRAGMA user_version')[0][0] != 17:
             raise ValueError('Current conversation schema17 is required')
-        if db.execute('SELECT rowid FROM shell_execution ORDER BY rowid LIMIT 1 OFFSET ?', (MAX_EXECUTIONS,)).fetchone():
+        if read_rows(db, 'SELECT rowid FROM shell_execution ORDER BY rowid LIMIT 1 OFFSET ?', (MAX_EXECUTIONS,)):
             raise ValueError('Source exceeds 10000 execution allowance; no partial catalogue published')
         for name in ('shell_execution', 'run', 'turn', 'thread', 'tool_call', 'tool_group', 'tool_result', 'node', 'output_chunk'):
-            found = db.execute("SELECT type FROM sqlite_master WHERE name=?", (name,)).fetchone()
-            if not found or found[0] != 'table':
+            found = read_rows(db, "SELECT type FROM sqlite_master WHERE name=?", (name,))
+            if not found or found[0][0] != 'table':
                 raise ValueError('Current source tables are required')
-        rows = db.execute(QUERY, (MAX_EXECUTIONS + 1,)).fetchall()
+        rows = read_rows(db, QUERY, (MAX_EXECUTIONS + 1,))
         if len(rows) > MAX_EXECUTIONS:
             raise ValueError('Source exceeds 10000 execution allowance; no partial catalogue published')
         result = []
@@ -236,10 +247,10 @@ def associate(raw, steps):
 
 def read_catalog(target, options=None):
     with contextlib.closing(connect_readonly(target)) as db:
-        meta = json.loads(db.execute("SELECT value FROM meta WHERE key='format'").fetchone()[0])
+        meta = json.loads(read_rows(db, "SELECT value FROM meta WHERE key='format'")[0][0])
         if meta['version'] != VERSION or options is not None and meta['options'] != options:
             raise ValueError('Derived format/options changed; explicitly rebuild')
-        rows = [json.loads(r[0]) for r in db.execute('SELECT fact FROM execution ORDER BY id LIMIT ?', (MAX_EXECUTIONS + 1,))]
+        rows = [json.loads(r[0]) for r in read_rows(db, 'SELECT fact FROM execution ORDER BY id LIMIT ?', (MAX_EXECUTIONS + 1,))]
         if len(rows) > MAX_EXECUTIONS:
             raise ValueError('Derived execution allowance exceeded')
         return meta, rows
@@ -262,15 +273,23 @@ def build(data_dir, incremental=False, steps=5, repo_root=None):
         fd, name = tempfile.mkstemp(prefix='.errors-', suffix='.sqlite3', dir=target.parent)
         os.close(fd)
         try:
-            with sqlite3.connect(name) as db:
-                db.execute('CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)')
-                db.execute('CREATE TABLE execution(id TEXT PRIMARY KEY,fact TEXT NOT NULL)')
-                db.execute('INSERT INTO meta VALUES(?,?)', ('format', packed({'version': VERSION, 'options': options})))
-                db.executemany('INSERT INTO execution VALUES(?,?)', ((r['id'], packed(r)) for r in rows))
+            # Connection.__exit__ only commits/rolls back. Close statements, then
+            # finish the transaction, then close the file before replace/unlink.
+            with contextlib.closing(sqlite3.connect(name)) as db:
+                with db, contextlib.closing(db.cursor()) as cursor:
+                    cursor.execute('CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)')
+                    cursor.execute('CREATE TABLE execution(id TEXT PRIMARY KEY,fact TEXT NOT NULL)')
+                    cursor.execute('INSERT INTO meta VALUES(?,?)', ('format', packed({'version': VERSION, 'options': options})))
+                    cursor.executemany('INSERT INTO execution VALUES(?,?)', ((r['id'], packed(r)) for r in rows))
             os.replace(name, target)
-        finally:
-            if os.path.exists(name):
-                os.unlink(name)
+        except BaseException as original:
+            try:
+                if os.path.exists(name):
+                    os.unlink(name)
+            except OSError as cleanup_error:
+                # Report both failures without replacing the original exception.
+                raise original from cleanup_error
+            raise
     return {'executions': len(rows), 'failures': sum(r['failure'] for r in rows), 'unchanged': unchanged,
             'changed': len(rows)-unchanged, 'elapsed_seconds': time.monotonic()-started, 'notice': NOTICE}
 
