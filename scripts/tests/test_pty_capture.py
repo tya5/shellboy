@@ -107,3 +107,16 @@ class ConfigAndCliTests(unittest.TestCase):
                 (root / 'config.toml').write_text(config)
                 with self.assertRaises(ValueError):
                     capture.check_config(root)
+
+class DescriptionConfigSafetyTests(unittest.TestCase):
+    def test_only_bounded_boolean_description_setting_is_added_to_fixture_allowlist(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            for value in ['true', 'false']:
+                (root / 'config.toml').write_text('[ui]\ncopy_backend="osc52"\n[shell]\ndescribe_calls=' + value + '\n')
+                capture.check_config(root)
+            for setting in ['describe_calls=80', 'executable="/must-not-run"', 'env={TOKEN="not-allowed"}']:
+                (root / 'config.toml').write_text('[ui]\ncopy_backend="osc52"\n[shell]\n' + setting + '\n')
+                with self.assertRaises(ValueError):
+                    capture.check_config(root)

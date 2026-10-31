@@ -247,6 +247,7 @@ pub(super) fn prepare_with_titles(
             let mut rows = Vec::with_capacity(2);
             if let Some(id) = extra.execution {
                 rows.push(LiveWorkRow {
+                    description: None,
                     target: LiveWorkTarget::Shell {
                         execution_id: id,
                         turn_id: extra.shell_turn,
@@ -268,6 +269,7 @@ pub(super) fn prepare_with_titles(
             }
             if let (Some(run_id), Some(thread_id)) = (extra.child_run, extra.child_thread) {
                 rows.push(LiveWorkRow {
+                    description: None,
                     target: LiveWorkTarget::ChildRun { run_id, thread_id },
                     label: "子の会話".into(),
                     state: extra.child_state.unwrap_or_default(),

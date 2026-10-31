@@ -5785,7 +5785,13 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         draw_recovery(frame, recovery_area, snapshot);
     }
     message_queue::draw_compact(frame, queue_area, view);
-    live_work::draw(frame, live_area, &view.live_work, state.palette);
+    live_work::draw(
+        frame,
+        live_area,
+        &view.live_work,
+        state.palette,
+        view.describe_calls,
+    );
     let input_area = layout[2];
     let input_body_height = input_area.height.saturating_sub(2);
     let cursor = draw_input(frame, input_area, state, &input, &input_metrics);

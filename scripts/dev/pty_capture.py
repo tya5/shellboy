@@ -48,12 +48,16 @@ class Frames:
 
 def check_config(root):
     config = tomllib.loads((root / 'config.toml').read_text(encoding='utf-8'))
-    if set(config) - {'default_connection', 'default_model', 'connections', 'ui'}:
+    if set(config) - {'default_connection', 'default_model', 'connections', 'ui', 'shell'}:
         raise ValueError('Only minimal synthetic fixture config is allowed')
     if config.get('ui', {}).get('copy_backend') != 'osc52':
         raise ValueError('Fixture requires explicit [ui] copy_backend="osc52"')
     if set(config.get('ui', {})) - {'copy_backend', 'palette', 'bell', 'send_key', 'newline_keys'}:
         raise ValueError('Unexpected fixture UI setting')
+    shell = config.get('shell', {})
+    if (not isinstance(shell, dict) or set(shell) - {'describe_calls'}
+            or ('describe_calls' in shell and not isinstance(shell['describe_calls'], bool))):
+        raise ValueError('Only boolean shell.describe_calls is allowed in a fixture')
     for connection in config.get('connections', {}).values():
         url = urlsplit(connection.get('base_url', ''))
         if (url.scheme != 'http' or url.hostname not in ('127.0.0.1', '::1')

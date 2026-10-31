@@ -21,6 +21,7 @@ pub enum LiveWorkTarget {
 pub struct LiveWorkRow {
     pub target: LiveWorkTarget,
     pub label: String,
+    pub description: Option<String>,
     pub state: String,
     pub started_at: Option<String>,
     pub elapsed_base: Option<Duration>,
@@ -31,6 +32,7 @@ impl PartialEq for LiveWorkRow {
     fn eq(&self, other: &Self) -> bool {
         self.target == other.target
             && self.label == other.label
+            && self.description == other.description
             && self.state == other.state
             && self.started_at == other.started_at
             && self.last_output_at == other.last_output_at
@@ -135,6 +137,7 @@ impl LiveWorkView {
             snapshot.rows.truncate(3);
             for row in &mut snapshot.rows {
                 row.label = bounded(&row.label, 512);
+                row.description = crate::tool_description::label(row.description.as_deref());
                 row.state = bounded(&row.state, 64);
             }
         }
@@ -453,6 +456,7 @@ pub(super) fn draw(
     area: Rect,
     view: &LiveWorkView,
     palette: theme::Palette,
+    describe_calls: bool,
 ) {
     if area.height == 0 {
         return;
@@ -506,7 +510,11 @@ pub(super) fn draw(
             )
         );
         let label = fit(
-            &row.label,
+            if describe_calls && !(view.active && view.selected.as_ref() == Some(&row.target)) {
+                row.description.as_deref().unwrap_or(&row.label)
+            } else {
+                &row.label
+            },
             usize::from(area.width).saturating_sub(prefix.width() + right.width() + 3),
         );
         let gap =
@@ -654,6 +662,7 @@ mod tests {
             observed_at: at,
             rows: vec![
                 LiveWorkRow {
+                    description: None,
                     target: LiveWorkTarget::Shell {
                         execution_id: "execution".into(),
                         turn_id: Some("answered-turn".into()),
@@ -666,6 +675,7 @@ mod tests {
                     output_age_base: Some(Duration::from_secs(30)),
                 },
                 LiveWorkRow {
+                    description: None,
                     target: LiveWorkTarget::ChildRun {
                         run_id: "child-run".into(),
                         thread_id: "child-thread".into(),
@@ -678,6 +688,7 @@ mod tests {
                     output_age_base: None,
                 },
                 LiveWorkRow {
+                    description: None,
                     target: LiveWorkTarget::Wait {
                         operation_id: "wait-operation".into(),
                         execution_id: "execution".into(),

@@ -1253,6 +1253,7 @@ mod watch_tests {
                 overflow: 0,
                 observed_at: at,
                 rows: vec![LiveWorkRow {
+                    description: None,
                     target: LiveWorkTarget::Shell {
                         execution_id: execution.into(),
                         turn_id: None,

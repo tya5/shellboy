@@ -365,6 +365,7 @@ mod live_child_tests {
             live_work: Some(LiveWorkSnapshot {
                 run_id: "parent-run".into(),
                 rows: vec![LiveWorkRow {
+                    description: None,
                     target: LiveWorkTarget::ChildRun {
                         run_id: "child-run".into(),
                         thread_id: "child".into(),

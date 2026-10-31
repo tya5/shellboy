@@ -2761,3 +2761,10 @@ numbered targets. New parser, ownership, source-limit and real-DB tests are writ
 These additional changes have passed formatting/static layout only, not compilation,
 standard checks or real PTY qualification yet. Earlier stage-1 validation does not
 qualify these additional paths. Rust qualification is queued after #91 and W2 work.
+## #97 description-label candidate
+
+Optional bounded shell descriptions and opt-out definition/display gating are
+implemented as ordinary metadata over existing call/shell history. Existing item
+focus/disclosure and original paging expose commands; cache keys derive from
+those existing inputs rather than independent interaction state. Source/SSE/UI
+and paging tests are prepared; compilation, PTY and final checks are pending.
