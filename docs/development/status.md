@@ -1,5 +1,13 @@
 # Development status
 
+## README overview (#78)
+
+The user selected candidate C: 89 colors, mean original-channel error about
+1.0/255, with no visually discernible difference confirmed by the user. The
+621,395-byte PNG is after the README title with alt text; intro/Features remain.
+Original and comparison files stay outside Git. Optimization hashes, layout
+checks and their limits are recorded in acceptance; exact-source CI is in #78.
+
 ## Noncontrolling EOF test observation
 
 Only the noncontrolling-PTY EOF shutdown test now treats best-effort diagnostic

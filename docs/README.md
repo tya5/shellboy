@@ -6,6 +6,7 @@ English is the default for documentation. Only the User Guide has a Japanese tra
 
 | Directory | Contents | Maintenance rule |
 | --- | --- | --- |
+| `assets/` | Public documentation images | Record source provenance, user selection and optimization evidence in validation. |
 | `guides/` | Product operation guides | Match the actual CLI, configuration, and display. `src/docs.rs` embeds the English guide bodies, so they are required at build time. Keep the Japanese User Guide aligned when changing the English User Guide; other guides have no translation obligation. |
 | `design/` | Adopted specifications and implementation designs | Check public types, configuration, migrations, and implementation; record contract changes first. |
 | `development/` | Setup, status, and decision records | Exclude personal configuration, credentials, and private logs. |
