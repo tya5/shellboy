@@ -240,3 +240,15 @@ assertion that the OS shell stopped. Exit/signal/group-confirmation facts are
 not fabricated; old executions lacking a lifeline are also unverified. Startup
 interruption evidence reports the same distinction. No new persistent state or
 schema is required. Terminal records and saved real outputs remain immutable.
+
+
+### Native descriptor and startup-snapshot clarification (#82 review)
+
+Guardian descriptor closing is inclusive: close_from(2, limit) also closes the
+shell stderr pipe at fd2; only lifeline/status at fd0/fd1 remain. It must not hold
+model output open until release. The normal supervisor observes/reaps the shell,
+cleans the group, releases/reaps the guardian, then finishes output drain. Native
+regression coverage also drains stderr to EOF while the guardian is still alive.
+Startup shell snapshot values are SQL parameters, not source-text replacement;
+Unix interrupted-owner JSON reports startup_state=failed and os_state=unverified,
+while other platforms retain stopped without claiming an observed OS outcome.
