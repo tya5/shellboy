@@ -212,13 +212,13 @@ the dispatch-time main912b2e2 and candidatecbc9960, as explicitly reported in
 Do not relabel those values as a comparison against1fec7f0 or the later repaired
 and rebased candidate. Qualification gaps remain unchecked below.
 
-- [x] P1 B+C:128 nodes/50 tool rows, focus/open-close UI+draw p95<=8ms and<=baseline+2ms.
-- [ ] P2 D/F: silent background shell10min, <=1 redraw/sec,0 DB jobs/tick, CPU no worse.
-- [ ] P3 Each applicable increment: visible Changed jobs and DB-worker time with
+- [x] P1 B+C:128 nodes/50 tool rows, layout/focus counts qualified; p95/baseline delta recorded only under6543044236.
+- [x] P2 D/F: silent work has0 display DB jobs/tick and bounded total draws; CPU recorded only (6543044236, run41193740385).
+- [ ] P3 Each applicable increment: visible Changed job/query counts; DB-worker time recorded only, with
   list/watch/descendant consumers enabled, showing combined/coalesced work.
-- [x] P4 F: native macOS256 descendants/depth8 one-query p95<=50ms plus bounded slow-only logging; source-qualified evidence and unchanged query/observer blobs below.
-- [ ] P5 D/E/F: hidden output40 batches/sec ->0 visible redraws/0 output-driven DB jobs.
-- [ ] P6 G:64KiB original,60 wheel events/sec ->frames<=max_fps and p95<=8ms/+2ms.
+- [x] P4 F:256 descendants/depth8, one-query/index/bounded-count gates; latency recorded only, plus bounded slow-only logging.
+- [x] P5 D/E/F: hidden output40+ committed batches/sec ->0 visible redraws/display DB reads/jobs (41193740385).
+- [ ] P6 G:64KiB original,60 wheel events/sec; total frames/cache/wrap bounds are gates; p95/baseline delta recorded only.
 - [x] P7 B+C:128x16KiB expanded previews counted within cache.body_bytes, including
   retained metadata; discarded previews rehydrate correctly under #58 rules.
   Report the explicit finite active working-set exception (<=64KiB total for an
@@ -510,7 +510,7 @@ qualification updates that follow identify implemented/tested scope and open gat
 | F12 | Add only actually needed indexes with reasons/costs; current main schema15 already occupies archived15. Fresh schema and isolated atomic migration agree; backup warning before upgrade. | Archived33724db parent index and0af2ccc lookup-index evidence are inputs, not copy-ready version numbers. Recheck actual current main/index overlap immediately before admission, then validate rollback/reopen/schema ledger. No new table. |
 | F13 | Saved Core facts keep shared meanings; frontend owns view/unread/discovery state. Any new large Core read projection has an explicit ownership/cost reason; G models do not enter F to satisfy an import. | Design/code/public type review. Reuse ordinary modules, existing finite presentation pool and E readonly connections; no repository/job engine/new worker/queue. |
 | F14 | Preserve #71 auto_history, #54 conditional status tick, canonical #77 watchdogs, source/generation/cache/paid-text invariants and main #82/#84. | Exact-source standard, real notification readiness, secret scan and meaningful commits; retain prior failures and native-vs-mock distinction. |
-| F15 | P3 current+List/Watch/count work/cost; P4 depth8/256 one query p95<=50ms; P2/P5 native long windows through manual CI measure. | Separate List and Watch cases (modes are exclusive). For hidden-output Watch, ensure producer is outside all visible scopes; visible clocks/output ages are genuine work, not silently treated as hidden. Retain original P2 strict-bin/CPU limits until resolved. |
+| F15 | P3 current+List/Watch/count work/cost; P4 depth8/256 one indexed query; record p95/CPU and existing P2/P5 CI observations. | Separate List and Watch cases (modes are exclusive). For hidden-output Watch, ensure producer is outside all visible scopes; visible clocks/output ages are genuine work, not silently treated as hidden. Apply6543044236: total draws/DB/read/query/cache counts are gates; timing/CPU are observations, with no variance rerun or strict-bin analysis. |
 | F16 | Complete independent guides/help/source labels and native80/wide dark/light/plain/fallback proof; three-OS main CI after approval. | Update English TUI/Agent and Japanese User Guide as applicable. Physical Windows UX stays explicitly unverified unless observed; no #83–#87 implementation. |
 
 Archive extraction anchors (not an admission recipe):33724db parent index,
@@ -677,3 +677,18 @@ Standard2,037/0/35 and Python41 succeed. See the F qualification record for
 exact sources, helper-preflight failures and binary witnesses. This closes the
 identified mode-memory gap, not the new exact3OS/main review/long-measurement
 gates. The earlier source's successful CI is not reused as the new source gate.
+
+
+## Current performance acceptance policy6543044236
+
+User/reviewer policy removes p95/CPU/DB-work-time and strict-bin acceptance
+conditions. Counted zero-work/batch/index/query/cache/total-draw conditions
+remain. Historical "open strict CPU/bin" paragraphs above are superseded, not
+unperformed measurements. F P2/P3/P4/P5 counts are now evidenced and times/CPU
+recorded; G P3/P6 counts remain its own later work. One available measure run is
+sufficient. Functional timing semantics and watchdogs remain unchanged.
+
+F's public feature candidate f286c5b already passes exact3OS CI41196986922 and
+native mode8 conditions. The local strict-bin-only clock-pacing branch5847799
+is preserved but excluded from this admission; optional tooling81c6f37 is not
+dispatched. Review follows the count audit in the F qualification record.

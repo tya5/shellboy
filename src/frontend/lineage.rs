@@ -498,8 +498,8 @@ mod tests {
         assert_eq!(trace.count(), 2);
     }
     #[test]
-    #[ignore = "P4 native timing observation; run explicitly without competing builds"]
-    fn measured_256_descendants_one_statement_p95_under_fifty_ms() {
+    #[ignore = "P4 native latency observation; no timing acceptance threshold"]
+    fn measured_256_descendants_one_statement_latency_observation() {
         for depth in [1, 8] {
             let mut db = fixture();
             thread(&db, "root", None);
@@ -527,12 +527,15 @@ mod tests {
             tx.commit().unwrap();
             let mut samples = Vec::new();
             for n in 0..40 {
+                let trace = Statements::new(&db);
                 let start = std::time::Instant::now();
                 let snapshot = one(&db, "root");
+                let elapsed = start.elapsed();
+                assert_eq!(trace.count(), 1, "one request stays one SQL statement");
                 assert_eq!(snapshot.threads.len(), 256);
                 assert_eq!(snapshot.truncated, depth == 1);
                 if n >= 10 {
-                    samples.push(start.elapsed());
+                    samples.push(elapsed);
                 }
             }
             samples.sort();
@@ -544,10 +547,7 @@ mod tests {
                 p95.as_micros(),
                 samples.last().unwrap().as_micros()
             );
-            assert!(
-                p95 < std::time::Duration::from_millis(50),
-                "depth={depth} p95={p95:?}"
-            );
+            // Time is recorded only; counts/cardinality remain acceptance checks.
         }
     }
     #[test]

@@ -4,6 +4,9 @@ This record qualifies specified F sources/workloads, not G or transferred
 #85–#87/#90 work. The [requirement ledger](../development/issue-41-plan.md)
 and [adopted design](../design/conversation-redesign.md) define the retained scope.
 
+Current policy: [6543044236 count-based acceptance](#current-acceptance-under-userreviewer-policy6543044236)
+supersedes historical strict timing/bin statements below; evidence keeps its source.
+
 ## Functional and native observations
 
 F67cc688 ordinary3OS CI41182628647 succeeds on Linux2017/0/34,
@@ -178,7 +181,7 @@ remain explicit final gates rather than inferred from earlier successful runs.
 | F12 | Main observation index16 retained; only F parent lookup index17. Fresh-schema/upgrade/rollback/reopen tests and backup guidance; numbering rechecked at main2b3cd91. |
 | F13 | No G models, new table, worker or queue. Raw saved facts remain shared; session/discovery state is frontend-owned. Readonly snapshot ownership and projection bounds are in the adopted design. |
 | F14 | Exact-source standards/3OS CI above; #71/#54/#77/#83/#84 retained. Main2b3cd91 owner-session extraction retained; its only F difference is the migration-fixture index drop. Final integration qualification pending. |
-| F15 | Source-qualified native P3/P4 and formal long P2/P5 above. Later presentation/integration source is not relabelled; final follow-up and unresolved strict P2 before-bin/CPU interpretation remain visible to review. |
+| F15 | Source-qualified native P3/P4 and formal long P2/P5 above. Later presentation/integration source is not relabelled; count gates apply under6543044236; timing/CPU values remain source-qualified observations. |
 | F16 | Independent English TUI/Agent and Japanese User Guide, help/completion; native8-condition PTYs and actual80/140 WezTerm images. Final3OS candidate/main gate and reviewer approval remain open; physical Windows UX unverified. |
 
 Real macOS WezTerm80x40 and140x40 captures use an isolated synthetic failed-run
@@ -292,3 +295,62 @@ those exact source-qualified observations; no final-source CPU claim is inferred
 The corrected source needs its own published exact-SHA ordinary3OS gate and
 separate main admission approval. The known #95 integration remains owned by
 its worker; retain that guard when incorporating its main change. G stays later.
+
+
+## Current acceptance under user/reviewer policy6543044236
+
+This section supersedes historical strict-bin/CPU/p95 gate language above.
+Timing/CPU/DB-work durations are recorded observations. Acceptance retains
+zero display work, bounded/indexed SQL/request counts, cache/source limits and
+total draws. No variance rerun or strict-bin analysis is required. The local
+strict-clock prototype5847799 is preserved but excluded from admission; the
+Watch-only tooling81c6f37 is not dispatched. Feature candidate remainsf286c5b
+with its successful3OS source gate41196986922.
+
+One full measure run41193740385 provides all32 Unix windows, exact E d0a92bf
+and F4b61c0f source/build/binary/harness witnesses, full durations and exit0.
+All12 silent-work windows have0 UI/display writer jobs,0 readonly opens and0
+UI read-task admissions. Existing unrelated index/maintenance/Core jobs remain
+separately counted in the raw records; these are not falsely reported as zero
+owner-wide work. All20 hidden-output windows have0 draws and those same zero
+display-read counters at actual53.993–150 committed outputs/s/three producers.
+For silent clocks, count the elapsed integer-second opportunities over the
+observed interval, including its partial final second (`ceil(actual seconds)`),
+not arbitrary histogram boundaries. Every P2 total is within that count; no
+extra real-time guarantee is inferred.
+
+| Platform/columns | Common P2 draws before/F | F Watch draws | Elapsed seconds before / F common / F Watch | P5 draws/display reads across all available cases |
+| --- | ---: | ---: | --- | --- |
+| Linux/80 | 600/600 | 601 | 600.020 / 600.020 / 600.020 | 0 / 0 |
+| Linux/140 | 600/600 | 601 | 600.020 / 600.020 / 600.020 | 0 / 0 |
+| macOS/80 | 600/600 | 460 | 600.042 / 600.164 / 600.191 | 0 / 0 |
+| macOS/140 | 600/600 | 517 | 600.166 / 600.056 / 600.149 | 0 / 0 |
+
+| Retained gate | Actual evidence |
+| --- | --- |
+| P2 zero display DB work/total draws |32-window artifact/count audit; all silent totals600/601 or lower within ceil(actual elapsed seconds), display counters0. Unchanged visible clock tick returns false in state tests. |
+| P3 combined consumers |Native six cases/96 measured actual CLI edits at3c6d9f3:16 shared snapshots/16 edits; Program Status on separately adds16 preexisting status reads, off isolates16.0 UI writer jobs; actual same-sequence/in-flight/cancel tests pass all3 OSes. Times remain recorded above. G's inspector counts remain its later scope. |
+| P4 indexed/bounded one-query |Default lineage tests cover EXPLAIN/index use and unrelated cardinality, one statement/root, depth8/discovery256, two roots/two statements, cycles/deletion/truncation. Native p95 values3.607/4.078ms are observations only. Optional timing test now retains query/cardinality assertions and no p95 ceiling. |
+| Bounded source/cache |2000 row/seen caps,128 visible detail IDs,16KiB/row and64KiB batch source witnesses before parse/copy, bounded lineage/frontier/query counters, cache eviction/stale-generation tests. Requested-live shape accounting remains its specified observation, not a hard total-heap claim. |
+| P5 hidden output |All20 actual windows>=40 commits/s with0 draws/display DB jobs/readonly opens/read tasks; producer outside each visible scope. |
+
+CPU observations are source-qualified, not gate failures or speedup claims:
+
+| Platform/columns | P2 CPU before / F | F Watch CPU | P5 hidden CPU before / F | P5 List CPU before / F | F scoped Watch CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Linux/80 | 3.75133/3.74728 | 3.76151 | 7.31015/7.29115 | 7.57411/7.41766 | 7.34298 |
+| Linux/140 | 3.82110/3.82345 | 3.83819 | 8.09572/8.19149 | 8.01741/8.50645 | 8.47172 |
+| macOS/80 | 0.27429/0.26681 | 0.28836 | 3.65858/3.81865 | 3.59925/3.74286 | 4.14584 |
+| macOS/140 | 0.35304/0.37989 | 0.37113 | 3.58646/3.65048 | 3.54092/3.58159 | 3.53079 |
+
+No common before/after CPU observation here exceeds2x; Watch has no E counterpart,
+so no zero-cost baseline or comparison is invented. Earlier P3/P4 times remain
+recorded under their original sources. Windows performance stays unavailable;
+functional3OS CI is separate. No new latency/CPU repeat is needed under6543044236.
+
+Candidate f286c5b ordinary3OS CI41196986922 artifacts identify exact source,
+failures0 and all8 targeted success lines on every OS: Linux2,038/0/34,
+macOS2,037/0/35, Windows1,905/0/26. This is distinct from the unadopted strict-
+clock branch's tests. F1–F16 feature/functional/count evidence is ready for review;
+F main still requires reviewer approval and reconciliation with then-current main
+(including separately integrated fixes such as #95/#96). G remains later.

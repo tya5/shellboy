@@ -313,29 +313,46 @@ Ignore Changed IDs outside the cached descendant set unless new-Thread evidence
 can affect that scope. Watch details use one visible-ID batch, sanitized/formatted
 at fetch time. Explicit truncation/cycle/deletion semantics remain unchanged.
 
-### Mandatory performance evidence per applicable increment
+### Performance counts and observations (6543044236)
 
-Compare the same synthetic fixtures against baseline main1fec7f0; report native
-OS/terminal, fixture counts, command, samples and unmeasured cases. These are
-admission measurements, not claims inferred from passing functional tests:
+The user/reviewer decision6543044236 supersedes the former P1–P7 latency/CPU
+thresholds and strict one-second-bin conditions. Compare a specified synthetic
+fixture and record OS/terminal, source/baseline, command, actual counts, observed
+values and unavailable cases. One available CI measure run is sufficient; do
+not repeat measurements to characterize variance or analyse strict time bins.
 
-1. B+C:128-node window/50 tool rows, repeated focus and open/close. UI handling +
-   draw p95 target<=8ms and no more than2ms above baseline; focus must reuse layout.
-2. D/F: one silent background shell for10min: at most1 redraw/sec, zero DB jobs per
-   clock tick, and CPU no worse than baseline; report CPU/sample uncertainty.
-3. B+C/D/E/F/G: visible active Thread Changed with applicable list/watch/count
-   consumers: DB-worker jobs and aggregate time before/after, with shared batching.
-4. F:256 descendants/depth8: one-query p95 target<=50ms, and slow-only diagnostics
-   through the existing bounded writer; no per-descendant diagnostic flood.
-5. D/E/F: hidden Thread output at40 batches/sec causes zero visible redraws and
-   zero output-induced DB jobs for visible consumers.
-6. G:64KiB original popup,60 wheel events/sec: frames<=max_fps and UI/draw p95 within
-   the same<=8ms/+2ms target, using cached wrapped rows.
-7. B+C:128 expanded previews at16KiB each: retained bytes conform to the shared
-   body-cache accounting (including metadata), with correct eviction/rehydration.
+Acceptance gates are countable behavior: no display DB jobs on unchanged clock
+ticks/silent work; hidden output causes no visible redraw/read; bounded batch/
+source/cache counts; indexed SQL (`EXPLAIN QUERY PLAN`); one statement/root for
+descendants; total draws stay within actual changes plus elapsed clock seconds.
+Use total elapsed-second opportunities, including a partially observed second,
+rather than arbitrary one-second histogram boundaries. Existing unrelated Core
+maintenance jobs remain separately classified, not called UI jobs or hidden
+from aggregate cost records.
 
-If a target requires adjustment based on native baseline evidence, record that
-reason and measured impact before admission; do not silently drop the requirement.
+1. B+C:128 nodes/50 tool rows; focus reuses layout. Record UI/draw p95 and baseline
+   delta, with no8ms/+2ms acceptance assertion.
+2. D/F: one silent background shell over the recorded10min window:0 UI/display
+   DB jobs and bounded total clock-driven draws. Record CPU, never assert
+   CPU-no-worse or a strict per-bin ceiling.
+3. Visible Thread Changed with applicable List/Watch/count consumers: shared
+   batch/job/read counts remain gates. Record DB/readonly work and latency only.
+4. F:256 descendants/depth8:one SQL statement/root, indexed/bounded traversal.
+   Record p95; no50ms performance assertion. The existing50ms slow-diagnostic
+   trigger only controls log volume and remains distinct from acceptance.
+5. D/E/F:hidden output at the specified load causes0 visible redraws and0 display
+   DB reads/jobs; record actual producers/output commits.
+6. G:64KiB original/60 wheel events per second:cache/wrap reuse and total frame
+   count within configured max_fps/actual event budget. Record p95/baseline delta
+   only, with no8ms/+2ms assertion.
+7. B+C:128x16KiB expanded previews stay within shared retained-body accounting,
+   including metadata and explicit finite working-set exceptions; evict/rehydrate.
+
+Notify the reviewer of an obvious observed regression (for example >2x) rather
+than automatically fail time/CPU observations. Functional/configured deadlines,
+coalescing/rate policy and60s watchdogs are unchanged. Historical measurements
+and prior acceptance decisions retain their sources; this is an explicit policy
+revision, not relabelling or removal of observed data.
 
 
 ### B+C freshness follow-up after first-unit review6523314574

@@ -2249,3 +2249,22 @@ comparison. The common External row remains labeled 外から, uses the existing
 user-marker palette and has width_cjk()==1. Candidate A was provisional only.
 The reviewer states this visual choice is approved; qualification/integration
 remain delegated to worker4. No confirmation dialog, color or protocol is added.
+
+
+## Adopt #41 count-based performance acceptance6543044236
+
+The user/reviewer explicitly removes p95/CPU/DB-work-duration and strict-bin
+acceptance thresholds, with one available measure run sufficient. Retain zero
+UI/display jobs/reads/draws, indexed SQL/query/batch/cache and total-frame counts;
+record timing/CPU and alert review only to an obvious measured regression.
+All32 run41193740385 windows satisfy the retained scope counts;601 frames are
+within ceil(actual elapsed seconds), including partial endpoint opportunities.
+Unrelated Core maintenance is separately classified, not silently zeroed.
+
+Do not adopt strict-bin-only clock-pacing prototype5847799 or dispatch the
+optional Watch follow-up81c6f37. Both remain preserved; the already qualified
+f286c5b feature source is the admission base. This avoids adding UI pacing state
+for a superseded guarantee. Remove the optional P4 p95 assertion while keeping
+its cardinality/one-statement assertions and observation output. Functional
+configured deadlines/coalescing and watchdogs remain. Revisit only if a new
+explicit count/behavior requirement or obvious observed regression warrants it.

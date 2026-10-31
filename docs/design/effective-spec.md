@@ -13,6 +13,15 @@ Shellboyの開発で使う採用仕様の入口です。仕様の採用と実装
 
 Shellboyへの改名では旧名の実行名・環境変数・既定保存先への互換を提供しない。旧データの移動は不要であり、既存環境を変更しない。新しい既定保存先は [setup](../development/setup.md) に記載する。
 
+## #41 performance acceptance policy
+
+User/reviewer decision6543044236 makes p95/CPU/DB-work durations observations,
+not acceptance thresholds. Keep zero display-work, indexed/bounded SQL/query,
+cache and total-draw count gates; do not repeat for variance or strict bins.
+See [the adopted count policy](conversation-redesign.md#performance-counts-and-observations-6543044236)
+and the source-qualified F record. Operational deadlines/rate semantics and
+watchdogs remain unchanged.
+
 ## Current conversation storage
 
 Conversation schema17 records selected-path admission (13), Turn interruption

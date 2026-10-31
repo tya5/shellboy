@@ -2488,3 +2488,21 @@ source/binary witnesses and prior negative/config preflights remain in the F
 qualification record. Corrected F publication/exact3OS follows this result.
 Long4b61c0f measurement41193740385 is still live and not relabelled. No main
 admission, G implementation, installed-binary or user-store change occurred.
+
+
+## F ready for count-policy review6543044236
+
+Adopt the user/reviewer count-only acceptance policy. All32 full run41193740385
+windows are audited: silent work has0 display DB jobs/reads and bounded total
+600/601-or-lower draws within actual elapsed-second opportunities; all20 P5
+windows53.993–150 commits/s have0 draws/display reads. Existing non-UI/Core
+maintenance remains separately counted. Timing/CPU and P3/P4 values are records,
+not pass/fail thresholds. No variance/strict-bin rerun is needed.
+
+F feature sourcef286c5b3OS CI41196986922 is fully green, actual artifact source/
+zero failures/all8 required successes verified: Linux2,038/0/34, macOS2,037/0/35,
+Windows1,905/0/26. Preserve but exclude local strict-clock5847799; do not dispatch
+optional profile81c6f37. Current cleanup changes only policy docs and the ignored
+P4 observation test (retain SQL/cardinality assertions, remove timing assertion).
+F review can proceed on this concrete feature/count packet. Main admission still
+needs reviewer approval and then-current main reconciliation; G remains later.
