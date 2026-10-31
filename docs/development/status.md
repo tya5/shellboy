@@ -3323,3 +3323,10 @@ unrun pending the shared-slot grant; no performance or native-OS claim yet.
 Use current UTC started_at string comparisons over capped primary-rowid pages;
 report excluded-time/outside-period counts. Added query-plan/count proof without
 new schema objects. Rust qualification is still pending the assigned shared slot.
+
+#101 qualified sourcefda663e4/base1ac2277e: explicit-manifest own-path recompilation
+and positive12+1+1 targeted gates passed, then full standard2144/0/35 plus
+Python71/layout94/fmt/strict Clippy. No schema/migration/index remains. The
+prior cb8 Clippy size failure and stopped00d3 zero-match artifacts remain invalid
+history, not passes. Only own entry-file mtimes changed to force qualification;
+shared artifacts were not deleted. Native3OS integration remains coordinator-owned.

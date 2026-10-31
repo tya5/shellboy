@@ -6975,3 +6975,18 @@ only for three new optional text arguments, preserving JSON strings/null/empty
 and cursor/timezone behavior without UI/G edits or lint suppression. Regression
 assertions cover <=200byte Command and serde roundtrips; corrected source remains
 unqualified until a new explicit shared-slot check. No index/schema/migration.
+
+#101 latest-source qualification: chain797554cd-26da-4509-82e9-ba43ef90fb16
+exited0 at2026-10-31T22:28:46Z, group cleanup confirmed. Exact checked code
+fda663e4953be7a0b2ff63e68c468909af535128 / base1ac2277eaa1ffe87da9b175bc93ff62cbeecc118.
+Approved own src/lib.rs and tests/integration/main.rs mtime updates (no byte
+changes/deletion) plus explicit manifest and verbose compile proved the actual
+own source path. Breakdown12, CLI1 and held-writer1 passed positive count gates.
+Full standard2144 passed/0 failed/35 ignored (lib1168,integration957,examples19),
+Python71/layout94/fmt/strictClippy/policy passed. Fixed stats/caps/EXPLAIN and
+excluded-time/nullable-wire/Command-size assertions all ran. Synthetic exact and
+capped read observations2.798/62.872ms are not thresholds or production timings.
+No index/schema/migration, separate binary/PTY, provider or user-data work ran.
+The earlier Clippy failure and invalid zero-match chain remain in issue101 and
+/tmp logs; neither qualifies corrected code. Native3OS/latest-main integration
+is still separate. This record-only follow-up does not change the checked code.
