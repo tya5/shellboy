@@ -687,9 +687,9 @@ The directory is required for shutdown too; inherited endpoint variables cannot
 select another owner. Requests are pinned to the observed instance, and a stale
 instance cannot stop a restarted owner. TUI owners reject this command. Existing
 local IPC/OS access is the authority, not sender-label or a human approval claim.
-Owner replacement does not transfer work or reconnect a UI. Parent background
-shell/nested Job and full failure-boundary qualification remain #5 stage 4; use
-disposable directories until those lifecycle checks land.
+Owner replacement does not transfer work or reconnect a UI. Native ownership and
+failure-boundary qualification is tracked in issue #5; use disposable directories
+for experiments.
 
 ### Terminal-free ownership and interruption
 

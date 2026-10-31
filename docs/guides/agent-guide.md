@@ -445,8 +445,8 @@ stderr. Use `shutdown --data-dir DIR` on every OS, or Unix SIGTERM/SIGHUP, to
 request the common cleanup. Accepted means saved request, not completed cleanup:
 observe the process and final stopped JSON. No final row after force-kill does
 not establish success. No bounded completion time or owner handover/reconnect is
-promised. TUI owners reject shutdown RPC. Parent/nested Job qualification and the
-complete recovery-wait workflow remain later #5 checks; use disposable data.
+promised. TUI owners reject shutdown RPC. Native ownership/recovery qualification
+is tracked in issue #5; use disposable data for experiments.
 
 Headless owners remain owned descendants of their launching background shell;
 parent shell/Run/owner stop can terminate them and their tools. Do not detach or
