@@ -793,7 +793,10 @@ fn summary_key(s: &Snapshot, sources: &[Source]) -> String {
     key(&(
         FORMAT,
         PROMPT,
-        if sources.iter().any(|source| summary_marker_item(&source.payload).is_some()) {
+        if sources
+            .iter()
+            .any(|source| summary_marker_item(&source.payload).is_some())
+        {
             MARKER_ADAPTER
         } else {
             ADAPTER
@@ -884,7 +887,9 @@ fn render(source: &Source, epoch: i64) -> String {
     // the ordinary outbound item projection for both sizing and emitted text.
     let mut value = if let Some(item) = summary_marker_item(&source.payload) {
         crate::control::replay::convert(json!({"item":item}), epoch)
-            .into_iter().next().unwrap_or_else(|| source.payload.clone())
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| source.payload.clone())
     } else {
         source.payload.clone()
     };
@@ -1179,43 +1184,99 @@ mod tests {
     }
     #[test]
     fn context_trim_summary_uses_projected_item_not_provenance_arrays() {
-        for count in [1076,4096] {
-            let ids=(0..count).map(|i|format!("00000000-0000-4000-8000-{i:012}")).collect::<Vec<_>>();
-            let payload=json!({"item":{"role":"developer","id":"provider-local","content":[{"type":"input_text","text":"Shellboy context notice: original history remains retrievable."}]},
+        for count in [1076, 4096] {
+            let ids = (0..count)
+                .map(|i| format!("00000000-0000-4000-8000-{i:012}"))
+                .collect::<Vec<_>>();
+            let payload = json!({"item":{"role":"developer","id":"provider-local","content":[{"type":"input_text","text":"Shellboy context notice: original history remains retrievable."}]},
                 "context_trim":{"version":1,"original_order":ids,"retained_node_ids":[]},"source_node_ids":ids});
-            let marker=source("marker",None,payload.clone());
-            assert!(payload.to_string().chars().count()>SEGMENT_CHARS);
-            let text=render(&marker,0);
-            let projected=crate::control::replay::convert(payload.clone(),0);
+            let marker = source("marker", None, payload.clone());
+            assert!(payload.to_string().chars().count() > SEGMENT_CHARS);
+            let text = render(&marker, 0);
+            let projected = crate::control::replay::convert(payload.clone(), 0);
             assert!(text.contains(&projected[0].to_string()));
-            assert!(!text.contains("original_order") && !text.contains("source_node_ids") && !text.contains("provider-local"));
-            assert!(text.chars().count()<2048);
-            assert_eq!(marker.payload,payload);
-            assert_eq!(segments(&[Group{sources:vec![marker],complete:true,tool:false}],0).unwrap(),vec![(0,1,0)]);
+            assert!(
+                !text.contains("original_order")
+                    && !text.contains("source_node_ids")
+                    && !text.contains("provider-local")
+            );
+            assert!(text.chars().count() < 2048);
+            assert_eq!(marker.payload, payload);
+            assert_eq!(
+                segments(
+                    &[Group {
+                        sources: vec![marker],
+                        complete: true,
+                        tool: false
+                    }],
+                    0
+                )
+                .unwrap(),
+                vec![(0, 1, 0)]
+            );
         }
     }
     #[test]
     fn context_trim_large_visible_notice_still_obeys_group_limit_and_actionable_hint() {
-        let marker=source("marker",None,json!({"context_trim":{"version":1},"item":{"role":"developer","content":[{"type":"input_text","text":"x".repeat(SEGMENT_CHARS+1)}]}}));
-        let error=segments(&[Group{sources:vec![marker],complete:true,tool:false}],0).unwrap_err();
-        let hint=error.hint.as_deref().unwrap();assert!(hint.contains("--omit") && hint.contains("--maximal"));
+        let marker = source(
+            "marker",
+            None,
+            json!({"context_trim":{"version":1},"item":{"role":"developer","content":[{"type":"input_text","text":"x".repeat(SEGMENT_CHARS+1)}]}}),
+        );
+        let error = segments(
+            &[Group {
+                sources: vec![marker],
+                complete: true,
+                tool: false,
+            }],
+            0,
+        )
+        .unwrap_err();
+        let hint = error.hint.as_deref().unwrap();
+        assert!(hint.contains("--omit") && hint.contains("--maximal"));
     }
     #[test]
     fn context_trim_invalid_marker_and_non_marker_audit_are_not_hidden() {
-        for payload in [json!({"context_trim":{"version":1},"item":null,"audit":"retain"}),
-            json!({"item":{"role":"developer","content":[]},"audit":"retain"})] {
-            assert!(render(&source("audit",None,payload),0).contains("retain"));
+        for payload in [
+            json!({"context_trim":{"version":1},"item":null,"audit":"retain"}),
+            json!({"item":{"role":"developer","content":[]},"audit":"retain"}),
+        ] {
+            assert!(render(&source("audit", None, payload), 0).contains("retain"));
         }
     }
     #[test]
     fn context_trim_projection_versions_only_its_summary_cache_keys() {
-        let old_key=|snapshot:&Snapshot,sources:&[Source]|key(&(FORMAT,PROMPT,ADAPTER,&snapshot.profile,&snapshot.model,&snapshot.effort,snapshot.epoch,
-            sources.iter().map(|n|(&n.id,n.revision,&n.hash,&n.attachments)).collect::<Vec<_>>()));
-        let snapshot=fixture_snapshot(Vec::new());
-        let ordinary=vec![source("normal",None,json!({"role":"user","content":"normal"}))];
-        assert_eq!(summary_key(&snapshot,&ordinary),old_key(&snapshot,&ordinary));
-        let marker=vec![source("marker",None,json!({"context_trim":{},"item":{"role":"developer","content":"notice"}}))];
-        assert_ne!(summary_key(&snapshot,&marker),old_key(&snapshot,&marker));
+        let old_key = |snapshot: &Snapshot, sources: &[Source]| {
+            key(&(
+                FORMAT,
+                PROMPT,
+                ADAPTER,
+                &snapshot.profile,
+                &snapshot.model,
+                &snapshot.effort,
+                snapshot.epoch,
+                sources
+                    .iter()
+                    .map(|n| (&n.id, n.revision, &n.hash, &n.attachments))
+                    .collect::<Vec<_>>(),
+            ))
+        };
+        let snapshot = fixture_snapshot(Vec::new());
+        let ordinary = vec![source(
+            "normal",
+            None,
+            json!({"role":"user","content":"normal"}),
+        )];
+        assert_eq!(
+            summary_key(&snapshot, &ordinary),
+            old_key(&snapshot, &ordinary)
+        );
+        let marker = vec![source(
+            "marker",
+            None,
+            json!({"context_trim":{},"item":{"role":"developer","content":"notice"}}),
+        )];
+        assert_ne!(summary_key(&snapshot, &marker), old_key(&snapshot, &marker));
     }
     #[test]
     fn segment_boundaries_never_split_a_group() {
