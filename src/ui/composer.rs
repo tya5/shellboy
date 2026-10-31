@@ -112,7 +112,7 @@ const COMMANDS: &[CommandHint] = &[
     },
     CommandHint {
         name: "/image",
-        help: "画像を貼付け",
+        help: "クリップボードの画像を下書きに添付",
     },
     CommandHint {
         name: "/paste-image",

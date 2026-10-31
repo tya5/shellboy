@@ -2735,3 +2735,16 @@ checks Run get's shared `run_details` result/JSON and selected activity projecti
 for eight damaged/missing witness cases. No boundary ordering or source mutation
 was added. Review correction is formatted and diff-checked; its Rust regression
 and standard check are deferred to the next allocated gate, not claimed passed.
+## Contextual bottom-row guidance (#87, stage 1)
+
+Readonly detail case handling is followed by a UI-only key vocabulary and cached
+2-4-action hints for composer, running Turn, history/live-work focus, selection,
+completions and popup modes. Configured send/newline keys are projected; notices
+retain priority and hints are right-aligned with whole-action reduction to F1.
+F1 can cover and return to a popup without discarding it. Help puts copying and
+attachments near the start; empty composer and /image discovery teach explicit
+image acquisition without probing the clipboard. Recovery contents/active filter
+and activity facts remain with #85. Validation and remaining scope are recorded
+in acceptance; this is not completion of #87's canonical code-copy chooser,
+numbered block targets, bare /copy preference, complete-block retrieval, copy
+counts or image-failure alternatives. Core/schema/protocol remain unchanged.

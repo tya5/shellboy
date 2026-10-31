@@ -438,6 +438,13 @@ impl Operations {
             self.filter_text(text);
         }
     }
+    pub(super) fn hint_context(&self) -> super::key_hints::Context {
+        if self.form.is_some() {
+            super::key_hints::Context::Form
+        } else {
+            super::key_hints::Context::Popup
+        }
+    }
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
         if let Some(form) = &mut self.form {
             if key.code == KeyCode::Esc {

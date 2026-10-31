@@ -5972,3 +5972,41 @@ rebase attempt encountered conflicts in `docs/design/control.md` and
 `tests/runtime_features.rs` while replaying the initial feature commit; it was
 aborted without retaining partial integration. Latest-main integration and its
 native CI remain separate, with the integrator. No whole-stack equivalence claim.
+## #87 stage 1: contextual hints and readonly navigation
+
+macOS arm64, Rust 1.99.1, synthetic temporary databases only. UI-focused tests
+passed 352/0 (3 ignored) before the shared readonly-key helper gained an explicit
+Ctrl/Alt preservation test. Subsequent full library run passed 1013/0 (13 ignored).
+Width 0..179, configured send/newline invalidation and unchanged-cache reuse,
+notice precedence in history focus, real original-page continuation availability,
+and F1 popup return are covered. Initial standard runs exposed old label/help
+expectations and an F1 Thread-information regression; those are corrected, and
+ui::dense_thread_rows_and_selected_preview_stay_compact passes independently.
+The last full run did NOT pass: frontend::persisted_output_identity_is_delivered_
+before_each_history_window hit its existing 60-second watchdog after 927 other
+integration passes (17 ignored). No watchdog/test-state weakening is applied;
+a final latest-main check remains required. Evidence: /tmp/issue-87-check-final.log,
+/tmp/issue-87-check-verified.log, /tmp/issue-87-thread-f1-test.log.
+
+Native PTYs using the existing standard-library helper passed 16 combinations:
+80/140 columns; dark/light/NO_COLOR/vt100; default Enter and custom Ctrl+Enter
+send bindings. All cover empty composer/image guidance, typing/newline keys,
+completion, F2 long-answer escape guidance and return. Eight default-binding
+cases also cover canonical saved Markdown, history focus, details, uppercase O/C,
+real OSC52 bytes (not a host clipboard claim), F1 over original and Esc return.
+Separate loopback SSE holds an actual Turn open and confirms Esc interruption /
+Ctrl+C stopping hints at both widths. Evidence: /tmp/issue-87-hints-pty-v5/
+(manifest includes the binary hash) and /tmp/issue-87-running-pty/. Earlier PTY
+attempts used incorrect predicates (newline alias rendering, an offscreen heading,
+an old popup title, and clipped notice suffix); their failed observations remain
+in /tmp/issue-87-hints-pty*.log. No product fix is inferred from those harness
+predicate corrections. The final source adds pending-original suppression and
+preserves Thread-browser F1 information; a rebuilt final-source capture and
+latest-main standard check are still required before final qualification.
+
+No paid provider, real clipboard/image acquisition, user data/config, installed
+binary, release, Core event/schema or protocol change is part of this stage.
+Windows/Linux native PTYs and measured P1 interaction comparison remain untested.
+The canonical code-copy chooser, numbered block targets, /copy preference/all,
+finite complete-block retrieval, copy character counts and image-failure /attach
+alternatives remain pending; these observations do not establish #87 completion.

@@ -364,6 +364,7 @@ impl ManagementPopup {
             .max(1)
     }
     pub(super) fn key(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Outcome {
+        let key = key_hints::readonly_key(key);
         if self.mode == ManagementMode::Received
             && key.code == KeyCode::Enter
             && let Some(field) = self.structured().and_then(|s| s.fields.get(s.selected))

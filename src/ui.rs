@@ -31,6 +31,7 @@ mod history_items;
 pub(crate) use history_items::ItemState as PreviewItemState;
 pub use history_items::{ItemKey, Preview as ToolPreview};
 mod input;
+mod key_hints;
 mod lifecycle;
 mod management;
 mod message_queue;
@@ -1523,6 +1524,7 @@ pub struct UiState {
     #[cfg(test)]
     retention_passes: usize,
     animation: activity::Animation,
+    key_hints: key_hints::Cache,
     pub views: BTreeMap<String, ThreadView>,
     pub active: String,
     thread_browser: threads::ThreadBrowser,
@@ -1530,6 +1532,8 @@ pub struct UiState {
     pub selection_mode: bool,
     selection_frozen_at: Option<String>,
     pub help_visible: bool,
+    // F1 can temporarily cover a popup without discarding its selection/source.
+    help_above_popups: bool,
     help_page: help::Page,
     help_scroll: u16,
     viewport: Rect,
@@ -1618,6 +1622,7 @@ impl UiState {
             diagnostics: None,
             bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
+            key_hints: key_hints::Cache::default(),
             views: BTreeMap::from([(active.clone(), view)]),
             active,
             thread_browser: threads::ThreadBrowser::default(),
@@ -1625,6 +1630,7 @@ impl UiState {
             selection_mode: false,
             selection_frozen_at: None,
             help_visible: false,
+            help_above_popups: false,
             help_page: help::Page::guide(config),
             help_scroll: 0,
             viewport: Rect::default(),
@@ -4845,12 +4851,26 @@ impl UiState {
             _ => vec![],
         }
     }
+    fn draw_help(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let body = popup::panel(
+            frame,
+            area,
+            self.help_page.title,
+            self.help_page.context,
+            HELP_FOOTER,
+        );
+        let lines = self.help_page.lines(popup::reader_width(body));
+        self.help_scroll = popup::reader(frame, body, &lines, self.help_scroll);
+    }
     fn draw_overlays(
         &mut self,
         frame: &mut Frame<'_>,
         area: Rect,
     ) -> Vec<crate::terminal_links::LinkRegion> {
         let mut link_regions = Vec::new();
+        if self.help_visible && !self.help_above_popups {
+            self.draw_help(frame, area);
+        }
         let status = self
             .views
             .get(&self.active)
@@ -4865,6 +4885,10 @@ impl UiState {
         }
         if let Some(models) = &mut self.models {
             models.draw(frame, area);
+            link_regions.clear();
+        }
+        if self.help_visible && self.help_above_popups {
+            self.draw_help(frame, area);
             link_regions.clear();
         }
         if self.is_quitting() {
@@ -5458,7 +5482,14 @@ fn draw_input(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(state.palette.muted())),
+                .border_style(Style::default().fg(state.palette.muted()))
+                .title_bottom(
+                    if state.view().draft.text.is_empty() && input_area.width >= 60 {
+                        "/image 画像を添付 · /attach パス"
+                    } else {
+                        ""
+                    },
+                ),
         ),
         input_area,
     );
@@ -5522,24 +5553,10 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     {
         spans.push(Span::raw(format!(" · {label}")));
     }
-    let mut lines = chrome::footer_lines(
-        view,
-        area.width,
-        state.selection_mode,
-        state.palette,
-        spans,
-        notice,
-    );
-    if view.items.active
-        && let Some(line) = lines.get_mut(1)
-    {
-        *line = Line::from("↑↓ 項目 · Space 開閉 · o 原文 · c コピー · Esc 入力");
-    }
-    if view.live_work.active
-        && let Some(line) = lines.get_mut(1)
-    {
-        *line = Line::from("↑↓ 作業 · Space 出力 · F6 詳細 · o 子へ · Esc 入力");
-    }
+    let hints = state
+        .key_hints
+        .text(state.hint_context(), area.width, &state.config);
+    let lines = chrome::footer_lines(view, area.width, &hints, state.palette, spans, notice);
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -5722,17 +5739,6 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         state
             .thread_browser
             .draw(frame, popup_area, active, notice_visible);
-    }
-    if state.help_visible {
-        let body = popup::panel(
-            frame,
-            popup_area,
-            state.help_page.title,
-            state.help_page.context,
-            HELP_FOOTER,
-        );
-        let lines = state.help_page.lines(popup::reader_width(body));
-        state.help_scroll = popup::reader(frame, body, &lines, state.help_scroll);
     }
     let overlay_links = state.draw_overlays(frame, popup_area);
     state.visible_links = overlay_links;

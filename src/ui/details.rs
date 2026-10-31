@@ -1,4 +1,5 @@
 //! Transient selected-node detail navigation; canonical viewport/draft stay unchanged.
+use super::key_hints::Action;
 use super::popup::Item as ListItem;
 use super::theme;
 use super::{ThreadView, UiAction, UiNode, popup};
@@ -884,21 +885,26 @@ impl Details {
             request_id: self.request_id,
         }
     }
+    pub(super) fn hint_context(&self) -> super::key_hints::Context {
+        use super::key_hints::Context;
+        match self.mode {
+            Mode::Original if self.original.is_none() => Context::OriginalPending,
+            Mode::Original => Context::Original {
+                next: self
+                    .original
+                    .as_ref()
+                    .is_some_and(|b| b.next_cursor.is_some()),
+            },
+            Mode::Fields => Context::Fields,
+            _ => Context::Details,
+        }
+    }
     pub fn key(&mut self, key: KeyEvent, view: &ThreadView, next: &mut u64) -> Outcome {
         self.sync_node(view);
-        let code = match key.code {
-            KeyCode::Char(letter)
-                if !key.modifiers.intersects(
-                    crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::ALT,
-                ) =>
-            {
-                KeyCode::Char(letter.to_ascii_lowercase())
-            }
-            code => code,
-        };
+        let code = super::key_hints::readonly_key(key).code;
         match code {
             KeyCode::Esc => return Outcome::Close,
-            KeyCode::Char('r') if !matches!(self.mode, Mode::Original) => {
+            code if Action::Refresh.matches(code) && !matches!(self.mode, Mode::Original) => {
                 self.invalidate_sources();
                 if !self.links_pending
                     && let Some(thread) = view.thread_id.clone()
@@ -931,13 +937,15 @@ impl Details {
                 self.selected = 0;
                 self.scroll.set(0);
             }
-            KeyCode::Char('o') => return Outcome::Action(Box::new(self.original(None, next))),
-            KeyCode::Char('n') if matches!(self.mode, Mode::Original) => {
+            code if Action::Original.matches(code) => {
+                return Outcome::Action(Box::new(self.original(None, next)));
+            }
+            code if Action::NextPage.matches(code) && matches!(self.mode, Mode::Original) => {
                 if let Some(cursor) = self.original.as_ref().and_then(|b| b.next_cursor.clone()) {
                     return Outcome::Action(Box::new(self.original(Some(cursor), next)));
                 }
             }
-            KeyCode::Char('p') if matches!(self.mode, Mode::Original) => {
+            code if Action::FirstPage.matches(code) && matches!(self.mode, Mode::Original) => {
                 return Outcome::Action(Box::new(self.original(None, next)));
             }
             KeyCode::PageDown if matches!(self.mode, Mode::Original) => self.scroll.set(
@@ -960,13 +968,15 @@ impl Details {
             KeyCode::PageUp => self.selected = self.selected.saturating_sub(self.page.get()),
             KeyCode::Up => self.selected = self.selected.saturating_sub(1),
             KeyCode::Down => self.selected = self.selected.saturating_add(1),
-            KeyCode::Char('v' | 'V') if matches!(self.mode, Mode::Fields) => {
+            code if Action::Fields.matches(code) && matches!(self.mode, Mode::Fields) => {
                 self.internal_fields = !self.internal_fields;
                 self.selected = 0;
                 self.scroll.set(0);
             }
-            KeyCode::Char('a') => return Outcome::Operation(super::operations::OpKind::HistoryGet),
-            KeyCode::Char('c') => {
+            code if Action::Operations.matches(code) => {
+                return Outcome::Operation(super::operations::OpKind::HistoryGet);
+            }
+            code if Action::Copy.matches(code) => {
                 let text = match self.mode {
                     Mode::Nodes => Some(self.node_id.clone()),
                     Mode::Fields => {
@@ -1129,13 +1139,7 @@ impl Details {
                 safe(&self.node_id)
             )
         };
-        let footer = if matches!(self.mode, Mode::Original) {
-            "Esc 戻る · ↑↓/PgUp/PgDn スクロール\nN 次page · P 先頭再取得 · O 再取得 · C 原文copy · F6 項目 · F7 リンク"
-        } else if matches!(self.mode, Mode::Fields) {
-            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nR 再取得 · O 原文 · C 値copy · V 要点/内部項目 · A 操作"
-        } else {
-            "Esc 戻る · ↑↓/PgUp/PgDn 選択 · Enter 詳細\nR 再取得 · O 原文 · C 値copy · A 操作 · F6 項目 · F7 リンク"
-        };
+        let footer = super::key_hints::detail_footer(self.hint_context());
         let mut body = popup::panel(frame, area, mode, &context, footer);
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
             frame.render_widget(
@@ -2469,7 +2473,7 @@ mod tests {
             assert!(visible.contains("本文:"));
             assert!(!visible.contains("項目 1 › 項目 1"));
             assert!(!visible.contains("呼出し群ID: null"));
-            assert!(visible.contains("O 原文"));
+            assert!(visible.contains("o 原文"));
         }
         assert!(
             matches!(details.key(KeyEvent::new(KeyCode::Char('o'),KeyModifiers::NONE),ui.view(),&mut next),

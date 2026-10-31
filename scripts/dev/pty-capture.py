@@ -64,7 +64,7 @@ def main():
     parser.add_argument('--palette', choices=['dark', 'light'], default='dark')
     parser.add_argument('--term', default='xterm-256color')
     parser.add_argument('--no-color', action='store_true')
-    parser.add_argument('--ready', default='F1 help', help='Live startup completed-frame marker')
+    parser.add_argument('--ready', default='Ctrl+T 会話', help='Live startup completed-frame marker')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--steps', default='[]', help='JSON action array (see epilog)')
     group.add_argument('--steps-stdin', action='store_true', help='Read action JSON from stdin (max 1 MiB)')

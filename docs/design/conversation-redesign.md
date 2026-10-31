@@ -1086,3 +1086,25 @@ slash descriptions teach copy/attachment paths near the start; failures suggest
 clipboard adapters/files only, never real OS clipboard reads or writes. Native
 80/wide, dark/light/NO_COLOR/vt100 and changed send-key scenes must demonstrate
 bottom-row hints; P1 interaction performance is compared separately from replay.
+
+### Contextual hint implementation boundaries (#87, stage 1)
+
+The second row is right-aligned only when no notice is present. Existing notice
+priority is input rejection, operation outcome, active recovery, then hints;
+history/live-work focus cannot replace a selected notice. Activity facts and the
+resolved-recovery filter remain #85's responsibility. Hints drop whole actions
+from the right, retaining F1 at two columns and hiding below two columns. Safety
+confirmation/shutdown keep their own panel instructions rather than advertising
+an unavailable F1. The one-entry UI cache uses owner/mode, width and actual
+send/newline bindings; elapsed ticks cannot invalidate it.
+
+F1 explicitly raised over a popup temporarily covers that popup without deleting
+its source, form or selection. A UI-only help-layer flag distinguishes that case
+from ordinary readouts in the existing stack. Esc/F1 restores the prior owner;
+confirmation and shutdown retain precedence. Editable model/filter/form text is
+not case-normalized. Readonly detail, management and queue letters accept either
+case. Form Tab means next field, not completion, and Enter retains the existing
+send/validation/confirmation path. Empty composer image guidance is static and
+width-conditional; it never infers clipboard contents or acquires an image.
+The Thread browser retains its existing F1 selected-Thread information action;
+its F1 fallback is contextual information, not an unrelated global help page.
