@@ -458,3 +458,11 @@ Unknown 429 follows #50 unchanged. The configured shared HTTP clients each own
 one in-memory reset slot; details and exclusions are in [model HTTP](model-http.md).
 No automatic connection switch or resume, durable cooldown state, queue or
 worker is introduced. The short TUI status rendering belongs to #85.
+
+## Shared owner bootstrap (#5 stage 1)
+
+`owner_session` owns the existing DataOwner/Control/IPC assembly and partial-
+startup cleanup, independent of the TUI frontend. The TUI calls the same watch-
+reporting adapter and one-result handoff; cancellation, cleanup ordering and
+in-process Control routing are unchanged. This structural move adds no serve
+command, shutdown request, signal behavior, worker, queue or persistent state.

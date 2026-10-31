@@ -4743,3 +4743,26 @@ do not extract body-specific plan/window details. Real-provider compatibility
 is unverified. src/ui/activity.rs and src/ui/chrome.rs are untouched; #85 tracks
 the deferred short status display, with the data contract in its comment
 6540361176. Existing reason text and run get already expose the reset.
+
+## #5 stage 1: shared owner bootstrap structural evidence
+
+2026-10-31, native macOS arm64. The former frontend startup module moves intact
+into `src/owner_session.rs`; only its module-title comment and visibility of
+`initialize_reporting` change. A byte comparison after those two substitutions
+confirms all function bodies and test fixtures are unchanged. TUI call sites
+change module paths; no RPC, signal, environment, runtime or shutdown policy is
+added in this stage. No new table, worker, queue or request channel is added.
+
+The complete moved module is 285 lines before and after. Across changed Rust
+files there are 7 inserted and 7 deleted lines (net zero), including moving the
+module declaration. Argument counts are unchanged: initialize_reporting 4,
+initialize 4, close 3, deliver 2, Prepared::shutdown 1 including self; all other
+functions are identical. Three existing tests move with the module: cancellation
+at database preparation, abandoned ready delivery, and recovery failure cleanup.
+
+Validation commands are `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=4 sh scripts/check.sh`
+and the separate `test_validation_documents.py` unittest discovery. Exact-source
+results, final SHA, record-line audit and integration status are tracked in #5;
+this structural evidence alone is not an unrun native-OS test result. serve,
+shutdown RPC, shared signal observation and real headless child-process tests
+remain later stages. User data, installed owner/binary and releases are untouched.
