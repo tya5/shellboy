@@ -255,7 +255,7 @@ impl WatchSummary {
         self
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct CompletionIdentity {
     pub run_id: String,
     pub answer_id: String,
@@ -370,6 +370,39 @@ impl WatchState {
         self.retained.clear();
         self.tick_origin = None;
         self.tick_second = None;
+    }
+    pub fn begin_generation(&mut self, generation: u64, new_session: bool) {
+        self.generation = generation;
+        self.open = true;
+        if new_session {
+            self.retained.clear();
+        }
+        for entry in self.entries.values_mut() {
+            entry.read_sequence = 0;
+            if new_session {
+                entry.observed_in_session = false;
+                entry.known_new_completion = false;
+                entry.previous_observed = None;
+            }
+        }
+        self.tick_origin = None;
+        self.tick_second = None;
+        self.reclassify();
+        self.rebuild();
+    }
+    pub fn prune_to(&mut self, ids: &BTreeSet<String>) {
+        self.entries.retain(|id, _| ids.contains(id));
+        self.retained.retain(|id| ids.contains(id));
+        self.rebuild();
+    }
+    pub fn retains(&self, id: &str) -> bool {
+        self.retained.contains(id)
+    }
+    pub fn seen_completions(&self) -> Vec<CompletionIdentity> {
+        self.seen.keys().cloned().collect()
+    }
+    pub fn seen_history_limited(&self) -> bool {
+        self.seen_overflow
     }
     pub fn generation(&self) -> u64 {
         self.generation
@@ -834,6 +867,55 @@ fn secondary_age_label(
     labels.join(" · ")
 }
 
+/// Candidate-page provenance, distinct from later reactive per-row facts.
+#[derive(Clone, Debug)]
+pub struct WatchPageInfo {
+    pub read_at: String,
+    pub limited_titles: Vec<String>,
+    pub continuation_limited: bool,
+}
+
+/// Bounded lineage facts for a root; no membership IDs or lifecycle authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DescendantCount {
+    pub root: String,
+    pub available: bool,
+    pub active: u64,
+    pub recovery: u64,
+    pub truncated: bool,
+    pub cycle: bool,
+}
+impl DescendantCount {
+    pub fn label(&self) -> Option<String> {
+        if !self.available {
+            return Some("子孫数は未取得".into());
+        }
+        if self.active == 0 && self.recovery == 0 {
+            return if self.truncated || self.cycle {
+                Some("子孫数は未確定".into())
+            } else {
+                None
+            };
+        }
+        let lower = if self.truncated || self.cycle {
+            "≥"
+        } else {
+            ""
+        };
+        let mut labels = Vec::with_capacity(2);
+        if self.active > 0 {
+            labels.push(format!("稼働{lower}{}", self.active));
+        }
+        if self.recovery > 0 {
+            labels.push(format!("復旧{lower}{}", self.recovery));
+        }
+        Some(format!(
+            "子孫 {}{}",
+            labels.join(" · "),
+            if self.cycle { " · 循環あり" } else { "" }
+        ))
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1167,5 +1249,63 @@ mod tests {
             state.row("t").unwrap().secondary_age.is_empty(),
             "unrecorded ages cannot become zero-duration facts"
         );
+    }
+    #[test]
+    fn page_generation_change_preserves_session_seen_and_rejects_late_facts() {
+        let mut state = WatchState::default();
+        state.open(1, vec![summary("t", ActivityPhase::Completed)]);
+        state.apply_detail(
+            1,
+            40,
+            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare(),
+        );
+        assert_eq!(state.visible_scope(0, 1).ids, ["t"]);
+        let seen = state.mark_opened("t").unwrap();
+        assert!(state.retains("t"));
+        state.begin_generation(2, false);
+        state.apply_detail(
+            2,
+            1,
+            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare(),
+        );
+        assert_eq!(state.row("t").unwrap().category, WatchCategory::Read);
+        assert!(!state.apply_detail(
+            1,
+            100,
+            detail("t", "other", Some("new"), ActivityPhase::Completed).prepare()
+        ));
+        assert_eq!(state.seen_completions(), [seen]);
+        assert!(!state.seen_history_limited());
+        state.begin_generation(3, true);
+        assert!(!state.retains("t"));
+        assert!(state.ordered_ids().is_empty());
+        state.prune_to(&BTreeSet::new());
+        assert!(state.row("t").is_none());
+        assert_eq!(
+            state.seen_completions().len(),
+            1,
+            "page pruning does not erase completion evidence"
+        );
+    }
+    #[test]
+    fn descendant_labels_distinguish_unavailable_exact_zero_and_truncated_zero() {
+        let mut count = DescendantCount {
+            root: "t".into(),
+            available: false,
+            active: 0,
+            recovery: 0,
+            truncated: false,
+            cycle: false,
+        };
+        assert_eq!(count.label().as_deref(), Some("子孫数は未取得"));
+        count.available = true;
+        assert!(count.label().is_none());
+        count.truncated = true;
+        assert_eq!(count.label().as_deref(), Some("子孫数は未確定"));
+        count.active = 2;
+        count.recovery = 1;
+        count.cycle = true;
+        let label = count.label().unwrap();
+        assert!(label.contains("稼働≥2") && label.contains("復旧≥1") && label.contains("循環"));
     }
 }

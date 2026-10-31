@@ -1889,3 +1889,17 @@ This is still local F preparation: no Watch UI/action exposure, new worker or
 writer call. Actual presentation-pool wiring, same-snapshot consumer broker,
 strict Clippy/full standard, native three-OS CI and F P2–P5 remain unqualified.
 No main update, installed binary/default-data change, paid API or release.
+
+
+## F Watch page-generation/session primitive
+
+Ported the archived pure session generation/pruning/completion-evidence helpers
+and bounded descendant labels. A generation change can retain the open-session
+read rows while rejecting late old-generation details; a new session clears
+that retention without erasing seen identities. Unknown/exact-zero/truncated
+counts remain distinct. Native macOS `cargo test --locked --lib watch` passes
+30/0/0 (997 filtered):9 session/UI tests,9 detail-reader tests,9 discovery-page
+fixture tests and3 shared-helper tests. This includes2 new state tests. The new
+retention fixture now observes the visible row before opening it, matching the
+actual retention contract; the initial missing-observation failure is retained.
+Watch frontend/overlay wiring and native UI proof remain pending.
