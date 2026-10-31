@@ -2,6 +2,15 @@
 
 ## Batched native CI (#92, in progress)
 
+Candidate7f339a7 run41184263185 passes Linux/macOS and all script gates,
+but both Windows partitions reject `test_watchdog` as unassigned. The runtime
+unknown-module guard works; the source scanner omitted visibility-qualified
+`pub(crate) mod` support declarations. Include private/public/restricted module
+declarations in the source check and assign watchdog (measured0.016s) and the
+empty count_after support module. Add a source-layout fixture demonstrating the
+omission is rejected. This is a deterministic layout bug, not an intermittent
+Rust failure. Native Windows library tests passed before shard1's rejection.
+
 First complete candidate39577ff failed run41184106926 on all OSes at
 `test_unicode_failure_survives_strict_ascii_child_output`: its isolated Python
 `-c` process did not have the runner's sibling-module directory on sys.path after

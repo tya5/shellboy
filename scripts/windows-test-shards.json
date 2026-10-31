@@ -2,8 +2,8 @@
   "measurement_run": "https://github.com/tya5/shellboy/actions/runs/41182264568",
   "measurement_sha": "efc10e5b89d8ac5e3e117f0ed6b1db151c95ae79",
   "estimated_isolated_seconds": {
-    "1": 147.68600000000015,
-    "2": 147.6880000000001
+    "1": 147.702,
+    "2": 147.688
   },
   "targets": {
     "bin:shellboy": "1",
@@ -28,6 +28,7 @@
     "config_setup": "1",
     "context": "1",
     "control_db": "1",
+    "count_after": "1",
     "deletion": "2",
     "dependency_smoke": "1",
     "diagnostics": "2",
@@ -90,6 +91,7 @@
     "storage_checkpoint": "2",
     "storage_hot_queries": "1",
     "terminal_links": "2",
+    "test_watchdog": "1",
     "thread_browser": "1",
     "thread_exit_marker": "1",
     "thread_observation": "2",

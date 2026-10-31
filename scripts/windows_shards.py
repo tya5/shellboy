@@ -11,7 +11,7 @@ def load(path=MANIFEST):
 
 
 def check_layout(root, config):
-    modules = re.findall(r'^mod ([a-z_0-9]+);',
+    modules = re.findall(r'^(?:pub(?:\([^)]*\))?\s+)?mod ([a-z_0-9]+);',
                          (root / 'tests/integration/main.rs').read_text(encoding='utf-8'), re.M)
     assigned = config['modules']
     if set(modules) != set(assigned):

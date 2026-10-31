@@ -2,9 +2,10 @@
 import copy
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from windows_shards import audit, selection
+from windows_shards import audit, selection, check_layout
 
 
 class WindowsShardTests(unittest.TestCase):
@@ -15,6 +16,19 @@ class WindowsShardTests(unittest.TestCase):
                 'tests': ['one', 'two'], 'ignored': ['two'], 'failures': []}
         return [dict(base, windows_shard='1', executed_tests=['one'], executed_ignored=[]),
                 dict(base, windows_shard='2', executed_tests=['two'], executed_ignored=['two'])]
+
+    def test_layout_includes_visibility_qualified_support_modules(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'tests/integration/main.rs'
+            source.parent.mkdir(parents=True)
+            source.write_text('mod one;\npub(crate) mod test_watchdog;\npub mod support;\n',
+                              encoding='utf-8')
+            config = {'targets': {}, 'modules': {'one': '1'}}
+            with self.assertRaises(ValueError):
+                check_layout(root, config)
+            config['modules'].update(test_watchdog='1', support='2')
+            check_layout(root, config)
 
     def test_complete_partition(self):
         self.assertEqual(audit(self.records())['tests'], 2)
