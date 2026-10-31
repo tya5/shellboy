@@ -1918,12 +1918,10 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
     owner
         .db
         .call(|db| {
+            let payload = serde_json::json!({"role":"assistant","content":"```text\nchanged\n```"}).to_string();
             db.execute(
-                "UPDATE node SET payload_json=?1,revision=revision+1 WHERE id='copy-long'",
-                [
-                    serde_json::json!({"role":"assistant","content":"```text\nchanged\n```"})
-                        .to_string(),
-                ],
+                "UPDATE node SET payload_json=?1,payload_bytes=?2,body_hash=?3,payload_revision=payload_revision+1 WHERE id='copy-long'",
+                rusqlite::params![payload, payload.len() as i64, crate::digest::sha256_hex(payload.as_bytes())],
             )?;
             Ok(())
         })

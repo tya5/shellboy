@@ -31,6 +31,7 @@ impl UiUpdate {
             | Self::LiveWorkPreview { .. }
             | Self::DetailSourcesChanged { .. }
             | Self::DetailLinks { .. }
+            | Self::CopyChoices { .. }
             | Self::SendOperation { .. }
             | Self::DraftRecovery { .. }
             | Self::RestoreArchives { .. }

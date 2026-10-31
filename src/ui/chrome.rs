@@ -753,7 +753,7 @@ mod terminal_time_tests {
             let lines = footer_lines(
                 &view,
                 200,
-                false,
+                "F1",
                 crate::ui::theme::Palette::from_capabilities(
                     crate::config::PaletteMode::Dark,
                     false,

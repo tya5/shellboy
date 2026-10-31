@@ -1,7 +1,6 @@
 //! Bounded canonical copy preparation in existing read/presentation workers.
 use super::*;
 use crate::ui::{CopyBlock, CopyOffer};
-use sha2::{Digest, Sha256};
 const SOURCE_BYTES: usize = 1024 * 1024;
 const SOURCE_PAGES: usize = 64;
 const BLOCKS: usize = 128;
@@ -79,7 +78,7 @@ fn summaries(text: &str) -> Result<Vec<CopyBlock>, ApiError> {
     Ok(blocks)
 }
 pub(super) fn source_hash(text: &str) -> String {
-    format!("{:x}", Sha256::digest(text.as_bytes()))
+    crate::digest::sha256_hex(text.as_bytes())
 }
 pub(super) async fn choices(control: &Control, node_id: String) -> Result<CopyOffer, ApiError> {
     let text = source(control, node_id, SOURCE_BYTES).await?;
