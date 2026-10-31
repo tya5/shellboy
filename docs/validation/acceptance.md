@@ -4941,3 +4941,14 @@ completes the held request, observes REFRESHED_PAUSED through the separate CLI,
 keeps older history visible and follow=false, drains shutdown and exits0. That
 5.14s observation is not a latency assertion. Only the shared60s watchdog guards
 permanent stalls. No diagnostic-policy relaxation or new timer was introduced.
+
+Final rebased source e80b723 on main9b4ae34 passes
+CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=2 sh scripts/check.sh:
+1,960 passed /0 failed /33 ignored; layout94, Python18, fmt, strict Clippy and
+watchdog policy pass. The native short-history regression also passes in this
+full run, without timing suppression. src/ui.rs changes exactly line1728 in
+UiState::prepare_visible_render_width (function1697-1795); it only excludes
+known closed result hydration. ui/history_interaction.rs and ui/view.rs own the
+navigation changes. Existing projection/body budgets, rendering, Core and schema
+are unchanged. The record is delivered to worker4 with review required; no local
+workflow_dispatch or main push is authorized under this handoff workflow.

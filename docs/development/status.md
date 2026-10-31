@@ -1944,3 +1944,7 @@ The corrected real PTY regression passes: older command witness before and after
 saved model completion/separate CLI refresh, follow stays false, normal exit0.
 A final unchanged-production5fc5cc0 comparison with that same fixture fails,
 confirming the latest-main reproduction rather than assuming the user hypothesis.
+Full latest-main local validation passes1,960/0/33, layout94, Python18, fmt/Clippy
+and watchdog policy. Native wheel/paused-update/shutdown passes; worker4 owns
+review-required integration/CI. The src/ui.rs change is only line1728 in
+prepare_visible_render_width (function1697-1795), no rendering logic rewrite.
