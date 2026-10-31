@@ -26,6 +26,7 @@ struct SavedTurn {
     recovery_reason: Option<String>,
 }
 struct SavedAttempt {
+    started_at: Option<String>,
     id: String,
     state: String,
     generation: i64,
@@ -97,6 +98,7 @@ pub(super) struct RawProjection {
     recovery_counts: Option<(u64, u64, u64, u64)>,
     owned: bool,
     tool_running: bool,
+    tool_started_at: Option<String>,
     tools: u64,
     cancelled: u64,
     live_work: Option<super::live_work::RawLiveWork>,
@@ -132,6 +134,7 @@ pub(super) fn read_tx_with_waits(
             recovery_counts: None,
             owned: false,
             tool_running: false,
+            tool_started_at: None,
             tools: 0,
             cancelled: 0,
             live_work: None,
@@ -158,6 +161,7 @@ pub(super) fn read_tx_with_waits(
         recovery_counts: None,
         owned,
         tool_running: false,
+        tool_started_at: None,
         tools: 0,
         cancelled: 0,
         live_work: if owned && matches!(run_state.as_str(), "live" | "stopping") {
@@ -173,9 +177,9 @@ pub(super) fn read_tx_with_waits(
         raw.context_reduction = reduction::read_tx(db, turn_id, generation)?;
         let attempt = db
             .query_row(
-                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END,CASE WHEN json_valid(error_json) THEN CASE WHEN json_type(error_json,'$.automatic_retry_exhausted')='object' THEN json_extract(error_json,'$.automatic_retry_exhausted') ELSE NULL END ELSE NULL END FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
+                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END,CASE WHEN json_valid(error_json) THEN CASE WHEN json_type(error_json,'$.automatic_retry_exhausted')='object' THEN json_extract(error_json,'$.automatic_retry_exhausted') ELSE NULL END ELSE NULL END,substr(started_at,1,128) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
                 rusqlite::params![turn_id,reason.is_some()],
-                |r| Ok(SavedAttempt { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)?,automatic_retry_exhausted:r.get(5)? }),
+                |r| Ok(SavedAttempt { started_at:r.get(6)?,id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)?,automatic_retry_exhausted:r.get(5)? }),
             )
             .optional()?;
         raw.attempt = attempt;
@@ -191,14 +195,15 @@ pub(super) fn read_tx_with_waits(
             )?;
             raw.recovery_counts = Some(counts);
         }
-        let tool_running = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tool_group WHERE turn_id=?1 AND state='running')",
+        let tool_started_at: Option<String> = db.query_row(
+            "SELECT MIN(created_at) FROM tool_group WHERE turn_id=?1 AND state='running'",
             [turn_id],
             |r| r.get(0),
         )?;
         let tools=db.query_row("SELECT COUNT(*) FROM shell_execution WHERE turn_id=?1 AND json_extract(shell_json,'$.spawned')=1",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
         let cancelled=db.query_row("SELECT COUNT(*) FROM tool_result tr JOIN tool_group g ON g.id=tr.group_id WHERE g.turn_id=?1 AND tr.status='cancelled'",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
-        raw.tool_running = tool_running;
+        raw.tool_running = tool_started_at.is_some();
+        raw.tool_started_at = tool_started_at;
         raw.tools = tools;
         raw.cancelled = cancelled;
         raw.turn = Some(saved_turn);
@@ -217,6 +222,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         recovery_counts,
         owned,
         tool_running,
+        tool_started_at,
         tools,
         cancelled,
         live_work,
@@ -236,6 +242,12 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         .as_ref()
         .and_then(crate::presentation::revisit_label);
     let mut snapshot = ActivitySnapshot {
+        tool_running,
+        timing: crate::ui::activity::SavedTiming {
+            tool_started_at,
+            wall_at: Some(chrono::Utc::now()),
+            ..Default::default()
+        },
         live_work: live_work.map(super::live_work::prepare),
         revisit,
         run_id: Some(run_id),
@@ -250,9 +262,12 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         recovery_reason: reason,
     }) = turn
     {
+        snapshot.timing.generation = Some(generation);
         snapshot.context_reduction = reduction::prepare(context_reduction);
         if let Some(reason) = reason
-            && (turn_state == "recovery_wait" || serde_json::from_str::<ApiError>(&reason).is_ok())
+            && (run_state == "failed"
+                || (matches!(run_state.as_str(), "live" | "stopping")
+                    && matches!(turn_state.as_str(), "recovery_wait" | "failed")))
         {
             // Startup interruption writes a different saved reason schema. Its
             // presence alone is not evidence that this Turn awaited recovery.
@@ -310,6 +325,11 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             let (pending_messages, saved_tool_results, live_shells, uncollected_shells) =
                 recovery_counts.expect("saved recovery reason has collected recovery counts");
             snapshot.recovery = Some(RecoverySnapshot {
+                usage_limit: error
+                    .as_ref()
+                    .and_then(|e| e.details.as_ref())
+                    .and_then(|d| d.get("usage_limit"))
+                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
                 stage,
                 message,
                 pending_messages,
@@ -321,6 +341,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         }
         if let Some(SavedAttempt {
             id,
+            started_at,
             state: saved_state,
             generation: attempt_generation,
             automatic_retry,
@@ -336,6 +357,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                     .and_then(|body| serde_json::from_str::<AutomaticRetrySnapshot>(&body).ok())
                     .filter(|retry| retry.number > 0 && retry.number <= retry.limit);
             }
+            snapshot.timing.attempt_started_at = started_at;
             snapshot.attempt_id = Some(id);
             attempt_state = Some(saved_state);
         }
@@ -470,6 +492,50 @@ mod tests {
                 .snapshot
                 .live_work
                 .is_none()
+        );
+    }
+}
+
+#[cfg(test)]
+mod footer85_tests {
+    use super::*;
+    #[test]
+    fn saved_recovery_is_current_only_until_explicit_saved_resolution() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','recovery_wait','now');").unwrap();
+        let limit = serde_json::json!({"kind":"usage_limit_reached","resets_at":1893499200_i64,"resets_at_utc":"2030-01-01T12:00:00Z","locally_blocked":true,"limit_window_minutes":10080});
+        let reason = ApiError::new(
+            crate::protocol::ErrorCode::IoFailed,
+            "original provider failure",
+        )
+        .details(serde_json::json!({"usage_limit":limit}));
+        db.execute(
+            "UPDATE turn SET recovery_reason_json=?1",
+            [serde_json::to_string(&reason).unwrap()],
+        )
+        .unwrap();
+        let p = project(&db, "t").unwrap();
+        let recovery = p.snapshot.recovery.unwrap();
+        assert!(recovery.usage_limit.unwrap().locally_blocked);
+        assert!(recovery.limit_summary().unwrap().contains("UTC"));
+        for state in ["running", "completed", "stopped"] {
+            db.execute("UPDATE turn SET state=?1", [state]).unwrap();
+            assert!(
+                project(&db, "t").unwrap().snapshot.recovery.is_none(),
+                "saved resolved state {state} wins over retained historical reason"
+            );
+        }
+        db.execute("UPDATE turn SET state='failed'", []).unwrap();
+        assert!(project(&db, "t").unwrap().snapshot.recovery.is_some());
+        db.execute("UPDATE run SET state='stopped'", []).unwrap();
+        assert!(project(&db, "t").unwrap().snapshot.recovery.is_none());
+        let original: String = db
+            .query_row("SELECT recovery_reason_json FROM turn", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<ApiError>(&original).unwrap().message,
+            reason.message
         );
     }
 }

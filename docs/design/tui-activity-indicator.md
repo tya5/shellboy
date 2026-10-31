@@ -67,3 +67,23 @@ frontendは現在選択中Threadのgenerationを付け、UIはThread/generation�
 Issue #8の受信空白の観測と自動再試行の待機は区別する。Driverが既存model_attempt.error_jsonへ保存したautomatic_retry（number、limit、delay_ms等）を、既存Changedから読取projectionへ反映する。最新attemptがfailed、Turnとattemptのgenerationが一致し、Run live・Turn runningの場合だけ再試行待機を表示する。古いattempt、旧generation、復旧待ち、停止中、終端には適用しない。新しいinflight attemptを保存した後は通常のモデル応答待ちへ戻る。
 
 footerは既存の1行・同じpulseと中立的な活動色を使い、保存済みの回数・上限を `一時的なエラーのため再試行中（1/2）` の形で表示する。表示するカウントは既存snapshotへ加えるUI向けprojectionであり、コア状態・永続表・event・worker・queueは増やさない。待機中はIssue #8のattempt別受信時計を破棄し、新attemptの受信を観測してから新たに計測する。完了・復旧後も古い受信通知で待機表示や受信時計を復活させない。終了時は保存済みの終端/復旧表示を優先し、再試行を経て成功したことだけで警告色を残さない。
+
+## Footer fact correction (#85)
+
+The #85/#86/#90 memo is implemented incrementally, with user permission to start
+before F/G admission. Keep the saved shared activity classifier and all Core
+states/protocol unchanged. A single UI composition gives current tools precedence
+over the current attempt while retaining the attempt as a secondary phase.
+Matching transport receive observations (headers/body liveness, not generated
+assistant content) end the response-wait label, including receive-before-snapshot.
+A new attempt resets its request age using saved started_at. Tool age uses the
+running group's saved creation anchor; receiving age is explicitly observed.
+Other phase durations are explicitly local observations, never the Turn total.
+Clock bases are internal UI facts from the existing shared view read, not timers.
+
+A saved recovery message is current only for failed/recovery_wait state, not
+merely because a historical recovery_reason_json still parses as ApiError.
+Resolved execution recovery disappears on a fresh successful saved-state read;
+independent command failures keep their existing notice ownership. Typed #76
+usage-limit facts supply reset kind/time and wait or /model guidance. A passed
+reset timestamp never promises automatic retry or bypass of connection cooldown.
