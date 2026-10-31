@@ -977,3 +977,17 @@ the existing epoch and dirty the Thread even during a read; stale activity canno
 clear that new work. Keep the same 500ms cadence, missed-tick behavior, paired
 browser ticket and all one-observation/same-sequence/no-reload assertions. This
 uses only the existing refreshing set, with no timer/state/worker/queue addition.
+
+### F fitting viewport offset coherence (#100)
+
+When every visible List tree row fits its table body, the actual TableState
+offset is zero even after a metadata reorder at unchanged geometry. Keep the
+selected identity, filter/collapse state and normal overflow screen anchors;
+do not retain an unnecessary blank bottom while hiding a promoted row.
+
+Watch applies the same fitting rule to its actual offset before choosing
+formatting neighborhoods and computing its visible-detail scope. A locally
+clamped formatting offset is not sufficient if rendering still uses an older
+TableState offset. Keep c5785c5's bounded neighborhood formatting and the
+2b9514e open-list membership regression. No browser ticket/admission, saved
+membership, timestamps, rows, workers, queues or pools change for this fix.

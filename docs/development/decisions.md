@@ -2339,3 +2339,14 @@ approved work is HTTP classification plus navigation tests, not a replay of the
 old E frontend. Restrict the source delta to four independently byte-compared
 files and retain all F guard/state modules exactly. #100 is a separate review;
 prior0ce qualification is not reusable as proof for this new product source.
+## #100: fitting offset coherence on F (2026-10-31)
+
+After F landed, reproduce before changing production: existing membership
+coverage and the preserved painted-row regression are complementary, not reasons
+to weaken either test. Prefer showing every row when the visible list fits over
+preserving an unnecessary blank bottom. Keep the selected ID and ordinary
+overflow/collapse behavior. Reconcile Watch's actual TableState before its
+bounded formatting bands and visible-ID scope; do not broaden formatting work.
+The patch is confined to presentation, with no new state/epoch/table/index/
+worker/queue/pool/timer and no replay of the unreviewed E browser draft. User
+binary, owner and databases remain unchanged; Core/UI review is required.

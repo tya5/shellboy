@@ -2599,3 +2599,11 @@ WezTerm file URLs and optional bare-path rules. The Agent Guide asks for absolut
 file URLs only when asking a user to open a file/folder. No path detector,
 existence check, launcher or product setting is added; source/bundle validation
 limits and the user's terminal observation are separated in acceptance.
+## #100 fitting viewport correction on admitted F
+
+The preserved E process reproduction still fails on F fff2076 while F's
+2b9514e membership test passes. List retains row data but can hide a promoted
+row above an unnecessary offset. List and Watch now reconcile the actual offset
+when all rows fit; Watch does so before bounded formatting/detail scope.
+Membership, F admission guards and overflow anchors are unchanged. Fresh local
+checks and the exact reviewed candidate are reported in issue #100.

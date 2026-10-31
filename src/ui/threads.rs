@@ -1766,10 +1766,10 @@ impl ThreadBrowser {
             .header(Row::new(headers).style(Style::default().fg(theme::MUTED)));
         let mut selection = self.table_state.borrow_mut();
         selection.select(selected_visible);
-        // A taller viewport can fit formerly hidden predecessors. Ordinary
-        // mutations retain the selected screen row even with a blank bottom.
+        // Show every row when the List fits, including after a reorder.
+        // Overflowing lists keep their selected screen row and blank bottom.
         let body_rows = usize::from(table_area.height.saturating_sub(1));
-        if body_rows > self.table_body_rows.replace(body_rows) {
+        if body_rows > self.table_body_rows.replace(body_rows) || rows.len() <= body_rows {
             let max_offset = rows.len().saturating_sub(body_rows);
             let offset = selection.offset().min(max_offset);
             *selection.offset_mut() = offset;
@@ -1898,6 +1898,10 @@ impl ThreadBrowser {
         };
         let capacity = usize::from(inner.height) / height;
         self.table_body_rows.set(capacity);
+        if count <= capacity {
+            // Formatting, rendering and visible-detail scope must share this offset.
+            *self.table_state.borrow_mut().offset_mut() = 0;
+        }
         let selected = self.selected_position();
         {
             let watch = self.watch.borrow();
@@ -4781,6 +4785,37 @@ mod watch_integration_tests {
                 }
             }
         }
+    }
+    #[test]
+    fn fitting_watch_viewport_reconciles_anchor_offset_before_formatting_and_scope() {
+        use crate::activity::ActivityPhase::Tools;
+        let mut browser = ThreadBrowser::default();
+        browser.open_watch(String::new(), None, None);
+        let rows = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| row(id, Tools))
+            .collect::<Vec<_>>();
+        let summaries = rows
+            .iter()
+            .map(|item| {
+                WatchSummary::prepare(item)
+                    .with_identity(Some(format!("run-{}", item.thread_id)), None)
+            })
+            .collect();
+        let generation = browser.generation;
+        browser.apply(generation, 10, None, rows, vec![], None, vec![], None);
+        browser.apply_watch_summaries(generation, 10, summaries);
+        paint(&browser, 120, 28);
+        let first = browser.items[browser.visible_indices()[0]].title.clone();
+        browser.selected = browser.visible_indices()[1];
+        *browser.table_state.get_mut().offset_mut() = 1;
+        let text = paint(&browser, 120, 28);
+        assert!(
+            text.contains(&first),
+            "fitting Watch must paint its first row: {text}"
+        );
+        assert_eq!(browser.table_state.borrow().offset(), 0);
+        assert_eq!(browser.watch_visible_ids.borrow().len(), 3);
     }
     #[test]
     fn watch_formats_only_viewport_neighborhoods_and_keeps_actual_visible_rows() {
