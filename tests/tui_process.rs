@@ -697,3 +697,178 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     embedding_proxy.abort();
     let _ = embedding_proxy.await;
 }
+
+async fn seed_collapsed_history(data: &std::path::Path, cwd: &std::path::Path) -> String {
+    let db = shellboy::storage::DbWorker::open(data.join("shellboy.db"))
+        .await
+        .unwrap();
+    let thread = uuid::Uuid::new_v4().to_string();
+    let id = thread.clone();
+    let cwd = cwd.to_string_lossy().into_owned();
+    db.call(move |db| {
+        use sha2::{Digest, Sha256};
+        let tx = db.transaction()?;
+        tx.pragma_update(None,"defer_foreign_keys",true)?;
+        tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'Short tools',?2,'AGENTS.md','fixture','fixture-model','2026-01-01')", rusqlite::params![id,cwd])?;
+        tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('old-run',?1,'completed','2026-01-01','2026-01-01')",[&id])?;
+        tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at) VALUES('old-turn',?1,'old-run','completed','2026-01-01','2026-01-01')",[&id])?;
+        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('old-attempt','old-turn',0,0,'fixture','fixture-model',0,'completed','{}','2026-01-01')",[])?;
+        tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('group','old-attempt','old-turn','completed','2026-01-01')",[])?;
+        let calls = (0..120).map(|i|json!({"type":"function_call","call_id":format!("call-{i}"),"name":"shell","arguments":json!({"command":format!("printf CMD{i:03}")}).to_string(),"status":"completed"})).collect::<Vec<_>>();
+        let mut previous: Option<String> = None;
+        for ordinal in 0..=120 {
+            let node = format!("tool-{ordinal:03}");
+            let payload = if ordinal==0 {json!({"group_id":"group","status":"completed","output":calls})} else {
+                let i=ordinal-1;
+                tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state) VALUES('group',?1,?2,'shell',?3,'completed')",rusqlite::params![format!("call-{i}"),i,json!({"command":format!("printf CMD{i:03}")}).to_string()])?;
+                tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status) VALUES('group',?1,?2,'completed')",rusqlite::params![format!("call-{i}"),node])?;
+                json!({"group_id":"group","item":{"type":"function_call_output","call_id":format!("call-{i}"),"output":json!({"status":"completed","exit_code":0,"output_complete":true,"output":"hidden ".repeat(1500)}).to_string()}})
+            };
+            // Deferred foreign keys validate each synthetic node/result pair at commit.
+            let raw=payload.to_string();
+            let hash=Sha256::digest(raw.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>();
+            tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,'old-turn',?2,'2026-01-01',?3,?4,?5)",rusqlite::params![node,if ordinal==0 {"assistant_response"} else {"tool_result"},raw,raw.len() as i64,hash])?;
+            tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES(?1,?2,?3)",rusqlite::params![id,ordinal,node])?;
+            if let Some(prior)=previous {tx.execute("INSERT INTO edge(src,dst) VALUES(?1,?2)",rusqlite::params![prior,node])?;}
+            previous=Some(node);
+        }
+        for (i,call) in calls.iter().enumerate(){tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id) VALUES('old-attempt',?1,'function_call','completed',?2,'tool-000')",rusqlite::params![i as i64,call.to_string()])?;}
+        tx.execute("UPDATE thread SET cursor_node_id='tool-120',selection_revision=1 WHERE id=?1",[&id])?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    db.shutdown().await.unwrap();
+    thread
+}
+
+async fn short_history_cli(root: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let output = crate::test_watchdog::watchdog(
+        "short history CLI",
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--config")
+            .arg(root.join("config.toml"))
+            .arg("--data-dir")
+            .arg(root.join("data"))
+            .args(args)
+            .env_clear()
+            .env("HOME", root)
+            .env("PATH", "/usr/bin:/bin")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(output.status.success() && value["ok"] == true, "{value}");
+    value["result"].clone()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn short_tool_history_wheel_loads_older_without_refollow() {
+    let root = tempfile::tempdir().unwrap();
+    use futures_util::FutureExt;
+    let mut output = Vec::new();
+    let outcome=std::panic::AssertUnwindSafe(crate::test_watchdog::watchdog("short tool PTY scroll",async {
+        let data=root.path().join("data");std::fs::create_dir_all(&data).unwrap();
+        let thread=seed_collapsed_history(&data,root.path()).await;
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let address=listener.local_addr().unwrap();
+        let (ready,started)=tokio::sync::oneshot::channel();let (release,finish)=tokio::sync::oneshot::channel();
+        let proxy=tokio::spawn(async move {
+            let (mut stream,_)=listener.accept().await.unwrap();let mut bytes=Vec::new();
+            let split=loop{let mut b=[0;8192];let n=stream.read(&mut b).await.unwrap();assert!(n>0);bytes.extend_from_slice(&b[..n]);if let Some(i)=bytes.windows(4).position(|v|v==b"\r\n\r\n"){break i+4;}};
+            let length=String::from_utf8_lossy(&bytes[..split]).lines().find_map(|l|l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|s|s.trim().parse::<usize>().ok())).unwrap();
+            while bytes.len()<split+length{let mut b=[0;8192];let n=stream.read(&mut b).await.unwrap();assert!(n>0);bytes.extend_from_slice(&b[..n]);}
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").await.unwrap();
+            stream.write_all(format!("data: {}\n\n",json!({"type":"response.created","response":{"id":"held","status":"in_progress","output":[]}})).as_bytes()).await.unwrap();
+            ready.send(()).unwrap();finish.await.unwrap();
+            stream.write_all(format!("data: {}\n\n",json!({"type":"response.completed","response":{"id":"held","status":"completed","output":[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"SYNTHETIC_FINISHED"}]}]}})).as_bytes()).await.unwrap();
+        });
+        let config=root.path().join("config.toml");
+        std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://{address}/v1'\n")).unwrap();
+        let (mut master,mut slave)=(-1,-1);let mut size=libc::winsize{ws_row:110,ws_col:100,ws_xpixel:0,ws_ypixel:0};
+        // SAFETY: each successful descriptor is immediately owned by a File.
+        assert_eq!(unsafe{libc::openpty(&mut master,&mut slave,std::ptr::null_mut(),std::ptr::null_mut(),std::ptr::addr_of_mut!(size))},0);
+        let mut terminal=unsafe{File::from_raw_fd(master)};let slave=unsafe{File::from_raw_fd(slave)};
+        // SAFETY: only change flags on the disposable owned PTY descriptors.
+        unsafe{assert!(libc::fcntl(master,libc::F_SETFL,libc::O_NONBLOCK)>=0);assert!(libc::fcntl(master,libc::F_SETFD,libc::FD_CLOEXEC)>=0);assert!(libc::fcntl(slave.as_raw_fd(),libc::F_SETFD,libc::FD_CLOEXEC)>=0);}
+        let mut child=tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy")).args(["--config",config.to_str().unwrap(),"--data-dir",data.to_str().unwrap()]).env_clear().env("PATH","/usr/bin:/bin").env("HOME",root.path()).env("TERM","xterm-256color").current_dir(root.path()).stdin(slave.try_clone().unwrap()).stdout(slave.try_clone().unwrap()).stderr(slave).kill_on_drop(true).spawn().unwrap();
+        read_until_text(&mut terminal,&mut output,"F1").await;
+        terminal.write_all(format!("/switch {thread}\r").as_bytes()).unwrap();
+        read_until_text(&mut terminal,&mut output,"CMD119").await;
+        let sent=short_history_cli(root.path(), &["message","send","--thread",&thread,"--text","Hold the synthetic response"]).await;
+        started.await.unwrap();
+        let mut anchor=None;
+        for _ in 0..80 {
+            terminal.write_all(b"\x1b[<64;10;6M\x0c").unwrap();
+            let frame=collect_matching(&mut terminal,&mut output,"wheel repaint footer",|bytes| {
+                bytes.windows(4).rposition(|b|b==b"\x1b[2J").is_some_and(|i|emitted_text(&bytes[i..]).contains("F1"))
+            }).await;
+            let at=frame.windows(4).rposition(|b|b==b"\x1b[2J").unwrap();
+            let text=emitted_text(&frame[at..]);
+            if let Some((i,_))=text.match_indices("CMD").find(|(i,_)|text.get(*i+3..*i+6).and_then(|n|n.parse::<usize>().ok()).is_some_and(|n|n<70)) {
+                anchor=Some(text[i..i+6].to_owned());break;
+            }
+        }
+        let anchor=anchor.expect("wheel gestures must reach a command older than the initial 50-node window");
+        release.send(()).unwrap();proxy.await.unwrap();
+        let conditions=json!([{"type":"turn_completed","turn_id":sent["turn_id"]}]).to_string();
+        let waited=short_history_cli(root.path(), &["wait","--conditions-json",&conditions]).await;
+        assert_eq!(waited["status"],"satisfied");
+        short_history_cli(root.path(), &["thread","set","--thread",&thread,"--title","REFRESHED_PAUSED"]).await;
+        read_until_text(&mut terminal,&mut output,"REFRESHED_PAUSED").await;
+        terminal.write_all(&[12]).unwrap();
+        collect_matching(&mut terminal,&mut output,"paused older history after saved completion",|bytes| {
+            bytes.windows(4).rposition(|b|b==b"\x1b[2J").is_some_and(|i| {
+                let frame=emitted_text(&bytes[i..]);
+                frame.contains("REFRESHED_PAUSED") && frame.match_indices("CMD").any(|(i,_)|frame.get(i+3..i+6).and_then(|n|n.parse::<usize>().ok()).is_some_and(|n|n<70))
+            })
+        }).await;
+        eprintln!("OLDER_COMMAND_WITNESS before completion={anchor}; after completion still older than initial tail");
+        terminal.write_all(&[17]).unwrap();
+        // Keep draining the disposable PTY while shutdown renders its final state.
+        // SAFETY: this test owns the nonblocking master and no other reader remains.
+        let fd=unsafe {tokio::io::unix::AsyncFd::register(terminal)}.unwrap();
+        let drain=async {
+            loop {
+                let mut ready=fd.readable().await.unwrap();
+                let mut bytes=[0;8192];
+                match ready.try_io(|inner| {let mut file=inner.get_ref();file.read(&mut bytes)}) {
+                    Ok(Ok(0))=>break,
+                    Ok(Ok(n))=>{output.extend_from_slice(&bytes[..n]);assert!(output.len()<4*1024*1024);},
+                    Ok(Err(e)) if e.raw_os_error()==Some(libc::EIO)=>break,
+                    Ok(Err(e))=>panic!("PTY shutdown read: {e}"),
+                    Err(_)=>{},
+                }
+            }
+        };
+        tokio::pin!(drain);
+        let status=tokio::select! {status=child.wait()=>status.unwrap(),_= &mut drain=>child.wait().await.unwrap()};
+        assert!(status.success());
+        let log=std::fs::read_to_string(data.join("logs/shellboy.log")).unwrap();
+        let traces=log.lines().filter_map(|line|serde_json::from_str::<serde_json::Value>(line).ok()).filter(|v|v["event"]=="ui_history"&&v["ids"]["thread_id"]==thread).map(|v|v["ui_history"].clone()).collect::<Vec<_>>();
+        eprintln!("SHORT_PTY traces={traces:?}");
+        let pause=traces.iter().position(|v|v["reason"]=="user_follow"&&v["follow_after"]==false).unwrap();
+        // The existing logger suppresses nonshrinking, same-follow windows.
+        // The older command frame is the positive read witness; traces guard follow.
+        assert!(!traces[pause..].iter().any(|v|v["follow_after"]==true));
+    })).catch_unwind().await;
+    if !matches!(&outcome, Ok(Ok(()))) {
+        let log =
+            std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap_or_default();
+        for line in log.lines().filter(|line| line.contains("ui_history")) {
+            eprintln!("PTY_FAILURE_HISTORY {line}");
+        }
+    }
+    let start = output
+        .windows(4)
+        .rposition(|w| w == b"\x1b[2J")
+        .unwrap_or(0);
+    if !matches!(&outcome, Ok(Ok(()))) {
+        eprintln!("PTY_FAILURE_FRAME {}", emitted_text(&output[start..]));
+    }
+    match outcome {
+        Ok(result) => result.unwrap(),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}

@@ -1926,3 +1926,17 @@ and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
 key actions and loopback-only configuration. Native captures and replay are used
 immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
 This is developer tooling only; product Rust, schema and workflows are unchanged.
+## Folded-history manual navigation (#93)
+
+Latest-main 5fc5cc0 synthetic regressions reproduce hidden-output hydration,
+edge-focus nonprogress and zero-distance follow resumption. The repair keeps
+manual navigation separate from presentation hydration, preserves its direction
+at a zero-height scroll range without changing existing projection budgets. Typed closed results remain known
+summary rows; expanded/prose sources retain source-window reads and anchors.
+
+Production changes are localized to ui/view.rs and ui/history_interaction.rs. ui.rs has one changed filter in
+prepare_visible_render_width (line1728 on this base), skipping closed-result
+hydration. F overlap was acknowledged by the user; worker4 receives the final
+line mapping with a review-required branch. No Core/protocol/schema change,
+installed binary, user data or clipboard operation is involved. Final local
+standard/native gates remain separate; CI and main integration belong to worker4.
