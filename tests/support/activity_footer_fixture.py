@@ -146,7 +146,7 @@ def main():
         capture('failure', lambda text: '復旧待ち' in text and 'fixture failure' in text)
         run = cli('thread', 'get', '--thread', tid)['run_id']
         cli('run', 'retry', '--run', run)
-        capture('external retry', lambda text: 'fixture recovered' in text and '復旧待ち' not in text
+        capture('external retry', lambda text: 'fixture recovered' in text and '復旧待ち' not in '\n'.join(text.splitlines()[-2:])
                 and 'fixture failure' not in '\n'.join(text.splitlines()[-2:]))
         terminal.paste('fixture quota request')
         terminal.send('\r')

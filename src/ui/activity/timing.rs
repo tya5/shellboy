@@ -28,6 +28,7 @@ pub(super) struct PhaseClock {
     ),
     anchor: Option<String>,
     at: Instant,
+    committed_at: Instant,
     base: Option<Duration>,
     observed: bool,
 }
@@ -76,13 +77,14 @@ impl PhaseClock {
             ActivityPhase::Tools => snapshot.timing.tool_started_at.clone(),
             _ => None,
         };
-        if let Some(previous) = previous
+        if let Some(mut previous) = previous
             && previous.key == key
             && previous.anchor == anchor
             && !(phase == ActivityPhase::Receiving
                 && previous.base.is_none()
                 && view.receive.as_ref().is_some_and(|r| r.received))
         {
+            previous.commit(at);
             return Some(previous);
         }
         let observed = anchor.is_none();
@@ -108,11 +110,16 @@ impl PhaseClock {
             key,
             anchor,
             at,
+            committed_at: at,
             base,
             observed,
         })
     }
+    pub fn commit(&mut self, at: Instant) {
+        self.committed_at = self.committed_at.max(at);
+    }
     pub fn note(&self, now: Instant) -> String {
+        let now = now.max(self.committed_at);
         match self.base {
             Some(base) => format!(
                 "{}{}s",

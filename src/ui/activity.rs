@@ -68,6 +68,7 @@ impl ActivityPhase {
 /// Existing saved facts for human recovery; never a new lifecycle state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecoverySnapshot {
+    pub resolved: bool,
     pub usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     pub stage: String,
     pub message: String,
@@ -238,6 +239,13 @@ impl ActivityView {
         }
     }
     pub fn advance_clock(&mut self, at: Instant) {
+        if let Some(age) = &mut self.phase_clock {
+            age.commit(at);
+        }
+        if let Some(age) = &mut self.request_clock {
+            age.commit(at);
+        }
+
         if let Some(clock) = &mut self.clock
             && clock.running
         {
