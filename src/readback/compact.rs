@@ -189,48 +189,92 @@ pub(crate) fn list(
 ) -> Result<Value, ApiError> {
     prepare(read_tx(db, thread, args)?)
 }
+pub(super) struct CopyBudget {
+    remaining: Option<usize>,
+}
+impl CopyBudget {
+    pub(super) fn display() -> Self {
+        Self {
+            remaining: Some(256 * 1024),
+        }
+    }
+    fn text(
+        &mut self,
+        row: &rusqlite::Row<'_>,
+        column: usize,
+        metrics: bool,
+    ) -> Result<String, crate::storage::StorageError> {
+        if let (Some(remaining), rusqlite::types::ValueRef::Text(bytes)) =
+            (self.remaining, row.get_ref(column)?)
+        {
+            if bytes.len() > remaining || (!metrics && bytes.len() > 512) {
+                return Err(ApiError::new(
+                    ErrorCode::InputLimit,
+                    "Compaction display text exceeds its copy budget",
+                )
+                .into());
+            }
+            self.remaining = Some(remaining - bytes.len());
+        }
+        Ok(row.get(column)?)
+    }
+    fn optional(
+        &mut self,
+        row: &rusqlite::Row<'_>,
+        column: usize,
+    ) -> Result<Option<String>, crate::storage::StorageError> {
+        if matches!(row.get_ref(column)?, rusqlite::types::ValueRef::Null) {
+            Ok(None)
+        } else {
+            self.text(row, column, false).map(Some)
+        }
+    }
+}
+pub(super) fn capture_error(error: crate::storage::StorageError) -> ApiError {
+    match error {
+        crate::storage::StorageError::Sqlite(sql) => super::error(sql),
+        other => other.into_api_error(),
+    }
+}
 pub(crate) fn read_tx(
     db: &Connection,
     thread: &str,
     a: &CompactListArgs,
 ) -> Result<RawCompactions, ApiError> {
+    collect_tx(db, thread, a, &mut CopyBudget { remaining: None }).map_err(capture_error)
+}
+pub(super) fn collect_tx(
+    db: &Connection,
+    thread: &str,
+    a: &CompactListArgs,
+    budget: &mut CopyBudget,
+) -> Result<RawCompactions, crate::storage::StorageError> {
     a.validate()?;
     super::register(db)?;
     let window = Window::new(a.since.as_deref(), a.until.as_deref())?;
-    let exists: bool = db
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
-            [thread],
-            |r| r.get(0),
-        )
-        .map_err(error)?;
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+        [thread],
+        |r| r.get(0),
+    )?;
     if !exists {
-        return Err(ApiError::new(
-            ErrorCode::TargetUnavailable,
-            "Thread is unavailable",
-        ));
+        return Err(ApiError::new(ErrorCode::TargetUnavailable, "Thread is unavailable").into());
     }
     let cap = (a.limit as usize * 4 + 1).min(801);
     let mut receipts = Vec::new();
     let mut spills = Vec::new();
     let mut included_receipts = 0usize;
-    let mut statement = db.prepare(&receipt_query(&window)).map_err(error)?;
-    for row in statement
-        .query_map(params![thread, cap as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, Option<String>>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, Option<String>>(5)?,
-                r.get::<_, i64>(6)?,
-                r.get::<_, i64>(7)?,
-            ))
-        })
-        .map_err(error)?
-    {
-        let (id, start, at, kind, raw, state, operation_count, spilled) = row.map_err(error)?;
+    let mut statement = db.prepare(&receipt_query(&window))?;
+    let mut rows = statement.query(params![thread, cap as i64])?;
+    while let Some(row) = rows.next()? {
+        let id = budget.text(row, 0, false)?;
+        let start = budget.text(row, 1, false)?;
+        let at = budget.optional(row, 2)?;
+        let kind = budget.text(row, 3, false)?;
+        let raw = budget.text(row, 4, true)?;
+        let state = budget.optional(row, 5)?;
+        let operation_count = row.get(6)?;
+        let spilled = row.get::<_, i64>(7)?;
         let in_window = window.includes(at.as_deref());
         if in_window {
             included_receipts += 1;
@@ -248,61 +292,53 @@ pub(crate) fn read_tx(
             in_window,
         });
     }
+    drop(rows);
     drop(statement);
     let mut covered_spills = std::collections::HashSet::new();
     for (op, start, end, n) in spills {
         let Some(end) = end else {
             continue;
         };
-        // Preserve the canonical per-thread serialization/coverage association.
-        let mut q = db.prepare(SPILL_COVERAGE_SQL).map_err(error)?;
-        for row in q
-            .query_map(
-                params![
-                    thread,
-                    start,
-                    end,
-                    format!("compact.result.{op}"),
-                    n.min(cap as u64) as i64
-                ],
-                |r| r.get::<_, String>(0),
-            )
-            .map_err(error)?
-        {
-            covered_spills.insert(row.map_err(error)?);
+        let mut statement = db.prepare(SPILL_COVERAGE_SQL)?;
+        let mut rows = statement.query(params![
+            thread,
+            start,
+            end,
+            format!("compact.result.{op}"),
+            n.min(cap as u64) as i64
+        ])?;
+        while let Some(row) = rows.next()? {
+            covered_spills.insert(budget.text(row, 0, false)?);
         }
     }
-    let mut statement = db.prepare(&automatic_query(&window)).map_err(error)?;
-    let automatic = statement
-        .query_map(params![thread, cap as i64], |r| {
-            Ok(AutomaticRow {
-                id: r.get(0)?,
-                at: r.get(1)?,
-                raw: r.get(2)?,
-                failure: r.get(3)?,
-                retry: r.get(4)?,
-                turn: r.get(5)?,
-                outcome: r.get(6)?,
-                failures: r.get(7)?,
-            })
-        })
-        .map_err(error)?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(error)?;
+    let mut automatic = Vec::new();
+    let mut statement = db.prepare(&automatic_query(&window))?;
+    let mut rows = statement.query(params![thread, cap as i64])?;
+    while let Some(row) = rows.next()? {
+        automatic.push(AutomaticRow {
+            id: budget.text(row, 0, false)?,
+            at: budget.optional(row, 1)?,
+            raw: budget.text(row, 2, true)?,
+            failure: budget.optional(row, 3)?,
+            retry: row.get(4)?,
+            turn: budget.text(row, 5, false)?,
+            outcome: budget.text(row, 6, false)?,
+            failures: row.get(7)?,
+        });
+    }
+    drop(rows);
     drop(statement);
-    let mut statement = db.prepare(&replacement_query(&window)).map_err(error)?;
-    let replacements = statement
-        .query_map(params![thread, cap as i64], |r| {
-            Ok(ReplacementRow {
-                id: r.get(0)?,
-                at: r.get(1)?,
-                format: r.get(2)?,
-                raw: r.get(3)?,
-            })
-        })
-        .map_err(error)?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(error)?;
+    let mut replacements = Vec::new();
+    let mut statement = db.prepare(&replacement_query(&window))?;
+    let mut rows = statement.query(params![thread, cap as i64])?;
+    while let Some(row) = rows.next()? {
+        replacements.push(ReplacementRow {
+            id: budget.text(row, 0, false)?,
+            at: budget.text(row, 1, false)?,
+            format: budget.text(row, 2, false)?,
+            raw: budget.text(row, 3, true)?,
+        });
+    }
     let saturated = included_receipts == cap || automatic.len() == cap || replacements.len() == cap;
     Ok(RawCompactions {
         thread: thread.into(),

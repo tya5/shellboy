@@ -198,6 +198,51 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
         .unwrap();
     assert_eq!(canonical["excerpt"], "retained answer");
     assert_eq!(canonical["body_available"], true);
+    control.store.database.call(|db| {
+        db.execute("UPDATE app_meta SET value=?1 WHERE key='compact.result.foreign-restore'",[serde_json::json!({"state":"completed","ended_at":"2026-10-31T00:02:00Z","outcome":{"result":{"omitted_nodes":0,"opaque":"x".repeat(1024*1024)}}}).to_string()])?;
+        Ok(())
+    }).await.unwrap();
+    let changed = control
+        .request(super::operation(
+            &control,
+            Command::ThreadSet(ThreadSetArgs {
+                thread_id: Some("independent".into()),
+                title: Some("updated under oversized compaction".into()),
+                ..Default::default()
+            }),
+        ))
+        .await;
+    assert!(changed.ok, "{:?}", changed.error);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, proofs| {
+        proofs.last().is_some_and(|proof| {
+            field(&proof.snapshot, "/title") == Some("updated under oversized compaction")
+                && proof.snapshot.fields.iter().any(|field| {
+                    field.key.starts_with("/view_limits/") && field.value == "last_compaction"
+                })
+        })
+    })
+    .await;
+    let latest = &proofs.last().unwrap().snapshot;
+    assert_eq!(field(latest, "/last_answer/body_available"), Some("true"));
+    assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+    let full = control
+        .store
+        .database
+        .call(|db| {
+            Ok(crate::readback::compactions(
+                db,
+                "independent",
+                &CompactListArgs {
+                    thread_id: Some("independent".into()),
+                    since: None,
+                    until: None,
+                    limit: 1,
+                },
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(full["items"][0]["kind"], "restore");
     sender.try_send(UiAction::Quit).unwrap();
     super::control_tests::finish_bridge(bridge, &incoming).await;
 }

@@ -28,7 +28,7 @@ enum Body {
     Thread(
         Arc<header::RawHeader>,
         Box<crate::thread_observation::RawLatest>,
-        Box<crate::readback::RawCompactions>,
+        Option<Box<crate::readback::RawCompactions>>,
     ),
     Lifecycle(Box<super::inspection_lifecycle::Raw>),
     Saved(super::inspection_saved::RawSaved, Option<u64>),
@@ -88,18 +88,9 @@ pub(super) fn read_scoped_tx(
                     Some(header) => Arc::clone(header),
                     None => Arc::new(header::read_tx(db, id)?),
                 };
-                let compact = crate::readback::read_compactions_tx(
-                    db,
-                    id,
-                    &CompactListArgs {
-                        thread_id: Some(id.clone()),
-                        since: None,
-                        until: None,
-                        limit: 1,
-                    },
-                )?;
+                let compact = crate::readback::read_last_compaction_display_tx(db, id)?;
                 let latest = crate::thread_observation::read_latest_display_tx(db, id)?;
-                Body::Thread(header, Box::new(latest), Box::new(compact))
+                Body::Thread(header, Box::new(latest), compact.map(Box::new))
             }
             InspectionTarget::Run(id) => {
                 Body::Lifecycle(Box::new(super::inspection_lifecycle::read_tx(
@@ -202,11 +193,15 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             limited_fields.extend(latest.limited_fields);
             details.last_answer = latest.last_answer;
             details.last_input = latest.last_input;
-            let compactions = crate::readback::prepare_compactions(*compactions)?;
-            details.last_compaction = compactions["items"]
-                .as_array()
-                .and_then(|rows| rows.first())
-                .cloned();
+            if let Some(compactions) = compactions {
+                let compactions = crate::readback::prepare_compactions(*compactions)?;
+                details.last_compaction = compactions["items"]
+                    .as_array()
+                    .and_then(|rows| rows.first())
+                    .cloned();
+            } else {
+                limited_fields.push("last_compaction".into());
+            }
             (
                 details.thread_id.clone(),
                 serde_json::to_value(details).map_err(|_| {

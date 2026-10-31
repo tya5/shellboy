@@ -266,8 +266,8 @@ fn compaction_sources_merge_without_merging_restore_into_its_omission() {
         let p = compactions(&c, "t", &a).unwrap();
         assert_eq!(p["items"].as_array().unwrap().len(), 1);
         assert_eq!(p["items"][0]["kind"], "automatic_reduction");
-        let all_raw = read_compactions_tx(&c, "t", &comp_args()).unwrap();
-        let period_raw = read_compactions_tx(&c, "t", &a).unwrap();
+        let all_raw = compact::read_tx(&c, "t", &comp_args()).unwrap();
+        let period_raw = compact::read_tx(&c, "t", &a).unwrap();
         drop(c);
         assert_eq!(prepare_compactions(all_raw).unwrap(), page);
         assert_eq!(prepare_compactions(period_raw).unwrap(), p);
@@ -304,7 +304,7 @@ fn spill_coverage_admission_keeps_integer_semantics_and_no_extra_lookup_queries(
             json!({"compact":{"spilled_groups":count,"original_node_ids":["original"]}}),
         );
         let trace = Statements::new(&c);
-        let raw = read_compactions_tx(&c, "t", &comp_args()).unwrap();
+        let raw = compact::read_tx(&c, "t", &comp_args()).unwrap();
         assert_eq!(trace.count(), if covered { 5 } else { 4 }, "{count}");
         drop(trace);
         drop(c);

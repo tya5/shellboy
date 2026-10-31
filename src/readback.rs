@@ -3,13 +3,13 @@ use crate::protocol::{ApiError, CompactListArgs, ErrorCode, ShellListArgs};
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 mod compact;
+mod compact_display;
 mod run_wait;
 mod shell;
 mod time;
 pub(crate) use compact::list as compactions;
-pub(crate) use compact::{
-    RawCompactions, prepare as prepare_compactions, read_tx as read_compactions_tx,
-};
+pub(crate) use compact::{RawCompactions, prepare as prepare_compactions};
+pub(crate) use compact_display::read as read_last_compaction_display_tx;
 pub(crate) use run_wait::read as run_wait_reason;
 pub(crate) use shell::list as shells;
 pub(crate) use time::Window;
