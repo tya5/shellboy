@@ -91,7 +91,7 @@ def main():
                                 click_described_header()
                                 scene('expanded', lambda s: 'コマンド原文' in s and 'printf CMD_DESCRIBED' in s)
                                 terminal.send('\x1b[17~')
-                                scene('details', lambda s: 'CMD_DESCRIBED' in s and 'F7 リンク' in s)
+                                scene('details', lambda s: '選択した内容の詳細' in s and 'CMD_DESCRIBED' in s and 'O 原文' in s)
                                 terminal.send('o')
                                 scene('original', lambda s: 'CMD_DESCRIBED' in s and 'N 次page' in s and ('arguments' in s or 'command' in s))
                                 terminal.send('\x1b\x1b')
