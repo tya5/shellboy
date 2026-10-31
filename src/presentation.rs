@@ -660,7 +660,15 @@ pub fn render_markdown(presentation: &mut NodePresentation, width: u16) {
         && !presentation.details_omitted
         && presentation.body_omitted_chars == 0
         && !presentation.body_extent_unknown
-        && !presentation.body_evicted;
+        && !presentation.body_evicted
+        && presentation
+            .blocks
+            .first()
+            .is_some_and(|b| b.source_start == 0)
+        && presentation
+            .blocks
+            .iter()
+            .all(|b| b.source_exact && matches!(b.kind, BlockKind::Prose | BlockKind::Reasoning));
     let mut copy_offset = 0;
     for block in &mut presentation.blocks {
         if !matches!(block.kind, BlockKind::Prose | BlockKind::Reasoning) {
@@ -1366,5 +1374,15 @@ mod copy_caption_tests {
         p.body_extent_unknown = true;
         render_markdown(&mut p, 78);
         assert!(!rendered(&p).contains("[1] コピー"));
+        let tail = "```\ntwo\n```\n";
+        let offset = text[..text.find(tail).unwrap()].chars().count();
+        let mut partial = project(
+            "assistant",
+            &serde_json::json!({"role":"assistant","content":text}),
+            tail,
+            offset,
+        );
+        render_markdown(&mut partial, 78);
+        assert!(!rendered(&partial).contains("[1] コピー"));
     }
 }
