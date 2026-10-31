@@ -4174,3 +4174,28 @@ The next full run passed950 unit tests and918 integration tests, with two
 remaining integration golden-label failures (`●` answer and `↳` background).
 These are updated to the adopted `▸` and `⏵ 背景（利用者）` contracts without
 changing source-order, command-identity, cancellation or watchdog assertions.
+
+
+Final local source7028c3b is rebased on accepted main e933054 (including #80).
+The three append-only documentation conflicts retained both tasks' records;
+Rust/UI integration had no conflict. The pending standard/local qualification
+statements above are superseded by the following independent final results:
+- `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 sh scripts/check.sh`: exit0,
+  Rust1,887 passed / 0 failed / 33 ignored, layout93 suites, Python18, fmt and
+  strict all-target Clippy. Evidence: `/tmp/issue-83-check-final2.log`.
+- Final rebuilt debug binary SHA256:
+  `bccbe30aab271abdcad9ba37da4cd2f6150e7681a772ae5d5d277b3ffd8993ee`.
+  The same actual PTY command, now `--out /tmp/issue-83-pty-final`, independently
+  passes8 sessions/56 completed frames after rebase/Enter-only following. Tests
+  also verify Space remains folding, unavailable source stays local and child
+  Enter follows the saved Thread. `py_compile` and `git diff --check` pass.
+- Same140x40 TestBackend,128 nodes/50 tools, debug,20 warmup/500 timed frames,
+  interaction mode on both main e933054 and candidate7028c3b, three interleaved
+  pairs: p95 microseconds3268→4449,3388→5135,3187→4169. All pass<=8ms and
+  <=current-main+2ms (largest delta1747us). Both keep131 layout builds,
+  258 unit builds/16510 unit hits and focus-only reuse assertions. Logs/JSON:
+  `/tmp/issue-83-p1.log`, `/tmp/issue-83-p1.json`. This is an incremental
+  current-main comparison, not a fresh observation of historical main1fec7f0.
+- Source/script changes stop at7028c3b; subsequent status/acceptance edits are
+  evidence-only. Branch CI and review outcome are recorded in issue #83; local
+  success alone is not three-OS admission or physical terminal qualification.

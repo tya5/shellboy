@@ -1553,12 +1553,14 @@ reloaded/recalled source text stays conservative. Local standard checks and
 eight native PTY sessions pass; native CI/integration are tracked in #84 and
 acceptance, separately from unmeasured P1 latency and physical terminals.
 
-### #83 conversation rows: implementation pending final admission checks
+### #83 conversation rows: local qualification complete, review pending
 
 Single EAW=N mark/label/color and spacing table; live/saved background shell
 facts and saved-start clocks; factual notifications and Enter source navigation.
-No Core/protocol/storage or #86 region rendering change. Actual native PTY:
+No Core/protocol/storage or #86 region rendering change. Standard check passes
+1,887 Rust tests / 0 failures / 33 ignored; actual final native PTY passes
 8 sessions / 56 completed screens across 80/140, dark/light/NO_COLOR/vt100.
-Initial standard check found a test-only usize/u64 mismatch and collapsible-if;
-both are corrected, not yet a full-check pass. Final rebase/check/P1/CI pending.
+Incremental P1 against main e933054: worst p95 5.135ms, largest delta1.747ms;
+all three interleaved pairs meet 8ms/+2ms. Details and failures are in acceptance.
+Branch three-OS CI/review/main admission are not claimed by local validation.
 Missing names and off-window source lookup are explicitly deferred to #88.
