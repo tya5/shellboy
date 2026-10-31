@@ -9,12 +9,12 @@ use serde_json::Value;
 use std::{mem::size_of, sync::Arc};
 
 pub(crate) struct ConfirmationCapture {
-    pub identity: RequestWitness,
-    pub kind: ObservationKind,
-    pub result: Arc<Value>,
-    pub captured_at: DateTime<Utc>,
-    pub targets: TargetWitnesses,
-    pub metadata_bytes: usize,
+    identity: RequestWitness,
+    kind: ObservationKind,
+    result: Arc<Value>,
+    captured_at: DateTime<Utc>,
+    targets: TargetWitnesses,
+    metadata_bytes: usize,
     stale: bool,
 }
 
@@ -53,6 +53,15 @@ pub(crate) fn capture_confirmation(
 }
 
 impl ConfirmationCapture {
+    pub fn identity(&self) -> &RequestWitness {
+        &self.identity
+    }
+    pub fn result(&self) -> &Arc<Value> {
+        &self.result
+    }
+    pub fn metadata_bytes(&self) -> usize {
+        self.metadata_bytes
+    }
     /// Keep the exact existing result Arc and wall time; never regenerate a preview.
     pub fn prepare(
         identity: RequestWitness,

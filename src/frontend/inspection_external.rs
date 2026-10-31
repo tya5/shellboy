@@ -107,7 +107,7 @@ pub(crate) fn prepare_refresh_notice(
     request_pending: bool,
 ) -> ObservationNotice {
     let owned = visible && !cancelled && &captured.identity == current;
-    let next_action = if !visible || cancelled || request_pending {
+    let next_action = if !owned || request_pending {
         NextAction::None
     } else if captured.kind == ObservationKind::Models {
         NextAction::RefreshModels
