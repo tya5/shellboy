@@ -2685,3 +2685,7 @@ Final F/#98/#100 integration source passes full standard gate and rebuilt native
 8-condition fixture. Shared elapsed/end-time follow-up is ready for review; latest
 results/source and conflict resolution are recorded in #85, with coordinator CI
 still separate. No quiet-slot remeasurement or own CI/main push was performed.
+#85 admission-notification follow-up passes its fixed-order red/green and original
+browser row assertions; full checked source on2954dda passes2,078/0/35 and
+rebuilt8-condition fixture. Current-main integration/Windows qualification remain
+coordinator gates. Detailed failure/source/order evidence is in#85.

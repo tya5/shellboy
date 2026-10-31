@@ -5882,3 +5882,9 @@ Final source on maind29e0fc passes sh scripts/check.sh:2,064/0/35, Python66,
 layout94/fmt/strict Clippy/policy. Rebuilt actual PTY matrix8/64 also passes,
 including saved completed-time labels. Detailed source/result evidence is in#85.
 Subsequent record-only commit leaves Rust/fixture blobs identical to checked code.
+#85 final owned-chain source8796e5b on2954dda passes standard2,078/0/35,
+Python70/layout94/fmt/strict Clippy/policy plus rebuilt native8/64. JOBS2 and
+TEST_THREADS2 used under reviewer16:24 override; no elapsed-time regression or
+external-process intervention inferred. Current main66d2746 also contains the
+later stage3 stack, which is not covered by this checked-base gate. New source
+review/Windows CI remain distinct; no rerun of failed41214341584 was requested.
