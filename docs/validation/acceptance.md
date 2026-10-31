@@ -5275,3 +5275,19 @@ future is never polled after its initial deadline. The tie test now first polls
 a pending header receiver on time, then makes both it and the timeout ready; a
 separate virtual-clock probe checks no late initial poll. This avoids trading
 ready-header classification for initiation of a new expired request.
+
+### #95 third failure added during investigation
+
+The user recorded macOS645cd36 run41189322766's pinned-tool wait at line1031.
+A request-boundary assertion deterministically rejects the old fixture's follow
+state before dispatch (red), rather than relying on a longer timeout to observe
+its later hang. A pure UI regression then exercises non-tail-window arrival both
+before and after the initial tail is cached: following correctly falls back when
+there is no tail; already-paused navigation retains the old node in both orders.
+The original fixture now pauses and anchors before requesting ordinal0. Its
+running->exited metadata, retained text/base offset and anchor assertions remain;
+all three10-second legacy guards are unchanged, with no skip/retry allowance.
+The focused real-owner case passes three native macOS runs. UI source changes
+in this increment are confined to cfg(test); this is not a retention-policy fix.
+The original CI had only Elapsed, so its exact cached-node state was not saved;
+the deterministic counterexample establishes the invalid prerequisite and repair.

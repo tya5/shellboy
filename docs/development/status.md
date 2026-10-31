@@ -2021,3 +2021,7 @@ conditions cover actual foreground/background/completed shells plus focused
 opened/closed rows. The final focus fallback is bold, not a new left marker;
 headings keep their columns. Opened notices use the shared muted indentation.
 #99's preview lifetime/closed-error issue remains separate and requires review.
+#95's third pinned-tool observation is a fixture navigation-intent ordering error:
+pause before dispatching a non-tail window, not after waiting for its reply.
+Two-order pure-state coverage and the original retained-body assertions remain;
+no UI retention change or longer guard is used for that case.
