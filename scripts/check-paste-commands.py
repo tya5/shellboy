@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import struct
@@ -51,6 +52,8 @@ class Terminal:
         self.stream = pyte.Stream(self.screen)
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self.raw = bytearray()
+        self.paint = bytearray()
+        self.completed_text = ""
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, cols, 0, 0))
         env = dict(os.environ, TERM=term)
@@ -65,16 +68,52 @@ class Terminal:
              "--data-dir", str(root / "data")], cwd=root, env=env,
             stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
         os.close(slave)
+        os.set_blocking(self.master, False)
 
-    def text(self):
+    def cells(self):
         # pyte's display property crashes on orphan wide-character stub cells
         # during Ratatui differential repaints. Read its parsed cell data directly.
         return "\n".join("".join(self.screen.buffer[y][x].data
                                  for x in range(self.screen.columns))
                          for y in range(self.screen.lines))
 
+    def text(self):
+        return self.completed_text
+
+    def feed_output(self, chunk):
+        self.raw.extend(chunk)
+        self.paint.extend(chunk)
+        # Ratatui ends each painted frame by hiding the cursor or showing and
+        # positioning it. Capture there, not halfway through a wide-cell repaint.
+        boundary = rb"\x1b\[\?25l|\x1b\[\?25h\x1b\[\d+;\d+H"
+        while match := re.search(boundary, self.paint):
+            self.stream.feed(self.decoder.decode(self.paint[:match.end()]))
+            del self.paint[:match.end()]
+            self.completed_text = self.cells()
+        if len(self.raw) > 4 * 1024 * 1024:
+            raise AssertionError("PTY output flood")
+
+    def read_ready(self):
+        try:
+            self.feed_output(os.read(self.master, 65536))
+        except BlockingIOError:
+            pass
+
     def send(self, text):
-        os.write(self.master, text.encode())
+        pending = text.encode()
+        deadline = time.monotonic() + WATCHDOG_SECONDS
+        # Drain output while delivering paste: both PTY directions are bounded.
+        while pending:
+            if time.monotonic() >= deadline:
+                raise AssertionError("60s PTY input watchdog")
+            readable, writable, _ = select.select([self.master], [self.master], [], .05)
+            if readable:
+                self.read_ready()
+            if writable:
+                try:
+                    pending = pending[os.write(self.master, pending[:256]):]
+                except BlockingIOError:
+                    pass
 
     def paste(self, text):
         self.send("\x1b[200~" + text + "\x1b[201~")
@@ -89,11 +128,7 @@ class Terminal:
                 raise AssertionError(f"TUI exited before {label}: {self.process.returncode}")
             readable, _, _ = select.select([self.master], [], [], .05)
             if readable:
-                chunk = os.read(self.master, 65536)
-                self.raw.extend(chunk)
-                self.stream.feed(self.decoder.decode(chunk))
-                if len(self.raw) > 4 * 1024 * 1024:
-                    raise AssertionError("PTY output flood")
+                self.read_ready()
         return self.text()
 
     def close(self):

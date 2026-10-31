@@ -4046,3 +4046,14 @@ failures are not passing product observations. Final PTY results, standard
 checks and native CI must be recorded independently after they complete.
 Unqualified: physical terminal/IME/clipboard operation, Windows ConPTY, and
 matched-baseline P1 timing (no unnecessary release build for this task).
+
+PTY result (2026-10-31): all eight sessions passed, with 10 screen observations
+each and exactly one explicitly submitted synthetic SSE request per session.
+The PTY bytes in `/tmp/issue-84-pty-third` were decoded again at Ratatui's
+end-of-frame cursor sequence to replace partial-repaint snapshots with 80
+complete-frame text captures, without rerunning the TUI. At 80 columns both
+warning/retyping lines and the 41-line/1326-character paste chip are readable.
+The second harness attempt deadlocked on a blocking master write; bidirectional
+nonblocking delivery with the same 60-second watchdog fixes that fixture issue.
+No product change was required for these harness corrections. Raw bytes,
+`results.json` and `*-complete.txt` remain local synthetic evidence, not user logs.
