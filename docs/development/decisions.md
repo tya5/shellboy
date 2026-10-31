@@ -1986,3 +1986,27 @@ not a traced cause. Focusedc19e5c1 now passes. If the full check or native CI fa
 again after this stronger gate, capture ticket IDs/admission and result sequences
 instead of relaxing assertions or adding sleeps/time budgets. No product cadence,
 queue, state or sequence policy changes on this evidence alone.
+
+
+### E CI follow-up: simultaneous deadline admission
+
+The selected-excerpt gate alone did not remove CBC's Linux/Windows sequence
+mismatch. Source inspection identifies a separate counterexample: both deadlines
+can be ready in the same select, whose browser arm immediately dispatches an
+independent read and advances the shared deadline before the selected view's
+outer admission loop runs. Yield that arm to the existing loop whenever its
+selected refresh deadline is already due. Browser-only reads remain unchanged;
+no new scheduler, queue, worker, event or timer is added.
+
+A real separate-CLI integration now performs16 consecutive mutations while
+preserving exact one-observation, paired-sequence and no-reload assertions under
+one shared60s watchdog. Focused macOS execution passes all16 changes. This
+supersedes treating readiness alone as a sufficient repair; the earlier failures
+remain visible. The full check and new native CI are still required.
+
+The unrelated raw-save stop case replaces8s/250ms/5s test guards with #77's
+shared watchdog and its75ms absence assertion with post-drain request and durable
+attempt counts. The saved stopped state and SaveFailed shutdown remain required.
+The existing short polling sleep stays inside the test-only saved-state waiter;
+there is no new product polling. Passing a60s deadlock guard does not explain the
+original eight-second delay or create a product shutdown-latency guarantee.

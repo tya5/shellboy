@@ -624,3 +624,11 @@ coherent readonly snapshot may contain that title, one queued message and no
 selected user node. Display the pending queue honestly; only a later saved path
 observation establishes admission. Tests must preserve this intermediate state
 and wait for the immutable selected node before stopping the Run.
+
+
+When the browser and selected-view deadlines become ready together, the browser
+select arm only wakes the outer admission loop. It must not start an independent
+browser read and move the shared deadline forward before the pending selected
+read can take that same browser ticket. Keep admission priority in the existing
+outer loop, with no new queue/worker or additional timer. A browser-only change
+still uses its normal bounded standalone read.

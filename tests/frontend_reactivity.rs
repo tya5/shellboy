@@ -876,38 +876,38 @@ async fn selected_header_and_open_browser_share_one_changed_snapshot_without_rel
         .await;
     let generation = fixture.ui.list_generation();
     let pages = fixture.browser_pages;
-    fixture.view_sequences.clear();
-    fixture.browser_sequences.clear();
-    let (_, commit) = fixture
-        .cli(&[
-            "thread",
-            "set",
-            "--thread",
-            "reactive",
-            "--title",
-            "E1_PAIRED_TITLE",
-        ])
-        .await;
-    fixture
-        .until("both consumers update without user input", |ui, _| {
-            ui.view().title == "E1_PAIRED_TITLE"
-                && ui
-                    .threads()
-                    .iter()
-                    .any(|row| row.thread_id == "reactive" && row.title == "E1_PAIRED_TITLE")
-        })
-        .await;
-    latency("browser_paired_header", commit);
-    assert_eq!(fixture.ui.list_generation(), generation);
-    assert_eq!(
-        fixture.browser_pages, pages,
-        "normal Changed must not reload the list"
-    );
-    assert_eq!(fixture.view_sequences.len(), 1, "one selected observation");
-    assert_eq!(
-        fixture.browser_sequences, fixture.view_sequences,
-        "both facts share the DB transaction's read sequence"
-    );
+    watchdog("consecutive shared read deadlines", async {
+        for step in 0..16 {
+            let title = format!("E1_PAIRED_TITLE_{step}");
+            fixture.view_sequences.clear();
+            fixture.browser_sequences.clear();
+            let (_, commit) = fixture
+                .cli(&["thread", "set", "--thread", "reactive", "--title", &title])
+                .await;
+            fixture
+                .until("both consumers update without user input", |ui, _| {
+                    ui.view().title == title
+                        && ui
+                            .threads()
+                            .iter()
+                            .any(|row| row.thread_id == "reactive" && row.title == title)
+                })
+                .await;
+            latency("browser_paired_header", commit);
+            assert_eq!(fixture.ui.list_generation(), generation);
+            assert_eq!(
+                fixture.browser_pages, pages,
+                "normal Changed must not reload the list"
+            );
+            assert_eq!(fixture.view_sequences.len(), 1, "one selected observation");
+            assert_eq!(
+                fixture.browser_sequences, fixture.view_sequences,
+                "step {step}: both facts share the DB transaction's read sequence"
+            );
+        }
+    })
+    .await
+    .unwrap();
     fixture.finish().await;
 }
 

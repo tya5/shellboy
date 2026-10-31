@@ -930,6 +930,12 @@ async fn run_with_delivery(
         tokio::select! {
             _=tokio::time::sleep_until(browser_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if browser_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
+                // Both timers can wake in the same select. Let the outer loop
+                // admit the selected view first so it can take this browser
+                // ticket into its one snapshot instead of delaying it 500ms.
+                if refresh_deadline.is_some_and(|due|tokio::time::Instant::now()>=due) {
+                    continue;
+                }
                 if let Ok(permit)=read_slots.clone().try_acquire_owned()
                     && let Some(ticket)=browser.take(tokio::time::Instant::now()) {
                     view_read_next=Some(tokio::time::Instant::now()+Duration::from_millis(500));
