@@ -94,6 +94,7 @@ Until acceptance completes, the submitted text and attachments remain visible. E
 
 - `/new` or Ctrl+N opens a new draft. It is not a saved Thread until the first send.
 - `/threads` or Ctrl+T opens a one-row-per-item list. Select with Up/Down and Enter. Left/Right expand, collapse, or move through parent/child relationships; typing filters the list. Details and a short conversation excerpt appear below; F1 opens full values.
+- Tab in the list switches to Watch. `/threads active` opens Watch directly; `/threads descendants` or Alt+D watches the selected conversation's descendants. Enter opens a row; Ctrl+S/Alt+R confirm Run stop/recovery retry, and Alt+O reads saved output. See [Watch](tui.md#watch-work-and-descendants).
 - If you know an ID, use `/switch THREAD_ID`.
 
 Saved title, state, additions and deletions update the open list automatically while keeping selection and collapsed branches. A new row may be above your retained reading position; use Up to reach it. `再確認中` means a previously selected row is being checked after refresh. Ctrl+R explicitly reloads the list; lost notifications trigger an explained resynchronization.

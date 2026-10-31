@@ -2064,3 +2064,19 @@ case passes1/0/0 (939 filtered), using only loopback mock HTTP and temporary dat
 observed event-to-paint477/496/494ms are observations, not performance pass guards.
 Canonical60s watchdogs/readiness replace imported15s limits. This source has not
 yet received a new full standard check or native three-OS/physical-terminal proof.
+
+
+## F help/guide/completion preparation
+
+Added explicit Watch/subscope completion candidates and help, keeping an exact
+`/threads` completion first. Candidate prefix matching handles registered command
+phrases without a hard-coded whitespace exception; other filter arguments stay
+literal and #84's typed-command provenance remains in force. Help reports Alt+D
+collision with configured send/newline keys. English TUI/User/Agent and Japanese
+User Guide explain actions, unread/limits and CLI versus human-view scope.
+Focused composer suite passes13/0/0 (1045 filtered) on native macOS, including
+existing paste provenance and real Tab/help/dispatch contracts. The imported
+help token check now validates consecutive command words, retaining exact-token
+boundaries for names containing spaces. Full standard after embedded-guide
+changes is pending. F work is saved separately while approved E admission takes
+priority; no F main admission or installed/default-data change.

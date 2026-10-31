@@ -222,6 +222,8 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/cancel-wait` | Cancel observation of a TUI-started wait, without stopping its target |
 | `/new` | New draft |
 | `/threads [FILTER]` | Threads and unsent drafts |
+| `/threads active` | Watch saved work across conversations |
+| `/threads descendants` | Watch descendants of the selected conversation |
 | `/switch THREAD_ID` | Switch by ID |
 | `/model` | Current connection, model, and effort |
 | `/queue` | Saved pending/held input; fixed-ID cancellation and original/delivery inspection |
@@ -283,6 +285,41 @@ In F8 `会話 · 設定` (conversation settings), set `タイトル操作` (titl
 Fixed bottom details show the selection's cwd, ID, parent, state, and a one-line excerpt of roughly at most 80 characters with Markdown/newlines normalized. Narrow screens omit columns; details or F1 show complete values. Enter opens the conversation; F6 reads source.
 
 `[親未取得]` means the parent is outside the fetched page/filter scope. Adding pages with PgDn groups children under newly fetched parents. Fetched rows group ancestry based on update order; this is not a guaranteed complete tree. At 2000 entries, narrow the filter. Ctrl+R retries failed fetches. Searching/browsing does not stop Thread work.
+
+### Watch work and descendants
+
+Tab switches the same conversation browser between List and Watch while keeping
+its filter and selection when available. `/threads active` opens Watch directly;
+`/threads descendants` or Alt+D scopes it to the selected saved conversation's
+descendants. A configured send/newline binding takes precedence over Alt+D.
+These are TUI slash commands, not CLI subcommands.
+
+Watch is a flat priority view: recovery, failed, unread completion, active work
+and background work, with saved details below each title. Enter opens a
+conversation. Ctrl+S confirms a full Run stop; Alt+R confirms retry of a recovery
+Turn; Alt+O reads saved output. Confirmation retains the actual Run/Turn/generation:
+a changed target is rejected rather than retargeted. Typing filters; deletion
+stays in List. Esc closes the browser without stopping work.
+
+Unread tracks completed Run/answer identities only in this UI process. Opening
+a completion marks it seen. Read rows already painted stay until the Watch
+session closes. The bounded 2000-identity history may become uncertain after
+eviction; changing a title does not create a new unread answer. Nothing expires
+merely because time passed.
+
+Descendant counts follow parent Threads, independently of Run ownership. Active
+and recovery counts are separate; exact zeros are hidden. Depth8/discovery256
+bounds produce an explicit lower bound or unknown status when truncated/cyclic.
+Retained grandchildren can remain reachable through a deleted intermediate; a
+missing/deleted root is unavailable. Counts and visible details update from saved
+changes; local age labels do not poll the database. An observed age is not an
+invented saved transition time.
+
+PgDn requests another discovery page. A bounded-title or candidate-scan notice
+can require continuation even when the current page has no matching rows; it is
+not proof that no work exists. Large previews/commands stay explicitly unavailable
+with a route to the conversation/detail; the preview limit does not delete source
+history. Normal source availability/GC rules still apply.
 
 ### Deleting from the conversation list
 

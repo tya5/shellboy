@@ -80,6 +80,41 @@ impl Page {
         page.entry("PgUp / PgDn", "会話を画面単位で前後に読む");
         page.entry("Ctrl+End", "会話の末尾へ戻り、新しい出力に追従する");
         page.entry("Ctrl+T", "会話一覧を開く（/threads）");
+        page.entry("一覧内 Tab", "一覧とWatchを切り替える。文字入力は絞り込み");
+        page.entry(
+            "/threads active",
+            "復旧待ち・失敗・未読完了・実行中の作業を監視",
+        );
+        page.entry(
+            "/threads descendants",
+            "現在の会話を親とする子孫の作業を監視",
+        );
+        let descendant_key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('d'),
+            crossterm::event::KeyModifiers::ALT,
+        );
+        if !super::key_matches(&config.ui.send_key, descendant_key)
+            && !config
+                .ui
+                .newline_keys
+                .iter()
+                .any(|binding| super::key_matches(binding, descendant_key))
+        {
+            page.entry("Alt+D", "現在の会話の子孫をWatchで開く");
+        } else {
+            page.entry(
+                "Alt+D",
+                "子孫監視の短縮キーは無効（送信・改行と重複）。/threads descendants を使用",
+            );
+        }
+        page.entry(
+            "Watch内 Ctrl+S / Alt+R",
+            "表示中のRunを停止／復旧待ちを再試行。確認対象が変われば未適用",
+        );
+        page.entry(
+            "Watch内 Alt+O / Enter",
+            "保存出力を読む／会話を開く。削除は一覧側で操作",
+        );
         page.entry(
             "一覧内 Delete / Ctrl+D",
             "選んだ会話の削除影響を確認する。まだ削除しない",

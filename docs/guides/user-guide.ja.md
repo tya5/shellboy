@@ -97,6 +97,7 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 - `/new`またはCtrl+Nで新しい下書きを作ります。最初の送信前はまだ保存済みThreadではありません。
 - `/threads`またはCtrl+Tで1行ずつの一覧を開き、上下キーとEnterで選びます。左右キーで親子を開閉・移動し、文字入力で絞り込みます。選択した項目の詳細と短い会話抜粋は下部、完全値はF1から確認できます。
+- 一覧内のTabでWatchへ切り替えます。`/threads active`で直接開き、`/threads descendants`またはAlt+Dで現在の会話の子孫を監視できます。Enterで会話へ移動、Ctrl+S/Alt+RでRun停止／復旧待ちの再試行を確認し、Alt+Oで保存出力を読みます。[Watchの詳細](tui.md#watch-work-and-descendants)も参照してください。
 - IDが分かる場合は`/switch THREAD_ID`で移動できます。
 
 一覧を開いている間も、保存済みタイトル・状態・追加・削除が自動で反映され、選択と親子の開閉状態を保ちます。新しい行が現在の閲覧位置より上に入る場合は、上キーで移動できます。「再確認中」は、再取得後に以前の選択先を確認している印です。Ctrl+Rで明示的に再取得でき、変更通知を取りこぼした場合は理由を表示して再同期します。

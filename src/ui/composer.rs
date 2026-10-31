@@ -67,6 +67,14 @@ const COMMANDS: &[CommandHint] = &[
         help: "会話一覧",
     },
     CommandHint {
+        name: "/threads active",
+        help: "作業を優先順に監視",
+    },
+    CommandHint {
+        name: "/threads descendants",
+        help: "現在の会話の子孫を監視",
+    },
+    CommandHint {
         name: "/switch",
         help: "IDで会話を切替",
     },
@@ -255,7 +263,6 @@ impl UiState {
         if !draft.command_is_typed()
             || draft.cursor != draft.text.len()
             || !draft.text.starts_with('/')
-            || draft.text.chars().any(char::is_whitespace)
             || self.view().composer.dismissed.as_ref() == Some(&draft.text)
         {
             return vec![];
@@ -737,10 +744,14 @@ mod contract_tests {
             .collect::<String>();
         let documented = help
             .split(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '/' | '-'))
-            .collect::<std::collections::BTreeSet<_>>();
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>();
         for hint in COMMANDS {
+            let words = hint.name.split_ascii_whitespace().collect::<Vec<_>>();
             assert!(
-                documented.contains(hint.name),
+                documented
+                    .windows(words.len())
+                    .any(|tokens| tokens == words),
                 "missing help: {}",
                 hint.name
             );
@@ -950,5 +961,32 @@ mod contract_tests {
         let mut ui = UiState::new(&Config::default(), invalid);
         assert!(ui.slash(&format!("/cwd {}", valid.display())).is_empty());
         assert_eq!(ui.view().cwd, valid);
+    }
+    #[test]
+    fn thread_subcommands_complete_without_taking_over_other_filter_arguments() {
+        for (query, expected) in [
+            ("/threads", "/threads"),
+            ("/threads a", "/threads active"),
+            ("/threads d", "/threads descendants"),
+        ] {
+            let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+            for ch in query.chars() {
+                ui.event(crossterm::event::Event::Key(KeyEvent::new(
+                    KeyCode::Char(ch),
+                    KeyModifiers::NONE,
+                )));
+            }
+            assert_eq!(ui.completions()[0].name, expected);
+            ui.composer_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            assert_eq!(ui.view().draft.text, format!("{expected} "));
+        }
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        for ch in "/threads project filter".chars() {
+            ui.event(crossterm::event::Event::Key(KeyEvent::new(
+                KeyCode::Char(ch),
+                KeyModifiers::NONE,
+            )));
+        }
+        assert!(ui.completions().is_empty());
     }
 }
