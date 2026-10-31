@@ -19,7 +19,7 @@ fn emit(value: &Value) -> bool {
         .is_ok()
 }
 #[cfg(unix)]
-async fn signal(signals: &mut crate::os_signals::OsSignals) {
+async fn signal(signals: &mut crate::os_signals::ServeSignals) {
     let _ = signals.recv().await;
 }
 #[cfg(not(unix))]
@@ -42,7 +42,7 @@ async fn listener_failure(
 /// Err is startup-only; once ready, a failed final result is stdout plus exit 1.
 pub async fn run(config: Option<PathBuf>, data: PathBuf) -> Result<bool, ApiError> {
     #[cfg(unix)]
-    let mut signals = crate::os_signals::OsSignals::new().map_err(|_| {
+    let mut signals = crate::os_signals::ServeSignals::new().map_err(|_| {
         ApiError::new(
             ErrorCode::IoFailed,
             "Cannot observe owner termination signals",

@@ -690,3 +690,25 @@ local IPC/OS access is the authority, not sender-label or a human approval claim
 Owner replacement does not transfer work or reconnect a UI. Parent background
 shell/nested Job and full failure-boundary qualification remain #5 stage 4; use
 disposable directories until those lifecycle checks land.
+
+### Terminal-free ownership and interruption
+
+On Unix, foreground Ctrl+C (SIGINT), TERM and HUP request the same cleanup.
+Repeated TERM during drain is not an escalation: use external SIGKILL if forced
+termination is necessary. Windows uses `shutdown --data-dir DIR`, not CTRL_BREAK.
+Neither path promises completion within the parent's termination grace. A missing
+final row can mean forced termination; reopen the data and inspect saved state.
+Never assume a shell whose effect may have happened is safe to execute again.
+
+A serve owner started by a model's background shell stays owned by that shell
+and Run. Stop the child explicitly when finished; otherwise its parent remains
+live. Parent shell/Run/owner termination also ends the nested owner and its tools
+through the existing Unix lifeline / Windows Job chain. No daemonization or
+breakaway is added. Restart does not automatically resume interrupted work.
+
+Use `status --thread THREAD_ID` and `run get --run RUN_ID` to inspect recovery,
+then explicitly choose `run retry --run RUN_ID`, new input, or `run stop --run RUN_ID`.
+Read the saved error before retrying; generation/embedding requests have normal
+costs. TUI drafts, submitted-draft restore, Turn interruption and TUI slash-only
+operations have no headless UI. Existing CLI compact operations remain available.
+A TUI cannot be attached later, and owner replacement does not transfer live work.

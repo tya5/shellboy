@@ -512,3 +512,11 @@ Observers that consumed preparing must not depend on response headers, a selecte
 view timer or another operation to see running. Rejected/conflicting/uncommitted
 admissions publish no success change. This is commit observability, not a new
 Run/Turn transition, request order or periodic notification (#85 CI follow-up).
+
+## Serve signals and nested ownership
+
+Serve observes Unix INT as well as TERM/HUP through its adapter; TUI keyboard and
+force/deadline policy are unchanged. Once drain begins, further TERM/HUP/INT do
+not escalate it; external SIGKILL remains forceful termination. Signal stream
+exhaustion parks rather than panicking. Background serve remains a normal owned
+shell descendant; its own tools keep their ordinary lifeline/Job ownership.

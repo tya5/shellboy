@@ -2689,3 +2689,9 @@ still separate. No quiet-slot remeasurement or own CI/main push was performed.
 browser row assertions; full checked source on2954dda passes2,078/0/35 and
 rebuilt8-condition fixture. Current-main integration/Windows qualification remain
 coordinator gates. Detailed failure/source/order evidence is in#85.
+## #5 stage 4 candidate
+
+Parent-owned background serve and nested-tool lifecycle checks, native bootstrap/
+snapshot/pre-DB-close cutpoints and CLI recovery workflow are prepared. Serve
+adds Unix INT to graceful termination without changing TUI policy; repeated TERM
+in drain is not forced termination. Qualification and native-OS limits are in #5.

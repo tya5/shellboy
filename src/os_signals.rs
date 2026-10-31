@@ -18,6 +18,31 @@ impl OsSignals {
         })
     }
     pub(crate) async fn recv(&mut self) -> Signal {
-        tokio::select! {Some(())=self.term.recv()=>Signal::Term,Some(())=self.hup.recv()=>Signal::Hup}
+        tokio::select! {
+            Some(()) = self.term.recv() => Signal::Term,
+            Some(()) = self.hup.recv() => Signal::Hup,
+            else => std::future::pending().await,
+        }
+    }
+}
+
+/// Serve observes Ctrl+C without changing TUI's keyboard/signal policy.
+pub(crate) struct ServeSignals {
+    common: OsSignals,
+    interrupt: tokio::signal::unix::Signal,
+}
+impl ServeSignals {
+    pub(crate) fn new() -> io::Result<Self> {
+        Ok(Self {
+            common: OsSignals::new()?,
+            interrupt: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?,
+        })
+    }
+    pub(crate) async fn recv(&mut self) {
+        tokio::select! {
+            _ = self.common.recv() => {},
+            Some(()) = self.interrupt.recv() => {},
+            else => std::future::pending::<()>().await,
+        }
     }
 }

@@ -447,3 +447,15 @@ observe the process and final stopped JSON. No final row after force-kill does
 not establish success. No bounded completion time or owner handover/reconnect is
 promised. TUI owners reject shutdown RPC. Parent/nested Job qualification and the
 complete recovery-wait workflow remain later #5 checks; use disposable data.
+
+Headless owners remain owned descendants of their launching background shell;
+parent shell/Run/owner stop can terminate them and their tools. Do not detach or
+break away. On Unix Ctrl+C/INT, TERM and HUP request cleanup. Repeated TERM during
+drain does not force it; external SIGKILL can, with no guaranteed final JSON.
+Windows uses the same shutdown CLI, not CTRL_BREAK. There is no duration promise.
+After interruption, inspect status/run get and saved tool outputs before explicit
+retry/new input/stop; do not repeat a possibly executed command blindly.
+
+Without a TUI there is no interactive draft/restore, Turn interrupt or slash-only
+UI operation, and no late UI attach/reconnect. Existing CLI compact is available.
+Owner binary replacement does not inherit live tools or automatically resume work.
