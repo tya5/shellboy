@@ -2349,3 +2349,11 @@ spawn/wait_with_output. No new table, worker, queue or owner mode-specific Core
 engine is introduced. Graceful shutdown, signal ordering and final lifecycle
 rows are stage 3, not a claimed property of this startup-only increment. Core
 review and integration approval remain required for the final stage 2 source.
+
+## #5 scope boundary after F (2026-10-31)
+
+Keep owner replacement without interrupted work out of this implementation.
+No exec-in-place transfer, inherited live shell handover, reconnect protocol or
+late TUI attach is introduced. #82 cleanup ownership remains unchanged. Stage 2
+only provides explicit terminal-free startup and existing CLI access; stage 3
+will separately define shutdown acceptance/reply ordering before implementation.

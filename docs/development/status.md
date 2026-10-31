@@ -2592,3 +2592,10 @@ the passing membership regression with a visual fix. The
 records both outcomes. Exact-source3OS and main push follow; no release/install.
 After F, start G on then-current main without waiting for #87 (6543753689);
 later side reconciles overlap, and G P6 time is observation only.
+
+### #5 stage 2 resumed on F
+
+The startup-only candidate is rebased onto admitted F. Ready/error JSON and
+explicit data-dir use the common bootstrap; the stage 3 shutdown draft remains
+separate. Owner reload/work transfer, UI reconnect and late attach are excluded
+per the latest issue #5 scope. Final qualification and submission live in #5.
