@@ -52,6 +52,7 @@ def main():
     mode.add_argument('--inventory-only', action='store_true')
     mode.add_argument('--profile-only', action='store_true', help='inventory plus isolated profiles, without full suite execution')
     parser.add_argument('--compare', type=Path, help='same-OS baseline results.json; require identical tests/ignored sets')
+    parser.add_argument('--per-suite', action='store_true', help='measure integration modules in separate processes')
     parser.add_argument('--per-test', default='', help='comma-separated suite names for extra isolated-process profiles')
     args = parser.parse_args()
     if args.inventory_only and args.per_test:
@@ -127,6 +128,15 @@ def main():
                         print('Failed test: ' + json.dumps(name, ensure_ascii=True), flush=True)
                     print(text[-16000:], flush=True)
                 print(f"  {item['seconds']:.3f}s, exit {item['exit_code']}", flush=True)
+            if args.per_suite and target == 'test:integration':
+                for suite in sorted({name.partition('::')[0] for name in names}):
+                    sample = {'target': target, 'suite': suite, 'mode': 'isolated module; four concurrent tests'}
+                    sample.update(run([binary, suite + '::'], args.output / f'suite-{suite}.log'))
+                    record.setdefault('suite_timings', []).append(sample)
+                    if sample['exit_code']:
+                        record['failures'].append(sample)
+                    print(f"  module {suite}: {sample['seconds']:.3f}s, exit {sample['exit_code']}", flush=True)
+                    save()
             for test in names:
                 suite = test.partition('::')[0] if target == 'test:integration' else target.partition(':')[2]
                 discovered_suites.add(suite)
