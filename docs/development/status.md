@@ -2639,3 +2639,11 @@ pass. Eight native conditions confirm open/close/reopen with the actual DB worke
 held, then three unrelated Changed events without new UI preview requests or a
 moving observation notice. The implementation remains review-required; source
 and verification details are recorded in the issue comment, not as design history.
+## Conflict forecast helper (#104)
+
+Python-only draft uses disposable Git merge-tree context and pinned refs for base
+and all work-branch pairs; source objects/index/files/refs are read-only. Native
+Git2.50.1 union probe is recorded in #104 before implementation. Ten temporary
+repository tests pass; real pinned three-pair example reports conflicts without
+union exclusions. Standard check/other native Git platforms and review/integration
+remain pending. #85 resource slot and its follow-up handoff have priority.
