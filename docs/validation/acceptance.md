@@ -5977,3 +5977,23 @@ reuse the existing terminal-state predicate. No new schema/index/worker/queue or
 Core protocol operation. No new observed test failure on this unit. Reactive
 notifications/shared admission, remaining index/context/history/status/readback
 coverage and G9–G12 evidence remain incomplete.
+
+## G7 saved index initial-read extraction (local, partial qualification)
+
+Source: main66d2746 plus the G branch through7c04dbc and the current saved-index
+extraction. Native macOS, Rust1.99.1, synthetic temporary SQLite fixtures;
+no paid API or user data. `cargo test --locked --lib index::saved_view::`
+passes13/0; `cargo test --locked --lib explicit_saved_gets_finish` passes1/0.
+The latter includes IndexStatus alongside existing saved readers while the
+writer is deliberately blocked and checks unchanged receipts. Strict library
+Clippy passes. The existing edit-adapter frontend integration passes1/0 with the retained
+management spaces/coverage/definitions assertions. Canonical index tests pass42/0/1; the complete standard check is running;
+these targeted results do not inherit the preceding2160-test standard result.
+
+The initial canonical parity regression caught a refactoring error: a shadowed
+witness compared itself instead of the current source, incorrectly accepting
+changed revisions. Corrected to compare against `current_witness`; the retained
+regression now verifies both unchanged coverage and two stale segments after
+revision change. Initial failed logs are retained privately, not counted as
+passes. Budget/cursor/selected-space/scalar/disabled-auto-history tests also pass.
+No live-observer/P3/P6/three-OS or native layout completion is established here.

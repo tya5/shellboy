@@ -13,6 +13,7 @@ mod history_reader;
 mod input_history;
 mod inspection_attachments;
 mod inspection_deletion;
+mod inspection_index;
 mod inspection_lifecycle;
 mod inspection_operation;
 mod inspection_saved;
@@ -185,6 +186,12 @@ async fn management_request_trigger(
     cancel: CancellationToken,
     trigger: crate::usage_totals::UsageTrigger,
 ) -> Result<Value, ApiError> {
+    if let Command::IndexStatus(args) = command {
+        return match inspection_index::request(control, args, cancel).await {
+            Ok(value) => Ok(value),
+            Err(error) => Ok(serde_json::json!({"error":error})),
+        };
+    }
     if let Command::ThreadDeletePreview(args) = command {
         return match inspection_deletion::request(control, args, cancel).await {
             Ok(value) => Ok(value),
@@ -225,11 +232,6 @@ async fn management_request_trigger(
         };
     }
     let is_read_projection = !command.requires_receipt();
-    let index_args = if let Command::IndexStatus(args) = &command {
-        Some(args.clone())
-    } else {
-        None
-    };
     let response = crate::usage_totals::with_trigger(
         trigger,
         control.request_cancellable(operation(control, command), cancel),
@@ -253,9 +255,6 @@ async fn management_request_trigger(
     }
     if !is_read_projection && let Value::Object(object) = &mut result {
         object.insert("request_operation_id".into(), Value::String(operation_id));
-    }
-    if let Some(args) = index_args {
-        result["management"] = control.index.management_status(args).await?;
     }
     Ok(result)
 }

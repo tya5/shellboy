@@ -127,12 +127,13 @@ impl IndexService {
     }
 }
 pub(super) fn source_bodies(source: &Source) -> Vec<(String, String)> {
-    let mut bodies = history::search_bodies(&source.kind, &source.payload);
-    if !source.attachment_paths.is_empty() {
-        bodies.push((
-            "attachment_paths".into(),
-            source.attachment_paths.join("\n"),
-        ));
+    body_facts(&source.kind, &source.payload, &source.attachment_paths)
+}
+/// Pure canonical body extraction for already collected saved facts.
+pub(super) fn body_facts(kind: &str, payload: &Value, paths: &[String]) -> Vec<(String, String)> {
+    let mut bodies = history::search_bodies(kind, payload);
+    if !paths.is_empty() {
+        bodies.push(("attachment_paths".into(), paths.join("\n")));
     }
     bodies
 }

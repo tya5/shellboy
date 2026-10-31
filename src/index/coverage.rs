@@ -181,7 +181,24 @@ pub(super) fn classify_source(
     split_chars: usize,
     coverage: &mut CoverageCounts,
 ) {
-    let bodies = source_bodies(source);
+    classify_bodies(
+        &source.witness,
+        source.raw_expected,
+        source_bodies(source),
+        jobs,
+        split_chars,
+        coverage,
+    );
+}
+/// One classifier shared by canonical CLI and bounded saved observations.
+pub(super) fn classify_bodies(
+    current_witness: &Witness,
+    raw_expected: bool,
+    bodies: Vec<(String, String)>,
+    jobs: Vec<CoverageJob>,
+    split_chars: usize,
+    coverage: &mut CoverageCounts,
+) {
     let visible = bodies
         .iter()
         .map(|(kind, text)| {
@@ -191,7 +208,7 @@ pub(super) fn classify_source(
         .collect::<std::collections::HashMap<_, _>>();
     let mut current = Vec::new();
     for job in jobs {
-        let text_matches = (job.kind == "tool_raw" && source.witness.raw.is_some())
+        let text_matches = (job.kind == "tool_raw" && current_witness.raw.is_some())
             || visible
                 .get(job.kind.as_str())
                 .is_some_and(|(text, offsets)| {
@@ -206,7 +223,7 @@ pub(super) fn classify_source(
         if !job
             .witness
             .as_ref()
-            .is_some_and(|witness| witness.matches_body(&source.witness, &job.kind))
+            .is_some_and(|witness| witness.matches_body(current_witness, &job.kind))
             || !text_matches
         {
             coverage.stale_segments += 1;
@@ -229,7 +246,7 @@ pub(super) fn classify_source(
     coverage.done_segments += done;
     coverage.pending_segments += pending;
     coverage.failed_segments += failed;
-    let raw_uncertain = source.raw_expected;
+    let raw_uncertain = raw_expected;
     let mut expected = 0;
     let mut missing = 0;
     for (kind, body) in &bodies {
@@ -344,7 +361,7 @@ fn read_preparation(db: &Connection, key: Option<String>) -> Result<Value, Stora
         "enqueue_fence_count":fence.and_then(|v|v.parse::<u64>().ok()),"note":note}),
     )
 }
-fn definitions() -> Value {
+pub(super) fn definitions() -> Value {
     json!({
         "not_indexed_sources":"Eligible current sources with zero done jobs backed by matching chunks in the selected space; queued/failed work does not count as indexed.",
         "partially_indexed_sources":"At least one current done chunk exists, but visible body coverage is missing or current pending/running/failed work remains.",

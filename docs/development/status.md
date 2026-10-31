@@ -2806,3 +2806,18 @@ scope. No live-observer/P3/P6/native-screen/three-OS completion follows from thi
 Next finish remaining index/context saved reads and connect the existing bounded
 observer/shared admission, with status/history/readback inventory still mandatory.
 G remains local; no main admission/push/release/install/user-data change.
+
+## G7 saved index observation checkpoint
+
+The initial F8 IndexStatus route now uses one readonly WAL snapshot for bounded
+saved metadata and source coverage, followed by existing presentation work.
+Canonical CLI classification/body extraction is shared; management spaces,
+coverage and definitions remain available. Window counts are explicitly local
+to the current finite membership window, with null unknowns and separate lower
+bounds. No provider probe, source authorization, raw-output decode or receipt.
+Targeted index13/0, blocked-writer route1/0 and strict library Clippy pass on
+native macOS. The existing edit-adapter frontend integration passes1/0, retaining index
+spaces/coverage/definitions and absence of a receipt link. Canonical index tests pass42/0/1; the complete standard check is running;
+no current full-standard or three-OS qualification is claimed.
+G5/G6 live notification/shared admission, context/status/history/readback coverage
+and G9–G12 remain open. G remains local; no push/main/release/install/data change.

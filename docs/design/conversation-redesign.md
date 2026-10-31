@@ -343,6 +343,24 @@ the dedicated destructive confirmation/revision checks remain unchanged. Core
 placement preserves private path/replacement/attachment relationships and canonical
 scope semantics; frontend owns read lifetime and presentation, never permission.
 
+Saved index inspection stays beside private profile/space/pause/dimension keys
+and existing coverage classification. Metadata admission is finite:200 spaces,
+1024 work/job/chunk prefixes,128KiB per metadata channel with guarded value cells,
+512-byte scalar cells and8MiB aggregate scalar channels. Coverage reads32 source
+memberships per window,128KiB per source/512KiB total body copies, then decodes
+after the transaction. Cursor preparation binds normalized explicit scope,
+profile and selected space; never silently rebind or sum successive windows as
+global current totals. Disabled auto_history holds automatic pending jobs; no
+read authorizes them, probes a provider, decodes shell raw output or enqueues work.
+
+The TUI keeps its management/spaces, management/coverage and management/definitions
+sections. Coverage counts describe the current finite window; adjacent window
+metadata explicitly states scope/exhaustion/currentness. Unverified window
+counts are null, with observed lower bounds separately retained. Canonical CLI
+status/coverage and shared classification/definitions remain unchanged. Metadata
+and coverage use one readonly WAL snapshot and existing presentation work; no
+schema/index/worker/queue or public Core command is added by this extraction.
+
 Private domain helpers are permitted only where they avoid duplicating canonical
 schema/semantics: index saved views know private space/pause/failure keys and must
 not call the heavyweight full-status/provider path; GC observations know category

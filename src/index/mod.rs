@@ -30,6 +30,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 mod coverage;
 mod queue;
+pub(crate) mod saved_view;
 mod search;
 mod source;
 mod space_gc;

@@ -803,7 +803,7 @@ mod tests {
     async fn explicit_saved_gets_finish_while_writer_is_blocked_and_create_no_receipts() {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
-        std::fs::write(&config, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+        std::fs::write(&config, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[embedding]\nconnection='fixture'\nmodel='synthetic'\n").unwrap();
         let owner = crate::app::DataOwner::start(
             Some(config),
             Some(root.path().join("data")),
@@ -895,7 +895,14 @@ mod tests {
                 )
                 .await
                 .unwrap();
-                (values, storage, deletion)
+                let index = super::super::management_request(
+                    &control,
+                    Command::IndexStatus(crate::protocol::IndexArgs::default()),
+                    tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+                (values, storage, deletion, index)
             })
             .await;
         // Always release before asserting so the intentional red cannot strand
@@ -911,7 +918,12 @@ mod tests {
             .unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
-        let (values, storage, deletion) = observed.unwrap();
+        let (values, storage, deletion, index) = observed.unwrap();
+        assert_eq!(index["management"]["kind"], "saved_index_observation");
+        assert!(index["management"]["spaces"].is_array());
+        assert!(index["management"]["definitions"]["not_indexed_sources"].is_string());
+        assert!(index["view_observation"]["observed_at"].is_string());
+        assert!(index.get("request_operation_id").is_none());
         assert_eq!(deletion["thread_id"], "target");
         assert_eq!(deletion["snapshot_only"], true);
         assert_eq!(deletion["deletable_now"], false);
