@@ -8,3 +8,7 @@
 *.yml text eol=lf
 # The final blank line delimits an SSE terminal frame; preserve exact fixture bytes.
 tests/fixtures/chat/*.sse text eol=lf whitespace=-blank-at-eof
+
+docs/development/status.md merge=union
+docs/validation/acceptance.md merge=union
+docs/development/decisions.md merge=union
