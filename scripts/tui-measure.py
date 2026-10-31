@@ -221,8 +221,28 @@ def build(subject, output):
     write_json(output/'build.json',record)
     if status: raise ValueError('instrumented build failed')
 
-def scenario(subject, output, kind, seconds, cols, smoke=False):
+def background_calls(command, count):
+    if type(count) is not int or not 1 <= count <= 4:
+        raise ValueError('producer count must be an integer from 1 to 4')
+    return [{'type':'function_call','id':f'measure-call-{i}',
+             'call_id':f'measure-call-{i}','name':'shell',
+             'arguments':json.dumps({'command':command,'background':True,'stdin_open':True})}
+            for i in range(count)]
+
+
+def saved_producers(rows, count):
+    if (len(rows)!=count or len({r[0] for r in rows})!=count
+            or any(r[3:] != ('completed','live') for r in rows)
+            or len({(r[1],r[2]) for r in rows})!=1):
+        return None
+    return dict(execution=rows[0][0],executions=[r[0] for r in rows],
+                run=rows[0][1],turn=rows[0][2])
+
+
+def scenario(subject, output, kind, seconds, cols, smoke=False, producers=1):
     import fcntl, pty, select, struct, termios
+    background_calls("", producers)  # Validate bounds before creating any resources.
+    producer_count=1 if kind=="p2" else producers
     binary=subject/"target/release/shellboy"
     screen=Screen(cols)  # Validate CI decoder before starting any child or server.
     work=subject
@@ -244,7 +264,7 @@ def scenario(subject, output, kind, seconds, cols, smoke=False):
                 body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 index=len(requests);assert index<6,'unexpected repeated model calls';requests.append({'index':index,'body_bytes':len(json.dumps(body))})
                 if index==0:
-                    output=[{'type':'function_call','id':'measure-call','call_id':'measure-call','name':'shell','arguments':json.dumps({'command':command,'background':True,'stdin_open':True})}]
+                    output=background_calls(command,producer_count)
                 else:
                     output=[{'type':'message','id':f'measure-message-{index}','role':'assistant','status':'completed','content':[{'type':'output_text','text':'NATIVE_MEASURE_READY'}]}]
                 event={'type':'response.completed','response':{'id':f'measure-response-{index}','status':'completed','output':output,'usage':{'input_tokens':0,'output_tokens':0,'total_tokens':0}}}
@@ -288,26 +308,30 @@ def scenario(subject, output, kind, seconds, cols, smoke=False):
     try:
         wait(lambda:(data/'endpoint.json').exists(),'endpoint')
         wait(lambda:'依頼を入力'in screen.text(),'composer')
-        os.write(master,b'create one stdin-gated background shell\r')
+        os.write(master,b'create stdin-gated background shells\r')
         wait(lambda:'NATIVE_MEASURE_READY'in screen.text(),'background answer')
         saved={}
         def fixture_ready():
             with sqlite3.connect(f'file:{data/"shellboy.db"}?mode=ro',uri=True) as db:
-                row=db.execute("SELECT e.id,e.owner_run_id,e.turn_id,t.state,r.state FROM shell_execution e JOIN turn t ON t.id=e.turn_id JOIN run r ON r.id=e.owner_run_id WHERE e.state='running'").fetchone()
-                if row and row[3:] == ('completed','live'):
-                    saved.update(execution=row[0],run=row[1],turn=row[2]);return True
+                row=db.execute("SELECT e.id,e.owner_run_id,e.turn_id,t.state,r.state FROM shell_execution e JOIN turn t ON t.id=e.turn_id JOIN run r ON r.id=e.owner_run_id WHERE e.state='running' ORDER BY e.id").fetchall()
+                ready=saved_producers(row,producer_count)
+                if ready:
+                    saved.update(ready);return True
                 return False
         wait(fixture_ready,'saved completed Turn with owned live background shell')
         execution,run,turn=saved['execution'],saved['run'],saved['turn']
         write_json(native_dir/'fixture.json',{'kind':kind,'cols':cols,'rows':40,
             'saved_readiness':saved,'turn_state':'completed','run_state':'live','shell_state':'running',
-            'command_sha256':digest(command.encode()),'producer_target_hz':50 if kind.startswith('p5') else None,
+            'command_sha256':digest(command.encode()),'producer_count':producer_count,
+            'producer_target_hz':50 if kind.startswith('p5') else None,
+            'aggregate_target_line_hz':50*producer_count if kind.startswith('p5') else None,
             'uses_real_stdin_gate':True,'synthetic_loopback_only':True,'browser_visible':kind=='p5-list'})
         (native_dir/'fixture-ready.txt').write_text(screen.text())
         if kind.startswith('p5'):
             os.write(master,b'/new\r');pump(2)
             assert 'NATIVE_MEASURE_READY'not in screen.text(),'hidden producer must not remain selected'
-            rpc('shell','write','--execution',execution,'--text','go\n')
+            for producer_execution in saved['executions']:
+                rpc('shell','write','--execution',producer_execution,'--text','go\n')
         if kind=='p5-list':
             os.write(master,b'\x14')
             wait(lambda:'会話 ·' in screen.text(),'visible browser before hidden-output observation')
@@ -317,7 +341,7 @@ def scenario(subject, output, kind, seconds, cols, smoke=False):
         start=time.monotonic();pump(seconds);os.write(master,b'\x1b[24~');ack(b'E');elapsed=time.monotonic()-start
         assert len(requests)==window_requests,('model unexpectedly invoked during observation',window_requests,requests)
         (native_dir/'window-end.txt').write_text(screen.text())
-        measurement={'requested_seconds':seconds,'harness_wall_seconds':elapsed,'window_model_requests':len(requests)-window_requests,'execution':execution,'run':run,'turn':turn}
+        measurement={'requested_seconds':seconds,'harness_wall_seconds':elapsed,'window_model_requests':len(requests)-window_requests,'execution':execution,'executions':saved['executions'],'producer_count':producer_count,'run':run,'turn':turn}
     except Exception as error:failure=repr(error)
     finally:
         if child.poll()is None:
@@ -404,20 +428,20 @@ def validate_result(result,manifest,seconds):
     return not errors,errors
 
 
-def pair(baseline,candidate,output,cols,smoke=False):
+def pair(baseline,candidate,output,cols,smoke=False,producers=1):
     if not smoke and os.environ.get('GITHUB_ACTIONS')!='true':
         raise ValueError('full windows run only in manual CI; use --smoke for local fixture qualification')
     results=[];errors=[]
     for label,subject in [('before',baseline),('after',candidate)]:
         for kind,seconds in [('p2',2 if smoke else 600),('p5',2 if smoke else 60),('p5-list',2 if smoke else 60)]:
-            try:results.append(scenario(subject,output/label,kind,seconds,cols,smoke))
+            try:results.append(scenario(subject,output/label,kind,seconds,cols,smoke,producers))
             except Exception as error:
                 errors.append({'subject':label,'kind':kind,'error':str(error)})
                 # Invalid cleanup or capability may contaminate subsequent observations.
                 write_json(output/'pair-error.json',errors)
                 raise
     write_json(output/'pair.json',{'version':VERSION,'host':platform.platform(),'cols':cols,
-               'smoke_only':smoke,'results':[{'source':r['source']['source']['head'],'kind':r['kind'],'metrics':r['native_metrics']} for r in results],
+               'smoke_only':smoke,'p5_producer_count':producers,'results':[{'source':r['source']['source']['head'],'kind':r['kind'],'metrics':r['native_metrics']} for r in results],
                'comparison_policy':'same runner, sequential same-profile builds; deltas recorded, never a performance pass/fail'})
 
 
@@ -448,14 +472,14 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     for command in ['prepare','build']:
         p=sub.add_parser(command);p.add_argument('--subject',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p=sub.add_parser('run-pair');p.add_argument('--baseline',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--cols',type=int,choices=[80,140],required=True);p.add_argument('--smoke',action='store_true')
+    p=sub.add_parser('run-pair');p.add_argument('--baseline',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--cols',type=int,choices=[80,140],required=True);p.add_argument('--smoke',action='store_true');p.add_argument('--producers',type=int,choices=range(1,5),default=1)
     p=sub.add_parser('unavailable');p.add_argument('--baseline',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p=sub.add_parser('summarize');p.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();args.output=args.output.resolve();args.output.mkdir(parents=True,exist_ok=True)
     try:
         if args.command=='prepare':prepare(args.subject.resolve(),args.output)
         elif args.command=='build':build(args.subject.resolve(),args.output)
-        elif args.command=='run-pair':pair(args.baseline.resolve(),args.candidate.resolve(),args.output,args.cols,args.smoke)
+        elif args.command=='run-pair':pair(args.baseline.resolve(),args.candidate.resolve(),args.output,args.cols,args.smoke,args.producers)
         elif args.command=='unavailable':write_json(args.output/'unavailable.json',{
             'status':'unavailable','reason':'Native Windows ConPTY fixture is not implemented; Windows P2/P5 gate remains open',
             'before':source_witness(args.baseline),'after':source_witness(args.candidate),

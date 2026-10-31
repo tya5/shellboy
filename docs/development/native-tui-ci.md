@@ -4,7 +4,7 @@ The optional `native-tui-measure` job in `.github/workflows/ci.yml` records issu
 
 Each Ubuntu/macOS job builds both subjects before measuring them sequentially on that runner, at 80×40 or 140×40. P2 observes an actual background shell blocked on stdin for 600 seconds after its Turn completed. P5 hides a real stdin-gated producer, then observes its flushed output for 60 seconds. A separate P5-list window keeps List mode visible while that other Thread produces output. The synthetic Responses endpoint binds loopback only. Each scenario has a fresh synthetic data directory and config; no user store or paid API is used. Fixture setup, CLI/SQLite checks and warmup precede the acknowledged observation window. No CLI/SQL probes run during the window.
 
-Windows currently uploads `unavailable.json`: a real ConPTY fixture has not been implemented. This is an open verification gate, not a simulated success. Ordinary CI does not run these long windows. No CI measurements have been executed by introducing this procedure.
+Windows currently uploads `unavailable.json`: a real ConPTY fixture has not been implemented. This is an open verification gate, not a simulated success. Ordinary CI does not run these long windows. The execution history below distinguishes fixture qualification from formal measurement.
 
 ## Witness and failure policy
 
@@ -50,7 +50,8 @@ candidate or the600s/60s acceptance windows. Silent-background smoke records two
 draws and zero UI worker jobs/readonly opens; hidden-output and visible-List
 smokes each record zero draws/UI jobs/readonly opens with102/101 committed
 batches (about50Hz). No provider request occurs inside a window. All fixture
-owners exit cleanly. No full CI or native Windows measurement has run.
+owners exit cleanly. At this initial checkpoint no full CI or native Windows
+measurement had run; the later CI report below supersedes that execution status.
 
 The first smoke attempt failed in pyte's wide-character `display` exporter,
 before metrics existed. The controller now exports the finite grid directly;
@@ -58,3 +59,37 @@ a regression tests a clipped wide glyph. Keep that initial failed proof. Fast
 Python tests20/0 and Ruby YAML syntax validation pass. Both the full historical
 baseline1fec7f0b2000b7dadbcec518e493cdfec169eeee and the E+#75 source support hook
 planning without source writes; baseline compilation/execution remains pending.
+
+
+## Bounded P5 producer follow-up (2026-10-31)
+
+The initial formal run41160746679 compared dispatch-time main912b2e2 withCBC.
+See [the full report](https://github.com/tya5/shellboy/issues/41#issuecomment-6538392801)
+for all12 same-runner pairs, ordinary-CI failures and performance gaps. Its Mac
+P5 windows reached16.62–17.77 saved commits/second despite about50 lines/second.
+These lower-load observations remain valid records but do not qualify40commits/s.
+
+`native_tui_producers` now selects1–4 independent gated shells for both subjects'
+P5/P5-list windows; default1 reproduces the original load. P2 remains one silent
+shell regardless of that option. Use3 explicitly for the proposed follow-up CI,
+with matching before/after count and actual saved-commit rates in the report.
+The CLI equivalent is `run-pair ... --producers 3`; `--smoke` remains2s. Readiness
+requires all distinct executions under one saved completed Turn/live Run, and all
+are released before warmup. Record per-producer50 target lines/second separately
+from the aggregate150 target lines/second and actual saved commits. Multiple
+producers are a load-fixture hypothesis, not a Core throughput fix or guarantee.
+
+A native macOS ARM64 release build of exact E source0b7bd73 completed using only
+measurement-target cache reuse. Its three80-column2s smoke windows pass:
+P2 uses1 producer/2 draws/0 commits; P5 and P5-list use3 producers,0 draws and
+306/305 commits, respectively (150.28/150.13 commits/s). All record0 UI read-task
+admissions,0 UI writer jobs,0 readonly opens and0 model calls inside the window;
+all owners exit0 with no remaining live shells. This qualifies the bounded
+fixture at short duration on this Mac, not a60s hosted macOS/Linux result, a
+before/after comparison, P3, Windows support or main admission.
+
+The initial local build launch lacked Cargo in PATH and failed before invoking
+the compiler; using the documented toolchain path completed the build in3m57s.
+This environment failure is distinct from product/test failures. Python22
+controller tests pass; repaired-source three-OS CI and formal follow-up are not
+run by these local changes. No user store, installed binary or provider is used.

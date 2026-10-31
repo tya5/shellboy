@@ -16,6 +16,11 @@ on:
         description: Also record native Unix P2 (600s) and P5 (60s), before/after at 80/140 columns
         type: boolean
         default: false
+      native_tui_producers:
+        description: Independent hidden-output producers for P5 (P2 always one)
+        type: choice
+        options: ['1', '2', '3', '4']
+        default: '1'
       native_tui_baseline_ref:
         description: Exact baseline ref for same-runner native TUI observations
         type: string
@@ -193,7 +198,7 @@ jobs:
         run: python3 tooling/scripts/tui-measure.py build --subject after --output observations/after
       - name: Record both subjects on this runner (no performance threshold gates)
         if: runner.os != 'Windows'
-        run: python3 tooling/scripts/tui-measure.py run-pair --baseline before --candidate after --output observations --cols ${{ matrix.cols }}
+        run: python3 tooling/scripts/tui-measure.py run-pair --baseline before --candidate after --output observations --cols ${{ matrix.cols }} --producers ${{ inputs.native_tui_producers }}
       - name: Summarize available and missing observations
         if: always()
         run: python tooling/scripts/tui-measure.py summarize --output observations

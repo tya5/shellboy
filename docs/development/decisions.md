@@ -2028,3 +2028,20 @@ each fingerprint is preferable to disguising it to evade the lexical checker.
 There is no file-wide exemption or new short asynchronous guard. The merged
 layout/watchdog policy and Python18 tests pass; Rust standard qualification is
 performed separately. F/G and migration changes remain excluded.
+
+## #41 P5 multiple-producer load hypothesis (2026-10-31)
+
+The formal Mac CI fixture retained roughly50 output lines/second but saved only
+16.62–17.77 chunks/second. Do not modify Core batching, durability or deadlines to
+make a measurement pass, and do not count lines as batches. Add an explicit1–4
+producer fixture option (default1), use identical count before/after, and keep P2
+at one silent shell. Each additional producer is a real owned background shell
+in the same completed Turn/live Run, gated before warmup and normally stopped
+by the existing owner shutdown. This adds no product worker/queue/table/model.
+
+The uncertain hypothesis is that independent output pipes can supply the40
+actual saved commits/second missing from the hosted Mac observation. A local
+3-producer2s smoke reached150.28/150.13commits/s for hidden/visible-List cases;
+it does not prove the hosted60s condition. Revisit if formal rates still fall
+below40 or cleanup fails. Keep the original single-producer artifacts and CPU
+numbers separate, because changing load invalidates direct cross-run deltas.

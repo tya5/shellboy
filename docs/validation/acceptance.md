@@ -4105,3 +4105,14 @@ Gitleaks8.30.1 redacted directory scan reported one existing synthetic fixture:
 its negative assertion; it is not a credential. No broad ignore or source change
 was added. The E documentation diff scan reports0 findings. Directory scan is
 not described as zero findings, and this is not a full-history scan.
+
+## Bounded P5 fixture qualification (2026-10-31)
+
+Tooling-only follow-up: Python22 pass; exact source0b7bd73 native macOS ARM64
+Rust1.99.1 instrumented release build and P2/P5/P5-list actual80-column PTYs pass
+with explicit2s smoke labels. P2 retains one silent producer; P5 cases use3 under
+the same completed Turn/live Run and record306/305 saved output commits,
+0 draws/visible reads and0 window model requests. Each owner exits0 and persisted
+live-shell count is0 after shutdown. Details and limitations: native-tui-ci.
+This is not a full-duration CI, before/after, Windows or P3 qualification. No
+long local measurement, paid API, install, user-data change or main push occurred.

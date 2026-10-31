@@ -9,6 +9,30 @@ SPEC=importlib.util.spec_from_file_location('tui_measure',Path(__file__).resolve
 M=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(M)
 
 class MeasurementTests(unittest.TestCase):
+    def test_multiple_background_calls_have_distinct_tool_pair_identities(self):
+        import json
+        calls=M.background_calls('fixed command',3)
+        self.assertEqual(len({c['call_id'] for c in calls}),3)
+        for call in calls:
+            self.assertEqual(call['id'],call['call_id'])
+            self.assertEqual(json.loads(call['arguments']),
+                {'command':'fixed command','background':True,'stdin_open':True})
+        for count in [0,5,True,1.5]:
+            with self.assertRaisesRegex(ValueError,'producer count'):
+                M.background_calls('fixed command',count)
+
+    def test_readiness_requires_all_distinct_producers_in_same_completed_turn(self):
+        rows=[(f'e{i}','run','turn','completed','live') for i in range(3)]
+        self.assertEqual(M.saved_producers(rows,3)['executions'],['e0','e1','e2'])
+        self.assertIsNone(M.saved_producers(rows[:2],3))
+        self.assertIsNone(M.saved_producers(rows+[rows[0]],3))
+        self.assertIsNone(M.saved_producers(rows[:2]+[rows[0]],3))
+        for changed in [('e2','other','turn','completed','live'),
+                        ('e2','run','other','completed','live'),
+                        ('e2','run','turn','running','live'),
+                        ('e2','run','turn','completed','stopped')]:
+            self.assertIsNone(M.saved_producers(rows[:2]+[changed],3))
+
     def test_bounded_capture_retains_actual_tail(self):
         capture=M.BoundedCapture(5)
         capture.append(b'123');capture.append(b'4567');capture.append(b'89')

@@ -1629,3 +1629,13 @@ PTY/P1 proof. It is an optional separate B presentation follow-up after E,
 not silently included in E or treated as implemented. F/G remain independent.
 Remote measurement branch remainsCBC; subsequent publication/main admission
 awaits delegated-reviewer approval. No installed binary or user data changed.
+
+## #41 measurement-only follow-up preparation (2026-10-31)
+
+The isolated tooling follow-up adds bounded1–4 hidden producers, default1,
+without changing Core. Native macOS source0b7bd73 release smokes pass P2/P5/
+P5-list at80columns/2seconds; the P5 windows use3 producers and record306/305
+saved commits,0 draws/visible reads and clean owner termination. Python22 pass.
+See native-tui-ci for source, rate, witness and formal-CI limits. No new push or
+main change; the published measurement branch remainsCBC. E source repairs and
+canonical #77/#79 integration are maintained on the separate E admission branch.

@@ -24,6 +24,24 @@ No automatic retry may convert a failed test into success.
 
 ## Measurement and fixture work
 
+### Native TUI hidden-output load (#41)
+
+P5 may use one to four independent stdin-gated background shell producers in
+the same completed Turn and live Run. The manual workflow records an explicit
+producer count, identical for both subjects; the default remains one to reproduce
+the original measurement. P2 always uses exactly one silent producer. Readiness
+requires every requested producer to be saved and running under that same owner;
+every producer is released before warmup. No new production mechanism is added.
+
+This tests the hypothesis that multiple independent pipes can reach the required
+40 saved output commits/second when one pipe coalesces lines on macOS. It is not
+a throughput guarantee. Record producer count, per-producer target line rate,
+aggregate target line rate and actual saved-commit rate separately. A multiple-
+producer result cannot replace the original single-producer result or establish
+40-commit qualification when its actual rate is lower. A producer line is never
+counted as a committed batch. The whole application is still observed, including
+all producer owners, without extra CLI/SQL probes inside the formal window.
+
 Use stable Cargo/libtest and standard-library tooling; no nextest dependency or
 nightly feature is required. Capture Cargo JSON artifacts from the complete
 all-target build, then record native harness wall time, exit status, test counts
