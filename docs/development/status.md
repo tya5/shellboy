@@ -2723,3 +2723,6 @@ shares the existing Thread boundary. Draft exposes protected inflight reason in
 run get/footer, with no new lifecycle state. Gated SSE/background reproduction,
 virtual-clock and malformed/terminal tests are written but not yet compiled.
 #99 owns preview read/fetched-at behavior; no duplicate fix here. Evidence in#102.
+Targeted saved-wait/virtual-clock/footer/gated-SSE cases and final standard/bin
+qualification pass on main66d2746. Review/merged-source CI remain coordinator
+gates; actual source/result and fixture corrections are recorded in#102.

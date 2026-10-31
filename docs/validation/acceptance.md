@@ -5944,3 +5944,7 @@ read-only waiting_reason projection and queue-start invalidation. Synthetic SSE
 with controlled foreground/background stdin, plus virtual-clock readback cases,
 are not yet run. No Rust build/standard/CI or integration claim. #99 preview/read
 ownership is preserved. No actual provider or user DB mutation was performed.
+#102 reader2/footer1/gated-SSE1 pass. Standard2,076/0/35, Python70/layout94/
+fmt/strict Clippy/policy and bin build pass on checked source3817003/base66d2746.
+Fixture compile corrections add the optional snapshot field and use current
+Control::new; no production scheduling/order/timeout change. Full evidence in#102.
