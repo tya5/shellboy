@@ -78,9 +78,17 @@ def main():
                             if enabled:
                                 assert 'CHECK_LABEL' in text and 'printf CMD_DESCRIBED' not in text
                                 assert 'printf CMD_FALLBACK' in text
-                                terminal.send('\t\x1b[A\x1b[A')
-                                scene('focused', lambda s: 'コマンド（プレビュー）' in s and 'printf CMD_DESCRIBED' in s)
+                                def click_described_header():
+                                    y = next(i + 1 for i, row in enumerate(terminal.text().splitlines()) if 'CHECK_LABEL' in row)
+                                    terminal.send(f'\x1b[<0;5;{y}M\x1b[<0;5;{y}m')
+                                # Notifications are separate selectable items: address the actual header,
+                                # not an assumed number of Up keys from the end of history.
+                                click_described_header()
+                                scene('focused-expanded', lambda s: 'コマンド（プレビュー）' in s and 'printf CMD_DESCRIBED' in s)
                                 terminal.send(' ')
+                                terminal.send('\x1b\x1b')
+                                scene('blurred-collapsed', lambda s: 'CHECK_LABEL' in s and 'printf CMD_DESCRIBED' not in s)
+                                click_described_header()
                                 scene('expanded', lambda s: 'コマンド原文' in s and 'printf CMD_DESCRIBED' in s)
                                 terminal.send('\x1b[17~')
                                 scene('details', lambda s: 'CMD_DESCRIBED' in s and 'F6' in s)
