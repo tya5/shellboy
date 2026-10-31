@@ -1,5 +1,28 @@
 # Validation record
 
+## G Thread compaction raw/preparation checkpoint35f45ce
+
+Native macOS/Rust1.99.1, existing shared root target/job, incremental disabled/two
+test threads, build notice in #41: `cargo test --locked --lib readback::`
+passes10/0; actual `frontend::inspection_tests::` passes12/0; strict all-target
+Clippy succeeds. Source35f45ce implements adopted design5c8dd98. This is focused
+qualification, not a current full-standard/three-OS/native-matrix/P3/P6 result.
+
+The existing canonical mixed receipt/automatic/replacement fixture keeps its
+manual event/metrics/order/period assertions; full and filtered raw facts then
+prepare after the DB is closed and match those results. Nine spill-count types
+exercise the existing integer semantics (including SQLite's boolean projection,
+float/string/negative/null/overflow/object cases). Actual statement counts are4
+without spill coverage and5 with it; no per-row decoder query is added. The real
+foreign-Thread F8 fixture receives a nonempty restore event while another
+connection holds BEGIN IMMEDIATE, with exact event identity and retained latest
+answer availability/limit facts. No provider or user-data changes.
+
+The raw reader still uses the canonical source queries and candidate caps;
+these do not prove finite source-byte copying or bounded total SQL work. G9
+source/query/plan qualification remains open. No row/time gate was weakened,
+and no successful stub, worker, queue, table, dependency or public API was added.
+
 ## G latest Thread messages: bounded raw/preparation checkpointc3608f0
 
 Native macOS/Rust1.99.1, one shared root target/job, incremental disabled/two

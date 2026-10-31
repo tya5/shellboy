@@ -1,5 +1,20 @@
 # Development status
 
+## G Thread compaction preparation after readonly capture
+
+Source35f45ce splits canonical compaction readback into raw capture and pure
+preparation. Thread inspection now decodes/merges/orders/formats compaction facts
+after its readonly snapshot; CLI list uses the same phases. Native readback10/0,
+actual frontend inspections12/0 and strict all-target Clippy pass. The held-writer
+F8 fixture also retains its nonempty foreign restore result, alongside the
+bounded latest-message facts. No new query is used to infer a spill count;
+integer/boolean/float/string/overflow cases retain canonical numeric semantics.
+
+Last-compaction source-copy and total SQL-work/query limits still need G9
+qualification. This structural result does not establish those bounds or close
+the remaining G5/P3/P6/native-wheel/review/3OS/main gates. No migration, push,
+installation, release or user-data change.
+
 ## G bounded latest Thread message facts
 
 Core raw-read/preparation refactor6280bca and display integrationc3608f0 share
@@ -12,8 +27,9 @@ all-target Clippy pass. The real F8 foreign-Thread fixture receives its source
 facts while another connection holds an immediate writer transaction. No
 additional schema, worker, queue or public API was introduced.
 
-This is not complete Thread/G9 qualification: last-compaction preparation and
-header/total query bounds remain, together with the remaining G5 retained-page
+This is not complete Thread/G9 qualification: compaction/header source and total
+query bounds remain (compaction preparation was subsequently split above),
+together with the remaining G5 retained-page
 inventory, P3/P6/native-wheel and eventual review/3OS/main admission. The earlier
 full-standard/native-form evidence belongs to its recorded source. No push,
 installation, release or user-data change.

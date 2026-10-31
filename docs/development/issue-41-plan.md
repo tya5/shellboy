@@ -726,6 +726,12 @@ units below; names describe scope, not a new engine/framework.
 
 ### G remaining saved-read coverage inventory (not implementation evidence)
 
+Compaction preparation checkpoint35f45ce: Thread's last-compaction capture now
+shares canonical readback queries and prepares after its readonly snapshot.
+Readback10/0, actual frontend inspections12/0 and strict all-target Clippy pass;
+the held-writer F8 case includes a nonempty foreign restore. Source-byte/total
+SQL-work/query limits remain open; candidate caps alone do not close G9.
+
 Latest Thread auxiliary checkpointc3608f0: input/answer raw reads and canonical
 preparation are shared; display scalar/source guards and off-snapshot decode are
 implemented. Domain8/0, actual frontend inspection12/0 and strict all-target
@@ -769,7 +775,7 @@ Read-only initial routes and their native tests remain separately qualified.
 
 | Route/result | Mutable facts and retained evidence | Remaining connection/qualification |
 | --- | --- | --- |
-| ThreadGet | Exact target settings, lifecycle, selected path, last input/answer/compaction; retain captured form target | Shared header/independent usage are connected. Input/answer now use canonical shared raw/preparation with bounded source/scalar copies atc3608f0; actual held-writer frontend route passes. Last-compaction preparation and header/query/source limits remain to qualify. |
+| ThreadGet | Exact target settings, lifecycle, selected path, last input/answer/compaction; retain captured form target | Shared header/independent usage are connected. Input/answer use canonical shared raw/preparation with bounded source/scalar copies atc3608f0. Compaction preparation also runs after the snapshot at35f45ce; actual held-writer frontend route retains a nonempty restore. Compaction/header/query/source limits remain to qualify. |
 | RunGet / TurnGet | Lifecycle, ownership, recovery, saved usage, owned work | Reuse extracted scalar/JSON guards; exact Thread dependencies, independent3s usage, late/stop/retry tests. |
 | ShellGet / MessageGet / RevisitGet | Native execution/delivery/Revisit state; immutable command or accepted message source | Reuse extracted readers; committed lifecycle/delivery/owner-output invalidation without retargeting the viewer. |
 | OperationGet | Immutable acceptance/expiry versus current downstream delivery/compaction | Subscribe to receipt/downstream changes and expiry; never replay an operation while observing it. |
