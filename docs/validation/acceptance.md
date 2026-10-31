@@ -3858,3 +3858,15 @@ Neither failed run counts toward the required two all-OS successful observations
 Azure log download temporarily returned503 ServerBusy/egress limits; a later
 job-log read confirmed the exact unused imports. No job/test retry hid the errors.
 Native Windows runtime/Job-object execution still requires the corrected gates.
+
+
+### Corrected candidate native gates
+
+Candidate3460132 passes manual all-OS runs41157071532 and41157073871, both on
+attempt1 with macOS/Linux/Windows checks successful. The Windows-only imports
+are fixed, and the native Job-object branch is included in its passing standalone
+crash target. Rebased local standard check remains1852/0/32 with layout93,
+Python16/fmt/strict Clippy. Before integration main advanced to15037c1 (#75,
+readback/schema indexes), so these gates are retained as candidate evidence and
+the combined final tree will be checked independently rather than assuming the
+older pair qualifies new production/schema code.
