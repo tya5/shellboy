@@ -615,6 +615,11 @@ fn style_code_regions(
                     ));
                     let padding = usize::from(width).saturating_sub(caption.width());
                     caption.spans.insert(0, Span::raw(" ".repeat(padding)));
+                    if copy_offset.is_some() {
+                        for span in &mut caption.spans {
+                            span.style.underline_color = Some(crate::ui::theme::COPY_DECORATION);
+                        }
+                    }
                     output.push(caption.style(Style::default().bg(background)));
                 }
                 for mut line in body {

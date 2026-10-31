@@ -73,9 +73,12 @@ const OUTPUT_ROW_MARKER: Color = Color::Indexed(254);
 const INPUT_DECORATION_MARKER: Color = Color::Indexed(253);
 
 fn body_spans<'a>(line: &'a Line<'_>) -> impl Iterator<Item = &'a Span<'a>> {
-    line.spans
-        .iter()
-        .filter(|span| span.style.underline_color != Some(INPUT_DECORATION_MARKER))
+    line.spans.iter().filter(|span| {
+        !matches!(
+            span.style.underline_color,
+            Some(INPUT_DECORATION_MARKER | theme::COPY_DECORATION)
+        )
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -4875,5 +4878,37 @@ mod conversation_item_tests {
                 "every wrapped user row fills the band"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod code_caption_anchor_tests {
+    use super::*;
+    #[test]
+    fn copy_labels_are_visible_but_never_count_as_canonical_source_or_links() {
+        let source = "```rust\nlet one = 1;\n```\n";
+        let payload = serde_json::json!({"role":"assistant","content":source});
+        let mut projected = crate::presentation::project("assistant", &payload, source, 0);
+        crate::presentation::render_markdown(&mut projected, 78);
+        let lines = &projected.blocks[0].rendered.as_ref().unwrap().lines;
+        let caption = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("[1] コピー")))
+            .unwrap();
+        assert_eq!(body_spans(caption).count(), 0);
+        let shown = borrowed(std::slice::from_ref(caption));
+        assert!(
+            shown[0]
+                .spans
+                .iter()
+                .any(|s| s.content.contains("[1] コピー"))
+        );
+        assert!(
+            shown[0]
+                .spans
+                .iter()
+                .all(|s| s.style.underline_color.is_none())
+        );
+        assert_eq!(crate::history::text_of_payload(&payload), source);
     }
 }
