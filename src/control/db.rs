@@ -191,6 +191,12 @@ impl Store {
         caller: Option<Origin>,
     ) -> Result<MutationResult> {
         request.validate()?;
+        if matches!(&request.command, Command::Status(a) if a.memory) {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "Owner memory requires the runtime observation route",
+            ));
+        }
         if let Command::Status(mut args) = request.command.clone() {
             if args.thread_id.is_none() && args.run_id.is_none() {
                 args.thread_id = caller.as_ref().map(|origin| origin.thread_id.clone());

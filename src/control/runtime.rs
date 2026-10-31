@@ -204,6 +204,9 @@ impl Control {
         caller: Option<Origin>,
         disconnected: CancellationToken,
     ) -> Result<Value, ApiError> {
+        if matches!(&request.command, Command::Status(a) if a.memory) {
+            return self.memory_snapshot(disconnected).await;
+        }
         if self.stop.is_cancelled() && !request.command.runtime_allowed_while_stopping() {
             return Err(ApiError::new(
                 ErrorCode::InvalidState,

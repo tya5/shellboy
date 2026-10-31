@@ -18,6 +18,19 @@ pub(crate) fn rfc3339(
 impl StatusArgs {
     fn validate(&self) -> Result<(), ApiError> {
         limit(self.limit, MAX_LIST_LIMIT)?;
+        if self.memory
+            && (self.thread_id.is_some()
+                || self.run_id.is_some()
+                || self.since.is_some()
+                || !self.state.is_empty()
+                || self.all
+                || self.cursor.is_some()
+                || self.limit != DEFAULT_LIST_LIMIT)
+        {
+            return Err(invalid(
+                "status memory is owner-wide and cannot use activity filters",
+            ));
+        }
         optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
         optional_nonempty(self.run_id.as_deref(), "run_id")?;
         optional_nonempty(self.cursor.as_deref(), "cursor")?;

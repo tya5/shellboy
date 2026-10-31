@@ -3011,6 +3011,9 @@ async fn run_with_delivery(
                 None => {}
             },
             event=ui_subscription.receiver.recv()=> match event {
+                Ok(EngineEvent::MemoryProbe {owner,reply}) => {
+                    if ui_subscription.belongs_to(owner) && !reply.is_closed() { update(&updates, UiUpdate::MemoryProbe(reply)).await; }
+                },
                 Ok(EngineEvent::Changed { thread_id, recovery }) => {
                     status_dirty |= status_enabled;
                     if recovery && control.store.config.ui.bell {

@@ -703,6 +703,7 @@ pub struct DraftRecoveryTarget {
 }
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    MemoryProbe(crate::memory::UiMemoryReply),
     ProgramStatus(crate::program_status::Snapshot),
 
     LiveWorkObserved {
@@ -1822,6 +1823,20 @@ impl UiState {
         std::mem::take(&mut self.terminal_requests)
     }
     pub fn apply(&mut self, update: UiUpdate) {
+        if let UiUpdate::MemoryProbe(reply) = update {
+            if !reply.is_closed() {
+                let working = self.retained_working_node_ids();
+                let body = self
+                    .views
+                    .iter()
+                    .map(|(key, view)| {
+                        retained_body_bytes(view, if key == &self.active { &working } else { &[] })
+                    })
+                    .sum::<usize>();
+                reply.finish(serde_json::json!({"body":crate::memory::cache(body,self.config.cache.body_bytes,self.views.len(),"view"),"layout":crate::memory::cache(self.layout_cache.bytes,self.config.cache.layout_bytes,self.layout_cache.entries.len()+self.layout_cache.units.len(),"layout_or_unit")}));
+            }
+            return;
+        }
         if let UiUpdate::CurrentView {
             generation,
             details,
@@ -2304,7 +2319,9 @@ impl UiState {
                 result,
             } => self.apply_thread_deletion(request_id, args, execute, result),
             UiUpdate::SavedMessage { .. } => unreachable!("handled as atomic saved projection"),
-            UiUpdate::ProgramStatus(_) => unreachable!("handled before view updates"),
+            UiUpdate::ProgramStatus(_) | UiUpdate::MemoryProbe(_) => {
+                unreachable!("handled before view updates")
+            }
             UiUpdate::CurrentView { .. } => unreachable!("handled as atomic current view"),
             UiUpdate::RecoveryBell => unreachable!("handled before selected-view updates"),
             UiUpdate::ScopedManagement { .. } => {
@@ -5639,6 +5656,36 @@ mod layout_cache_tests {
             total_nodes: 1,
         });
     }
+    #[test]
+    fn memory_probe_uses_body_and_layout_accounting_without_f8_changes() {
+        use ratatui::{Terminal, backend::TestBackend};
+        fn probe(ui: &mut UiState) -> serde_json::Value {
+            let (reply, mut receive) = crate::memory::UiMemoryReply::new();
+            ui.apply(UiUpdate::MemoryProbe(reply));
+            receive.try_recv().unwrap()
+        }
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let before = probe(&mut ui);
+        ui.active_view_mut().thread_id = Some("memory-thread".into());
+        history(&mut ui, "memory-thread", &"cache data ".repeat(4096));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        ui.new_chat();
+        let after = probe(&mut ui);
+        for key in ["body", "layout"] {
+            assert!(
+                after[key]["retained_bytes"].as_u64().unwrap()
+                    > before[key]["retained_bytes"].as_u64().unwrap(),
+                "{after}"
+            );
+            assert!(
+                after[key]["retained_bytes"].as_u64().unwrap()
+                    <= after[key]["limit_bytes"].as_u64().unwrap()
+            );
+            assert!(after[key]["entries"].as_u64().unwrap() > 0);
+        }
+    }
+
     #[test]
     fn management_selection_is_typed_and_controls_stay_fixed() {
         use ratatui::{Terminal, backend::TestBackend};
