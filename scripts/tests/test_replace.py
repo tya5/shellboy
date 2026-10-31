@@ -195,3 +195,95 @@ class ReplaceTests(unittest.TestCase):
         self.assertEqual((self.root / 'a').read_text(), 'external edit')
         self.assertEqual((self.root / 'b').read_bytes(), b'B\n')
         self.assert_no_stages()
+
+    def test_blocks_multi_file_same_file_order_and_crlf_payload(self):
+        text = ('@@ replace: a\nA\r\n@@ with\nAA\r\n@@ end\n'
+                '@@ replace: b\nB\n@@ with\nBB\n@@ end\n'
+                '@@ replace: a\nAA\r\n@@ with\nZZ\r\n@@ end')
+        rules = edit.parse_blocks(text)
+        self.assertEqual(rules, [rule('a', 'A\r\n', 'AA\r\n'),
+                                rule('b', 'B\n', 'BB\n'), rule('a', 'AA\r\n', 'ZZ\r\n')])
+        edit.apply(rules, self.root)
+        self.assertEqual((self.root / 'a').read_bytes(), b'ZZ\r\n')
+        self.assertEqual((self.root / 'b').read_bytes(), b'BB\n')
+        self.assert_no_stages()
+
+    def test_malformed_blocks_never_apply_an_earlier_valid_block(self):
+        valid = '@@ replace: a\nA\r\n@@ with\nnew\r\n@@ end\n'
+        bad = ['@@ replace: b\nB\n@@ end\n', '@@ replace: b\nB\n@@ with\nnew\n',
+               '@@ replace: b\n@@ replace: a\n', '@@ replace: b\nB\n@@ with\n@@ replace: a\n',
+               '@@ with\n', '@@ end\n', '@@ replace: \n', 'stray text\n',
+               '@@ replace: b\nB\n@@ with\n@@ with\n@@ end\n']
+        for suffix in bad:
+            with self.assertRaises(ValueError):
+                edit.apply(edit.parse_blocks(valid + suffix), self.root)
+            self.assertEqual((self.root / 'a').read_bytes(), b'A\r\n')
+            self.assert_no_stages()
+
+    def test_custom_marker_allows_default_delimiters_as_literal_payload(self):
+        before = '@@ with\n@@ end\n@@ replace: literal\n'
+        after = r'''$HOME "double" 'single' \path\to\file \\ \n''' + '\n'
+        (self.root / 'a').write_text(before)
+        text = '%% replace: a\n' + before + '%% with\n' + after + '%% end\n'
+        rules = edit.parse_blocks(text, '%%')
+        self.assertEqual(rules, [rule('a', before, after)])
+        edit.apply(rules, self.root)
+        self.assertEqual((self.root / 'a').read_text(), after)
+
+    def test_bad_markers_and_empty_blocks_input_fail(self):
+        for marker in ('', 'two words', '\n', '\t', 'x' * 33):
+            with self.assertRaises(ValueError):
+                edit.parse_blocks('@@ replace: a\nA\n@@ with\nB\n@@ end\n', marker)
+        for text in ('', '\n\n', '@@ replace: a\n@@ with\nnew\n@@ end\n'):
+            with self.assertRaises(ValueError):
+                edit.apply(edit.parse_blocks(text), self.root)
+        self.assert_no_stages()
+
+    def test_only_entire_delimiter_lines_count_not_unicode_line_separators(self):
+        before = '@@ with \n @@ end\nx\u2028@@ with\n'
+        payload = '@@ replace: a\r\n' + before + '@@ with\r\nnew\r\n@@ end\r\n'
+        self.assertEqual(edit.parse_blocks(payload), [rule('a', before, 'new\r\n')])
+
+    def test_blocks_mismatch_and_duplicate_match_preserve_the_whole_batch(self):
+        valid = '@@ replace: a\nA\r\n@@ with\nnew\r\n@@ end\n'
+        for body in ('missing\n', 'B\nB\n'):
+            (self.root / 'b').write_text(body)
+            with self.assertRaises(edit.MatchError):
+                edit.apply(edit.parse_blocks(valid + '@@ replace: b\nB\n@@ with\nnew\n@@ end\n'), self.root)
+            self.assertEqual((self.root / 'a').read_bytes(), b'A\r\n')
+            self.assertEqual((self.root / 'b').read_text(), body)
+            self.assert_no_stages()
+
+    def test_blocks_cli_and_custom_marker_use_the_same_engine(self):
+        text = b'%% replace: a\nA\r\n%% with\n$HOME \\literal "quote"\r\n%% end\n'
+        result = subprocess.run([sys.executable, str(SCRIPT), '--root', str(self.root),
+                                 '--blocks', '--marker', '%%'], input=text, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(json.loads(result.stdout)['ok'])
+        self.assertEqual((self.root / 'a').read_bytes(), b'$HOME \\literal "quote"\r\n')
+        result = subprocess.run([sys.executable, str(SCRIPT), '--root', str(self.root),
+                                 '--marker', '%%'], input=b'[]', capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assert_no_stages()
+
+    @unittest.skipUnless(os.name == 'posix', 'Quoted Unix shell heredoc')
+    def test_quoted_heredoc_preserves_dollar_quotes_and_backslashes(self):
+        import shlex
+        (self.root / 'a').write_text('A\n')
+        literal = r'''$HOME "${EXAMPLE}" 'single' \path\file \\ \n''' + '\n'
+        command = (shlex.join([sys.executable, str(SCRIPT), '--root', str(self.root), '--blocks']) +
+                   " <<'BLOCK_INPUT'\n@@ replace: a\nA\n@@ with\n" + literal + '@@ end\nBLOCK_INPUT\n')
+        env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(self.root), 'EXAMPLE': 'must-not-expand'}
+        result = subprocess.run(['/bin/sh', '-c', command], env=env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / 'a').read_text(), literal)
+        self.assert_no_stages()
+
+    def test_malformed_blocks_cli_does_not_write_valid_first_block(self):
+        text = b'@@ replace: a\nA\r\n@@ with\nnew\r\n@@ end\n@@ replace: b\nB\n'
+        result = subprocess.run([sys.executable, str(SCRIPT), '--root', str(self.root), '--blocks'],
+                                input=text, capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(json.loads(result.stdout)['ok'])
+        self.assertEqual((self.root / 'a').read_bytes(), b'A\r\n')
+        self.assert_no_stages()

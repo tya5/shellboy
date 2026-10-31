@@ -4919,3 +4919,20 @@ delegated to worker4. The issue's original measurement is file rewrite327/107000
 characters, record checker186/530000, PTY29/80000. Those are the supplied baseline,
 not a newly measured reduction. Multi-day follow-up with the same command-metadata
 counting method remains outstanding; no savings percentage is invented here.
+
+#94.3 input-shape revision supersedes b2c5b186: --blocks accepts literal whole
+lines and --marker changes the exact delimiter prefix. The parser preserves LF/
+CRLF payload bytes after UTF-8 decoding, does not split on Unicode line separators,
+rejects missing/duplicated with/end and nested blocks, and passes the complete
+rule array to the unchanged JSON preflight/commit engine. A malformed later block
+cannot apply an earlier valid block. JSON remains available for partial-line and
+no-final-newline changes; setup leads with the quoted-heredoc block form.
+Python63 tests pass: nine new block tests cover multi-file/same-file ordering,
+exact delimiters, custom-marker collisions, missing delimiters/nesting, empty and
+bad markers, all-or-nothing nonunique matches, real CLI input and a real quoted
+Unix heredoc retaining $variables, quotes and backslashes. The new --blocks form
+is immediately used to update its own setup example (custom %% permits literal
+@@ delimiters inside the example). Evidence: /tmp/issue-94-blocks-tests1.log and
+/tmp/issue-94-blocks-help.txt. No user clipboard/config/data, provider, Rust build
+or installed binary is used in these scripts-only checks. Existing rollback and
+crash/concurrency limitations remain; they are not replaced by parser success.
