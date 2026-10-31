@@ -1361,3 +1361,178 @@ async fn open_list_keeps_running_foreign_row_through_repeated_cli_reordering() {
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_browser_keeps_reordered_running_rows_visible_without_reopen() {
+    let (url, mut requests, proxy) = failing_proxy().await;
+    let mut fixture = Fixture::new(&url).await;
+    let (created, _) = fixture.cli_only(&["thread", "create"]).await;
+    let worker = created["result"]["thread_id"].as_str().unwrap().to_owned();
+    fixture
+        .cli_only(&[
+            "thread",
+            "set",
+            "--thread",
+            &worker,
+            "--title",
+            "WORKER_ONE",
+        ])
+        .await;
+    let (other, _) = fixture.cli_only(&["thread", "create"]).await;
+    let other = other["result"]["thread_id"].as_str().unwrap().to_owned();
+    fixture
+        .cli_only(&[
+            "thread",
+            "set",
+            "--thread",
+            &other,
+            "--title",
+            "WORKER_THREE",
+        ])
+        .await;
+    fixture
+        .cli(&[
+            "thread",
+            "set",
+            "--thread",
+            "reactive",
+            "--title",
+            "SELECTED_STAYS",
+        ])
+        .await;
+    fixture
+        .until("selected title before browser", |ui, _| {
+            ui.view().title == "SELECTED_STAYS"
+        })
+        .await;
+    for action in fixture.ui.event(crossterm::event::Event::Key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('t'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ),
+    )) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture
+        .until("all three initial rows", |ui, screen| {
+            ui.threads()
+                .iter()
+                .filter(|row| !row.thread_id.starts_with("draft:"))
+                .count()
+                == 3
+                && screen.contains("WORKER_ONE")
+                && screen.contains("WORKER_THREE")
+        })
+        .await;
+    let generation = fixture.ui.list_generation();
+    let pages = fixture.browser_pages;
+    let witness = fixture.root.path().join("browser-witness.jsonl");
+    std::fs::write(&witness, "").unwrap();
+    for cycle in 0..4 {
+        let worker = if cycle % 2 == 0 { &worker } else { &other };
+        let (accepted, _) = fixture
+            .cli_only(&[
+                "message",
+                "send",
+                "--thread",
+                worker,
+                "--text",
+                "Synthetic running work",
+            ])
+            .await;
+        let run = accepted["result"]["run_id"].as_str().unwrap().to_owned();
+        let incoming = watchdog("held model request", requests.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let screen = fixture
+            .until("running row facts", |ui, _| {
+                ui.threads()
+                    .iter()
+                    .any(|row| row.thread_id.as_str() == worker.as_str() && row.state == "running")
+            })
+            .await;
+        let (canonical, _) = fixture.cli_only(&["thread", "list"]).await;
+        assert!(
+            canonical["result"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["thread_id"].as_str() == Some(worker.as_str())),
+            "saved Thread still exists while the browser is open"
+        );
+        let visible_before_reopen = screen.contains("WORKER_ONE");
+        if !visible_before_reopen {
+            for code in [
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyCode::Char('t'),
+            ] {
+                let modifiers = if code == crossterm::event::KeyCode::Esc {
+                    crossterm::event::KeyModifiers::NONE
+                } else {
+                    crossterm::event::KeyModifiers::CONTROL
+                };
+                for action in fixture.ui.event(crossterm::event::Event::Key(
+                    crossterm::event::KeyEvent::new(code, modifiers),
+                )) {
+                    fixture.actions.send(action).await.unwrap();
+                }
+            }
+            fixture
+                .until("reopen restores row", |_, screen| {
+                    screen.contains("WORKER_ONE") && screen.contains("WORKER_THREE")
+                })
+                .await;
+        }
+        assert!(
+            visible_before_reopen,
+            "cycle {cycle}: canonical row remains; reopening restored it, but an in-place reorder hid it: {screen}"
+        );
+        assert!(screen.contains("WORKER_THREE"));
+        {
+            use std::io::Write;
+            writeln!(
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&witness)
+                    .unwrap(),
+                "{}",
+                json!({"cycle":cycle,"state":"running","present":true})
+            )
+            .unwrap();
+        }
+        fixture.cli_only(&["run", "stop", "--run", &run]).await;
+        let _ = incoming.reply.send(());
+        let screen = fixture
+            .until("stopped row facts", |ui, _| {
+                ui.threads()
+                    .iter()
+                    .any(|row| row.thread_id.as_str() == worker.as_str() && row.state == "stopped")
+            })
+            .await;
+        assert!(
+            screen.contains("WORKER_ONE"),
+            "stopped row still belongs to the browser"
+        );
+        {
+            use std::io::Write;
+            writeln!(
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&witness)
+                    .unwrap(),
+                "{}",
+                json!({"cycle":cycle,"state":"stopped","present":true})
+            )
+            .unwrap();
+        }
+        assert_eq!(fixture.ui.list_generation(), generation);
+        assert_eq!(
+            fixture.browser_pages, pages,
+            "no repair reload should be needed"
+        );
+    }
+    assert_eq!(std::fs::read_to_string(witness).unwrap().lines().count(), 8);
+    fixture.finish().await;
+    proxy.abort();
+}
