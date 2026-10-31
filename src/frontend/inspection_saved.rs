@@ -543,6 +543,8 @@ mod tests {
          UPDATE turn SET answer_node_id='answer' WHERE id='turn';
          INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,result_json)VALUES('receipt','fixture:message','{\"kind\":\"human\",\"label\":\"Author\"}','target','message','run','turn','applied','2026-01-01T00:00:00Z','{\"assignment\":\"new_turn\"}');
          INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,exit_code,output_complete)VALUES('shell','run','turn','shell','exited','/','{\"command\":\"printf done\",\"completion\":{\"elapsed_ms\":42,\"forced\":false,\"exit_signal\":15,\"group_cleanup_confirmed\":true}}','UTF-8','cp932','closed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z',0,1);
+         INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('attachment','message','/SHELLBOY_SYNTHETIC_NO_FILE_PROBE','file','external','2026-01-01T00:00:00Z');
+         INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order)VALUES('target','attachment','active','2026-01-01T00:00:00Z',0);
          INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('saved:operation','fixture','null','hash','completed','{\"result\":{\"message_id\":\"message\"}}','2026-01-01T00:00:00Z');
          INSERT INTO output_chunk VALUES('shell',1,'stdout',0,X'61','2026-01-01T00:00:00.5Z');")?;
         Ok(())
@@ -852,6 +854,9 @@ mod tests {
                     Command::OperationGet(crate::protocol::OperationTarget {
                         operation_id: "saved:operation".into(),
                     }),
+                    Command::AttachmentList(crate::protocol::ThreadTarget {
+                        thread_id: Some("target".into()),
+                    }),
                 ] {
                     values.push(
                         super::super::management_request(
@@ -863,6 +868,16 @@ mod tests {
                         .unwrap(),
                     );
                 }
+                values.push(
+                    super::super::inspection_attachments::request(
+                        &control,
+                        "target".into(),
+                        Some("attachment".into()),
+                        tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap(),
+                );
                 values
             })
             .await;
@@ -894,6 +909,16 @@ mod tests {
         assert_eq!(values[5]["operation_id"], "saved:operation");
         assert_eq!(values[5]["downstream"]["state"], "applied");
         assert_eq!(values[5]["current_instance"], false);
+        assert_eq!(values[6]["attachments"][0]["attachment_id"], "attachment");
+        assert_eq!(values[6]["scope"]["kind"], "thread");
+        assert_eq!(values[7]["scope"]["kind"], "attachment");
+        assert_eq!(values[7]["scope"]["selection_found"], true);
+        assert!(
+            values[7]["notice"]
+                .as_str()
+                .unwrap()
+                .contains("not been checked")
+        );
         for value in values {
             assert_eq!(value["view_observation"]["thread_id"], "target");
             assert!(

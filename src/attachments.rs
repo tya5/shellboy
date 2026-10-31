@@ -685,6 +685,22 @@ pub(crate) fn observe_paths(items: &mut [AttachmentDetails]) {
     }
 }
 
+/// Pure precedence of saved facts, shared by exact CLI and bounded display.
+/// Call only with known (not size-limited) reason cells.
+pub(crate) fn saved_unavailable_reason(
+    managed_state: Option<&str>,
+    managed_reason: Option<&str>,
+    selection_reason: Option<&str>,
+) -> Option<String> {
+    match managed_state {
+        Some(state) if state != "ready" => Some(format!(
+            "{} ({state})",
+            managed_reason.unwrap_or("Managed attachment unavailable")
+        )),
+        _ => selection_reason.map(str::to_owned),
+    }
+}
+
 pub fn list_tx(db: &Connection, thread_id: &str) -> Result<Vec<AttachmentDetails>, ApiError> {
     let mut statement = db.prepare(ATTACHMENT_LIST_SQL).map_err(sql_error)?;
     statement
@@ -704,13 +720,26 @@ pub fn list_tx(db: &Connection, thread_id: &str) -> Result<Vec<AttachmentDetails
                 },
                 managed: r.get::<_, String>(3)? == "managed_clipboard",
                 selected: r.get::<_, String>(4)? == "active",
-                unavailable_reason: match r.get::<_, Option<String>>(7)? {
-                    Some(state) if state != "ready" => Some(format!(
-                        "{} ({state})",
-                        r.get::<_, Option<String>>(8)?
-                            .unwrap_or_else(|| "Managed attachment unavailable".into())
-                    )),
-                    _ => r.get(5)?,
+                unavailable_reason: {
+                    let state: Option<String> = r.get(7)?;
+                    let managed_unavailable =
+                        state.as_deref().is_some_and(|state| state != "ready");
+                    // Retain the canonical one-reason copy: an overridden
+                    // selection reason may itself be large.
+                    let reason: Option<String> = r.get(if managed_unavailable { 8 } else { 5 })?;
+                    saved_unavailable_reason(
+                        state.as_deref(),
+                        if managed_unavailable {
+                            reason.as_deref()
+                        } else {
+                            None
+                        },
+                        if managed_unavailable {
+                            None
+                        } else {
+                            reason.as_deref()
+                        },
+                    )
                 },
             })
         })

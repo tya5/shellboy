@@ -41,6 +41,8 @@ mod docs_proxy;
 mod frontend;
 #[path = "../frontend_activity.rs"]
 mod frontend_activity;
+#[path = "../frontend_attachment_reference.rs"]
+mod frontend_attachment_reference;
 #[path = "../frontend_ordered.rs"]
 mod frontend_ordered;
 #[path = "../frontend_reactivity.rs"]

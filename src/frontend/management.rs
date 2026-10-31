@@ -285,6 +285,60 @@ fn work_report(safe: Value, budget: usize) -> Report {
     }
 }
 
+/// Human-only saved reference targets; no new Core operation or CLI parser.
+pub(super) enum FollowTarget {
+    Command(Box<Command>),
+    Attachment {
+        thread_id: String,
+        attachment_id: String,
+    },
+}
+pub(super) fn follow_target(
+    value: &Value,
+    pointer: &str,
+    mode: crate::ui::ManagementFollow,
+) -> Result<FollowTarget, ApiError> {
+    use crate::ui::ManagementFollow;
+    if matches!(mode, ManagementFollow::Inspect | ManagementFollow::Read)
+        && let Some((parent, "attachment_id")) = pointer.rsplit_once('/')
+    {
+        let row = value.pointer(parent).ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::TargetUnavailable,
+                "Saved attachment record is unavailable",
+            )
+        })?;
+        if matches!(mode, ManagementFollow::Read) {
+            let source=row.get("source_node_id").and_then(Value::as_str).filter(|s|!s.is_empty()).ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Saved attachment source node is unavailable; select its metadata to inspect saved selection"))?;
+            return Ok(FollowTarget::Command(Box::new(Command::HistoryGet(
+                HistoryGetArgs {
+                    node_id: source.into(),
+                    final_answer_only: false,
+                    cursor: None,
+                    encoding: DEFAULT_ENCODING.into(),
+                    limit_bytes: MAX_BODY_BYTES,
+                },
+            ))));
+        }
+        let id = row
+            .get("attachment_id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::TargetUnavailable,
+                    "Saved attachment identity is unavailable",
+                )
+            })?;
+        let thread=row.get("thread_id").and_then(Value::as_str).filter(|s|!s.is_empty()).ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"The selected attachment record has no explicit Thread; inspect its Thread attachment list"))?;
+        return Ok(FollowTarget::Attachment {
+            thread_id: thread.into(),
+            attachment_id: id.into(),
+        });
+    }
+    follow(value, pointer, mode).map(|command| FollowTarget::Command(Box::new(command)))
+}
+
 /// Resolve only explicit saved identifiers and read commands; never execute mutations from a view.
 pub(super) fn follow(
     value: &Value,
@@ -359,7 +413,7 @@ pub(super) fn follow(
             }))
         }
         "execution_id" => Ok(Command::ShellGet(ExecutionTarget { execution_id: id })),
-        "node_id" | "answer_node_id" | "request_node_id" | "result_node_id" => {
+        "node_id" | "source_node_id" | "answer_node_id" | "request_node_id" | "result_node_id" => {
             Ok(Command::HistoryGet(HistoryGetArgs {
                 final_answer_only: false,
                 node_id: id,
@@ -726,5 +780,50 @@ mod recovery_hint_tests {
                 .any(|field| field.key == "/error/hint" && field.value == "original machine hint")
         );
         assert_eq!(report.detail.unwrap(), value);
+    }
+}
+
+#[cfg(test)]
+mod attachment_reference_tests {
+    use super::*;
+    use crate::ui::ManagementFollow;
+    #[test]
+    fn selected_record_owns_attachment_thread_and_source_without_viewer_fallback() {
+        let value = serde_json::json!({"thread_id":"viewer","attachments":[{"thread_id":"foreign","attachment_id":"a","source_node_id":"source"}]});
+        assert!(
+            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Inspect).unwrap(),FollowTarget::Attachment{thread_id,attachment_id} if thread_id=="foreign"&&attachment_id=="a")
+        );
+        assert!(
+            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Read).unwrap(),FollowTarget::Command(command) if matches!(command.as_ref(),Command::HistoryGet(a) if a.node_id=="source"))
+        );
+        assert!(
+            matches!(follow(&value,"/attachments/0/source_node_id",ManagementFollow::Inspect).unwrap(),Command::HistoryGet(a) if a.node_id=="source")
+        );
+        let missing =
+            serde_json::json!({"thread_id":"viewer","attachments":[{"attachment_id":"a"}]});
+        assert!(
+            follow_target(
+                &missing,
+                "/attachments/0/attachment_id",
+                ManagementFollow::Inspect
+            )
+            .is_err()
+        );
+        assert!(
+            follow_target(
+                &missing,
+                "/attachments/0/attachment_id",
+                ManagementFollow::Read
+            )
+            .is_err()
+        );
+        assert!(
+            follow_target(
+                &value,
+                "/attachments/9/attachment_id",
+                ManagementFollow::Inspect
+            )
+            .is_err()
+        );
     }
 }

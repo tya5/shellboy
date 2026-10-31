@@ -5740,3 +5740,43 @@ missing errors, and constant exact-key query work with1000/10000 unrelated recei
 This checkpoint has not rerun the full standard and is not live subscription,
 shared admission, native-layout/P6 or three-OS qualification. No schema, worker,
 queue, operation or authorization change; replay/expiry semantics stay canonical.
+
+## G bounded saved attachment references and common field admission
+
+Runtime source: this attachment/reference unit plus its common-field parent,
+on288ec0d. Native macOS, pinned Rust1.99.1; temporary synthetic databases and
+loopback-discard configuration; no model API, user database or installed binary.
+Final `sh scripts/check.sh` v6:2124 passed/0 failed/35 ignored (library1164,
+integration941, block replacement12, frontend structure7), Python66, layout95,
+watchdog/fmt and strict all-target Clippy pass. Actual named tests for bounded
+metadata roots, exact selection outside the list cohort, explicit foreign record
+scope/source, blocked writer across eight read routes and existing structured
+history/detail navigation all ran and passed.
+
+The actual frontend integration reads a150-item bounded list, opens a saved
+operation's attachment outside that cohort using its explicit foreign Thread,
+then follows the source to the exact saved text/node. Its fixture forwards finite
+128-slot channels by notification and joins the receiver off the async thread;
+it uses the common60s safety watchdog, no elapsed-time acceptance assertion.
+Exact-selection VM/fullscan work stays unchanged at1000/10000 other selections.
+Canonical small rows retain managed-file unavailability precedence, delivery and
+selection/source/tombstone facts; oversize paths/reasons remain explicitly limited.
+Neither the saved list nor exact selection performs a filesystem availability
+probe. The canonical exhaustive CLI still provides that explicit native check.
+
+Retain observed failures: first attachment suite24/1 found missing canonical
+managed-file reason precedence; it was fixed by sharing the existing pure rule,
+without broadening CLI reason-copy work. A new reference guard initially failed
+to compile because its test moved a boxed value in a match guard; it now borrows.
+Next targeted runs27/0 and reference1/0 passed. The initial actual frontend v3 hit the safety watchdog because expansive rows
+starved scope metadata; the shared collector now reserves common metadata under
+the unchanged128-field/64KiB cap. V4 passed that stage but hit the watchdog later
+while the fixture awaited an incorrect original-source pointer.
+A v4 targeted filter matched zero tests and is not evidence; the corrected named
+collector test and final full standard both executed it successfully. The fixture
+now asserts each completed report immediately; v5 exposed a wrong fixture source
+pointer (`/text/content`), since canonical history returns plain text at `/text`.
+That expectation was corrected to exact source text; v6 dispatch passed before
+the standard and again within it. No watchdog was increased or failure retried
+without a code/fixture correction. These are not completion of G's live update/
+shared-read/domain coverage, P3/P6, native-layout or three-OS gates.

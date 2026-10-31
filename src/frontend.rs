@@ -11,6 +11,7 @@ mod draft_saver;
 mod header;
 mod history_reader;
 mod input_history;
+mod inspection_attachments;
 mod inspection_lifecycle;
 mod inspection_operation;
 mod inspection_saved;
@@ -181,6 +182,15 @@ async fn management_request_trigger(
     cancel: CancellationToken,
     trigger: crate::usage_totals::UsageTrigger,
 ) -> Result<Value, ApiError> {
+    if inspection_attachments::supports(&command)
+        && let Command::AttachmentList(args) = &command
+        && let Some(thread) = &args.thread_id
+    {
+        return match inspection_attachments::request(control, thread.clone(), None, cancel).await {
+            Ok(value) => Ok(value),
+            Err(error) => Ok(serde_json::json!({"error":error})),
+        };
+    }
     if let Command::OperationGet(args) = command {
         return match inspection_operation::request(control, args.operation_id, cancel).await {
             Ok(value) => Ok(value),
@@ -2522,28 +2532,32 @@ async fn run_with_delivery(
                         let follow_updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result =
-                                presentation_work(move || management::follow(&value, &pointer, mode))
+                                presentation_work(move || management::follow_target(&value, &pointer, mode))
                                     .await;
-                            let command = match result {
-                                Ok(Ok(command)) => command,
+                            let target = match result {
+                                Ok(Ok(target)) => target,
                                 Ok(Err(error)) | Err(error) => {
                                     management_status(&follow_updates, context.clone(), error).await;
                                     return;
                                 }
                             };
-                            let title = command_title(&command);
-                            let work_status = management::work_status(&command);
-                            let observed =
-                                match management_request(&control, command, CancellationToken::new())
-                                    .await
-                                {
-                                    Ok(value) => value,
-                                    Err(error) => {
-                                        management_status(&follow_updates, context.clone(), error)
-                                            .await;
-                                        return;
-                                    }
-                                };
+                            let (title,work_status,response)=match target {
+                                management::FollowTarget::Command(command)=> {
+                                    let title=command_title(&command);
+                                    let work_status=management::work_status(&command);
+                                    (title,work_status,management_request(&control,*command,CancellationToken::new()).await)
+                                },
+                                management::FollowTarget::Attachment {thread_id,attachment_id}=> {
+                                    ("添付の参照".into(),false,inspection_attachments::request(&control,thread_id,Some(attachment_id),CancellationToken::new()).await)
+                                },
+                            };
+                            let observed=match response {
+                                Ok(value)=>value,
+                                Err(error)=> {
+                                    management_status(&follow_updates,context.clone(),error).await;
+                                    return;
+                                },
+                            };
                             if let Some(error) = observed.get("error") {
                                 management_status(
                                     &follow_updates,

@@ -2703,3 +2703,18 @@ new unit remains unqualified. Next complete bounded attachment/reference facts,
 then connect the saved-target observer/joint read plan without bypassing G's full
 mutable-result inventory. G remains local, not admitted, and does not alter
 installed binaries or user data.
+
+## G8 saved attachment and source-reference checkpoint
+
+Bounded attachment-list facts and exact (Thread,attachment) reads are now wired
+to management/reference dispatch. Exact reads work outside the list cohort and
+never use the viewer as target fallback. Source references reach canonical saved
+history text; current native file availability remains explicit CLI observation.
+The common result collector reserves scope/count/read-limit/time facts before
+large arrays under unchanged field/byte limits. Shared managed-file precedence
+preserves CLI semantics. Native standard2124/0/35, Python66 and strict all-target
+Clippy pass, including actual frontend operation→foreign attachment→source.
+See acceptance for retained red tests and their corrections. Next connect these
+readers to the saved-target observer/joint read plan and complete remaining
+index/storage/deletion/status/history/readback freshness and G9/G10/G11/G12 gates.
+G remains local, not admitted; no release/install/user-data change.
