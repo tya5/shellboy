@@ -661,7 +661,7 @@ async fn run_shell(
     let execution_id = execution.clone();
     let group = group.to_owned();
     let call_id = call_id.to_owned();
-    let shell_config = json!({"command":args.command,"kind":control.store.config.shell.kind});
+    let shell_config = json!({"command":args.command,"description":args.description,"kind":control.store.config.shell.kind});
     let args_copy = args.clone();
     let ready=control.store.database.call(move|db|{let tx=db.transaction()?;
         let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1 AND u.run_id=?2 AND u.generation=?3 AND u.interrupt_requested_at IS NULL AND u.state IN ('preparing','running','waiting') AND r.state='live')",params![current.turn,current.run,current.generation],|r|r.get(0))?;if !live{return Ok(false);}

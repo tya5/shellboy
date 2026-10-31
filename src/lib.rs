@@ -36,6 +36,7 @@ pub mod shell;
 pub mod status;
 pub mod storage;
 pub mod terminal_links;
+pub(crate) mod tool_description;
 pub mod ui;
 
 mod usage;

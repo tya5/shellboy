@@ -271,3 +271,16 @@ permanent HTTP status even if its body stalls; do not invent unknown transport
 and retry that status. Existing pending deadlines and retry policy are unchanged.
 This is the previously approved #95 transport patch, independent of F browser
 state. Its paused-clock and request-JSONL tests remain part of qualification.
+
+## Bounded shell descriptions
+
+Shell calls may include an optional model-authored description. Canonical completed
+shell arguments retain at most 80 Unicode scalar values of description, without
+changing command text; truncation is recorded as Shellboy normalization metadata,
+not a provider assertion. Display strips plain-text controls and falls back to
+the command for absent/empty/whitespace-only descriptions. The description is not
+an authorization or a verified explanation of the command. shell.describe_calls
+is true by default; false omits the parameter from generation tool definitions
+and uses command labels. Existing history/DB formats, lifecycle and workers stay
+unchanged. Incomplete opaque audit input remains subject to existing transport
+limits; it is not accepted as an executable description.

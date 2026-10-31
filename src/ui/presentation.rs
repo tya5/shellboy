@@ -1461,9 +1461,11 @@ fn compact_tool_line(
             .fg(kind.spec().2)
             .underline_color(INPUT_DECORATION_MARKER),
     );
-    let command = crate::presentation::sanitize_plain(&tool.command, 0)
-        .0
-        .replace(['\n', '\r'], " ");
+    let description = crate::tool_description::label(tool.description.as_deref());
+    let command =
+        crate::presentation::sanitize_plain(description.as_deref().unwrap_or(&tool.command), 0)
+            .0
+            .replace(['\n', '\r'], " ");
     let command = if command.trim().is_empty() {
         "shell"
     } else {
@@ -1871,7 +1873,15 @@ fn typed_history(
                         outcome,
                     };
                     let row_start = lines.len();
-                    let mut chunk = vec![compact_tool_line(tool, width, view.palette)];
+                    let mut label = tool.clone();
+                    if !view.describe_calls {
+                        label.description = None;
+                    }
+                    let mut chunk = vec![compact_tool_line(&label, width, view.palette)];
+                    let focused = view.items.active && view.items.focus.as_ref() == Some(&key);
+                    if label.description.is_some() && (focused || open) {
+                        chunk.extend(tool_note(&tool.command, width, view.palette));
+                    }
                     // Canonical call URLs remain original link targets after
                     // compacting the visible command.
                     annotate_links(&mut chunk, &node.presentation.links, &mut links);
@@ -4172,6 +4182,54 @@ mod conversation_item_tests {
                 .iter()
                 .all(|s| !matches!(s.item.as_ref().map(|i| &i.key), Some(ItemKey::Node(_))))
         );
+    }
+    #[test]
+    fn description_replaces_command_until_existing_focus_or_disclosure_reveals_it() {
+        let config = crate::config::Config::default();
+        let mut view = ThreadView::new(&config, std::env::temp_dir());
+        let mut value = tool("described", "completed");
+        value.description = Some("Inspect repository".into());
+        let key = ItemKey::tool(&value, "call", 0);
+        let outcome = tool_outcome(&value);
+        let command = value.command.clone();
+        *view.nodes_mut_for_test() = vec![node(
+            "call",
+            "",
+            vec![PresentationBlock {
+                kind: BlockKind::ToolCall,
+                tool: Some(value),
+                ..Default::default()
+            }],
+        )];
+        let collapsed = plain(&history(&view, 80).0);
+        assert!(collapsed.contains("Inspect repository"));
+        assert!(!collapsed.contains(&command), "{collapsed}");
+        view.items.active = true;
+        view.items.focus = Some(key.clone());
+        let selected = plain(&history(&view, 80).0);
+        assert!(selected.contains(&command), "{selected}");
+        view.items.active = false;
+        assert!(!plain(&history(&view, 80).0).contains(&command));
+        view.items.toggle(key, false, &outcome);
+        assert!(plain(&history(&view, 80).0).contains(&command));
+        view.describe_calls = false;
+        let opted_out = plain(&history(&view, 80).0);
+        assert!(opted_out.contains(&command));
+        assert!(!opted_out.contains("Inspect repository"));
+    }
+    #[test]
+    fn blank_descriptions_fall_back_to_command_even_for_direct_presentations() {
+        for description in ["", "  ", "\n\t\u{1b}"] {
+            let mut value = tool("blank", "completed");
+            value.description = Some(description.into());
+            let text = compact_tool_line(
+                &value,
+                120,
+                theme::Palette::detect(crate::config::PaletteMode::Dark),
+            )
+            .to_string();
+            assert!(text.contains(&value.command), "{text}");
+        }
     }
     #[test]
     fn compact_tool_rows_hide_ids_and_only_label_factual_background_work() {

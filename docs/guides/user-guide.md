@@ -342,3 +342,6 @@ large backlogs skip to a marked tail and uncertain decoding remains explicit.
 Closed/covered views and conversation switching stop that preview subscription.
 F2 keeps its existing frozen-screen behavior. Use `/status` or F8 when more than
 three work items or full saved facts are needed.
+
+Tool-row descriptions are written by the model, not verified against the command;
+select the row or press F6 to check the actual command that ran.

@@ -1212,6 +1212,8 @@ struct HistoryLayoutKey {
     anchor: Option<String>,
     expanded: Vec<String>,
     items_revision: u64,
+    focused_item: Option<ItemKey>,
+    describe_calls: bool,
     palette: theme::Palette,
     width: u16,
 }
@@ -1233,6 +1235,8 @@ struct RenderUnitKey {
     item: Option<ItemKey>,
     block_index: usize,
     item_revision: u64,
+    focused: bool,
+    describe_calls: bool,
     dependency: Option<usize>,
     palette: theme::Palette,
 }
@@ -1272,6 +1276,8 @@ impl RenderUnitKey {
                 .max()
                 .unwrap_or(0),
             dependency: None,
+            focused: false,
+            describe_calls: view.describe_calls,
             palette: view.palette,
         })
     }
@@ -1286,6 +1292,7 @@ impl RenderUnitKey {
     ) -> Option<Self> {
         let mut result = Self::new(view, primary, primary + 1, width, links)?;
         result.item = Some(key.clone());
+        result.focused = view.items.active && view.items.focus.as_ref() == Some(key);
         result.block_index = block_index;
         result.item_revision = view.items.cache_revision(key);
         result.dependency = dependency;
@@ -1343,6 +1350,12 @@ impl HistoryLayoutKey {
                 .map(|n| n.node_id.clone()),
             expanded: view.reasoning_expanded.iter().cloned().collect(),
             items_revision: view.items.revision(),
+            focused_item: view
+                .items
+                .active
+                .then(|| view.items.focus.clone())
+                .flatten(),
+            describe_calls: view.describe_calls,
             palette: view.palette,
             width,
         }
@@ -1350,6 +1363,10 @@ impl HistoryLayoutKey {
     fn bytes(&self) -> usize {
         self.view.capacity()
             + self.thread.as_ref().map_or(0, String::capacity)
+            + self
+                .focused_item
+                .as_ref()
+                .map_or(0, history_interaction::key_bytes)
             + self.anchor.as_ref().map_or(0, String::capacity)
             + self.expanded.capacity() * std::mem::size_of::<String>()
             + self.expanded.iter().map(String::capacity).sum::<usize>()

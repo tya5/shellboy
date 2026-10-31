@@ -1139,3 +1139,12 @@ surfaces, using the same one-based parser order as the canonical chooser. These
 captions are rendered decoration only; partial/evicted projections do not claim
 global block numbers. The b shortcut opens that answer's numbered chooser, then
 one digit copies the selected full block without typing a node identity.
+
+## Tool description labels
+
+When shell.describe_calls is enabled, compact tool identity uses its nonblank,
+sanitized model-authored description instead of command text. The existing
+history item focus/open state reveals the command; details and raw provenance
+continue to expose the real command. Losing focus restores the compact label.
+No independent selection, lifecycle or disclosure state is introduced. Description
+text is not evidence that the actual command is safe or matches its explanation.

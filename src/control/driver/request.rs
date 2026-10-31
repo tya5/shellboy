@@ -202,9 +202,10 @@ pub(super) async fn stream_response(
     thread: &str,
     attempt: &str,
     client: &HttpModelClient,
-    request: Value,
+    mut request: Value,
     stop: &CancellationToken,
 ) -> Result<model::ModelResponse, model::http::AttemptFailure> {
+    model::configure_shell_description(&mut request, control.store.config.shell.describe_calls);
     let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
