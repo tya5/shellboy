@@ -1880,6 +1880,11 @@ fn typed_history(
                     let mut chunk = vec![compact_tool_line(&label, width, view.palette)];
                     let focused = view.items.active && view.items.focus.as_ref() == Some(&key);
                     if label.description.is_some() && (focused || open) {
+                        chunk.extend(tool_note(
+                            "コマンド（プレビュー） · o コマンド原文（ページ表示）",
+                            width,
+                            view.palette,
+                        ));
                         chunk.extend(tool_note(&tool.command, width, view.palette));
                     }
                     // Canonical call URLs remain original link targets after

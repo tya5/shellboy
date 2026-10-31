@@ -453,7 +453,30 @@ impl UiState {
             self.details = Some(details::Details::new(self.view(), links));
             return vec![];
         };
-        let source = item.primary_node_id.clone();
+        let command_source = self
+            .view()
+            .describe_calls
+            .then(|| {
+                self.view()
+                    .nodes()
+                    .iter()
+                    .flat_map(|node| {
+                        node.presentation.blocks.iter().enumerate().filter_map(
+                            move |(index, block)| {
+                                block.tool.as_ref().map(|tool| (node, index, tool))
+                            },
+                        )
+                    })
+                    .find_map(|(node, index, tool)| {
+                        (ItemKey::tool(tool, &node.node_id, index) == item.key
+                            && crate::tool_description::label(tool.description.as_deref())
+                                .is_some())
+                        .then(|| tool.call_node_id.clone())
+                        .flatten()
+                    })
+            })
+            .flatten();
+        let source = command_source.unwrap_or_else(|| item.primary_node_id.clone());
         let loaded = self
             .view()
             .nodes()

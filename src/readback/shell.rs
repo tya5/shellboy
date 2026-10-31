@@ -113,10 +113,11 @@ pub(crate) fn list(db: &Connection, a: &ShellListArgs, instance: &str) -> Result
         let valid = value["sec"].as_i64().is_some_and(|s| s != i64::MIN);
         let description = crate::tool_description::label(value["description"].as_str());
         let obj = value.as_object_mut().unwrap();
-        obj.insert(
-            "description".into(),
-            json!(description.map(|s| snippet(&s).0)),
-        );
+        if let Some(description) = description {
+            obj.insert("description".into(), json!(snippet(&description).0));
+        } else {
+            obj.remove("description");
+        }
         obj.remove("raw_command");
         obj.remove("sec");
         obj.remove("nano");
