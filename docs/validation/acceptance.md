@@ -5878,3 +5878,7 @@ retaining #98 tool geometry, body priority and cached release facts, applying on
 the shared formatter and recognizing an existing hour/minute suffix during paint.
 This latest integrated source requires a fresh final gate; earlier green is not
 claimed as that gate. No force push or own native CI is used for the replacement.
+Final source on maind29e0fc passes sh scripts/check.sh:2,064/0/35, Python66,
+layout94/fmt/strict Clippy/policy. Rebuilt actual PTY matrix8/64 also passes,
+including saved completed-time labels. Detailed source/result evidence is in#85.
+Subsequent record-only commit leaves Rust/fixture blobs identical to checked code.

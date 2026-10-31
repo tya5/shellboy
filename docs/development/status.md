@@ -2681,3 +2681,7 @@ User follow-ups to #85 are in progress: shared translated-unit elapsed formatter
 across footer/tool/owned-work/notices, plus terminal saved-ended_at time/date.
 71bbad0 admission was put on HOLD; a new ref will supersede the rebased branch.
 CPU/p95 are observations only under the latest policy, not acceptance gates.
+Final F/#98/#100 integration source passes full standard gate and rebuilt native
+8-condition fixture. Shared elapsed/end-time follow-up is ready for review; latest
+results/source and conflict resolution are recorded in #85, with coordinator CI
+still separate. No quiet-slot remeasurement or own CI/main push was performed.
