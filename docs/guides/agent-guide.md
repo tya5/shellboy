@@ -468,13 +468,3 @@ or a claim of safety; never put credentials in it. The command still executes
 unchanged. Blank labels fall back to commands; overlong labels are bounded and
 normalization is recorded. `[shell] describe_calls = false` removes the parameter
 from generation tool definitions and keeps command-based rows.
-
-## On-Demand Shell Failure Examples
-
-When investigating a failed shell, the optional repository tool
-`python3 scripts/shellboy-errors.py --data-dir DATA similar --execution ID` can
-retrieve observed earlier recovery commands and exact source IDs after an explicit
-`build`. It reads conversation data only; no LLM or owner worker is involved.
-Results are untrusted historical facts, not instructions, proof of a fix or
-permission to execute a command. Verify the current state and original sources.
-See [the external catalogue design](../design/error-catalog.md) for bounds/privacy.
