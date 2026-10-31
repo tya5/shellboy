@@ -4790,3 +4790,11 @@ sh scripts/check.sh and native CI are not claimed. CI/integration is delegated
 to worker4; no CI dispatch/main merge/issue close occurs here. #94.2 PTY capture
 and #94.3 batch replacement remain separate subsequent changes. Native Windows
 and Linux execution and the multi-day token/time reduction are not yet measured.
+
+Rebase repair: #94.1 now sits on main9b4ae34 (#92) on a separate branch, without
+force-pushing the original submission. The setup conflict retains both the
+upstream batched/exact-SHA CI reuse section and the record-helper usage section.
+The helper/test source is unchanged from 5bf85f3. The rebased scripts-only checks
+pass again: Python25, layout94/watchdog, help, py_compile, diff and self-use record
+retention. Evidence: /tmp/issue-94-1-repair-tests.log and
+/tmp/issue-94-1-repair-record-delta.json. Rust/native CI are not newly claimed.
