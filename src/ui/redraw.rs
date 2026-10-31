@@ -68,6 +68,16 @@ mod tests {
         Event::Key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL))
     }
     #[test]
+    fn completed_idle_has_no_animation_and_no_unsolicited_frame() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.dirty = false;
+        assert!(!crate::activity::ActivityPhase::Completed.is_active());
+        let frame = Duration::from_millis(100);
+        for _ in 0..100 {
+            assert!(!ui.draw_due(false, frame, frame));
+        }
+    }
+    #[test]
     fn redraw_restores_foreign_cells_without_changing_any_input_owner() {
         for owner in [
             "composer",

@@ -79,7 +79,7 @@ mod tests {
         io::Read,
         os::fd::{AsRawFd, FromRawFd},
         process::{Command, Stdio},
-        time::{Duration, Instant},
+        time::Duration,
     };
     const FIXTURE: &str = "SHELLBOY_TERMINAL_PANIC_FIXTURE";
     const RESTORE: &[u8] = b"\x1b[?1049l";
@@ -155,7 +155,7 @@ mod tests {
             .spawn()
             .unwrap();
         drop(slave);
-        let deadline = Instant::now() + Duration::from_secs(20);
+        let deadline = crate::test_watchdog::Deadline::new("PTY subprocess exit");
         let mut output = Vec::new();
         loop {
             let mut bytes = [0; 8192];
@@ -177,10 +177,10 @@ mod tests {
                 }
                 return (status, output);
             }
-            if Instant::now() >= deadline {
+            if deadline.expired() {
                 child.kill().unwrap();
                 child.wait().unwrap();
-                panic!("fixture exceeded20s: {}", String::from_utf8_lossy(&output));
+                panic!("fixture watchdog: {}", String::from_utf8_lossy(&output));
             }
             std::thread::sleep(Duration::from_millis(2));
         }

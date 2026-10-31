@@ -208,7 +208,7 @@ mod tests {
         for action in ui.select_thread("thread".into()) {
             sender.try_send(action).unwrap();
         }
-        tokio::time::timeout(Duration::from_secs(10), async {
+        crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_cleanup_save_failed_warns_new_draft_and_stops_admission", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     let loaded = matches!(&update, UiUpdate::History { thread_id, .. } if thread_id == "thread");
@@ -230,7 +230,7 @@ mod tests {
                 known_thread_ids: vec!["thread".into()],
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(10), async {
+        crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_cleanup_save_failed_warns_new_draft_and_stops_admission", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     let deleted = matches!(
@@ -283,8 +283,7 @@ mod tests {
             "cleanup failure must close owner admission before delivering the warning"
         );
         sender.try_send(UiAction::Quit).unwrap();
-        let result = tokio::time::timeout(
-            Duration::from_secs(if cfg!(windows) { 30 } else { 15 }),
+        let result = crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_cleanup_save_failed_warns_new_draft_and_stops_admission",
             async {
                 loop {
                     while incoming.try_recv().is_ok() {}
@@ -465,7 +464,7 @@ mod tests {
                 preview_sources: vec![],
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     if matches!(update, UiUpdate::History { ref thread_id, .. } if thread_id == "thread") {
@@ -506,7 +505,7 @@ mod tests {
                 known_thread_ids: vec!["thread".into(), "independent".into()],
             })
             .unwrap();
-        let deleted = tokio::time::timeout(Duration::from_secs(10), async {
+        let deleted = crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     if let UiUpdate::ThreadDeletion {
@@ -543,7 +542,7 @@ mod tests {
             thread_id: "independent".into(),
             error: ApiError::new(ErrorCode::IoFailed, "post-deletion-event-fence"),
         });
-        tokio::time::timeout(Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     match update {
@@ -822,7 +821,7 @@ mod tests {
         let mut command_errors = 0;
         let mut bare_errors = 0;
         let mut duplicate_errors = 0;
-        tokio::time::timeout(Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: submitted_image_failure_is_reported_once_while_unsubmitted_failure_keeps_draft_notice", async {
             while command_errors == 0 || bare_errors == 0 {
                 while let Ok(update) = incoming.try_recv() {
                     match update {

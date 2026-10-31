@@ -352,7 +352,6 @@ enum Admission {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     fn frame(display: &mut Display, attempt: &str, text: &str) -> Prepared {
         display.observe("thread".into(), attempt.into(), 0, text, false);
@@ -422,7 +421,7 @@ mod tests {
         }).await.unwrap();
     }
     async fn next(incoming: &std::sync::mpsc::Receiver<UiUpdate>) -> UiUpdate {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("src/frontend/streaming.rs: next", async {
             loop {
                 if let Ok(update) = incoming.try_recv() {
                     return update;

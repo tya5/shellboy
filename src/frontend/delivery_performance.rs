@@ -92,7 +92,7 @@ async fn performance_slow_ui_bridge_action_and_event_progress() {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        let deadline = crate::test_watchdog::Deadline::new("UI drain resumes bridge");
         while latency.is_none() || !producer.is_finished() {
             while incoming.try_recv().is_ok() {}
             if latency.is_none()
@@ -100,10 +100,7 @@ async fn performance_slow_ui_bridge_action_and_event_progress() {
             {
                 latency = Some(start.elapsed());
             }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "bridge did not resume after UI drain"
-            );
+            assert!(!deadline.expired(), "bridge did not resume after UI drain");
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         producer.await.unwrap();

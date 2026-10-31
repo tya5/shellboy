@@ -34,7 +34,7 @@ async fn an_already_queued_management_result_stays_durable_but_cannot_reopen_a_c
     for action in actions {
         sender.try_send(action).unwrap();
     }
-    let queued=tokio::time::timeout(std::time::Duration::from_secs(10),async {
+    let queued=crate::test_watchdog::watchdog("src/frontend/control_tests/management_scope.rs: an_already_queued_management_result_stays_durable_but_cannot_reopen_a_closed_other_view",async {
         loop {
             while let Ok(update)=incoming.try_recv(){
                 if matches!(&update,UiUpdate::ScopedManagement{update,..} if matches!(update.as_ref(),UiUpdate::StructuredManagement{..})) {return update;}

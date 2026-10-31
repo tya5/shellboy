@@ -88,16 +88,16 @@ pub(super) async fn rank(
                 if let Some(ready) = gate.ready.lock().unwrap().take() {
                     let _ = ready.send(ranked.hits.len());
                 }
-                gate.resume
-                    .lock()
-                    .unwrap()
-                    .recv_timeout(Duration::from_secs(5))
-                    .map_err(|_| {
-                        err(
-                            ErrorCode::InvalidState,
-                            "Test refresh barrier was not released",
-                        )
-                    })?;
+                crate::test_watchdog::blocking_recv(
+                    "release ranked-reader refresh barrier",
+                    &gate.resume.lock().unwrap(),
+                )
+                .map_err(|_| {
+                    err(
+                        ErrorCode::InvalidState,
+                        "Test refresh barrier was not released",
+                    )
+                })?;
             }
             ensure_running(Some(&cancel))?;
             // Writers may commit deletion/GC while ranking uses its WAL snapshot.
@@ -392,21 +392,21 @@ mod tests {
             .await
         });
         assert_eq!(
-            tokio::time::timeout(Duration::from_secs(2), observed)
+            crate::test_watchdog::watchdog("src/index/search/reader.rs: readonly_ranking_releases_its_snapshot_before_observing_concurrent_writer_changes", observed)
                 .await
                 .unwrap()
                 .unwrap(),
             2,
             "Both valid hits must come from the actual readonly ranking snapshot"
         );
-        tokio::time::timeout(Duration::from_secs(2),db.call(|db| {
+        crate::test_watchdog::watchdog("src/index/search/reader.rs: readonly_ranking_releases_its_snapshot_before_observing_concurrent_writer_changes",db.call(|db| {
             let tx = db.transaction()?;
             tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1,deleted_reason='collected' WHERE id='first'",[])?;
             tx.execute("DELETE FROM thread_path WHERE node_id='second'",[])?;
             tx.commit()?; Ok(())
         })).await.unwrap().unwrap();
         release.send(()).unwrap();
-        let hits = tokio::time::timeout(Duration::from_secs(2), query)
+        let hits = crate::test_watchdog::watchdog("src/index/search/reader.rs: readonly_ranking_releases_its_snapshot_before_observing_concurrent_writer_changes", query)
             .await
             .unwrap()
             .unwrap()
@@ -533,13 +533,9 @@ mod tests {
         let mut idle = tokio::spawn(async move {
             waiting.wait_idle().await.unwrap();
         });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), &mut idle)
-                .await
-                .is_err()
-        );
+        assert!(futures_util::poll!(&mut idle).is_pending());
         drop(permit);
-        tokio::time::timeout(Duration::from_secs(1), idle)
+        crate::test_watchdog::watchdog("src/index/search/reader.rs: admission_rejects_before_embedding_and_shutdown_waits_for_actual_task_permit", idle)
             .await
             .unwrap()
             .unwrap();
@@ -784,7 +780,7 @@ mod tests {
                 ..Default::default()
             }),
         ));
-        let response = tokio::time::timeout(Duration::from_secs(10), search)
+        let response = crate::test_watchdog::watchdog("src/index/search/reader.rs: readonly_query_error_through_control_keeps_owner_open_for_later_mutation", search)
             .await
             .unwrap();
         assert!(!response.ok);

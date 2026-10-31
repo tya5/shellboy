@@ -138,10 +138,12 @@ async fn stream_input_layout_and_db_fairness() {
     let mut stream_ready = false;
     let mut proxy_released = false;
     let mut saved = false;
+    let guard =
+        crate::test_watchdog::Deadline::new("load fixture completes saved state and inputs");
     let start = Instant::now();
     while !(saved && input_samples.len() == 7) {
         assert!(
-            start.elapsed() < Duration::from_secs(30),
+            !guard.expired(),
             "load fixture timeout; projected_samples={projected_samples}, inputs={}, saved={saved}",
             input_samples.len()
         );
@@ -274,12 +276,15 @@ async fn stream_input_layout_and_db_fairness() {
         json!({"deltas":DELTAS,"source_bytes":expected.len(),"snapshots":counters.load(Ordering::Relaxed),"cloned_bytes":frontend::stream_metrics::CLONED_BYTES.load(Ordering::Relaxed),"post_pump_view_samples":projected_samples,"post_pump_sample_bytes":projected_sample_bytes,"markers_not_observed_between_pumps":gaps,"layout_builds":ui.layout_cache.builds,"draws":draws,"draw_total_ms":draw_ns as f64/1e6,"source_to_projected_view_ms":{"n":lag.len(),"p50":percentile(lag.clone(),0.5),"p95":percentile(lag,0.95)},"input_to_testbackend_ms":{"n":input_samples.len(),"samples":input_samples},"db_roundtrip_ms":{"n":db_ms.len(),"samples":db_ms},"display_db_gate_reads":frontend::stream_metrics::GATE_READS.load(Ordering::Relaxed),"display_db_gate_service_ns":frontend::stream_metrics::GATE_NANOS.load(Ordering::Relaxed),"wall_seconds":start.elapsed().as_secs_f64(),"boundary":"local SSE emit timestamp -> latest source marker observed after production drain_updates (32 updates/4ms, including retention); samples and skipped markers are post-pump view observations, not dequeued update counts; injected Paste -> matching TestBackend cells; DB worker queue+read RTT; 1ms harness polling and 30fps TestBackend, no terminal pixels or physical input"})
     );
     send.try_send(UiAction::Quit).unwrap();
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !bridge.is_finished() {
-            ui.drain_updates(&incoming);
-            tokio::task::yield_now().await;
-        }
-    })
+    crate::test_watchdog::watchdog(
+        "src/ui/performance_stream.rs: stream_input_layout_and_db_fairness",
+        async {
+            while !bridge.is_finished() {
+                ui.drain_updates(&incoming);
+                tokio::task::yield_now().await;
+            }
+        },
+    )
     .await
     .unwrap();
     bridge.await.unwrap().unwrap();

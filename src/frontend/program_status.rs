@@ -309,34 +309,37 @@ mod tests {
                 tx.execute("UPDATE run SET state='failed' WHERE id='r-live'", [])?;
                 entered.send(()).unwrap();
                 // Synthetic only: hold a writer transaction until all reads finish.
-                gate.recv_timeout(Duration::from_secs(60)).unwrap();
+                crate::test_watchdog::blocking_recv("release writer hold", &gate).unwrap();
                 tx.commit()?;
                 Ok(())
             })
             .unwrap();
         ready.await.unwrap();
-        let reads = tokio::time::timeout(Duration::from_secs(60), async {
-            let mut timings = Vec::new();
-            for _ in 0..10 {
-                let began = Instant::now();
-                let projected = read(path.clone(), None, start, seen.clone()).await.unwrap();
-                timings.push(began.elapsed());
-                let counts = &projected.snapshot.counts;
-                assert_eq!(
-                    (
-                        counts.working,
-                        counts.blocked,
-                        counts.error,
-                        counts.done,
-                        counts.idle
-                    ),
-                    (2, 1, 1, 1, 9995)
-                );
-                assert_eq!(projected.snapshot.children.len(), 5);
-                assert_eq!(projected.seen, seen);
-            }
-            timings
-        })
+        let reads = crate::test_watchdog::watchdog(
+            "src/frontend/program_status.rs: ten_thousand_threads_read_while_writer_is_occupied",
+            async {
+                let mut timings = Vec::new();
+                for _ in 0..10 {
+                    let began = Instant::now();
+                    let projected = read(path.clone(), None, start, seen.clone()).await.unwrap();
+                    timings.push(began.elapsed());
+                    let counts = &projected.snapshot.counts;
+                    assert_eq!(
+                        (
+                            counts.working,
+                            counts.blocked,
+                            counts.error,
+                            counts.done,
+                            counts.idle
+                        ),
+                        (2, 1, 1, 1, 9995)
+                    );
+                    assert_eq!(projected.snapshot.children.len(), 5);
+                    assert_eq!(projected.seen, seen);
+                }
+                timings
+            },
+        )
         .await;
         release.send(()).unwrap();
         writing.receive().await.unwrap();
