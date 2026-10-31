@@ -2,7 +2,7 @@
 
 ## Current-only contract (Issue #33, 0.2.0)
 
-Current conversation schema is v14. Migration12 accounts for bounded Revisit
+Current conversation schema is v15. Migration 15 adds derived readback indexes only. Migration12 accounts for bounded Revisit
 metadata;13 records selected-path admission;14 records Turn interruption and
 indexes drafts. The existing `tool_result_node(node_id)` index from migration2
 also covers retained result-source lookup after payload GC; #41 adds no new index
@@ -154,3 +154,29 @@ Historical admission classification remains isolated in migration13.
 terminal copy disposal; schema remains14. See pending-messages for the exact
 unknown/submitting guards and the existing GC transaction lifecycle. Cancelled
 archive references and original message/attachment storage remain unchanged.
+
+
+## Saved readback indexes (#75, schema 15)
+
+No new table, worker, queue, source-body copy or counter is introduced. Two shell
+indexes cover normalized start-instant/ID and owner-Run/start-instant/ID. They
+include terminal shells lacking tool links. The time keys use deterministic SQLite
+built-ins only, preserve RFC3339 offsets/nanoseconds/leap seconds, and put unknown
+starts last. Their SQL fragments and migration are checked by real query plans.
+A partial operation-receipt index seeks queued compaction targets by Thread;
+a partial attempt index seeks automatic-reduction observations by Turn. Both
+partial predicates guard malformed optional JSON, including during startup upgrade.
+
+On a synthetic 5,000 rows per indexed source, bundled SQLite with 4 KiB pages
+reports B-tree sizes via dbstat: shell time 118,784 B, shell owner/time 139,264 B,
+compaction receipt 221,184 B, automatic attempt 217,088 B. These are observations,
+not quotas or size guarantees. Shell rows add two index entries; queued operation
+receipts and automatic attempts add one eligible partial entry each. Startup index
+construction and relevant writes have this explicit cost even when lists are not
+used. Existing model/Run/Turn indexes serve usage periods; no redundant model index.
+
+Read-only WAL connections share the existing two-slot presentation admission.
+Normal mutations continue to use the writer. All source records/retention remain
+unchanged. Upgrade from 14 appends only the migration ledger entry and indexes;
+back up before opening with a new build. Old v0.4.0/schema14 binaries cannot open
+schema 15, and no installed owner or user database is upgraded by validation.

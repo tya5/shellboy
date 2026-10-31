@@ -326,7 +326,10 @@ impl Command {
     pub fn validate(&self) -> Result<(), ApiError> {
         match self {
             Self::Status(a) => a.validate(),
+            Self::CompactList(a) => a.validate(),
+            Self::ShellList(a) => a.validate(),
             Self::UsageGet(a) => {
+                crate::readback::Window::new(a.since.as_deref(), a.until.as_deref())?;
                 if [
                     a.thread_id.is_some(),
                     a.run_id.is_some(),

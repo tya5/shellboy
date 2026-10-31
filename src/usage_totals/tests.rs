@@ -567,3 +567,113 @@ fn first_and_last_known_start_preserve_offsets_subseconds_and_negative_epoch_ord
         "internal sort keys are not public metadata"
     );
 }
+
+#[test]
+fn requested_periods_use_saved_start_boundaries_and_keep_whole_lifetimes() {
+    crate::readback::tests::watchdog(|| {
+        let mut c = db();
+        seed(&mut c, 1, false);
+        c.execute("UPDATE model_attempt SET started_at='unknown'", [])
+            .unwrap();
+        for (id, at) in [
+            ("a0-0", "2026-10-30T00:00:00Z"),
+            ("a0-1", "2026-10-30T00:00:00.000000001Z"),
+            ("a0-2", "2026-10-30T09:00:00.000000001+09:00"),
+            ("a0-3", "2026-10-30T00:00:00.000000002Z"),
+            ("a0-4", "2026-10-30T00:00:00.000000001Z"),
+        ] {
+            c.execute(
+                "UPDATE model_attempt SET started_at=?2 WHERE id=?1",
+                params![id, at],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "UPDATE model_attempt SET state='inflight',ended_at=NULL WHERE id='a0-4'",
+            [],
+        )
+        .unwrap();
+        c.execute("UPDATE shell_execution SET started_at='unknown'", [])
+            .unwrap();
+        c.execute("UPDATE shell_execution SET started_at='2026-10-30T00:00:00.000000001Z' WHERE id IN ('s0-0','s0-2')",[]).unwrap();
+        c.execute("UPDATE shell_execution SET started_at='2026-10-30T00:00:00.000000002Z' WHERE id='s0-1'",[]).unwrap();
+        c.execute(
+            "UPDATE shell_execution SET state='running',ended_at=NULL WHERE id='s0-2'",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE run SET created_at='2026-10-30T00:00:00.000000001Z' WHERE id='r0'",
+            [],
+        )
+        .unwrap();
+        let w = crate::readback::Window::new(
+            Some("2026-10-30T00:00:00.000000001Z"),
+            Some("2026-10-30T00:00:00.000000002Z"),
+        )
+        .unwrap();
+        let scope = Scope::Thread {
+            id: "t0".into(),
+            children: false,
+        };
+        let before = c.total_changes();
+        let v = read_period_logged(&c, &scope, ReadContext::default(), None, &w).unwrap();
+        assert_eq!(v["model_attempts"]["completed"]["count"], 1);
+        assert_eq!(v["model_attempts"]["incomplete"]["count"], 1);
+        assert!(v["model_attempts"].get("failed").is_none());
+        assert_eq!(v["shell"]["count"], 1);
+        assert_eq!(v["shell"]["duration_ms"]["known_sum"], 5);
+        assert_eq!(v["active"]["shell"]["count"], 1);
+        assert_eq!(v["run"]["count"], 1);
+        assert_eq!(v["run"]["duration_ms"]["known_sum"], 9);
+        assert_eq!(v["attempt_period"]["unknown_start_count"], 0);
+        assert_eq!(c.total_changes(), before);
+        let mut trace = Trace::default();
+        inspect_period(&c, &scope, &mut trace, &w).unwrap();
+        for (sql, _) in trace.statements {
+            let mut st = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let parameter = if sql.contains("json_each(?1)") {
+                r#"["t0"]"#
+            } else {
+                "t0"
+            };
+            let p = if st.parameter_count() == 2 {
+                st.query_map(params![parameter, END], |r| r.get::<_, String>(3))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            } else {
+                st.query_map([parameter], |r| r.get::<_, String>(3))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            };
+            eprintln!("period usage: {p:?}");
+            for d in p {
+                let words = d.split_whitespace().collect::<Vec<_>>();
+                assert!(
+                    !(words.first() == Some(&"SCAN")
+                        && words.get(1).is_some_and(|s| [
+                            "a",
+                            "s",
+                            "r",
+                            "u",
+                            "t",
+                            "thread",
+                            "turn",
+                            "model_attempt",
+                            "shell_execution",
+                            "run"
+                        ]
+                        .contains(s))),
+                    "{d}"
+                );
+            }
+        }
+        let empty = crate::readback::Window::new(Some(START), Some(START)).unwrap();
+        let z = read_period_logged(&c, &scope, ReadContext::default(), None, &empty).unwrap();
+        assert_eq!(z["shell"]["count"], 0);
+        assert_eq!(z["run"]["count"], 0);
+        assert_eq!(z["model_attempts"], json!({}));
+    });
+}

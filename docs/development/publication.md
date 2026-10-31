@@ -314,3 +314,14 @@ real providers or every physical terminal. Candidate synthetic-upgrade evidence
 remains in issue #70. User installation is separately authorized after this
 publication task; none of these public-byte tests touches that installation,
 its running owner, its configuration or real data.
+
+
+### Unreleased schema 15 readback indexes (#75)
+
+The public v0.4.0 tag stays at schema 14; it is not rebuilt or replaced by this
+change. Current main adds only derived indexes via startup migration 15. For
+new-main synthetic upgrade checks, `scripts/check-release-upgrade.py` defaults to
+`--expected-new-schema 15` and verifies the unchanged old ledger prefix plus entry
+15, rather than claiming no migration. Use `--expected-new-schema 14` only to
+repeat the historical v0.4.0/schema14 qualification. This script change itself is
+not a new release build or an executed public-binary upgrade qualification.

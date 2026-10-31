@@ -1,5 +1,14 @@
 # Development status
 
+## Saved readback (#75, unreleased main)
+
+CLI now reads retained compaction observations, latest compaction in thread get,
+saved-start usage periods, and cross-conversation shell metadata with bounded
+redacted snippets/cursors. Heavy observations share the two-slot presentation
+admission on read-only WAL snapshots. Schema 15 adds four derived indexes only;
+no new tables/workers/queues. Local standard check passes; exact-source native CI
+is tracked in issue #75. Public v0.4.0 and installed binaries remain unchanged.
+
 ## #73 review fixes / D-017
 
 Map cache identity is independent of output limits and retains the pre-#73 key.

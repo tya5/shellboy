@@ -27,6 +27,8 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
         (&["status"], "status"),
         (&["usage", "get", "--thread", "t"], "usage.get"),
         (&["model", "list"], "model.list"),
+        (&["shell", "list"], "shell.list"),
+        (&["compact", "list", "--thread", "t"], "compact.list"),
         (&["thread", "list"], "thread.list"),
         (&["thread", "get", "--thread", "t"], "thread.get"),
         (&["thread", "create"], "thread.create"),
@@ -131,7 +133,7 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
             "storage.collect",
         ),
     ];
-    assert_eq!(cases.len(), 44);
+    assert_eq!(cases.len(), 46);
     for (args, name) in cases {
         let command = convert(args).await;
         assert_eq!(serde_json::to_value(command).unwrap()["command"], *name);
@@ -961,7 +963,7 @@ async fn agents_paths_remain_relative_until_target_cwd_is_known() {
 }
 
 #[tokio::test]
-async fn saved_usage_cli_scopes_are_read_only_and_exclude_period_filters() {
+async fn saved_usage_cli_scopes_are_read_only_and_mutually_exclusive() {
     for (args, kind) in [
         (vec!["usage", "get", "--turn", "u"], "turn_id"),
         (vec!["usage", "get", "--run", "r"], "run_id"),
@@ -980,7 +982,6 @@ async fn saved_usage_cli_scopes_are_read_only_and_exclude_period_filters() {
     for args in [
         vec!["usage", "get", "--thread", "t", "--run", "r"],
         vec!["usage", "get", "--turn", "u", "--include-children"],
-        vec!["usage", "get", "--thread", "t", "--since", "now"],
     ] {
         assert!(Cli::try_parse_from(std::iter::once("shellboy").chain(args)).is_err());
     }
@@ -1063,4 +1064,67 @@ async fn compact_summary_limit_overrides_are_typed_and_summary_only() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn saved_readback_options_are_typed_bounded_and_observational() {
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        let c = convert(&[
+            "shell",
+            "list",
+            "--thread",
+            "t",
+            "--since",
+            "2026-10-31T00:00:00Z",
+            "--until",
+            "2026-11-01T00:00:00Z",
+            "--command-contains",
+            "rag search",
+            "--state",
+            "exited",
+            "--exit-code",
+            "-1",
+            "--limit",
+            "200",
+        ])
+        .await;
+        assert!(c.is_read_only());
+        let Command::ShellList(a) = c else { panic!() };
+        assert_eq!(a.exit_code, Some(-1));
+        assert_eq!(a.limit, 200);
+        let c = convert(&["compact", "list", "--thread", "t", "--limit", "1"]).await;
+        assert!(c.is_read_only());
+        assert_eq!(c.name(), "compact.list");
+        let c = convert(&[
+            "usage",
+            "get",
+            "--thread",
+            "t",
+            "--since",
+            "2026-10-31T09:00:00+09:00",
+            "--until",
+            "2026-11-01T00:00:00Z",
+        ])
+        .await;
+        let Command::UsageGet(a) = c else { panic!() };
+        assert!(a.since.is_some());
+        assert!(a.until.is_some());
+        for words in [
+            vec!["shell", "list", "--limit", "201"],
+            vec!["compact", "list", "--limit", "0"],
+            vec!["usage", "get", "--thread", "t", "--since", "bad"],
+            vec!["compact", "--summary", "list"],
+        ] {
+            match Cli::try_parse_from(std::iter::once("shellboy").chain(words)) {
+                Err(_) => {}
+                Ok(c) => assert!(
+                    c.into_command_with_stdin(cwd(), &mut &b""[..])
+                        .await
+                        .is_err()
+                ),
+            }
+        }
+    })
+    .await
+    .expect("saved-readback CLI fixture watchdog");
 }

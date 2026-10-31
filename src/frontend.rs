@@ -57,7 +57,7 @@ use std::{
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, OnceLock, mpsc::SyncSender},
+    sync::{Arc, mpsc::SyncSender},
 };
 use tokio::{
     sync::{Semaphore, mpsc},
@@ -374,6 +374,8 @@ fn command_title(command: &Command) -> String {
         Command::ModelList(_) => "モデル一覧",
         Command::ThreadList(_) => "会話一覧",
         Command::ThreadGet(_) => "会話の詳細",
+        Command::CompactList(_) => "圧縮履歴の取得",
+        Command::ShellList(_) => "shell実行一覧",
         Command::UsageGet(_) => "使用量の合計",
         Command::ThreadCreate(_) => "会話の作成",
         Command::ThreadFork(_) => "会話の分岐",
@@ -3573,19 +3575,7 @@ fn tool_preview_at(
 async fn presentation_work<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, ApiError> {
-    static SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
-    let permit = SLOTS
-        .get_or_init(|| Arc::new(Semaphore::new(2)))
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Presentation workers closed"))?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        work()
-    })
-    .await
-    .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Presentation worker failed"))
+    crate::presentation::work(work).await
 }
 #[derive(Clone, Copy)]
 enum NodePosition {

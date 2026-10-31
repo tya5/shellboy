@@ -28,6 +28,8 @@ def main():
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--expected-version', default='0.4.0')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15), default=15,
+                        help='Use 14 only when rechecking the historical public v0.4.0 source')
     args = parser.parse_args()
     old, new = args.old.resolve(), args.new.resolve()
     assert subprocess.check_output([str(old), '--version'], text=True).strip() == 'shellboy 0.3.0'
@@ -206,8 +208,11 @@ def main():
         current = Owner(new, upgraded)
         owners.append(current)
         ready(new, upgraded)
-        assert sql(upgraded, 'PRAGMA user_version') == [(14,)]
-        assert sql(upgraded, 'SELECT * FROM schema_migration ORDER BY version') == before_ledger
+        assert sql(upgraded, 'PRAGMA user_version') == [(args.expected_new_schema,)]
+        after_ledger = sql(upgraded, 'SELECT * FROM schema_migration ORDER BY version')
+        expected_ledger = before_ledger + ([(15, '0015_readback_indexes')]
+                                           if args.expected_new_schema == 15 else [])
+        assert after_ledger == expected_ledger
         assert sql(upgraded, 'PRAGMA integrity_check') == [('ok',)]
         assert sql(upgraded, 'PRAGMA foreign_key_check') == []
         assert 'SYNTHETIC_ANSWER' in json.dumps(cli(new, upgraded, 'history', 'search', '--thread', seed, '--query', 'SYNTHETIC_ANSWER'))
@@ -241,7 +246,8 @@ def main():
         result = dict(old_public_version='0.3.0', new_version=args.expected_version,
                       old_binary_sha256=hashlib.sha256(old.read_bytes()).hexdigest(),
                       new_binary_sha256=hashlib.sha256(new.read_bytes()).hexdigest(),
-                      schema_before=14, schema_after=14, migration_ledger_unchanged=True,
+                      schema_before=14, schema_after=args.expected_new_schema,
+                      migration_ledger_unchanged=(after_ledger == before_ledger),
                       rag_schema=rag_schema, original_nodes_before=before_nodes,
                       old_external_sender='unknown', old_model_sender='model',
                       pending_preserved=saved_pending['delivery_status'], new_exec_sender=added,

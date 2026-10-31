@@ -16,6 +16,8 @@ impl Command {
             Self::ThreadList(_) => ("thread.list", CommandRoute::Database),
             Self::ThreadGet(_) => ("thread.get", CommandRoute::Database),
             Self::UsageGet(_) => ("usage.get", CommandRoute::Database),
+            Self::CompactList(_) => ("compact.list", CommandRoute::Database),
+            Self::ShellList(_) => ("shell.list", CommandRoute::Database),
             Self::ThreadCreate(_) => ("thread.create", CommandRoute::Database),
             Self::ThreadFork(_) => ("thread.fork", CommandRoute::Database),
             Self::ThreadDelete(_) => ("thread.delete", CommandRoute::Database),
@@ -86,6 +88,8 @@ impl Command {
             Self::Status(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::CompactList(_)
+            | Self::ShellList(_)
             | Self::UsageGet(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
@@ -126,6 +130,8 @@ impl Command {
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::CompactList(_)
+            | Self::ShellList(_)
             | Self::UsageGet(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
@@ -187,6 +193,8 @@ impl Command {
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::CompactList(_)
+            | Self::ShellList(_)
             | Self::UsageGet(_)
             | Self::ThreadDeletePreview(_)
             | Self::MessageGet(_)
@@ -222,6 +230,8 @@ impl Command {
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::CompactList(_)
+            | Self::ShellList(_)
             | Self::UsageGet(_)
             | Self::ThreadDeletePreview(_)
             | Self::MessageGet(_)

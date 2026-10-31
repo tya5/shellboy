@@ -238,3 +238,29 @@ validation rejects nonpositive characters, nonfinite/out-of-range percentages
 and limits on non-summary actions. Existing safety-boundary queue, operation
 receipts and immutable source adoption are unchanged. See the bounded-summary
 contract in [compaction](compaction.md).
+
+## Saved readback queries (#75)
+
+`compact list --thread T [--since TIME --until TIME] [--limit N]` reads saved
+compaction operations, automatic-failure observations and retained replacements,
+newest first. Unknown legacy metrics remain null and retention gaps are explicit.
+`thread get` includes its latest retained compaction observation.
+
+`usage get` accepts a half-open RFC3339 interval [since,until), selecting model
+attempts by started_at, shells by started_at and Runs by created_at. Selected
+lifetimes are counted whole, not prorated; unknown start times are excluded only
+when a period is requested. Existing usage state/unknown/overflow rules remain.
+
+`shell list` defaults to all conversations, with optional thread, period, command
+substring (literal/case-sensitive), native state and exit-code filters. Maximum
+page size is 200. A bounded candidate window permits empty filtered pages with a
+continuation cursor; follow it until absent. Cursor scope/filter and insertion
+watermark are bound, while each page reads current saved metadata. No output body
+is returned. Snippets are bounded to 512 characters, stripped of controls and
+conservatively suppressed for obvious credential shapes; this is not a guarantee
+against arbitrary obfuscated secrets. Explicit shell get/read remain separate.
+
+These operations run on read-only WAL snapshots through the existing finite
+presentation admission, not the writer's queue. No new tables, workers or queues.
+Derived indexes and their measured sizes are documented in acceptance. Query-plan
+tests must seek persistent tables; ephemeral materialized/JSON iterators may scan.

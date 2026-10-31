@@ -111,7 +111,7 @@ fn saved_ms(start: Option<&str>, end: Option<&str>) -> Option<i64> {
     let end = DateTime::parse_from_rfc3339(end?).ok()?;
     (end >= start).then(|| end.signed_duration_since(start).num_milliseconds())
 }
-fn start_key(raw: Option<&str>) -> Option<String> {
+pub(crate) fn start_key(raw: Option<&str>) -> Option<String> {
     let value = DateTime::parse_from_rfc3339(raw?).ok()?;
     // Fixed-width biased seconds also order pre-epoch and expanded-year values.
     let shifted = value.timestamp() as i128 - i64::MIN as i128;
@@ -133,7 +133,7 @@ fn serialize_start_key<S: serde::Serializer>(
     start_value(key.as_deref()).serialize(serializer)
 }
 
-fn register(db: &Connection) -> rusqlite::Result<()> {
+pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
     db.create_scalar_function(
         "usage_saved_ms",
         2,
@@ -153,6 +153,7 @@ fn register(db: &Connection) -> rusqlite::Result<()> {
     )
 }
 struct Selection {
+    window: crate::readback::Window,
     threads: Vec<String>,
     parameter: String,
     kind: &'static str,
@@ -204,6 +205,7 @@ fn selection(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Select
         id.clone()
     };
     Ok(Selection {
+        window: Default::default(),
         threads,
         parameter,
         kind,
@@ -246,9 +248,10 @@ fn model_sql(s: &Selection, wide: bool) -> String {
     select.push_str(",min(start_key),max(start_key),count(*)-count(start_key)");
     let block = if wide { ",block" } else { "" };
     format!(
-        "WITH docs AS MATERIALIZED (SELECT a.rowid/65536 block,a.state,{} standard_values,CASE WHEN a.state IN ('preparing','inflight') THEN usage_saved_ms(a.started_at,?2) ELSE usage_saved_ms(a.started_at,a.ended_at) END duration_ms,CASE WHEN a.state IN ('completed','failed','incomplete') THEN usage_saved_start(a.started_at) END start_key FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.state IN ('completed','failed','incomplete','preparing','inflight')),values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms,start_key) AS MATERIALIZED (SELECT block,state,{projected},duration_ms,start_key FROM docs) SELECT {select} FROM values_read GROUP BY state{block}",
+        "WITH docs AS MATERIALIZED (SELECT a.rowid/65536 block,a.state,{} standard_values,CASE WHEN a.state IN ('preparing','inflight') THEN usage_saved_ms(a.started_at,?2) ELSE usage_saved_ms(a.started_at,a.ended_at) END duration_ms,CASE WHEN a.state IN ('completed','failed','incomplete') THEN usage_saved_start(a.started_at) END start_key FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.state IN ('completed','failed','incomplete','preparing','inflight') AND {}),values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms,start_key) AS MATERIALIZED (SELECT block,state,{projected},duration_ms,start_key FROM docs) SELECT {select} FROM values_read GROUP BY state{block}",
         standard_values_sql(),
-        turn_source(s)
+        turn_source(s),
+        s.window.sql("a.started_at")
     )
 }
 // Rare SQL integer overflow retries exact high/low sums in bounded rowid blocks;
@@ -365,8 +368,17 @@ fn timing(
     unreachable!("wide timing aggregation returns or fails")
 }
 fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, ApiError> {
+    inspect_period(db, scope, trace, &Default::default())
+}
+fn inspect_period(
+    db: &Connection,
+    scope: &Scope,
+    trace: &mut Trace,
+    window: &crate::readback::Window,
+) -> Result<Value, ApiError> {
     register(db).map_err(error)?;
-    let s = selection(db, scope, trace)?;
+    let mut s = selection(db, scope, trace)?;
+    s.window = window.clone();
     let observed = chrono::Utc::now().to_rfc3339();
     let mut attempts = match models(db, &s, false, &observed, trace) {
         Ok(v) => v,
@@ -388,10 +400,12 @@ fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, A
             "r.thread_id IN (SELECT value FROM json_each(?1))"
         };
         let done = format!(
-            "SELECT r.rowid/65536 block,usage_saved_ms(created_at,ended_at) duration FROM run r WHERE {filter} AND state NOT IN ('live','stopping')"
+            "SELECT r.rowid/65536 block,usage_saved_ms(created_at,ended_at) duration FROM run r WHERE {filter} AND state NOT IN ('live','stopping') AND {}",
+            window.sql("r.created_at")
         );
         let active = format!(
-            "SELECT r.rowid/65536 block,usage_saved_ms(created_at,?2) duration FROM run r WHERE {filter} AND state IN ('live','stopping')"
+            "SELECT r.rowid/65536 block,usage_saved_ms(created_at,?2) duration FROM run r WHERE {filter} AND state IN ('live','stopping') AND {}",
+            window.sql("r.created_at")
         );
         (
             timing(db, &done, &s.parameter, None, trace).map_err(error)?,
@@ -400,20 +414,23 @@ fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, A
     };
     let elapsed = "CASE WHEN json_type(s.shell_json,'$.completion.elapsed_ms')='integer' AND typeof(json_extract(s.shell_json,'$.completion.elapsed_ms'))='integer' AND json_extract(s.shell_json,'$.completion.elapsed_ms')>=0 THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END";
     let shell_filter = match s.kind {
-        "turn" => "s.turn_id=?1",
+        "turn" => "s.owner_run_id=(SELECT run_id FROM turn WHERE id=?1) AND s.turn_id=?1",
         "run" => "s.owner_run_id=?1",
         _ => {
             "s.owner_run_id IN (SELECT r.id FROM json_each(?1) j JOIN run r INDEXED BY run_thread_created ON r.thread_id=j.value)"
         }
     };
-    // Schema12 has no terminal owner/Turn index. Keep the complete indexed scan
-    // rather than dropping shells lacking a tool-call link. Active owners do seek.
+    // Owner/time seeks include terminal rows even without a tool-call link.
     let shell_sql = format!(
-        "SELECT s.rowid/65536 block,{elapsed} duration FROM shell_execution s INDEXED BY shell_terminal_time WHERE s.state IN ('exited','failed','stopped') AND {shell_filter}"
+        "SELECT s.rowid/65536 block,{elapsed} duration FROM shell_execution s INDEXED BY shell_owner_started_readback WHERE s.state IN ('exited','failed','stopped') AND {shell_filter} AND {} AND {}",
+        window.indexed_sql("s.started_at"),
+        window.sql("s.started_at")
     );
     let shell = timing(db, &shell_sql, &s.parameter, None, trace).map_err(error)?;
     let active_shell_sql = format!(
-        "SELECT s.rowid/65536 block,usage_saved_ms(started_at,?2) duration FROM shell_execution s INDEXED BY shell_active_owner WHERE s.state IN ('starting','running','stopping') AND {shell_filter}"
+        "SELECT s.rowid/65536 block,usage_saved_ms(started_at,?2) duration FROM shell_execution s INDEXED BY shell_owner_started_readback WHERE s.state IN ('starting','running','stopping') AND {shell_filter} AND {} AND {}",
+        window.indexed_sql("s.started_at"),
+        window.sql("s.started_at")
     );
     let active_shell =
         timing(db, &active_shell_sql, &s.parameter, Some(&observed), trace).map_err(error)?;
@@ -441,14 +458,19 @@ fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, A
         .map(|v| v.unknown_start_count)
         .sum::<u64>();
     let own_turn_lifetime = if let Scope::Turn(id) = scope {
-        let sql = "SELECT usage_saved_ms(created_at,ended_at) FROM turn WHERE id=?1";
-        let mut st = db.prepare(sql).map_err(error)?;
+        let sql = format!(
+            "SELECT usage_saved_ms(created_at,ended_at) FROM turn WHERE id=?1 AND {}",
+            window.sql("created_at")
+        );
+        let mut st = db.prepare(&sql).map_err(error)?;
         let value = st
             .query_row([id], |r| r.get::<_, Option<i64>>(0))
-            .map_err(error)?;
+            .optional()
+            .map_err(error)?
+            .flatten();
         trace
             .statements
-            .push((sql.into(), st.get_status(StatementStatus::VmStep) as u64));
+            .push((sql, st.get_status(StatementStatus::VmStep) as u64));
         value
     } else {
         None
@@ -487,14 +509,25 @@ pub fn read(db: &Connection, scope: &Scope) -> Result<Value, ApiError> {
 mod tests;
 
 /// Timing begins on the DB lane, after request/queue admission, not on the UI.
-pub(crate) fn read_logged(
+fn logged(
     db: &Connection,
     scope: &Scope,
     context: ReadContext,
     diagnostics: Option<&crate::diagnostics::Diagnostics>,
+    window: Option<&crate::readback::Window>,
 ) -> Result<Value, ApiError> {
     let started = std::time::Instant::now();
-    let result = read(db, scope);
+    let result = match window {
+        Some(w) => {
+            if db.is_autocommit() {
+                let tx = db.unchecked_transaction().map_err(error)?;
+                inspect_period(&tx, scope, &mut Trace::default(), w)
+            } else {
+                inspect_period(db, scope, &mut Trace::default(), w)
+            }
+        }
+        None => read(db, scope),
+    };
     let elapsed = started.elapsed();
     #[cfg(test)]
     let elapsed = context.elapsed_override.unwrap_or(elapsed);
@@ -508,4 +541,24 @@ pub(crate) fn read_logged(
         diagnostics.record_usage_aggregation(context.trigger, kind, elapsed);
     }
     result
+}
+
+pub(crate) fn read_logged(
+    db: &Connection,
+    scope: &Scope,
+    context: ReadContext,
+    diagnostics: Option<&crate::diagnostics::Diagnostics>,
+) -> Result<Value, ApiError> {
+    logged(db, scope, context, diagnostics, None)
+}
+pub(crate) fn read_period_logged(
+    db: &Connection,
+    scope: &Scope,
+    context: ReadContext,
+    diagnostics: Option<&crate::diagnostics::Diagnostics>,
+    window: &crate::readback::Window,
+) -> Result<Value, ApiError> {
+    let mut value = logged(db, scope, context, diagnostics, Some(window))?;
+    value["requested_period"] = window.json();
+    Ok(value)
 }

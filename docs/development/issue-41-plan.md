@@ -334,7 +334,7 @@ measurement implementation/dispatch remains open, not hidden behind old samples.
 
 ## E standalone admission ledger (2026-10-31)
 
-This ledger covers List mode only, based on D2 plus main4a6b839. F Watch,
+This ledger covers List mode only, based on D2 plus main15037c1 (#75, schema15). F Watch,
 descendant counts/migrations and G catalogue/forms/management observation are
 excluded. A row identifies implementation and proof, not an automatic release
 or push approval. Reviewer Claude owns the E push decision after the ledger is
@@ -380,3 +380,13 @@ Sources: review comments6536761757,6536813721,6536844049,6536999852 and
 Copying a code block is UI/Frontend composition of the existing saved-original
 read and Markdown extraction path, not justification for a new Core operation,
 worker, table, parser or storage format.
+
+
+### E merge of concurrent main #75
+
+Main15037c1 adds readback schema15 independently of E. Preserve its shared finite
+presentation pool, readonly CLI paths and readback fields/fixtures. E adds no
+migration. F's previously proposed15/16 parent/view-lookup numbers now conflict:
+recheck at F admission (currently next free16/17), update its isolated migration
+files/ledger and retain the pre-upgrade backup warning. Neither old F migration
+is imported here. #71 admission and #54 tick conditions remain unchanged.

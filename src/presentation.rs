@@ -1,4 +1,25 @@
 //! Bounded, immutable display projection. Canonical history and raw bytes stay untouched.
+/// Shared finite blocking admission for display projections and read-only CLI facts.
+pub(crate) async fn work<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, crate::protocol::ApiError> {
+    use crate::protocol::{ApiError, ErrorCode};
+    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    let permit = SLOTS
+        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Presentation workers closed"))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Presentation worker failed"))
+}
+
 mod events;
 pub(crate) mod fields;
 mod markdown_links;

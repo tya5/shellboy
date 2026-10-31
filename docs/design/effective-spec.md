@@ -15,8 +15,8 @@ Shellboyへの改名では旧名の実行名・環境変数・既定保存先へ
 
 ## Current conversation storage
 
-Conversation schema14 records selected-path admission (13), Turn interruption
-and draft indexes (14); standalone RAG remains schema3. The existing migration2
+Conversation schema 15 records selected-path admission (13), Turn interruption
+and draft indexes (14), and derived readback indexes (15); standalone RAG remains schema3. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;
 no new index/migration is required. See [storage](storage.md). Historical version
 notes below describe their own releases, not the current schema number.
@@ -270,3 +270,15 @@ narrow exception to the earlier no-old-owner-field-defaults rule, not a general
 Core compatibility parser, schema fallback or request-format downgrade.
 Configuration still defaults auto_history to true; an absent response bool
 uses the requested serde default false, not an inferred owner setting.
+
+
+## Saved readback (#75)
+
+The adopted CLI contract now includes compact list, latest retained compaction in
+thread get, usage get half-open start-time periods, and cross-conversation shell
+list with bounded snippets and cursor pages. These are receipt-free saved facts,
+not provider calls or permission grants. Heavy reads use the shared finite
+presentation pool and read-only WAL snapshots. Schema 15 adds four justified
+indexes, not tables/workers/queues; see storage and CLI designs for costs, boundary
+semantics and explicit retention/unknown coverage. Unreleased main functionality
+requires a matching new owner/CLI, not merely the published v0.4.0 executable.

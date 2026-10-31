@@ -1953,3 +1953,20 @@ loop's pure visible-action delay. Latencies are recorded, never used as a speed
 assertion. #77's independent broad timeout cleanup remains on its own branch;
 its scanner is used against the E fixture files without copying its unrelated
 product/test changes or granting file-wide exceptions.
+
+## #75 saved readback placement (2026-10-31, active)
+
+The user authorizes these core interfaces as generic bounded reads of existing
+facts, not a supervisor-specific engine. Reuse finite presentation admission and
+read-only WAL connections, retaining writer ownership for mutations. Select whole
+usage lifetimes by saved starts (Run creation) in half-open periods; never invent
+unknown times or costs. Bound shell candidates and snippets, redact obvious
+credentials conservatively, and expose continuation even for empty filtered pages.
+
+Schema15 adds four justified access paths: global/owner shell start time, sparse
+compaction receipt target and sparse automatic attempt. Existing model/Run indexes
+serve periods. The measured index sizes/write cost and legacy/retention gaps are
+explicit in validation/storage docs. No new tables, workers, queues or denormalized
+source copies. Revisit only if real scoped-query workloads justify another access
+path; mocks/query plans are not real-provider or general latency guarantees.
+Source: issue75 and user-approved query-plan/read-only/watchdog/redaction constraints.

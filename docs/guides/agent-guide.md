@@ -113,6 +113,20 @@ If a connection drops and the result is uncertain, first query your saved `opera
 To inspect your own saved usage, run `shellboy usage get`; add
 `--thread THREAD_ID --include-children` for a bounded conversation-family total.
 These are saved usage/duration facts, not a bill; unknown/unrecorded is not zero.
+Use `usage get --since TIME --until TIME` for a half-open saved-start period.
+Model/shell starts and Run creation select whole lifetimes, not prorated overlap.
+Use `compact list --thread THREAD_ID --limit 20` for retained compaction facts
+and `thread get` for the latest observation. Failed/no-target records do not prove
+input changed; missing legacy metrics/collected history stay unknown.
+Use `shell list --command-contains TEXT --limit 50` across conversations, adding
+`--thread`, time, state or exit-code filters as needed. Follow next_cursor even on
+an empty filtered page until it is absent. Keep filters unchanged and restart the
+list after owner replacement. Snippets are bounded/control-stripped and obvious
+credentials are redacted, but arbitrary secrets are not guaranteed detected.
+Use the returned execution ID with shell get/read for full command/output; a list
+never starts a shell or fetches its output. New readback commands require matching
+unreleased-main owner/CLI, not just the published v0.4.0 binary.
+
 
 ## Retrieve the original text you need
 

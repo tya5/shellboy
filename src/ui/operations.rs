@@ -715,6 +715,8 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::UsageGet(UsageGetArgs {
+                        since: None,
+                        until: None,
                         thread_id: form.thread_target()?.thread_id,
                         run_id: None,
                         turn_id: None,

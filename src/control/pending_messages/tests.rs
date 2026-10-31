@@ -1027,7 +1027,7 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
                 );
                 assert_eq!(
                     db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-                    14
+                    crate::storage::SCHEMA_VERSION
                 );
                 Ok(())
             })
