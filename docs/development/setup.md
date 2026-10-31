@@ -192,8 +192,25 @@ module or Rust build is required to use the helper.
 
 ## Exact batch text replacement
 
-`python3 scripts/dev/replace.py --root .` reads a JSON array from stdin:
-`[{"file":"path/to/existing.txt","before":"old text","after":"new text"}]`.
+Normally use literal full-line blocks with a quoted heredoc (no escaping):
+
+```sh
+python3 scripts/dev/replace.py --root . --blocks <<'EOF'
+@@ replace: path/to/existing.txt
+old lines with "quotes", $variables and \backslashes
+@@ with
+new lines with "quotes", $variables and \backslashes
+@@ end
+EOF
+```
+
+Repeat blocks for the same or different files. Payload lines include their exact
+newlines; markers count only as entire exact lines. If the payload itself has a
+delimiter line, use `--blocks --marker '%%'` and replace delimiter prefixes with
+`%%`. Missing with/end or nested headers reject the whole request before writes.
+For partial-line changes (or a final line without a newline), use the JSON form:
+`[{"file":"path/to/existing.txt","before":"old text","after":"new text"}]`
+on stdin without `--blocks`. Both inputs use the same preflight/commit engine.
 Only explicit existing UTF-8 regular files inside the root are considered; no
 path is selected implicitly. Empty input is rejected; an empty array is a no-op.
 All needles must match exactly once, including overlapping matches. Multiple
