@@ -4063,3 +4063,15 @@ ordinary non-command text in the existing attachment/restart equality test;
 tracking is now restricted to leading slash drafts. The same run also hit the
 existing persisted-output observer watchdog. Neither failure is erased; the
 final standard gate runs with two test threads to bound concurrent memory use.
+
+Final local source `869fa2e` (rebased on `72f7889`):
+`CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 sh scripts/check.sh` passes layout 93,
+watchdog policy, Python 18, fmt, strict all-target Clippy, and Rust 1,875 passed /
+0 failed / 33 ignored. Both previously failing native identities pass.
+The final debug binary SHA-256 is
+`6179bc85d8146955bc5b01481ee0e8b37ec7b43e951130cd3d147a3993ac2ec3`.
+The completed-frame PTY driver passes all eight sessions/80 observations again
+on that binary (`/tmp/issue-84-pty-final`); manifest, screen text, raw bytes and
+request counts remain synthetic local evidence. No timing threshold is asserted.
+Subsequent evidence-only documentation changes do not alter the tested Rust tree.
+Native three-OS CI and integration status are tracked in issue #84.

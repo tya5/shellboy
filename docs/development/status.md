@@ -1541,6 +1541,6 @@ typed command name still dispatches with pasted arguments; pasted names remain
 literal and show a keyed warning/retyping hint. Long paste folding and explicit
 send remain unchanged. Core, protocol and persisted draft formats are unchanged.
 The minimum version omits a confirmation dialog and per-character provenance;
-reloaded/recalled source text stays conservative. Focused contract tests pass;
-exact-source standard checks, native CI and PTY observations are tracked in #84
-and acceptance, separately from unmeasured P1 latency and physical terminals.
+reloaded/recalled source text stays conservative. Local standard checks and
+eight native PTY sessions pass; native CI/integration are tracked in #84 and
+acceptance, separately from unmeasured P1 latency and physical terminals.
