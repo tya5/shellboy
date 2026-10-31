@@ -41,10 +41,16 @@ pub(crate) fn activity_pulse(level: f64) -> Color {
 
 pub(crate) const CONTENT_INSET: u16 = 1;
 pub(crate) fn conversation_content(area: ratatui::layout::Rect) -> ratatui::layout::Rect {
-    area.inner(ratatui::layout::Margin { horizontal: CONTENT_INSET, vertical: 1 })
+    area.inner(ratatui::layout::Margin {
+        horizontal: CONTENT_INSET,
+        vertical: 1,
+    })
 }
 pub(crate) fn header_content(area: ratatui::layout::Rect) -> ratatui::layout::Rect {
-    area.inner(ratatui::layout::Margin { horizontal: CONTENT_INSET, vertical: 0 })
+    area.inner(ratatui::layout::Margin {
+        horizontal: CONTENT_INSET,
+        vertical: 0,
+    })
 }
 
 /// Immutable process-local capabilities; no terminal probing or runtime I/O.

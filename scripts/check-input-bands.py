@@ -68,6 +68,10 @@ def main():
                     assert len(mark_rows) == 4, text
                     band_end = next(i for i, row in enumerate(rows) if "CODE_END" in row)
                     expected_bg = "default" if no_color else ("262626" if palette == "dark" else "dadada")
+                    header = terminal.screen.buffer[0]
+                    header_bg = "default" if no_color else ("1c1c1c" if palette == "dark" else "d0d0d0")
+                    assert header[0].data == header[cols - 1].data == " ", (name, "header inset")
+                    assert all(header[x].bg == header_bg for x in range(cols)), (name, "header background")
                     color_evidence = []
                     for y in range(mark_rows[0], band_end + 1):
                         row = terminal.screen.buffer[y]
@@ -79,7 +83,8 @@ def main():
                         else:
                             colored = [x for x, bg in enumerate(backgrounds) if bg == expected_bg]
                             assert colored, (name, y, backgrounds)
-                            assert all(bg == expected_bg for bg in backgrounds[min(colored):max(colored)+1]), (name, y, backgrounds)
+                            assert backgrounds[0] == backgrounds[-1] == "default", (name, y, "outer margin", backgrounds)
+                            assert backgrounds[1:-1] == [expected_bg] * (cols - 2), (name, y, "band extent", backgrounds)
                         color_evidence.append({"row": y, "backgrounds": sorted(set(backgrounds))})
                     assert "Claude" not in rows[mark_rows[1]], "anonymous input must not inherit a label"
                     for y in range(mark_rows[2] + 1, mark_rows[3]):

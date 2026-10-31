@@ -5354,7 +5354,9 @@ fn draw_conversation(
     view: &ThreadView,
 ) {
     let content = theme::conversation_content(area);
-    frame.buffer_mut().set_style(area, Style::default().bg(ratatui::style::Color::Reset));
+    frame
+        .buffer_mut()
+        .set_style(area, Style::default().bg(ratatui::style::Color::Reset));
     let start = scroll.min(history.styled.len());
     let end = history
         .styled
@@ -5370,18 +5372,40 @@ fn draw_conversation(
         Instant::now(),
     );
     frame.render_widget(Paragraph::new(visible).wrap(Wrap { trim: false }), content);
-    paint_conversation_edges(frame, content, &history.styled[start..end], &history.sources[start..end], view);
+    paint_conversation_edges(
+        frame,
+        content,
+        &history.styled[start..end],
+        &history.sources[start..end],
+        view,
+    );
 }
-fn paint_conversation_edges(frame: &mut Frame<'_>, area: Rect, lines: &[Line<'static>], sources: &[presentation::RowSource], view: &ThreadView) {
-    for (row, (line, source)) in lines.iter().zip(sources).enumerate().take(usize::from(area.height)) {
+fn paint_conversation_edges(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    lines: &[Line<'static>],
+    sources: &[presentation::RowSource],
+    view: &ThreadView,
+) {
+    for (row, (line, source)) in lines
+        .iter()
+        .zip(sources)
+        .enumerate()
+        .take(usize::from(area.height))
+    {
         let y = area.y + row as u16;
-        let user = view.nodes().get(source.node).filter(|node|
-            node.role == "user" && source.item.as_ref().is_some_and(|item|
-                matches!(&item.key, ItemKey::Node(id) if id == &node.node_id)));
+        let user = view.nodes().get(source.node).filter(|node| {
+            node.role == "user"
+                && source.item.as_ref().is_some_and(
+                    |item| matches!(&item.key, ItemKey::Node(id) if id == &node.node_id),
+                )
+        });
         if let Some(node) = user {
             let mut style = view.palette.user_band(node.presentation.input_source);
             style.fg = None;
-            frame.buffer_mut().set_style(Rect::new(area.x, y, area.width, 1), style);
+            frame
+                .buffer_mut()
+                .set_style(Rect::new(area.x, y, area.width, 1), style);
         } else {
             // Preserve real code/inline backgrounds, clearing only stale edge color.
             for x in area.width.saturating_sub(2)..area.width {
@@ -5389,10 +5413,17 @@ fn paint_conversation_edges(frame: &mut Frame<'_>, area: Rect, lines: &[Line<'st
                 let mut bg = line.style.bg.unwrap_or(ratatui::style::Color::Reset);
                 for span in &line.spans {
                     let end = column + span.width();
-                    if usize::from(x) < end { bg = span.style.bg.or(line.style.bg).unwrap_or(ratatui::style::Color::Reset); break; }
+                    if usize::from(x) < end {
+                        bg = span
+                            .style
+                            .bg
+                            .or(line.style.bg)
+                            .unwrap_or(ratatui::style::Color::Reset);
+                        break;
+                    }
                     column = end;
                 }
-                frame.buffer_mut()[(area.x + x,y)].set_bg(bg);
+                frame.buffer_mut()[(area.x + x, y)].set_bg(bg);
             }
         }
     }
@@ -7880,46 +7911,120 @@ mod band_extent_tests {
     use ratatui::{backend::TestBackend, style::Color};
     #[test]
     fn header_background_is_full_width_but_both_text_edges_are_blank() {
-        for width in [80,81,140] {
-            for mode in [crate::config::PaletteMode::Dark,crate::config::PaletteMode::Light] {
-                for plain in [false,true] {
-                    let mut state=UiState::new(&Config::default(),PathBuf::from("/fixture"));
-                    state.palette=theme::Palette::from_capabilities(mode,plain,true);
-                    let mut terminal=Terminal::new(TestBackend::new(width,4)).unwrap();
-                    terminal.draw(|frame|draw_header(frame,Rect::new(0,0,width,1),&state)).unwrap();
-                    let row=terminal.backend().buffer();
-                    assert_eq!(row[(0,0)].symbol()," ");
-                    assert_eq!(row[(width-1,0)].symbol()," ");
-                    for x in 0..width { assert_eq!(row[(x,0)].bg,state.palette.header().bg.unwrap_or(Color::Reset)); }
-                    assert_ne!(row[(1,0)].symbol()," ");
+        for width in [80, 81, 140] {
+            for mode in [
+                crate::config::PaletteMode::Dark,
+                crate::config::PaletteMode::Light,
+            ] {
+                for plain in [false, true] {
+                    let mut state = UiState::new(&Config::default(), PathBuf::from("/fixture"));
+                    state.palette = theme::Palette::from_capabilities(mode, plain, true);
+                    let mut terminal = Terminal::new(TestBackend::new(width, 4)).unwrap();
+                    terminal
+                        .draw(|frame| draw_header(frame, Rect::new(0, 0, width, 1), &state))
+                        .unwrap();
+                    let row = terminal.backend().buffer();
+                    assert_eq!(row[(0, 0)].symbol(), " ");
+                    assert_eq!(row[(width - 1, 0)].symbol(), " ");
+                    for x in 0..width {
+                        assert_eq!(
+                            row[(x, 0)].bg,
+                            state.palette.header().bg.unwrap_or(Color::Reset)
+                        );
+                    }
+                    assert_ne!(row[(1, 0)].symbol(), " ");
                 }
             }
         }
     }
     #[test]
     fn a_short_continuation_and_a_later_plain_row_own_their_last_cells() {
-        for width in [80,81,140] {
-            for mode in [crate::config::PaletteMode::Dark,crate::config::PaletteMode::Light] {
-                let mut view=ThreadView::new(&Config::default(),PathBuf::from("/fixture"));
-                view.palette=theme::Palette::from_capabilities(mode,false,true);
-                *view.nodes_mut_for_test()=vec![UiNode {node_id:"user".into(),role:"user".into(),..Default::default()},
-                    UiNode {node_id:"plain".into(),role:"assistant".into(),..Default::default()}];
-                let region=|id:&str|Arc::new(history_items::ItemRegion {key:ItemKey::Node(id.into()),source_node_ids:vec![id.into()],
-                    primary_node_id:id.into(),execution_id:None,expandable:true,default_open:true,outcome:String::new()});
-                let mut history=HistoryLayout {text:String::new(),styled:vec![Line::raw("first"),Line::raw("short continuation")],lines:2,targets:vec![],
-                    sources:vec![presentation::RowSource {node:0,covered_end:1,offset:0,item:Some(region("user"))},
-                        presentation::RowSource {node:0,covered_end:1,offset:5,item:Some(region("user"))}]};
-                let mut terminal=Terminal::new(TestBackend::new(width,6)).unwrap();
-                terminal.draw(|frame|draw_conversation(frame,Rect::new(0,0,width,6),&history,0,&view)).unwrap();
-                let bg=view.palette.user_band(view.nodes()[0].presentation.input_source).bg.unwrap();
-                for y in [1,2] {
-                    for x in 1..width-1 { assert_eq!(terminal.backend().buffer()[(x,y)].bg,bg); }
-                    assert_eq!(terminal.backend().buffer()[(0,y)].bg,Color::Reset);
-                    assert_eq!(terminal.backend().buffer()[(width-1,y)].bg,Color::Reset);
+        for width in [80, 81, 140] {
+            for mode in [
+                crate::config::PaletteMode::Dark,
+                crate::config::PaletteMode::Light,
+            ] {
+                let mut view = ThreadView::new(&Config::default(), PathBuf::from("/fixture"));
+                view.palette = theme::Palette::from_capabilities(mode, false, true);
+                *view.nodes_mut_for_test() = vec![
+                    UiNode {
+                        node_id: "user".into(),
+                        role: "user".into(),
+                        ..Default::default()
+                    },
+                    UiNode {
+                        node_id: "plain".into(),
+                        role: "assistant".into(),
+                        ..Default::default()
+                    },
+                ];
+                let region = |id: &str| {
+                    Arc::new(history_items::ItemRegion {
+                        key: ItemKey::Node(id.into()),
+                        source_node_ids: vec![id.into()],
+                        primary_node_id: id.into(),
+                        execution_id: None,
+                        expandable: true,
+                        default_open: true,
+                        outcome: String::new(),
+                    })
+                };
+                let mut history = HistoryLayout {
+                    text: String::new(),
+                    styled: vec![Line::raw("first"), Line::raw("short continuation")],
+                    lines: 2,
+                    targets: vec![],
+                    sources: vec![
+                        presentation::RowSource {
+                            node: 0,
+                            covered_end: 1,
+                            offset: 0,
+                            item: Some(region("user")),
+                        },
+                        presentation::RowSource {
+                            node: 0,
+                            covered_end: 1,
+                            offset: 5,
+                            item: Some(region("user")),
+                        },
+                    ],
+                };
+                let mut terminal = Terminal::new(TestBackend::new(width, 6)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        draw_conversation(frame, Rect::new(0, 0, width, 6), &history, 0, &view)
+                    })
+                    .unwrap();
+                let bg = view
+                    .palette
+                    .user_band(view.nodes()[0].presentation.input_source)
+                    .bg
+                    .unwrap();
+                for y in [1, 2] {
+                    for x in 1..width - 1 {
+                        assert_eq!(terminal.backend().buffer()[(x, y)].bg, bg);
+                    }
+                    assert_eq!(terminal.backend().buffer()[(0, y)].bg, Color::Reset);
+                    assert_eq!(terminal.backend().buffer()[(width - 1, y)].bg, Color::Reset);
                 }
-                history.styled=vec![Line::raw("plain")];history.sources=vec![presentation::RowSource {node:1,covered_end:2,offset:0,item:Some(region("plain"))}];history.lines=1;
-                terminal.draw(|frame|draw_conversation(frame,Rect::new(0,0,width,6),&history,0,&view)).unwrap();
-                for y in 1..5 { for x in [width-3,width-2,width-1] { assert_eq!(terminal.backend().buffer()[(x,y)].bg,Color::Reset); } }
+                history.styled = vec![Line::raw("plain")];
+                history.sources = vec![presentation::RowSource {
+                    node: 1,
+                    covered_end: 2,
+                    offset: 0,
+                    item: Some(region("plain")),
+                }];
+                history.lines = 1;
+                terminal
+                    .draw(|frame| {
+                        draw_conversation(frame, Rect::new(0, 0, width, 6), &history, 0, &view)
+                    })
+                    .unwrap();
+                for y in 1..5 {
+                    for x in [width - 3, width - 2, width - 1] {
+                        assert_eq!(terminal.backend().buffer()[(x, y)].bg, Color::Reset);
+                    }
+                }
             }
         }
     }
