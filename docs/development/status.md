@@ -25,8 +25,12 @@ layout95/watchdog/fmt/strict all-target Clippy (v30). The G-only65-commit
 gitleaks scan throughdeeb2b0 finds0 leaks. Reconciled G1–G11 and per-route
 evidence in the current plan; older open paragraphs remain historical.
 Latest main1ac2277 (#106 driver retirement/accepted stop) merges cleanly
-at8f0ad72. Its announced sequential standard v31 is running; the previous run
-is terminal. Do not transfer earlier success to the new control source.
+at8f0ad72. Its announced sequential standard v31 exits0:2328 passed/0 failed/
+35 ignored (library1352, integration957, termination12, crash7), Python71,
+layout95/watchdog/fmt/strict all-target Clippy. Only development/validation docs
+changed after that code freeze; src/scripts/Cargo/workflow diff against8f0ad72
+is empty. The independent read-only completion audit found no retained-G product
+blocker; it does not replace native checks. G1–G11 local evidence is reconciled.
 G review/publication, exact-source3OS and main admission remain open. Offloaded #107–#109 are not G completion gates.
 The actual adapter/type handoff is #107 comment6549946520, linked from108/109;
 it explicitly distinguishes missing batch APIs and test-only helpers.

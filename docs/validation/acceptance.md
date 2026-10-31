@@ -12,8 +12,16 @@ only reconciles the ledger. G-only65-commit gitleaks8.30.1 scan reports0 leaks.
 
 New main1ac2277/#106 changed control driver retirement and stop ownership;
 merge8f0ad72 is conflict-free. Its separate announced sequential standard v31
-is running; no success is inferred yet. Exact-source3OS, G publication/reviewer
-approval and main admission remain unperformed.
+exits0: Python71/layout95/watchdog/format/strict all-target Clippy, Rust2328
+passed/0 failed/35 ignored (library1352/15, integration957/17, termination12/1,
+crash7/2; main/three examples0). Evidence: private
+issue-41-g-main106-standard-v31.log. All product/test/build/workflow files remain
+identical to8f0ad72; subsequent commits only update non-embedded development and
+validation docs. Native run termination is confirmed; no duplicate run is live.
+An independent read-only audit found no additional retained-G blocker, with the
+same limits on P3 fixture counts/native empty-DB smoke/physical Windows evidence.
+Exact-source3OS, G publication/reviewer approval and main admission remain
+unperformed; no release/install/user-data authority is inferred.
 
 ## G production5ba1cdd and external IPC7984c0c qualification
 
@@ -73,8 +81,8 @@ assertions are unchanged. No product behavior was modified for this harness.
 Existing cb1d480 visual/effect/Enter form matrix and a8bbcf0 P6 evidence remain
 separately source-qualified; current original reader/cache/dispatch code is
 unchanged. Merge7071932 adds #105 build debug profile only; integrated standard6c8eeca
-now passes as recorded above. Later #106 source8f0ad72 and exact-source3OS/main
-review remain separately pending.
+now passes as recorded above. Later #106 source8f0ad72 also passes its separate v31 standard as above;
+exact-source3OS/main review remain pending.
 
 
 ## G native P6 checkpointa8bbcf0: count gates pass
