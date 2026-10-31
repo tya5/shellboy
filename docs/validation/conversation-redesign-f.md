@@ -354,3 +354,25 @@ macOS2,037/0/35, Windows1,905/0/26. This is distinct from the unadopted strict-
 clock branch's tests. F1–F16 feature/functional/count evidence is ready for review;
 F main still requires reviewer approval and reconciliation with then-current main
 (including separately integrated fixes such as #95/#96). G remains later.
+
+
+## F review source CI and latest-main local qualification
+
+Published review source `f5384300ec5ed6f76e6d2f89a4bed31993ff30b0`
+passed ordinary CI [41200362560](https://github.com/tya5/shellboy/actions/runs/41200362560)
+on Linux (2,038 passed/0 failed/34 ignored), macOS (2,037/0/35),
+and Windows (1,905/0/26). Downloaded native harness artifacts identify that
+exact source, report no failures, and contain actual success lines for mode
+memory, the three cancellation guards and the scoped-Watch CLI regression.
+The renamed optional lineage latency observation is ignored, not silently run
+or counted as passing a latency threshold. No measure job was requested.
+
+The separate local preparation source
+`dcfe4ba365018f1fc3888187d66b0a03918388ab` merges main `f1e2a16`.
+Its native macOS standard check completed: 2,039 passed/0 failed/35 ignored,
+Python66, layout/watchdog checks, formatting and strict all-target Clippy.
+The full log contains actual mode-memory, cancellation and scoped-Watch success
+lines. This is local evidence only; no exact-source remote CI or main admission
+is claimed for dcfe4ba. Review6543263300 remains pending. Reconcile any later
+main changes, especially the separately reviewed #95 read-admission correction,
+before final admission. G remains after F main; archived G work is untouched.

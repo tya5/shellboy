@@ -2527,3 +2527,15 @@ files match exactly. F's schema remains17 over main16. Standard and exact-source
 ordinary3OS gates follow this source before any main push. No new performance
 measurement/strict-bin analysis is scheduled. The strict-clock prototype and
 optional measurement profile remain outside this candidate; G remains later.
+
+
+## F review qualification update
+
+Published F review source f538430 passed all three native CI platforms in
+41200362560 (Linux2038/0/34, macOS2037/0/35, Windows1905/0/26), with exact
+source/artifact/targeted success verification. Local preparation dcfe4ba,
+including mainf1e2a16, passed standard2039/0/35 and Python66. See the
+[F source-qualified record](../validation/conversation-redesign-f.md#f-review-source-ci-and-latest-main-local-qualification).
+F main approval is still pending; dcfe4ba has no remote exact-source gate yet.
+No further performance repeat is needed under6543044236. Retain #95's reviewed
+admission fix when integrated; G starts after F main. No main/install/data change.
