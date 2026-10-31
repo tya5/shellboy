@@ -14,6 +14,7 @@ pub(super) enum Route {
     Shell,
     Compact,
 }
+#[derive(Clone, Debug)]
 pub(super) struct CapturedScope {
     pub command: Command,
     pub original: Arc<Value>,
@@ -90,7 +91,9 @@ pub(super) fn capture_list_scope(
             .get(key)
             .and_then(Value::as_str)
             .ok_or_else(|| bad("Captured row has no canonical identity"))?;
-        status::validate_ids(&[id.into()])?;
+        if id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
+            return Err(bad("Captured row identity exceeds scalar limit"));
+        }
         ids.push(id.into());
         if route == Route::Status {
             let kind = row["kind"]
@@ -106,6 +109,12 @@ pub(super) fn capture_list_scope(
             if let Some(operations) = row["operation_ids"].as_array() {
                 for operation in operations {
                     if let Some(source) = operation.as_str() {
+                        if source.is_empty()
+                            || source.len() > 1024
+                            || source.chars().any(char::is_control)
+                        {
+                            return Err(bad("Compact source identity exceeds scalar limit"));
+                        }
                         compact.push(retained::RetainedSource {
                             event_id: id.into(),
                             source_id: source.into(),
@@ -115,6 +124,10 @@ pub(super) fn capture_list_scope(
                 }
             }
             if let Some(source) = row["attempt_id"].as_str() {
+                if source.is_empty() || source.len() > 1024 || source.chars().any(char::is_control)
+                {
+                    return Err(bad("Compact attempt identity exceeds scalar limit"));
+                }
                 compact.push(retained::RetainedSource {
                     event_id: id.into(),
                     source_id: source.into(),
@@ -181,7 +194,10 @@ pub(super) fn read_list_facts_tx(
     scope: CapturedScope,
 ) -> Result<RawLists, StorageError> {
     let mut budget = status::TextBudget {
-        used: scope.text_bytes,
+        used: scope
+            .text_bytes
+            .saturating_add(64 * 1024)
+            .min(status::TEXT_BYTES),
     };
     let mut membership = None;
     let mut status_membership = None;
@@ -235,6 +251,7 @@ pub(super) fn read_list_facts_tx(
         }
         Route::Thread => {
             let mut allowed = Vec::new();
+            let mut preflight_found = BTreeSet::new();
             let mut unconfirmed = Vec::new();
             let mut st = db.prepare(THREAD_PREFLIGHT)?;
             let mut rows = st.query([serde_json::to_string(&scope.ids).expect("bounded IDs")])?;
@@ -243,6 +260,7 @@ pub(super) fn read_list_facts_tx(
                     .get_ref(0)?
                     .as_str()
                     .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                preflight_found.insert(id.to_owned());
                 let bytes = row.get::<_, i64>(1)?.max(0) as usize;
                 if bytes > 64 * 1024 || !budget.take(bytes.saturating_add(8192)) {
                     unconfirmed.push(id.into());
@@ -250,6 +268,13 @@ pub(super) fn read_list_facts_tx(
                     allowed.push(id.to_owned());
                 }
             }
+            unconfirmed.extend(
+                scope
+                    .ids
+                    .iter()
+                    .filter(|id| !preflight_found.contains(id.as_str()))
+                    .cloned(),
+            );
             let mut chunks = Vec::new();
             for chunk in allowed.chunks(128) {
                 let summaries = crate::control::db::thread_summary::read_ids_tx(db, chunk)?;
@@ -299,7 +324,7 @@ pub(super) fn prepare_list_facts(raw: RawLists) -> Result<Value, ApiError> {
     let membership = raw.membership.map(retained::prepare).transpose()?;
     let status_membership=raw.status_membership.map(|m|json!({"potential_ids":m.candidates.into_iter().map(|k|json!({"kind":k.kind.name(),"id":k.id})).collect::<Vec<_>>(),"unconfirmed":m.unconfirmed,"limited":m.limited,"sql_statements":m.statements,"prefix_rows":m.prefix_rows}));
     Ok(
-        json!({"selection_scope":{"query":raw.scope.command,"retained_ids":raw.scope.ids,"notification_threads":raw.scope.threads},"retained":raw.scope.original.as_ref(),"current":current,"membership":membership,"status_membership":status_membership,"metadata_text_bytes":raw.text_bytes,"notice":"Captured filters/page/window/cursor and selection remain fixed; missing or unconfirmed source is not a deletion or an empty global result"}),
+        json!({"selection_scope":{"query":raw.scope.command,"retained_ids":raw.scope.ids,"notification_threads":raw.scope.threads},"captured_next_cursor":raw.scope.original.get("next_cursor"),"current":current,"membership":membership,"status_membership":status_membership,"metadata_text_bytes":raw.text_bytes,"notice":"Captured filters/page/window/cursor and selection remain fixed; missing or unconfirmed source is not a deletion or an empty global result"}),
     )
 }
 
@@ -308,12 +333,9 @@ mod tests {
     use super::*;
     #[test]
     fn capture_preserves_exact_cursor_filters_and_rejects_unknown_shapes() {
-        let args = ShellListArgs {
-            thread_id: Some("scope".into()),
-            cursor: Some("opaque".into()),
-            limit: 17,
-            ..Default::default()
-        };
+        let args: ShellListArgs =
+            serde_json::from_value(json!({"thread_id":"scope","cursor":"opaque","limit":17}))
+                .unwrap();
         let command = Command::ShellList(args);
         let value = Arc::new(json!({"items":[{"execution_id":"s"}],"next_cursor":"next"}));
         let scope = capture_list_scope(&command, value.clone(), &[]).unwrap();
@@ -324,7 +346,7 @@ mod tests {
     }
     #[test]
     fn capture_checks_text_and_structure_before_cloning() {
-        let command = Command::ThreadList(ThreadListArgs::default());
+        let command = Command::ThreadList(serde_json::from_value(json!({})).unwrap());
         let value =
             Arc::new(json!({"items":[{"thread_id":"one","title":"x".repeat(status::TEXT_BYTES)}]}));
         assert!(capture_list_scope(&command, value, &[]).is_err());
