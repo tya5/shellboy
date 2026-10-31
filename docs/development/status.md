@@ -2183,3 +2183,34 @@ passes on native macOS; combined standard checks and native CI are pending.
 E exact-candidate CI41181650657 is running; neither E nor F is admitted by
 this preparation record. F publication follows E admission; F main still needs
 review, and G remains separate. No installed binary or user data is changed.
+
+
+## F latest-main integration qualification (source742d523)
+
+The F-only candidate merges E d0a92bf/main a0f7022. Native macOS standard
+`sh scripts/check.sh` succeeds:2,016 passed/0 failed/35 ignored (lib1069/0/15,
+integration928/0/17, termination12/0/1, forced7/0/2), Python18, layout/watchdog,
+format and strict all-target Clippy. Gitleaks d0a92bf..742d523 scans15 commits
+without a leak. The new parent migration17 passes rollback/reopen/fresh-schema
+checks, retaining main schema16 observation indexes and canonical facts.
+
+An explicit ignored P4 native measurement runs one actual lineage test at this
+source:30 retained samples after10 warmups for each depth. Depth1: p50 3.415ms,
+p95 3.607ms, max3.678ms; depth8: p50 3.822ms, p95 4.078ms, max4.126ms. The
+fixture returns256 descendants and checks the cap/depth truncation policy.
+Both satisfy the50ms target on this host; they are not Windows/Linux timings
+or full selected-view/Watch/count P3 costs. The million-sibling stress remains
+ignored/unexecuted, not a successful observation.
+
+The combined standard includes actual separate-CLI scoped Watch lifecycle,
+stale-retry guard, selected/List shared-snapshot and paired descendant tests,
+current #84 composer contracts and all main #74 observations. The main #83
+row vocabulary is byte-identical; F adds its own scoped completion hints to
+main's composer without replacing paste provenance.
+
+Open admission evidence: F native terminal80/wide/palette/fallback review,
+retained-memory accounting, full consumer cancellation/contention and P3 costs,
+formal F P2/P5 CI windows and ordinary3OS CI. This local success is not main
+admission and does not qualify G. Publication/CI may follow E admission under
+6540583854; F main still requires reviewer approval. No release, installed
+binary, paid endpoint or user data was touched.
