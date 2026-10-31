@@ -26,7 +26,10 @@ fn has_usage(target: &InspectionTarget) -> bool {
 fn global_saved(target: &InspectionTarget) -> bool {
     matches!(
         target,
-        InspectionTarget::Storage | InspectionTarget::Deletion(_) | InspectionTarget::Index(_)
+        InspectionTarget::Storage
+            | InspectionTarget::Deletion(_)
+            | InspectionTarget::Index(_)
+            | InspectionTarget::HistorySources(_)
     )
 }
 

@@ -38,7 +38,9 @@ pub mod inspection;
 mod key_hints;
 mod lifecycle;
 mod management;
-pub use inspection::{InspectionFieldAnchor, InspectionPart, InspectionSnapshot, InspectionTarget};
+pub use inspection::{
+    HistorySourceScope, InspectionFieldAnchor, InspectionPart, InspectionSnapshot, InspectionTarget,
+};
 mod message_queue;
 mod models;
 pub use message_queue::{PendingMessage, PendingMessages, SubmittedMessage};
@@ -955,6 +957,10 @@ pub enum UiUpdate {
         title: String,
         fields: Vec<PresentationField>,
         omitted: bool,
+    },
+    RetainedInspectionStarted {
+        request_id: u64,
+        target: InspectionTarget,
     },
     InspectionStarted {
         target: InspectionTarget,
@@ -2709,6 +2715,11 @@ impl UiState {
             } => {
                 self.management
                     .open_structured(title, request_id, fields, omitted, work_status);
+            }
+            UiUpdate::RetainedInspectionStarted { request_id, target } => {
+                self.dirty |= self
+                    .management
+                    .start_retained_inspection(request_id, target);
             }
             UiUpdate::InspectionStarted { target, title } => {
                 self.management.start_inspection(target, title);

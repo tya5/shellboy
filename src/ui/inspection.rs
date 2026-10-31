@@ -2,6 +2,7 @@
 use super::*;
 #[derive(Clone, Debug, PartialEq)]
 pub enum InspectionTarget {
+    HistorySources(HistorySourceScope),
     Operation(String),
     Usage(crate::protocol::UsageGetArgs),
     Thread(String),
@@ -17,6 +18,18 @@ pub enum InspectionTarget {
     Storage,
     Deletion(ThreadDeleteArgs),
     Index(IndexArgs),
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistorySourceScope {
+    pub nodes: Vec<(String, Option<i64>)>,
+    pub thread_id: Option<String>,
+    pub captured_at: String,
+    pub scope_limited: bool,
+}
+impl InspectionTarget {
+    pub(crate) fn retains_history(&self) -> bool {
+        matches!(self, Self::HistorySources(_))
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InspectionPart {
@@ -55,6 +68,8 @@ pub struct InspectionSnapshot {
     pub omitted: bool,
 }
 pub(super) struct State {
+    pub retained_fields: Option<Vec<PresentationField>>,
+    pub retained_omitted: bool,
     pub target: InspectionTarget,
     pub metadata_sequence: u64,
     pub usage_sequence: Option<u64>,
@@ -74,6 +89,8 @@ pub(super) struct State {
 impl State {
     pub fn new(target: InspectionTarget) -> Self {
         Self {
+            retained_fields: None,
+            retained_omitted: false,
             target,
             metadata_sequence: 0,
             usage_sequence: None,
@@ -97,6 +114,12 @@ impl State {
         } else {
             "保存状態を取得中".into()
         };
+        if let InspectionTarget::HistorySources(scope) = &self.target {
+            text.push_str(&format!(
+                " · 取得時の結果 {} を保持 · 再取得:aから同じ履歴照会",
+                scope.captured_at
+            ));
+        }
         if let Some(at) = &self.usage_observed_at {
             text.push_str(&format!(" · 使用量取得 {at}"));
         }
@@ -1357,5 +1380,256 @@ mod tests {
                 .text,
             "PAID OPERATION TEXT"
         );
+    }
+    #[test]
+    fn retained_history_keeps_original_fields_and_exact_selection_while_current_facts_change() {
+        let (mut ui, context) = setup();
+        ui.management.open_structured(
+            "History".into(),
+            40,
+            vec![PresentationField {
+                key: "/text".into(),
+                label: "本文".into(),
+                value: "retained original".into(),
+                ..Default::default()
+            }],
+            false,
+            false,
+        );
+        let target = InspectionTarget::HistorySources(HistorySourceScope {
+            nodes: vec![("n".into(), Some(7))],
+            thread_id: None,
+            captured_at: "obtained-at".into(),
+            scope_limited: false,
+        });
+        assert!(!ui.management.start_retained_inspection(39, target.clone()));
+        assert!(ui.management.start_retained_inspection(40, target.clone()));
+        ui.management.inspection.as_mut().unwrap().detail_anchor = Some(InspectionFieldAnchor {
+            pointer: "/text".into(),
+            entity: None,
+            relative_pointer: "/text".into(),
+            stable: true,
+        });
+        ui.management.structured_mut().unwrap().detail = Some(management::ManagementPage {
+            source_request_id: 40,
+            observed_at: "obtained-at".into(),
+            stale: None,
+            pointer: "/text".into(),
+            text: "retained original full page".into(),
+            next_cursor: Some("retained cursor".into()),
+        });
+
+        for (sequence, available) in [(10, "true"), (11, "false")] {
+            let snap = InspectionSnapshot {
+                target: target.clone(),
+                metadata_sequence: sequence,
+                usage_sequence: None,
+                metadata_observed_at: format!("current-{sequence}"),
+                usage_observed_at: None,
+                fields: vec![PresentationField {
+                    key: "/current_source/nodes/0/body_available".into(),
+                    label: "現在 · 原文".into(),
+                    value: available.into(),
+                    ..Default::default()
+                }],
+                anchors: vec![InspectionFieldAnchor {
+                    pointer: "/current_source/nodes/0/body_available".into(),
+                    entity: Some(("node".into(), "n".into())),
+                    relative_pointer: "/body_available".into(),
+                    stable: true,
+                }],
+                omitted: false,
+            };
+            assert!(ui.management.patch_inspection(sequence + 40, snap));
+            let state = ui.management.structured().unwrap();
+            assert_eq!(state.fields[state.selected].key, "/text");
+            let page = state.detail.as_ref().unwrap();
+            assert_eq!(page.source_request_id, sequence + 40);
+            assert_eq!(page.text, "retained original full page");
+            assert_eq!(page.observed_at, "obtained-at");
+            assert_eq!(page.next_cursor.as_deref(), Some("retained cursor"));
+            assert!(page.stale.is_none() && state.pending_pointer.is_none());
+
+            assert_eq!(
+                state
+                    .fields
+                    .iter()
+                    .find(|f| f.key == "/text")
+                    .unwrap()
+                    .value,
+                "retained original"
+            );
+            assert_eq!(
+                state
+                    .fields
+                    .iter()
+                    .find(|f| f.key == "/current_source/nodes/0/body_available")
+                    .unwrap()
+                    .value,
+                available
+            );
+            assert!(
+                ui.management
+                    .inspection
+                    .as_ref()
+                    .unwrap()
+                    .label()
+                    .contains("obtained-at")
+            );
+        }
+        let _ = context;
+    }
+    #[test]
+    fn retained_original_pending_next_and_first_page_survive_metadata_request_fence() {
+        for (key, cursor, replacement) in [
+            ('n', Some("next-page-cursor"), "next original page"),
+            ('p', None, "first original page"),
+        ] {
+            let (mut ui, _) = setup();
+            ui.management.open_structured(
+                "History".into(),
+                40,
+                vec![PresentationField {
+                    key: "/text".into(),
+                    label: "本文".into(),
+                    value: "original preview".into(),
+                    ..Default::default()
+                }],
+                false,
+                false,
+            );
+            let target = InspectionTarget::HistorySources(HistorySourceScope {
+                nodes: vec![("n".into(), Some(7))],
+                thread_id: None,
+                captured_at: "obtained-at".into(),
+                scope_limited: false,
+            });
+            assert!(ui.management.start_retained_inspection(40, target.clone()));
+            let inspection = ui.management.inspection.as_mut().unwrap();
+            inspection.detail_anchor = Some(InspectionFieldAnchor {
+                pointer: "/text".into(),
+                entity: None,
+                relative_pointer: "/text".into(),
+                stable: true,
+            });
+            inspection.detail_pointer = Some("/text".into());
+            ui.management.structured_mut().unwrap().detail = Some(management::ManagementPage {
+                source_request_id: 40,
+                observed_at: "obtained-at".into(),
+                stale: None,
+                pointer: "/text".into(),
+                text: "visible original page".into(),
+                next_cursor: Some("next-page-cursor".into()),
+            });
+            let management::Outcome::Actions(actions) = ui.management.key(
+                KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE),
+                10,
+                None,
+            ) else {
+                panic!("original page key must request a page");
+            };
+            let first = actions
+                .iter()
+                .find_map(detail)
+                .expect("initial page intent");
+            assert_eq!(first, (40, 1, "/text".into(), cursor.map(str::to_owned)));
+            assert_eq!(
+                ui.management
+                    .structured()
+                    .unwrap()
+                    .pending_cursor
+                    .as_deref(),
+                cursor
+            );
+            let current = InspectionSnapshot {
+                target,
+                metadata_sequence: 10,
+                usage_sequence: None,
+                metadata_observed_at: "current-at".into(),
+                usage_observed_at: None,
+                fields: vec![PresentationField {
+                    key: "/current_source/nodes/0/body_available".into(),
+                    label: "現在の原文".into(),
+                    value: "false".into(),
+                    ..Default::default()
+                }],
+                anchors: vec![InspectionFieldAnchor {
+                    pointer: "/current_source/nodes/0/body_available".into(),
+                    entity: Some(("node".into(), "n".into())),
+                    relative_pointer: "/body_available".into(),
+                    stable: true,
+                }],
+                omitted: false,
+            };
+            assert!(ui.management.patch_inspection(41, current));
+            let reissued = ui
+                .management
+                .take_inspection_detail()
+                .expect("pending original page must be reissued");
+            assert_eq!(
+                detail(&reissued),
+                Some((41, 2, "/text".into(), cursor.map(str::to_owned)))
+            );
+            {
+                let state = ui.management.structured().unwrap();
+                let page = state.detail.as_ref().unwrap();
+                assert_eq!(page.text, "visible original page");
+                assert_eq!(page.source_request_id, 41);
+                assert_eq!(page.observed_at, "obtained-at");
+                assert_eq!(page.next_cursor.as_deref(), Some("next-page-cursor"));
+                assert!(page.stale.is_none());
+                assert_eq!(state.pending_pointer.as_deref(), Some("/text"));
+                assert_eq!(state.pending_cursor.as_deref(), cursor);
+                assert!(
+                    !state.preserve_detail_scroll,
+                    "retain the requested page's scroll intent"
+                );
+            }
+            ui.management
+                .accept_detail(40, 1, "/text".into(), "late old page".into(), None);
+            assert_eq!(
+                ui.management
+                    .structured()
+                    .unwrap()
+                    .detail
+                    .as_ref()
+                    .unwrap()
+                    .text,
+                "visible original page"
+            );
+            assert_eq!(
+                ui.management
+                    .structured()
+                    .unwrap()
+                    .pending_pointer
+                    .as_deref(),
+                Some("/text")
+            );
+            ui.management.accept_detail(
+                41,
+                2,
+                "/text".into(),
+                replacement.into(),
+                Some("following-page".into()),
+            );
+            let state = ui.management.structured().unwrap();
+            let page = state.detail.as_ref().unwrap();
+            assert_eq!(page.text, replacement);
+            assert_eq!(page.observed_at, "obtained-at");
+            assert_eq!(page.next_cursor.as_deref(), Some("following-page"));
+            assert!(state.pending_pointer.is_none() && state.pending_cursor.is_none());
+            ui.management
+                .accept_detail(40, 1, "/text".into(), "late old page".into(), None);
+            assert_eq!(
+                ui.management
+                    .structured()
+                    .unwrap()
+                    .detail
+                    .as_ref()
+                    .unwrap()
+                    .text,
+                replacement
+            );
+        }
     }
 }

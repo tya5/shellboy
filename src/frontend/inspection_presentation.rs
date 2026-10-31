@@ -53,6 +53,9 @@ pub(super) fn prepare(ticket: &Presentation, budget: usize) -> Result<Prepared, 
         .pointer("/management/coverage_window/next_cursor")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    if ticket.target.retains_history() {
+        value = serde_json::json!({"current_source":value});
+    }
     let mut source = crate::presentation::safe_detail_value(value);
     // A private JSON-encoded cursor is an opaque navigation token, not a field
     // tree to expand or rewrite. Its list row never displays the token.
@@ -68,6 +71,16 @@ pub(super) fn prepare(ticket: &Presentation, budget: usize) -> Result<Prepared, 
     let mut fields = std::mem::take(&mut report.fields);
     if matches!(ticket.target, crate::ui::InspectionTarget::Index(_)) {
         fields = prioritize_index(&source, fields, &mut report.omitted);
+    }
+    if ticket.target.retains_history() {
+        report.omitted |= fields.len() > 128;
+        fields.truncate(128);
+        for field in &mut fields {
+            if field.key.is_empty() {
+                field.key = "/current_source".into();
+            }
+            field.label = format!("現在 · {}", field.label);
+        }
     }
     // report.detail may be omitted by a tiny budget. Anchors still derive from
     // exactly the current values, before the bounded retention decision.

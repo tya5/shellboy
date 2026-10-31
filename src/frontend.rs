@@ -14,6 +14,7 @@ mod history_reader;
 mod input_history;
 mod inspection_attachments;
 mod inspection_deletion;
+mod inspection_history;
 mod inspection_index;
 mod inspection_lifecycle;
 mod inspection_operation;
@@ -233,6 +234,12 @@ async fn management_request_trigger(
     }
     if inspection_saved::supports(&command) {
         return match inspection_saved::request(control, command, cancel).await {
+            Ok(value) => Ok(value),
+            Err(error) => Ok(serde_json::json!({"error":error})),
+        };
+    }
+    if matches!(command, Command::HistoryGet(_) | Command::HistoryList(_)) {
+        return match inspection_history::request(control, command, cancel).await {
             Ok(value) => Ok(value),
             Err(error) => Ok(serde_json::json!({"error":error})),
         };
@@ -495,6 +502,7 @@ enum BackgroundResult {
         result: Result<(CopyOutcome, usize), ApiError>,
     },
     Command {
+        retained: Option<InspectionTarget>,
         work_status: bool,
         context: Option<ManagementContext>,
         generation: u64,
@@ -1670,7 +1678,7 @@ async fn run_with_delivery(
                                 update(&outcomes, owner.update(format!("{title} · {}", if success {"処理結果を受信"} else {"失敗 · 詳細を確認してください"}))).await;
                             }
                             let result = prepare_management(response, control.store.config.cache.body_bytes).await;
-                            let _ = sender.send(BackgroundResult::Command { work_status: false, context, generation, title, result }).await;
+                            let _ = sender.send(BackgroundResult::Command { retained:None, work_status: false, context, generation, title, result }).await;
                         });
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
@@ -1732,7 +1740,9 @@ async fn run_with_delivery(
                         let outcomes = updates.worker();
                         let observe = management.observe(&command);
                         spawn_work(&mut workers, permit, async move {
+                            let retained_command=inspection_history::capture_command(&command);
                             let response = management_request(&control, command, observe).await;
+                            let retained=response.as_ref().ok().and_then(|value|retained_command.as_ref().and_then(|command|inspection_history::capture(command,value)));
                             command_outcome(&outcomes, submission, &management_outcome(&response))
                                 .await;
                             if mutation && let Some(owner) = notice_owner {
@@ -1746,7 +1756,7 @@ async fn run_with_delivery(
                                 prepare_management(response, control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command {
+                                .send(BackgroundResult::Command { retained,
                                     work_status,
                                     context,
                                     generation,
@@ -1797,7 +1807,7 @@ async fn run_with_delivery(
                                 prepare_management(response, control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command {
+                                .send(BackgroundResult::Command { retained:None,
                                     work_status: false,
                                     context,
                                     generation,
@@ -2120,7 +2130,7 @@ async fn run_with_delivery(
                             let response=watch_action::execute(&control,target).await;
                             if output {
                                 let result=prepare_management(response,control.store.config.cache.body_bytes).await;
-                                let _=results.send(BackgroundResult::Command {work_status:false,context:None,generation,title,result}).await;
+                                let _=results.send(BackgroundResult::Command { retained:None,work_status:false,context:None,generation,title,result}).await;
                             } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,format!("{title}は未適用 · {error}")).await,}}
                         });
                     },
@@ -2701,7 +2711,7 @@ async fn run_with_delivery(
                             .await;
                             continue;
                         }
-                        let Some(value) = management.detail.clone() else {
+                        let Some((value,resolved_pointer)) = management.detail_source(&pointer) else {
                             management_status(
                                 &updates,
                                 context.clone(),
@@ -2720,7 +2730,7 @@ async fn run_with_delivery(
                         let follow_updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result =
-                                presentation_work(move || management::follow_target(&value, &pointer, mode))
+                                presentation_work(move || management::follow_target(&value, &resolved_pointer, mode))
                                     .await;
                             let target = match result {
                                 Ok(Ok(target)) => target,
@@ -2739,6 +2749,7 @@ async fn run_with_delivery(
                                     return;
                                 }
                             }
+                            let retained_command=match &target {management::FollowTarget::Command(command)=>inspection_history::capture_command(command),_=>None};
                             let (title,work_status,response)=match target {
                                 management::FollowTarget::Command(command)=> {
                                     let title=command_title(&command);
@@ -2768,11 +2779,12 @@ async fn run_with_delivery(
                                 .await;
                                 return;
                             }
+                            let retained=retained_command.as_ref().and_then(|command|inspection_history::capture(command,&observed));
                             let result =
                                 prepare_management(Ok(observed), control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command {
+                                .send(BackgroundResult::Command { retained,
                                     work_status,
                                     context,
                                     generation,
@@ -2792,7 +2804,7 @@ async fn run_with_delivery(
                             management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:"管理結果が更新されました。現在の同じ対象を再取得してください".into()}).await;
                             continue;
                         }
-                        let Some(value) = management.detail.clone() else {
+                        let Some((value,resolved_pointer)) = management.detail_source(&pointer) else {
                             management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:"詳細は本文cache予算を超えたため未保持。対象IDから原文pageを取得するか範囲を絞って再照会してください".into()}).await;
                             continue;
                         };
@@ -2800,7 +2812,7 @@ async fn run_with_delivery(
                         let worker_context = context.clone();
                         let refused_pointer = pointer.clone();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                            let selected = pointer.clone();
+                            let selected = resolved_pointer;
                             match presentation_work(move || {
                                 management::detail_page(&value, &selected, cursor.as_deref())
                             })
@@ -3082,8 +3094,11 @@ async fn run_with_delivery(
                     if !management.accepts(ticket.generation) || !management.inspection.presentation_finished(&ticket) {continue;}
                     match result {
                         Ok(prepared)=>{
-                            let request_id=management.begin_result();
-                            management.detail=prepared.report.detail.map(Arc::new);
+                            let request_id=if ticket.target.retains_history(){management.current_history_detail=prepared.report.detail.map(Arc::new);management.begin_retained_update()}else{
+                                let id=management.begin_result();
+                                management.detail=prepared.report.detail.map(Arc::new);
+                                id
+                            };
                             management_update(&updates,Some(ticket.context),UiUpdate::InspectionSnapshot {request_id,snapshot:prepared.snapshot}).await;
                         },
                         Err(error)=>management_status(&updates,Some(ticket.context),error).await,
@@ -3255,7 +3270,7 @@ async fn run_with_delivery(
                 }
                 Some(BackgroundResult::Copied {
                     result: Err(error), ..
-                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command {
+                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { retained,
                     work_status,
                     context,
                     generation,
@@ -3271,7 +3286,7 @@ async fn run_with_delivery(
                             management.detail = report.detail.map(Arc::new);
                             management_update(
                                 &updates,
-                                context,
+                                context.clone(),
                                 UiUpdate::StructuredManagement {
                                     work_status,
                                     request_id: management_id,
@@ -3281,6 +3296,10 @@ async fn run_with_delivery(
                                 },
                             )
                             .await;
+                            if let (Some(target),Some(context))=(retained,context) {
+                                management.inspection.install(generation,context.clone(),target.clone(),None);
+                                management_update(&updates,Some(context),UiUpdate::RetainedInspectionStarted{request_id:management_id,target}).await;
+                            }
                         }
                         Err(error) => {
                             management_update(

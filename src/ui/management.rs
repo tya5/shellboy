@@ -26,6 +26,7 @@ pub(super) struct StructuredManagementState {
     pub(super) omitted: bool,
     pub(super) detail: Option<ManagementPage>,
     pub(super) pending_pointer: Option<String>,
+    pub(super) pending_cursor: Option<String>,
 }
 
 struct ManagementFrame {
@@ -124,10 +125,47 @@ impl ManagementPopup {
         self.inspection = Some(state);
         self.inspection_detail = None;
     }
+    pub(super) fn start_retained_inspection(
+        &mut self,
+        request_id: u64,
+        target: InspectionTarget,
+    ) -> bool {
+        let Some(state) = self
+            .frame
+            .as_mut()
+            .and_then(|frame| frame.structured.as_mut())
+            .filter(|state| state.request_id == request_id)
+        else {
+            return false;
+        };
+        if !target.retains_history() {
+            return false;
+        }
+        let mut inspection = inspection::State::new(target);
+        let mut fields = state.fields.clone();
+        fields.truncate(256);
+        for field in &mut fields {
+            field.label = format!("取得時 · {}", field.label);
+        }
+        inspection.anchors = fields
+            .iter()
+            .map(|field| InspectionFieldAnchor {
+                pointer: field.key.clone(),
+                entity: None,
+                relative_pointer: field.key.clone(),
+                stable: true,
+            })
+            .collect();
+        state.fields = fields.clone();
+        inspection.retained_fields = Some(fields);
+        inspection.retained_omitted = state.omitted;
+        self.inspection = Some(inspection);
+        true
+    }
     pub(super) fn patch_inspection(
         &mut self,
         request_id: u64,
-        snapshot: InspectionSnapshot,
+        mut snapshot: InspectionSnapshot,
     ) -> bool {
         let Some(inspection) = self.inspection.as_ref() else {
             return false;
@@ -145,6 +183,19 @@ impl ManagementPopup {
             || snapshot.anchors.len() > 256
         {
             return false;
+        }
+        if let Some(retained) = &inspection.retained_fields {
+            let available = 256usize.saturating_sub(snapshot.fields.len());
+            snapshot.omitted |= inspection.retained_omitted || retained.len() > available;
+            for field in retained.iter().take(available) {
+                snapshot.fields.push(field.clone());
+                snapshot.anchors.push(InspectionFieldAnchor {
+                    pointer: field.key.clone(),
+                    entity: None,
+                    relative_pointer: field.key.clone(),
+                    stable: true,
+                });
+            }
         }
         let selected = if inspection.reset_selection {
             None
@@ -171,16 +222,48 @@ impl ManagementPopup {
                     .position(|field| field.key == anchor.pointer)
             });
         let detail_anchor = inspection.detail_anchor.clone();
-        let mapped = detail_anchor
-            .as_ref()
-            .and_then(|old| snapshot.anchors.iter().find(|new| old.same_source(new)))
-            .map(|anchor| anchor.pointer.clone());
+        let retained_pointer = detail_anchor.as_ref().and_then(|anchor| {
+            inspection
+                .retained_fields
+                .as_ref()?
+                .iter()
+                .find(|field| field.key == anchor.pointer)
+                .map(|field| field.key.clone())
+        });
+        let mapped = retained_pointer.clone().or_else(|| {
+            detail_anchor
+                .as_ref()
+                .and_then(|old| snapshot.anchors.iter().find(|new| old.same_source(new)))
+                .map(|anchor| anchor.pointer.clone())
+        });
         let Some(frame) = self.frame.as_mut() else {
             return false;
         };
         let Some(state) = frame.structured.as_mut() else {
             return false;
         };
+        // The visible original page may coexist with an in-flight next/first
+        // page request. Keep that exact intent before the metadata fence moves.
+        let pending_original = state.pending_pointer.as_ref().and_then(|pointer| {
+            inspection
+                .retained_fields
+                .as_ref()?
+                .iter()
+                .any(|field| &field.key == pointer)
+                .then(|| {
+                    (
+                        pointer.clone(),
+                        state.pending_cursor.clone(),
+                        state.preserve_detail_scroll,
+                    )
+                })
+        });
+        let keep_original_page = retained_pointer.as_ref().is_some_and(|pointer| {
+            state
+                .detail
+                .as_ref()
+                .is_some_and(|page| &page.pointer == pointer)
+        });
         let detail_consumer = inspection.detail_requested
             || state.detail.is_some()
             || state.pending_pointer.is_some()
@@ -192,6 +275,7 @@ impl ManagementPopup {
         state.request_id = request_id;
         state.detail_request_id = state.detail_request_id.wrapping_add(1);
         state.pending_pointer = None;
+        state.pending_cursor = None;
         self.inspection_detail = None;
         let inspection = self.inspection.as_mut().unwrap();
         inspection.reset_selection = false;
@@ -221,7 +305,14 @@ impl ManagementPopup {
             inspection.usage_error = None;
         }
         inspection.detail_pointer = mapped.clone();
-        if let Some(detail) = state.detail.as_mut() {
+        if keep_original_page {
+            let page = state
+                .detail
+                .as_mut()
+                .expect("retained page identity checked above");
+            page.source_request_id = request_id;
+            page.stale = None;
+        } else if let Some(detail) = state.detail.as_mut() {
             detail.stale = Some(
                 if mapped.is_some() {
                     "新しい保存状態の詳細を取得中"
@@ -231,8 +322,22 @@ impl ManagementPopup {
                 .into(),
             );
         }
-        if detail_consumer && let Some(pointer) = mapped {
+        if let Some((pointer, cursor, preserve_scroll)) = pending_original {
             state.pending_pointer = Some(pointer.clone());
+            state.pending_cursor = cursor.clone();
+            state.preserve_detail_scroll = preserve_scroll;
+            self.inspection_detail = Some(UiAction::LoadManagementDetail {
+                request_id,
+                detail_request_id: state.detail_request_id,
+                pointer,
+                cursor,
+            });
+        } else if detail_consumer
+            && !keep_original_page
+            && let Some(pointer) = mapped
+        {
+            state.pending_pointer = Some(pointer.clone());
+            state.pending_cursor = None;
             state.preserve_detail_scroll = state.detail.is_some();
             self.inspection_detail = Some(UiAction::LoadManagementDetail {
                 request_id,
@@ -318,6 +423,7 @@ impl ManagementPopup {
         let prefix = error.chars().take(512).collect::<String>();
         let reason = crate::presentation::sanitize_plain(&prefix, 0).0;
         state.pending_pointer = None;
+        state.pending_cursor = None;
         state.detail_error = Some(reason.clone());
         if let Some(page) = &mut state.detail {
             page.stale = Some(format!("詳細の更新に失敗: {reason}"));
@@ -330,6 +436,7 @@ impl ManagementPopup {
     pub(super) fn detail_rejected(&mut self, reason: &str) {
         if let Some(state) = self.structured_mut() {
             state.pending_pointer = None;
+            state.pending_cursor = None;
             if let Some(page) = &mut state.detail {
                 page.stale = Some(reason.into());
             }
@@ -424,6 +531,7 @@ impl ManagementPopup {
                 omitted,
                 detail: None,
                 pending_pointer: None,
+                pending_cursor: None,
             }),
         });
     }
@@ -449,7 +557,15 @@ impl ManagementPopup {
                 observed_at: self
                     .inspection
                     .as_ref()
-                    .map(|state| state.metadata_observed_at.clone())
+                    .map(|state| match &state.target {
+                        InspectionTarget::HistorySources(scope)
+                            if pointer != "/current_source"
+                                && !pointer.starts_with("/current_source/") =>
+                        {
+                            scope.captured_at.clone()
+                        }
+                        _ => state.metadata_observed_at.clone(),
+                    })
                     .unwrap_or_default(),
                 stale: None,
                 pointer,
@@ -457,6 +573,7 @@ impl ManagementPopup {
                 next_cursor,
             });
             state.pending_pointer = None;
+            state.pending_cursor = None;
             state.detail_error = None;
             if !state.preserve_detail_scroll {
                 frame.view.scroll = 0;
@@ -743,6 +860,7 @@ impl ManagementPopup {
             inspection.detail_requested = false;
             state.selected = 0;
             state.pending_pointer = None;
+            state.pending_cursor = None;
             state.detail_request_id = state.detail_request_id.wrapping_add(1);
             self.inspection_detail = None;
             self.paint.set(None);
@@ -956,6 +1074,7 @@ impl ManagementPopup {
                                 structured.detail_request_id.wrapping_add(1);
                             structured.preserve_detail_scroll = false;
                             structured.pending_pointer = Some(field.key.clone());
+                            structured.pending_cursor = None;
                             return vec![UiAction::LoadManagementDetail {
                                 request_id: structured.request_id,
                                 detail_request_id: structured.detail_request_id,
@@ -974,6 +1093,7 @@ impl ManagementPopup {
                         structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
                         structured.preserve_detail_scroll = false;
                         structured.pending_pointer = Some(field.key.clone());
+                        structured.pending_cursor = None;
                         return vec![UiAction::LoadManagementDetail {
                             request_id: structured.request_id,
                             detail_request_id: structured.detail_request_id,
@@ -990,6 +1110,7 @@ impl ManagementPopup {
                         structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
                         structured.preserve_detail_scroll = false;
                         structured.pending_pointer = Some(page.pointer.clone());
+                        structured.pending_cursor = Some(cursor.clone());
                         return vec![UiAction::LoadManagementDetail {
                             request_id: structured.request_id,
                             detail_request_id: structured.detail_request_id,
@@ -1010,6 +1131,7 @@ impl ManagementPopup {
                         structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
                         structured.preserve_detail_scroll = false;
                         structured.pending_pointer = Some(pointer.clone());
+                        structured.pending_cursor = None;
                         return vec![UiAction::LoadManagementDetail {
                             request_id: structured.request_id,
                             detail_request_id: structured.detail_request_id,
@@ -1021,6 +1143,7 @@ impl ManagementPopup {
                 KeyCode::Esc if structured.detail.is_some() => {
                     structured.detail = None;
                     structured.pending_pointer = None;
+                    structured.pending_cursor = None;
                     structured.detail_request_id = structured.detail_request_id.wrapping_add(1);
                     return vec![];
                 }

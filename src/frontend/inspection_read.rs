@@ -25,6 +25,7 @@ pub(super) struct RawInspection {
     at: String,
 }
 enum Body {
+    History(crate::history::observation::Raw),
     Thread(
         Arc<header::RawHeader>,
         Box<crate::thread_observation::RawLatest>,
@@ -76,6 +77,24 @@ pub(super) fn read_scoped_tx(
     let services = services.ok_or_else(unavailable)?;
     let body =
         match target {
+            InspectionTarget::HistorySources(scope) => {
+                if scope.scope_limited {
+                    return Err(ApiError::new(
+                        ErrorCode::InputLimit,
+                        "Retained history source scope exceeds its finite metadata budget",
+                    )
+                    .into());
+                }
+                Body::History(crate::history::observation::read_tx(
+                    db,
+                    &scope
+                        .nodes
+                        .iter()
+                        .map(|(id, _)| id.clone())
+                        .collect::<Vec<_>>(),
+                    scope.thread_id.as_deref(),
+                )?)
+            }
             InspectionTarget::Usage(_) => {
                 return Err(ApiError::new(
                     ErrorCode::InvalidState,
@@ -208,6 +227,28 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
                     ApiError::new(ErrorCode::InvalidState, "Cannot prepare Thread facts")
                 })?,
             )
+        }
+        Body::History(raw) => {
+            let mut value = crate::history::observation::prepare(raw);
+            if let InspectionTarget::HistorySources(scope) = &target {
+                value["captured_result_at"] = serde_json::json!(scope.captured_at);
+                value["repeat_result"] = serde_json::json!(
+                    "aから同じ履歴照会と引数を指定して再取得。現在状態の更新は元の結果を取り直しません"
+                );
+            }
+            if let InspectionTarget::HistorySources(scope) = &target
+                && let Some(nodes) = value["nodes"].as_array_mut()
+            {
+                for (node, (_, expected)) in nodes.iter_mut().zip(&scope.nodes) {
+                    node["captured_source_revision"] = serde_json::json!(expected);
+                    node["revision_matches"] = serde_json::json!(
+                        expected
+                            .zip(node["source_revision"].as_i64())
+                            .map(|(a, b)| a == b)
+                    );
+                }
+            }
+            (String::new(), value)
         }
         Body::Lifecycle(raw) => {
             let prepared = super::inspection_lifecycle::prepare(*raw)?;

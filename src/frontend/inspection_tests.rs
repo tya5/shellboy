@@ -1599,3 +1599,225 @@ async fn f8_operation_and_saved_reference_react_to_actual_message_cancel_without
     sender.try_send(UiAction::Quit).unwrap();
     super::control_tests::finish_bridge(bridge, &incoming).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn f8_history_body_retains_original_detail_while_current_source_facts_change() {
+    let (root, owner, control, server) = super::control_tests::fixture().await;
+    owner.db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_revision,payload_json)VALUES('retained-history','user','now',7,'{\"role\":\"user\",\"content\":\"retained history original\"}');")?;Ok(())}).await.unwrap();
+    let path = control.store.database.path().to_path_buf();
+    let mut ui = UiState::new(&owner.loaded.config, root.path().into());
+    let (sender, receiver) = actions::channel(64);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(super::run_with_clipboard(
+        control.clone(),
+        receiver,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+        Arc::new(NoClipboard),
+    ));
+    dispatch(&sender, ui.select_thread("thread".into()));
+    let mut proofs = Vec::new();
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+    })
+    .await;
+    let writer = rusqlite::Connection::open(path).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
+    dispatch(&sender, ui.event(Event::Paste("history get".into())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    dispatch(&sender, ui.event(Event::Paste("retained-history".into())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
+        p.last().is_some_and(|p| {
+            field(&p.snapshot, "/current_source/nodes/0/body_available") == Some("true")
+        })
+    })
+    .await;
+    let initial = proofs.last().unwrap().clone();
+    writer.execute_batch("ROLLBACK").unwrap();
+    let InspectionTarget::HistorySources(scope) = &initial.snapshot.target else {
+        panic!("wrong target")
+    };
+    assert_eq!(scope.nodes, vec![("retained-history".into(), Some(7))]);
+    assert!(scope.thread_id.is_none());
+    control.store.database.call(|db|{db.execute_batch("UPDATE node SET payload_json=NULL,payload_revision=8,deleted_reason='synthetic collection' WHERE id='retained-history';")?;Ok(())}).await.unwrap();
+    let changed = control
+        .request(super::operation(
+            &control,
+            Command::ThreadSet(ThreadSetArgs {
+                thread_id: Some("independent".into()),
+                title: Some("source observation fixture change".into()),
+                ..Default::default()
+            }),
+        ))
+        .await;
+    assert!(changed.ok, "{:?}", changed.error);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
+        p.last().is_some_and(|p| {
+            field(&p.snapshot, "/current_source/nodes/0/body_available") == Some("false")
+                && p.snapshot.metadata_sequence > initial.snapshot.metadata_sequence
+        })
+    })
+    .await;
+    let current = proofs.last().unwrap();
+    assert_eq!(
+        field(
+            &current.snapshot,
+            "/current_source/nodes/0/revision_matches"
+        ),
+        Some("false")
+    );
+    assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+    sender
+        .try_send(UiAction::ManagementIntent {
+            context: current.context.clone(),
+            action: Box::new(UiAction::LoadManagementDetail {
+                request_id: current.request_id,
+                detail_request_id: 99,
+                pointer: "/text".into(),
+                cursor: None,
+            }),
+        })
+        .unwrap();
+    let deadline = crate::test_watchdog::Deadline::new("retained history original detail");
+    loop {
+        let update = tokio::task::block_in_place(|| deadline.receive(&incoming)).unwrap();
+        let text = match &update {
+            UiUpdate::ScopedManagement { update, .. } => match &**update {
+                UiUpdate::ManagementDetail { pointer, text, .. } if pointer == "/text" => {
+                    Some(text.clone())
+                }
+                UiUpdate::ManagementDetailFailure { error, .. } => panic!("{error}"),
+                _ => None,
+            },
+            _ => None,
+        };
+        ui.apply(update);
+        if let Some(text) = text {
+            assert!(text.contains("retained history original"), "{text}");
+            break;
+        }
+    }
+    sender.try_send(UiAction::Quit).unwrap();
+    super::control_tests::finish_bridge(bridge, &incoming).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn f8_history_list_keeps_captured_foreign_page_when_selected_path_changes() {
+    let (root, owner, control, server) = super::control_tests::fixture().await;
+    owner.db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('list-first','user','now','{\"role\":\"user\",\"content\":\"retained first\"}'),('list-second','user','now','{\"role\":\"user\",\"content\":\"retained second\"}');INSERT INTO thread_path VALUES('independent',0,'list-first'),('independent',1,'list-second');")?;Ok(())}).await.unwrap();
+    let mut ui = UiState::new(&owner.loaded.config, root.path().into());
+    let (sender, receiver) = actions::channel(64);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(super::run_with_clipboard(
+        control.clone(),
+        receiver,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+        Arc::new(NoClipboard),
+    ));
+    dispatch(&sender, ui.select_thread("thread".into()));
+    let mut proofs = Vec::new();
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+    })
+    .await;
+    key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
+    dispatch(&sender, ui.event(Event::Paste("history list".into())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    key(&mut ui, &sender, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    dispatch(&sender, ui.event(Event::Paste("independent".into())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
+        p.last()
+            .is_some_and(|p| field(&p.snapshot, "/current_source/nodes/1/selected") == Some("true"))
+    })
+    .await;
+    let initial = proofs.last().unwrap().clone();
+    let InspectionTarget::HistorySources(scope) = &initial.snapshot.target else {
+        panic!("wrong target")
+    };
+    assert_eq!(scope.thread_id.as_deref(), Some("independent"));
+    assert_eq!(scope.nodes.len(), 2);
+    control
+        .store
+        .database
+        .call(|db| {
+            let tx = db.transaction()?;
+            crate::history::select_path(&tx, "independent", 0, &["list-first".into()], "now")?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let changed = control
+        .request(super::operation(
+            &control,
+            Command::ThreadSet(ThreadSetArgs {
+                thread_id: Some("independent".into()),
+                title: Some("changed path fixture".into()),
+                ..Default::default()
+            }),
+        ))
+        .await;
+    assert!(changed.ok, "{:?}", changed.error);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
+        p.last().is_some_and(|p| {
+            field(&p.snapshot, "/current_source/nodes/1/selected") == Some("false")
+                && p.snapshot.metadata_sequence > initial.snapshot.metadata_sequence
+        })
+    })
+    .await;
+    let current = proofs.last().unwrap();
+    assert_eq!(
+        field(&current.snapshot, "/current_source/nodes/0/selected"),
+        Some("true")
+    );
+    assert_eq!(
+        field(
+            &current.snapshot,
+            "/current_source/selection_scope/selection_revision"
+        ),
+        Some("1")
+    );
+    assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+    sender
+        .try_send(UiAction::ManagementIntent {
+            context: current.context.clone(),
+            action: Box::new(UiAction::LoadManagementDetail {
+                request_id: current.request_id,
+                detail_request_id: 99,
+                pointer: "/items/1/excerpt".into(),
+                cursor: None,
+            }),
+        })
+        .unwrap();
+    let deadline = crate::test_watchdog::Deadline::new("retained foreign history list detail");
+    loop {
+        let update = tokio::task::block_in_place(|| deadline.receive(&incoming)).unwrap();
+        let text = match &update {
+            UiUpdate::ScopedManagement { update, .. } => match &**update {
+                UiUpdate::ManagementDetail { pointer, text, .. }
+                    if pointer == "/items/1/excerpt" =>
+                {
+                    Some(text.clone())
+                }
+                UiUpdate::ManagementDetailFailure { error, .. } => panic!("{error}"),
+                _ => None,
+            },
+            _ => None,
+        };
+        ui.apply(update);
+        if let Some(text) = text {
+            assert!(text.contains("retained second"), "{text}");
+            break;
+        }
+    }
+    sender.try_send(UiAction::Quit).unwrap();
+    super::control_tests::finish_bridge(bridge, &incoming).await;
+}
