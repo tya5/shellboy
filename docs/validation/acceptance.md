@@ -3676,3 +3676,23 @@ log is produced (zero new request-log rows). Usage guidance now explicitly puts
 whole boundary-crossing lifetimes on their start side. This does not extend the
 heuristic into arbitrary-secret detection. Exact-source standard/native checks
 are recorded in issue #75; no installed binary, user DB or owner is changed.
+
+## Noncontrolling EOF diagnostic observation (2026-10-31)
+
+Main 912b2e2 run 41160166609 attempt 1 failed on macOS because the EOF test required
+a scope=signal diagnostic row; Ubuntu/Windows passed. The same-SHA failed job was
+rerun as attempt 2 before changing the test; its result is retained in issue #75.
+
+Diagnostics enqueue uses sender.try_lock and try_send, incrementing a dropped
+counter on failure. Orderly shutdown closes the sender and joins the writer, so
+accepted rows are drained, but rows dropped before admission cannot be recovered
+by waiting. The EOF test therefore keeps all read-only DB state, saved tool result,
+success exit and native process-group cleanup assertions. It validates any retained
+signal diagnostic as terminal_lost/begin, without requiring a row or substituting
+log text for durable facts. The other termination tests retain their existing
+assertions; this scoped change avoids the worker's separate #77 work. No runtime
+logging contract, timeout, transport retry or shutdown implementation changes.
+
+Native macOS arm64/Rust 1.99.1: the exact EOF test passes. Full standard-check,
+role-test and exact-source native CI results are recorded in issue #75. Fixtures
+use temporary stores/processes, not the installed owner, real data or providers.

@@ -1,5 +1,12 @@
 # Development status
 
+## Noncontrolling EOF test observation
+
+Only the noncontrolling-PTY EOF shutdown test now treats best-effort diagnostic
+rows as optional. Durable tool/Run/shell state and native process cleanup remain
+mandatory. Other termination tests and runtime logging/shutdown are unchanged;
+validation and original/same-SHA rerun history are recorded in issue #75.
+
 ## Readback follow-up (#75)
 
 Shell snippets also suppress secret-access-key flags, sshpass password arguments,
