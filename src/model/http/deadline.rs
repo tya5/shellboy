@@ -111,8 +111,10 @@ impl Deadline {
         tokio::select! {
             biased;
             _ = cancel.cancelled() => Err(cancelled()),
-            _ = tokio::time::sleep_until(at) => Err(ModelError::new("timeout", format!("HTTP response-header wait timed out after {} ms (limit {} ms; {}); request delivery is not inferred from this deadline", self.started.elapsed().as_millis(), limit.as_millis(), setting))),
+            // Preserve ready status facts before an expired local wait can
+            // misclassify a permanent response as retryable unknown transport.
             result = future => Ok(result),
+            _ = tokio::time::sleep_until(at) => Err(ModelError::new("timeout", format!("HTTP response-header wait timed out after {} ms (limit {} ms; {}); request delivery is not inferred from this deadline", self.started.elapsed().as_millis(), limit.as_millis(), setting))),
         }
     }
     pub(super) fn received(&mut self) {
@@ -220,6 +222,46 @@ pub(super) fn transport_error(error: reqwest::Error, stage: &str) -> ModelError 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn ready_permanent_headers_are_not_erased_by_a_simultaneously_expired_wait() {
+        for status in [400_u16, 401, 403, 422] {
+            let connection = Connection {
+                response_header_timeout_ms: 500,
+                stream_idle_timeout_ms: 500,
+                ..Default::default()
+            };
+            let deadline = Deadline::new(ApiEndpoint::Responses, &connection, "fixture").unwrap();
+            tokio::time::advance(Duration::from_millis(500)).await;
+            let cancel = CancellationToken::new();
+            let observed = deadline
+                .wait_headers(&cancel, std::future::ready(status))
+                .await;
+            assert_eq!(
+                observed.unwrap(),
+                status,
+                "a scheduler-late poll must classify available permanent headers, not invent a status-free retryable timeout"
+            );
+            cancel.cancel();
+            assert_eq!(
+                deadline
+                    .wait_headers(&cancel, std::future::ready(status))
+                    .await
+                    .unwrap_err()
+                    .kind,
+                "cancelled"
+            );
+            assert_eq!(
+                deadline
+                    .wait_headers(&CancellationToken::new(), std::future::pending::<u16>())
+                    .await
+                    .unwrap_err()
+                    .kind,
+                "timeout",
+                "pending headers still expire"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn expired_total_budget_rejects_ready_data_and_cancel_keeps_priority() {

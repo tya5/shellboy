@@ -99,6 +99,10 @@ async fn read_request(stream: &mut TcpStream) -> Value {
 
 async fn proxy(log: std::path::PathBuf) -> (String, mpsc::Receiver<Incoming>, JoinHandle<()>) {
     std::fs::write(&log, "").unwrap();
+    assert!(
+        std::fs::read(&log).unwrap().is_empty(),
+        "request JSONL starts at zero rows"
+    );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let (sender, receiver) = mpsc::channel(8);
@@ -843,17 +847,69 @@ async fn stalled_error_body_preserves_retryable_status_and_can_recover() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn stalled_permanent_error_body_is_not_retried() {
     for status in [400, 401, 403, 422] {
+        tokio::time::pause();
+        // A pending blocking task prevents Tokio's paused clock from auto-
+        // advancing while the real loopback headers are still in transit.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let clock = tokio::task::spawn_blocking(move || {
+            crate::test_watchdog::blocking_recv("hold virtual loopback clock", &held)
+        });
         let mut fixture = Fixture::new(2, 10, 500).await;
+        let mut events = fixture.control.subscribe();
         fixture.incoming().await.reply.send(Reply {
-            bytes: format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: 99999\r\nConnection: close\r\n\r\n{{").into_bytes(),
+            bytes: format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: 99999\r\nConnection: close\r\n\r\n").into_bytes(),
             hold_open:true,
         }).ok().unwrap();
+        crate::test_watchdog::watchdog("permanent response headers observed", async {
+            loop {
+                if let EngineEvent::ModelReceive { thread_id, .. } = events.recv().await.unwrap()
+                    && thread_id == fixture.accepted.thread_id
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        crate::test_watchdog::watchdog("saved permanent-body recovery", async {
+            loop {
+                let turn = fixture.accepted.turn_id.clone().unwrap();
+                let state: String = fixture
+                    .control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(
+                            db.query_row("SELECT state FROM turn WHERE id=?1", [turn], |row| {
+                                row.get(0)
+                            })?,
+                        )
+                    })
+                    .await
+                    .unwrap();
+                if state == "recovery_wait" {
+                    break;
+                }
+                events.recv().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::resume();
+        release.send(()).unwrap();
+        clock.await.unwrap().unwrap();
         assert_eq!(fixture.settled().await, "recovery_wait", "status {status}");
         let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts.len(), 1, "status {status}: {attempts:?}");
+        assert_eq!(
+            usage_limit_log_lines(&fixture),
+            1,
+            "one actual HTTP request"
+        );
         let saved = attempts[0].1.as_ref().unwrap();
         assert_eq!(saved["error"]["kind"], "timeout");
         assert_eq!(saved["error"]["status"], status);
