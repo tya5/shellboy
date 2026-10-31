@@ -247,5 +247,4 @@ async fn catalog_precancelled_makes_no_http_request() {
     assert!(futures_util::FutureExt::now_or_never(listener.accept()).is_none());
 }
 
-#[path = "support/count_after.rs"]
-mod count_after;
+use crate::count_after;

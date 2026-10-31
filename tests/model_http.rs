@@ -1420,5 +1420,4 @@ async fn sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only(
     }
 }
 
-#[path = "support/count_after.rs"]
-mod count_after;
+use crate::count_after;
