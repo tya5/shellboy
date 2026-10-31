@@ -25,7 +25,11 @@ pub(super) struct RawInspection {
     at: String,
 }
 enum Body {
-    Thread(Arc<header::RawHeader>, [Option<Value>; 3]),
+    Thread(
+        Arc<header::RawHeader>,
+        Box<crate::thread_observation::RawLatest>,
+        Option<Value>,
+    ),
     Lifecycle(Box<super::inspection_lifecycle::Raw>),
     Saved(super::inspection_saved::RawSaved, Option<u64>),
     Attachments(super::inspection_attachments::Raw),
@@ -94,15 +98,12 @@ pub(super) fn read_scoped_tx(
                         limit: 1,
                     },
                 )?;
-                let extra = [
-                    crate::thread_observation::last_answer(db, id)?,
-                    crate::thread_observation::last_input(db, id)?,
-                    compact["items"]
-                        .as_array()
-                        .and_then(|rows| rows.first())
-                        .cloned(),
-                ];
-                Body::Thread(header, extra)
+                let latest = crate::thread_observation::read_latest_display_tx(db, id)?;
+                let compact = compact["items"]
+                    .as_array()
+                    .and_then(|rows| rows.first())
+                    .cloned();
+                Body::Thread(header, Box::new(latest), compact)
             }
             InspectionTarget::Run(id) => {
                 Body::Lifecycle(Box::new(super::inspection_lifecycle::read_tx(
@@ -198,11 +199,13 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
     let mut observed_at = raw.at;
     let target = raw.target;
     let (thread, value) = match raw.body {
-        Body::Thread(header, [last_answer, last_input, last_compaction]) => {
+        Body::Thread(header, latest, last_compaction) => {
             let (mut details, limited) = header.prepare_inspection();
             limited_fields = limited;
-            details.last_answer = last_answer;
-            details.last_input = last_input;
+            let latest = crate::thread_observation::prepare_latest_display(*latest);
+            limited_fields.extend(latest.limited_fields);
+            details.last_answer = latest.last_answer;
+            details.last_input = latest.last_input;
             details.last_compaction = last_compaction;
             (
                 details.thread_id.clone(),

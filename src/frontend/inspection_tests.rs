@@ -122,6 +122,78 @@ async fn pump_until(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn foreign_thread_latest_message_limits_keep_source_available_and_read_while_writer_is_held()
+{
+    let (root, owner, control, server) = super::control_tests::fixture().await;
+    owner.db.call(|db| {
+        db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('bounded-answer','independent-run','assistant_response','now',?1)",
+            [serde_json::json!({"content":"retained answer","opaque":"x".repeat(2*1024*1024)}).to_string()])?;
+        db.execute("UPDATE turn SET answer_node_id='bounded-answer',state='completed' WHERE id='independent-run'",[])?;
+        db.execute("UPDATE run SET state='completed' WHERE id='independent-run'",[])?;
+        Ok(())
+    }).await.unwrap();
+    let path = control.store.database.path().to_path_buf();
+    let mut ui = UiState::new(&owner.loaded.config, root.path().into());
+    let (sender, receiver) = actions::channel(64);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(super::run_with_clipboard(
+        control.clone(),
+        receiver,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+        Arc::new(NoClipboard),
+    ));
+    dispatch(&sender, ui.select_thread("thread".into()));
+    let mut proofs = Vec::new();
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+    })
+    .await;
+    let writer = rusqlite::Connection::open(path).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
+    dispatch(&sender, ui.event(Event::Paste("thread get".into())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    key(&mut ui, &sender, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    dispatch(&sender, ui.event(Event::Paste("independent".into())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, proofs| {
+        proofs.last().is_some_and(|proof| {
+            field(&proof.snapshot, "/last_answer/body_available") == Some("true")
+                && proof.snapshot.fields.iter().any(|field| {
+                    field.key.starts_with("/view_limits/") && field.value == "last_answer.excerpt"
+                })
+        })
+    })
+    .await;
+    let result = &proofs.last().unwrap().snapshot;
+    assert_eq!(
+        result.target,
+        InspectionTarget::Thread("independent".into())
+    );
+    assert_eq!(
+        field(result, "/last_answer/node_id"),
+        Some("bounded-answer")
+    );
+    assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+    writer.execute_batch("ROLLBACK").unwrap();
+    drop(writer);
+    let canonical = control
+        .store
+        .database
+        .call(|db| Ok(crate::thread_observation::last_answer(db, "independent")?))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(canonical["excerpt"], "retained answer");
+    assert_eq!(canonical["body_available"], true);
+    sender.try_send(UiAction::Quit).unwrap();
+    super::control_tests::finish_bridge(bridge, &incoming).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cleared_f8_thread_target_is_not_replaced_by_reply_owner_context() {
     let (root, owner, control, server) = super::control_tests::fixture().await;
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());

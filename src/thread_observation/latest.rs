@@ -70,6 +70,15 @@ enum Metadata {
         sender: Option<String>,
     },
 }
+pub(crate) struct RawLatest {
+    answer: Option<RawMessage>,
+    input: Option<RawMessage>,
+}
+pub(crate) struct PreparedLatest {
+    pub last_answer: Option<Value>,
+    pub last_input: Option<Value>,
+    pub limited_fields: Vec<String>,
+}
 fn excerpt_parts(db: &Connection, node: &str) -> Result<Vec<String>> {
     let mut stmt = db.prepare(EXCERPT).map_err(error)?;
     let mut rows = stmt.query([node]).map_err(error)?;
@@ -208,6 +217,39 @@ fn prepare_message(raw: RawMessage, prefix: &str, limited_fields: &mut Vec<Strin
         }
     }
 }
+pub(crate) fn read_latest_display_tx(db: &Connection, thread: &str) -> Result<RawLatest> {
+    if thread.is_empty() {
+        return Err(ApiError::new(
+            crate::protocol::ErrorCode::InvalidArgument,
+            "Thread identity is required",
+        ));
+    }
+    if thread.len() > 512 {
+        return Err(limited());
+    }
+    let mut budget = Budget {
+        scalar: 512,
+        remaining: 64 * 1024,
+    };
+    Ok(RawLatest {
+        answer: read_answer(db, thread, &mut budget)?,
+        input: read_input(db, thread, &mut budget)?,
+    })
+}
+pub(crate) fn prepare_latest_display(raw: RawLatest) -> PreparedLatest {
+    let mut limited_fields = Vec::new();
+    let last_answer = raw
+        .answer
+        .map(|row| prepare_message(row, "last_answer", &mut limited_fields));
+    let last_input = raw
+        .input
+        .map(|row| prepare_message(row, "last_input", &mut limited_fields));
+    PreparedLatest {
+        last_answer,
+        last_input,
+        limited_fields,
+    }
+}
 pub(crate) fn last_answer(db: &Connection, thread: &str) -> Result<Option<Value>> {
     Ok(read_answer(db, thread, &mut Budget::canonical())?
         .map(|raw| prepare_message(raw, "last_answer", &mut Vec::new())))
@@ -220,6 +262,150 @@ pub(crate) fn last_input(db: &Connection, thread: &str) -> Result<Option<Value>>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontend::sql_trace::Statements;
+    fn saved_messages(answer: &str, input: &str, sender: Value) -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
+          INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
+          INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');").unwrap();
+        for (id, kind, body) in [("a", "assistant_response", answer), ("m", "user", input)] {
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,?2,'now',?3)",
+                rusqlite::params![id, kind, body],
+            )
+            .unwrap();
+        }
+        db.execute("UPDATE turn SET answer_node_id='a' WHERE id='u'", [])
+            .unwrap();
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('receipt','op',?1,'t','m','held','now')",[sender.to_string()]).unwrap();
+        db
+    }
+    #[test]
+    fn display_messages_share_canonical_semantics_and_prepare_after_database_closes() {
+        let db = saved_messages(
+            &json!({"output":[{"type":"reasoning","summary":[{"text":"HIDDEN"}]},{"type":"message","content":[{"type":"output_text","text":"answer 日本語\n"}]}]}).to_string(),
+            &json!({"content":[{"type":"input_text","text":"request e\u{301}🙂"}]}).to_string(),
+            json!({"kind":"external_cli","label":"untrusted-label","token":"DO_NOT_COPY"}),
+        );
+        let expected_answer = last_answer(&db, "t").unwrap();
+        let expected_input = last_input(&db, "t").unwrap();
+        let trace = Statements::new(&db);
+        let raw = read_latest_display_tx(&db, "t").unwrap();
+        assert_eq!(trace.count(), 4);
+        drop(trace);
+        drop(db);
+        let prepared = prepare_latest_display(raw);
+        assert_eq!(prepared.last_answer, expected_answer);
+        assert_eq!(prepared.last_input, expected_input);
+        assert!(prepared.limited_fields.is_empty());
+        let input = prepared.last_input.unwrap();
+        assert_eq!(input["excerpt"], "request e\u{301}🙂");
+        assert_eq!(input["sender"]["label"], "untrusted-label");
+        assert!(!input.to_string().contains("DO_NOT_COPY"));
+        let answer = prepared.last_answer.unwrap();
+        assert_eq!(answer["excerpt"], "answer 日本語\n");
+        assert!(!answer.to_string().contains("HIDDEN"));
+    }
+    #[test]
+    fn oversized_payload_is_unknown_without_a_json_walk_while_cli_keeps_its_excerpt() {
+        let answer =
+            json!({"content":"retained answer","opaque":"x".repeat(2*1024*1024)}).to_string();
+        let db = saved_messages(
+            &answer,
+            &json!({"content":"request"}).to_string(),
+            json!({"kind":"external_cli","label":"known"}),
+        );
+        let trace = Statements::new(&db);
+        let raw = read_latest_display_tx(&db, "t").unwrap();
+        assert_eq!(
+            trace.count(),
+            3,
+            "oversized answer must not enter its excerpt query"
+        );
+        drop(trace);
+        let prepared = prepare_latest_display(raw);
+        assert_eq!(
+            prepared.last_answer.as_ref().unwrap()["body_available"],
+            true
+        );
+        assert!(prepared.last_answer.as_ref().unwrap()["excerpt"].is_null());
+        assert_eq!(prepared.last_input.unwrap()["excerpt"], "request");
+        assert_eq!(prepared.limited_fields, ["last_answer.excerpt"]);
+        assert_eq!(
+            last_answer(&db, "t").unwrap().unwrap()["excerpt"],
+            "retained answer"
+        );
+    }
+    #[test]
+    fn source_budget_is_shared_across_both_payloads_and_sender_without_false_unavailability() {
+        let answer = json!({"content":"a".repeat(30000)}).to_string();
+        let input = json!({"content":"i".repeat(30000)}).to_string();
+        let db = saved_messages(
+            &answer,
+            &input,
+            json!({"kind":"external_cli","label":"known","padding":"s".repeat(20000)}),
+        );
+        let trace = Statements::new(&db);
+        let raw = read_latest_display_tx(&db, "t").unwrap();
+        assert_eq!(
+            trace.count(),
+            3,
+            "third source exceeds the shared64KiB allowance"
+        );
+        drop(trace);
+        let prepared = prepare_latest_display(raw);
+        assert_eq!(prepared.last_answer.unwrap()["excerpt"], "a".repeat(512));
+        let input = prepared.last_input.unwrap();
+        assert_eq!(input["body_available"], true);
+        assert!(input["excerpt"].is_null());
+        assert_eq!(input["sender"]["label"], "known");
+        assert_eq!(prepared.limited_fields, ["last_input.excerpt"]);
+        db.execute(
+            "UPDATE receipt SET sender_json=?1",
+            [
+                json!({"kind":"external_cli","label":"known","padding":"s".repeat(70000)})
+                    .to_string(),
+            ],
+        )
+        .unwrap();
+        let prepared = prepare_latest_display(read_latest_display_tx(&db, "t").unwrap());
+        let input = prepared.last_input.unwrap();
+        assert_eq!(input["excerpt"], "i".repeat(512));
+        assert!(input["sender"].is_null());
+        assert_eq!(prepared.limited_fields, ["last_input.sender"]);
+        assert_eq!(
+            last_input(&db, "t").unwrap().unwrap()["sender"]["label"],
+            "known"
+        );
+    }
+    #[test]
+    fn display_scalar_limits_fail_without_fabricating_source_fields_or_changing_cli() {
+        let empty = Connection::open_in_memory().unwrap();
+        let trace = Statements::new(&empty);
+        assert!(
+            matches!(read_latest_display_tx(&empty,""),Err(error) if error.code==crate::protocol::ErrorCode::InvalidArgument)
+        );
+        assert!(
+            matches!(read_latest_display_tx(&empty,&"t".repeat(513)),Err(error) if error.code==crate::protocol::ErrorCode::InputLimit)
+        );
+        assert_eq!(trace.count(), 0);
+        let db = saved_messages("{}", "{}", json!({"kind":"external_cli"}));
+        let at = "a".repeat(1024 * 1024);
+        db.execute("UPDATE node SET created_at=?1 WHERE id='a'", [&at])
+            .unwrap();
+        let trace = Statements::new(&db);
+        assert!(
+            matches!(read_latest_display_tx(&db,"t"),Err(error) if error.code==crate::protocol::ErrorCode::InputLimit)
+        );
+        assert_eq!(
+            trace.count(),
+            1,
+            "scalar rejection precedes sender/excerpt work"
+        );
+        drop(trace);
+        assert_eq!(last_answer(&db, "t").unwrap().unwrap()["at"], at);
+    }
     #[test]
     fn latest_query_plans_seek_one_thread_without_sorting_history() {
         let db = Connection::open_in_memory().unwrap();
