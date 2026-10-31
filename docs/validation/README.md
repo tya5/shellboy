@@ -12,5 +12,6 @@ Do not include real conversations, personal paths or credentials in public recor
 
 Conversation redesign evidence is split into [B+C](conversation-redesign-bc.md),
 [shared reads](conversation-redesign-shared-read.md), and
-[live work](conversation-redesign-live-work.md). Each records its own source,
+[live work](conversation-redesign-live-work.md) and
+[E list qualification](conversation-redesign-e.md). Each records its own source,
 observations and remaining gates; evidence is not transferable between increments.
