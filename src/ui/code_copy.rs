@@ -2,10 +2,11 @@
 use super::*;
 
 pub(crate) fn caption(index: usize, language: &str) -> String {
+    let key = key_hints::Action::Code.spec().0;
     if language.is_empty() {
-        format!("[{}] コピー · bで番号を選ぶ", index + 1)
+        format!("[{}] コピー · {key}で番号を選ぶ", index + 1)
     } else {
-        format!("[{}] コピー · bで番号を選ぶ · {language}", index + 1)
+        format!("[{}] コピー · {key}で番号を選ぶ · {language}", index + 1)
     }
 }
 #[derive(Clone, Debug)]

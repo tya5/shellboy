@@ -67,10 +67,21 @@ impl Page {
         }
         page.entry("/help", "操作ガイドを開く（F1と同じ）");
         page.section("回答をコピーする");
-        page.entry("Tab → c", "焦点を当てた項目の原文を丸ごとコピーする");
         page.entry(
-            "Tab → b",
-            "保存された原文のコードの塊を番号で選んでコピーする",
+            &format!(
+                "{} → {}",
+                Action::History.binding(config),
+                Action::Copy.binding(config)
+            ),
+            "焦点を当てた項目の原文を丸ごとコピーする",
+        );
+        page.entry(
+            &format!(
+                "{} → {}",
+                Action::History.binding(config),
+                Action::Code.binding(config)
+            ),
+            Action::Code.description(),
         );
         page.entry(
             "o → c",

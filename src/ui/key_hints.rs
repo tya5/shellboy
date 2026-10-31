@@ -81,6 +81,7 @@ impl Action {
             Self::Interrupt => "現在のTurnを中断する（Runと背景の停止はCtrl+C）",
             Self::Stop => "Runと所有する背景の作業を停止する",
             Self::Commands => "コマンド候補を表示。↑↓で選び、Tabで補完",
+            Self::Code => "保存された原文のコードの塊を番号で選んでコピーする",
             _ => self.spec().1,
         }
     }

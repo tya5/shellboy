@@ -263,7 +263,7 @@ impl UiState {
                     .unwrap_or_else(|| self.toggle_history_item()),
             ),
             KeyCode::Char(' ') => Some(self.toggle_history_item()),
-            KeyCode::Char('b') => Some(self.choose_code(false)),
+            code if key_hints::Action::Code.matches(code) => Some(self.choose_code(false)),
             code if key_hints::Action::Original.matches(code) => {
                 Some(self.open_history_details(false, true))
             }
