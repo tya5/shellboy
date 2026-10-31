@@ -2651,3 +2651,9 @@ Unix signal reception separated from TUI force/deadline policy, and final JSON.
 It retains existing receipt, snapshot, repair and process-ownership boundaries.
 Review, counted-fault evidence and native qualification are tracked in issue #5;
 parent background/nested Job coverage remains stage 4, not an inferred result.
+
+### #5 stage 3 cfg portability correction
+
+TUI termination maps the shared Unix signal type only on Unix; Windows keeps its
+existing Source directly. No TUI policy, protocol or shutdown ordering changes.
+The pure-stage3 resubmission excludes stage4 and unlanded UI work; checks in #5.
