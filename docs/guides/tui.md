@@ -285,6 +285,27 @@ Ordinary lists, detail fields, and forms use Up/Down for selection and PgUp/PgDn
 | Action confirmation | Y confirms; N/Esc cancel |
 | Shutdown grace exceeded | W/Enter wait; F force confirmation, then Y force quit |
 
+### Typed operation forms
+
+F8 uses one catalogue for names, meanings, CLI identities, effects and field help.
+[変更] changes saved data; [制御] starts or controls processing. Group headings are
+not actions and disappear while filtering. Enter says display for inspection,
+execute for changes/control, and send only for messages. F1 explains the selected
+field's type, initial-value source and how to find an ID. Run inspection reads
+saved state; it does not retry or stop it. Docs/config/RAG/exec use the same typed
+clients as the CLI. Inline input belongs to the form; the TUI never consumes
+terminal stdin. Explicit confirmations retain their existing cost/target guards.
+
+The wait form also supports thread_settled: enter Thread IDs separated by spaces
+and the observed states in its state field. After changing a condition, specify
+an ID of the matching type; the initial target is the Turn captured when opened.
+The shell-output cursor and the previous wait's after cursor are different fields.
+
+Wheel input affects only the top popup under its painted bounds. Outside, at an
+edge or during F2 terminal selection it is a no-op. Read-only pages reuse wrapped
+rows until their source revision or width changes; a cache limit does not change
+the original source/copy target. Fetching a later page remains explicit.
+
 The conversation list uses one row per conversation with name, working directory, state, and update time columns. Filter text appears immediately; fetching follows 150ms without typing. Ctrl+R refreshes immediately. An empty saved title displays a short name from the first user request, searchable by that name, without rewriting explicit titles or history. Branch lines show ancestry; `▾` / `▸` mean expanded/collapsed, `●` marks the open conversation, and `›` with background marks the selected item. Left collapses children or moves to the parent when already collapsed/a leaf. Right expands or enters the first child when already expanded. Up/Down traverse visible rows and keep selection in view.
 
 In F8 `会話 · 設定` (conversation settings), set `タイトル操作` (title action) to `set` and enter a title to rename. `auto` clears the manual name and returns to conversation-derived display; `keep` preserves it. CLI: `shellboy thread set --thread THREAD --title 'Name'`; clear with `--title ''`.

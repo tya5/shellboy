@@ -177,13 +177,21 @@ following. Background refreshes do not pause following or erase already
 displayed response content. [History and search](history-and-search.md) explains
 forks, request editing, search filters, provenance and direct relationships.
 
-F8 retains its current `この会話で` (in this conversation), `よく使う` (common),
-and `すべての操作` (all actions) groups. Filter by human-facing name, CLI name or
-related slash command; enter target IDs and arguments in separate fields.
-Results use field/value presentation. [TUI controls](tui.md#read-source-text-and-links-from-details)
-documents detailed keys and copy ranges. Watch
-mode and operation-form redesign are later increments; they are not implied by
-the conversation layout.
+F8 groups actions under `この会話で` (this conversation), `よく使う` (common),
+and `その他の操作` (other operations). Headings cannot be selected. Filter by
+meaning, human-facing name, CLI name or related slash command. [変更] marks
+saved-data changes and [制御] marks processing/control. Forms explain their
+effect, ID types, initial-value sources and discovery routes (F1); Enter displays,
+executes or sends according to that operation. An edited form keeps its entered
+values while saved state changes. The catalogue includes owner operations and
+standalone docs/config/RAG/exec clients; potentially costly work requires its
+explicit confirmation. Results use field/value presentation.
+
+Wheel over the top popup scrolls that popup, preserving the conversation behind
+it. Outside the painted popup, at a scroll edge, or in F2 terminal selection,
+wheel input does not move it. [TUI controls](tui.md#read-source-text-and-links-from-details)
+documents detailed keys and copy ranges. List/Watch is available in the same
+conversation browser; it is separate from F8 operation forms.
 
 ### Inspect saved usage
 
