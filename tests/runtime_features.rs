@@ -3300,6 +3300,9 @@ async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background
         assert_eq!(blocked["waiting_reason"]["kind"],"context_edit_boundary");
         assert_eq!(blocked["waiting_reason"]["operation_id"],accepted["operation_id"]);
         assert_eq!(blocked["waiting_reason"]["action"],"compact");
+        let projected_thread=thread.clone();
+        let projected=control.store.database.call(move|db|shellboy::frontend::activity::project(db,&projected_thread)).await.unwrap();
+        assert_eq!(serde_json::to_value(projected.snapshot.waiting_reason).unwrap(),blocked["waiting_reason"]);
         // Finishing the background shell cannot release the held summary boundary.
         request(&control,Command::ShellEof(ExecutionTarget {execution_id:background.clone()})).await;
         loop {

@@ -760,3 +760,21 @@ mod terminal_time_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod context_wait_footer_tests {
+    use super::*;
+    #[test]
+    fn footer_shows_saved_boundary_owner_and_removes_it_on_fresh_empty_snapshot() {
+        let config=crate::config::Config::default();
+        let mut view=crate::ui::view::ThreadView::new(&config,std::path::PathBuf::from("/"));
+        let reason=crate::protocol::RunWaitReason {kind:"context_edit_boundary".into(),operation_id:"fixture".into(),action:"summary".into(),accepted_at:"saved".into(),operation_count:1};
+        let palette=crate::ui::theme::Palette::from_capabilities(crate::config::PaletteMode::Dark,false,true);
+        view.activity.accept(1,crate::ui::activity::ActivitySnapshot {phase:crate::activity::ActivityPhase::Running,run_id:Some("r".into()),waiting_reason:Some(reason),..Default::default()});
+        let text=footer_lines(&view,140,false,palette,vec![],None).iter().flat_map(|l|&l.spans).map(|s|s.content.as_ref()).collect::<String>();
+        assert!(text.contains("会話要約の完了待ち"),"{text}");
+        view.activity.accept(2,crate::ui::activity::ActivitySnapshot {phase:crate::activity::ActivityPhase::AwaitingModel,run_id:Some("r".into()),..Default::default()});
+        let text=footer_lines(&view,140,false,palette,vec![],None).iter().flat_map(|l|&l.spans).map(|s|s.content.as_ref()).collect::<String>();
+        assert!(!text.contains("会話要約の完了待ち"),"{text}");
+    }
+}

@@ -496,3 +496,12 @@ and originals remain unchanged. Terminal activity labels show the saved Run end
 time, for example 完了 · 21:16 (or a date on other local days), not a new observation time;
 missing/invalid end facts are marked unavailable. Live/recovery phases do not
 reuse a previous end time. An idle clock does not trigger a redraw just for dates.
+
+An in-flight summary/context edit can hold the safe request boundary after a
+foreground command has finished. The footer shows the saved boundary owner's
+reason (for example 会話要約の完了待ち); `run get` supplies its operation ID/action
+and acceptance time. Acceptance time is not a measured lock-wait start. Shell
+completion can already be saved while its model-facing event waits for that next
+request boundary. This does not mean the driver is waiting for a background shell
+or that replay should be forced; inspect the protected operation's downstream
+result. Finishing/failed edits remove this current reason without a new timer.
