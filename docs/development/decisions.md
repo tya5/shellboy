@@ -2010,3 +2010,21 @@ attempt counts. The saved stopped state and SaveFailed shutdown remain required.
 The existing short polling sleep stays inside the test-only saved-state waiter;
 there is no new product polling. Passing a60s deadlock guard does not explain the
 original eight-second delay or create a product shutdown-latency guarantee.
+
+
+### E integration with #77 and managed-path main (2026-10-31)
+
+Merge main0d4f63a, preserving #77's canonical harness modules, count-after helper,
+policy checker and all unrelated test conversions, plus #79's managed-path read /
+file-observation boundaries. Keep the E raw-save post-drain request/attempt checks
+and its descriptive watchdog labels when resolving overlapping guards. Register
+the shared lib helper once; no duplicate module or local watchdog constant.
+
+Remove9 exact obsolete frontend/frontend_reactivity guard allowances. Add6 exact
+allowances for three UI tests that pass sampled future Instants to pure debounce /
+coverage methods. These are input data, with no sleeping, elapsed-speed assertion
+or real-time acceptance deadline. Retaining the source and explicitly explaining
+each fingerprint is preferable to disguising it to evade the lexical checker.
+There is no file-wide exemption or new short asynchronous guard. The merged
+layout/watchdog policy and Python18 tests pass; Rust standard qualification is
+performed separately. F/G and migration changes remain excluded.
