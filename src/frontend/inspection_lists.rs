@@ -88,8 +88,9 @@ pub(super) fn capture_list_scope(
         Command::CompactList(_) => Route::Compact,
         _ => return Err(bad("Command is not a retained list route")),
     };
-    let mut text_bytes =
-        metadata_size(&original, 0, &mut 0)?.saturating_add(command_bytes(command)?);
+    // The existing body stays in its existing Arc; only new scope/facts are charged.
+    metadata_size(&original, 0, &mut 0)?;
+    let mut text_bytes = command_bytes(command)?;
     let rows = original
         .get("items")
         .and_then(Value::as_array)
@@ -262,7 +263,35 @@ enum Body {
 /// This is a preflight for the opaque F reader, not another summary projection.
 /// Identity/optional F scalar allowance is conservative; rejected IDs stay
 /// explicitly unknown and are never passed to the copying F reader.
-const THREAD_PREFLIGHT: &str = "SELECT t.id,octet_length(t.title)+octet_length(t.cwd)+octet_length(t.id)+COALESCE(octet_length(t.parent_thread_id),0)+octet_length(t.updated_at) FROM json_each(?1)j CROSS JOIN thread t ON t.id=j.value WHERE t.deleted_at IS NULL";
+fn thread_preflight_sql() -> String {
+    let columns = [
+        "t.id",
+        "t.title",
+        "t.cwd",
+        "t.parent_thread_id",
+        "t.updated_at",
+        "COALESCE(u.state,latest.state)",
+        "latest.stop_reason",
+        "latest.id",
+        "latest.state",
+        "u.state",
+        "a.state",
+        "u.id",
+        "u.answer_node_id",
+        "latest.ended_at",
+        "a.started_at",
+    ];
+    let cost = columns
+        .iter()
+        .map(|column| format!("COALESCE(octet_length({column}),0)"))
+        .collect::<Vec<_>>()
+        .join("+");
+    let joins = crate::control::db::thread_summary::RUN_TURN_JOINS;
+    // retry JSON <=256 bytes, revisit count <=21 digits and time <=128 scalars.
+    format!(
+        "SELECT t.id,{cost}+1024,CASE WHEN octet_length(t.title)<=4096 THEN t.title END FROM json_each(?1)j CROSS JOIN thread t ON t.id=j.value {joins} LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1) WHERE t.deleted_at IS NULL"
+    )
+}
 pub(super) fn read_list_facts_tx(
     db: &Connection,
     scope: CapturedScope,
@@ -327,7 +356,7 @@ pub(super) fn read_list_facts_tx(
             let mut allowed = Vec::new();
             let mut preflight_found = BTreeSet::new();
             let mut unconfirmed = Vec::new();
-            let mut st = db.prepare(THREAD_PREFLIGHT)?;
+            let mut st = db.prepare(&thread_preflight_sql())?;
             let mut rows = st.query([serde_json::to_string(&scope.ids).expect("bounded IDs")])?;
             while let Some(row) = rows.next()? {
                 let id = row
@@ -336,7 +365,16 @@ pub(super) fn read_list_facts_tx(
                     .map_err(|_| rusqlite::Error::InvalidQuery)?;
                 preflight_found.insert(id.to_owned());
                 let bytes = row.get::<_, i64>(1)?.max(0) as usize;
-                if bytes > 64 * 1024 || !budget.take(bytes.saturating_add(8192)) {
+                let named_title = row
+                    .get_ref(2)?
+                    .as_str_or_null()
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                // The F fallback witness has a larger channel than this leaf.
+                // Do not call it without a budget-compatible facade from G.
+                if bytes > 64 * 1024
+                    || named_title.is_none_or(|title| title.trim().is_empty())
+                    || !budget.take(bytes)
+                {
                     unconfirmed.push(id.into());
                 } else {
                     allowed.push(id.to_owned());
