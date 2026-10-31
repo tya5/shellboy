@@ -234,3 +234,127 @@ base_url="http://127.0.0.1:1/v1"
         .unwrap();
     owner.shutdown().await.unwrap();
 }
+
+// This fixture needs private admission facts, not a sleep or a public test hook.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shutdown() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let response = control
+        .request(Request::new(
+            format!("{}:create", control.store.instance_id),
+            Command::ThreadCreate(crate::protocol::ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            }),
+        ))
+        .await;
+    assert!(response.ok, "{:?}", response.error);
+    let thread = response.result.unwrap()["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (entered, ready) = oneshot::channel();
+    let (release, gate) = std::sync::mpsc::channel();
+    let db = control.store.database.clone();
+    let blocker = tokio::spawn(async move {
+        db.call(move |_| {
+            entered.send(()).unwrap();
+            crate::test_watchdog::blocking_recv("release cancelled-observer DB barrier", &gate)
+                .unwrap();
+            Ok(())
+        })
+        .await
+        .unwrap()
+    });
+    ready.await.unwrap();
+    let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
+    let op = operation.clone();
+    let sender = control.clone();
+    let observer = tokio::spawn(async move {
+        sender
+            .request(Request::new(
+                op,
+                Command::MessageSend(crate::protocol::MessageSendArgs {
+                    sender_label: None,
+                    now: false,
+                    thread_id: Some(thread),
+                    text: "accepted despite observer cancellation".into(),
+                }),
+            ))
+            .await
+    });
+    crate::test_watchdog::watchdog(
+        "owned worker admitted before observation is cancelled",
+        async {
+            while control.active_requests.load(Ordering::Acquire) == 0 {
+                tokio::task::yield_now().await;
+            }
+        },
+    )
+    .await
+    .unwrap();
+    observer.abort();
+    let stopping = control.clone();
+    let shutdown = tokio::spawn(async move { stopping.shutdown().await });
+    crate::test_watchdog::watchdog("shutdown closes admission before blocked commit", async {
+        while !control.admission_closed.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !shutdown.is_finished(),
+        "DB barrier must keep actual shutdown pending"
+    );
+    release.send(()).unwrap();
+    crate::test_watchdog::watchdog("DB barrier completes", blocker)
+        .await
+        .unwrap()
+        .unwrap();
+    crate::test_watchdog::watchdog("cancelled observer shutdown completes", shutdown)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let result = control
+        .store
+        .database
+        .call(move |db| {
+            Ok((
+                db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id=?1",
+                    [operation],
+                    |r| r.get::<_, i64>(0),
+                )?,
+                db.query_row(
+                    "SELECT count(*) FROM run WHERE state IN ('live','stopping')",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?,
+                db.query_row(
+                    "SELECT count(*) FROM turn WHERE state IN ('preparing','running','waiting')",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?,
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(result, (1, 0, 0));
+    owner.shutdown().await.unwrap();
+}

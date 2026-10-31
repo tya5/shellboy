@@ -112,6 +112,30 @@
     "reason": "Deferred #41/shared-read: existing sparse_live_output_flushes_at_the_configured_time_bound test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
+    "file": "src/control/driver/shell_output/live_marker_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "367eae11f19608b7652cd08720161fc2c3f02a6048c24595e20d3e844b06bf01",
+    "function": "marker_case",
+    "count": 1,
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing marker_case occurrence; migrate with shared-read integration, no whole-file exemption."
+  },
+  {
+    "file": "src/control/driver/shell_output/live_marker_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "8d8c86908dd05a6802e97374f889cde2809bb170c90a7ea1c312138bb2940928",
+    "function": "marker_case",
+    "count": 1,
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing marker_case occurrence; migrate with shared-read integration, no whole-file exemption."
+  },
+  {
+    "file": "src/control/driver/shell_output/live_marker_tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "dfa38e358d62857c1432ae682a807740e92eb19c271c14cf31c083b8caf1e7b8",
+    "function": "marker_case",
+    "count": 1,
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing marker_case occurrence; migrate with shared-read integration, no whole-file exemption."
+  },
+  {
     "file": "src/control/driver/shell_output/performance_tests.rs",
     "rule": "elapsed-comparison",
     "fingerprint": "bd13f79cbfc6c4df50fb13cbc63aec52970cac313684e12228717761b994cd22",
@@ -142,6 +166,14 @@
     "function": "quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/control/wait.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "1d8fcbbce9e8f6716d41b0624cb74b4f7ee4a4589cf9a3785474c88c2f377fc5",
+    "function": "failed_pending_insert_or_delete_does_not_publish_a_rolled_back_fact",
+    "count": 1,
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing failed_pending_insert_or_delete_does_not_publish_a_rolled_back_fact occurrence; migrate with shared-read integration, no whole-file exemption."
   },
   {
     "file": "src/control/wait.rs",
@@ -194,6 +226,14 @@
   {
     "file": "src/control/wait.rs",
     "rule": "raw-timeout",
+    "fingerprint": "9dfc4293bcbb23fbd008c5a25d6f8f6eefd1bb23c63b9ad712a800accad4413d",
+    "function": "background_wait_creation_and_cleanup_notify_committed_facts_without_turn_changes",
+    "count": 1,
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing background_wait_creation_and_cleanup_notify_committed_facts_without_turn_changes occurrence; migrate with shared-read integration, no whole-file exemption."
+  },
+  {
+    "file": "src/control/wait.rs",
+    "rule": "raw-timeout",
     "fingerprint": "ab1952cd2039e94a0dc10b1b3f0689ec01d242516edddba462155b088ab31430",
     "function": "waiting_state",
     "count": 1,
@@ -206,30 +246,6 @@
     "function": "last_foreground_wait_restores_running_but_human_and_background_observers_do_not_change_it",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing last_foreground_wait_restores_running_but_human_and_background_observers_do_not_change_it test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "4016e16e8010b22a0ad923808b22e236dc47c18b210f339697e92297ee56dc6e",
-    "function": "run_with_delivery",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "082dd291e84fb60e4063d7d3795710f4eefc00b6a6fdb042de8c0603d4ae8492",
-    "function": "run_with_delivery",
-    "count": 2,
-    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "d0699bcc513b80193ac39e9db2bec83da31929527e73685ed38049f9d4558114",
-    "function": "run_with_delivery",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing run_with_delivery test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/control_tests.rs",
@@ -370,18 +386,18 @@
   {
     "file": "src/frontend/control_tests/thread_settings.rs",
     "rule": "raw-timeout",
-    "fingerprint": "4375aecb133d887e9a6c6974750431b64b35e51281a65fb6268ae0d42f1782d1",
-    "function": "unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread",
+    "fingerprint": "37a7464a3c345ba476757b500fa458b8503cd6984c19d3c5945a8c9fd7d250b1",
+    "function": "external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery occurrence; migrate with shared-read integration, no whole-file exemption."
   },
   {
     "file": "src/frontend/control_tests/thread_settings.rs",
     "rule": "raw-timeout",
-    "fingerprint": "8a3549fc5a5bac7945edd59f4d684c6647cab0ba609dca11fec9bd58f0eb3cc1",
-    "function": "external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery",
+    "fingerprint": "4375aecb133d887e9a6c6974750431b64b35e51281a65fb6268ae0d42f1782d1",
+    "function": "unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41/shared-read: existing unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/control_tests/thread_settings.rs",
@@ -422,6 +438,14 @@
     "function": "cancellation_at_database_preparation_finishes_migration_before_releasing_owner",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing cancellation_at_database_preparation_finishes_migration_before_releasing_owner test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/streams.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "80f636bb208cba544ed1a6966b94bcd799e4b8c3cf33377a19072f910d5e17d5",
+    "function": "paused_call_only_refresh_observes_real_failed_execution_tails",
+    "count": 1,
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing paused_call_only_refresh_observes_real_failed_execution_tails occurrence; migrate with shared-read integration, no whole-file exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
@@ -1114,10 +1138,10 @@
   {
     "file": "tests/tui_recovery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "ab562ca33aa3512f0d4974e7eb2af82bca0a50f2b4854e3b06cd0f5a8d5bf30a",
+    "fingerprint": "8d862e7cf245429a60f4127d839a3c57c46b9fc6ba1237c49c904a586a32df32",
     "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
     "count": 1,
-    "reason": "Deferred #41/shared-read: existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
+    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons occurrence; migrate with shared-read integration, no whole-file exemption."
   },
   {
     "file": "tests/tui_recovery.rs",

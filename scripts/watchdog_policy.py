@@ -88,11 +88,26 @@ def test_scopes(root):
                     target = None
                 if target:
                     external.add(target)
-            opening = re.search('[;{]', rest)
-            if opening and opening[0] == '{':
-                start = attr.end() + opening.start()
-                end, _ = call(text, masked, start)
+            # A cfg(test) argument/field ends at its comma or closing paren;
+            # it must not accidentally mark the following production function.
+            item = re.match(r"\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|unsafe|const)\s+)*(?:fn|mod|impl|struct|enum)\b", rest)
+            if item:
+                opening = re.search(r"[;{]", rest)
+                boundary = attr.end() + opening.start() if opening else len(masked)
+            else:
+                boundary = attr.end()
+                depth = 0
+                while boundary < len(masked):
+                    token = masked[boundary]
+                    if depth == 0 and token in ";{},)": break
+                    if token in "([": depth += 1
+                    elif token in ")]": depth -= 1
+                    boundary += 1
+            if boundary < len(masked) and masked[boundary] == "{":
+                end, _ = call(text, masked, boundary)
                 spans.append((attr.start(), end + 1))
+            else:
+                spans.append((attr.start(), boundary))
         if spans:
             files[p] = spans
     while external:

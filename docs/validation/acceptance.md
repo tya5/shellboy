@@ -3804,13 +3804,13 @@ it is now loaded once per integration harness. No test timeout suppression,
 automatic retry, reduced assertion or production timer patch hides those failures.
 
 scripts/check-test-layout.py runs the watchdog policy on all native CI jobs and
-both standard check scripts. Its six Python tests cover short/long raw guards,
+both standard check scripts. Its seven Python tests cover short/long raw guards,
 production exclusion, nested/platform test modules, path overrides, aliases,
 comments/raw strings, manual deadlines, and exact allowance growth/staleness.
 The checker is lexical, not a full Rust macro expander. The committed reason list
 pins existing file/function/fingerprint counts; copying a deferred timeout adds
 an unapproved occurrence, and deleting one requires removing its stale allowance.
-At the current snapshot132 #41-owned occurrences are deliberately deferred and14
+At the current snapshot134 #41-owned occurrences are deliberately deferred and14
 intentional helper/virtual-clock/non-gating workload occurrences remain allowed.
 This is not a claim that #41's legacy short waits are already migrated. The
 initial #41 diff did not include src/frontend/control_tests.rs; a later read-only
@@ -3821,3 +3821,27 @@ All database/process/provider fixtures use disposable data and local mocks. No
 paid API, user configuration, installed binary, live owner, schema/worker/queue or
 new package is used. Successful local checks do not replace the required two
 three-OS manual branch CI runs and the final main gate.
+
+
+### Rebased D2 and admission facts
+
+The branch rebased onto main4a6b839, including D2's shared readers. Only appended
+status/acceptance sections conflicted; the complete upstream histories were kept
+before #77's sections. The exact deferred allowance inventory was reinspected
+against the integrated #41 sources:134 deferred occurrences plus14 deliberate
+exceptions. A new parser regression prevents cfg(test) arguments/parameters from
+incorrectly capturing the following production function. Production-token audit
+(excluding test scopes) found no differences in31 changed src files; the remaining
+src/lib.rs change is only the cfg(test) shared module registration.
+
+One all-target run exposed a fixture mistake in the observer-cancellation
+migration: polling a spawned JoinHandle as pending does not prove its inner owned
+worker has been admitted (receipt count0 instead of1). The unchanged substantive
+fixture/assertions now live in control::ipc_admission_tests, where it can inspect
+existing private active-request/admission-closed facts without a new production
+hook. It waits for admission before dropping observation and for shutdown closure
+before releasing the blocked DB, then verifies exactly1 receipt and no live
+Run/active Turn. The focused test passes. This is not a weakened count assertion
+or another scheduling delay. The original integration test was moved, not copied
+or dropped. The source checker also rejected an injected1ms test timeout in a new
+support file; the temporary poison file was removed after that failure check.

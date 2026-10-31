@@ -40,6 +40,17 @@ class WatchdogPolicyTests(unittest.TestCase):
         })
         self.assertEqual(len(check(root, [])), 1)
 
+    def test_cfg_arguments_and_parameters_do_not_capture_production_bodies(self):
+        root = self.fixture({'src/lib.rs': """
+async fn production(#[cfg(test)] value: Option<()>) {
+ let deadline = Instant::now() + Duration::from_secs(5);
+ timeout(product_budget, network()).await;
+}
+fn caller() { production(#[cfg(test)] None,); }
+#[cfg(test)] async fn test_only() -> Result<(), E> { timeout(x, f()).await; }
+"""})
+        self.assertEqual(len(check(root, [])), 1)
+
     def test_comments_raw_strings_and_character_literals_do_not_create_findings(self):
         root = self.fixture({'tests/data.rs': '''
 // timeout(x, f());

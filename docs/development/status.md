@@ -1487,7 +1487,7 @@ Five native force-kill milestones exercise saved-result retention, uncommitted
 rollback, interrupted/not-started repair and idempotent reopen. Unix SIGKILL was
 qualified locally; the Windows Job-object path awaits native branch CI.
 The standard layout gate now runs the lexical test deadline policy and its
-reasoned, fingerprint/count-bounded allowance list.132 existing occurrences in
+reasoned, fingerprint/count-bounded allowance list.134 existing occurrences in
 #41-owned files remain deferred, not fixed;14 deliberate shared-guard, injected
 clock or non-gating measurement occurrences are documented separately. #41 was
 notified; only minimal cfg(test) lib-module wiring overlaps its current files.
