@@ -1407,26 +1407,73 @@ async fn running_shell_publication_has_a_registered_foreground_receiver() {
 
 #[tokio::test]
 async fn successful_attempt_admission_notifies_after_preparing_browser_read_without_headers() {
-    let (_root,owner,control,accepted)=fixture("http://127.0.0.1:1/v1").await;
-    let snapshot=ready(&control,&accepted).await;
-    let target=snapshot.turn.clone();
-    let before: String=control.store.database.call(move|db|Ok(db.query_row("SELECT state FROM turn WHERE id=?1",[target],|r|r.get(0))?)).await.unwrap();
-    assert_eq!(before,"preparing","fixed first browser-read boundary before admission");
-    let prepared=Arc::new(control.attachments.prepare_at_revision(&accepted.thread_id,CancellationToken::new(),false,snapshot.selection).await.unwrap());
-    let mut events=control.subscribe();
-    assert!(admit_attempt(&control,&snapshot,"notified-admission",prepared.clone(),0,0).await.unwrap());
-    let target=snapshot.turn.clone();
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let snapshot = ready(&control, &accepted).await;
+    let target = snapshot.turn.clone();
+    let before: String = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row("SELECT state FROM turn WHERE id=?1", [target], |r| r.get(0))?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        before, "preparing",
+        "fixed first browser-read boundary before admission"
+    );
+    let prepared = Arc::new(
+        control
+            .attachments
+            .prepare_at_revision(
+                &accepted.thread_id,
+                CancellationToken::new(),
+                false,
+                snapshot.selection,
+            )
+            .await
+            .unwrap(),
+    );
+    let mut events = control.subscribe();
+    assert!(
+        admit_attempt(
+            &control,
+            &snapshot,
+            "notified-admission",
+            prepared.clone(),
+            0,
+            0
+        )
+        .await
+        .unwrap()
+    );
+    let target = snapshot.turn.clone();
     let after:(String,String)=control.store.database.call(move|db|Ok(db.query_row("SELECT u.state,a.state FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.id=?1",[target],|r|Ok((r.get(0)?,r.get(1)?)))?)).await.unwrap();
-    assert_eq!(after,("running".into(),"inflight".into()));
+    assert_eq!(after, ("running".into(), "inflight".into()));
     // No HTTP is started, so headers, model failure, periodic refresh or a later
     // user event cannot repair a missing committed-state notification.
-    let mut changed=0;
-    while let Ok(event)=events.try_recv() {
-        if matches!(event,EngineEvent::Changed {thread_id,..} if thread_id==accepted.thread_id) {changed+=1;}
+    let mut changed = 0;
+    while let Ok(event) = events.try_recv() {
+        if matches!(event,EngineEvent::Changed {thread_id,..} if thread_id==accepted.thread_id) {
+            changed += 1;
+        }
     }
-    assert_eq!(changed,1,"admission completion must notify observers that already consumed preparing");
-    let mut stale=(*snapshot).clone();stale.selection+=1;
-    assert!(!admit_attempt(&control,&stale,"rejected-admission",prepared,0,0).await.unwrap());
-    assert!(events.try_recv().is_err(),"uncommitted/rejected admission must not mint a change");
-    drop(stale);drop(snapshot);close(control,owner).await;
+    assert_eq!(
+        changed, 1,
+        "admission completion must notify observers that already consumed preparing"
+    );
+    let mut stale = (*snapshot).clone();
+    stale.selection += 1;
+    assert!(
+        !admit_attempt(&control, &stale, "rejected-admission", prepared, 0, 0)
+            .await
+            .unwrap()
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "uncommitted/rejected admission must not mint a change"
+    );
+    drop(stale);
+    drop(snapshot);
+    close(control, owner).await;
 }
