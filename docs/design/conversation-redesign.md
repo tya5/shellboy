@@ -167,9 +167,11 @@ where an empty value can be discovered. The list explains that it runs the same
 operations as the CLI and shows the selected CLI syntax; the form shows that
 operation's explanation/effect, replacing generic prepared/request wording.
 
-Prove a complete mapping between catalogue operations and executable CLI leaves,
-including standalone docs/RAG and attach shorthand; parser help/version and UI
-launch are not operation leaves. Do not hide missing commands by testing only the
+Prove a complete mapping between catalogue operations and executable CLI paths,
+including standalone docs/RAG, attach shorthand, and executable parents with
+optional subcommands (compact itself as well as compact list). Enumerate these
+from the current clap command tree; parser help/version and UI launch are not
+operations. Do not hide missing commands by testing only the
 old OpKind.ALL inventory. Introduce no successful stub for an unsupported form.
 
 Section headings are separate nonselectable rows, visually distinct from actions.

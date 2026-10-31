@@ -2597,3 +2597,18 @@ The [G1–G12 admission ledger](issue-41-plan.md#g-standalone-admission-ledger-o
 tracks scope/extraction/current evidence.6543753689 cancels waiting for #87;
 later integration reconciles overlaps. P6 times are observations only. Archive
 staged/unstaged work is preserved, not bulk-merged. G remains unqualified.
+
+
+## G1 catalogue foundation, before runtime form wiring
+
+Extracted the ordinary typed catalogue and current-clap parity tests from the
+preserved archive. Current61 operations/62 executable spellings include both
+compact and compact list, shell list, status memory, usage periods and wait after.
+Native targeted catalogue tests:8 passed/0 failed, with no ignored tests or
+compiler warnings in the final run. The initial6-test run passed with two unused
+marker warnings; explicit effect-marker vocabulary coverage removes those gaps.
+Only the test build registers the metadata at this boundary; G2 will connect the
+runtime forms. No successful unsupported operation or delivered-G claim is made.
+No full-standard/native-form/CI qualification is claimed for this foundation.
+#100 overlap notice6544035614 records later popup/overlay/frontend seams; retain
+its subsequent F-based fix. G remains independent and unqualified.

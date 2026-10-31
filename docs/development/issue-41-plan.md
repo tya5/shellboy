@@ -711,7 +711,7 @@ units below; names describe scope, not a new engine/framework.
 
 | ID / review unit | Retained requirement | Current state / required evidence |
 | --- | --- | --- |
-| G1 catalogue | One typed catalogue for meanings/effects/CLI identity/terms; nonselectable headings and effect markers before forms; cache filtered rows on changes | Open. Extract archive metadata; enumerate executable parents plus leaves against current clap, including compact/list, shell/list, sender/config/summary settings. Do not merely adjust an old fixed count. |
+| G1 catalogue | One typed catalogue for meanings/effects/CLI identity/terms; nonselectable headings and effect markers before forms; cache filtered rows on changes | Metadata foundation now extracted and updated:61 operations/62 spellings match current clap, including executable compact plus compact list and every option/default/choice. Eight targeted catalogue tests pass. Runtime UI wiring, nonselectable headings/effects and full G evidence remain open. |
 | G2 owner forms | Complete typed owner commands, required-ID discovery, explicit defaults/effects/confirmation; Enter labels match read/execute/send | Open. Reuse actual clients/handlers; operation-to-CLI/effect/input-ownership tests and native form observations. |
 | G3 standalone forms | docs/config/RAG/exec and attach shorthand share catalogue and exact current CLI fields | Open. Typed builders, real CLI parity/validation, no subprocess parser or generic DSL. |
 | G4 popup interaction | Wheel only top painted popup; outside/edge/no-op and F2 do not dirty history; stable original/copy identities; bounded revision/width wrapping cache | Open. Reconcile current main; actual ownership/cache/scroll tests, old source is not proof. |

@@ -25,6 +25,9 @@ mod json_pointer;
 pub mod memory;
 pub mod model;
 pub mod owner_session;
+// G1 metadata is qualified before the G2 runtime form wiring.
+#[cfg(test)]
+mod operations;
 pub mod presentation;
 pub mod program_status;
 pub mod protocol;
