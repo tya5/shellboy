@@ -5948,3 +5948,20 @@ ownership is preserved. No actual provider or user DB mutation was performed.
 fmt/strict Clippy/policy and bin build pass on checked source3817003/base66d2746.
 Fixture compile corrections add the optional snapshot field and use current
 Control::new; no production scheduling/order/timeout change. Full evidence in#102.
+
+### #102 post-review qualification scope
+
+The owned macOS chain `41eadd51-1a25-441b-881d-210b2ceabb24` qualified source
+`6b8c0c818628bd8724eee5c0b8c06d6b2ef03bec` on base
+`bc9582d531240b4b1715b398c37d50a0e6d25500`: targeted footer test,
+`sh scripts/check.sh`, and `cargo build --locked --bin shellboy` all passed
+with `CARGO_BUILD_JOBS=2` and `RUST_TEST_THREADS=2`. It exited 0 and released
+at 2026-10-31T17:06:27Z, with process-group cleanup confirmed. This supersedes
+neither preserved historical source records nor native cross-OS qualification.
+
+The subsequent review correction omits damaged auxiliary wait witnesses and adds
+`damaged_wait_witness_does_not_block_run_get_or_projection` (eight cases).
+Only formatting and `git diff --check` have run for that correction; the new
+regression and standard check await the next allocated gate. The preceding
+full/bin result does not qualify this changed source. No additional Rust/bin,
+PTY, quiet chain, installed binary change, provider call or user DB mutation ran.

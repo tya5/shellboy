@@ -533,6 +533,8 @@ read-only saved-fact projection, not a new lifecycle state, timeout, background-
 shell wait policy or worker. Run get and selected activity share one projection;
 operation identity/action/accepted time are facts, not elapsed lock-acquisition
 measurements. Completion/cancellation removes the same saved inflight witness,
-so stale reasons cannot outlive it. Invalid queue/receipt facts must not be
-silently presented as a known reason. Queue admission wakes the existing selected
+so stale reasons cannot outlive it. Missing or invalid queue/receipt/action facts
+omit the auxiliary reason without failing Run get or selected activity; SQL errors
+still propagate. Invalid facts must not be presented as a known reason.
+Queue admission wakes the existing selected
 read; clock ticks do not issue extra DB work. Detailed reproduction is in#102.

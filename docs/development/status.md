@@ -2726,3 +2726,12 @@ virtual-clock and malformed/terminal tests are written but not yet compiled.
 Targeted saved-wait/virtual-clock/footer/gated-SSE cases and final standard/bin
 qualification pass on main66d2746. Review/merged-source CI remain coordinator
 gates; actual source/result and fixture corrections are recorded in#102.
+
+### #102 review correction: auxiliary witness damage
+
+Missing/malformed inflight metadata, receipts, or action facts now omit only
+`waiting_reason`; SQL failures still propagate. One table-driven regression
+checks Run get's shared `run_details` result/JSON and selected activity projection
+for eight damaged/missing witness cases. No boundary ordering or source mutation
+was added. Review correction is formatted and diff-checked; its Rust regression
+and standard check are deferred to the next allocated gate, not claimed passed.

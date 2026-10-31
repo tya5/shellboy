@@ -1,5 +1,5 @@
 //! Current safe-boundary ownership from existing protected compaction metadata.
-use crate::protocol::{ApiError, ErrorCode, RunWaitReason};
+use crate::protocol::{ApiError, RunWaitReason};
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub(crate) fn read(
@@ -16,36 +16,24 @@ pub(crate) fn read(
         return Ok(None);
     };
     let (Some(count), Some(operation_id)) = row else {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Malformed saved context-edit wait witness",
-        ));
+        return Ok(None);
     };
     if count < 1 || operation_id.len() > 1024 {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Invalid saved context-edit wait witness",
-        ));
+        return Ok(None);
     }
     let saved: Option<(String,Option<String>)>=db.query_row(
         "SELECT created_at, CASE WHEN json_valid(result_ref_json) THEN CASE WHEN json_type(result_ref_json,'$.result.context_edit') IS NULL THEN 'compact' WHEN json_type(result_ref_json,'$.result.context_edit.action')='text' THEN json_extract(result_ref_json,'$.result.context_edit.action') ELSE 'invalid' END ELSE 'invalid' END FROM operation_receipt WHERE operation_id=?1",
         [&operation_id],|r|Ok((r.get(0)?,r.get(1)?)),
     ).optional().map_err(super::error)?;
     let Some((accepted_at, action)) = saved else {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Context-edit wait receipt unavailable",
-        ));
+        return Ok(None);
     };
     let action = action.unwrap_or_else(|| "compact".into());
     if !matches!(
         action.as_str(),
         "summary" | "spill" | "trim" | "omit" | "restore" | "maximal" | "compact"
     ) {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Invalid saved context-edit wait action",
-        ));
+        return Ok(None);
     }
     Ok(Some(RunWaitReason {
         kind: "context_edit_boundary".into(),
@@ -94,19 +82,30 @@ mod tests {
         assert!(read(&db, "t", "r").unwrap().is_none());
     }
     #[test]
-    fn malformed_witness_and_missing_receipt_are_not_guessed() {
-        let db = fixture();
-        db.execute(
-            "UPDATE app_meta SET value='bad' WHERE key='compact.inflight.t'",
-            [],
-        )
-        .unwrap();
-        assert!(read(&db, "t", "r").is_err());
-        db.execute(
-            "UPDATE app_meta SET value='[\"missing\"]' WHERE key='compact.inflight.t'",
-            [],
-        )
-        .unwrap();
-        assert!(read(&db, "t", "r").is_err());
+    fn damaged_wait_witness_does_not_block_run_get_or_projection() {
+        for damage in [
+            "DELETE FROM app_meta",
+            "UPDATE app_meta SET value='bad'",
+            "UPDATE app_meta SET value='[]'",
+            "UPDATE app_meta SET value='[\"missing\"]'",
+            "DELETE FROM operation_receipt",
+            "UPDATE operation_receipt SET result_ref_json='bad'",
+            "UPDATE operation_receipt SET result_ref_json='{\"result\":{\"context_edit\":{}}}'",
+            "UPDATE operation_receipt SET result_ref_json='{\"result\":{\"context_edit\":{\"action\":\"unknown\"}}}'",
+        ] {
+            let db = fixture();
+            db.execute_batch(damage).unwrap();
+            let run = crate::control::db::run_details(&db, "r").unwrap();
+            assert!(run.waiting_reason.is_none(), "{damage}");
+            assert!(
+                serde_json::to_value(run)
+                    .unwrap()
+                    .get("waiting_reason")
+                    .is_none(),
+                "{damage}"
+            );
+            let projection = crate::frontend::activity::project(&db, "t").unwrap();
+            assert!(projection.snapshot.waiting_reason.is_none(), "{damage}");
+        }
     }
 }
