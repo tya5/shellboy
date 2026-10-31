@@ -82,7 +82,7 @@ def main():
                         'default_connection="visual"\ndefault_model="offline-fixture"\n'
                         '[connections.visual]\n'
                         f'base_url="http://127.0.0.1:{server.server_port}/v1"\n'
-                        f'[ui]\npalette="{palette}"\nbell=false\n')
+                        f'[ui]\ncopy_backend="osc52"\npalette="{palette}"\nbell=false\n')
                     terminal = capture.Terminal(binary, root, cols, palette, term, no_color)
                     observations = []
 

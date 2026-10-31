@@ -9,6 +9,13 @@ reuse only; Windows retains the original single job/four test threads. Rejected
 split experiments and #95 failures are retained in acceptance. Native unsplit
 qualification and live main-push reuse remain pending on the reuse-only source.
 
+## Shared owner bootstrap (#5 stage 1)
+
+Owner assembly and partial-startup cleanup now live in `owner_session`, outside
+the TUI frontend. The existing TUI adapter, cancellation and delivery tests move
+with their implementation. No headless command or shutdown behavior is added
+in this structural stage. Stage evidence and integration are tracked in #5.
+
 ## Explicit usage-limit recovery (#76)
 
 Known future usage-limit resets now bypass automatic resend/reduction and enter
@@ -2325,3 +2332,17 @@ The combined Watch module passes12 focused tests, including both regressions
 at80/140 columns and Home/End/Page navigation. The first compile emitted an
 unused doc-comment warning; the comment now annotates its intended helper.
 The standard check for the final source remains pending.
+## Reusable developer record checker (#94.1)
+
+The standard-library record-delta tool emits one JSON line for baseline/current
+record lengths and additions/deletions. It fails closed on removed lines or
+unreadable inputs, without fetching or editing records. Usage is in setup;
+Python fixture validation and the scripts-only scope are in acceptance.
+
+## Shared disposable PTY helper (#94.2)
+
+Reusable standard-library transport/VT cells replace the #84 inline Terminal
+and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
+key actions and loopback-only configuration. Native captures and replay are used
+immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
+This is developer tooling only; product Rust, schema and workflows are unchanged.

@@ -5000,3 +5000,106 @@ and combined-consumer P3 observations are maintained in
 [the F qualification record](conversation-redesign-f.md). Discarded shared-target
 evidence is kept separate from the isolated950c9ed success. Main admission
 still requires the latest combined source gates and reviewer approval.
+## Developer record-delta helper (#94.1)
+
+2026-10-31, native macOS ARM64/Python3.12. The standard-library-only helper uses
+Git's line-change semantics, including staged/unstaged changes, explicit refs
+and worktrees, and produces one compact JSON result. Disposable Git fixtures
+cover unchanged/additive records, middle insertions, same-count replacements,
+deletions, missing/binary records, missing baseline paths, option-shaped invalid
+refs and inherited Git routing. Seven new tests pass within the 25-test Python
+suite. CLI help, py_compile, integration-layout/watchdog checks and diff checks
+pass. The helper is immediately used on this task and the #91 worktree.
+No Rust/product changes or build are needed per the user's scripts-only scope;
+sh scripts/check.sh and native CI are not claimed. CI/integration is delegated
+to worker4; no CI dispatch/main merge/issue close occurs here. #94.2 PTY capture
+and #94.3 batch replacement remain separate subsequent changes. Native Windows
+and Linux execution and the multi-day token/time reduction are not yet measured.
+
+Rebase repair: #94.1 now sits on main9b4ae34 (#92) on a separate branch, without
+force-pushing the original submission. The setup conflict retains both the
+upstream batched/exact-SHA CI reuse section and the record-helper usage section.
+The helper/test source is unchanged from 5bf85f3. The rebased scripts-only checks
+pass again: Python25, layout94/watchdog, help, py_compile, diff and self-use record
+retention. Evidence: /tmp/issue-94-1-repair-tests.log and
+/tmp/issue-94-1-repair-record-delta.json. Rust/native CI are not newly claimed.
+
+## Standard-library disposable PTY helper (#94.2)
+
+2026-10-31, macOS26.3.1(a)/ARM64, Python3.12.7. The extracted #84 transport now
+uses a bounded standard-library cell decoder rather than pyte. On base5fc5cc0,
+32 Python tests pass: the 18 existing tests plus 14 VT/frame/config/CLI/Unix-child
+checks. Coverage includes split UTF-8/escape sequences, CJK/combining/ZWJ cells,
+indexed/RGB colors, alternate screen/wrap, cluster/output bounds, OSC52/hyperlink
+removal, unsupported operations, explicit OSC52/no-auth loopback preflight,
+minimal child environment, scratch argument paths, normal cleanup, replay,
+output overwrite refusal, and rejection of image/raw-key actions before spawn.
+Live Unix cases are skipped on Windows; portable replay/cell tests remain active.
+
+No Rust build is run: validation reuses the existing #91 candidate binary
+1e3b3be21c2787a8025c347ecba6ea5054a2441815155e9a3861d035222e9e42
+and its matching visual_fixture. The extracted #84 driver passes eight sessions
+and 80 completed screens across 80/140 columns x dark/light/NO_COLOR/vt100;
+each session makes its one explicit synthetic-loopback model request. An in-memory
+adapter binds #91's existing six-session band/canonical-copy fixture to the new
+transport; all six pass, including decoded OSC52 body/selection/original copy.
+It does not edit the #91 worktree or make pyte a new helper/test dependency.
+The CLI's live help capture and offline replay are immediately used in this task.
+A historical #83 80x36 static frame replays byte-for-text equal to its saved pyte
+cell text; that is replay evidence, not a new product/terminal run.
+
+Failed observations are retained: an initial test syntax error was fixed; a live
+help wait for /copy timed out because that text was below the visible help page,
+so the example now waits for its actual modal footer. The first adapter import
+lacked the old fixture_safety module path and was corrected. A live legacy #83
+row assertion expected the old human-looking mark while the reused #91 binary
+renders external input as its provisional distinct mark; that run is not called
+a passing main-baseline row-vocabulary test. The old static-frame replay and
+#91-specific fixture validate the shared decoder separately without weakening
+the legacy row assertion or rebuilding Rust.
+
+Evidence: /tmp/issue-94-2-tests-final-pre.log, /tmp/issue-94-2-paste-final/,
+/tmp/issue-94-2-bands-2/, /tmp/issue-94-2-live-final.json,
+/tmp/issue-94-2-replay-final.json, /tmp/issue-94-2-old-row-replay.json.
+py_compile, integration-layout/watchdog checks and git diff --check pass. The
+#94.1 record-delta tool checks these records. Product changes and sh scripts/check.sh
+are deliberately not run for this scripts-only stage per the user; no local CI
+job dispatch, main integration or issue closure occurs. Three-OS CI belongs to
+worker4. Full VT/emoji/font/IME/ConPTY/physical terminal fidelity and the multi-day
+aggregate token/time reduction are not established by these checks.
+
+Combined #94.1/#94.2 qualification: retain main9b4ae34, then #94.1@661de822 and
+rebase the submitted #94.2 onto it on a new branch. All setup/status/acceptance
+conflicts retain both submissions, including the #94.1 rebase note. The two
+helpers/tests are byte-for-byte unchanged from their separate qualified SHAs;
+product, manifests and workflow source are unchanged from main9b4ae34. Combined
+Python39 tests, layout94/watchdog, py_compile, both helps, record-retention and
+diff checks pass. Immediate live help and completed-frame replay pass again
+with the existing #91 debug binary; no Rust build or paid provider is used.
+Evidence: /tmp/issue-94-combined-tests.log, /tmp/issue-94-combined-record-delta.json,
+/tmp/issue-94-combined-live.json and /tmp/issue-94-combined-replay.json. Native
+three-OS CI and integration remain delegated to worker4; old branches are not
+force-pushed. This qualifies combined scripts, not physical terminal/ConPTY or
+universal VT/font behavior; the earlier failed observations remain recorded.
+## #5 stage 1: shared owner bootstrap structural evidence
+
+2026-10-31, native macOS arm64. The former frontend startup module moves intact
+into `src/owner_session.rs`; only its module-title comment and visibility of
+`initialize_reporting` change. A byte comparison after those two substitutions
+confirms all function bodies and test fixtures are unchanged. TUI call sites
+change module paths; no RPC, signal, environment, runtime or shutdown policy is
+added in this stage. No new table, worker, queue or request channel is added.
+
+The complete moved module is 285 lines before and after. Across changed Rust
+files there are 7 inserted and 7 deleted lines (net zero), including moving the
+module declaration. Argument counts are unchanged: initialize_reporting 4,
+initialize 4, close 3, deliver 2, Prepared::shutdown 1 including self; all other
+functions are identical. Three existing tests move with the module: cancellation
+at database preparation, abandoned ready delivery, and recovery failure cleanup.
+
+Validation commands are `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=4 sh scripts/check.sh`
+and the separate `test_validation_documents.py` unittest discovery. Exact-source
+results, final SHA, record-line audit and integration status are tracked in #5;
+this structural evidence alone is not an unrun native-OS test result. serve,
+shutdown RPC, shared signal observation and real headless child-process tests
+remain later stages. User data, installed owner/binary and releases are untouched.

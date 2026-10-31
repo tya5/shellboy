@@ -32,7 +32,6 @@ mod refresh;
 mod selection;
 #[cfg(test)]
 pub(crate) mod sql_trace;
-pub mod startup;
 #[cfg(test)]
 pub(crate) mod stream_metrics;
 mod streaming;

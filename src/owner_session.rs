@@ -1,4 +1,4 @@
-//! TUI bootstrap and safe cancellation using existing async/DB/file workers.
+//! Owner bootstrap and safe cancellation using existing async/DB/file workers.
 use crate::{
     app::{DataOwner, StartupStage},
     control::Control,
@@ -56,7 +56,7 @@ pub async fn initialize(
 
 // Keep reporting observational. Tests can cancel synchronously at a stage
 // without treating a coalescing watch notification as DB-worker admission.
-async fn initialize_reporting(
+pub async fn initialize_reporting(
     config: Option<PathBuf>,
     data: Option<PathBuf>,
     cancel: CancellationToken,
