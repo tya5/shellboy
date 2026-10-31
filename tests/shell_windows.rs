@@ -4,8 +4,7 @@ use shellboy::{
     protocol::{ShellState, ShellToolArgs},
     shell::*,
 };
-use std::{collections::BTreeMap, time::Duration};
-use tokio::time::timeout;
+use std::collections::BTreeMap;
 fn config() -> Config {
     let mut c = Config::default();
     c.shell.kind = ShellKind::Powershell;

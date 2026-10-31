@@ -3845,3 +3845,16 @@ Run/active Turn. The focused test passes. This is not a weakened count assertion
 or another scheduling delay. The original integration test was moved, not copied
 or dropped. The source checker also rejected an injected1ms test timeout in a new
 support file; the temporary poison file was removed after that failure check.
+
+
+### First native candidate observations
+
+Candidate c2a5c9e passes the rebased local standard check:1852 passed/0 failed/
+32 ignored, layout93, Python16, fmt/strict Clippy. Manual branch runs41156089976
+and41156092253 both passed macOS/Linux but failed Windows Clippy before Tests:
+old Duration and timeout imports remained in Windows-only tests/shell_windows.rs.
+These are #77 migration errors, not flaky timeouts; both imports are removed.
+Neither failed run counts toward the required two all-OS successful observations.
+Azure log download temporarily returned503 ServerBusy/egress limits; a later
+job-log read confirmed the exact unused imports. No job/test retry hid the errors.
+Native Windows runtime/Job-object execution still requires the corrected gates.
