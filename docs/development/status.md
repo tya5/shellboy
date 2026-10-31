@@ -10,6 +10,13 @@ native/process cleanup instead of requiring log presence. No production shell
 or lifeline ordering, timeout, retry or assert-on-durable-result is relaxed.
 Exact-source native CI and integration results are tracked in issue #89.
 
+## Shell metadata palette follow-up (#83)
+
+The shared row table now chooses muted routine shell metadata versus attention
+for failure/nonzero exits/cancellation. Static headers and cached live seconds
+share that rule, with unchanged NO_COLOR metadata. Native 80-column PTY checks
+cover dark/light/plain/fallback; evidence and limits are recorded in acceptance.
+
 ## On-demand owner memory (#80)
 
 CLI status --memory returns existing body/layout/attachment/replay cache accounting

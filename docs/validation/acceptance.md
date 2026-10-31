@@ -4253,3 +4253,31 @@ Python 18, fmt and strict all-target Clippy. The document-role test passes
 separately. Status adds 10 lines and deletes 0; this qualification appends its
 record without deleting prior evidence. Rebase/pre-push validation is repeated
 on the exact candidate; native branch CI must pass before main integration.
+
+## 2026-10-31 shell metadata palette follow-up (#83)
+
+- User-requested separate change before #81. `rows.rs` owns right-hand metadata
+  color: the existing palette muted role for routine facts, existing attention
+  role for failure/nonzero exits/cancellation, previous Reset under NO_COLOR.
+  Both compact headers and live-seconds painting use it. No text, identity,
+  source/layout, persistence, protocol or theme configuration changes.
+- macOS 26.3.1 (a), arm64 debug: standard check passes 1,889 Rust tests,
+  33 ignored, zero failed; layout 93 suites, Python 18, fmt/strict Clippy pass.
+  New tests cover all row kinds, dark/light/plain metadata spans, stable text
+  and live elapsed-color painting.
+- Actual Unix PTY plus pyte and synthetic loopback SSE: 80 columns, dark/light/
+  NO_COLOR/vt100, four candidate sessions with 36 completed scenes. Normal
+  metadata uses #8a8a8a/#4e4e4e in dark/light, attention remains #ff0000.
+  Live background elapsed seconds are muted. Candidate NO_COLOR shell-row
+  visible cells/foreground/background equal an independent baseline owner.
+  Baseline is the pre-follow-up binary built for #81 at `1610b3b`; its Rust
+  sources equal reviewed main `0ca4ec5` (guide-only differences).
+- PTY driver failures are preserved: initial attention expectation used a
+  symbolic ANSI name instead of pyte's indexed RGB value; next comparisons
+  exposed empty orphan-stub versus space representation. Corrected the driver
+  to compare displayed blank cells without relaxing color/nonblank checks.
+  Final independent rerun succeeds; failures are not counted as passing scenes.
+- Evidence: `/tmp/issue-83-metadata-check.log`, `-build.log`, `-pty-v4.log`,
+  `/tmp/issue-83-metadata-pty-v4/` (screens, raw, cell-color JSON and results).
+  Physical-terminal/font readability, IME, OS clipboard and Windows ConPTY
+  remain unverified; this small color-only change does not rerun P1.

@@ -109,6 +109,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ("visual-scroll-wrap", "スクロール・日本語の折り返し", vec![
                 ("assistant_response", answer(&(1..=40).map(|i| format!("P{i:03} 日本語の折り返し位置を確認します。幅が変わっても、ホイールは文字数ではなく実際に表示される行で動きます。絵文字🙂と結合文字e\u{301}も含めます。")).collect::<Vec<_>>().join("\n\n"))),
             ]),
+            ("visual-shell-metadata", "Shell metadata palette fixture", vec![
+                ("tool_result", json!({"item":{"type":"function_call_output","call_id":"metadata-success","output":json!({"command":"METADATA_SUCCESS","status":"exited","exit_code":0,"elapsed_ms":12400}).to_string()}})),
+                ("tool_result", json!({"item":{"type":"function_call_output","call_id":"metadata-nonzero","output":json!({"command":"METADATA_NONZERO","status":"exited","exit_code":7,"elapsed_ms":12400}).to_string()}})),
+                ("tool_result", json!({"item":{"type":"function_call_output","call_id":"metadata-failed","output":json!({"command":"METADATA_FAILED","status":"failed","elapsed_ms":12400}).to_string()}})),
+                ("tool_result", json!({"item":{"type":"function_call_output","call_id":"metadata-cancelled","output":json!({"command":"METADATA_CANCELLED","status":"cancelled","elapsed_ms":12400}).to_string()}})),
+            ]),
             ("visual-row-kinds", "Row vocabulary synthetic fixture", vec![
                 ("user", json!({"role":"user","content":"ROW_FIXTURE_USER"})),
                 ("summary", json!({"source_node_ids":["visual-row-kinds-node-0"],"item":{"role":"developer","content":"ROW_FIXTURE_SUMMARY"}})),

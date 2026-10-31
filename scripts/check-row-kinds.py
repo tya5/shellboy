@@ -57,6 +57,8 @@ def main():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--columns", type=int, nargs="+", default=[80, 140])
+    parser.add_argument("--metadata-baseline", type=Path)
     args = parser.parse_args()
     binary, fixture = args.binary.resolve(), args.fixture.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -64,7 +66,7 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     results = []
     try:
-        for cols in (80, 140):
+        for cols in args.columns:
             for palette, term, no_color in [("dark", "xterm-256color", False),
                                             ("light", "xterm-256color", False),
                                             ("dark", "xterm-256color", True),
@@ -99,6 +101,58 @@ def main():
                                        "UNKNOWN_OBSERVATION" in s)
                         assert all(mark in static for mark in ["›", "⬦", "⁂", "◌"])
                         assert "⁂ 通知" in static and "子の回答" in static
+                        terminal.send("/switch visual-shell-metadata\r")
+                        scene("shell-metadata", lambda s: all(f"METADATA_{kind}" in s for kind in
+                              ("SUCCESS", "NONZERO", "FAILED", "CANCELLED")))
+
+                        def metadata_cells(display):
+                            facts = {}
+                            for y in range(display.screen.lines):
+                                row = display.screen.buffer[y]
+                                text = "".join(row[x].data for x in range(cols))
+                                for kind in ("SUCCESS", "NONZERO", "FAILED", "CANCELLED"):
+                                    if f"METADATA_{kind}" not in text:
+                                        continue
+                                    # pyte may retain empty orphan stubs after a differential repaint;
+                                    # they display as blank cells, not different visible text.
+                                    cells = [(row[x].data or " ", row[x].fg, row[x].bg) for x in range(cols)]
+                                    while cells and cells[-1][0] == " ":
+                                        cells.pop()
+                                    facts[kind] = cells
+                            assert len(facts) == 4, facts
+                            return facts
+
+                        metadata = metadata_cells(terminal)
+                        muted = "default" if no_color or term == "vt100" else (
+                            "8a8a8a" if palette == "dark" else "4e4e4e")
+                        for kind, cells in metadata.items():
+                            expected = muted if kind == "SUCCESS" or no_color else "ff0000"
+                            assert cells[-1][1] == expected, (kind, cells[-1], expected)
+                        (out / "metadata-cells.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
+                        if no_color and args.metadata_baseline:
+                            with tempfile.TemporaryDirectory(prefix="shellboy-metadata-baseline-") as scratch_old:
+                                old_root = Path(scratch_old) / "fixture"
+                                subprocess.run([str(fixture), str(old_root)], check=True,
+                                               capture_output=True, timeout=capture.WATCHDOG_SECONDS)
+                                (old_root / "config.toml").write_text((root / "config.toml").read_text())
+                                previous = capture.Terminal(args.metadata_baseline.resolve(), old_root,
+                                                            cols, palette, term, no_color)
+                                try:
+                                    previous.expect(lambda s: "F1 help" in s, "baseline-ready")
+                                    previous.send("/switch visual-shell-metadata\r")
+                                    previous.expect(lambda s: "METADATA_CANCELLED" in s,
+                                                    "baseline-metadata")
+                                    old_metadata = metadata_cells(previous)
+                                    (out / "baseline-cells.json").write_text(json.dumps(old_metadata, ensure_ascii=False, indent=2))
+                                    differences = {kind: [(i, old, new) for i, (old, new) in
+                                                   enumerate(zip(old_metadata[kind], metadata[kind]))
+                                                   if old != new][:8] for kind in metadata}
+                                    assert old_metadata == metadata, ("NO_COLOR differs from baseline", differences)
+                                finally:
+                                    previous.close()
+                                    (out / "baseline.raw").write_bytes(previous.raw)
+                        terminal.send("/switch visual-row-kinds\r")
+                        scene("return-to-static", lambda s: "UNKNOWN_OBSERVATION" in s)
                         # The unavailable-tool visual scene is deliberately not
                         # valid model replay. Start a fresh synthetic conversation.
                         terminal.send("/new\r")
@@ -107,6 +161,15 @@ def main():
                         live = scene("background-and-foreground", lambda s: "ROW_FIXTURE_DONE" in s and
                                      "⏵ 背景" in s and "printf FAST_ONE" in s and "printf FAST_TWO" in s)
                         assert "▸ ROW_FIXTURE_BODY" in live
+                        live_color = None
+                        for y in range(terminal.screen.lines):
+                            row = terminal.screen.buffer[y]
+                            text = "".join(row[x].data for x in range(cols))
+                            if "⏵" in text and "背景" in text:
+                                occupied = [row[x] for x in range(cols) if row[x].data.strip()]
+                                live_color = occupied[-1].fg
+                        assert live_color == muted, (live_color, muted)
+
                         assert re.search(r"⏵.*背景.*\d+秒", live), live
                         rows = live.splitlines()
                         short = [i for i, line in enumerate(rows) if "printf FAST_" in line]
@@ -129,7 +192,7 @@ def main():
                         scene("notice-jump-open-tool", lambda s: "│ BACKGROUND_DONE" in s)
                         terminal.send(" \t")
                         scene("tool-closed-input", lambda s: "│ BACKGROUND_DONE" not in s and "F1 help" in s)
-                        results.append({"case": name, "observations": observations, "execution_id": execution})
+                        results.append({"case": name, "observations": observations, "execution_id": execution, "metadata_colors": {kind: cells[-1][1] for kind, cells in metadata.items()}})
                     except Exception:
                         (out / "failure.txt").write_text(terminal.text() + "\n")
                         raise

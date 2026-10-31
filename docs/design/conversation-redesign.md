@@ -593,6 +593,10 @@ Revisit, `▸` answer, `▹` request, `⏵` running, `◌` unavailable, `✓` su
 reserved for the #86 work-region heading. The old ambiguous-width `●`, `◇` and
 `◐` are not chosen. Distinct shapes plus labels work without color. Existing
 palette roles are reused; no new theme configuration or translation framework.
+Shell right-hand metadata uses the same table: ordinary exit/time facts use the
+active palette's muted role; failure/nonzero-exit and cancellation retain the
+attention role. Live elapsed painting shares this policy. NO_COLOR keeps the
+previous plain metadata appearance; marks, labels and layout do not change.
 
 Insert one nonselectable display blank between unlike body/tool/notice/
 replacement groups, including within mixed answer/tool nodes. Consecutive tools

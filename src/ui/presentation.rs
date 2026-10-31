@@ -1267,7 +1267,11 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     format!("{state}:{code:?}:{}", tool.requires_attention())
 }
 
-fn compact_tool_line(tool: &crate::presentation::ToolPresentation, width: u16) -> Line<'static> {
+fn compact_tool_line(
+    tool: &crate::presentation::ToolPresentation,
+    width: u16,
+    palette: theme::Palette,
+) -> Line<'static> {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
     let status = tool.current_state.as_deref().unwrap_or(&tool.status);
     let failed = tool.requires_attention();
@@ -1347,8 +1351,10 @@ fn compact_tool_line(tool: &crate::presentation::ToolPresentation, width: u16) -
         line.spans.push(Span::raw(" ".repeat(
             usize::from(width).saturating_sub(line.width() + right.width()),
         )));
-        line.spans
-            .push(Span::styled(right, Style::default().fg(theme::MUTED)));
+        line.spans.push(Span::styled(
+            right,
+            Style::default().fg(row_kind.metadata_color(palette)),
+        ));
     }
     line
 }
@@ -1652,7 +1658,7 @@ fn typed_history(
                         outcome,
                     };
                     let row_start = lines.len();
-                    let mut chunk = vec![compact_tool_line(tool, width)];
+                    let mut chunk = vec![compact_tool_line(tool, width, view.palette)];
                     // Canonical call URLs remain original link targets after
                     // compacting the visible command.
                     annotate_links(&mut chunk, &node.presentation.links, &mut links);
@@ -2130,7 +2136,10 @@ pub(super) fn paint_live_times(
         line.spans = vec![
             left,
             Span::raw(" ".repeat(padding)),
-            Span::styled(elapsed, Style::default().fg(view.palette.muted())),
+            Span::styled(
+                elapsed,
+                Style::default().fg(RowKind::Running.metadata_color(view.palette)),
+            ),
         ];
     }
 }
@@ -3758,6 +3767,39 @@ mod conversation_item_tests {
         );
     }
     #[test]
+    fn compact_shell_metadata_uses_shared_palette_without_changing_text() {
+        use crate::config::PaletteMode;
+        for (status, code, kind) in [
+            ("completed", Some(0), RowKind::Success),
+            ("exited", Some(7), RowKind::Failure),
+            ("failed", None, RowKind::Failure),
+            ("cancelled", None, RowKind::Cancelled),
+        ] {
+            let mut value = tool("metadata", status);
+            value.exit_code = code;
+            value.elapsed_ms = Some(12400);
+            let mut previous_text = None;
+            for mode in [PaletteMode::Dark, PaletteMode::Light] {
+                for no_color in [false, true] {
+                    let palette = theme::Palette::from_capabilities(mode, no_color, true);
+                    let line = compact_tool_line(&value, 80, palette);
+                    let right = line.spans.last().unwrap();
+                    assert!(right.content.ends_with("12.4秒"));
+                    assert_eq!(right.style.fg, Some(kind.metadata_color(palette)));
+                    let text = line
+                        .spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>();
+                    if let Some(previous) = &previous_text {
+                        assert_eq!(&text, previous);
+                    }
+                    previous_text = Some(text);
+                }
+            }
+        }
+    }
+    #[test]
     fn live_time_paints_from_saved_base_without_changing_layout_or_sources() {
         let now = std::time::Instant::now();
         let mut live = tool("live", "running");
@@ -3797,6 +3839,18 @@ mod conversation_item_tests {
             .join("\n");
         assert!(shown.contains("⏵ 背景（利用者）"), "{shown}");
         assert!(shown.contains("323秒"), "{shown}");
+        assert_eq!(
+            painted
+                .iter()
+                .find(|line| line.spans.last().is_some_and(|s| s.content == "323秒"))
+                .unwrap()
+                .spans
+                .last()
+                .unwrap()
+                .style
+                .fg,
+            Some(RowKind::Running.metadata_color(view.palette))
+        );
         assert!(
             plain(&lines).contains("経過未取得"),
             "cached rows must remain immutable"
