@@ -223,7 +223,7 @@ class ReplaceTests(unittest.TestCase):
     def test_custom_marker_allows_default_delimiters_as_literal_payload(self):
         before = '@@ with\n@@ end\n@@ replace: literal\n'
         after = r'''$HOME "double" 'single' \path\to\file \\ \n''' + '\n'
-        (self.root / 'a').write_text(before)
+        (self.root / 'a').write_bytes(before.encode('utf-8'))
         text = '%% replace: a\n' + before + '%% with\n' + after + '%% end\n'
         rules = edit.parse_blocks(text, '%%')
         self.assertEqual(rules, [rule('a', before, after)])
@@ -286,4 +286,15 @@ class ReplaceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertFalse(json.loads(result.stdout)['ok'])
         self.assertEqual((self.root / 'a').read_bytes(), b'A\r\n')
+        self.assert_no_stages()
+
+    def test_blocks_do_not_normalize_target_newlines(self):
+        (self.root / 'a').write_bytes(b'old\r\n')
+        lf = '@@ replace: a\nold\n@@ with\nnew\n@@ end\n'
+        with self.assertRaises(edit.MatchError):
+            edit.apply(edit.parse_blocks(lf), self.root)
+        self.assertEqual((self.root / 'a').read_bytes(), b'old\r\n')
+        crlf = '@@ replace: a\nold\r\n@@ with\nnew\r\n@@ end\n'
+        edit.apply(edit.parse_blocks(crlf), self.root)
+        self.assertEqual((self.root / 'a').read_bytes(), b'new\r\n')
         self.assert_no_stages()

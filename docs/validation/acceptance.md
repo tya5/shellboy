@@ -4936,3 +4936,15 @@ is immediately used to update its own setup example (custom %% permits literal
 /tmp/issue-94-blocks-help.txt. No user clipboard/config/data, provider, Rust build
 or installed binary is used in these scripts-only checks. Existing rollback and
 crash/concurrency limitations remain; they are not replaced by parser success.
+
+Windows CI repair: batch71960f9 run41192167865 failed
+ReplaceTests.test_custom_marker_allows_default_delimiters_as_literal_payload;
+Linux/macOS passed. The fixture used write_text on LF payload text, which uses
+platform newline conversion on Windows, while the parsed before string stayed LF.
+The fixture now writes explicit UTF-8 bytes. Exact matching/parser/product behavior
+is not weakened or changed. A portable regression proves LF does not match a
+CRLF target, leaves it intact, and an exact CRLF block then succeeds. Python64
+passes locally; py_compile/layout/watchdog/diff/record-retention pass. Windows
+success requires a new CI run and is not claimed from this macOS result.
+Evidence: /tmp/issue-94-crlf-tests.log. This supersedes 7115399 as well as the
+older JSON-only b2c5b186; it is independent of #91 B's passing-parent repair.
