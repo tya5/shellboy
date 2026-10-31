@@ -74,6 +74,7 @@ struct Entry {
     request_revision: u64,
     preview: Option<Preview>,
     preview_status: PreviewStatus,
+    preview_cancel: Option<tokio_util::sync::CancellationToken>,
     hydration_attempted_visible: bool,
     touched: u64,
 }
@@ -85,6 +86,15 @@ pub struct ItemState {
     clock: u64,
     revision: u64,
 }
+fn disclosure(outcome: &str) -> &str {
+    outcome
+        .split_once("|output:")
+        .map_or(outcome, |(state, _)| state)
+}
+fn known_output_change(previous: &str, current: &str) -> bool {
+    disclosure(previous) != disclosure(current)
+        || (current.contains("|output:") && previous != current)
+}
 impl ItemState {
     pub fn revision(&self) -> u64 {
         self.revision
@@ -94,6 +104,7 @@ impl ItemState {
     }
     #[cfg(test)]
     pub fn clear(&mut self) {
+        self.cancel_pending();
         self.entries.clear();
         self.focus = None;
         self.active = false;
@@ -136,7 +147,7 @@ impl ItemState {
     pub fn is_open(&self, key: &ItemKey, default_open: bool, outcome: &str) -> bool {
         self.entries
             .get(key)
-            .filter(|entry| entry.outcome == outcome)
+            .filter(|entry| disclosure(&entry.outcome) == disclosure(outcome))
             .and_then(|entry| entry.explicit)
             .unwrap_or(default_open)
     }
@@ -149,8 +160,10 @@ impl ItemState {
                 .iter()
                 .min_by_key(|(_, entry)| entry.touched)
                 .map(|(key, _)| key.clone())
+            && let Some(entry) = self.entries.remove(&old)
+            && let Some(cancel) = entry.preview_cancel
         {
-            self.entries.remove(&old);
+            cancel.cancel();
         }
         let entry = self.entries.entry(key.clone()).or_insert(Entry {
             explicit: None,
@@ -158,13 +171,19 @@ impl ItemState {
             request_revision: 0,
             preview: None,
             preview_status: PreviewStatus::Absent,
+            preview_cancel: None,
             hydration_attempted_visible: false,
             touched: self.clock,
         });
         if entry.outcome != outcome {
+            if let Some(cancel) = entry.preview_cancel.take() {
+                cancel.cancel();
+            }
+            if disclosure(&entry.outcome) != disclosure(outcome) {
+                entry.explicit = None;
+                entry.preview = None;
+            }
             entry.outcome = outcome.into();
-            entry.explicit = None;
-            entry.preview = None;
             entry.preview_status = PreviewStatus::Absent;
             entry.hydration_attempted_visible = false;
             entry.request_revision = entry.request_revision.wrapping_add(1);
@@ -197,6 +216,10 @@ impl ItemState {
         let request = self.clock;
         let entry = self.entries.get_mut(key).expect("touched item");
         entry.request_revision = request;
+        if let Some(cancel) = entry.preview_cancel.take() {
+            cancel.cancel();
+        }
+        entry.preview_cancel = Some(tokio_util::sync::CancellationToken::new());
         entry.preview_status = PreviewStatus::Loading;
         if let Some(preview) = &mut entry.preview {
             preview.refresh_error = None;
@@ -229,6 +252,9 @@ impl ItemState {
         }
         self.clock = self.clock.wrapping_add(1);
         let entry = self.entries.get_mut(key).expect("validated item");
+        if let Some(cancel) = entry.preview_cancel.take() {
+            cancel.cancel();
+        }
         entry.preview = Some(preview);
         entry.preview_status = PreviewStatus::Ready;
         entry.touched = self.clock;
@@ -270,6 +296,9 @@ impl ItemState {
         {
             self.clock = self.clock.wrapping_add(1);
             entry.request_revision = self.clock;
+            if let Some(cancel) = entry.preview_cancel.take() {
+                cancel.cancel();
+            }
             entry.preview_status = PreviewStatus::Absent;
             entry.hydration_attempted_visible = false;
             entry.touched = self.clock;
@@ -279,19 +308,32 @@ impl ItemState {
             self.revision = self.revision.wrapping_add(1);
         }
     }
-    pub fn mark_visible(&mut self, visible: &[ItemKey]) {
+    pub fn mark_visible(&mut self, visible: &[ItemKey]) -> Vec<(ItemKey, u64)> {
+        let mut cancelled = Vec::new();
         for (key, entry) in &mut self.entries {
             if !visible.contains(key) {
                 entry.hydration_attempted_visible = false;
+                if entry.preview_status == PreviewStatus::Loading {
+                    cancelled.push((key.clone(), entry.request_revision));
+                    if let Some(cancel) = entry.preview_cancel.take() {
+                        cancel.cancel();
+                    }
+                    entry.request_revision = entry.request_revision.wrapping_add(1);
+                    entry.preview_status = PreviewStatus::Absent;
+                }
             }
         }
+        cancelled
     }
-    pub fn needs_visible_preview(&self, key: &ItemKey, outcome: &str) -> bool {
-        self.needs_preview(key, outcome)
-            && self
-                .entries
-                .get(key)
-                .is_some_and(|entry| !entry.hydration_attempted_visible)
+    pub fn needs_visible_preview(&self, key: &ItemKey, outcome: &str, default_open: bool) -> bool {
+        if !self.is_open(key, default_open, outcome) {
+            return false;
+        }
+        self.entries.get(key).map_or(default_open, |entry| {
+            known_output_change(&entry.outcome, outcome)
+                || (entry.preview_status == PreviewStatus::Absent
+                    && !entry.hydration_attempted_visible)
+        })
     }
     pub fn preview_loading(&self, key: &ItemKey, outcome: &str) -> bool {
         self.entries.get(key).is_some_and(|entry| {
@@ -336,6 +378,9 @@ impl ItemState {
         if preview.bytes() > budget {
             preview.blocks = Vec::new();
         }
+        if let Some(cancel) = entry.preview_cancel.take() {
+            cancel.cancel();
+        }
         entry.preview = (preview.bytes() <= budget).then_some(preview);
         entry.preview_status = PreviewStatus::Failed;
         entry.touched = self.clock;
@@ -350,17 +395,39 @@ impl ItemState {
     pub fn matches_outcome(&self, key: &ItemKey, outcome: &str) -> bool {
         self.entries
             .get(key)
-            .is_some_and(|entry| entry.outcome == outcome)
+            .is_some_and(|entry| !known_output_change(&entry.outcome, outcome))
     }
     pub fn preview_for(&self, key: &ItemKey, outcome: &str) -> Option<&Preview> {
         self.entries
             .get(key)
-            .filter(|entry| entry.outcome == outcome)?
+            .filter(|entry| disclosure(&entry.outcome) == disclosure(outcome))?
             .preview
             .as_ref()
     }
+    pub fn preview_cancel(&self, key: &ItemKey) -> Option<tokio_util::sync::CancellationToken> {
+        self.entries
+            .get(key)
+            .and_then(|entry| entry.preview_cancel.clone())
+    }
+    pub fn preview_request(&self, key: &ItemKey) -> Option<u64> {
+        self.entries
+            .get(key)
+            .filter(|entry| entry.preview_status == PreviewStatus::Loading)
+            .map(|entry| entry.request_revision)
+    }
+    pub fn retire_request(&mut self, key: &ItemKey, request: u64) -> bool {
+        if self.preview_request(key) != Some(request) {
+            return false;
+        }
+        self.cancel_request(key);
+        self.revision = self.revision.wrapping_add(1);
+        true
+    }
     pub fn cancel_request(&mut self, key: &ItemKey) {
         if let Some(entry) = self.entries.get_mut(key) {
+            if let Some(cancel) = entry.preview_cancel.take() {
+                cancel.cancel();
+            }
             entry.request_revision = entry.request_revision.wrapping_add(1);
             if entry.preview_status == PreviewStatus::Loading {
                 entry.preview_status = PreviewStatus::Absent;
@@ -615,9 +682,9 @@ mod tests {
         };
         let mut reads = 0;
         for _ in 0..100 {
-            state.mark_visible(&keys);
+            let _ = state.mark_visible(&keys);
             for key in &keys {
-                if state.needs_visible_preview(key, "done") {
+                if state.needs_visible_preview(key, "done", false) {
                     let token = state.request(key, "done");
                     reads += 1;
                     assert!(state.preview_loading(key, "done"));
@@ -638,17 +705,17 @@ mod tests {
             1
         );
         assert!(state.needs_preview(&keys[0], "done"));
-        assert!(!state.needs_visible_preview(&keys[0], "done"));
+        assert!(!state.needs_visible_preview(&keys[0], "done", false));
         state.toggle(keys[0].clone(), false, "done");
         state.toggle(keys[0].clone(), false, "done");
         let manual = state.request(&keys[0], "done");
         assert!(state.accept_preview(&keys[0], manual, preview(), 20 * 1024));
-        state.mark_visible(&[]);
-        state.mark_visible(&keys);
+        let _ = state.mark_visible(&[]);
+        let _ = state.mark_visible(&keys);
         for _ in 0..100 {
-            state.mark_visible(&keys);
+            let _ = state.mark_visible(&keys);
             for key in &keys {
-                if state.needs_visible_preview(key, "done") {
+                if state.needs_visible_preview(key, "done", false) {
                     let token = state.request(key, "done");
                     reads += 1;
                     assert!(state.accept_preview(key, token, preview(), 20 * 1024));
@@ -661,7 +728,7 @@ mod tests {
         );
         let pending = state.request(&keys[0], "done");
         state.cancel_pending();
-        assert!(state.needs_visible_preview(&keys[0], "done"));
+        assert!(state.needs_visible_preview(&keys[0], "done", false));
         assert!(!state.accept_preview(&keys[0], pending, preview(), 20 * 1024));
     }
     #[test]
@@ -679,5 +746,53 @@ mod tests {
             ItemKey::tool(&tool, "n", 0),
             ItemKey::tool(&tool, "other", 0)
         );
+    }
+}
+
+#[cfg(test)]
+mod preview_visibility_tests {
+    use super::*;
+    #[test]
+    fn leaving_the_view_retires_loading_replies_without_a_failure_or_reused_revision() {
+        let mut items = ItemState::default();
+        let key = ItemKey::Node("one".into());
+        let revision = items.request(&key, "outcome");
+        assert!(items.preview_loading(&key, "outcome"));
+        assert_eq!(items.mark_visible(&[]), vec![(key.clone(), revision)]);
+        assert!(!items.preview_failed(&key, "outcome"));
+        assert!(!items.accept_preview(&key, revision, Preview::default(), 65536));
+        let next = items.request(&key, "outcome");
+        assert_ne!(next, revision);
+        assert!(items.accept_preview(&key, next, Preview::default(), 65536));
+    }
+}
+
+#[cfg(test)]
+mod output_revision_tests {
+    use super::*;
+    #[test]
+    fn terminal_snapshot_is_not_read_again_on_redraw_and_new_output_does_not_change_disclosure() {
+        let mut items = ItemState::default();
+        let key = ItemKey::Node("one".into());
+        let old = "exited:Some(1):true|output:7:true";
+        assert!(items.needs_visible_preview(&key, old, true));
+        let first = items.request(&key, old);
+        let preview = Preview {
+            notice: Some("取得 FIXED".into()),
+            ..Default::default()
+        };
+        assert!(items.accept_preview(&key, first, preview, 65536));
+        for _ in 0..100 {
+            assert!(!items.needs_visible_preview(&key, old, true));
+            assert_eq!(
+                items.preview_for(&key, old).unwrap().notice.as_deref(),
+                Some("取得 FIXED")
+            );
+        }
+        assert!(!items.toggle(key.clone(), true, old));
+        assert!(!items.needs_visible_preview(&key, "exited:Some(1):true|output:8:true", true));
+        assert!(items.toggle(key.clone(), true, old));
+        assert!(items.is_open(&key, true, "exited:Some(1):true|output:8:true"));
+        assert!(items.needs_visible_preview(&key, "exited:Some(1):true|output:8:true", true));
     }
 }

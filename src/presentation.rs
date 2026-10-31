@@ -194,6 +194,8 @@ pub struct ToolPresentation {
     pub background: bool,
     #[serde(skip)]
     pub elapsed_observation: Option<(std::time::Duration, std::time::Instant)>,
+    #[serde(skip)]
+    pub output_revision: Option<(u64, bool)>,
     pub exit_code: Option<i64>,
 }
 impl ToolPresentation {
@@ -289,6 +291,7 @@ impl ToolPresentation {
         self.current_state = None;
         self.current_exit_code = None;
         self.elapsed_observation = None;
+        self.output_revision = None;
         self.started_at = None;
         self.background = false;
     }

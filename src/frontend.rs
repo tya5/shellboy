@@ -16,6 +16,7 @@ mod live_output;
 mod live_work;
 mod message_metadata;
 mod message_queue;
+mod preview_reads;
 mod receipt_delivery;
 mod received;
 mod snapshot;
@@ -2184,6 +2185,8 @@ async fn run_with_delivery(
                         generation,
                         key,
                         request_revision,
+                        cancel,
+                        limit_bytes,
                         source_node_id,
                         group_id,
                         call_id,
@@ -2192,11 +2195,15 @@ async fn run_with_delivery(
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         let requested_key = key.clone();
+                        if selection.active_thread.as_deref() != Some(&thread_id)
+                            || selection.generations.get(&thread_id) != Some(&generation) { continue; }
+                        if cancel.is_cancelled() { continue; }
                         if !spawn_read(
                             &mut read_workers,
                             &read_slots,
                             &selection.cancel,
                             async move {
+                                tokio::select! { biased; _ = cancel.cancelled() => {}, _ = async {
                                 let identity_matches = match &requested_key {
                                     ItemKey::Tool { group_id: expected_group, call_id: expected_call } => {
                                         group_id.as_deref() == Some(expected_group.as_str()) && call_id == *expected_call
@@ -2207,17 +2214,13 @@ async fn run_with_delivery(
                                 let result = if !identity_matches {
                                     Err("出力の表示対象が変わりました。項目を開き直してください".into())
                                 } else {
-                                    let limit = control.store.config.limits.tool_excerpt_bytes.min(16 * 1024) as usize;
-                                    let deadline = Duration::from_millis(control.store.config.io.file_prepare_timeout_ms.min(1000));
-                                    match tokio::time::timeout(deadline, streams::preview(&control, &source_node_id, group_id.as_deref(), &call_id, limit)).await {
-                                        Ok(Ok(page)) => Ok(tool_preview(page)),
-                                        Ok(Err(error)) => Err(error.to_string()),
-                                        Err(_) => Err("出力の読込が時間内に終わりませんでした。もう一度開いてください".into()),
-                                    }
+                                    let limit = limit_bytes.min(control.store.config.limits.tool_excerpt_bytes.min(16 * 1024) as usize).max(1);
+                                    preview_reads::load(&control, &source_node_id, group_id.as_deref(), &call_id, limit).await
                                 };
                                 update(&sender, UiUpdate::ToolPreview {
                                     thread_id: target, generation, key: requested_key, request_revision, result,
                                 }).await;
+                                } => {} }
                             },
                         ) {
                             update(&updates, UiUpdate::ToolPreview {

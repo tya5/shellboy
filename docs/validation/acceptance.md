@@ -5666,3 +5666,26 @@ stderr (Tokio output would replace the configured writer), the shared watchdog,
 and exact error/endpoint/lock/database integrity assertions. Production behavior
 is unchanged. The final fresh-source process and standard results are recorded
 in issue #5; earlier read-only fixture descriptions are superseded by this note.
+## #99 development checkpoint (not final qualification)
+
+The first serialized focused run passed 44 preview-related tests. The initial
+standard run stopped at Clippy (test-only imports, a now-test-only source accessor,
+and a collapsible eviction cancellation branch); these were corrected without
+lint allowances. The next standard check completed exit0: Rust1975 passed,
+0 failed,33 ignored and Python66 passed, with layout/watchdog/fmt/Clippy.
+The bin/preview_gate example build also passed. Evidence:
+/tmp/issue-99-focused.log, /tmp/issue-99-standard-v2.log and
+/tmp/issue-99-build-v2.log. Newer terminal-no-raw proof, shared observation ranking
+and fixture-request-counter changes still require their next serialized run;
+this record does not qualify those untested deltas.
+
+Eight real PTYs passed actual DB-worker-gated open, close while pending, reopen,
+release, raw-output delivery and final close (80/140,dark/light/NO_COLOR/vt100).
+Each also received three real Thread-title Changed updates while keeping its
+observed preview notice unchanged. Raw/frames are /tmp/issue-99-native/.
+The tested example predates its optional request-counter output; results correctly
+record requests=null, not a measured SQLite/raw-read count. Controlled-clock and
+DB-gate unit tests, rather than elapsed wall time, establish pending-read behavior.
+No paid provider or OS clipboard was involved. A next rebuilt fixture run and
+review-required handoff remain pending. No all-OS/native or latency guarantee is
+claimed from these local observations.

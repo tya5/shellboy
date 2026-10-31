@@ -2621,3 +2621,14 @@ The startup-only candidate is rebased onto admitted F. Ready/error JSON and
 explicit data-dir use the common bootstrap; the stage 3 shutdown draft remains
 separate. Owner reload/work transfer, UI reconnect and late attach are excluded
 per the latest issue #5 scope. Final qualification and submission live in #5.
+## Preview lifetime and closed disclosure (#99, in progress)
+
+Implementation removes the 1-second preview deadline and pairs each UI request
+with an ItemState-owned cancellation token. Thread/generation/revision fences,
+read-slot and byte limits remain. Renderer occurrences use the canonical best
+outcome for one disclosure key; exact empty result members no longer become
+independent placeholders. Synthetic counterexample, virtual-clock cancellation,
+and actual DB-worker-gate tests are prepared. A marked disposable real-TUI
+example gates its DB worker for open/close/reopen verification without a paid
+provider or clipboard access. This is uncompiled until the serialized Rust slot
+is released and is not yet a validated submission. Review remains required.
