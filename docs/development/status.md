@@ -1795,3 +1795,15 @@ Combined-source standard check is next. Published measurement7c6f4d6 remains
 frozen; main, installed binaries and user data are not changed. The new merge
 will have its own test/source record and does not inherit exact-source timing
 claims from0b/7c. E publication still requires the promised separate approval.
+
+## E latest-main local checks complete
+
+Merge10d6df8 includes main2327636 (#79/#82/#84). Standard native macOS passes
+1915/0/33, Python18/layout93/watchdog/fmt/strict Clippy. The unchanged upstream
+#84 actual-PTY checker passes8 configurations/80 captures using8 local mock
+requests. Main-relative diff secret scan is clean. Combined-source qualification
+and exact timing/OS limits are in acceptance; do not reuse old SHA timing claims.
+E is locally reviewable and publication still waits for separate approval.
+F has a separate local planning-only branch0d375f0 with F1–F16 requirement/proof
+rows; no F/G code or transferred #83–#87 work is bundled into E. No additional
+push, release, install or user-data change has occurred.

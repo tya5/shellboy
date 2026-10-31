@@ -4315,3 +4315,27 @@ on that binary (`/tmp/issue-84-pty-final`); manifest, screen text, raw bytes and
 request counts remain synthetic local evidence. No timing threshold is asserted.
 Subsequent evidence-only documentation changes do not alter the tested Rust tree.
 Native three-OS CI and integration status are tracked in issue #84.
+
+## E combined with main #79/#82/#84: local admission candidate (2026-10-31)
+
+Exact merge10d6df8 contains current main23276368ad2461ab2b053e57e87a3bb1be50a2eb
+(main CI41171514740 green). Native macOS standard completes with1915 successes,
+0 failures,33 ignored: library977/0/13, integration921/0/17,
+termination10/0/1, force-kill7/0/2. Python18, layout93, watchdog policy, fmt and
+strict all-target Clippy pass. Target crate-root mtimes were refreshed before
+building to avoid accepting shared-target artifacts from another checkout;
+tracked source bytes remained unchanged. The private standard log is retained.
+
+The upstream #84 checker also passes on the combined source: actual Unix PTY
+80/140 columns x dark/light/NO_COLOR/vt100 =8 cases,80 captured stages,8 loopback
+mock requests. It checks the existing typed-leading-slash/pasted-argument and
+literal-paste behavior after E integration; it does not implement assigned #84
+work again. Raw synthetic captures/results and binary digest remain private.
+Diff from main2327636 gitleaks8.30.1 reports0 findings. No broader full-history
+scan or physical Windows result is implied.
+
+P3 and formal producer3 witnesses remain their original0b/7c sources; exact-source
+timings are not relabelled as10d6df8. The new merge's ordinary Linux/Windows CI
+and main CI have not run. E publication requires the promised separate review
+approval. Only the approved measurement branch was pushed; main, installation,
+user store and transferred #83–#87 features were not changed by this work.
