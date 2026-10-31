@@ -2584,3 +2584,16 @@ the passing membership regression with a visual fix. The
 records both outcomes. Exact-source3OS and main push follow; no release/install.
 After F, start G on then-current main without waiting for #87 (6543753689);
 later side reconciles overlap, and G P6 time is observation only.
+
+
+## F shipped; G standalone admission started
+
+F main isfff20766ee0792770df3d9bf542ab0305fd1f6c2 after reviewer6543719886
+and exact-source3OS CI41204955956: Linux2048/0/34, macOS2047/0/35,
+Windows1914/0/26. Artifact source/failures/targeted successes checked; remote main
+verified. #100 remains reproducible in F, assigned to worker1 after admission;
+no screen-fix claim is made. G work starts on this main in its own branch.
+The [G1–G12 admission ledger](issue-41-plan.md#g-standalone-admission-ledger-on-f-mainfff2076)
+tracks scope/extraction/current evidence.6543753689 cancels waiting for #87;
+later integration reconciles overlaps. P6 times are observations only. Archive
+staged/unstaged work is preserved, not bulk-merged. G remains unqualified.

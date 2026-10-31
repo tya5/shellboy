@@ -18,7 +18,8 @@ Coordination6541457457 also keeps #90 on the Shellboy side. #85–#87/#90 may
 start before F/G; later admission rebases overlapping changes.
 E main admission is approved by6540583854, conditional on latest-main standard
 checks and exact-candidate three-OS CI. After E lands, F publication/CI is
-authorized; F main admission still requires separate reviewer approval.
+authorized. F main admission was separately approved by6543719886 and shipped
+atfff2076 after exact-source3OS CI41204955956. G remains separately reviewed.
 
 | Transferred inventory / comment scope | Owner issue | Coordination |
 | --- | --- | --- |
@@ -26,7 +27,7 @@ authorized; F main admission still requires separate reviewer approval.
 | G-C1: typed slash with pasted arguments / literal pasted command | #84 | Shellboy work thread; may proceed before F/G. |
 | Status footer strings/seconds and clearing resolved failures (6538715802/6538696784/6536400800) | #85 | Shellboy may start now; later admission rebases small overlaps. |
 | D3-L1/L2/C1/W1/W2 and heading color role: owned-work region/configurable rows/saved wait target/deadline | #86 | Shellboy may start now; later admission rebases small overlaps. |
-| G-C2–G-C6: detail keys, easy whole-answer/code-block copy, image/attachment discovery | #87 | Shellboy may start now; G builds on #87 when it is already in main. |
+| G-C2–G-C6: detail keys, easy whole-answer/code-block copy, image/attachment discovery | #87 | Shellboy may start now;6543753689 cancels the G/#87 dependency; later integration reconciles overlap. |
 
 Historical inventories below retain the exact requests/supersessions for handoff,
 but their transferred rows are not unfinished #41 admission gates. No design,
@@ -692,3 +693,37 @@ F's public feature candidate f286c5b already passes exact3OS CI41196986922 and
 native mode8 conditions. The local strict-bin-only clock-pacing branch5847799
 is preserved but excluded from this admission; optional tooling81c6f37 is not
 dispatched. Review follows the count audit in the F qualification record.
+
+
+## G standalone admission ledger on F mainfff2076
+
+F is admitted atfff20766ee0792770df3d9bf542ab0305fd1f6c2, exact-source ordinary
+CI41204955956: Linux2048/0/34, macOS2047/0/35, Windows1914/0/26. Retain #95
+pending-read/tick guards and #98/#91/#93/#96/#94 displays/order. #100 is separately
+reproduced on F (not fixed by F), with worker1 correcting it after admission.
+G begins now on that main;6543753689 explicitly removes waiting for #87.
+Later integration reconciles overlay/popup/help overlap. Do not restore the old
+combined archive or treat its1945/2058/etc checks as this source's qualification.
+
+Each row must have implemented source, current assertions/runtime evidence and
+remaining limitations before the G review request. Commit separately by the
+units below; names describe scope, not a new engine/framework.
+
+| ID / review unit | Retained requirement | Current state / required evidence |
+| --- | --- | --- |
+| G1 catalogue | One typed catalogue for meanings/effects/CLI identity/terms; nonselectable headings and effect markers before forms; cache filtered rows on changes | Open. Extract archive metadata; enumerate executable parents plus leaves against current clap, including compact/list, shell/list, sender/config/summary settings. Do not merely adjust an old fixed count. |
+| G2 owner forms | Complete typed owner commands, required-ID discovery, explicit defaults/effects/confirmation; Enter labels match read/execute/send | Open. Reuse actual clients/handlers; operation-to-CLI/effect/input-ownership tests and native form observations. |
+| G3 standalone forms | docs/config/RAG/exec and attach shorthand share catalogue and exact current CLI fields | Open. Typed builders, real CLI parity/validation, no subprocess parser or generic DSL. |
+| G4 popup interaction | Wheel only top painted popup; outside/edge/no-op and F2 do not dirty history; stable original/copy identities; bounded revision/width wrapping cache | Open. Reconcile current main; actual ownership/cache/scroll tests, old source is not proof. |
+| G5 reactive reads | All mutable saved F8/reference targets update via exact notifications; retained target/selection, stale/late/cancel fences; justified snapshots show source/read time and refresh route | Open. Complete target/dependency inventory, actual CLI mutations, rollback/replay and delayed-result tests. |
+| G6 shared admission | Visible current/inspector reads share bounded readonly WAL snapshot/sequence using existing pool; metadata500ms and usage3s retain separate cadence, no hidden work | Open. Preserve F/#95 guards; current simultaneous-consumer P3/count/cancellation evidence. |
+| G7 domain projections | Private saved index/deletion/GC observations beside canonical semantics, with explicit Core rationale, finite SQL/source/channel bounds and honest unknowns | Open. Review archived helpers against current domain; no generic Repository, table/worker/queue/job engine. |
+| G8 source inspections | Attachment/operation/context/provenance/receipt/downstream identities are exact; source witnesses bound copies before parse; stale retained coverage is explicit | Open. Preserve both archived staged/unstaged layers, extract separately, test every mutable consumer. |
+| G9 storage/migration | Only necessary indexed reads; inspect actual slot after main17, avoid overlapping indexes, atomic ledger/schema rollback/reopen and pre-upgrade backup | Open. Re-evaluate three archived lookup indexes;18 is a candidate, not reserved. |
+| G10 functional/native | Complete effect/label/catalogue mapping and freshness ledger, actual80/wide dark/light/NO_COLOR/fallback forms, standard checks and secret scan | Open. No physical Windows UI success inferred from mocks/CI. |
+| G11 P6/counts |64KiB original, actual input stream, bounded frame/cache/wrap counts; no paint on unchanged inputs; times recorded against available original baseline only | Open. Policy6543044236 applies: no8ms/+2ms/CPU acceptance or variance/strict-bin reruns; unsupported old wheel is unavailable, not zero cost. |
+| G12 admission | Separate G publication/CI/reviewer approval, current main reconciliation and exact-source3OS, #41 shipped/residual report | Open. F approval is not G approval; no release/install/user-data authority is inferred. |
+
+Preserve the root archive and private staged/unstaged backups. Extraction uses
+ordinary Rust modules and existing ownership/admission. New evidence belongs to
+its exact source; functional/count gates cannot be replaced by timing success.
