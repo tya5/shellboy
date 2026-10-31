@@ -483,6 +483,26 @@ impl ThreadView {
         view.scroll.initialized = true;
         view.scroll.row
     }
+    // A typed, closed result's rendered rows do not depend on its hidden output.
+    // Mixed/prose sources and expanded/error previews still need body windows.
+    pub(super) fn closed_tool_source(&self, node: &UiNode) -> bool {
+        node.presentation.kind == crate::presentation::PresentationKind::ToolResult
+            && !node.presentation.blocks.is_empty()
+            && node
+                .presentation
+                .blocks
+                .iter()
+                .enumerate()
+                .all(|(index, block)| {
+                    block.tool.as_ref().is_some_and(|tool| {
+                        !self.items.is_open(
+                            &ItemKey::tool(tool, &node.node_id, index),
+                            tool.requires_attention(),
+                            &presentation::tool_outcome(tool),
+                        )
+                    })
+                })
+    }
     pub(super) fn scroll(
         &mut self,
         amount: isize,
@@ -490,6 +510,7 @@ impl ThreadView {
         cache: &mut HistoryLayoutCache,
         budget: usize,
     ) -> Vec<UiAction> {
+        let following = self.follow;
         if self.committed_preview.is_some()
             && !self.history_rebase_pending
             && let Some(action) = self.rebase_preview()
@@ -503,11 +524,12 @@ impl ThreadView {
                 return vec![];
             }
             if self.loading {
-                let view = &mut *self;
-                if view.scroll.request.is_some() {
-                    view.scroll.pending = view.scroll.pending.saturating_add(amount);
+                if self.scroll.request.is_some() {
+                    self.scroll.pending = self.scroll.pending.saturating_add(amount);
+                    return vec![];
                 }
-                return vec![];
+                // Explicit navigation supersedes presentation-only hydration.
+                self.loading = false;
             }
             if !self.follow {
                 let view = &mut *self;
@@ -520,6 +542,7 @@ impl ThreadView {
                     let end = node.base_char_offset + node.text.chars().count();
                     if (offset < node.base_char_offset
                         || (offset >= end && offset < node.total_chars))
+                        && !view.closed_tool_source(node)
                         && let Some(thread_id) = view.thread_id.clone()
                     {
                         view.loading = true;
@@ -575,6 +598,9 @@ impl ThreadView {
                 // this direction; otherwise it follows the known cached rows.
                 let gap = |index: usize| {
                     let node = &view.nodes[index];
+                    if view.closed_tool_source(node) {
+                        return None;
+                    }
                     let empty = node.text.is_empty() && node.total_chars > 0;
                     let end = node.base_char_offset + node.text.chars().count();
                     if empty
@@ -689,13 +715,17 @@ impl ThreadView {
             }
             view.scroll.row = row;
             view.scroll.anchor = view.anchor.clone();
-            if amount > 0 && target >= max as isize && end {
+            if amount > 0
+                && target >= max as isize
+                && end
+                && (following || row > top || (max == 0 && view.first_ordinal == 0))
+            {
                 view.follow = true;
                 view.unseen = false;
             }
             let boundary = if target < 0 {
                 Some(false)
-            } else if !end && target >= max as isize {
+            } else if amount > 0 && !end && target >= max as isize {
                 Some(true)
             } else {
                 None
@@ -711,8 +741,9 @@ impl ThreadView {
                 if let Some(source) = source {
                     let node = &view.nodes[source.node];
                     let cached_end = node.base_char_offset + node.text.chars().count();
-                    if (!forward && node.base_char_offset > 0)
-                        || (forward && cached_end < node.total_chars)
+                    if !view.closed_tool_source(node)
+                        && ((!forward && node.base_char_offset > 0)
+                            || (forward && cached_end < node.total_chars))
                     {
                         view.loading = true;
                         view.scroll.pending = amount;
@@ -790,6 +821,7 @@ impl ThreadView {
             if let Some(source) = layout.sources.get(row) {
                 let node = &view.nodes[source.node];
                 if (node.text.is_empty() && node.total_chars > 0)
+                    && !view.closed_tool_source(node)
                     && let Some(thread_id) = view.thread_id.clone()
                 {
                     view.loading = true;

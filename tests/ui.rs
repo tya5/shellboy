@@ -3868,3 +3868,175 @@ fn structured_index_status_cannot_hide_ready_preview() {
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(!screen_text(&terminal).contains("wrong-scope-error"));
 }
+
+fn collapsed_history_node(i: usize) -> UiNode {
+    collapsed_history_source(i, true, 512)
+}
+fn collapsed_history_source(i: usize, windowed: bool, chars: usize) -> UiNode {
+    let payload = serde_json::json!({"item":{"type":"function_call_output","call_id":format!("short-{i}"),"output":serde_json::json!({"status":"completed","exit_code":0,"output_complete":true,"output":if windowed {"hidden output ".repeat(2000)} else {String::new()}}).to_string()}});
+    let text = shellboy::history::text_of_payload(&payload);
+    let mut node = scroll_fixture_node(i, text.clone());
+    node.role = "tool".into();
+    node.base_char_offset = text.chars().count().saturating_sub(chars);
+    node.text = text.chars().skip(node.base_char_offset).collect();
+    node.presentation =
+        shellboy::presentation::project("tool_result", &payload, &node.text, node.base_char_offset);
+    if !windowed {
+        node.text = text.clone();
+        node.base_char_offset = 0;
+        node.presentation = shellboy::presentation::project("tool_result", &payload, &text, 0);
+    }
+    for tool in node
+        .presentation
+        .blocks
+        .iter_mut()
+        .filter_map(|b| b.tool.as_mut())
+    {
+        tool.group_id = Some(format!("group-{i}"));
+        tool.result_node_id = Some(node.node_id.clone());
+    }
+    node
+}
+
+#[test]
+fn short_collapsed_tail_up_requests_older_without_refollow() {
+    let mut ui = scroll_fixture((70..120).map(collapsed_history_node).collect(), 70, 120);
+    let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
+    scroll_cells(&mut ui, &mut terminal);
+    let actions = scroll_wheel(&mut ui, true);
+    eprintln!(
+        "SHORT_TAIL up: follow={} loading={} actions={actions:?}",
+        ui.view().follow,
+        ui.view().loading
+    );
+    assert!(!ui.view().follow);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, UiAction::LoadHistoryWindow { .. })),
+        "up from a short tail must request older metadata"
+    );
+}
+
+#[test]
+fn short_collapsed_tail_focus_up_at_edge_requests_older() {
+    let mut ui = scroll_fixture((70..120).map(collapsed_history_node).collect(), 70, 120);
+    let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
+    scroll_cells(&mut ui, &mut terminal);
+    ui.event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+    let actions: Vec<_> = (0..60)
+        .flat_map(|_| ui.event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))))
+        .collect();
+    eprintln!(
+        "SHORT_TAIL focus: follow={} actions={actions:?}",
+        ui.view().follow
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, UiAction::LoadHistoryWindow { .. })),
+        "focus Up must cross the loaded source boundary"
+    );
+}
+
+#[test]
+fn short_collapsed_tail_down_without_row_progress_does_not_refollow() {
+    let mut ui = scroll_fixture(
+        (70..120)
+            .map(|i| collapsed_history_source(i, false, 512))
+            .collect(),
+        70,
+        120,
+    );
+    ui.view_mut().follow = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
+    scroll_cells(&mut ui, &mut terminal);
+    scroll_wheel(&mut ui, false);
+    assert!(
+        !ui.view().follow,
+        "a zero-distance down event on a partial short window is not reaching the bottom"
+    );
+}
+
+#[test]
+fn short_collapsed_large_projection_scrolls_back_without_forward_ping_pong() {
+    let mut ui = scroll_fixture(
+        (70..120)
+            .map(|i| collapsed_history_source(i, true, 8192))
+            .collect(),
+        70,
+        120,
+    );
+    let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
+    scroll_cells(&mut ui, &mut terminal);
+    let mut requests = Vec::new();
+    for _ in 0..30 {
+        requests.extend(scroll_wheel(&mut ui, true));
+    }
+    assert!(!ui.view().follow);
+    assert!(
+        requests
+            .iter()
+            .any(|a| matches!(a, UiAction::LoadHistoryWindow { .. })),
+        "backward gestures must not oscillate toward the forward projection edge"
+    );
+}
+
+#[test]
+fn short_collapsed_following_down_and_explicit_end_preserve_tail_intent() {
+    let mut ui = scroll_fixture(
+        (70..120)
+            .map(|i| collapsed_history_source(i, false, 512))
+            .collect(),
+        70,
+        120,
+    );
+    let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
+    scroll_cells(&mut ui, &mut terminal);
+    scroll_wheel(&mut ui, false);
+    assert!(
+        ui.view().follow,
+        "down while already following must not pause it"
+    );
+    scroll_wheel(&mut ui, true);
+    assert!(!ui.view().follow);
+    ui.event(Event::Key(KeyEvent::new(
+        KeyCode::End,
+        KeyModifiers::CONTROL,
+    )));
+    assert!(
+        ui.view().follow,
+        "explicit Ctrl+End still returns to the live tail"
+    );
+}
+
+#[test]
+fn short_collapsed_page_up_and_expanded_body_keep_distinct_navigation() {
+    let mut ui = scroll_fixture((70..120).map(collapsed_history_node).collect(), 70, 120);
+    let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
+    scroll_cells(&mut ui, &mut terminal);
+    let actions = ui.event(Event::Key(KeyEvent::new(
+        KeyCode::PageUp,
+        KeyModifiers::NONE,
+    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, UiAction::LoadHistoryWindow { .. }))
+    );
+    let mut ui = scroll_fixture(vec![collapsed_history_node(0)], 0, 1);
+    scroll_cells(&mut ui, &mut terminal);
+    ui.event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+    ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char(' '),
+        KeyModifiers::NONE,
+    )));
+    scroll_cells(&mut ui, &mut terminal);
+    let actions = scroll_wheel(&mut ui, true);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, UiAction::LoadNodeWindow { .. })),
+        "expanded output still navigates its canonical body window"
+    );
+}
