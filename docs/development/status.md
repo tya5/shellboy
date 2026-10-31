@@ -2707,3 +2707,12 @@ than the final styled span, explicitly resets normal background edges, and uses
 one theme inset for full-width header color with inset text. Synthetic short-line
 and band-to-plain replacement tests are prepared. No candidate Rust check/build
 has run yet. This is not a causal claim about the user's physical-terminal case.
+
+#91 band-extent follow-up supersedes its pending-check note: code 3670eac on main
+19b9f87 passes the standard check (Rust2058 / Python66, zero failures), nine chrome
+checks and the bin/visual-fixture build. Fresh intercepted-OSC52 PTY/VT captures
+pass 27 width/palette/fallback conditions, with live input and scroll-return in
+21 of them. The user-terminal continuation symptom was not reproduced in the
+baseline; exact geometry is enforced without claiming that symptom's root cause.
+Fresh release P1 profiling and native non-macOS/physical-terminal validation
+remain untested. #99 and #87 retain their separate review/qualification scope.

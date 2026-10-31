@@ -5888,3 +5888,42 @@ TEST_THREADS2 used under reviewer16:24 override; no elapsed-time regression or
 external-process intervention inferred. Current main66d2746 also contains the
 later stage3 stack, which is not covered by this checked-base gate. New source
 review/Windows CI remain distinct; no rerun of failed41214341584 was requested.
+
+### #91 Conversation Band And Header Extent Follow-Up
+
+2026-10-31, macOS arm64 / Rust 1.99.1, single-job Cargo and two test threads.
+Candidate code 3670eacec9365d3cb977835ed39583bb5da7ffed is rebased on main
+19b9f87ef76e6786cbad3128e15e27d8cc6a1224. `sh scripts/check.sh` passes:
+Rust 2058 passed / 0 failed / 35 ignored, Python 66; layout/watchdog, fmt,
+Clippy and all targets pass. The separate chrome preflight passes all nine
+cases. `cargo build --locked --bin shellboy --example visual_fixture` passes.
+Evidence: `/tmp/issue-91-width-qualified-v5.log`, execution
+7e570b9a-a56f-421f-a98c-abb44f2f3181. No installed binary was changed.
+
+Fresh real-process PTY/VT captures pass 27 cases: 80/81/140 columns plus
+79/83/139/141, each dark/light/NO_COLOR; 80/140 additionally use TERM=vt100.
+Every capture checks exact full-width header color with one-column text margins,
+input colors through x=1..width-2, normal outer cells and canonical OSC52 payloads
+for slash/focused/original-page copy. The first 21 cases include synthetic local
+SSE input followed by PageUp and return-to-tail captures; no provider is called.
+The OS clipboard is never touched. Captures are in `/tmp/issue-91-width-after-v5`,
+`/tmp/issue-91-width-odd-after-v5` and `/tmp/issue-91-width-vt100-after-v5`;
+executions ed1d7078-2aee-45d8-86ca-401018681413 and
+8efcf7be-d6eb-4979-8e45-58c51ce24678 both exit0. Binary SHA-256:
+a16294d8b1555fcbe15b00e0e34430fe1bcbe71e9a94a220618984dce0eda949.
+
+The earlier baseline did not reproduce the user's one-cell-short continuation;
+this change enforces the requested geometry, not a proven cause for that physical
+terminal symptom. Before/after synthetic cell evidence is retained separately.
+Validation exposed TestBackend's unpainted wide-glyph continuation slots; the
+full-color invariant is asserted on the actual Frame buffer and real VT cells,
+not those backend placeholders. Earlier failed checks are retained in
+`/tmp/issue-91-width-qualified.log`, `-v2.log`, `-targeted-v3.log` and `-v4.log`:
+the last full run found two old header-position/minimum-banner assumptions.
+The updated contract asserts both blank margins, phase at column one and a
+compact freeze label at eight columns; it does not drop the visibility check.
+
+Untested: physical GUI terminal rendering, real OS clipboard completion, native
+Windows/Linux PTYs and a fresh opt-in release P1 latency/memory profile. The
+standard functional suite is not claimed as that performance measurement. No
+new worker, queue, timer, DB read or source-format field is introduced.
