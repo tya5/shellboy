@@ -85,8 +85,8 @@ def main():
                     selected = copy("\tc")
                     assert selected in expected and "Claude" not in selected, selected
                     terminal.send("o")
-                    terminal.expect(lambda text: "原文" in text and selected.splitlines()[0] in text and
-                                    "名乗り" in text, "F6-original")
+                    terminal.expect(lambda text: "┌ 原文 " in text and selected.splitlines()[0] in text and
+                                    "名乗り：" in text, "F6-original")
                     original = copy("c")
                     assert original == selected, (original, selected)
                     # A doubled Esc is decoded as Esc/Alt+Esc without waiting
