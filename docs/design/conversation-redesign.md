@@ -271,6 +271,29 @@ the result's captured Thread, not whichever Thread happens to be visible later.
 Shell pages likewise retain their original retention generation/sequence and
 observe current execution/retention facts without another raw-output read.
 
+
+Retained history integration uses the existing management detail Arc for original
+JSON/body pages and the existing inspection metadata Arc for current facts.
+Current field pointers live under `/current_source`; detail/follow resolution
+selects that metadata Arc without serializing or copying the original body again.
+A retained inspection does not clear the management detail on each read. The UI
+may retain at most256 original field descriptors (not body JSON) and combines a
+bounded current prefix with them under the existing256-row field limit; omissions
+remain explicit and original detail retrieval remains available. The current
+snapshot's request identity still fences old detail replies and hide/cancel.
+
+HistoryGet has no Thread selection argument: do not infer selection from the
+viewer, node creation Thread or delivery owner. Show selection scope unknown
+while observing exact node revision/body availability. HistoryList uses its
+literal captured Thread, never a later viewer selection; a captured selection
+revision unavailable in the wire result stays unknown, not invented. A page
+revision match is not a guarantee of raw-file availability. Metadata captures
+use one exact Thread query when scoped and one indexed batch for at most200
+node IDs; input JSON is capped128KiB, scalar copies and metadata are capped
+before materialization. Core's private history reader owns these path/tombstone
+semantics because canonical payload readers materialize the original body and
+cannot serve a body-free notification refresh. No new command/table/worker/queue.
+
 Saved lists retain the chosen page/window and selected row identity. Reuse F's
 Thread row reader for generic F8 ThreadList instead of creating a second summary
 projection. Shell/compact rows and activity status use their native domain
