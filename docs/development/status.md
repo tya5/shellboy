@@ -1915,3 +1915,34 @@ new queue or worker is added. Native macOS `cargo test --locked --lib diagnostic
 passes6/0/0 (1021 filtered), including existing history transition-only logging,
 shutdown, usage and repair diagnostics. The new async test uses the common60s
 watchdog. No actual slow workload or P4 timing gate is claimed by this test.
+
+
+## F readonly Watch discovery primitive
+
+The local F candidate now has canonical Watch discovery on a readonly WAL
+connection through the existing finite presentation pool/progress admission.
+Its sequence is assigned before admission; cancellation is checked before open
+and after collection. The transaction ends before title/text projection.
+Discovery retains at most4096 candidate metadata rows and128 title witnesses;
+this does not bound SQLite's global priority-sort work to4096 rows. Descendant
+scopes use the same bounded lineage and explicit truncation/unavailability.
+Private cursors bind filter/root/seen identities/watermark; no public wire or
+Core operation is added. Diagnostics are supplied by the existing owner, avoiding
+a new Core accessor just for this frontend read.
+
+On the combined prepared F source, native macOS `cargo test --locked --lib watch`
+passes30/0/0, including9 discovery fixtures (priority outside the first List page,
+seen overflow,51st match, Unicode derived titles, deleted bridge, metadata/
+witness continuations and cursor root/watermark fences). `diagnostics::` passes
+6/0/0. These results describe the complete prepared primitive tree, including
+the separately committed session and diagnostics changes, not each earlier
+intermediate commit in isolation. Formatter/layout93/watchdog policy and diff
+gitleaks pass.
+
+The async page adapter is not exercised through a running Watch frontend yet;
+its UI, pool contention/cancellation and shared-consumer P3 proof remain pending.
+Four lib-test dead-code warnings currently expose the unwired reader entry and
+fields; ordinary non-test builds may identify more. No suppression/full standard/
+strict Clippy success is claimed. P2/P4/P5, Watch actions and three-OS native UI
+qualification remain open. E main admission still needs separate approval; no
+main push, installed-binary change, default data, paid API or release.

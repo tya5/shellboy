@@ -38,6 +38,7 @@ mod streams;
 use streaming::StreamBody;
 mod tools;
 mod usage;
+mod watch_page;
 mod watch_read;
 
 use crate::{

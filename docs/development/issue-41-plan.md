@@ -545,3 +545,12 @@ reader primitive only; F4 runtime coalescing, visible UI memory accounting and
 full F admission are still pending. The three shared-consumer tests prove
 query reuse given same-transaction supplied witnesses, not that every runtime
 caller has already been connected.
+
+
+F3/F11 discovery primitive: combined focused Watch suite passes30/0/0, with9
+page fixtures and2 additional session/count cases. Slow-lineage diagnostics pass
+with the6-test diagnostics suite. Page cursor/retained-result limits are tested;
+actual Watch frontend admission/cancellation, shared current/List-or-Watch/count
+P3, retained UI cache accounting and F's native visual/performance gates remain
+pending. The canonical page's SQLite sort work is not claimed to be capped by
+its4096 retained metadata rows. Do not mark F complete from component tests.
