@@ -150,7 +150,7 @@ mod tests {
             let db = rusqlite::Connection::open(path).unwrap();
             // Prepare an older supported fixture before startup. No second
             // writer remains to race the production 2-second busy timeout.
-            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX shell_started_readback; DROP INDEX shell_owner_started_readback; DROP INDEX compact_operation_thread; DROP INDEX automatic_compaction_turn; DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; COMMIT;").unwrap();
+            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX thread_parent; DROP INDEX shell_started_readback; DROP INDEX shell_owner_started_readback; DROP INDEX compact_operation_thread; DROP INDEX automatic_compaction_turn; DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DELETE FROM schema_migration WHERE version>=8; PRAGMA user_version=7; COMMIT;").unwrap();
         }).await.unwrap();
         let token = CancellationToken::new();
         let cancel = token.clone();

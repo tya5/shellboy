@@ -4326,3 +4326,21 @@ category order and local visible ages/sanitization. Formatting passes. No I/O,
 new Core state, command, worker or table is added. Runtime Watch/page/lineage
 integration, later archive corrections, full standard and F P2–P5/native proof
 remain pending. No new feature is advertised or admitted to main by these tests.
+
+
+## F parent-index preparation (2026-10-31)
+
+On the isolated F branch based on E10d6df8, inspected origin/main e933054's
+schema15 and added local candidate0016_thread_parent. Native macOS/Rust1.99.1
+`cargo test --locked --test integration storage` passes32/0/0 (907 filtered),
+including injected ledger failure rollback, original rows, fresh/upgraded schema
+equality, two reopens and covering successor seek. The focused storage library
+run passes3/0/0. Synthetic historical fixtures drop the added index before
+downgrading; the readback corruption guard now uses the common60s helper and
+its old allowance is removed. Formatting/layout93/watchdog policy pass.
+
+The release-note draft includes stopped-owner/full-data backup and schema
+rejection guidance. Number16 remains provisional until F admission. This is not
+a full standard/strict Clippy/three-OS result; incomplete F reader consumers
+currently produce dead-code warnings without suppression. No main push,
+installed binary, default-data change, paid API or release.

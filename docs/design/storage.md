@@ -2,11 +2,11 @@
 
 ## Current-only contract (Issue #33, 0.2.0)
 
-Current conversation schema is v15. Migration 15 adds derived readback indexes only. Migration12 accounts for bounded Revisit
+Current conversation schema on the F preparation branch is v16. Migration 15 adds derived readback indexes;16 adds the parent-Thread covering index. Migration12 accounts for bounded Revisit
 metadata;13 records selected-path admission;14 records Turn interruption and
 indexes drafts. The existing `tool_result_node(node_id)` index from migration2
-also covers retained result-source lookup after payload GC; #41 adds no new index
-or migration. No new state table or runtime compatibility path is introduced. Fresh databases are created directly from `src/storage/current.sql`, with the complete current ledger. Existing older-schema upgrades run only through the isolated startup migration runner; ordinary runtime readers require the current schema. The historic v6 receipt-accounting repair and attachment-origin reconstruction are not runtime compatibility mechanisms.
+also covers retained result-source lookup after payload GC; the earlier #41
+B+C work needs no additional index, while F adds the justified parent index. No new state table or runtime compatibility path is introduced. Fresh databases are created directly from `src/storage/current.sql`, with the complete current ledger. Existing older-schema upgrades run only through the isolated startup migration runner; ordinary runtime readers require the current schema. The historic v6 receipt-accounting repair and attachment-origin reconstruction are not runtime compatibility mechanisms.
 
 Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
 
@@ -180,3 +180,20 @@ Normal mutations continue to use the writer. All source records/retention remain
 unchanged. Upgrade from 14 appends only the migration ledger entry and indexes;
 back up before opening with a new build. Old v0.4.0/schema14 binaries cannot open
 schema 15, and no installed owner or user database is upgraded by validation.
+
+
+### F parent lookup index (local schema 16 candidate)
+
+At origin/main e933054, conversation schema is 15. The F-only local candidate
+adds `thread_parent(parent_thread_id,id)` in isolated startup migration 0016.
+Successor seeks for bounded descendant traversal require this covering index;
+existing updated-at and Run indexes do not cover parent membership. It costs
+one entry per Thread and index maintenance on parent/id changes. No table,
+event, worker or queue is added. Fresh bootstrap and upgrade use the same index
+and ledger. The upgrade transaction atomically commits DDL, ledger and version;
+failed admission rolls them all back. Saved conversations are unchanged.
+Before a release containing this upgrade, stop the owner and take a complete
+data-directory backup (including any SQLite WAL/SHM files) before opening it
+with the new binary. Older binaries reject schema 16. Recheck main's actual
+version and migration names immediately before F admission; 16 is not reserved
+against independent work. This primitive alone does not expose descendant UI.

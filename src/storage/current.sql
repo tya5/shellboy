@@ -394,3 +394,7 @@ CREATE INDEX compact_operation_thread ON operation_receipt(json_extract(result_r
 CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
 INSERT INTO schema_migration(version,name) VALUES(15,'0015_readback_indexes');
 PRAGMA user_version=15;
+
+CREATE INDEX thread_parent ON thread(parent_thread_id,id);
+INSERT INTO schema_migration(version,name) VALUES(16,'0016_thread_parent');
+PRAGMA user_version=16;
