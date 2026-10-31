@@ -764,3 +764,17 @@ or cancellation fact retains attention styling and may reserve body space only
 after other metadata has been dropped. Clock painting uses the cached mark/body
 and updates right-side metadata without discarding background reasons, reparsing
 Markdown, changing source anchors or reading the database.
+
+### History focus without changing columns (#98)
+
+The user's final correction supersedes the proposed left-edge marker. Focus
+changes only the first heading row's style, never indentation, column count,
+body text, opened output or read-status rows. Rich dark/light palettes define a
+subtle focus background separate from user bands; NO_COLOR/non-256 terminals
+use bold on that heading only. Link-specific interactive underlining remains
+unchanged. A continuation visible after its heading scrolls away is not styled
+as a new heading. No focus marker is added to selectable/copyable text.
+Opened-output notices (observed time, refreshing, genuine read error and loading)
+use a shared two-space indentation and muted style on every wrapped notice row,
+matching the user's example. This is item-internal structure, not focus
+indentation. Notice spans are decoration and never canonical output-body spans.

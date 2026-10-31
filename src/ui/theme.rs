@@ -117,6 +117,16 @@ impl Palette {
                 .bg(Color::Indexed(if human { 254 } else { 253 })),
         }
     }
+    pub(crate) fn history_focus(self) -> ratatui::style::Style {
+        use ratatui::style::{Modifier, Style};
+        if self.no_color || !self.rich {
+            return Style::default().add_modifier(Modifier::BOLD);
+        }
+        Style::default().bg(match self.choice {
+            crate::config::PaletteMode::Dark => Color::Indexed(238),
+            crate::config::PaletteMode::Light => Color::Indexed(251),
+        })
+    }
     pub(crate) fn interactive(self) -> ratatui::style::Style {
         use ratatui::style::{Modifier, Style};
         let style = Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED);

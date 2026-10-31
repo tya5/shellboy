@@ -549,23 +549,25 @@ pub(super) fn highlight(
     let Some(key) = &view.items.focus else {
         return;
     };
-    for (line, source) in history
+    // The cached projection is bounded; find the real header, not the first
+    // visible continuation of an expanded item.
+    let Some(header) = history
         .sources
         .iter()
-        .skip(scroll)
-        .take(usize::from(area.height.saturating_sub(2)))
-        .enumerate()
-    {
-        if source.item.as_ref().is_some_and(|item| &item.key == key) {
-            let row = Rect::new(
-                area.x + 1,
-                area.y + 1 + line as u16,
-                area.width.saturating_sub(2),
-                1,
-            );
-            frame.buffer_mut().set_style(row, palette.interactive());
-        }
+        .position(|source| source.item.as_ref().is_some_and(|item| &item.key == key))
+    else {
+        return;
+    };
+    if header < scroll || header - scroll >= usize::from(area.height.saturating_sub(2)) {
+        return;
     }
+    let row = Rect::new(
+        area.x + 1,
+        area.y + 1 + (header - scroll) as u16,
+        area.width.saturating_sub(2),
+        1,
+    );
+    frame.buffer_mut().set_style(row, palette.history_focus());
 }
 
 #[cfg(test)]
@@ -916,5 +918,100 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         }));
         assert!(!ui.view().items.active);
+    }
+}
+
+#[cfg(test)]
+mod heading_focus_tests {
+    use super::*;
+    use crate::config::PaletteMode;
+    use ratatui::{Terminal, backend::TestBackend, style::Modifier};
+    #[test]
+    fn only_heading_is_styled_without_moving_text_or_styling_scrolled_continuations() {
+        let key = ItemKey::Node("one".into());
+        let region = Arc::new(ItemRegion {
+            key: key.clone(),
+            source_node_ids: vec!["one".into()],
+            primary_node_id: "one".into(),
+            execution_id: None,
+            expandable: true,
+            default_open: true,
+            outcome: String::new(),
+        });
+        let history = HistoryLayout {
+            text: String::new(),
+            styled: vec![],
+            lines: 3,
+            targets: vec![],
+            sources: (0..3)
+                .map(|offset| presentation::RowSource {
+                    node: 0,
+                    covered_end: 1,
+                    offset,
+                    item: Some(region.clone()),
+                })
+                .collect(),
+        };
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.items.active = true;
+        view.items.focus = Some(key);
+        for mode in [PaletteMode::Dark, PaletteMode::Light] {
+            for (plain, rich) in [(false, true), (true, true), (false, false)] {
+                let palette = theme::Palette::from_capabilities(mode, plain, rich);
+                if !plain && rich {
+                    assert_ne!(
+                        palette.history_focus().bg,
+                        palette
+                            .user_band(crate::presentation::InputSource::Human)
+                            .bg
+                    );
+                }
+                for scroll in [0, 1] {
+                    let mut terminal = Terminal::new(TestBackend::new(32, 8)).unwrap();
+                    terminal
+                        .draw(|frame| {
+                            frame.render_widget(
+                                Paragraph::new("HEADER\nOUTPUT\nNOTICE"),
+                                Rect::new(1, 1, 30, 3),
+                            );
+                            highlight(
+                                frame,
+                                Rect::new(0, 0, 32, 8),
+                                &history,
+                                scroll,
+                                &view,
+                                palette,
+                            );
+                        })
+                        .unwrap();
+                    let buffer = terminal.backend().buffer();
+                    assert_eq!(buffer[(1, 1)].symbol(), "H");
+                    assert_eq!(buffer[(1, 2)].symbol(), "O");
+                    assert_eq!(buffer[(1, 2)].bg, ratatui::style::Color::Reset);
+                    assert!(
+                        !buffer[(1, 2)]
+                            .modifier
+                            .intersects(Modifier::BOLD | Modifier::UNDERLINED)
+                    );
+                    assert!(!buffer[(1, 1)].modifier.contains(Modifier::UNDERLINED));
+                    if scroll == 0 {
+                        assert_eq!(
+                            buffer[(1, 1)].bg,
+                            palette
+                                .history_focus()
+                                .bg
+                                .unwrap_or(ratatui::style::Color::Reset)
+                        );
+                        assert_eq!(
+                            buffer[(1, 1)].modifier.contains(Modifier::BOLD),
+                            plain || !rich
+                        );
+                    } else {
+                        assert_eq!(buffer[(1, 1)].bg, ratatui::style::Color::Reset);
+                        assert!(!buffer[(1, 1)].modifier.contains(Modifier::BOLD));
+                    }
+                }
+            }
+        }
     }
 }
