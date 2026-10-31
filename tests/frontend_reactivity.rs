@@ -154,15 +154,12 @@ impl Fixture {
         screen
     }
     async fn wait_update_or_action(&mut self) {
-        let action_due = self
-            .ui
-            .deferred_action_wait(Instant::now())
-            .map(|delay| tokio::time::Instant::now() + delay);
+        let action_delay = self.ui.deferred_action_wait(Instant::now());
         tokio::select! {
             update = self.updates.recv() => self.accept_update(update.expect("frontend update channel closed before predicate")),
             _ = async {
-                match action_due {
-                    Some(due) => tokio::time::sleep_until(due).await,
+                match action_delay {
+                    Some(delay) => tokio::time::sleep(delay).await,
                     None => std::future::pending::<()>().await,
                 }
             } => {}

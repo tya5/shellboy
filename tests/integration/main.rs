@@ -183,3 +183,6 @@ mod index_space_gc;
 
 #[path = "../exec_client.rs"]
 mod exec_client;
+
+#[path = "../support/watchdog.rs"]
+pub(crate) mod test_watchdog;
