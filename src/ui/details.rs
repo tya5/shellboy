@@ -1179,7 +1179,7 @@ impl Details {
                     format!(
                         "{}保存 {} · 表示受信 {}",
                         self.described_command_context(view)
-                            .map(|s| format!("{s} · 同じ原文内の隣接callはIDで区別 · "))
+                            .map(|s| format!("{s} · 共有assistant原文（隣接callを含む） · "))
                             .unwrap_or_default(),
                         safe(&body.provenance.created_at),
                         self.original_observed_at.as_deref().unwrap_or("未確認")

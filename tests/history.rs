@@ -847,6 +847,7 @@ async fn adjacent_described_commands_larger_than_preview_budget_reach_exact_tail
         assert_eq!(collected, expected);
         assert!(collected.contains("FIRST-COMMAND-ONLY"));
         assert!(collected.contains("SECOND-COMMAND-TAIL"));
+        assert!(collected.contains(&long_command), "selected B command must be complete, not just an arbitrary tail marker");
         database.shutdown().await.unwrap();
     }).await.unwrap();
 }

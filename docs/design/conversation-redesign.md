@@ -1154,3 +1154,8 @@ that text as a preview and supplies an exact-call command-original action (`o`).
 F6/original reuse the existing read-only, cursor-bounded source pages to reach
 all command text, including adjacent calls and long-command tails. Do not eagerly
 materialize all calls or increase aggregate preview retention for this label.
+
+Original pages are the verified shared assistant/source node and can include
+adjacent calls. The selected call ID and actual command preview identify the
+chosen item; the view does not claim an exclusive per-call raw stream. All of
+the selected command remains reachable through those bounded source pages.
