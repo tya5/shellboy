@@ -517,7 +517,7 @@ impl Control {
             let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"confirmed_run_id":confirmed_run,"text":content.text,"files":references,"args":args,"now":options.now,"submission":options.submission});
             content.fingerprint_positions(&mut intent);
             let reservation=control.store.reserve_internal(operation_id.clone(),intent).await?;
-            match reservation{db::RuntimeReservation::Saved(result)=>return result,db::RuntimeReservation::Pending=>return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),db::RuntimeReservation::New=>{}}
+            match reservation{db::RuntimeReservation::Saved(result)=>return result,db::RuntimeReservation::Pending=>return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),db::RuntimeReservation::New=>{control.changed.notify_waiters();}}
             let outcome=async{
                 if let Some(submission)=&options.submission {
                     control.store.prepare_draft_submission(&operation_id,Some(&thread),submission).await?;

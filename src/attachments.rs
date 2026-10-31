@@ -751,7 +751,7 @@ pub fn remove_tx(
     tx: &Transaction<'_>,
     thread_id: &str,
     attachment_id: &str,
-) -> Result<(), ApiError> {
+) -> Result<bool, ApiError> {
     let changed=tx.execute("UPDATE attachment_selection SET state='excluded',reason='explicitly removed',revision=revision+1 WHERE thread_id=?1 AND attachment_id=?2 AND state='active'",params![thread_id,attachment_id]).map_err(sql_error)?;
     if changed == 0 {
         let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM attachment_selection WHERE thread_id=?1 AND attachment_id=?2)",params![thread_id,attachment_id],|r|r.get(0)).map_err(sql_error)?;
@@ -765,7 +765,7 @@ pub fn remove_tx(
     if changed > 0 {
         tx.execute("UPDATE thread SET selection_revision=selection_revision+1,revision=revision+1 WHERE id=?1",[thread_id]).map_err(sql_error)?;
     }
-    Ok(())
+    Ok(changed > 0)
 }
 /// Same transaction as attempt admission, before any API side effect.
 pub fn adopt_prepared_tx(
@@ -1113,21 +1113,31 @@ impl AttachmentService {
         &self,
         at: chrono::DateTime<chrono::Utc>,
     ) -> Result<ManagedGcReport, ApiError> {
+        self.collect_managed_observed(at, None).await
+    }
+    /// GC passes its existing availability signal. Publish each committed
+    /// availability transition even if a later unlink/save fails.
+    pub(crate) async fn collect_managed_observed(
+        &self,
+        at: chrono::DateTime<chrono::Utc>,
+        availability_changed: Option<Arc<tokio::sync::Notify>>,
+    ) -> Result<ManagedGcReport, ApiError> {
         let cutoff = i64::try_from(self.config.retention.clipboard_days)
             .ok()
             .and_then(chrono::Duration::try_days)
             .and_then(|duration| at.checked_sub_signed(duration))
             .map(|date| date.to_rfc3339());
         let budget = self.config.retention.clipboard_bytes;
+        let first_signal = availability_changed.clone();
         let (candidates,protected,total)=self.database.call(move|db|{
             let tx=db.transaction()?;let mut statement=tx.prepare("SELECT m.id,m.absolute_path,m.state,COALESCE(m.raw_size,0),m.created_at,EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='managed_file' AND p.resource_id=m.id) OR EXISTS(SELECT 1 FROM attachment_ref a JOIN attachment_selection s ON s.attachment_id=a.id JOIN thread t ON t.id=s.thread_id WHERE a.absolute_path=m.absolute_path AND s.state='active' AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM draft d,json_each(d.body_json,'$.attachments') a WHERE d.state IN ('editing','accepting','submitting','submitted') AND (d.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=d.thread_id AND t.deleted_at IS NULL)) AND (json_extract(a.value,'$.id')=m.id OR json_extract(a.value,'$.path')=m.absolute_path)) OR EXISTS(SELECT 1 FROM draft d JOIN thread t ON t.id=d.thread_id JOIN attachment_ref a ON a.source_node_id=json_extract(d.body_json,'$.source_message_id') WHERE d.state='archived' AND json_extract(d.body_json,'$.kind')='cancelled_message' AND t.deleted_at IS NULL AND a.absolute_path=m.absolute_path) FROM managed_file m WHERE m.state IN ('ready','failed','deleting') ORDER BY m.created_at,m.id")?;
             let rows=statement.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,bool>(5)?)))?.collect::<Result<Vec<_>,_>>()?;drop(statement);
-            let mut total=rows.iter().filter(|r|r.2=="ready").map(|r|r.3 as u64).sum::<u64>();let protected=rows.iter().filter(|r|r.5).map(|r|r.3 as u64).sum();let mut candidates=Vec::new();
+            let mut total=rows.iter().filter(|r|r.2=="ready").map(|r|r.3 as u64).sum::<u64>();let protected=rows.iter().filter(|r|r.5).map(|r|r.3 as u64).sum();let mut candidates=Vec::new();let mut availability_transition=false;
             for (id,path,state,size,created,pinned) in rows {
                 if pinned { continue; }
-                if state=="deleting"||state=="failed"||cutoff.as_ref().is_some_and(|cutoff|created<=*cutoff)||total>budget{if state=="ready"{total=total.saturating_sub(size as u64);}tx.execute("UPDATE managed_file SET state='deleting',deleted_reason=COALESCE(deleted_reason,'clipboard retention') WHERE id=?1 AND state IN ('ready','failed','deleting')",[&id])?;candidates.push((id,PathBuf::from(path)));}
+                if state=="deleting"||state=="failed"||cutoff.as_ref().is_some_and(|cutoff|created<=*cutoff)||total>budget{if state=="ready"{total=total.saturating_sub(size as u64);}availability_transition |= tx.execute("UPDATE managed_file SET state='deleting',deleted_reason=COALESCE(deleted_reason,'clipboard retention') WHERE id=?1 AND (state IN ('ready','failed') OR (state='deleting' AND deleted_reason IS NULL))",[&id])? > 0; candidates.push((id,PathBuf::from(path)));}
             }
-            tx.commit()?;Ok((candidates,protected,total))
+            tx.commit()?;if availability_transition && let Some(signal)=first_signal { signal.notify_one(); }Ok((candidates,protected,total))
         }).await.map_err(storage_error)?;
         let mut report = ManagedGcReport {
             protected_bytes: protected,
@@ -1163,7 +1173,14 @@ impl AttachmentService {
             match result {
                 Ok(()) => {
                     let row = id.clone();
-                    self.database.call(move|db|{db.execute("UPDATE managed_file SET state='deleted' WHERE id=?1 AND state='deleting'",[row])?;Ok(())}).await.map_err(storage_error)?;
+                    let signal = availability_changed.clone();
+                    self.database.call(move|db|{
+                        let tx = db.transaction()?;
+                        let changed = tx.execute("UPDATE managed_file SET state='deleted' WHERE id=?1 AND state='deleting'",[row])?;
+                        tx.commit()?;
+                        if changed > 0 && let Some(signal) = signal { signal.notify_one(); }
+                        Ok(())
+                    }).await.map_err(storage_error)?;
                     report.deleted.push(id);
                 }
                 Err(error) => report.failed.push((id, error.message)),

@@ -1174,12 +1174,15 @@ impl Store {
                 &target(args.thread_id.as_deref(), caller)?,
             )?),
             Command::AttachmentRemove(args) => {
-                crate::attachments::remove_tx(
-                    tx,
-                    &target(args.thread_id.as_deref(), caller)?,
-                    &args.attachment_id,
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let changed = crate::attachments::remove_tx(tx, &thread, &args.attachment_id)?;
+                let mut result = MutationResult::value(
+                    json!({"attachment_id":args.attachment_id,"removed":true}),
                 )?;
-                MutationResult::value(json!({"attachment_id":args.attachment_id,"removed":true}))
+                if changed {
+                    result.changed_threads.push(thread);
+                }
+                Ok(result)
             }
             Command::HistoryList(args) => MutationResult::value(history::list_nodes(tx, args)?),
             Command::HistoryGet(args) => MutationResult::value(history::get_node(tx, args)?),

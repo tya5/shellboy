@@ -283,7 +283,10 @@ impl GcService {
             category,
             StorageCategory::All | StorageCategory::ManagedImages
         ) {
-            let managed = self.attachments.collect_managed(at).await?;
+            let managed = self
+                .attachments
+                .collect_managed_observed(at, Some(self.availability_changed.clone()))
+                .await?;
             report.managed_deleted_count = managed.deleted.len() as u64;
             report.managed_failure_count = managed.failed.len() as u64;
             report.managed_details_truncated =

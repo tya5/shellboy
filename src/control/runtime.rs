@@ -109,6 +109,8 @@ impl Control {
                     )),
                     Err(error) => Err(error),
                     Ok(db::RuntimeReservation::New) => {
+                        // The pending receipt is durable before external work.
+                        control.changed.notify_waiters();
                         // Saved results never create a new reply-grace effect.
                         // Publish ownership before the action can save stopping.
                         if let Some(execution) = &deferred_shell_stop {
