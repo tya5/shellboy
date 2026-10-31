@@ -5203,3 +5203,45 @@ was intentionally changed to transport Receiving under the adopted #85 contract.
 The fixture likewise checks absence of active footer recovery, not absence of the
 historical recovery panel. The initial four integration failures are retained in
 logs; they are not covered by the separate #96 unrelated-CI classification.
+
+The later exact-main #91B comparison is NOT a closed P1 gate: baselineafe4c08 and
+candidatef432751, same debug fixture, three interleaved pairs yielded p95us
+8579->9006,8690->8370,8335->10961. Both sides exceed8ms under shared-host load,
+and the third candidate delta exceeds2ms. Cache counts/reuse assertions remain
+identical. All observations are retained, not replaced by the earlier passing
+checkpoint or called a speedup/causal regression diagnosis. Host load around the
+build was10.65/10.27/9.85; one lib-test compilation took11m23s with concurrent
+workers and1 build job. A controlled low-contention paired measurement is needed
+before claiming this P1 admission goal, with no timer/assertion relaxation.
+
+Resource coordination followed the user notice: the already-started final
+receive-order lib build continues at1 job; no subsequent Rust build/check starts
+until worker1 releases the #96 standard-check slot (its current build uses2 jobs).
+The saved native P1 executables need no rebuild to inspect host-contention effects;
+a short quiet observation interval was requested directly. Existing/user processes
+are not interrupted. The previous over-budget P1 numbers remain visible and no
+closed gate is claimed merely from a future rerun.
+
+After explicit slot release from workers1/3 (both holding all new Rust work),
+the already-built baselineafe4c08 and final receiver-fix candidate executables
+were observed without rebuilding,11:27:44-11:27:59UTC. Three interleaved P1 pairs
+p95us:4490->4447,4398->4465,4418->4435. All candidate values satisfy8ms and
++2ms relative goals in this controlled interval; cache counts131/258/16510 and
+focus-reuse assertions remain identical. The earlier over-budget loaded-host
+values remain above, not discarded or called a causal speedup diagnosis.
+Binary hashes, source/diff witnesses and complete logs are in the quiet P1
+capture directory. The two peers were notified once of results and slot release;
+no new local Rust work starts until the next #96/#95 resource slot is released.
+
+A final race test additionally passes Preparing(a)->receive(a)->Preparing(a)->
+Awaiting(a), and the analogous running transition: bytes alone do not invent
+inflight, but the matching later saved inflight projection retains reception.
+All15 activity/time cases pass on that source. The final latest-main standard
+check and rebuilt native matrix are still separate gates after the resource hold.
+
+Shared helpers were reused for record deltas and PTY/VT lifecycle. Another
+extraction candidate was measured from saved shell commands:3 actual lib-test
+artifact-selection/paired-build scripts,4275 characters (the fourth matching
+entry is the measurement query itself and is excluded). A source-witnessed
+paired-artifact helper could remove repeated boilerplate; this task does not
+expand #85 into that new helper implementation.

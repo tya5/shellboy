@@ -265,4 +265,27 @@ mod tests {
             Some("観測 1s")
         );
     }
+    #[test]
+    fn receive_before_inflight_survives_repeated_preparing_or_running_snapshots() {
+        for phase in [ActivityPhase::Preparing, ActivityPhase::Running] {
+            let at = Instant::now();
+            let mut view = ActivityView::default();
+            let mut pending = snapshot("a", 10);
+            pending.phase = phase;
+            view.accept_at(1, pending.clone(), at);
+            view.receive_at("a", at + Duration::from_secs(1));
+            assert_eq!(
+                view.phase(),
+                phase,
+                "do not infer inflight from bytes alone"
+            );
+            view.accept_at(2, pending, at + Duration::from_secs(2));
+            view.accept_at(3, snapshot("a", 13), at + Duration::from_secs(3));
+            assert_eq!(view.phase(), ActivityPhase::Receiving);
+            assert_eq!(
+                view.phase_time_note(at + Duration::from_secs(4)).as_deref(),
+                Some("観測 3s")
+            );
+        }
+    }
 }
