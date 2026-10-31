@@ -46,7 +46,7 @@ when updating main; do not import the archived combined F/G development branch.
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | D2 shipped in main per6539106715; cross-increment P2/P3/P5 measurements remain tracked with E/F, not a new D admission or transferred display work |
 | E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Admitted to main d0a92bf after exact-SHA ordinary3OS CI41181650657, approval6540583854 and accepted qualified producer3/P3 evidence. |
-| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Published4b61c0f: native standard2026/0/35, Watch8 conditions, P3 six cases; Exact-source3OS CI41193738579 verified; long measurements running. Separate main review/admission pending. |
+| F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Corrected source3c6d9f3: native standard2037/0/35 and Ctrl+T8 conditions; final publication/exact3OS follows. Prior4b61c0f3OS verified, long measurement running; separate main review/admission pending. |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
 
 Each increment must be usable independently. A requirement that crosses these
@@ -666,3 +666,14 @@ all7 targeted regression success lines on every OS: Linux2,027/0/34,
 macOS2,026/0/35, Windows1,895/0/26. This closes the candidate ordinary source
 CI gate, not long P2/P5, later-main reconciliation or reviewer main approval.
 G remains after F's separately approved main admission.
+
+
+## F1 mode-memory correction qualification
+
+Source3c6d9f3 follows mainafe4c08 and fixes the last-mode requirement missed by
+the previous F1 evidence map. Direct native4b61c0f reproduces wrong List reopen;
+new source passes actual-key regression and8 native mode-reopen conditions.
+Standard2,037/0/35 and Python41 succeed. See the F qualification record for
+exact sources, helper-preflight failures and binary witnesses. This closes the
+identified mode-memory gap, not the new exact3OS/main review/long-measurement
+gates. The earlier source's successful CI is not reused as the new source gate.

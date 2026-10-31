@@ -252,3 +252,43 @@ verified: Linux2,027/0/34, macOS2,026/0/35, Windows1,895/0/26. These include
 both new Watch render, all three cancellation, paired snapshot and actual
 scoped-Watch CLI tests. Long comparison41193740385 remains live; F main still
 requires its separate review and later-main ancestry reconciliation.
+
+
+## Session-mode correction and main #91/#93 source3c6d9f3
+
+The F1 audit found the in-process last-mode contract was missing. Native frozen
+4b61c0f reopened List after closing Watch; saved cells show the wrong mode and
+normal exit0. Earlier private import/config preflight failures occurred before
+startup and are not product reproductions. Commitf7b00d5 reuses the existing
+mode enum and entry routes: Ctrl+T reopens List/global Watch, explicit /threads
+still opens List, new UI starts List, old descendant root/filter is cleared.
+Design, decision log, help and both user guides state this contract.
+
+Combined source3c6d9f3 includes mainafe4c08's #91 selected B input bands and
+#93 manual history-navigation fix. Inherited presentation::rows,
+ui::presentation, message_metadata and streams are unchanged from that main.
+Native macOS standard succeeds2,037/0/35, Python41, layout/watchdog, format and
+strict all-target Clippy. Actual full-run lines verify all8 targeted regressions:
+mode reopen, both Watch row rendering checks, all3 cancellation cases, paired
+snapshot and scoped-Watch CLI lifecycle. The preceding #93-only27e7733 standard
+is separately2,033/0/35 and is not relabelled. Node CI-reuse12/0; gitleaks
+4b61c0f..3c6d9f3 scans12 commits/no leaks. Record-delta versus mainafe4c08:
+status+491, acceptance+225, decisions+56, all deleted0 before this result record.
+
+The newly compiled standard debug binary is frozen before native verification;
+witnessca580eae0478ba6fdd5c753c4fb3d34891701f387285517516d593b31ad7e7d0.
+Actual Ctrl+T reopen passes8 native PTY conditions (80/140, dark/light, NO_COLOR,
+vt100): Watch→Esc→Ctrl+T returns Watch and normal shutdown exits0 in each.
+Palette is explicit in fixture config, OSC52 is selected solely for safe fixture
+isolation, no message is sent and the only configured endpoint is literal
+loopback:9. This is behavior evidence, not a debug/release speed comparison.
+Physical Windows UX is still unverified. No product state/worker/queue is added.
+
+The long comparison41193740385 remains pinned to4b61c0f and is still running;
+it is not restarted or relabelled to3c6d9f3. Mode entry changes no timer/read
+cadence: measurement starts after explicit browser entry in a fresh UI. Later
+main presentation changes remain their authored behavior. Review must assess
+those exact source-qualified observations; no final-source CPU claim is inferred.
+The corrected source needs its own published exact-SHA ordinary3OS gate and
+separate main admission approval. The known #95 integration remains owned by
+its worker; retain that guard when incorporating its main change. G stays later.

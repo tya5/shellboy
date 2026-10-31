@@ -2476,3 +2476,15 @@ The user selected B (⇥) on 2026-10-31. The common External/外から row and t
 driver default now use B; an explicit regression assertion binds mark/label/CJK
 width. The prior A branch remains historical, not the integration candidate.
 The selected branch is being requalified and sent to worker4 as visually approved.
+
+
+## F source3c6d9f3 corrected-mode qualification
+
+Latest-main source3c6d9f3 (mainafe4c08, #91/#93) passes native standard2,037/0/35,
+Python41, strict Clippy/fmt/layout/watchdog. All8 targeted regression lines
+are present. Node12/0, secret scan12 commits/no leaks and record-delta pass.
+Native frozen debug binary passes8 Ctrl+T mode-reopen PTY conditions, all exit0;
+source/binary witnesses and prior negative/config preflights remain in the F
+qualification record. Corrected F publication/exact3OS follows this result.
+Long4b61c0f measurement41193740385 is still live and not relabelled. No main
+admission, G implementation, installed-binary or user-store change occurred.
