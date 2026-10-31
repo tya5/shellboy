@@ -548,7 +548,8 @@ shellboy shell list --thread THREAD_ID --cursor CURSOR
 Replace example IDs/times. Times are RFC3339 with an explicit offset and four-digit
 year. Intervals include since and exclude until; either bound may be omitted.
 Usage selects model requests and shells by saved start, Runs by saved creation,
-and a Turn's own lifetime by its creation. Selected durations are whole, not
+and a Turn's own lifetime by its creation. Requests and Runs crossing a boundary
+belong wholly to their start side, without splitting. Selected durations are whole, not
 prorated overlap. Unknown start times are excluded only when time filtering; saved
 usage states/unknowns/overflow still apply. Totals are not invoices or prices.
 

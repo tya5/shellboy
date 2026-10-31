@@ -3663,3 +3663,16 @@ pass. Cause remains unproven, not claimed fixed by this task. No retries/timeout
 were relaxed to hide it. No user DB, installed binary, owner or public tag/Release
 is changed. Real-provider billing/quality and giant real-history latency remain
 unverified; readbacks report retained facts, not recovered deleted data.
+
+## #75 small redaction and usage-boundary follow-up (2026-10-31)
+
+Native macOS arm64, Rust 1.99.1: targeted command_redaction test passes with
+synthetic secret-access-key flags (separate/equals), sshpass -p (bare/path),
+mysql attached -p (quoted/unquoted), mixed-case credential-suffix assignments,
+and PowerShell environment syntax. Ordinary mkdir -p/mysql --port remain visible.
+The existing 60-second watchdog applies; no performance deadline is asserted.
+Tests inspect returned strings only: no subprocess, provider, receipt or request
+log is produced (zero new request-log rows). Usage guidance now explicitly puts
+whole boundary-crossing lifetimes on their start side. This does not extend the
+heuristic into arbitrary-secret detection. Exact-source standard/native checks
+are recorded in issue #75; no installed binary, user DB or owner is changed.

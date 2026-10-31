@@ -1,5 +1,13 @@
 # Development status
 
+## Readback follow-up (#75)
+
+Shell snippets also suppress secret-access-key flags, sshpass password arguments,
+attached -p values and generic credential-suffix assignments. Usage documentation
+states explicitly that boundary-crossing lifetimes belong to their start side.
+Targeted synthetic redaction checks pass; final standard/native CI evidence is
+recorded in issue #75. No user database or installed runtime is changed.
+
 ## Saved readback (#75, unreleased main)
 
 CLI now reads retained compaction observations, latest compaction in thread get,

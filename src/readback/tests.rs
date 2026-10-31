@@ -280,10 +280,29 @@ fn command_redaction_covers_credentials_controls_and_unicode_bounds() {
             "ConvertTo-SecureString secret -AsPlainText",
             "curl -H 'X-API-Key: abcdef'",
             "echo --password='secret'",
+            "aws configure --secret-access-key example-value",
+            "aws configure --secret-access-key=example-value",
+            "sshpass -p example-value ssh example.test",
+            "/usr/bin/sshpass -p 'example-value' ssh example.test",
+            "mysql -pexample-value test",
+            "mysql -p'example-value' test",
+            "CUSTOM_KEY=example-value command",
+            "Custom_Token = 'example-value' command",
+            "CUSTOM_SECRET=example-value command",
+            "$env:CUSTOM_KEY = 'example-value'; command",
         ] {
             let (snippet, redacted) = shell::snippet(raw);
             assert!(redacted, "{raw}");
             assert_eq!(snippet, "[redacted: credential-like command]");
+        }
+        for raw in [
+            "mkdir -p directory",
+            "mysql --port 3306",
+            "echo ordinary-value",
+        ] {
+            let (snippet, redacted) = shell::snippet(raw);
+            assert!(!redacted, "{raw}");
+            assert_eq!(snippet, raw);
         }
     });
 }
