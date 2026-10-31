@@ -563,6 +563,7 @@ async fn measure_current_instance_receipt_sizes() {
         (
             "wait (already-ended shell)",
             Command::Wait(WaitArgs {
+                after: None,
                 conditions: vec![WaitCondition::ShellEnded {
                     execution_id: "shell".into(),
                 }],

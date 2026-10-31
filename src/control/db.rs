@@ -1707,8 +1707,10 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { last_answer: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
+    details.last_answer = crate::thread_observation::last_answer(connection, id)?;
+    details.last_input = crate::thread_observation::last_input(connection, id)?;
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection
         .query_row(
@@ -1928,6 +1930,8 @@ fn thread_list(connection: &Connection, args: &ThreadListArgs) -> Result<Page<Th
             })
             .is_some_and(|r| r.number > 0 && r.number <= r.limit);
         items.push(ThreadSummary {
+            last_answer: crate::thread_observation::last_answer(connection, &id)?,
+            last_input: crate::thread_observation::last_input(connection, &id)?,
             activity: crate::activity::classify(
                 run.as_deref(),
                 turn.as_deref(),

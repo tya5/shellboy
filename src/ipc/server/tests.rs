@@ -157,6 +157,7 @@ async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded()
                 .connect_command(
                     number,
                     Command::Wait(WaitArgs {
+                        after: None,
                         conditions: vec![WaitCondition::RunEnded {
                             run_id: "run".into(),
                         }],

@@ -113,6 +113,7 @@ async fn performance_native_wait_and_thread_page_indexes() {
             let wait = request(
                 &control,
                 Command::Wait(WaitArgs {
+                    after: None,
                     conditions: vec![WaitCondition::ShellEnded {
                         execution_id: "s00000".into(),
                     }],

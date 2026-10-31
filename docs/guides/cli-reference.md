@@ -604,3 +604,31 @@ on request, are not atomic across owners, and must not be added to estimate tota
 heap. SQLite/allocator/other untracked allocations are not estimated. No periodic
 sampling/logging, cache purge or provider request is performed. F8 display remains
 separate #41 work.
+
+### Thread wait continuation and latest messages (#74)
+
+`wait --conditions-json JSON [--after CURSOR] [--timeout-ms N]` accepts
+`{"type":"thread_settled","thread_ids":["A","B"],"states":["completed","recovery_wait","failed","stopped"]}`.
+The nonempty states filter is explicit; omit unwanted states. At most64 Thread
+IDs total (each at most128 bytes) and four distinct states are accepted; repeated
+IDs within a condition are errors. Other existing wait conditions can coexist.
+The result's `snapshot.changes` contains bounded Thread/Run/state/at and optional
+Turn identities; `at=null` means not recorded, never a guessed observation time.
+`cursor` is the Thread continuation cursor when these conditions are present,
+otherwise the existing shell-output cursor. `snapshot.more` announces another
+saved matching change. Keep the cursor on timeout too and pass it to the next
+wait with unchanged conditions. It is independent of owner instance. Cursor
+anchors invalidated by data removal require a fresh observation; external SQL
+editing/VACUUM is not a supported continuation path. Self/owning-ancestor/composed
+model waits remain cycle checked. Human wait observation does not scan the model
+ownership graph. No-after reports current settled states, not arbitrary history.
+
+`thread list/get` keep `excerpt` and add `last_answer` and `last_input` objects
+(or null when absent). The answer includes `node_id`, `turn_id`, `at`, `excerpt`
+and `body_available`; the input includes `message_id`, `node_id`, `at`, `state`,
+`sender`, `excerpt`, `body_available`. Excerpts include at most512 characters
+from at most64 natural-text fragments, excluding tools/reasoning/opaque bodies.
+These are the Thread's own saved facts, not expansion of fork-only ancestors.
+Existing list paging/limits remain unchanged. Held/cancelled input is still a
+received fact, not proof that the model consumed it; sender labels do not grant
+permissions. Reclaimed bodies retain identity/time with an empty excerpt.

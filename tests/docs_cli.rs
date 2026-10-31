@@ -215,3 +215,47 @@ async fn agent_semantic_search_guidance_is_bundled_and_examples_match_the_cli() 
     .await
     .expect("bundled guide watchdog");
 }
+
+#[tokio::test]
+async fn bundled_agent_guide_explains_thread_wait_continuation_without_an_owner() {
+    crate::test_watchdog::watchdog("bundled Thread wait guide", async {
+        let root = tempfile::tempdir().unwrap();
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .env_clear()
+            .current_dir(root.path())
+            .kill_on_drop(true)
+            .arg("--config")
+            .arg(root.path().join("missing.toml"))
+            .arg("--data-dir")
+            .arg(root.path().join("uncreated"))
+            .args([
+                "docs",
+                "get",
+                "--id",
+                "shellboy/agent-guide",
+                "--section",
+                "wait-for-any-child-thread",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let text = reply["result"]["text"].as_str().unwrap();
+        for required in [
+            "thread_settled",
+            "--after",
+            "result.snapshot.changes",
+            "result.cursor",
+            "last_answer",
+            "last_input",
+            "owner restart",
+        ] {
+            assert!(text.contains(required), "{text}");
+        }
+        assert!(!root.path().join("uncreated").exists());
+    })
+    .await
+    .unwrap();
+}

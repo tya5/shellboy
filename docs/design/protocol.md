@@ -381,3 +381,13 @@ not a new work queue. Native collection shares existing control-file admission a
 does not touch the DB worker. Other status queries keep their existing projection
 route. Cancellation discards the reply; native file tasks retain their existing
 permit until real exit. No persistent schema or local protocol version changes.
+
+## Thread observation extension (#74)
+
+See [Thread observations](thread-observation.md). WaitArgs adds optional after;
+WaitCondition adds thread_settled with explicit Thread IDs and settled-state
+filters. Existing any-condition results keep their shape, with a Thread cursor
+and snapshot.changes/more when these conditions are present. ThreadSummary and
+ThreadDetails add last_answer/last_input optional saved-fact objects. They do not
+change lifecycle, authorization, MessageSender identity or model-facing tools.
+Schema16 contains only derived indexes; protocol version remains2.

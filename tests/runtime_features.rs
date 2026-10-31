@@ -2373,6 +2373,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     let ended = request(
         &control,
         Command::Wait(WaitArgs {
+            after: None,
             conditions: vec![WaitCondition::RunEnded { run_id: run }],
             timeout_ms: 5_000,
         }),

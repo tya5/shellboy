@@ -178,11 +178,13 @@ impl ThreadSetArgs {
 
 impl WaitArgs {
     fn validate(&self) -> Result<(), ApiError> {
+        crate::thread_observation::validate(&self.conditions, self.after.as_deref())?;
         if self.conditions.is_empty() {
             return Err(invalid("wait requires at least one condition"));
         }
         for condition in &self.conditions {
             match condition {
+                WaitCondition::ThreadSettled { .. } => {}
                 WaitCondition::TurnCompleted { turn_id } => nonempty(turn_id, "turn_id")?,
                 WaitCondition::RunEnded { run_id } => nonempty(run_id, "run_id")?,
                 WaitCondition::ShellEnded { execution_id } => {

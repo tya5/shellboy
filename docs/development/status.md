@@ -1574,3 +1574,25 @@ Incremental P1 against main e933054: worst p95 5.135ms, largest delta1.747ms;
 all three interleaved pairs meet 8ms/+2ms. Details and failures are in acceptance.
 Branch three-OS CI/review/main admission are not claimed by local validation.
 Missing names and off-window source lookup are explicitly deferred to #88.
+
+## Thread observation and #82 review follow-up (#74, 2026-10-31)
+
+The separate #82 follow-up binds startup shell snapshot facts instead of SQL
+source replacement. Inclusive close_from(2) clarifies that guardian stderr is
+already closed; regression tests cover EOF before guardian release and normal
+release/reap/output-drain completion. Unix snapshot failed/unverified JSON and
+non-Unix stopped/no-OS-claim behavior are asserted directly.
+
+Thread wait adds64-target/64-change bounds, explicit settled-state filters and an
+instance-independent scoped cursor. Indexed Run/recovery streams retain finish/
+restart and recovery/resume transitions between calls. Root recovery retains the
+same existing fact without delivery. ThreadList/Get keep excerpt and separate
+own-final-answer from received-input/sender facts. Schema16 adds only four lookup
+indexes. #80/#83 main work is preserved; no rendering or composer logic changes.
+
+Focused SQL-plan, gap/restart, cycle, schema-upgrade, CLI and loopback observations
+pass during implementation; final combined standard/native gates are reported
+by exact SHA in issue74, separately from these focused results. The first version
+omits a subscription/UI watcher, idle-without-Run state and fork-only ancestor
+answer expansion. Excerpts bound returned text/fragments, not all JSON parsing.
+No paid provider, installed binary, owner restart or user data is used/changed.

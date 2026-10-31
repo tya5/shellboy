@@ -4253,3 +4253,82 @@ Python 18, fmt and strict all-target Clippy. The document-role test passes
 separately. Status adds 10 lines and deletes 0; this qualification appends its
 record without deleting prior evidence. Rebase/pre-push validation is repeated
 on the exact candidate; native branch CI must pass before main integration.
+
+## #82 Low follow-up: bound snapshot values and guardian EOF
+
+2026-10-31, native macOS ARM64/Rust1.99.1, a separate commit before #74.
+SHELL_SNAPSHOT uses SQL parameters for startup state and JSON extras, not source
+text replacement. The existing app_ipc restart fixture now reads the actual
+interruption_context JSON and asserts failed/unverified on Unix, stopped with
+no os_state field elsewhere, and retained result uncertainty.
+
+close_from's lower bound is inclusive, so fd2 was already closed in production;
+no /dev/null reassignment or lifetime policy change is needed. The new native
+natural_shell_exit_drains_stderr_to_eof_before_guardian_release test confirms
+stderr bytes and EOF while try_wait still says the guardian is alive. A separate
+normal supervisor test natural_exit_releases_guardian_and_finishes_output_drain_
+without_stderr_eof_cycle confirms stdout/stderr tail bytes, Exited0, complete
+output and confirmed group cleanup through the production release/drain path.
+All three focused checks pass. The first native harness incorrectly retained
+Command's parent pre_exec FD copies while waiting for the launch acknowledgment;
+that harness blocked and was terminated. A first whitespace-based edit missed
+its target; the unchanged harness was terminated again. The fixture was fixed
+to match production drop-before-ack in existing blocking work. This is not an
+observed production stderr-retention defect. No test deadline was shortened.
+
+## Bounded Thread wait/readback qualification (#74)
+
+Base main0ca4ec5, native macOS ARM64/Rust1.99.1. Build concurrency is1, test
+concurrency2; no release build or concurrent duplicate full check is used.
+New waits use the existing Notify-before-read loop, receipt/cleanup and graph.
+Terminal state/time comes from Run rows; genuine recovery/resume uses retained
+existing recovery events, also recorded for root Runs without parent delivery.
+No lifecycle classification from arbitrary attempt failures is introduced.
+
+The following focused observations pass during implementation; final combined
+full-standard/native results are independent gates recorded by exact SHA in
+issue74 rather than inferred from this list:
+
+- Actual EXPLAIN QUERY PLAN on next/head Run and recovery, current Run/Turn,
+  last Run and latest answer/input statements proves indexed Thread/range or
+  primary-key seeks, without history-wide table scans or temporary order trees.
+  A manual SQLite3.51 check also shows thread/state/rowid and expression/rowid
+  range seeks. Root human waits skip the unrelated model ownership graph.
+- Synthetic131 changes cross the64-change cap without loss, using per-stream
+  positions and round robin. Current active work is not an old completion;
+  unknown/deleted targets and invalid scopes/cursors/limits are distinguished.
+- A real pending model observation is registered before the existing Changed
+  publication; a completed Run and newer live Run are committed between reads.
+  The wait still returns the saved completion and leaves new work live.
+- A real temporary owner stores a root recovery fact, resumes the Turn, and
+  reads both the prior completion and recovery via cursor. After shutdown and
+  restart the same cursor reads the new stopped fact. Self/ancestor/composed
+  ownership protection remains; no polling or target stop is used to wait.
+- A schema15 temporary store upgrades/reopens with all four indexes and unchanged
+  Run/event row identities. The touched schema14 corruption fixture retains its
+  source-preservation assertions and uses the shared watchdog; its one obsolete
+  allowance is removed, not broadened.
+- A real owner plus two gated loopback JSON model responses verifies multi-Thread
+  settlement and old final answer versus new received input during the second
+  request, same metadata in list/get, saved sender/label, then the new final
+  answer. Another saved-fact fixture keeps held input distinct, strips an unknown
+  credential field and preserves identity when body bytes are reclaimed.
+- The CLI maps --after to the shared wait contract and rejects65 targets or after
+  without a Thread condition. Guide examples explain cursor continuation and
+  distinguish received input/labels from execution or recovery authorization.
+
+The initial plan fixture used &str-to-SQLite-Value conversions unsupported by the
+pinned API; explicit owned Values fixed compilation. The initial loopback fixture
+assumed ThreadCreateArgs::default; explicit current fields fixed compilation.
+The first latest-data fixture set a Turn answer FK before inserting the node;
+correct insertion order fixed that fixture. These are harness failures, not
+suppressed assertions. Further final-gate failures, if any, must be retained in
+the issue result. All async waits use the common60s watchdog, not speed criteria.
+
+Source excerpts select one node, at most64 natural fragments and512 returned
+characters, excluding tools/reasoning/opaque bodies. Missing bodies remain known
+identities with an empty excerpt. The selected path's fork-only ancestor answer
+is not expanded; no idle-without-Run state, subscription or UI watch screen is
+added. No new table/worker/queue/dependency, real provider, user data, installed
+binary or owner swap is part of qualification. #80/#83 main is retained; UI edits
+only initialize new optional DTO fields after their owner work completed.

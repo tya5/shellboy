@@ -104,6 +104,24 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 
 Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. An answered parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check its answer notification and retrieve the original text.
 
+
+### Wait for any child Thread
+
+Use one wait for several child Threads, not a repeated ThreadList comparison:
+
+```sh
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]'
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]' --after 'CURSOR'
+```
+
+Keep `result.cursor` even on timeout and pass it with unchanged conditions.
+Read `result.snapshot.changes`; `snapshot.more` means continue with that cursor.
+This also catches a finish/restart or recovery/resume between calls and survives
+owner restart. `satisfied` does not imply success or authorize recovery/retry.
+ThreadList/Get expose `last_answer` separately from `last_input`, including the
+latter's saved sender and self-asserted label. See [Delegation](delegation.md#waiting-for-several-threads)
+for bounds, current-state baselines and result/original-content inspection.
+
 ## Distinguish acceptance from completion
 
 CLI `ok:true` means that the operation succeeded, not that a sent request has an answer. In `message send` results, inspect `message_id`, `delivery_status`, `assignment`, and optional `run_id` / `turn_id`. Do not equate `accepted` with `applied`; track `held` / `pending` using `message get`.

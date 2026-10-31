@@ -504,12 +504,15 @@ pub struct ExecutionOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Wait for a saved target:\n  shellboy wait --conditions-json '[{\"type\":\"shell_ended\",\"execution_id\":\"WORK_EXECUTION_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"turn_completed\",\"turn_id\":\"CHILD_TURN_ID\"}]' --timeout-ms 30000\n\nConditions use any semantics. timeout leaves the target running; satisfied means inspect target state, not guaranteed success. recovery_wait means inspect Run/Turn and choose recovery explicitly. Guide: shellboy docs get --id shellboy/delegation"
+    after_help = "Wait for a saved target:\n  shellboy wait --conditions-json '[{\"type\":\"shell_ended\",\"execution_id\":\"WORK_EXECUTION_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"turn_completed\",\"turn_id\":\"CHILD_TURN_ID\"}]' --timeout-ms 30000\n\nThread conditions: {\"type\":\"thread_settled\",\"thread_ids\":[\"A\",\"B\"],\"states\":[\"completed\",\"recovery_wait\",\"failed\",\"stopped\"]}. Reuse result.cursor with --after and unchanged conditions to catch saved transitions.\n\nConditions use any semantics. timeout leaves the target running; satisfied means inspect target state, not guaranteed success. recovery_wait means inspect Run/Turn and choose recovery explicitly. Guide: shellboy docs get --id shellboy/delegation"
 )]
 pub struct WaitOptions {
-    /// JSON array of typed turn_completed/run_ended/shell_ended/shell_output conditions.
+    /// JSON array of typed thread_settled/turn_completed/run_ended/shell_ended/shell_output conditions.
     #[arg(long)]
     pub conditions_json: String,
+    /// Continue saved Thread transitions from a previous wait cursor.
+    #[arg(long)]
+    pub after: Option<String>,
     #[arg(long, default_value_t = wire::DEFAULT_WAIT_TIMEOUT_MS)]
     pub timeout_ms: u64,
 }
@@ -851,6 +854,7 @@ impl Cli {
                     invalid("conditions-json must be an array of typed wait conditions")
                 })?,
                 timeout_ms: a.timeout_ms,
+                after: a.after,
             }),
             CliCommand::History { command } => match command {
                 HistoryCommand::List(a) => C::HistoryList(wire::HistoryListArgs {
