@@ -2214,3 +2214,22 @@ formal F P2/P5 CI windows and ordinary3OS CI. This local success is not main
 admission and does not qualify G. Publication/CI may follow E admission under
 6540583854; F main still requires reviewer approval. No release, installed
 binary, paid endpoint or user data was touched.
+
+
+## E admission and F publication checkpoint
+
+E is admitted at exact SHA d0a92bf after ordinary CI41181650657 succeeds on
+Linux1949/0/32, macOS1948/0/33, Windows1817/0/24. Downloaded source_sha and
+actual paired-snapshot harness lines match all3 OSes. The main fast-forward
+from a0f7022 starts automatic main CI41182386543 at that same SHA. Scope and
+remaining F/G were reported in #41 comment6540842872. No extra E migration
+or #83/#84 source change was introduced.
+
+F source742d523 also passes actual native macOS #84 PTY regression:8 conditions
+(80/140 columns, dark/light, NO_COLOR and vt100),10 captures each, exactly one
+local mock request per case and no paid API. Test-only pyte uses the existing
+terminal-review virtual environment; default Python lacks that optional module.
+This proves the retained paste/composer interaction, not full Watch visual
+acceptance or physical Windows UX. Combined F standard2016/0/35 and P4 values
+are recorded above; F native/P2/P3/P5/memory gaps remain open. F publication/CI
+is authorized after E admission; F main admission is separately gated on review.
