@@ -366,7 +366,21 @@ pub(super) fn read_list_facts_tx(
 /// Pure output. G maps this to PreparedInspection and owns all adoption fences.
 pub(super) fn prepare_list_facts(raw: RawLists) -> Result<Value, ApiError> {
     let current = match raw.current {
-        Body::Status(value) => status::prepare(value),
+        Body::Status(value) => {
+            let mut prepared = status::prepare(value);
+            if let Command::Status(args) = &raw.scope.command {
+                if let Some(rows) = prepared.get_mut("items").and_then(Value::as_array_mut) {
+                    for row in rows {
+                        let matches = row["kind"]
+                            .as_str()
+                            .and_then(status::Kind::parse)
+                            .and_then(|kind| status::matches_filters(kind, &row["current"], args));
+                        row["matches_captured_filters"] = matches.map_or(Value::Null, Value::Bool);
+                    }
+                }
+            }
+            prepared
+        }
         Body::Shell(value) | Body::Compact(value) => retained::prepare(value)?,
         Body::Threads(chunks, unconfirmed) => {
             let mut rows = Vec::new();
