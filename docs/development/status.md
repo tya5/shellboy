@@ -1,5 +1,22 @@
 # Development status
 
+## G native P6 count checkpointa8bbcf0
+
+Four native Unix PTY cases pass at80/140 columns for keyboard/wheel:600 events
+per10s,65536 original bytes,219–241 draws, zero warm-reader rebuilds; peak1493
+rows/446375 bytes stays within cache bounds. Keyboard UI+draw p95 observations
+are8.599/8.777ms versus original36.836/39.427ms; wheel6.132/12.485ms has no
+supported original baseline. Durations do not gate acceptance. Private source,
+raw terminal/results and hashes remain local; instrumentation restores exactly.
+Shared target/debug/shellboy currently holds that private measurement executable,
+so rebuild ordinary source before normal development use. Installed binary is
+untouched. See acceptance for exact source/hash/counts and preflight failure.
+
+P6 is a qualified checkpoint, not all G: remaining saved routes, header/SQL bounds,
+shared-consumer P3, all-popup native wheel and review/three-OS/main gates remain.
+No new build directory/copy, dependency, product instrumentation or push.
+
+
 ## G latest-main integration78abbf8: qualification running
 
 The G branch now includes origin/mainca317a8 (#88 saved notification links and

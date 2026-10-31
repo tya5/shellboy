@@ -1,5 +1,48 @@
 # Validation record
 
+## G native P6 checkpointa8bbcf0: count gates pass
+
+Native macOS/Rust1.99.1, shared debug target only. Sourcea8bbcf0 (Rust source
+78abbf8) plus private atomic instrumentation builds and runs four sequential
+Unix PTY cases. Each case opens a saved64KiB original, warms the reader, sends
+600 keyboard/wheel events at60Hz for10s, then exits cleanly. Synthetic loopback
+Responses only: exactly one request per case; no user data/provider/clipboard.
+
+| Input | Columns | Accepted events | Draws | Rebuilds during window | UI+draw p95 observation (ms) |
+| --- | --- | --- | --- | --- | --- |
+| Keyboard |80|600|238|0|8.599333|
+| Keyboard |140|600|228|0|8.777375|
+| Wheel |80|600|241|0|6.131876|
+| Wheel |140|600|219|0|12.485084|
+
+All cases retain65536 source bytes; observed reader peaks are1493 rows and446375
+charged bytes, below65536 rows/8MiB. Actual frame counts fit both configured30fps
+total allowance and changes plus elapsed seconds. Sample arrays are complete;
+readable source changes after the first second; the binary is unchanged during
+each capture. No strict1s-bin, latency, variance or CPU threshold is used.
+The full binary SHA256 is
+`aaf6271f6db823927ebb31d89908b0fa5ff7f47b36bd044c4c27057a436cac99`.
+Private p6-a8bbcf0-{keyboard,wheel}-{80,140} results retain terminal bytes, source
+manifest, fixture/script/binary hashes and raw metrics. Private instrumentation
+patch/originals/manifests are preserved; restoration verifies all touched files
+and leaves the source tree clean. Shared debug executable remains the private
+measurement build: rebuild ordinary source before its next ordinary use.
+
+Original baseline1fec7f0 keyboard p95 values are36.836459ms (80) and39.427083ms
+(140); current deltas are-28.237126ms and-30.649708ms. Comparisons require the same
+fixture/input duration/event count. Durations are observations only. Baseline
+wheel support is unavailable; zero old wheel frames are not a speedup claim.
+Original scripts/results, including the historical rejected-config preflight,
+are unchanged. The candidate's first preflight used system Python without pyte
+and stopped before product launch; its failure log remains. Existing terminal
+review venv then runs the successful four cases; no dependency was installed.
+
+This is a P6 source-qualified count result, not the remaining all-popup wheel
+matrix, P3 shared-consumer proof, physical terminal/Windows success or full G
+admission. All G5 saved-route and G9 query/source obligations remain in the ledger.
+No product instrumentation, push, installed binary or user data change.
+
+
 ## G integrated native standard78abbf8
 
 On native macOS/Rust1.99.1, `RUST_TEST_THREADS=2 sh scripts/check.sh` exits0
