@@ -1,26 +1,17 @@
 #!/usr/bin/env python3
-"""Observe #84 through a real Unix PTY and pyte screen (test-only dependency)."""
+"""Observe #84 through the shared standard-library Unix PTY driver."""
 import argparse
-import codecs
-import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import pty
-import re
-import select
-import signal
-import struct
 import subprocess
 import tempfile
-import termios
 import threading
-import time
 
-import pyte
+from dev.pty_capture import Terminal, WATCHDOG_SECONDS
 
-WATCHDOG_SECONDS = 60
+
 
 
 class Mock(BaseHTTPRequestHandler):
@@ -45,112 +36,6 @@ class Mock(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-
-class Terminal:
-    def __init__(self, binary, root, cols, palette, term, no_color):
-        self.screen = pyte.Screen(cols, 36)
-        self.stream = pyte.Stream(self.screen)
-        self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
-        self.raw = bytearray()
-        self.paint = bytearray()
-        self.completed_text = ""
-        self.master, slave = pty.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, cols, 0, 0))
-        env = dict(os.environ, TERM=term)
-        env.pop("COLORTERM", None)
-        env.pop("NO_COLOR", None)
-        # Do not inherit the agent's conversation/owner context.
-        env = {k: v for k, v in env.items() if not k.startswith("SHELLBOY_")}
-        if no_color:
-            env["NO_COLOR"] = "1"
-        self.process = subprocess.Popen(
-            [str(binary), "--config", str(root / "config.toml"),
-             "--data-dir", str(root / "data")], cwd=root, env=env,
-            stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
-        os.close(slave)
-        os.set_blocking(self.master, False)
-
-    def cells(self):
-        # pyte's display property crashes on orphan wide-character stub cells
-        # during Ratatui differential repaints. Read its parsed cell data directly.
-        return "\n".join("".join(self.screen.buffer[y][x].data
-                                 for x in range(self.screen.columns))
-                         for y in range(self.screen.lines))
-
-    def text(self):
-        return self.completed_text
-
-    def feed_output(self, chunk):
-        self.raw.extend(chunk)
-        self.paint.extend(chunk)
-        # Ratatui ends each painted frame by hiding the cursor or showing and
-        # positioning it. Capture there, not halfway through a wide-cell repaint.
-        boundary = rb"\x1b\[\?25l|\x1b\[\?25h\x1b\[\d+;\d+H"
-        while match := re.search(boundary, self.paint):
-            self.stream.feed(self.decoder.decode(self.paint[:match.end()]))
-            del self.paint[:match.end()]
-            self.completed_text = self.cells()
-        if len(self.raw) > 4 * 1024 * 1024:
-            raise AssertionError("PTY output flood")
-
-    def read_ready(self):
-        try:
-            self.feed_output(os.read(self.master, 65536))
-        except BlockingIOError:
-            pass
-
-    def send(self, text):
-        pending = text.encode()
-        deadline = time.monotonic() + WATCHDOG_SECONDS
-        # Drain output while delivering paste: both PTY directions are bounded.
-        while pending:
-            if time.monotonic() >= deadline:
-                raise AssertionError("60s PTY input watchdog")
-            readable, writable, _ = select.select([self.master], [self.master], [], .05)
-            if readable:
-                self.read_ready()
-            if writable:
-                try:
-                    pending = pending[os.write(self.master, pending[:256]):]
-                except BlockingIOError:
-                    pass
-
-    def paste(self, text):
-        self.send("\x1b[200~" + text + "\x1b[201~")
-
-    def expect(self, predicate, label):
-        # This is solely a hung-test watchdog, never a latency acceptance gate.
-        deadline = time.monotonic() + WATCHDOG_SECONDS
-        while not predicate(self.text()):
-            if time.monotonic() >= deadline:
-                raise AssertionError(f"60s watchdog: {label}\n{self.text()}")
-            if self.process.poll() is not None:
-                raise AssertionError(f"TUI exited before {label}: {self.process.returncode}")
-            readable, _, _ = select.select([self.master], [], [], .05)
-            if readable:
-                self.read_ready()
-        return self.text()
-
-    def close(self):
-        # Ctrl+U clears only this disposable draft; typed /quit requests normal shutdown.
-        if self.process.poll() is None:
-            self.send("\x15/quit\r")
-            deadline = time.monotonic() + WATCHDOG_SECONDS
-            while self.process.poll() is None:
-                if time.monotonic() >= deadline:
-                    os.killpg(self.process.pid, signal.SIGKILL)
-                    self.process.wait()
-                    raise AssertionError("60s shutdown watchdog")
-                readable, _, _ = select.select([self.master], [], [], .05)
-                if readable:
-                    try:
-                        self.raw.extend(os.read(self.master, 65536))
-                    except OSError:
-                        break
-            self.process.wait()
-        os.close(self.master)
-        if self.process.returncode:
-            raise AssertionError(f"TUI exit code {self.process.returncode}")
 
 
 def main():
@@ -180,7 +65,7 @@ def main():
                         'default_connection = "fixture"\ndefault_model = "fixture"\n'
                         '[connections.fixture]\n'
                         f'base_url = "http://127.0.0.1:{server.server_port}/v1"\n'
-                        f'[ui]\npalette = "{palette}"\nbell = false\n')
+                        f'[ui]\ncopy_backend="osc52"\npalette = "{palette}"\nbell = false\n')
                     terminal = Terminal(binary, root, cols, palette, term, no_color)
                     start_requests = len(Mock.requests)
                     captures = []

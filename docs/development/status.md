@@ -1904,3 +1904,11 @@ projections alongside E's shared summary/readonly bounded display contract.
 The row vocabulary and composer are unchanged from this main. Combined-source
 validation is pending; no CI result or performance value is inherited by this
 new merge. F remains separately saved at b41135c, not included in E.
+
+## Shared disposable PTY helper (#94.2)
+
+Reusable standard-library transport/VT cells replace the #84 inline Terminal
+and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
+key actions and loopback-only configuration. Native captures and replay are used
+immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
+This is developer tooling only; product Rust, schema and workflows are unchanged.

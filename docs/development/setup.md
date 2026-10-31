@@ -145,3 +145,37 @@ little wall-time benefit. Exposed test instability is tracked in #95. The reuse
 logic has lightweight Node built-in tests, executed by Linux CI with
 `node --test scripts/tests/ci-reuse.test.cjs`; Node is not a product dependency.
 Measurement and release jobs are unchanged.
+
+## Disposable PTY capture
+
+`python3 scripts/dev/pty-capture.py --binary target/debug/shellboy --cols 80 --rows 36`
+uses an existing trusted binary (no build), a fresh temporary data/config/HOME,
+and fixed OSC52 copying. Output is one JSON line of completed screens; add
+`--out NEW.json` for a new result file and a short stdout summary. Example:
+
+```sh
+python3 scripts/dev/pty-capture.py --binary target/debug/shellboy \
+  --steps '[{"command":"/help","until":"Esc / Enter / F1","label":"help"}]' \
+  --out /tmp/new-help-capture.json
+python3 scripts/dev/pty-capture.py --replay capture.raw --cols 80 --rows 36 --until CODE_END
+```
+
+Use `--steps-stdin` for action JSON from stdin. Each step has one `command`,
+`paste`, or named `key`, visible `until` text on a fresh completed frame, and an
+optional label. `--palette light`, `--term vt100` and `--no-color` select native
+capabilities. See `--help` for allowed commands/keys and bounds. Image-clipboard,
+OS link-opening and raw-byte actions are not exposed by the CLI. No user
+config/data path is accepted. Child environment is allowlisted; HOME/XDG/temp
+paths are inside the fixture. Escape output is parsed, never forwarded to a GUI.
+Raw-key/existing-root Python APIs are for trusted repository-owned temporary
+fixtures only, with OSC52/loopback/no-auth/owner-stopped preflight; they are not a
+sandbox for arbitrary programs, actions or fixture contents.
+
+The shared standard-library driver now backs check-paste-commands and row-kind
+capture. Its VT decoder covers this TUI's output, not a full terminal or font
+engine: CJK/combining/wide emoji and basic ZWJ clusters, indexed/RGB cells,
+Ratatui completed-frame boundaries, and OSC removal. Unknown cell operations,
+narrow-base emoji presentation widths, oversized clusters/output/screen sizes
+fail closed. Limits are 60s watchdogs, 4 MiB output and 400x200 cells. Live PTYs
+require Unix; replay and most unit tests are portable. No third-party Python
+module or Rust build is required to use the helper.
