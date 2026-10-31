@@ -1421,3 +1421,41 @@ async fn sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only(
 }
 
 use crate::count_after;
+
+#[tokio::test]
+async fn fragmented_shell_description_sse_is_bounded_and_opt_out_is_visible_in_http_body() {
+    crate::test_watchdog::watchdog("description SSE and exact opt-out request body", async {
+        let root = tempfile::tempdir().unwrap();
+        let record = root.path().join("requests.jsonl");
+        std::fs::write(&record, "").unwrap();
+        let mut count = 0;
+        for enabled in [true, false] {
+            for description in [None, Some("".to_owned()), Some(" \t\n".to_owned()), Some("\u{1b}\u{7}".to_owned()), Some("Inspect local files".to_owned()), Some("語".repeat(100))] {
+                let command = "printf 'ACTUAL COMMAND'";
+                let mut arguments = json!({"command":command});
+                if let Some(description) = &description { arguments["description"] = json!(description); }
+                let item = json!({"type":"function_call","id":"item","name":"shell","call_id":"call","status":"completed","arguments":arguments.to_string()});
+                let raw = json!({"id":"response","status":"completed","output":[item.clone()]});
+                let events = vec![json!({"type":"response.output_item.done","output_index":0,"item":item}),json!({"type":"response.completed","response":raw})];
+                let (client, observed, server) = fake(200, "text/event-stream", sse(&events), 7).await;
+                let mut request = response_request("fixture", vec![], None, true);
+                shellboy::model::configure_shell_description(&mut request, enabled);
+                let response = client.response(request, CancellationToken::new(), None).await.unwrap();
+                let sent = observed.await.unwrap();
+                assert_eq!(sent.body["tools"][0]["parameters"]["properties"].get("description").is_some(), enabled);
+                use std::io::Write;
+                writeln!(std::fs::OpenOptions::new().append(true).open(&record).unwrap(), "{}", sent.body).unwrap();
+                count += 1;
+                let args = response.calls[0].args.as_ref().unwrap();
+                assert_eq!(args.command, command);
+                assert!(args.description.as_ref().is_none_or(|s|s.chars().count() <= 80));
+                assert_eq!(server.await.unwrap(), 1, "metadata must not cause another HTTP request");
+                if description.as_ref().is_some_and(|s|s.chars().count() > 80) {
+                    assert_eq!(response.raw["_shellboy_description_truncations"]["call"], 100);
+                }
+            }
+        }
+        assert_eq!(count, 12);
+        assert_eq!(std::fs::read_to_string(&record).unwrap().lines().count(), count);
+    }).await.unwrap();
+}
