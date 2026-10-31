@@ -8,6 +8,16 @@ pub(crate) const MAX_TARGETS: usize = 200;
 pub(crate) const MAX_IDENTITY_BYTES: usize = 512;
 pub(crate) const MAX_METADATA_BYTES: usize = 256 * 1024;
 
+/// Parse the existing G observed_at once; never substitute a draw-time clock.
+pub(crate) fn captured_utc(observed_at: &str) -> Option<DateTime<Utc>> {
+    if observed_at.len() > 64 {
+        return None;
+    }
+    DateTime::parse_from_rfc3339(observed_at)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RequestWitness {
     pub owner: String,
@@ -203,6 +213,15 @@ mod tests {
         large.push('x');
         assert!(TargetWitnesses::Known(vec![large]).metadata_bytes().is_none());
         assert!(TargetWitnesses::Unavailable.relevant(Some(&[])));
+    }
+
+    #[test]
+    fn existing_g_observed_at_is_parsed_once_without_inventing_missing_time() {
+        let utc = captured_utc("2026-10-31T12:34:56+09:00").unwrap();
+        assert_eq!(utc.to_rfc3339(), "2026-10-31T03:34:56+00:00");
+        assert!(captured_utc("").is_none());
+        assert!(captured_utc("2026-10-31T12:34:56").is_none());
+        assert!(captured_utc(&"x".repeat(65)).is_none());
     }
 
     #[test]
