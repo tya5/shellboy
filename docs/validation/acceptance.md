@@ -1,5 +1,66 @@
 # Validation record
 
+## G production5ba1cdd and external IPC7984c0c qualification
+
+Native macOS/Rust1.99.1, root shared CARGO_TARGET_DIR, job1/incremental off and
+test threads2; announced sequential standard v27 exits0. Python71, layout95/
+watchdog, fmt and strict all-target Clippy pass. Rust2326/0/35: library1350/15
+ignored, integration957/17, termination12/1, crash7/2; main/three examples0.
+Private issue-41-g-combined-standard-v27.log and the17-file hash witness bind
+this result to the unchanged source before source commits339223e/5244ebe/
+e7e4602/5ba1cdd. The v26 attempt failed only new-test macro resolution; no
+assertion or count gate was weakened to obtain v27 success.
+
+The test-only7984c0c helper calls real public ipc::call against the fixture owner,
+forwards exact origin/operation ID and asserts returned identity. Eleven existing
+mutations cross transport, including retained HistoryGet/List refresh, lifecycle,
+index/probe and attachment/receipt cases. Focused frontend::inspection_tests::
+passes14/0 and strict all-target Clippy exits0 (v28 logs). This is separate-client
+IPC evidence, not subprocess CLI or real provider/GC evidence. Synthetic initial
+source/path mutations remain distinguished from the subsequent real IPC commit.
+
+P3's production read_current_and_views_tx is used by refresh::run and the native
+coupled test. One readonly WAL connection/transaction/sequence carries current,
+browser, descendants and same-Thread inspector. The fixture's standalone Thread
+inspector uses7 collection statements; sharing the header removes exactly1.
+Combined collection statements <=64 for this fixed fixture (not a universal
+budget for every source category); readonly setup/transaction overhead is
+separate. Cancelled browser/count/inspector add0 SQL to current-only collection.
+Existing view_read cancellation/admission and inspection_state quiet/hidden/
+coalescing/late-result tests retain their own source coverage. No extra timing
+study or universal own-cardinality constant-VM requirement follows.
+
+Header tests enforce SQL-before-copy caps and canonical parity, preserve exact
+indexed counts and0 SQL for invalid input. Run/context tests record scoped own
+row growth and compare optional tied-Turn index extension in disposable DBs.
+The current indexed-scope gate does not require that optional migration; no
+schema change is adopted by G. Existing explicit row/copy/channel caps remain.
+
+## G native popup wheel smoke7984c0c
+
+Private driver v29 uses public completed-frame VT/PTY helper and the shared
+normal development binary. Native80x24 and140x40 each pass Help down/up, F8
+catalogue selection down/up, unsubmitted HistorySearch form down/up and submitted
+embedded docs-list structured metadata down/up. No search/model/shell/message
+was submitted. Original draft marker survives, synthetic node count remains0,
+no OSC52 is emitted. Captures retain raw/text/cells, helper/driver/source hashes
+and binary SHA256
+`9fef9ea6f1649abdbf508b1d391f7eec0455b05258d287262b79a1ca327b0fe2`,
+verified unchanged. These are native Unix frames, not physical screenshots or
+Windows qualification. Nonempty-history offset/edge/outside/F2/noop ownership
+remains covered by the existing unit matrix; do not infer it from an empty DB.
+
+The failed v28 capture stopped at a driver's draft-ready predicate requiring
+Ctrl+T even after the product correctly replaced empty-composer key guidance
+with send/newline hints. Raw failed frames/manifests remain. The v29 predicate
+uses the preserved draft and empty-history body; actual wheel movement/counter
+assertions are unchanged. No product behavior was modified for this harness.
+Existing cb1d480 visual/effect/Enter form matrix and a8bbcf0 P6 evidence remain
+separately source-qualified; current original reader/cache/dispatch code is
+unchanged. Latest main7071932 adds #105 build debug profile only; its final
+integrated standard and exact-source3OS/main review are still pending.
+
+
 ## G native P6 checkpointa8bbcf0: count gates pass
 
 Native macOS/Rust1.99.1, shared debug target only. Sourcea8bbcf0 (Rust source

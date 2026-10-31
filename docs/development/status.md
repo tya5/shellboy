@@ -1,5 +1,33 @@
 # Development status
 
+## G review-candidate qualification after offload
+
+Production source5ba1cdd passes native standard2326/0/35 (library1350,
+integration957, termination12, crash7), Python71, layout95/watchdog, formatting
+and strict all-target Clippy. The17 tested Rust file hashes were checked before
+splitting design485be1b, header339223e, SQL witnesses5244ebe, retained history
+and pending-cursor fix e7e4602, and production P3 collector5ba1cdd.
+Test-only7984c0c sends11 existing mutations through public local IPC with exact
+origin/operation IDs; the actual F8 suite14/0 and strict all-target Clippy pass.
+Synthetic GC/path preparation is still labeled synthetic, not claimed CLI GC.
+
+Native popup-wheel smoke at80x24/140x40 passes Help, catalogue, unsubmitted form
+and docs-list structured metadata down/up, retains draft, and keeps synthetic
+node count0. Binary9fef9ea6 is unchanged throughout. Earlier failed preflight
+v28 incorrectly required a footer hint that disappears for a nonempty composer;
+v29 fixes only that driver predicate and preserves all movement assertions.
+No real provider/clipboard/user-data use. P6a8bbcf0 remains the source-qualified
+original-reader/cache count checkpoint; relevant original-reader/wheel code is
+unchanged. No new timing or variance gate is introduced.
+
+Latest main e83047f (#105 line-table dev debug) merges at7071932 without Rust
+source changes/conflicts. Final integrated standard is pending; do not attribute
+the previous standard to the new profile. G review/publication, exact-source3OS
+and main admission remain open. Offloaded #107–#109 are not G completion gates.
+The actual adapter/type handoff is #107 comment6549946520, linked from108/109;
+it explicitly distinguishes missing batch APIs and test-only helpers.
+
+
 ## #41 offload ownership and current unqualified source
 
 The2026-11-01 user explicitly authorizes independent issues outside #41, with
