@@ -3607,3 +3607,12 @@ root. The previously failing parent-shell PTY test passes both bash and zsh;
 retain the initial failure as unexplained instead of claiming causal repair.
 No E/F/G source, migration15/16, paid API, installed update or push is included.
 Native main three-OS CI and CI long measurements remain separate unexecuted gates.
+
+### E-only readonly admission: pending native qualification
+
+New focused tests exercise actual browser page/ID-patch and paired current-view
+reads while the writer worker is held, plus one WAL snapshot's stale sequence,
+pre-open cancellation and retryable query contention. They are prepared, not yet
+run on this exact source. This follow-up adds no F/G feature or migration.
+Applicable E P3/P5 and native 80/wide checks remain open; existing D2 tests or
+moving reads off the persistence queue do not demonstrate those targets.

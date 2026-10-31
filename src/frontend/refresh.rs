@@ -44,6 +44,7 @@ fn read_visible_tx(
     thread: &str,
     tool_scope: Option<ToolObservation>,
     waits: Option<&[(String, String)]>,
+    sequence: u64,
 ) -> Result<RawVisible, StorageError> {
     if tool_scope
         .as_ref()
@@ -80,9 +81,8 @@ fn read_visible_tx(
         },
     )?;
     let activity = activity::read_tx_with_waits(db, thread, waits)?;
-    // Queue, path, metadata and activity have all been read. Publish one witness
-    // for this entire observation, never a separate per-surface read sequence.
-    history.set_read_revision(message_queue::read_revision());
+    // Admission order belongs to the whole paired observation, not read completion.
+    history.set_read_revision(sequence);
     Ok(RawVisible {
         details,
         history,
@@ -187,23 +187,21 @@ pub(super) async fn run(
         let target=thread.clone();
         let waits=control.pending_wait_sources();
         let browser_scope=browser.as_ref().map(|ticket|(ticket.ids.clone(),ticket.selected.clone(),ticket.stop.clone()));
-        let read=control.store.database.call(move |db| {
-            let tx=db.transaction()?;
-            let receipts=receipt_states_tx(&tx,&ids)?;
-            // Domain failures of the selected view do not discard independently
-            // committed receipt facts. Storage failures retain their real type.
-            let mut visible=read_visible_tx(&tx,&target,tool_scope,waits.as_deref()).map_err(StorageError::into_api_error);
+        let read=snapshot::read_sequenced(
+            control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
+            let receipts=receipt_states_tx(db,&ids)?;
+            // Keep typed per-surface errors until the display mapper can distinguish
+            // retryable WAL contention from a true storage failure.
+            let visible=read_visible_tx(db,&target,tool_scope,waits.as_deref(),sequence);
             let browser=browser_scope.map(|(ids,selected,stop)|{
-                if stop.is_cancelled() {return Err(ApiError::new(ErrorCode::InvalidState,"Browser observation closed"));}
-                super::browser_read::read_tx(&tx,&ids,selected.as_deref()).map_err(StorageError::into_api_error)
+                if stop.is_cancelled() {return Err(StorageError::from(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")));}
+                super::browser_read::read_tx(db,&ids,selected.as_deref())
             });
-            let sequence=message_queue::read_revision();
-            if let Ok(raw)=&mut visible {raw.history.set_read_revision(sequence);}
-            tx.commit()?;
-            Ok((receipts,visible,browser,sequence))
-        }).await.map_err(storage_error);
+            Ok((receipts,visible,browser))
+        }).await;
+        drop(_progress_permit);
         let (receipts,visible,browser_result,sequence)=match checked_storage(&control,read).await {
-            Ok((receipts,visible,browser,sequence))=>(Ok(receipts),visible,browser,sequence),
+            Ok(((receipts,visible,browser),sequence))=>(Ok(receipts),visible.map_err(snapshot::storage_error),browser.map(|result|result.map_err(snapshot::storage_error)),sequence),
             Err(error)=>(Err(error.clone()),Err(error.clone()),Some(Err(error)),0),
         };
         if let Some(ticket)=browser.take() {
@@ -218,7 +216,7 @@ pub(super) async fn run(
         let result=async {
             let raw=checked_storage(&control,visible).await?;
             // Rendering, sender/model-error JSON, decoding and timestamp work
-            // begin only after the DB worker released its read transaction.
+            // begin only after the readonly snapshot released its transaction.
             let mut frame=presentation_work(move || project(raw,render_width)).await??;
             let page_len=frame.nodes.len();
             if let Some(scope)=&mut frame.tool_scope {frame.nodes.append(&mut scope.nodes);}
@@ -274,10 +272,16 @@ mod tests {
                 })
                 .collect(),
         };
-        let error = read_visible_tx(&db, "not-read", Some(scope), Some(&[]))
-            .err()
-            .unwrap()
-            .into_api_error();
+        let error = read_visible_tx(
+            &db,
+            "not-read",
+            Some(scope),
+            Some(&[]),
+            message_queue::read_revision(),
+        )
+        .err()
+        .unwrap()
+        .into_api_error();
         assert_eq!(error.code, ErrorCode::InputLimit);
     }
 
@@ -328,7 +332,13 @@ mod tests {
             .call(move |db| {
                 let tx = db.transaction()?;
                 let receipts = receipt_states_tx(&tx, &["queued".into()])?;
-                let raw = read_visible_tx(&tx, "t", Some(scope), Some(&[]))?;
+                let raw = read_visible_tx(
+                    &tx,
+                    "t",
+                    Some(scope),
+                    Some(&[]),
+                    message_queue::read_revision(),
+                )?;
                 tx.commit()?;
                 Ok((raw, receipts))
             })
@@ -428,7 +438,7 @@ mod tests {
                     tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('a',?1,'message','completed','{}',?2)",rusqlite::params![ordinal,id])?;
                 }
             }
-            let raw=read_visible_tx(&tx,"t",None,Some(&[]))?;
+            let raw=read_visible_tx(&tx,"t",None,Some(&[]),message_queue::read_revision())?;
             assert_eq!(raw.recovery.len(),1,"a non-event carrying event_id is not a recovery observation");
             tx.commit()?;Ok(raw)
         }).await.unwrap();
@@ -461,6 +471,113 @@ mod tests {
                 "both existing assistant projector kinds retain exact adopted usage"
             );
         }
+        owner.shutdown().await.unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_combined_view_and_browser_keep_one_sequence_without_writer_admission() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        owner.db.call(|db| {
+            let tx=db.transaction()?;
+            tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','paired saved name','/','','p','m','2026-01-01T00:00:00Z')",[])?;
+            tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z');")?;
+            shellboy_fixture_input(&tx,"held-paired",false)?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let pending = owner
+            .db
+            .try_call(move |_| {
+                let _ = entered.send(());
+                let _ = blocked.recv();
+                Ok(())
+            })
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(60), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut browser = browser::Browser::default();
+        browser
+            .observe(7, "".into(), Some("t".into()), true)
+            .unwrap();
+        let ticket = browser.take(tokio::time::Instant::now()).unwrap();
+        let (updates, received) = std::sync::mpsc::sync_channel(16);
+        let (sender, mut results) = mpsc::channel(8);
+        let slots = Arc::new(Semaphore::new(1));
+        let permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
+        let observed = tokio::time::timeout(
+            Duration::from_secs(60),
+            run(
+                Query {
+                    thread: "t".into(),
+                    ids: vec!["held-paired".into()],
+                    generation: Some(3),
+                    visible: true,
+                    epoch: 0,
+                    render_width: 80,
+                    tool_scope: None,
+                    browser: Some(ticket),
+                },
+                control.clone(),
+                updates,
+                sender,
+                CancellationToken::new(),
+                slots.clone(),
+                permit,
+            ),
+        )
+        .await;
+        drop(release);
+        pending.receive().await.unwrap();
+        observed.unwrap();
+        let mut browser_sequence = None;
+        let mut receipts_seen = false;
+        while let Ok(result) = results.try_recv() {
+            match result {
+                BackgroundResult::BrowserPatch { result, .. } => {
+                    browser_sequence = Some(result.unwrap().read_sequence)
+                }
+                BackgroundResult::Refreshed {
+                    receipts, progress, ..
+                } => {
+                    assert_eq!(
+                        receipts.unwrap(),
+                        [("held-paired".into(), ReceiptStatus::Held)]
+                    );
+                    assert!(progress.unwrap().is_ok());
+                    receipts_seen = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(receipts_seen);
+        let view = received
+            .try_iter()
+            .find_map(|update| match update {
+                UiUpdate::CurrentView {
+                    details, history, ..
+                } => Some((details, history)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(view.0.title, "paired saved name");
+        let UiUpdate::History {
+            pending,
+            read_revision,
+            ..
+        } = *view.1
+        else {
+            panic!("paired history")
+        };
+        assert_eq!(Some(read_revision), browser_sequence);
+        assert_eq!(pending.items[0].message_id, "held-paired");
+        assert_eq!(slots.available_permits(), 1);
+        drop(control);
         owner.shutdown().await.unwrap();
     }
 }

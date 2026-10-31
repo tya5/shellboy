@@ -1439,3 +1439,15 @@ exits0:1835/0/32 (lib915/integration910/termination7/crash3), layout93/Python9/
 fmt/strict all-target Clippy. Both native parent-shell cleanup variants pass.
 This does not explain the earlier intermittent missing-signal diagnostic.
 Local main contains D2 only; push and main three-OS CI remain unperformed.
+
+### E-only readonly admission follow-up (qualification pending)
+
+The isolated E increment now collects visible current-view/browser patches and
+explicit browser pages through short-lived query-only WAL snapshots on the
+existing finite presentation pool. One shared progress permit covers raw reads;
+paired facts use an admission-time sequence. Hidden receipt delivery and CLI page
+semantics are unchanged. Focused held-writer, cancellation, stale-snapshot and
+transient-error tests have been added but not yet executed for this source.
+Canonical initial-page title/excerpt scans remain a known cost; no global SQL or
+P3/P5 performance success is inferred. Main admission and native/3-OS evidence
+remain pending independent review.

@@ -582,3 +582,29 @@ slots. Every marker snapshot includes all observed displayed executions (at most
 so replacing it cannot lose an earlier different shell's activity. Receipts and
 business-operation outcomes keep their ordered critical delivery. This adds no
 channel or capacity; raw UI-channel deliveries remain separately bounded.
+
+### E admission: display snapshot ownership
+
+The E-only increment moves the visible current-view plus optional browser-ID
+patch, standalone browser-ID patch, and explicit browser page reads off the
+persistence worker. They use short-lived query-only WAL connections on the
+existing finite presentation pool, admitted by the existing read slots and
+shared progress permit. No new worker, queue, schema or F/G consumer is added.
+The progress permit is released after raw collection, before projection and
+preview decoding. Cancellation is checked again before opening a connection.
+
+Mint one observation sequence at asynchronous read admission, before waiting for
+the presentation pool or opening its WAL snapshot. The paired current-view and
+browser facts use that same sequence; a late older read cannot mint a newer
+sequence after an overtaking canonical history read. Keep independent receipt
+facts when one visible surface has a domain error. SQLite busy/locked/interrupted
+errors retain their concrete type through per-surface collection and become
+retryable display errors, never a persistence-failure latch.
+
+Explicit browser opening/filter/pagination initially retain canonical CLI page,
+cursor and title/excerpt semantics in that readonly task. That existing path
+still performs per-row title/excerpt queries and may scan filtered candidates;
+relocation does not qualify globally bounded SQL or prove a performance win.
+Hidden receipt-only delivery remains on its existing authoritative path. E still
+requires exact-source functional/native checks and applicable P3/P5 observations;
+D2-only evidence does not qualify visible browser work.

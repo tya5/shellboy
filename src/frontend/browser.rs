@@ -216,23 +216,30 @@ impl Browser {
 pub(super) async fn read(
     control: &Control,
     ticket: &Ticket,
+    progress_slots: Arc<Semaphore>,
 ) -> Result<crate::ui::thread_patch::BrowserPatch, ApiError> {
     let ids = ticket.ids.clone();
     let selected = ticket.selected.clone();
-    let raw = control
-        .store
-        .database
-        .call(move |db| {
-            let tx = db.transaction()?;
-            let raw = super::browser_read::read_tx(&tx, &ids, selected.as_deref())?;
-            let sequence = super::message_queue::read_revision();
-            tx.commit()?;
-            Ok((raw, sequence))
-        })
-        .await
-        .map_err(storage_error);
-    let (raw, read_sequence) = checked_storage(control, raw).await?;
+    let permit = tokio::select! {biased;
+        _=ticket.stop.cancelled()=>return Err(observation_closed()),
+        permit=progress_slots.acquire_owned()=>permit.map_err(|_|observation_closed())?,
+    };
+    let result = super::snapshot::read_sequenced(
+        control.store.database.path().to_path_buf(),
+        ticket.stop.clone(),
+        move |db, _sequence| super::browser_read::read_tx(db, &ids, selected.as_deref()),
+    )
+    .await;
+    drop(permit);
+    let (raw, read_sequence) = checked_storage(control, result).await?;
+    if ticket.stop.is_cancelled() {
+        return Err(observation_closed());
+    }
     project(raw, read_sequence, ticket.generation).await
+}
+
+fn observation_closed() -> ApiError {
+    ApiError::new(ErrorCode::InvalidState, "Browser observation closed")
 }
 
 pub(super) async fn project(
@@ -260,27 +267,23 @@ pub(super) async fn page(
     control: &Control,
     args: ThreadListArgs,
     stop: CancellationToken,
+    progress_slots: Arc<Semaphore>,
 ) -> Result<(Page<ThreadSummary>, Vec<ThreadDisplayTime>, u64), ApiError> {
-    let result = control
-        .store
-        .database
-        .call(move |db| {
-            if stop.is_cancelled() {
-                return Err(ApiError::new(
-                    ErrorCode::InvalidState,
-                    "Browser page observation closed",
-                )
-                .into());
-            }
-            let tx = db.transaction()?;
-            let page = crate::control::db::thread_list(&tx, &args)?;
-            let sequence = super::message_queue::read_revision();
-            tx.commit()?;
-            Ok((page, sequence))
-        })
-        .await
-        .map_err(storage_error);
+    let permit = tokio::select! {biased;
+        _=stop.cancelled()=>return Err(observation_closed()),
+        permit=progress_slots.acquire_owned()=>permit.map_err(|_|observation_closed())?,
+    };
+    let result = super::snapshot::read_sequenced(
+        control.store.database.path().to_path_buf(),
+        stop.clone(),
+        move |db, _sequence| crate::control::db::thread_list(db, &args).map_err(Into::into),
+    )
+    .await;
+    drop(permit);
     let (page, sequence) = checked_storage(control, result).await?;
+    if stop.is_cancelled() {
+        return Err(observation_closed());
+    }
     presentation_work(move || {
         let times = thread_display_times(&page.items);
         (page, times, sequence)
@@ -382,5 +385,60 @@ mod tests {
         assert!(browser.take_resync().is_none());
         browser.observe(6, "old".into(), None, true).unwrap();
         assert!(browser.scope.is_none());
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_page_and_id_patch_complete_while_writer_queue_is_held() {
+        let root = tempfile::tempdir().unwrap();
+        let owner =
+            crate::app::DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+                .await
+                .unwrap();
+        owner.db.call(|db| {
+            db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('browser-root','saved browser name','/','','p','m','2026-01-01T00:00:00Z')",[])?;Ok(())
+        }).await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let pending = owner
+            .db
+            .try_call(move |_| {
+                let _ = entered.send(());
+                let _ = blocked.recv();
+                Ok(())
+            })
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(60), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        let slots = Arc::new(Semaphore::new(1));
+        let mut browser = Browser::default();
+        browser
+            .observe(1, "".into(), Some("browser-root".into()), true)
+            .unwrap();
+        let ticket = browser.take(tokio::time::Instant::now()).unwrap();
+        let observed = tokio::time::timeout(Duration::from_secs(60), async {
+            let (page, _, page_sequence) = page(
+                &control,
+                ThreadListArgs::default(),
+                CancellationToken::new(),
+                slots.clone(),
+            )
+            .await?;
+            let patch = read(&control, &ticket, slots.clone()).await?;
+            Ok::<_, ApiError>((page, page_sequence, patch))
+        })
+        .await;
+        drop(release);
+        pending.receive().await.unwrap();
+        let (page, page_sequence, patch) = observed.unwrap().unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].title, "saved browser name");
+        assert_eq!(patch.rows[0].thread_id, "browser-root");
+        assert_eq!(patch.rows[0].title, page.items[0].title);
+        assert!(patch.read_sequence > page_sequence);
+        assert_eq!(slots.available_permits(), 1);
+        drop(control);
+        owner.shutdown().await.unwrap();
     }
 }

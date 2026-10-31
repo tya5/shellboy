@@ -16,6 +16,7 @@ mod message_metadata;
 mod message_queue;
 mod receipt_delivery;
 mod received;
+mod snapshot;
 mod thread_deletion;
 mod update_delivery;
 use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
@@ -931,9 +932,10 @@ async fn run_with_delivery(
                     && let Some(ticket)=browser.take(tokio::time::Instant::now()) {
                     view_read_next=Some(tokio::time::Instant::now()+Duration::from_millis(500));
                     let control=control.clone();let results=background_tx.clone();
+                    let progress_slots=progress_slots.clone();
                     read_workers.spawn(async move {
                         let _permit=permit;
-                        let result=tokio::select! {biased;_=ticket.stop.cancelled()=>Err(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")),value=browser::read(&control,&ticket)=>value};
+                        let result=tokio::select! {biased;_=ticket.stop.cancelled()=>Err(ApiError::new(ErrorCode::InvalidState,"Browser observation closed")),value=browser::read(&control,&ticket,progress_slots)=>value};
                         let _=results.send(BackgroundResult::BrowserPatch {ticket,result}).await;
                     });
                 }
@@ -1815,12 +1817,13 @@ async fn run_with_delivery(
                             }
                         };
                         let control=control.clone();let sender=updates.worker();
+                        let progress_slots=progress_slots.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
                             let requested_cursor=cursor.clone();
                             let args=ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter)};
                             let result=tokio::select! {biased;
                                 _=page_stop.cancelled()=>return,
-                                result=browser::page(&control,args,page_stop.clone())=>result,
+                                result=browser::page(&control,args,page_stop.clone(),progress_slots)=>result,
                             };
                             if page_stop.is_cancelled() {return;}
                             match result {
