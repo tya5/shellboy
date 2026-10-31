@@ -4105,3 +4105,20 @@ Gitleaks8.30.1 redacted directory scan reported one existing synthetic fixture:
 its negative assertion; it is not a credential. No broad ignore or source change
 was added. The E documentation diff scan reports0 findings. Directory scan is
 not described as zero findings, and this is not a full-history scan.
+
+## Repaired E CI invocation and source freeze (2026-10-31)
+
+Approved branch issue-41/e-ci-followup77 was pushed at exact7c6f4d6. Corrected
+manual workflow41166258538 uses full baseline0d4f63a6bcf90fa9d8b30d8598f7b8e8ca8e52bd
+and candidate7c6f4d6e4ee12f0e6bd906504626d781ba751c13. Ordinary3OS and formal
+Unix80/140-column windows run together, P2=one producer600s, P5/P5-list=three
+producers60s each before/after. Checkout/instrumentation have succeeded; build/
+tests are pending. Record final source-matched values later, not as this entry.
+
+The first attempt41166177038 failed checkout because the short ref0d4f63a was
+matched as a branch/tag. Saved the failed native job log and cancelled remaining
+duplicate checks; it is not a product/P3/P5 failure or a successful test run.
+Explicitly corrected to the same full SHA in a new workflow. Preserve both runs.
+Windows native jobs may complete successfully by uploading unavailable.json;
+that never qualifies ConPTY performance. Main and the installed binary remain
+unchanged. #41 comments6538653546/6538662493 distinguish launch/correction.

@@ -1638,3 +1638,29 @@ qualification text and added an explicit limit; original measurements remain
 completed-Run observations. New E P3 must record actual lifecycle states and
 List/selected-conversation consumers. This documentation correction does not
 change frozen CI candidate7c6f4d6 or infer any pending test success.
+
+## Approved E repaired-source CI launched (2026-10-31)
+
+Reviewer Claude explicitly approved issue-41/e-ci-followup77 at7c6f4d6, ordinary
+three-OS checks and formal Linux/macOS P2/P5 at both widths. Pushed only that
+branch; main and oldCBC branch remain unchanged. The exact candidate is frozen.
+Active corrected workflow:41166258538, baseline0d4f63a6bcf90fa9d8b30d8598f7b8e8ca8e52bd,
+candidate7c6f4d6e4ee12f0e6bd906504626d781ba751c13, P5 producers3 both subjects,
+P2 producer1. Existing Windows test-performance job stays disabled. Windows
+native TUI fixture still explicitly unavailable, not a native performance pass.
+
+Initial41166177038 used a short baseline SHA; checkout interpreted it as branch/
+tag and failed before measurement. Preserved that failure and cancelled duplicate
+ordinary jobs, then corrected only the input to the same full commit SHA. This is
+an invocation correction, not a retry that converts a failed product assertion.
+The new run has passed checkout/instrumentation and is building measurement
+binaries; ordinary Linux/macOS tests and Windows Clippy are in progress at this
+checkpoint. No paired-snapshot or P2/P5 success is claimed yet. Results must
+separate producer3 from the original producer1 run41160746679. Main admission
+still needs separate later review approval. No release/install/user-data change.
+
+Private P3 measurement preparation uses two additional detached checkouts and
+synthetic128-node/50-tool/50-Thread data with asserted live Run/completed Turn.
+It will compare direct refresh+explicit List read with E's paired read and count
+writer closure time separately from readonly connection lifetime. No P3 result
+is inferred from its compilation or from the parallel CI windows.
