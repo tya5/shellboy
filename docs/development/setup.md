@@ -115,3 +115,13 @@ same-SHA failed-job rerun for diagnosis, retaining both failure and rerun eviden
 there is no automatic retry or assumption that the initial failure was harmless.
 See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57)
 and [publication gates](publication.md#release-validation-gates-57).
+
+## Small developer tools
+
+`python3 scripts/dev/record-delta.py [--base origin/main] [--repo WORKTREE]`
+prints one JSON line with base/current line counts, deltas, Git added/deleted
+counts and `only_additions` for status, acceptance and decisions. It reads the
+working tree (staged and unstaged), does not fetch or edit files, and exits1 if
+any baseline lines are deleted/replaced; missing files or an invalid base exit2.
+`only_additions` permits insertions anywhere, not only EOF; newline-only changes
+follow Git diff rules. Use `--help` for the JSON/error and exit conventions.

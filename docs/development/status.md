@@ -1895,3 +1895,10 @@ projections alongside E's shared summary/readonly bounded display contract.
 The row vocabulary and composer are unchanged from this main. Combined-source
 validation is pending; no CI result or performance value is inherited by this
 new merge. F remains separately saved at b41135c, not included in E.
+
+## Reusable developer record checker (#94.1)
+
+The standard-library record-delta tool emits one JSON line for baseline/current
+record lengths and additions/deletions. It fails closed on removed lines or
+unreadable inputs, without fetching or editing records. Usage is in setup;
+Python fixture validation and the scripts-only scope are in acceptance.
