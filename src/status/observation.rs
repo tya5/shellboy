@@ -441,6 +441,18 @@ mod tests {
             assert_eq!(st.get_status(StatementStatus::FullscanStep), 0);
             st.get_status(StatementStatus::VmStep)
         };
+        // Keep index range neighbours present on both sides of the comparison.
+        // A singleton/end-of-index prefix omits one final IdxLT range check.
+        db.execute(
+            "INSERT INTO run VALUES('left-edge','foreign','completed','2026-01-01',NULL,NULL)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO run VALUES('right-edge','zulu','completed','2026-01-01',NULL,NULL)",
+            [],
+        )
+        .unwrap();
         let before = measure();
         for n in 0..10000 {
             db.execute(
