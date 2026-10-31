@@ -662,3 +662,53 @@ async fn headless_non_utf8_data_directory_is_a_startup_error_not_a_json_panic() 
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn headless_failed_ready_write_closes_endpoint_and_releases_owner() {
+    crate::test_watchdog::watchdog("headless failed ready output cleanup", async {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let data = root.path().join("child");
+        let output_path = root.path().join("read-only-stdout.jsonl");
+        std::fs::write(&output_path, "").unwrap();
+        // A read-only inherited handle deterministically rejects the first write.
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .args(["serve", "--data-dir"])
+            .arg(&data)
+            .arg("--config")
+            .arg(config)
+            .stdout(std::process::Stdio::from(
+                std::fs::File::open(&output_path).unwrap(),
+            ))
+            .kill_on_drop(true)
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .await
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(std::fs::read(&output_path).unwrap().is_empty());
+        let text = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(text.lines().count(), 1, "{text}");
+        let error: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(error["ok"], false);
+        assert_eq!(error["error"]["code"], "io_failed");
+        assert_eq!(error["error"]["message"], "Cannot write owner ready line");
+        assert!(!data.join("endpoint.json").exists());
+        let _lock = shellboy::app::OwnerLock::acquire(&data).unwrap();
+        let db = rusqlite::Connection::open_with_flags(
+            data.join("shellboy.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let integrity: String = db
+            .query_row("PRAGMA quick_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+    })
+    .await
+    .unwrap();
+}

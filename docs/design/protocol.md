@@ -391,3 +391,14 @@ and snapshot.changes/more when these conditions are present. ThreadSummary and
 ThreadDetails add last_answer/last_input optional saved-fact objects. They do not
 change lifecycle, authorization, MessageSender identity or model-facing tools.
 Schema16 contains only derived indexes; protocol version remains2.
+
+## Terminal-free startup rows (#5 stage 2)
+
+`serve` is a local process adapter, not a new IPC operation. Its readiness row
+has protocol_version, event/state `ready`, absolute UTF-8 data_dir and instance_id;
+it is not an operation Response and does not issue an operation receipt or use
+an inherited Origin. It is flushed only after IPC binding and dispatcher startup.
+Startup failure is one stderr JSON object with protocol_version, ok=false and
+error; there is no successful stdout result. Failure to write readiness closes
+the prepared session before reporting failure. Existing IPC commands, version,
+validation and authorization remain unchanged in this startup-only stage.
