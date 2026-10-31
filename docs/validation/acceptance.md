@@ -5098,3 +5098,21 @@ binary, release/tag or paid product API is used. Knowledge search is separate
 from product verification. This worker does not dispatch CI, integrate main or
 close the issue; worker4 owns CI/integration after user mark selection/review.
 Keep the branch and worktree until confirmed main integration.
+
+## User-selected B external-input mark (#91 final)
+
+2026-10-31: the user selected and approved B (⇥); External remains 外から.
+On main2b3cd91 with integrated #94.2, B Rust/source qualification c9651bb passes
+sh scripts/check.sh: Rust1956 passed/0 failed/33 ignored, Python41, layout94,
+watchdog/fmt/strict Clippy. The explicit selected-mark/label/width_cjk()==1 test
+passes. Build and six fresh 80/140 x dark/light/NO_COLOR PTYs pass with B,
+including18 canonical body/selection/original OSC52 copy checks. Shared PTY/VT
+APIs are unchanged from main and retain fixed OSC52/no-auth/scratch preflight.
+Evidence: /tmp/issue-91-B-check.log, /tmp/issue-91-B-build.log,
+/tmp/issue-91-B-final/results.json and /tmp/issue-91-B-record-delta.json.
+The external-CLI row fixture expectation is updated from the obsolete human-like
+mark to B; an edit indentation error was caught by py_compile and fixed before
+submission. This is a test-only change after Rust qualification; src is unchanged.
+No physical-font/ConPTY/IME or performance qualification is inferred. Three-OS CI,
+main integration and any user-binary replacement remain delegated; provisional A
+must not land. No installed binary, release or real OS clipboard is modified.
