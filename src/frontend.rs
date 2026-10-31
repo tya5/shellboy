@@ -296,15 +296,11 @@ async fn management_status(
     .await;
 }
 
-fn inspection_target(command: &Command, context: &ManagementContext) -> Option<InspectionTarget> {
+fn inspection_target(command: &Command) -> Option<InspectionTarget> {
     match command {
         Command::UsageGet(args) => Some(InspectionTarget::Usage(args.clone())),
         Command::OperationGet(args) => Some(InspectionTarget::Operation(args.operation_id.clone())),
-        Command::ThreadGet(args) => args
-            .thread_id
-            .clone()
-            .or_else(|| context.owner_thread.clone())
-            .map(InspectionTarget::Thread),
+        Command::ThreadGet(args) => args.thread_id.clone().map(InspectionTarget::Thread),
         Command::AttachmentList(args) => {
             args.thread_id
                 .clone()
@@ -1671,7 +1667,7 @@ async fn run_with_delivery(
                         });
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
-                        if let Some(scope) = context.clone() && let Some(target) = inspection_target(&command, &scope) {
+                        if let Some(scope) = context.clone() && let Some(target) = inspection_target(&command) {
                             let generation = management.next_generation();
                             start_inspection(&mut management,&updates,scope,generation,target,command_title(&command),submission).await;
                             // A submitted slash read owns one admitted result and
@@ -2728,7 +2724,7 @@ async fn run_with_delivery(
                             };
                             if let Some(scope)=context.clone() {
                                 let resolved=match &target {
-                                    management::FollowTarget::Command(command)=>inspection_target(command,&scope).map(|target|(target,command_title(command))),
+                                    management::FollowTarget::Command(command)=>inspection_target(command).map(|target|(target,command_title(command))),
                                     management::FollowTarget::Attachment {thread_id,attachment_id}=>Some((InspectionTarget::Attachments {thread_id:thread_id.clone(),attachment_id:Some(attachment_id.clone())},"添付の参照".into())),
                                 };
                                 if let Some((target,title))=resolved {

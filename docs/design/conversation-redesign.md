@@ -225,6 +225,12 @@ Record per-field source, committed notification, finite readonly read and failur
 behavior before claiming each route complete. A followed reference is not by
 itself a reason to freeze mutable facts. Edited form inputs intentionally remain
 captured; the read result and downstream mutable work remain separate.
+The form's prefilled ID is the typed request target. ManagementContext identifies
+where a reply belongs; it is not an implicit Thread/Run authority. Clearing a
+required human target must retain canonical CLI validation, not silently restore
+the viewing Thread. In particular, human Revisit get without --run remains an
+error rather than following a changing current Run; attachment source references
+keep their explicitly resolved foreign Thread and selection identity.
 
 | Result class | Required treatment |
 | --- | --- |

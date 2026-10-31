@@ -122,6 +122,52 @@ async fn pump_until(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cleared_f8_thread_target_is_not_replaced_by_reply_owner_context() {
+    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let mut ui = UiState::new(&owner.loaded.config, root.path().into());
+    let (sender, receiver) = actions::channel(64);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(super::run_with_clipboard(
+        control,
+        receiver,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+        Arc::new(NoClipboard),
+    ));
+    dispatch(&sender, ui.select_thread("thread".into()));
+    let mut proofs = Vec::new();
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+    })
+    .await;
+    key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
+    dispatch(&sender, ui.event(Event::Paste("thread get".into())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    key(&mut ui, &sender, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
+        ui.management
+            .as_ref()
+            .is_some_and(|view| view.title == "会話 · 詳細")
+    })
+    .await;
+    let screen = draw(&mut ui);
+    assert!(
+        screen.contains("external operations must specify --thread"),
+        "{screen}"
+    );
+    assert!(
+        proofs.is_empty(),
+        "reply ownership must not authorize a saved target read"
+    );
+    assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+    sender.try_send(UiAction::Quit).unwrap();
+    super::control_tests::finish_bridge(bridge, &incoming).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_foreign_run_inspection_tracks_real_stop_without_switching_conversation_or_rolling_back_watermarks()
  {
     let (root, owner, control, server) = super::control_tests::fixture().await;
@@ -1003,13 +1049,8 @@ fn explicit_saved_usage_reference_enters_the_same_inspection_without_viewer_reta
     let value = serde_json::json!({"reference":{"targets":[Command::UsageGet(args.clone())]}});
     let command =
         management::follow(&value, "/reference", crate::ui::ManagementFollow::Inspect).unwrap();
-    let context = ManagementContext {
-        epoch: 1,
-        owner_draft: "input".into(),
-        owner_thread: Some("viewer".into()),
-    };
     assert_eq!(
-        inspection_target(&command, &context),
+        inspection_target(&command),
         Some(InspectionTarget::Usage(args))
     );
 }
