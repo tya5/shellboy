@@ -5865,3 +5865,7 @@ not covered by the earlier green gate until their new validation completes.
 The broader performance-policy update makes p95/CPU observations only; prior
 loaded and quiet values remain recorded, without repeating a quiet measurement.
 Structural job/read/draw counters and virtual-time redraw bounds remain gates.
+Formatter follow-up gates initially found two obsolete expectations (60秒待機
+versus1分0秒 and133s versus2分13秒) and a guide scanner interpreting a dynamic
+completed-time example as a literal navigation label. Expected strings/example
+notation were corrected without weakening duration/source/clock assertions.
