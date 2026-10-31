@@ -844,7 +844,12 @@ async fn run_shell(
     });
     // The collector owns the process before any further fallible DB write. A
     // failed running-state save cannot strand an unobserved OS execution.
+    // Publish this call's release receiver before its running row is observable.
+    let release = (!args.background).then(|| slot.foreground.register(&execution));
     if let Err(error) = control.reapply_shell_intent(&execution, &handle).await {
+        if release.is_some() {
+            slot.foreground.clear();
+        }
         handle.stop();
         if error.is_storage_failure() {
             control.fail_storage().await;
@@ -858,7 +863,7 @@ async fn run_shell(
             false,
         ));
     }
-    let mut release = slot.foreground.register(&execution);
+    let mut release = release.expect("foreground call registered before running publication");
     control.changed.notify_waiters();
     let released = |reason| {
         Ok((

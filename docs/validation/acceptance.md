@@ -5341,3 +5341,70 @@ submission. This is a test-only change after Rust qualification; src is unchange
 No physical-font/ConPTY/IME or performance qualification is inferred. Three-OS CI,
 main integration and any user-binary replacement remain delegated; provisional A
 must not land. No installed binary, release or real OS clipboard is modified.
+
+## #96: integration race source-order qualification
+
+2026-10-31, native macOS arm64 / Rust 1.99.1, synthetic databases, a real owned
+Unix shell and loopback fixtures. Builds use CARGO_BUILD_JOBS=2; local tests use
+RUST_TEST_THREADS=4. No provider billing, user data, installed owner or binary
+was used. Native Windows/Ubuntu qualification is integration-owned.
+
+Ubuntu run 41192807282 at afe4c087 reported no second model request and the
+status "No foreground shell is being awaited". The fixture's running-row test
+precedes its single Background action. No rendering happens before that failure;
+#91's diff does not change the fixture, Control, or Background dispatch. A manually
+polled real run_shell future commits running while its caller has not resumed.
+Against the old order, the first Background deterministically returns the same
+InvalidState (the fixture reaps its process before asserting red). Registering
+the current call's receiver before reapply_shell_intent publishes running makes
+that test green. Its two-line temporary witness records running then admission;
+0->2 lines, not a model request log. Explicit background mode remains receiver-
+free, failed publication clears the slot, and completion/later-call isolation
+rules are retained. The original integration multiple_calls test passes without
+changing its commands, assertions or waits.
+
+Windows run 41192626561/job124512348162 reported draft revision 99, 30 user nodes,
+30 accepted receipts and an unfinished frontend. Send workers held their 32
+permits across optional HistoryReader::saved display work. Quit drops the
+background result receiver but did not cancel those reads; stalled presentation
+admission could prevent remaining closing submissions from obtaining a permit.
+A stronger version of the existing real closing fixture holds both presentation
+slots until its end. The old boundary deterministically fails with exactly 32
+saved inputs and frontend unfinished, while retaining the original 10-second
+watchdog and every 40-input/draft/FIFO/force assertion. The corrected boundary
+passes with both display slots still held: only the optional post-commit
+projection observes the existing frontend cancellation token. Durable sends
+are never raced against cancellation. Ordinary send/read admission capacities,
+UI critical retention, and shutdown ordering are unchanged. A poll-level test
+also verifies cancellation releases a pending display future and never starts
+new display work after cancellation.
+
+These source counterexamples reproduce each failure class. The original CI did
+not save foreground-registration or presentation-admission traces, so exact
+past interleavings, or whether other contributors existed, remain unproved.
+They are not declarations that a rerun alone fixed an intermittent failure.
+The targeted foreground test, 16 outbox tests and unchanged real TUI recovery
+test pass locally. New asynchronous guards use the shared 60-second watchdog;
+legacy targeted guards were not extended, assertions relaxed or tests ignored.
+Full latest-main standard checks, role/delta audit and exact submitted SHA are
+recorded in #96 rather than substituting an older tree's successful result.
+
+Latest-main local qualification on afe4c087 plus #96 succeeds: standard checks
+1,965 passed / 0 failed / 33 ignored, layout 94, Python 41, watchdog policy, format
+and strict all-target Clippy. The separate document-role test passes; bundled
+docs checks pass 33 CLI checks / 13 guides / 3 categories / 147 links, in empty
+cwd with cleared environment, absent config and no owner API. No earlier source
+success replaces the submitted tree's prepush recheck. Build contention was
+observed while other task builds ran; it is not a runtime performance result.
+
+Windows CI repair: batch71960f9 run41192167865 failed
+ReplaceTests.test_custom_marker_allows_default_delimiters_as_literal_payload;
+Linux/macOS passed. The fixture used write_text on LF payload text, which uses
+platform newline conversion on Windows, while the parsed before string stayed LF.
+The fixture now writes explicit UTF-8 bytes. Exact matching/parser/product behavior
+is not weakened or changed. A portable regression proves LF does not match a
+CRLF target, leaves it intact, and an exact CRLF block then succeeds. Python64
+passes locally; py_compile/layout/watchdog/diff/record-retention pass. Windows
+success requires a new CI run and is not claimed from this macOS result.
+Evidence: /tmp/issue-94-crlf-tests.log. This supersedes 7115399 as well as the
+older JSON-only b2c5b186; it is independent of #91 B's passing-parent repair.

@@ -466,3 +466,21 @@ startup cleanup, independent of the TUI frontend. The TUI calls the same watch-
 reporting adapter and one-result handoff; cancellation, cleanup ordering and
 in-process Control routing are unchanged. This structural move adds no serve
 command, shutdown request, signal behavior, worker, queue or persistent state.
+
+## Foreground publication and closing projections (#96)
+
+For a foreground shell, the collector must own the native process and its
+call-specific foreground receiver must be registered before the running-state
+commit can be observed. Native starting alone is not a reusable background
+intent. A failed running-state write clears that receiver; explicit background
+launches do not register one. Completion still clears it before result reads,
+and a release never carries over into another call.
+
+Frontend send workers retain admission through durable submission/acceptance.
+Their optional saved-history projection observes the existing frontend cancel
+token: Quit cancels only this presentation read, not the accepted send or its
+receipt. The existing receiver is already dropped on Quit, so post-close result
+sends remain unobserved as before. This prevents the 32 send permits from being
+held behind the shared two-slot presentation admission while queued closing
+sends still need to commit. No worker, queue, capacity, timer or durable format
+is added; ordinary nonclosing projection and receipt delivery are unchanged.

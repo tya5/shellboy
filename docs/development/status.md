@@ -2506,3 +2506,24 @@ optional profile81c6f37. Current cleanup changes only policy docs and the ignore
 P4 observation test (retain SQL/cardinality assertions, remove timing assertion).
 F review can proceed on this concrete feature/count packet. Main admission still
 needs reviewer approval and then-current main reconciliation; G remains later.
+## #96: foreground publication and closing send projections
+
+Two source-order counterexamples are fenced: a running foreground process was
+observable before its release receiver, and post-commit display reads could
+retain send slots after Quit while remaining accepted inputs needed to save.
+The original assertions/timeouts remain; native fixed-order red/green tests and
+existing end-to-end recovery/closing tests pass locally. #91 band rendering is
+not the originating path. Core review and exact-source native CI are tracked in
+#96; original CI did not record all registration/pool-admission events.
+
+
+## F admission preparation while review6543263300 is pending
+
+Feature/count review requested on publishedf538430. The next local admission
+candidate integrates mainf1e2a16, preserving #96 foreground-release publication
+and cancelled post-commit projection fences and #94.3 literal-block helper.
+Merge has no conflicts; main's driver/update-delivery and #91 presentation
+files match exactly. F's schema remains17 over main16. Standard and exact-source
+ordinary3OS gates follow this source before any main push. No new performance
+measurement/strict-bin analysis is scheduled. The strict-clock prototype and
+optional measurement profile remain outside this candidate; G remains later.

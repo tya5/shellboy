@@ -2268,3 +2268,18 @@ for a superseded guarantee. Remove the optional P4 p95 assertion while keeping
 its cardinality/one-statement assertions and observation output. Functional
 configured deadlines/coalescing and watchdogs remain. Revisit only if a new
 explicit count/behavior requirement or obvious observed regression warrants it.
+## #96: publication and post-commit observation boundaries (2026-10-31)
+
+Counterexamples are separated from original CI attribution. The old Ubuntu
+status is reproducible without #91 rendering; close its foreground receiver
+publication window, rather than retrying a rejected Background or weakening
+end-to-end output assertions. Publish only after a collector owns the process;
+clear receiver ownership if the running-state write fails. Existing sticky
+per-call release and no-later-call delivery remain authoritative.
+
+On Quit, accepted sends must finish independently of optional display reads.
+Cancel only post-commit HistoryReader::saved observation with the existing
+frontend token. Do not enlarge the send/presentation pools, discard durable
+submissions, or add another worker/queue. Keep ordinary UI result retention and
+Core shutdown order unchanged. The old Windows trace lacks a pool witness;
+report the controlled deadlock class and that qualification gap explicitly.
