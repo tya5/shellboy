@@ -28,6 +28,20 @@ mod refresh;
 mod selection;
 #[cfg(test)]
 pub(crate) mod sql_trace;
+
+// A redirty selected view owns the next joint read even while an older read is finishing.
+fn standalone_browser_deadline(
+    browser: &browser::Browser,
+    selected: Option<&str>,
+    dirty: &std::collections::HashSet<String>,
+    next_view: Option<tokio::time::Instant>,
+) -> Option<tokio::time::Instant> {
+    browser
+        .deadline()
+        .filter(|_| selected.is_none_or(|thread| !dirty.contains(thread)))
+        .map(|due| next_view.map_or(due, |global| due.max(global)))
+}
+
 #[cfg(test)]
 pub(crate) mod stream_metrics;
 mod streaming;
@@ -818,6 +832,7 @@ async fn run_with_delivery(
                 .iter()
                 .find(|thread| {
                     !refreshing.contains(*thread)
+                        && !browser.blocks_selected_refresh(thread)
                         && (selection.active_thread.as_deref() != Some(thread.as_str())
                             || view_read_next.is_none_or(|due| tokio::time::Instant::now() >= due))
                         && selection.refresh_ready(thread, tokio::time::Instant::now())
@@ -921,11 +936,20 @@ async fn run_with_delivery(
                     })
                     .and(view_read_next)
             })
+            .filter(|_| {
+                selection
+                    .active_thread
+                    .as_deref()
+                    .is_none_or(|thread| !browser.blocks_selected_refresh(thread))
+            })
             .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         let live_deadline = live_output.deadline();
-        let browser_deadline = browser
-            .deadline()
-            .map(|due| view_read_next.map_or(due, |global| due.max(global)));
+        let browser_deadline = standalone_browser_deadline(
+            &browser,
+            selection.active_thread.as_deref(),
+            &dirty_threads,
+            view_read_next,
+        );
         tokio::select! {
             _=tokio::time::sleep_until(browser_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if browser_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{

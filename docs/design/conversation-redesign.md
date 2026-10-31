@@ -745,3 +745,15 @@ navigation supersedes presentation-only reads by advancing its view revision,
 while an actual navigation request retains and accumulates pending movement.
 
 The existing 128-source and192KiB projection budgets remain unchanged.
+
+### Pending selected changes during an older read (#95)
+
+A pending Changed for the selected Thread reserves the next joint read even when
+an older view is still refreshing (and therefore has no refresh_deadline yet).
+Do not admit a standalone browser read in that state. If an older browser ticket
+still owns the one-flight slot, defer the selected refresh and its timer until
+that ticket completes; then the existing outer loop consumes the pending browser
+IDs with the selected snapshot. Otherwise the view can lose the browser ticket
+before either deadline tie rule applies. Browser-only/foreign work retains the
+same cadence and existing notification wakeups. No epoch, worker, queue, timer
+or persistent state is added. The strict paired-sequence test remains unchanged.
