@@ -271,3 +271,19 @@ permanent HTTP status even if its body stalls; do not invent unknown transport
 and retry that status. Existing pending deadlines and retry policy are unchanged.
 This is the previously approved #95 transport patch, independent of F browser
 state. Its paused-clock and request-JSONL tests remain part of qualification.
+
+## Bounded shell descriptions
+
+Shell calls may include an optional model-authored description. Received function
+call arguments are saved and replayed verbatim, including long descriptions and
+JSON whitespace. Only execution deserialization and display labels are capped at
+80 Unicode scalar values. No description normalization or truncation metadata is
+added to the response or adopted node. The existing MAX_TOOL_ARGUMENT_BYTES bound
+limits the entire arguments string, just as for command text. Display strips
+plain-text controls and falls back to
+the command for absent/empty/whitespace-only descriptions. The description is not
+an authorization or a verified explanation of the command. shell.describe_calls
+is true by default; false omits the parameter from generation tool definitions
+and uses command labels. Existing history/DB formats, lifecycle and workers stay
+unchanged. Incomplete opaque audit input remains subject to existing transport
+limits; it is not accepted as an executable description.

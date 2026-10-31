@@ -819,3 +819,35 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     );
     db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn adjacent_described_commands_larger_than_preview_budget_reach_exact_tail_via_original_pages()
+ {
+    crate::test_watchdog::watchdog("described exact call source bounded original paging", async {
+        let (_root, database, history) = repository().await;
+        let long_command = format!("SECOND-COMMAND-START{}SECOND-COMMAND-TAIL", "x".repeat(128 * 1024));
+        let payload = json!({"output":[
+            {"type":"function_call","name":"shell","call_id":"first","arguments":json!({"command":"FIRST-COMMAND-ONLY","description":"first label"}).to_string()},
+            {"type":"function_call","name":"shell","call_id":"second","arguments":json!({"command":long_command,"description":"second label"}).to_string()}
+        ]});
+        let expected = text_of_payload(&payload);
+        append(&database, "exact-source", "assistant_response", payload).await;
+        let mut cursor = None;
+        let mut collected = String::new();
+        let mut pages = 0;
+        loop {
+            let page = history.get(body("exact-source", 4096, cursor)).await.unwrap();
+            assert!(page.text.len() <= 4096);
+            collected.push_str(&page.text);
+            pages += 1;
+            cursor = page.next_cursor;
+            if cursor.is_none() { break; }
+        }
+        assert!(pages > 16, "must cross both 512 metadata and 64KiB preview budgets");
+        assert_eq!(collected, expected);
+        assert!(collected.contains("FIRST-COMMAND-ONLY"));
+        assert!(collected.contains("SECOND-COMMAND-TAIL"));
+        assert!(collected.contains(&long_command), "selected B command must be complete, not just an arbitrary tail marker");
+        database.shutdown().await.unwrap();
+    }).await.unwrap();
+}

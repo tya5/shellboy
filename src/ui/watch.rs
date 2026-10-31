@@ -1031,6 +1031,7 @@ mod tests {
         facts.work = Some(LiveWorkSnapshot {
             run_id: id.into(),
             rows: vec![super::super::live_work::LiveWorkRow {
+                description: None,
                 target: LiveWorkTarget::Shell {
                     execution_id: format!("shell-{id}"),
                     turn_id: Some("turn".into()),

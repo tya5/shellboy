@@ -301,3 +301,15 @@ real-time bound is that helper's60-second watchdog. Text/raw frames and a binary
 SHA-256 manifest are evidence of the native Unix process/PTY only, not physical
 terminal screenshots or Windows UI success. Retain failures as well as passes;
 the existence of this driver is not a qualification result.
+
+### Notification Reference PTYs
+
+After building the current source into the shared CARGO_TARGET_DIR, run
+`python3 scripts/check-notice-references.py --binary SHARED_TARGET/debug/shellboy --fixture SHARED_TARGET/debug/examples/visual_fixture --out NEW_TEMP_DIRECTORY`.
+Use that shared build directly; do not copy executables or create another target
+directory for a measurement. Record the source and binary digest before capture.
+It creates disposable synthetic databases and captures sixteen 80/140-column
+shell/child scenes across dark/light/NO_COLOR/vt100, including exact original
+access, duplicate short names, reactive rename and deletion. It never uses user
+data, real providers or the host clipboard. The only timeout is the shared 60s
+watchdog; observations are not latency acceptance gates.

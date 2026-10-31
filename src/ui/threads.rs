@@ -4743,6 +4743,7 @@ mod watch_integration_tests {
                     facts.work = Some(LiveWorkSnapshot {
                         run_id: "run-probe".into(),
                         rows: vec![LiveWorkRow {
+                            description: None,
                             target: LiveWorkTarget::Shell {
                                 execution_id: "probe-execution".into(),
                                 turn_id: facts.turn_id.clone(),

@@ -65,6 +65,7 @@ mod streaming;
 mod streams;
 #[cfg(test)]
 use streaming::StreamBody;
+mod notices;
 mod tools;
 mod usage;
 mod watch_page;
@@ -460,6 +461,12 @@ enum BackgroundResult {
         progress: Option<Result<activity::Projection, ApiError>>,
         epoch: u64,
         generation: Option<u64>,
+    },
+    NoticeDependencies {
+        thread_id: String,
+        generation: u64,
+        epoch: u64,
+        threads: Vec<String>,
     },
     Progress {
         thread_id: String,
@@ -3059,6 +3066,9 @@ async fn run_with_delivery(
                         Err(error) => status(&updates, Some(thread_id), error).await,
                     }
                 }
+                Some(BackgroundResult::NoticeDependencies {thread_id,generation,epoch,threads})=>{
+                    selection.observe_notices(&thread_id,generation,epoch,threads);
+                },
                 Some(BackgroundResult::ViewFacts {tickets,result})=>{
                     view_read::complete(control.diagnostics(),&mut browser,&mut descendants,&mut management.inspection,&updates,tickets,result.map(|value|*value)).await;
                 },

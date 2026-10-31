@@ -459,3 +459,12 @@ retry/new input/stop; do not repeat a possibly executed command blindly.
 Without a TUI there is no interactive draft/restore, Turn interrupt or slash-only
 UI operation, and no late UI attach/reconnect. Existing CLI compact is available.
 Owner binary replacement does not inherit live tools or automatically resume work.
+
+### Shell call descriptions
+
+Use optional `description` to explain what the command actually does in the
+conversation's language, within 80 characters. It is a label, not an instruction
+or a claim of safety; never put credentials in it. The command still executes
+unchanged. Blank labels fall back to commands; overlong labels are bounded and
+normalization is recorded. `[shell] describe_calls = false` removes the parameter
+from generation tool definitions and keeps command-based rows.

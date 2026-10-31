@@ -18,6 +18,7 @@ pub(super) struct CallSource {
     pub(super) call_id: String,
     ordinal: u32,
     command: Option<String>,
+    description: Option<String>,
     result_state: String,
     pub(super) shell_state: Option<String>,
     shell_exit_code: Option<i64>,
@@ -54,7 +55,8 @@ SELECT c.ordinal,
          THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END,
        substr(s.started_at,1,128),
        CASE WHEN json_valid(c.arguments_json) THEN json_extract(c.arguments_json,'$.background')=1 ELSE 0 END,
-       s.saved_sequence,s.output_complete
+       s.saved_sequence,s.output_complete,
+       CASE WHEN json_valid(c.arguments_json) THEN substr(json_extract(c.arguments_json,'$.description'),1,80) END
 FROM tool_call c LEFT JOIN shell_execution s ON s.id=c.operation_id
     AND s.turn_id=(SELECT turn_id FROM tool_group WHERE id=c.group_id)
 WHERE c.group_id=COALESCE(
@@ -83,6 +85,7 @@ ORDER BY c.ordinal DESC LIMIT 1";
 pub(super) struct ToolFacts {
     sources: Vec<CallSource>,
     truncated_nodes: Vec<String>,
+    notices: Vec<super::notices::Fact>,
 }
 impl ToolFacts {
     #[cfg(test)]
@@ -90,6 +93,17 @@ impl ToolFacts {
         &self.sources
     }
     pub(super) fn append(&mut self, other: Self) {
+        for notice in other.notices {
+            if let Some(old) = self
+                .notices
+                .iter_mut()
+                .find(|old| old.node_id == notice.node_id)
+            {
+                *old = notice;
+            } else {
+                self.notices.push(notice);
+            }
+        }
         let mut seen = self
             .sources
             .iter()
@@ -152,6 +166,7 @@ fn read_tx_reference(
                     call_id: call.clone(),
                     ordinal: row.get(0)?,
                     command: row.get(1)?,
+                    description: row.get(15)?,
                     result_state: row.get(2)?,
                     shell_state: row.get(3)?,
                     released: row.get(4)?,
@@ -187,6 +202,7 @@ fn read_tx_reference(
     Ok(ToolFacts {
         sources,
         truncated_nodes: Vec::new(),
+        notices: Vec::new(),
     })
 }
 
@@ -239,6 +255,7 @@ pub(super) fn read_tx(
     Ok(ToolFacts {
         sources: read_sources_batch(db, &resolved)?,
         truncated_nodes: Vec::new(),
+        notices: Vec::new(),
     })
 }
 
@@ -257,7 +274,7 @@ SELECT requested.position,n.id,n.kind,
    EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.output')='array' THEN json_extract(n.payload_json,'$.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
    OR EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.response.output')='array' THEN json_extract(n.payload_json,'$.response.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
  ELSE 0 END
-FROM requested CROSS JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result') ORDER BY requested.position";
+FROM requested CROSS JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result','event') ORDER BY requested.position";
 
 // One bounded ordered seek per actual group member. Unlike row_number over a
 // group join, this never reads every call merely to retain its first129 rows.
@@ -292,6 +309,7 @@ calls AS MATERIALIZED (
           AND json_extract(s.shell_json,'$.completion.elapsed_ms')>=0 THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END END AS elapsed_ms,
         substr(s.started_at,1,128) AS started_at,
         CASE WHEN json_valid(c.arguments_json) THEN json_extract(c.arguments_json,'$.background')=1 ELSE 0 END AS background,
+        CASE WHEN json_valid(c.arguments_json) THEN substr(json_extract(c.arguments_json,'$.description'),1,80) END AS description,
         s.saved_sequence AS output_sequence,s.output_complete
  FROM keys JOIN tool_call c ON c.group_id=keys.group_id AND c.call_id=keys.call_id
  JOIN tool_group g ON g.id=c.group_id
@@ -318,7 +336,7 @@ item_calls AS MATERIALIZED (
 )
 SELECT requested.node_id,c.call_id,c.ordinal,c.command,
  c.result_state,c.shell_state,c.result_node_id IS NOT NULL,c.group_id,c.exit_code,c.operation_id,
- o.node_id,c.result_node_id,c.elapsed_ms,priors.reason,c.started_at,c.background,c.output_sequence,c.output_complete
+ o.node_id,c.result_node_id,c.elapsed_ms,priors.reason,c.started_at,c.background,c.output_sequence,c.output_complete,c.description
 FROM requested JOIN calls c ON c.group_id=requested.group_id AND c.call_id=requested.call_id
 LEFT JOIN node source ON source.id=requested.node_id
 LEFT JOIN first_items first ON first.group_id=c.group_id AND first.call_id=c.call_id
@@ -366,6 +384,12 @@ pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let notice_ids = nodes
+        .iter()
+        .filter(|node| node.kind == "event")
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    let notices = super::notices::read_tx(db, &notice_ids)?;
     let groups = nodes
         .iter()
         .filter(|node| node.kind == "assistant_response" && node.direct.is_none() && node.whole)
@@ -414,12 +438,14 @@ pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts
         return Ok(ToolFacts {
             sources: Vec::new(),
             truncated_nodes,
+            notices,
         });
     }
     let sources = read_sources_batch(db, &requests)?;
     Ok(ToolFacts {
         sources,
         truncated_nodes,
+        notices,
     })
 }
 
@@ -439,6 +465,7 @@ fn read_sources_batch(
                 call_id: row.get(1)?,
                 ordinal: row.get(2)?,
                 command: row.get(3)?,
+                description: row.get(18)?,
                 result_state: row.get(4)?,
                 shell_state: row.get(5)?,
                 released: row.get(6)?,
@@ -464,6 +491,7 @@ fn read_sources_batch(
 
 pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
     clear_observations(nodes);
+    super::notices::apply(nodes, &facts.notices);
     for source in &facts.sources {
         let Some(node) = nodes.iter_mut().find(|node| node.node_id == source.node_id) else {
             continue;
@@ -498,6 +526,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
                     _ => {}
                 }
             }
+            tool.description = crate::tool_description::label(source.description.as_deref());
             if tool.command.is_empty() {
                 tool.command =
                     crate::presentation::sanitize_plain(source.command.as_deref().unwrap_or(""), 0)
@@ -560,13 +589,23 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             })
         })
         .collect::<Vec<_>>();
-    if requests.is_empty() {
+    let notice_ids = nodes
+        .iter()
+        .filter(|node| node.presentation.kind == crate::presentation::PresentationKind::Event)
+        .take(MAX_NODES)
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    if requests.is_empty() && notice_ids.is_empty() {
         return Ok(());
     }
     let facts = control
         .store
         .database
-        .call(move |db| read_tx(db, &requests))
+        .call(move |db| {
+            let mut facts = read_tx(db, &requests)?;
+            facts.notices = super::notices::read_tx(db, &notice_ids)?;
+            Ok(facts)
+        })
         .await
         .map_err(StorageError::into_api_error)?;
     let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();

@@ -1451,3 +1451,43 @@ fn index_pause_is_an_actionable_historical_record_with_saved_time() {
     assert!(!p.title.contains("復旧待ち"));
     assert!(p.fields.iter().any(|field| field.value == "saved-identity"));
 }
+
+#[test]
+fn shell_descriptions_are_bounded_searchable_and_never_replace_canonical_commands() {
+    let command = "printf 'FULL-COMMAND-UNCHANGED'";
+    for description in [
+        None,
+        Some("".to_owned()),
+        Some(" \n\t".to_owned()),
+        Some("inspect repository".to_owned()),
+        Some("語".repeat(100)),
+    ] {
+        let mut args = json!({"command":command});
+        if let Some(description) = &description {
+            args["description"] = json!(description);
+        }
+        let response = shellboy::model::ModelResponse::completed(json!({"id":"described","status":"completed","output":[{"type":"function_call","name":"shell","call_id":"c","arguments":args.to_string()}]}), true).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(response.output[0]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(saved["command"], command);
+        let text = text_of_payload(&response.raw);
+        assert!(text.contains("FULL-COMMAND-UNCHANGED"));
+        if description.as_deref() == Some("inspect repository") {
+            assert!(
+                text.contains("inspect repository"),
+                "existing history/index text must retain the description"
+            );
+        }
+        let p = project("assistant_response", &response.raw, &text, 0);
+        let tool = p.blocks.iter().find_map(|b| b.tool.as_ref()).unwrap();
+        assert!(tool.command.contains("FULL-COMMAND-UNCHANGED"));
+        if description.as_ref().is_none_or(|s| s.trim().is_empty()) {
+            assert!(tool.description.is_none());
+        }
+        if description.as_ref().is_some_and(|s| s.chars().count() > 80) {
+            assert_eq!(tool.description.as_ref().unwrap().chars().count(), 80);
+            assert_eq!(saved["description"].as_str().unwrap().chars().count(), 100);
+            assert_eq!(response.output[0]["arguments"], args.to_string());
+        }
+    }
+}

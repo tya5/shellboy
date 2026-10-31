@@ -272,6 +272,7 @@ pub enum ShellKind {
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Shell {
+    pub describe_calls: bool,
     pub kind: ShellKind,
     pub executable: Option<PathBuf>,
     pub env: BTreeMap<String, String>,
@@ -279,6 +280,7 @@ pub struct Shell {
 impl Default for Shell {
     fn default() -> Self {
         Self {
+            describe_calls: true,
             kind: if cfg!(windows) {
                 ShellKind::Powershell
             } else {
@@ -294,6 +296,7 @@ impl fmt::Debug for Shell {
         f.debug_struct("Shell")
             .field("kind", &self.kind)
             .field("executable", &self.executable)
+            .field("describe_calls", &self.describe_calls)
             .field("env", &"[redacted]")
             .finish()
     }

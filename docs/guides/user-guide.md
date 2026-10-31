@@ -290,6 +290,9 @@ See [Configuration](configuration.md#all-sections-and-defaults) for settings and
 
 ## Safety model
 
+Tool-row descriptions are written by the model, not verified against the command;
+select the row or press F6 to check the actual command that ran.
+
 **What you grant.** The model's only tool is a general-purpose shell. Commands
 inherit the owner's OS account and environment by default. Shellboy does not
 insert a per-command approval prompt. Shellboy supplies no filesystem/network sandbox

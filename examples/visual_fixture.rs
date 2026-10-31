@@ -19,6 +19,93 @@ fn context(kind: &str, change: Value) -> Value {
     )
 }
 
+fn notice_sources(
+    tx: &rusqlite::Transaction<'_>,
+    cwd: &str,
+    agents: &str,
+) -> Result<(), shellboy::storage::StorageError> {
+    for (id, title) in [
+        ("visual-notice-shell", "Bounded shell notice"),
+        ("visual-notice-parent", "Bounded child notice"),
+        ("visual-notice-child", "Twin"),
+        ("visual-notice-twin", "Twin"),
+    ] {
+        tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?2,?3,?4,'visual','offline-fixture','2026-10-24T12:00:00+09:00')",rusqlite::params![id,title,cwd,agents])?;
+    }
+    tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('notice-run','visual-notice-shell','completed','now'),('notice-child-run','visual-notice-child','completed','now');
+      INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('notice-turn','visual-notice-shell','notice-run','completed','now');
+      INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('notice-attempt','notice-turn',0,0,'visual','offline-fixture',0,'completed','{}','now');
+      INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('notice-group','notice-attempt','notice-turn','completed','now');
+      INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('notice-group','same',0,'shell','{\"command\":\"printf NOTICE_SOURCE_COMMAND\",\"background\":true}','completed','notice-execution');
+      INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,exit_code)VALUES('notice-execution','notice-run','notice-turn','notice-execution','exited','/','{}','UTF-8','UTF-8','closed','now',0);")?;
+    append_node(
+        tx,
+        "visual-notice-shell",
+        "notice-exact-result",
+        Some("notice-turn"),
+        "tool_result",
+        &json!({"group_id":"notice-group","item":{"type":"function_call_output","call_id":"same","output":json!({"execution_id":"notice-execution","status":"exited","exit_code":0,"stdout":"EXACT_NOTICE_SOURCE_MARKER"}).to_string()}}),
+        "2026-10-24T12:00:00+09:00",
+    )?;
+    tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('notice-group','same','notice-exact-result','exited')",[])?;
+    for i in 0..70 {
+        append_node(
+            tx,
+            "visual-notice-shell",
+            &format!("notice-archive-{i}"),
+            None,
+            "assistant_response",
+            &answer(&format!("ARCHIVE_ROW_{i:02}")),
+            "2026-10-24T12:00:00+09:00",
+        )?;
+    }
+    append_node(
+        tx,
+        "visual-notice-child",
+        "notice-right-child",
+        None,
+        "assistant_response",
+        &answer("RIGHT_CHILD_MARKER"),
+        "2026-10-24T12:00:00+09:00",
+    )?;
+    append_node(
+        tx,
+        "visual-notice-twin",
+        "notice-wrong-child",
+        None,
+        "assistant_response",
+        &answer("WRONG_CHILD_MARKER"),
+        "2026-10-24T12:00:00+09:00",
+    )?;
+    for (thread, id, kind, payload) in [
+        (
+            "visual-notice-shell",
+            "notice-shell-event",
+            "shell_ended",
+            json!({"execution_id":"notice-execution","state":"exited","exit_code":0}),
+        ),
+        (
+            "visual-notice-parent",
+            "notice-child-event",
+            "child_run_ended",
+            json!({"run_id":"notice-child-run","state":"completed"}),
+        ),
+    ] {
+        tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES(?1,?2,'{}',?3,?4,'2026-10-24T12:00:00+09:00')",rusqlite::params![id,kind,thread,payload.to_string()])?;
+        let envelope = json!({"event_id":id,"kind":kind,"payload":payload});
+        append_node(
+            tx,
+            thread,
+            &format!("node-{id}"),
+            None,
+            "event",
+            &json!({"role":"developer","event_id":id,"content":[{"type":"input_text","text":format!("Shellboy event v1: {envelope}")}]}),
+            "2026-10-24T12:00:00+09:00",
+        )?;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let root = std::env::args_os()
@@ -146,6 +233,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 append_node(&tx,thread,&format!("{thread}-node-{index}"),None,kind,&payload,"2026-10-24T12:00:00+09:00")?;
             }
         }
+        notice_sources(&tx,&cwd,&agents)?;
         for index in 0..4 {
             let id = format!("visual-input-bands-node-{index}");
             let sender = if index == 1 { json!({"kind":"external_cli"}) } else { json!({"kind":"external_cli","label":"Claude（レビュア）"}) };

@@ -529,3 +529,12 @@ completion can already be saved while its model-facing event waits for that next
 request boundary. This does not mean the driver is waiting for a background shell
 or that replay should be forced; inspect the protected operation's downstream
 result. Finishing/failed edits remove this current reason without a new timer.
+
+### Notification Reference Metadata
+
+Notification headers can show a short saved shell command and its background
+request flag, or a child conversation's explicitly labelled current name. Names
+are not historical identity. Deleted or missing references remain unavailable.
+Enter follows an exact loaded execution row; otherwise it opens the saved tool
+result's original source when its exact group/call/node relation is available.
+Child navigation uses the saved Thread ID, never a similar short name.

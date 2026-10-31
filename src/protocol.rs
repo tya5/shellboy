@@ -671,7 +671,7 @@ pub(crate) use command::CommandRoute;
 mod validation;
 pub(crate) use validation::rfc3339;
 
-args!(ShellToolArgs { command: String, #[serde(default)] background: bool, #[serde(default)] stdin_open: bool, #[serde(default)] initial_stdin: Option<String>, #[serde(default = "utf8")] input_encoding: String, #[serde(default = "utf8")] output_encoding: String });
+args!(ShellToolArgs { command: String, #[serde(default, deserialize_with = "crate::tool_description::deserialize", skip_serializing_if = "Option::is_none")] description: Option<String>, #[serde(default)] background: bool, #[serde(default)] stdin_open: bool, #[serde(default)] initial_stdin: Option<String>, #[serde(default = "utf8")] input_encoding: String, #[serde(default = "utf8")] output_encoding: String });
 impl ShellToolArgs {
     pub fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.command, "command")?;

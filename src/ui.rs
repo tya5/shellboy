@@ -187,7 +187,14 @@ impl UiNode {
                 })
             })
             .collect::<Vec<_>>();
-        if blocks.is_empty() {
+        let notice_fields = self
+            .presentation
+            .fields
+            .iter()
+            .filter(|f| f.key.starts_with("/ui_notice/"))
+            .cloned()
+            .collect::<Vec<_>>();
+        if blocks.is_empty() && notice_fields.is_empty() {
             return None;
         }
         Some(Self {
@@ -199,7 +206,13 @@ impl UiNode {
             reasoning_ranges: vec![],
             presentation: NodePresentation {
                 kind: self.presentation.kind.clone(),
+                title: if notice_fields.is_empty() {
+                    String::new()
+                } else {
+                    self.presentation.title.clone()
+                },
                 blocks,
+                fields: notice_fields,
                 ..Default::default()
             },
         })
@@ -208,7 +221,28 @@ impl UiNode {
         if self.node_id != source.node_id {
             return false;
         }
-        let mut changed = false;
+        let old = self
+            .presentation
+            .fields
+            .iter()
+            .filter(|f| f.key.starts_with("/ui_notice/"))
+            .collect::<Vec<_>>();
+        let incoming = source
+            .presentation
+            .fields
+            .iter()
+            .filter(|f| f.key.starts_with("/ui_notice/"))
+            .collect::<Vec<_>>();
+        let mut changed = old != incoming;
+        if changed {
+            self.presentation
+                .fields
+                .retain(|f| !f.key.starts_with("/ui_notice/"));
+            self.presentation
+                .fields
+                .extend(incoming.into_iter().cloned());
+            self.presentation.bound_metadata();
+        }
         for block in &mut self.presentation.blocks {
             if let Some(tool) = &mut block.tool
                 && let Some(incoming) = source
@@ -1250,6 +1284,8 @@ struct HistoryLayoutKey {
     anchor: Option<String>,
     expanded: Vec<String>,
     items_revision: u64,
+    focused_item: Option<ItemKey>,
+    describe_calls: bool,
     palette: theme::Palette,
     width: u16,
 }
@@ -1271,6 +1307,8 @@ struct RenderUnitKey {
     item: Option<ItemKey>,
     block_index: usize,
     item_revision: u64,
+    focused: bool,
+    describe_calls: bool,
     dependency: Option<usize>,
     palette: theme::Palette,
 }
@@ -1310,6 +1348,8 @@ impl RenderUnitKey {
                 .max()
                 .unwrap_or(0),
             dependency: None,
+            focused: false,
+            describe_calls: view.describe_calls,
             palette: view.palette,
         })
     }
@@ -1324,6 +1364,7 @@ impl RenderUnitKey {
     ) -> Option<Self> {
         let mut result = Self::new(view, primary, primary + 1, width, links)?;
         result.item = Some(key.clone());
+        result.focused = view.items.active && view.items.focus.as_ref() == Some(key);
         result.block_index = block_index;
         result.item_revision = view.items.cache_revision(key);
         result.dependency = dependency;
@@ -1381,6 +1422,12 @@ impl HistoryLayoutKey {
                 .map(|n| n.node_id.clone()),
             expanded: view.reasoning_expanded.iter().cloned().collect(),
             items_revision: view.items.revision(),
+            focused_item: view
+                .items
+                .active
+                .then(|| view.items.focus.clone())
+                .flatten(),
+            describe_calls: view.describe_calls,
             palette: view.palette,
             width,
         }
@@ -1388,6 +1435,10 @@ impl HistoryLayoutKey {
     fn bytes(&self) -> usize {
         self.view.capacity()
             + self.thread.as_ref().map_or(0, String::capacity)
+            + self
+                .focused_item
+                .as_ref()
+                .map_or(0, history_interaction::key_bytes)
             + self.anchor.as_ref().map_or(0, String::capacity)
             + self.expanded.capacity() * std::mem::size_of::<String>()
             + self.expanded.iter().map(String::capacity).sum::<usize>()
@@ -5978,7 +6029,13 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         draw_recovery(frame, recovery_area, snapshot);
     }
     message_queue::draw_compact(frame, queue_area, view);
-    live_work::draw(frame, live_area, &view.live_work, state.palette);
+    live_work::draw(
+        frame,
+        live_area,
+        &view.live_work,
+        state.palette,
+        view.describe_calls,
+    );
     let input_area = layout[2];
     let input_body_height = input_area.height.saturating_sub(2);
     let cursor = draw_input(frame, input_area, state, &input, &input_metrics);

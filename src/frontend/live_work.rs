@@ -38,17 +38,18 @@ WITH wait_keys AS MATERIALIZED (
  SELECT 'shell' AS kind,s.id AS id,s.turn_id AS related,s.id AS execution,
         CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.command')='text' THEN substr(json_extract(s.shell_json,'$.command'),1,512) END END AS label,
         s.state,s.started_at,
-        (SELECT received_at FROM output_chunk o WHERE o.execution_id=s.id ORDER BY o.sequence DESC LIMIT 1) AS output_at
+        (SELECT received_at FROM output_chunk o WHERE o.execution_id=s.id ORDER BY o.sequence DESC LIMIT 1) AS output_at,
+        CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END AS description
  FROM shell_members member CROSS JOIN shell_execution s ON s.id=member.id
 ), children AS MATERIALIZED (
  SELECT 'child' AS kind,r.id AS id,r.thread_id AS related,NULL AS execution,
-        substr(t.title,1,512) AS label,r.state,r.created_at AS started_at,NULL AS output_at
+        substr(t.title,1,512) AS label,r.state,r.created_at AS started_at,NULL AS output_at,NULL AS description
  FROM run r JOIN thread t ON t.id=r.thread_id
  WHERE r.owner_run_id=?1 AND r.state IN ('live','stopping')
  ORDER BY julianday(r.created_at) IS NULL,julianday(r.created_at),r.id LIMIT 3
 ), wait_rows AS MATERIALIZED (
  SELECT 'wait' AS kind,operation_id AS id,NULL AS related,execution_id AS execution,
-        NULL AS label,'waiting' AS state,started_at,NULL AS output_at FROM waits
+        NULL AS label,'waiting' AS state,started_at,NULL AS output_at,NULL AS description FROM waits
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),operation_id LIMIT 3
 ), picked AS MATERIALIZED (
  SELECT * FROM (SELECT * FROM shells UNION ALL SELECT * FROM children UNION ALL SELECT * FROM wait_rows)
@@ -68,7 +69,7 @@ SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked
          EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=picked.id AND state IN ('starting','running','stopping'))
          OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=picked.id AND state IN ('live','stopping')) ELSE 0 END,
        CASE WHEN picked.kind='child' AND picked.state='live' AND child_turn.state='running' AND COALESCE(child_attempt.state,'')<>'inflight'
-         THEN EXISTS(SELECT 1 FROM tool_group WHERE turn_id=child_turn.id AND state='running') ELSE 0 END
+         THEN EXISTS(SELECT 1 FROM tool_group WHERE turn_id=child_turn.id AND state='running') ELSE 0 END,picked.description
 FROM counts LEFT JOIN picked ON 1
 LEFT JOIN turn child_turn ON child_turn.id=(SELECT id FROM turn WHERE picked.kind='child' AND run_id=picked.id ORDER BY created_at DESC,id DESC LIMIT 1)
 LEFT JOIN model_attempt child_attempt ON child_attempt.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=child_turn.id
@@ -91,6 +92,7 @@ struct RawRow {
     related: Option<String>,
     execution: Option<String>,
     label: Option<String>,
+    description: Option<String>,
     state: String,
     started_at: Option<String>,
     output_at: Option<String>,
@@ -144,6 +146,7 @@ pub(super) fn read_tx(
                 related: row.get(2)?,
                 execution: row.get(3)?,
                 label: row.get(4)?,
+                description: row.get(17)?,
                 state: row.get(5)?,
                 started_at: row.get(6)?,
                 output_at: row.get(7)?,
@@ -257,6 +260,7 @@ pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
             LiveWorkRow {
                 target,
                 label: display,
+                description: crate::tool_description::label(row.description.as_deref()),
                 state: row.state,
                 elapsed_base: age(row.started_at.as_deref(), now),
                 output_age_base: age(row.output_at.as_deref(), now),
@@ -306,6 +310,18 @@ mod tests {
         db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",rusqlite::params![format!("wait.pending.{operation}"),json!({"operation_id":operation,"caller":{"run_id":run,"execution_id":execution},"accepted_at":"2020-01-01T00:00:02Z"}).to_string()]).unwrap();
     }
 
+    #[test]
+    fn common_description_metadata_preserves_real_command_label_for_details_and_optout() {
+        let db = fixture();
+        db.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.description',?1) WHERE id='s-old'", ["  Inspect\nfiles\u{7}  "]).unwrap();
+        let snapshot = prepare(read_tx(&db, "r", Some(&[])).unwrap());
+        let first = &snapshot.rows[0];
+        assert_eq!(first.description.as_deref(), Some("Inspect files"));
+        assert!(first.label.contains("printf saved"));
+        assert!(
+            matches!(&first.target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-old")
+        );
+    }
     #[test]
     fn saved_ownership_oldest_rows_counts_and_timing_survive_later_changes() {
         let db = fixture();

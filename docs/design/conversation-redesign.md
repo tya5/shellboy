@@ -40,7 +40,7 @@ Add group_id: Option<String> to ToolPresentation as display-only enrichment, pop
 
 A conversation item carries its stable identity, source node IDs, kind, canonical ordinal anchor, saved timestamp, relevant tool facts and expansion availability. A projected tool row merges call/result by the saved key even across source-window boundaries. Nonadjacent source members are not a contiguous ordinal span: suppress only the duplicate tool block, preserve intermediate prose, and keep each emitted row's actual node/source anchor. Saved result facts can enrich call-only rows through bounded exact-source metadata; do not fetch hidden raw output merely to correlate an item. When a result is outside the loaded source window, perform a bounded exact-source lookup; until then the row shows the known call state and an explicit unavailable/loading affordance, never an invented successful result. A call embedded with prose does not hide the surrounding prose.
 
-Ui history focus is Option<ItemKey>; ordinary conversation bodies default open, while successful tool output defaults closed. Enter/Space operates on the selected item's available fold/preview; original/copy access remains independent.  expansion state is a bounded LRU of at most128 identities per selected conversation, retained across body/layout eviction and cleared when its Thread view is discarded. UI source-window/cache budgets remain those of #58. No entire Turn is pinned. Geometry maps click regions and F6/F7 to the same ItemKey; the mapping is regenerated on layout and width changes. Late replies must match Thread/generation, ItemKey and per-item request revision.
+Ui history focus is Option<ItemKey>; ordinary conversation bodies default open, while successful tool output defaults closed. Enter/Space operates on the selected item's available fold/preview; original/copy access remains independent.  expansion state is a bounded LRU of at most 128 identities per selected conversation, retained across body/layout eviction and cleared when its Thread view is discarded. UI source-window/cache budgets remain those of #58. No entire Turn is pinned. Geometry maps click regions and F6/F7 to the same ItemKey; the mapping is regenerated on layout and width changes. Late replies must match Thread/generation, ItemKey and per-item request revision.
 
 ## B+C: bands, rows, interaction and quiet chrome
 
@@ -91,7 +91,7 @@ These are crate-private in-process APIs, not new CLI/protocol semantics. For B+C
 
 Run the synchronous query/decoding on the existing finite frontend read/presentation blocking path, opening the existing DbWorker path with SQLITE_OPEN_READ_ONLY and query_only. Drop the connection/transaction when the bounded task ends; do not retain snapshots across sleeps. Existing read semaphore owns admission and existing cancellation/generation owns acceptance. No new DB thread or connection pool is introduced.
 
-Query/copy limits bound returned rows and application bytes, not SQLite's internal filesystem I/O for giant BLOB pages. Use existing output_stream(execution_id,stream,stream_offset) to seek each stream's actual tail; use the primary key for sequence continuation. Use substr to copy only the bounded suffix from a large chunk. Bound both raw bytes and inspected/copied chunk rows (at most128 per preview); short fragmented output may return fewer bytes. Head/tail presentation reads share the existing per-tool byte allowance rather than paying it twice. Failure automatic preview budget is2KiB TOTAL, with a bounded share reserved for stderr when present. Explicit completed expansion uses existing limits.tool_excerpt_bytes (currently16KiB) TOTAL and maintains the true tail when abbreviated.
+Query/copy limits bound returned rows and application bytes, not SQLite's internal filesystem I/O for giant BLOB pages. Use existing output_stream(execution_id,stream,stream_offset) to seek each stream's actual tail; use the primary key for sequence continuation. Use substr to copy only the bounded suffix from a large chunk. Bound both raw bytes and inspected/copied chunk rows (at most 128 per preview); short fragmented output may return fewer bytes. Head/tail presentation reads share the existing per-tool byte allowance rather than paying it twice. Failure automatic preview budget is2KiB TOTAL, with a bounded share reserved for stderr when present. Explicit completed expansion uses existing limits.tool_excerpt_bytes (currently16KiB) TOTAL and maintains the true tail when abbreviated.
 
 Use encoding_rs and the existing encoding resolver. Keep separate stream decoder state for contiguous incremental reads in frontend memory. A tail jump resets decoder state; UTF8/UTF16 boundary alignment can be repaired with a small lookbehind charged to the same budget. Stateful encodings cannot promise exact arbitrary-tail decoding: display a fixed decode-uncertain fact and retain original access rather than scan from the start or claim exact output. Trim ANSI/OSC/cursor/control/invisible-format characters with existing sanitization. A preview-only bounded current-line normalizer handles carriage-return overwrite before sanitization (the global sanitizer only strips CR); do not change CLI raw semantics. Cap decoded preview text by the existing excerpt/body budget.
 
@@ -613,7 +613,7 @@ use one scoped UI request/reply, fenced by popup request identity, Thread and
 generation. Read at most2 already-validated ItemRegion source node IDs in one
 existing read-slot DB job/transaction. Check SQL payload length before copying:
 at most96KiB per source and192KiB total. Project metadata/links only, without
-tools, raw-output or receipt enrichment, and retain at most128 links in that
+tools, raw-output or receipt enrichment, and retain at most 128 links in that
 popup. Deleted/oversized/unavailable sources report explicit unavailability rather
 than an empty successful list. Do not install offpage nodes or change the #58
 history window, follow or selection. No new Core command/schema/queue is added.
@@ -631,7 +631,7 @@ refresh engine. Record actual job counts and total DB-worker time per Changed.
 Do not hide per-row SQL inside a nominally single job and call it bounded work.
 
 B+C source correlation/missing-result metadata uses one window-bounded source
-batch (at most128 node/call IDs), with at most one in flight and cache by
+batch (at most 128 node/call IDs), with at most one in flight and cache by
 (node/source identity, accepted read revision). It must not issue a new DB job
 per rendered row or redraw. Explicit user expansion can request its bounded raw
 preview; its successful display copy belongs to cache.body_bytes, including
@@ -837,11 +837,11 @@ user-payload title policy so explicit stored titles remain verbatim and normal
 derived titles retain Unicode, text-part ordering and terminal-sanitization rules.
 CLI title lookup semantics and wire/schema are unchanged.
 
-For an empty stored title, inspect a prefix of at most128 selected-path entries
-(plus one sentinel), then accepted/held receipt prefixes of at most128 per state
+For an empty stored title, inspect a prefix of at most 128 selected-path entries
+(plus one sentinel), then accepted/held receipt prefixes of at most 128 per state
 (plus sentinels), using the existing path/receipt indexes. Inspect prefix membership
 before node-kind/path exclusion rather than scan an unlimited history to find128
-users. Only user JSON bodies can be copied: at most128KiB each and512KiB total
+users. Only user JSON bodies can be copied: at most 128KiB each and512KiB total
 across the witness. Compute lengths and cumulative bounded-prefix budgets in SQL
 before copying; parse JSON only after releasing the transaction.
 
@@ -867,7 +867,7 @@ conversation schema remains14 and no new index/migration is adopted.
 
 ### D2 pending-wait source scope and live DTO
 
-Before the activity DB read, copy at most128 existing WaitRegistry entries as
+Before the activity DB read, copy at most 128 existing WaitRegistry entries as
 (operation ID, source shell execution ID), without credentials or new registry
 fields. CLI transport admits at most24 ordinary requests, but direct Control
 callers are not globally limited by that semaphore: an over128 snapshot is
@@ -897,7 +897,7 @@ observations. All normally admitted CLI waits are included in the exact scope.
 
 Only the at most3 displayed owned-child rows acquire bounded title witnesses
 through the same frontend header title policy: explicit title first, otherwise
-at most128 path/pending membership candidates and512KiB copied evidence per
+at most 128 path/pending membership candidates and512KiB copied evidence per
 child. SQL collects owned facts inside the existing read transaction; title JSON
 and saved activity classification are prepared after leaving the DB worker.
 This fixed display-only title work may issue at most2 extra bounded statements
@@ -951,7 +951,7 @@ copies and small decoder/identity metadata are distinct. Closing, hiding,
 completion or selection changes discard both active copies. Inactive views
 retain no live output body. Existing history/item cache limits are unchanged.
 
-Each observation uses one read-only transaction, at most128 chunk metadata rows
+Each observation uses one read-only transaction, at most 128 chunk metadata rows
 and4KiB total new raw bytes. Contiguous ranges retain stream decoder state;
 initial observation, retention/encoding change, missing range or excessive
 backlog starts a tail and reports skipped/uncertain evidence. UTF8/UTF16 tail
@@ -1496,3 +1496,62 @@ surfaces, using the same one-based parser order as the canonical chooser. These
 captions are rendered decoration only; partial/evicted projections do not claim
 global block numbers. The b shortcut opens that answer's numbered chooser, then
 one digit copies the selected full block without typing a node identity.
+
+## Tool description labels
+
+When shell.describe_calls is enabled, compact tool identity uses its nonblank,
+sanitized model-authored description instead of command text. The existing
+history item focus/open state reveals the command; details and raw provenance
+continue to expose the real command. Losing focus restores the compact label.
+No independent selection, lifecycle or disclosure state is introduced. Description
+text is not evidence that the actual command is safe or matches its explanation.
+
+Command metadata keeps its existing 512-character bound. Focus/disclosure labels
+that text as a preview and supplies an exact-call command-original action (`o`).
+F6/original reuse the existing read-only, cursor-bounded source pages to reach
+all command text, including adjacent calls and long-command tails. Do not eagerly
+materialize all calls or increase aggregate preview retention for this label.
+
+Original pages are the verified shared assistant/source node and can include
+adjacent calls. The selected call ID and actual command preview identify the
+chosen item; the view does not claim an exclusive per-call raw stream. All of
+the selected command remains reachable through those bounded source pages.
+
+## Bounded notification references (#88)
+
+Extend #83's minimum without changing Core events, protocol, schema or canonical
+history. The existing admitted frontend reader resolves at most 128 event-node
+IDs in one indexed metadata statement. It follows node.event_id to the saved
+event, execution to the unique tool_call.operation_id and matching shell/group
+Turn, and child Run to its saved Thread. Duplicate call IDs or similar commands
+are never identity evidence. Select bounded command/title/identity fields only;
+never return provider bodies or shell output for display. Missing, deleted and
+expired sources remain explicit. Current Thread titles say "current name";
+a recorded title is not silently replaced with a claimed historical title.
+
+Reuse the finite presentation worker, source metadata allowance, existing
+read-revision/generation fences and paused-source observation scope. Decoration
+lives in bounded /ui_notice fields, not original text or source offsets. Existing
+Changed notifications invalidate only the selected view's bounded referenced
+Threads; no poller, owner scan, per-notification query, new worker or queue.
+Late observations cannot revive a replaced scope, renamed view or deleted source.
+
+Enter first follows an exact loaded execution row. Otherwise an exact saved
+(group,call,node) reference opens that original source through the existing
+Details reader; it must not fall back to a nearby node or search by name/call ID.
+Child navigation uses the saved/resolved Thread identity and never a short name.
+Original-source reads occur only on explicit action. Unknown/deleted targets
+retain factual identifiers and a clear unavailable message instead of guessing.
+
+Synthetic validation covers repeated call IDs, equal short names, rename/delete,
+run-only child references, missing/expired source, out-of-window original access,
+stale scope/generation replies and query plans/counts. Functional PTYs cover
+80/wide, dark/light/NO_COLOR/vt100 without a host clipboard or user data. Record
+P1 observations separately; latency/CPU observations are not acceptance gates.
+The existing finite background-result channel additionally carries one bounded
+reference set (at most 128 IDs for the 128-node current page). The independent
+paused scope remains bounded to 128 nodes. Selection owns these references and
+adopts the current-page set only for the current Thread/generation/
+progress epoch; switching views clears it. This is metadata on an existing
+reader completion, not a durable event, queue or subscription. Unrelated Changed
+IDs do not refresh it. The existing paused scope supplies older visible sources.

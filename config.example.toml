@@ -65,3 +65,7 @@ auto_history = true
 # summary_max_percent = 5
 # summary_map_max_requests = 128 # 1..4096; cached parts do not consume requests
 # summary_reduce_max_requests = 16 # 1..4096
+
+[shell]
+# Model-authored tool-row labels; false removes the parameter from generation tools.
+describe_calls = true

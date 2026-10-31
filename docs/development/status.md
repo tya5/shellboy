@@ -3107,3 +3107,52 @@ numbered targets. New parser, ownership, source-limit and real-DB tests are writ
 These additional changes have passed formatting/static layout only, not compilation,
 standard checks or real PTY qualification yet. Earlier stage-1 validation does not
 qualify these additional paths. Rust qualification is queued after #91 and W2 work.
+## #97 description-label candidate
+
+Optional bounded shell descriptions and opt-out definition/display gating are
+implemented as ordinary metadata over existing call/shell history. Existing item
+focus/disclosure and original paging expose commands; cache keys derive from
+those existing inputs rather than independent interaction state. Source/SSE/UI
+and paging tests are prepared; compilation, PTY and final checks are pending.
+
+### #97 local qualification
+
+The description-label candidate passes local type/targeted/SSE/paging checks,
+12 copied-binary PTY cases and the standard check. Failure history and exact
+source/results are recorded in issue #97. Core/UI review, native CI and main
+integration remain pending; no real-provider or general security claim is made.
+
+### #97 raw replay review correction
+
+Received shell arguments remain verbatim in response, adopted node, tool_call
+and subsequent model input. Only execution deserialization/display labels are
+80-character bounded; no normalization or truncation marker is persisted.
+Updated exact-source qualification is recorded in issue #97 after its next lease.
+
+## #88 notification references: native qualification complete, review required
+
+The UI-only bounded metadata projection and exact original-reference navigation
+are implemented on landed #87/main805efc9. At8f9e457, the corrected16-case native
+PTY matrix passed (80/140 columns, dark/light/NO_COLOR/vt100, shell/child),
+including exact original access, duplicate short names, reactive rename while
+paused and deletion without input. Latest-HEAD standard checks then passed2116
+Rust tests (0 failures,35 ignored),70 Python tests, layout94, fmt and clippy.
+Review is required; this is not cross-OS qualification or reviewer acceptance.
+The following earlier failed attempts remain part of the validation history.
+Synthetic unit cases cover identity, rename/delete, query counts/plans and stale
+dependency ownership. First native
+qualification passed formatting, integration layout (94 suites) and 70 Python
+tests, then stopped at clippy compilation: the new exact-original UI test was
+placed in a sibling module without its fixture/key helpers (E0425). The test is
+moved into the existing helper-owning module. Second qualification at8097b1d
+passed full standard checks (2116 Rust tests, 0 failures, 35 ignored; 70 Python
+tests) and binary/fixture build. The 80-column dark shell PTY reached the exact
+out-of-window original, and the child PTY displayed its current name. That child
+case then hit the 60-second watchdog waiting for the wrong pause label: Tab
+selects history and pauses follow (observed original/copy hints and down arrow),
+whereas the expected freeze label belongs to F2 display freeze. The harness now
+checks the selected-history hint plus paused-follow arrow. The third chain
+subsequently qualified all16 cases, superseding that earlier partial result.
+The first failed chain ran no Rust tests/build/PTY. Python SQLite3.51 synthetic
+metadata/query-plan observations remain separate non-Rust evidence. No Core
+event, protocol or storage schema is changed. P1 remains deferred and non-gating.

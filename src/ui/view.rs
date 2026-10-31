@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug)]
 pub struct ThreadView {
     pub(super) palette: theme::Palette,
+    pub(super) describe_calls: bool,
     pub(super) items: history_items::ItemState,
     pub(super) history_focus_item: Option<Arc<history_items::ItemRegion>>,
     pub(super) operation_notice: Option<history_interaction::OperationNotice>,
@@ -249,9 +250,14 @@ impl ThreadView {
             .iter()
             .filter(|node| {
                 node.presentation
-                    .blocks
+                    .fields
                     .iter()
-                    .any(|block| block.tool.is_some())
+                    .any(|f| f.key == "/ui_notice/title")
+                    || node
+                        .presentation
+                        .blocks
+                        .iter()
+                        .any(|block| block.tool.is_some())
             })
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
@@ -316,6 +322,7 @@ impl ThreadView {
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
         Self {
             palette: theme::Palette::from_capabilities(config.ui.palette, false, true),
+            describe_calls: config.shell.describe_calls,
             items: Default::default(),
             history_focus_item: None,
             operation_notice: None,

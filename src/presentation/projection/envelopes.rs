@@ -199,6 +199,8 @@ fn call(
     );
     if let Some(tool) = &mut b.tool {
         tool.command = short(&text, 512);
+        tool.description =
+            crate::tool_description::label(value.get("description").and_then(Value::as_str));
     }
     b.text = text;
     p.body_omitted_chars = p.body_omitted_chars.saturating_add(omitted);
@@ -232,6 +234,8 @@ fn result(
     trailing: &mut Vec<PresentationBlock>,
 ) {
     if let Some(tool) = &mut b.tool {
+        tool.description =
+            crate::tool_description::label(value.get("description").and_then(Value::as_str));
         tool.status = value
             .get("status")
             .and_then(Value::as_str)

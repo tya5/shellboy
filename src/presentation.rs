@@ -178,6 +178,8 @@ pub struct ToolPresentation {
     pub call_id: String,
     pub ordinal: Option<u32>,
     pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub status: String,
     #[serde(default)]
     pub current_state: Option<String>,
@@ -319,6 +321,7 @@ impl ToolPresentation {
             + self.result_node_id.as_ref().map_or(0, String::capacity)
             + self.started_at.as_ref().map_or(0, String::capacity)
             + self.command.capacity()
+            + self.description.as_ref().map_or(0, String::capacity)
             + self.status.capacity()
             + self.current_state.as_ref().map_or(0, String::capacity)
             + self.reason.capacity()
