@@ -2283,3 +2283,50 @@ frontend token. Do not enlarge the send/presentation pools, discard durable
 submissions, or add another worker/queue. Keep ordinary UI result retention and
 Core shutdown order unchanged. The old Windows trace lacks a pool witness;
 report the controlled deadlock class and that qualification gap explicitly.
+## #95 ordering boundaries (2026-10-31, review required)
+
+The Windows split failure recorded three saved attempts, not three proven HTTP
+sends; its assertion omitted per-attempt phase/status and actual JSONL. Do not
+infer the original CI timeline or duplicate provider charges from that count.
+A separate deterministic counterexample is real: a ready permanent header loses
+to an expired header timer, fabricating a status-free retryable failure. Preserve
+ready response facts after cancellation, before the local header deadline. Keep
+pending-header timeout, unknown-transport retry policy and strict total deadlines.
+
+For E, the prior simultaneous-deadline guard misses pending selected changes
+while an older read has no refresh deadline. Reserve the existing next joint read
+and wait for an older browser ticket before selected admission; otherwise its
+pending IDs can be consumed independently. This uses existing dirty/inflight
+state and notification wakeups, no new queue, worker, epoch or timer. Codex was
+notified in #41 comment 6541664736. Exact CI ticket traces are unavailable; source
+counterexamples and red/green virtual-clock tests, not rerun success, justify the
+changes. Require user Core review and delegated Windows split repeats before
+claiming qualification. No #5 implementation or CI-sharding change is included.
+
+### #95 third observation: backward-window intent (fixture-side)
+
+The pinned-tool fixture dispatched an ordinal0 non-tail window while still
+following the newest page, and only disabled follow after waiting for that old
+node. That is a circular prerequisite when the initial tail is not yet in the
+cache: on_history_window correctly requests a real tail rather than replacing
+a following frame with a non-tail slice. When the tail is already cached, merge
+can cover the tail and hide the fixture mistake. Establish paused navigation and
+its anchor before dispatch, matching actual backward navigation. Keep the exact
+old guards and body/metadata assertions. A pure two-order regression checks both
+states without time; no UI product policy changes for this third case.
+
+## #95 return: periodic work is not another Changed event (2026-10-31)
+
+Use the existing selected-refresh in-flight set to suppress redundant periodic
+poll requests while a snapshot is already being read/projected. Do not clear
+real dirty work, suppress a real Changed event, deduplicate delivered facts to
+hide extra reads, or invent a new epoch. Idle activity can stop polling without
+a tick echo left behind; live activity resumes the existing cadence after the
+read completes. Real Changed during a read retains epoch invalidation and its
+next read. Keep the strict E observation/sequence/reload contract unchanged.
+
+An old-rule red fixed-order test and new-rule green test establish this source
+class; three local original integration runs are separate regression evidence,
+not historical Windows scheduling proof. The old product's three green split
+runs do not cancel its failed ordinary Windows run. This source change requires
+Core review and fresh exact-source native CI by the integration worker.

@@ -2556,3 +2556,17 @@ conditions cover actual foreground/background/completed shells plus focused
 opened/closed rows. The final focus fallback is bold, not a new left marker;
 headings keep their columns. Opened notices use the shared muted indentation.
 #99's preview lifetime/closed-error issue remains separate and requires review.
+#95's third pinned-tool observation is a fixture navigation-intent ordering error:
+pause before dispatching a non-tail window, not after waiting for its reply.
+Two-order pure-state coverage and the original retained-body assertions remain;
+no UI retention change or longer guard is used for that case.
+
+## #95 ordinary Windows return: periodic selected-read echo
+
+The failed ordinary run is not overridden by three green split runs on the same
+old candidate. A fixed-order test exposes periodic ticks requeuing the selected
+Thread while its Changed read is already in flight. The derived tick request now
+consults the existing refreshing set; real Changed/epoch handling stays intact.
+The strict original 16-edit paired observation test remains byte-identical and
+passes three native macOS runs. Exact final checks and new native qualification
+are tracked in #95; no claim that the old Windows schedule was fully traced.

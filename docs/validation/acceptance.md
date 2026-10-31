@@ -5456,3 +5456,65 @@ future selected description/command/ID inspection surface; existing exact source
 expanded/original and F6 diagnostic references remain intact. #99's timeout and
 closed-preview ownership corrections are NOT claimed by this #98 result and
 must be handed off separately as review-required.
+### #95 third failure added during investigation
+
+The user recorded macOS645cd36 run41189322766's pinned-tool wait at line1031.
+A request-boundary assertion deterministically rejects the old fixture's follow
+state before dispatch (red), rather than relying on a longer timeout to observe
+its later hang. A pure UI regression then exercises non-tail-window arrival both
+before and after the initial tail is cached: following correctly falls back when
+there is no tail; already-paused navigation retains the old node in both orders.
+The original fixture now pauses and anchors before requesting ordinal0. Its
+running->exited metadata, retained text/base offset and anchor assertions remain;
+all three10-second legacy guards are unchanged, with no skip/retry allowance.
+The focused real-owner case passes three native macOS runs. UI source changes
+in this increment are confined to cfg(test); this is not a retention-policy fix.
+The original CI had only Elapsed, so its exact cached-node state was not saved;
+the deterministic counterexample establishes the invalid prerequisite and repair.
+
+### #95 rebase onto admitted #91 B / #93
+
+The adopted-design EOF conflict keeps the complete afe4c087 conversation design
+(including #91/#93) and appends the approved paired-snapshot rule once. No source
+conflict required manual edits. The approved cb75209 src/tests patch and rebased
+patch have stable ID 7ecc4bde107275ae8ccf7737fdc8fa9ce5488b2c. Independently,
+applying the approved source patch onto afe4c087 in a temporary Git index yields
+an exact byte-for-byte src/tests tree match with the rebased candidate. This is
+source-patch equality, not a claim that the older whole repository equals main B.
+Latest-tree standard checks and exact resubmission SHA are recorded in #95;
+Windows split x3 qualification remains integration-owned, with no local dispatch.
+
+### #95 ordinary Windows return: no periodic echo behind an in-flight view
+
+2026-10-31, native macOS arm64 / Rust 1.99.1, CARGO_BUILD_JOBS=2 and
+RUST_TEST_THREADS=4. Failed ordinary Windows run 41198580797, product 8c4fed7,
+reported two selected observations instead of one at frontend_reactivity.rs:902.
+Seven latency lines put this at step 6; the last two report about 4.81s/3.39s.
+Old-product split runs 41198667760, 41198669358 and 41198671273 all passed their
+two shards and audit, but do not override the ordinary failure or qualify this
+new source. No rerun/exception was used to erase that failed ordinary result.
+
+Source counterexample: Changed sets progress_running until activity returns,
+even for an idle Thread. The old tick reinserts the selected Thread into dirty
+while refreshing already contains it. A delayed snapshot/projection can thus
+return idle activity and leave a redundant second read queued. The tick helper
+was first extracted with exactly the old rule. A fixed-order eight-tick test
+failed (0 passed/1 failed, exit 101) because it left a dirty Thread behind. The
+correction filters only the existing in-flight set, without new lifecycle state,
+epoch, timer, worker, queue, pool or capacity. Real Changed during a read still
+advances the epoch and remains independently dirty; stale activity is rejected.
+
+Six selection tests pass after the correction, including that real-Changed
+case. The synthetic periodic-poll-witness.jsonl grows 0->9 rows (eight ticks and
+idle completion); no provider log is involved. The original 16-update E test,
+including exact one-observation, paired sequence and no-reload assertions, is
+unchanged and passes three explicit native macOS runs (48 CLI edits). The actual
+CLI was rebuilt explicitly before these subprocess checks rather than inferring
+its identity from a previously shared target. Watchdogs/production cadence and
+retry behavior are unchanged; no assertion or test exclusion was weakened.
+
+This reproduces and closes a source ordering class consistent with slow reads;
+the old CI lacks the full admission/tick trace needed to prove its exact past
+interleaving or exclude all other contributors. Standard/doc checks and final
+SHA are reported in #95. Native Windows/Linux validation on this new source is
+still an integration gate, not inferred from local success or old split runs.
