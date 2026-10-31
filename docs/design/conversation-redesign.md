@@ -282,7 +282,11 @@ A retained inspection does not clear the management detail on each read. The UI
 may retain at most256 original field descriptors (not body JSON) and combines a
 bounded current prefix with them under the existing256-row field limit; omissions
 remain explicit and original detail retrieval remains available. The current
-snapshot's request identity still fences old detail replies and hide/cancel.
+snapshot's request identity still fences old detail replies and hide/cancel. Completed
+original-detail pages retain their text, cursor and captured time across current
+metadata updates; rebind their unchanged original source to the new display
+request identity instead of labeling them stale or refetching them. Pending
+original-detail reads still receive a fresh request fence when needed.
 
 HistoryGet has no Thread selection argument: do not infer selection from the
 viewer, node creation Thread or delivery owner. Show selection scope unknown
@@ -573,6 +577,15 @@ a possible next slot is not reserved, and pre-upgrade backup/atomic ledger and
 rollback/reopen checks remain required.
 
 ## Cross-surface reactivity and performance admission (comments6520522032/6520544888)
+
+Delivery ownership update2026-11-01: the user moves unfinished saved lists/status
+to #107, remaining retained references/pages/waits to #108, and confirmation plus
+external/native snapshot labels to #109, outside #41. Their product requirements
+below remain adopted. G retains existing inspectors and HistoryGet/List plus its
+own reader/SQL qualification. Worker-owned files/functions and count gates are
+listed in those issues; shared glue/registration is coordinator-owned after G,
+so workers do not modify active G files. No unregistered-code success claim.
+
 
 These mandatory additions supersede any blanket rule that reference navigation,
 F6 cached metadata or F8 results are fixed snapshots. Reactivity is the default

@@ -1,5 +1,27 @@
 # Development status
 
+## #41 offload ownership and current unqualified source
+
+The2026-11-01 user explicitly authorizes independent issues outside #41, with
+non-overlapping files/functions, countable completion and G ordering. #107 owns
+saved list/status work; #108 owns remaining retained reference/page/wait work;
+#109 owns confirmation invalidation and external/native snapshot labels. Each
+reserves active G/shared files to the coordinator and requires G main before
+module/typed glue/test registration and integrated qualification. Preparation
+may be parallel; unregistered modules are not a passing implementation.
+
+G keeps its existing inspectors, in-progress retained HistoryGet/List, reader/SQL
+hardening, P3/count and final review/exact-source3OS/main gates. Local agents
+prepared header scalar bounds and honest lifecycle/context cost tests in G-owned
+files, then stopped editing; their private patches are preserved. Those additions
+are not yet compiled. History's previous v25 checks passed domain4/capture2/
+cache1/UI15/actual frontend13 (35 total), but strict Clippy found one collapsible
+if. The correction, immutable opened-page preservation, readonly initial history
+routing and header/query additions are newer unqualified source. No current full
+standard or P6 success is inferred from earlier checkpoints. Next: format and
+run one announced shared-target pipeline on the combined stable source.
+
+
 ## G native P6 count checkpointa8bbcf0
 
 Four native Unix PTY cases pass at80/140 columns for keyboard/wheel:600 events

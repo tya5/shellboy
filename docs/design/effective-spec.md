@@ -13,6 +13,14 @@ Shellboyの開発で使う採用仕様の入口です。仕様の採用と実装
 
 Shellboyへの改名では旧名の実行名・環境変数・既定保存先への互換を提供しない。旧データの移動は不要であり、既存環境を変更しない。新しい既定保存先は [setup](../development/setup.md) に記載する。
 
+## #41 delivery ownership (2026-11-01)
+
+User-authorized offloads #107–#109 own unfinished list/status, retained source and
+confirmation/external observation work. They require distinct leaf-file ownership
+and coordinator integration after G. Product reactivity remains adopted; these
+features are not claimed shipped by #41. See the current issue41 plan for exact
+retained G scope, count-only completion gates and ordering.
+
 ## #41 performance acceptance policy
 
 User/reviewer decision6543044236 makes p95/CPU/DB-work durations observations,

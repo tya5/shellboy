@@ -8,6 +8,35 @@ until every retained #41 requirement is delivered. Keep #58 separate and first;
 English migration (#35) follows #41. Each implementation increment and meaningful
 subpart gets a reviewable commit; avoid a combined redesign commit.
 
+## 2026-11-01 owner-approved offload (#107–#109)
+
+The user explicitly permits offloaded work to become separate issues outside
+#41, then requires exact file/function ownership, count-only acceptance and G
+ordering. This supersedes the earlier G assignment of the rows below; product
+reactivity requirements remain intact in their new owners and are not claimed
+implemented by G. See #41 comment6549483977.
+
+| Worker / issue | Transferred scope | Files / order |
+| --- | --- | --- |
+|1 / #107| Status and retained generic Thread/Shell/Compact lists | New inspection_lists/status observation/list observation leaf modules only; exact functions and forbidden G files are listed in the issue. |
+|2 / #108| HistoryRelations/Search/received sources, ShellRead and completed wait current facts | New inspection_retained plus existing raw_witness.rs only; reuse G history metadata/retained cache, do not change G-owned files. |
+|3 / #109| Stale preview/confirmation invalidation and external/native observation time/refresh | New inspection_confirmations/inspection_external/observation_notice modules only. |
+
+All three require G's main SHA for integration/acceptance. Workers may prepare
+owned modules in parallel, but the coordinator alone adds module/target/dispatcher
+and integration-test registration after G. Unregistered code is not compiled or
+passing evidence. Do not advertise these as independently mergeable before G;
+no generic extension engine or dead-code suppression is justified to evade that
+ordering. The issues specify finite IDs/source/query budgets, actual request and
+test counts, quiet/hidden zero-work and zero-failure integrated checks, without
+latency/CPU/bin thresholds. Commits stay split by route/refactor boundary.
+
+#41 retains G catalogue/forms/readers, the initial twelve inspectors, retained
+HistoryGet/List currently being finished, existing G reader/source/SQL hardening,
+shared-consumer P3/current counts and review/exact-source3OS/main admission.
+Header/lifecycle/context files already changed by G stay coordinator-owned.
+Earlier display/copy transfers to #83–#87 remain unchanged.
+
 ## Current owner-approved scope (6539106715)
 
 The user's2026-10-31 decision limits #41 completion to admitting the existing
@@ -800,14 +829,14 @@ Read-only initial routes and their native tests remain separately qualified.
 | StorageStatus | Saved category/eligibility bounds and separately timed physical sample | Pure DB refresh must not call the initial wrapper that samples physical storage; physical dirty admission remains separate3s work. |
 | ThreadDeletePreview | Saved scope/blockers/references versus retained destructive confirmation | Refresh advisory facts and mark obsolete confirmation stale; never turn a bounded observation into execution permission. |
 | UsageGet / Thread context usage | Exact captured filter/configuration, known/unknown saved scalars | Readonly same-snapshot usage with3s dirty cadence; profile/model mismatch remains explicitly old observation. |
-| Status | Current saved jobs/ownership/model/recovery and bounded list membership | Inventory all native rows and scope/defaults; initial whole-owner snapshot is not a permanent exception. |
-| ThreadList | Saved page rows, selected mode and membership | Reuse F browser facts/bounds where possible; prove generic F8 route as well as dedicated browser; preserve #100 and later header changes. |
-| ShellList / CompactList | Saved page row state and retention, original requested cursor/window | Update mutable row facts; define watermark/newer-result indication without silently advancing a user's cursor. |
-| HistoryList / HistoryGet / HistoryRelations | Obtained immutable node/body/provenance and current selection/availability | Preserve original bytes/hash/page; separately observe mutable path/tombstone/source facts and cursor validity. |
-| HistorySearch / received source references | Retained match/result evidence and current source availability/path | No automatic query embedding or rewritten historical result; observe bounded selected sources, label result time and explicit repeat route. |
-| ShellRead / wait result | Obtained bytes/cursor/encoding or completed wait outcome; current target lifecycle is distinct | Preserve captured result; live lifecycle/availability facts cannot be inferred from an old page/outcome. |
-| IndexPreview / mutation confirmation | Retained source/cost/confirmation evidence | Invalidate on changed facts and keep existing stronger execution checks; no hidden repeated paid request. |
-| ModelList / native memory / standalone clients | Explicit external/native observation or completed client result | Show observed/completion time and refresh/repeat route; no hidden provider/OS/file polling or repeated mutation. |
+| Status | Current saved jobs/ownership/model/recovery and bounded list membership | Transferred to #107 by the2026-11-01 user decision; requirements and countable gates remain there, not current G completion. |
+| ThreadList | Saved page rows, selected mode and membership | Transferred to #107 by the2026-11-01 user decision; requirements and countable gates remain there, not current G completion. |
+| ShellList / CompactList | Saved page row state and retention, original requested cursor/window | Transferred to #107 by the2026-11-01 user decision; requirements and countable gates remain there, not current G completion. |
+| HistoryList / HistoryGet / HistoryRelations | Obtained immutable node/body/provenance and current selection/availability | HistoryGet/List retained integration remains G; HistoryRelations transfers to #108. Preserve original bytes/hash/page and explicit current facts. |
+| HistorySearch / received source references | Retained match/result evidence and current source availability/path | Transferred to #108 by the2026-11-01 user decision; requirements and countable gates remain there, not current G completion. |
+| ShellRead / wait result | Obtained bytes/cursor/encoding or completed wait outcome; current target lifecycle is distinct | Transferred to #108 by the2026-11-01 user decision; requirements and countable gates remain there, not current G completion. |
+| IndexPreview / mutation confirmation | Retained source/cost/confirmation evidence | Transferred to #109 by the2026-11-01 user decision; requirements and countable gates remain there, not current G completion. |
+| ModelList / native memory / standalone clients | Explicit external/native observation or completed client result | Transferred to #109 by the2026-11-01 user decision; requirements and countable gates remain there, not current G completion. |
 
 For each mutable route record actual CLI mutation, committed invalidation,
 rollback/replay silence, hidden-consumer zero work, dirty coalescing, cancellation
