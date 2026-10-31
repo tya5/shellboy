@@ -1352,3 +1352,55 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
         close(control, owner).await;
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn running_shell_publication_has_a_registered_foreground_receiver() {
+    crate::test_watchdog::watchdog("running shell foreground publication", async {
+        let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let snapshot = ready(&control, &accepted).await;
+        let turn = snapshot.turn.clone();
+        control.store.database.call(move |db| {
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('publication-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
+            db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('publication-group','publication-attempt',?1,'running','now')", [turn])?;
+            db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('publication-group','publication-call',0,'shell','{}','pending')", [])?;
+            Ok(())
+        }).await.unwrap();
+        let slot = control.live.register_or_nudge_driver(
+            &snapshot.thread, snapshot.run.clone(), &control.stop, false,
+        ).await.unwrap();
+        // Poll the real driver only at explicit steps. The DB can commit its
+        // running row while the driver's response future has not resumed.
+        let args = serde_json::from_value(json!({"command":"cat","stdin_open":true})).unwrap();
+        let shell = run_shell(control.clone(), &snapshot, &slot,
+            "publication-group", "publication-call", args);
+        tokio::pin!(shell);
+        loop {
+            assert!(futures_util::poll!(shell.as_mut()).is_pending());
+            let running = control.store.database.call(|db| {
+                Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE state='running')", [], |row| row.get::<_, bool>(0))?)
+            }).await.unwrap();
+            if running { break; }
+            tokio::task::yield_now().await;
+        }
+        let witness = root.path().join("publication.jsonl");
+        std::fs::write(&witness, "{\"running\":true}\n").unwrap();
+        let accepted = control.background(&snapshot.thread).await;
+        let first_admitted = accepted.is_ok();
+        if !first_admitted {
+            // Reap the deliberately exposed old boundary before reporting red.
+            assert!(futures_util::poll!(shell.as_mut()).is_pending());
+            control.background(&snapshot.thread).await.unwrap();
+        }
+        let (result, halt) = shell.await.unwrap();
+        assert!(halt);
+        assert_eq!(result["reason"], "human_backgrounded");
+        use std::io::Write;
+        writeln!(std::fs::OpenOptions::new().append(true).open(&witness).unwrap(),
+            "{{\"foreground_accepted\":true}}").unwrap();
+        assert_eq!(std::fs::read_to_string(witness).unwrap().lines().count(), 2);
+        control.live.remove_driver_if_current(&snapshot.thread, &slot.id).await;
+        close(control, owner).await;
+        assert!(first_admitted, "running was published before foreground admission: {accepted:?}");
+    }).await.unwrap();
+}

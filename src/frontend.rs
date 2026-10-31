@@ -101,6 +101,17 @@ impl ClipboardBackend for ClipboardAdapter {
         Box::pin(self.copy_text(text, backend, max_bytes, timeout_ms, cancel))
     }
 }
+/// Only the post-commit projection is disposable; accepted sends are not.
+async fn post_commit_projection<T>(
+    stop: &CancellationToken,
+    projection: impl std::future::Future<Output = Result<T, ApiError>>,
+) -> Option<T> {
+    tokio::select! { biased;
+        _ = stop.cancelled() => None,
+        result = projection => result.ok(),
+    }
+}
+
 async fn update(sender: &(impl UpdateTarget + ?Sized), mut value: UiUpdate) {
     loop {
         let Some(next) = sender.defer(value) else {
@@ -1197,6 +1208,7 @@ async fn run_with_delivery(
                             }
                         };
                         let send_slots = send_slots.clone();
+                        let projection_stop = cancel.clone();
                         let image_leases = images.leases(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
@@ -1253,7 +1265,8 @@ async fn run_with_delivery(
                                 result.as_ref().ok(),
                             );
                             let projection=match &result {
-                                Ok(value)=>HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value).await.ok(),
+                                Ok(value)=>post_commit_projection(&projection_stop,
+                                    HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value)).await,
                                 Err(_)=>None,
                             };
                             let _ = sender
@@ -1680,6 +1693,7 @@ async fn run_with_delivery(
                             }
                         };
                         let send_slots = send_slots.clone();
+                        let projection_stop = cancel.clone();
                         let image_leases = images.leases(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
@@ -1735,7 +1749,8 @@ async fn run_with_delivery(
                                 result.as_ref().ok(),
                             );
                             let projection=match &result {
-                                Ok(value)=>HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value).await.ok(),
+                                Ok(value)=>post_commit_projection(&projection_stop,
+                                    HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value)).await,
                                 Err(_)=>None,
                             };
                             let _ = sender

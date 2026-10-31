@@ -1985,3 +1985,13 @@ The user selected B (⇥) on 2026-10-31. The common External/外から row and t
 driver default now use B; an explicit regression assertion binds mark/label/CJK
 width. The prior A branch remains historical, not the integration candidate.
 The selected branch is being requalified and sent to worker4 as visually approved.
+
+## #96: foreground publication and closing send projections
+
+Two source-order counterexamples are fenced: a running foreground process was
+observable before its release receiver, and post-commit display reads could
+retain send slots after Quit while remaining accepted inputs needed to save.
+The original assertions/timeouts remain; native fixed-order red/green tests and
+existing end-to-end recovery/closing tests pass locally. #91 band rendering is
+not the originating path. Core review and exact-source native CI are tracked in
+#96; original CI did not record all registration/pool-admission events.

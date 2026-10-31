@@ -397,9 +397,39 @@ mod tests {
             assert!(main.defer(critical(n as u64)).is_none());
         }
     }
+    struct HeldProjectionSlots(Vec<std::sync::mpsc::Sender<()>>);
+    impl Drop for HeldProjectionSlots {
+        fn drop(&mut self) {
+            for release in self.0.drain(..) {
+                let _ = release.send(());
+            }
+        }
+    }
+    async fn hold_projection_slots() -> HeldProjectionSlots {
+        let mut holds = HeldProjectionSlots(Vec::new());
+        for _ in 0..2 {
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let (release, waiting) = std::sync::mpsc::channel();
+            holds.0.push(release);
+            tokio::spawn(async move {
+                crate::presentation::work(move || {
+                    let _ = started.send(());
+                    let _ = waiting.recv();
+                })
+                .await
+                .unwrap();
+            });
+            crate::test_watchdog::watchdog("held presentation admission", ready)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        holds
+    }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch() {
         let (root, owner, control, server) = control_tests::fixture().await;
+        let _held_projections = hold_projection_slots().await;
         // Isolate delivery pressure from same-Thread selection-revision CAS:
         // each queued request has a distinct existing recovery-wait owner and
         // stays held, so this fixture starts no model HTTP request.
@@ -1086,5 +1116,32 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert_eq!(error.details.unwrap()["forced_shutdown"], true);
+    }
+}
+
+#[cfg(test)]
+mod stalled_send_projection_tests {
+    use super::*;
+    use futures_util::FutureExt;
+
+    #[tokio::test]
+    async fn shutdown_releases_a_pending_post_commit_projection_without_polling_new_work() {
+        let stop = CancellationToken::new();
+        let projection =
+            post_commit_projection(&stop, std::future::pending::<Result<(), ApiError>>());
+        tokio::pin!(projection);
+        assert!(projection.as_mut().now_or_never().is_none());
+        stop.cancel();
+        assert_eq!(projection.now_or_never(), Some(None));
+        let polled = std::sync::atomic::AtomicBool::new(false);
+        assert_eq!(
+            post_commit_projection(&stop, async {
+                polled.store(true, Ordering::SeqCst);
+                Ok::<_, ApiError>(())
+            })
+            .await,
+            None
+        );
+        assert!(!polled.load(Ordering::SeqCst));
     }
 }

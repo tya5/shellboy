@@ -2193,3 +2193,19 @@ comparison. The common External row remains labeled 外から, uses the existing
 user-marker palette and has width_cjk()==1. Candidate A was provisional only.
 The reviewer states this visual choice is approved; qualification/integration
 remain delegated to worker4. No confirmation dialog, color or protocol is added.
+
+## #96: publication and post-commit observation boundaries (2026-10-31)
+
+Counterexamples are separated from original CI attribution. The old Ubuntu
+status is reproducible without #91 rendering; close its foreground receiver
+publication window, rather than retrying a rejected Background or weakening
+end-to-end output assertions. Publish only after a collector owns the process;
+clear receiver ownership if the running-state write fails. Existing sticky
+per-call release and no-later-call delivery remain authoritative.
+
+On Quit, accepted sends must finish independently of optional display reads.
+Cancel only post-commit HistoryReader::saved observation with the existing
+frontend token. Do not enlarge the send/presentation pools, discard durable
+submissions, or add another worker/queue. Keep ordinary UI result retention and
+Core shutdown order unchanged. The old Windows trace lacks a pool witness;
+report the controlled deadlock class and that qualification gap explicitly.
