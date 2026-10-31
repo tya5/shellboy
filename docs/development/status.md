@@ -9,6 +9,13 @@ reuse only; Windows retains the original single job/four test threads. Rejected
 split experiments and #95 failures are retained in acceptance. Native unsplit
 qualification and live main-push reuse remain pending on the reuse-only source.
 
+## Shared owner bootstrap (#5 stage 1)
+
+Owner assembly and partial-startup cleanup now live in `owner_session`, outside
+the TUI frontend. The existing TUI adapter, cancellation and delivery tests move
+with their implementation. No headless command or shutdown behavior is added
+in this structural stage. Stage evidence and integration are tracked in #5.
+
 ## Explicit usage-limit recovery (#76)
 
 Known future usage-limit resets now bypass automatic resend/reduction and enter
